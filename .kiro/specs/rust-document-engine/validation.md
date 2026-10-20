@@ -412,8 +412,8 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 ### Imported markup coordinate review correction
 
 - Independently reproduced a tiny imported Underline whose finite ±1e308 right-edge coordinates overflow native interpolation while the guarded left height and bottom length remain finite. Recolor was accepted and serialized literal `inf` into the appearance. The adapter now applies the existing ±1,000,000 PDF-user-unit page-box coordinate limit before any native markup appearance work.
-- Native extreme/boundary assertions and a public imported-PDF regression cover all four markup kinds, compound recolor/text rollback and deletion without appearance regeneration. The original frozen PR39 package independently passed all 203 Python tests; the corrected exact-head full suite remains pending.
-
+- Native extreme/boundary assertions and a public imported-PDF regression cover all four markup kinds, compound recolor/text rollback and deletion without appearance regeneration. The original frozen PR39 package independently passed all 203 Python tests; corrected runtime head `98c035c8e8b5c2a49d640a43a4c96f7cbd812b47` passed CI 39469758507: formatting, 186 Rust tests, warnings-denied Clippy, 204 installed-wheel Python tests (no skips), and the unchanged 264-package license audit.
+- CI artifact: CPython 3.11.17 / Linux x86_64, wheel 17,317,570 bytes, native extension 40,163,296 bytes, wheel SHA-256 `d13f133870d8e0d3ae2390ab566b68460e60ea0568476f1a1d16c8e5ebb67abc`. No dependencies or upstream revisions changed in this feature.
 
 ## 2026-10-20 section geometry and authored slide layouts
 
