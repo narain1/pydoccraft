@@ -35,7 +35,7 @@ The check scans eligible members regardless of their path or extension, so reloc
 
 - DPI must be finite and between 1 and 1200 inclusive.
 - Python rejects out-of-range page indexes.
-- PdfCraft rendering uses upstream oversize rejection.
+- Full-page PDF rendering checks the public native rounded pixel dimensions before requesting a raster, and retains native oversize rejection. Valid CropBox, rotation and UserUnit use native inspected display dimensions; clipped requests keep their separate region preflight.
 - WordCraft and DeckCraft dimensions are checked against their upstream maximum-side constants before raster allocation.
 - Each raster is limited to 64 million pixels (256 MB for one RGBA buffer). Encoding and renderer intermediates can require additional memory; this is not a total process-memory budget.
 - RGBA buffers must have exactly the expected length before PNG encoding.

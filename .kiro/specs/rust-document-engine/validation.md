@@ -1019,3 +1019,14 @@ The existing word.story-clear profile reuses this exact artifact for its edit-au
 Clearing retains the reference/kind/options and native number mark, not zero-height removal or semantic note deletion. Native-only media/cell cleanup tests do not expose public rich-note insertion. Independent review and exact-head/current-main CI remain required; broader LAY7/DOC5 are partial.
 
 PR86 independent source review and all 439 tests against its copied frozen package pass in 145.448 seconds, with strict typing and matching wheel hash. Its extension was independently confirmed byte-identical to PR85; final main integration/CI remains queued.
+
+
+## PDF integer raster preallocation — focused isolated validation
+
+Source code is based on c5a67d033ddbdb8b1e42971b814bb8cfc433be45; these documentation additions preserve the subsequent Note.clear head fecebc36f13a2e7ae7912f4e6ca28a25400f6124 and its prior artifact history. No upstream pin, dependency, runtime API or attribution changed. This is focused validation, not a new complete installed-wheel artifact.
+
+The pinned public native scale/rounding helpers prove that an 8000.5 by 7999.5 point view at 72 DPI passes continuous f32 area limits but rounds to 8001 by 8000 pixels (64,008,000). The adapter now applies its existing integer-pixel/side checks before the common full-page native render call, retaining native reject_oversize. No oversized raster was allocated in the regression. Original synthetic empty PDFs use offset CropBox, distinct MediaBox, UserUnit 2 and all four rotations. Tests warm a small cached raster, prove oversized requests leave native render/raster counters unchanged, and accept tiny clips at 72/1200 DPI. A thin 8192-by-1 control checks the native side boundary safely; exact 8000-by-8000 acceptance is arithmetic-only.
+
+Rust 1.95 locked/offline formatting, two new native groups (0.03 seconds), warnings-denied all-targets Clippy and debug compilation pass. Two new public workflows pass against the isolated copied debug extension (0.080 seconds). Twenty-six related all-format rendering, geometry/clipping, retained sessions and PDF-box tests pass (32.641 seconds), including fractional DPI, blank pages, invalid DPI/index/lifetime cases and visible pixel controls. Full integrated release/clean installed-wheel validation and independent exact-head review remain required.
+
+Broad R4/U09 remains open: pinned DeckCraft's caught-panic path returns a correctly sized blank image through the selected public renderer, and no per-call fallible alternative was found. This correction does not certify parsing/layout/intermediate allocations, total process memory or hostile-input execution time. Existing 64-million-pixel output limits and clipped-region bounds remain unchanged.

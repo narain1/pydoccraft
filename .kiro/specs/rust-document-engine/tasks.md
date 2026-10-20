@@ -555,3 +555,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete integrated locked release/clean installed-wheel validation: 310 Rust / 444 Python tests, strict typing and unchanged license audit; refresh only affected story-clear evidence.
 - [ ] Complete independent review and exact-head/current-main CI before manual merge.
 - [ ] Retain broader DOC5/LAY7 imported note, semantic deletion and fragment-remapping work.
+
+
+## PDF integer raster preallocation boundary
+
+- [x] Audit all-format output preflight and prove the native continuous-area/integer-rounding gap without a large allocation.
+- [x] Reuse native device-pixel rounding in the common PDF full-page renderer; preserve native oversize and region checks.
+- [x] Add safe arithmetic, request-counter, view geometry and thin-raster regressions; complete focused native and public checks.
+- [ ] Complete integrated release/installed-wheel validation and independent exact-head review.
+- [ ] Keep R4/U09 open for upstream fallible per-call renderer failures and broader resource guarantees.
