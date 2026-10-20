@@ -537,3 +537,10 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete 33 related Python regressions and strict copied-package typing.
 - [x] Complete integrated locked release/installed-wheel validation: 307 Rust / 436 Python tests, strict typing and unchanged license audit.
 - [ ] Complete independent review/current-main CI; broader SLIDE3/TXT6 acceptance remains open.
+
+
+## Slide-cell append lifetime checks
+
+- [x] Reproduce the preexisting callback-before-closed-check behavior with the supported font key.
+- [x] Add a narrow initial target lookup while retaining final native validation; verify invalid targets, live reorder, deletion/reset/close and caller exceptions.
+- [ ] Complete integrated installed-wheel regression validation and independent review before merge.

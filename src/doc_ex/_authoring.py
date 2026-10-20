@@ -3007,6 +3007,9 @@ class _SlideCellParagraph(Paragraph):
             _ = self.text  # Empty patches still validate the owner and handle.
 
     def add_run(self, text, **formatting):
+        # Validate the exact paragraph target before caller formatting callbacks;
+        # final target validation still runs after normalization in add_run_patch.
+        self._owner._call("cell_paragraph_alignment", *self._range_args, self._target)
         patch = _format_patch(formatting, rgb_highlight=True)
         start, end, revision = self._owner._call("add_run_patch", *self._range_args, text, patch,
                                                _change=True, **self._range_kwargs)

@@ -578,3 +578,9 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 1. Existing PPTX shape/cell range format and add_run SHALL accept letter_spacing through public native RunProps.spacing, without a new API family or dependency. The initial shared profile SHALL match DOCX's finite [-100,100] points and 0.05-point precision, with canonicalization before native serialization. None SHALL reset inheritance; 0 SHALL remain an explicit override.
 2. Native resolution, grapheme tracking, autofit, wrapping, writer and PDF export SHALL own behavior. Source text/links/identity SHALL remain intact. Intentional negative overlap SHALL not imply a reading-order guarantee. Visible raster and invisible PDF text-layer geometry SHALL both receive meaningful acceptance checks.
 3. Existing content/property/run budgets, staged mutation, revision/cell generations and ownership checks SHALL remain authoritative. Invalid mixed patches and resource failures SHALL not mutate state. Tests SHALL cover native storage bounds, inheritance, shape/cell editing, source/PNG/PDF output, copies, links and callbacks. The obsolete DOCX negative-PPTX test SHALL be explicitly replaced by the new capability suite; historical artifact evidence SHALL remain historical.
+
+
+## 75. Slide-cell append lifetime checks
+
+1. Existing PPTX cell paragraph add_run SHALL validate its current owner, slide/table/cell and paragraph generations before evaluating caller formatting callbacks. It SHALL retain final native target validation after normalization.
+2. Live slide reordering during normalization SHALL retain the original stable target; callback deletion/reset/close or exceptions SHALL not append text or formatting beyond the callback's own changes. No new public API or broader callback-order guarantee SHALL be introduced.

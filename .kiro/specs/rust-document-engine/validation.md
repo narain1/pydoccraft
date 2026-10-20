@@ -975,3 +975,10 @@ The original 432-test DOCX artifact retains its historical rejection-test scope.
 PR84 independent source review and all 432 tests against its copied frozen release package passed in 126.169 seconds, with strict typing and matching wheel hash. This is independent confirmation of the recorded DOCX artifact; its final main integration/CI is still pending.
 
 PR74 final head `60a568fbc8e04e0e15e048ed3f0ee7dad3a570db` passed [current-main CI 39507569770](https://github.com/narain1/pydoccraft/actions/runs/39507569770): 285 Rust / 409 installed-wheel Python tests and all required checks. It was manually merged as `57fcc94216e58d74b967b24cf2ced68f9f45b742` after independent review. Auto-merge remains disabled; broader PDF6 stays open.
+
+
+## Slide-cell append lifetime — isolated Python correction
+
+On 2026-10-20, an unmodified /opt/slidebackgroundresettest installed release reproduced the preexisting issue: close the presentation, then call cell.paragraphs[0].add_run("x", font=Font("Inter")) where Font.__len__ raises. The caller RuntimeError occurred before DocumentClosedError. The narrow facade correction checks an existing native alignment lookup first, without copying the paragraph text, then preserves final append validation after normalization.
+
+Three new test groups pass in 0.024 seconds against an isolated copy of that installed native release plus the corrected facade. They cover already-closed/deleted/stale body and grid targets without callbacks; reordering two slides with same-position tables while retaining the original logical cell; and live callback deletion/reset/close/raising with no append beyond callback effects. Ordinary source output and cached PNG bytes remain unchanged after a raising callback. No Cargo, native code, dependency or pin change. These are focused correction results, not a new full release artifact or a blanket callback-order guarantee for other methods.
