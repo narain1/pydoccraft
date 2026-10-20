@@ -2625,15 +2625,19 @@ class Slide:
         self._owner._call("set_slide_notes", self.number, value, _change=True)
 
     @property
-    def background(self):
+    def background(self) -> str | None:
+        """Explicit solid color, or None when the slide inherits its background."""
         value = self._owner._call("slide_background", self.number)
         return None if value is None else _hex_color(value)
 
     @background.setter
-    def background(self, color):
+    def background(self, color: _Color | None) -> None:
         self.number  # Reject a deleted slide or closed owner before caller callbacks.
-        rgb = _color(color)
-        self._owner._call("background", self.number, rgb, _change=True)
+        if color is None:
+            self._owner._call("clear_background", self.number, _change=True)
+        else:
+            rgb = _color(color)
+            self._owner._call("background", self.number, rgb, _change=True)
 
     @property
     def shapes(self) -> Shapes:

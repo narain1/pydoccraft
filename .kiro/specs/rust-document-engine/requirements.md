@@ -546,3 +546,11 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 3. Valid value assignments SHALL be refused by native filling while read-only, including identical values and clearing. Existing earlier input/fit errors SHALL remain compatible. Unsetting read_only SHALL restore filling; tooltip/geometry changes, copies, deletion and flattening SHALL remain available. The property SHALL not be described as security or viewer-only enforcement.
 4. Initial lifetime/structural checks SHALL precede strict bool validation; no truth conversion SHALL execute. Existing model/text/input/mutation/output limits and stale-handle behavior SHALL remain. Failure SHALL preserve bytes/state/cache.
 5. Tests SHALL verify all three kinds across four rotated CropBox/UserUnit profiles, actual ink/native saved flags, complete field/AP-content preservation, programmatic write refusal/recovery, allowed edits, copy/page/deletion/flatten behavior, strict input/lifetime checks and atomic budget failures.
+
+
+## 71. Native slide background inheritance reset
+
+1. Existing Slide.background SHALL accept None to remove the explicit slide override through the public native model. Its getter SHALL remain explicit str-or-None, not an effective inherited-color query. Inherited backgrounds SHALL be resolved by native layout/master/theme behavior without a local resolver or transparency promise.
+2. Reset SHALL preserve stable slide/shape identity, unrelated content/links and independently copied documents. Existing initial lifetime and final callback-safe stable-ID checks SHALL remain. Successful mutations SHALL retain normal revision/cache semantics.
+3. Removing an owned picture override SHALL preserve shared authored media and reclaim only the supported authored-media graph. Direct inherited-picture combinations outside that profile SHALL fail before mutation when local reclamation cannot preserve them; no generic imported media walker SHALL be added.
+4. Tests SHALL cover native inheritance and save/reopen/PNG/PDF output, explicit-versus-inherited getter semantics, shared media and final reclamation, copy/lifetime/callback behavior and atomic invalid/resource failures. Broader SLIDE4/theme/imported preservation SHALL remain open.

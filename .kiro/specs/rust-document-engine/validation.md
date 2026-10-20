@@ -902,6 +902,26 @@ Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,507,974 byt
 This historical local artifact uses the original decimal-outline test. PR71's independent diagnostic review has identified one-level coverage quantization and is validating a corrected spatial comparison separately; this artifact does not replace its current-main CI gate. Independent review and fresh current-main CI remain required for this branch. Broader PDF6 form/imported/widget work stays open.
 
 
+## Slide background inheritance reset — isolated focused evidence
+
+On 2026-10-20, isolated base `c2e6484` passed three new native groups (293 filtered), formatting, locked/offline all-targets warnings-denied Clippy and a matching debug extension build. Twelve focused Python tests pass in13.873s: three new reset workflows plus existing slide/picture callback and transform regressions. Strict consumer typing passes against a temporary environment containing the matching copied package, checking the explicit str-or-None getter and None/color setters. This is development evidence, not a new release artifact or complete installed corpus.
+
+Native fixtures verify theme, master, layout, gradient and picture inheritance through source readback, exact before/after PNG and exact before/after exported-PDF PNG. Getter None remains explicit absence rather than an effective color. The gradient fixture's native samples are [250,0,62,255] and [60,0,250,255]; an initial linear-byte color assumption was corrected to assert actual direction/opacity while preserving exact reset comparisons. Native source-call arity and a mypy post-assignment narrowing expectation were corrected in test code before final checks; runtime behavior needed no change from those failures.
+
+Shared picture/other-slide media survives reset and is reclaimed after its last supported reference disappears. Raw explicit-picture plus inherited master/layout picture fixtures demonstrate the authored-only pruning limitation and now fail atomically before reset; solid-override removal retains inherited assets without pruning. Revision-limit, invalid-page, closed/deleted, color-callback reorder/deletion, cache/range invalidation, copied ownership, actual source p:bg removal and retained PDF text/links are exercised. This does not certify imported theme/master-shape asset graphs or new theme/layout editing.
+
+No dependency, upstream revision, license graph, conversion pair or hidden-slide policy changes. Native PDF conversion already skips hidden slides by default; that pre-existing behavior is not changed or newly certified here. Complete integrated release/installed validation and independent review remain pending; broader SLIDE4/E3 coverage stays open.
+
+
+## Slide background reset — complete local artifact
+
+Runtime commit `58c1eaa53f5b37bb167958d8d6a059c2c9603a7c` passed **299 Rust tests and 426 clean installed-wheel Python tests**, zero failures/errors/skips. The Python corpus ran in 114.75 seconds on Linux x86_64 / Python 3.11.2 / Rust 1.95. Installed facade/native files match the wheel exactly. Formatting, locked/offline all-target warnings-denied Clippy, release build, strict installed-package typing and the unchanged 264-package license audit pass. The full corpus verifies extraction, PNG rendering and reopened conversions for PDF/DOCX/PPTX; native reset controls compare real inherited appearance before/after and retain authored media and identity limits.
+
+Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,508,811 bytes**; native extension **40,614,440 bytes**; SHA-256 `e084a6f29a4346eaeeaf67ca151475d1a4d35c4e2d8cdaf9ca40d47a5fd980c5`. Lock SHA-256 remains `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. PdfCraft/WordCraft/DeckCraft/craft-libs revisions remain pinned above; no dependency/attribution/prohibited-runtime changes.
+
+This local artifact retains the original decimal-outline test and does not supersede PR71's separate corrected-test/current-main CI validation. Final independent branch review and current-main CI remain required. Reset restores native inheritance; it does not imply arbitrary imported theme/master editing, complete referenced-media accounting or transparent output. SLIDE4 remains partial.
+
+
 ## Decimal-outline raster comparison — corrected CI artifact
 
 - Corrected final-main head `d5912b9aad74520b13a9753e6b6ee4b27c2caa3d` passes [CI 39504970072](https://github.com/narain1/pydoccraft/actions/runs/39504970072): all 280 locked Rust tests and 393 installed-wheel Python tests, zero failures/errors/skips, formatting, warnings-denied Clippy, strict typing and the unchanged 264-package audit. Independent corrected-test verification against the copied local release also passes all 393 tests (79.069s). PR71 was manually merged as `e402268f5bc33f756f34587594761c41308a2a1e`; auto-merge remains disabled.

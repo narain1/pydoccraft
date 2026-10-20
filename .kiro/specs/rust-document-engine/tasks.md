@@ -506,3 +506,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete integrated locked native/release/installed-wheel checks: 296 Rust / 423 Python tests, strict typing and unchanged license audit.
 - [ ] Complete independent review and fresh current-main CI before manual merge.
 - [ ] Keep broader PDF6/U10 field/widget capabilities open.
+
+
+## Native slide background inheritance reset
+
+- [x] Audit existing hidden/navigation/background overlaps and pinned native inheritance, writer, renderer and PDF paths.
+- [x] Extend only Slide.background=None, with explicit getter semantics, stable ownership and bounded authored-media reclamation.
+- [x] Complete focused native/public/typing inheritance, output, sharing, rollback and lifetime evidence.
+- [x] Complete integrated release/clean installed-wheel validation: 299 Rust / 426 Python tests, strict typing and unchanged license audit.
+- [ ] Complete independent review and fresh current-main CI before manual merge.
+- [ ] Retain broader SLIDE4/master/theme/imported-media preservation work.
