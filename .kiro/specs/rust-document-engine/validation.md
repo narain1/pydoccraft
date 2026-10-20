@@ -408,3 +408,8 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 
 - Independently ran all 196 Python tests against the frozen installed package for `ef0b577ac5cf11ba45936bb2541ec1c72a6d4535`; all passed. CI 39467831926 on that exact head also passed formatting, 177 Rust tests, warnings-denied Clippy, 196 installed-wheel Python tests (no skips) and the 264-package locked license audit. Integration of the reviewed PR35/36 histories changed no runtime, tests, dependency or attribution files.
 - CI artifact: CPython 3.11.17 / Linux x86_64, wheel 17,299,520 bytes, native extension 40,130,544 bytes, wheel SHA-256 `6191b9e0be1ba7a56b6fe7ab4df64cbbc87cb7b6dc65842aabe5041133d699e3`. Reviewed native reference traversal, bounded media accounting, retained paragraph anchors and generation-captured iteration; no additional findings.
+
+### Imported markup coordinate review correction
+
+- Independently reproduced a tiny imported Underline whose finite ±1e308 right-edge coordinates overflow native interpolation while the guarded left height and bottom length remain finite. Recolor was accepted and serialized literal `inf` into the appearance. The adapter now applies the existing ±1,000,000 PDF-user-unit page-box coordinate limit before any native markup appearance work.
+- Native extreme/boundary assertions and a public imported-PDF regression cover all four markup kinds, compound recolor/text rollback and deletion without appearance regeneration. The original frozen PR39 package independently passed all 203 Python tests; the corrected exact-head full suite remains pending.

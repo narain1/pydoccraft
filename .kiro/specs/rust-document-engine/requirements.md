@@ -252,3 +252,5 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 1. Existing annotation operations SHALL support native underline, strikeout and squiggly kinds with current-view coordinates, metadata changes, movement, recoloring, deletion and reopened persistence. New authoring SHALL use one quadrilateral and reject unsupported resizing/target changes.
 2. Appearance work SHALL be bounded before native property inspection or regeneration. Direct native QuadPoints SHALL have bounded counts and finite geometry; newly generated appearance bytes SHALL count toward document mutation budgets. Deletion SHALL not rebuild an appearance merely to identify its subtype.
 3. Tests SHALL verify actual pixels across rotations/CropBox/UserUnit, preserved page text, cache invalidation, reopened metadata, stale handles and atomic budget/geometry failures. Broader PDF6 form/import/reply criteria SHALL remain open.
+
+5. Imported text-markup mutation SHALL reject quadrilateral coordinates outside ±1,000,000 PDF user units before native appearance evaluation, preventing nonfinite derived geometry; removal SHALL remain available without rebuilding the appearance.
