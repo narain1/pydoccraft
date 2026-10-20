@@ -442,7 +442,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reject affected assignments in the existing staged parser; preserve resets and supported direct/whole-table/outer-edge controls.
 - [x] Retain raw-native source/readback/placed-rule/PNG/PDF repros and focused public atomicity/inheritance/cache/copy checks.
 - [x] Complete integrated locked native/release/installed-wheel validation (282 Rust / 405 Python).
-- [ ] Complete independent manual review/current-main CI.
+- [x] Complete independent manual review/current-main CI; PR73 merged after 282 Rust / 405 installed-wheel Python tests and all required checks.
 - [ ] Keep native conditional-edge selection, patterned shading and full shared-edge conflict resolution under existing U02/TBL7.
 
 
@@ -525,5 +525,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Probe native cluster advances, expanded/condensed PNG/PDF output and twip write/read semantics without a local positioning algorithm.
 - [x] Reuse CharPatch, snapshots, existing style/default/region dispatch and public typing; retain explicit PPTX rejection and all existing guards.
 - [x] Add three focused native groups and six public workflows covering precision, output, scopes, inheritance, callbacks, ownership and atomic failures; run related regressions and strict copied-package typing.
-- [ ] Complete integrated locked native/release/clean installed-wheel validation and independent review/current-main CI.
+- [x] Complete integrated locked native/release/clean installed-wheel validation: 302 Rust / 432 Python tests, strict typing and unchanged license audit.
+- [ ] Complete independent review and exact-head/current-main CI before manual merge.
 - [ ] Keep broader TXT6 font/shaping controls and diagnostics under their existing owner.

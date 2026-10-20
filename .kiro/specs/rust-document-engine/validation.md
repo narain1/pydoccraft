@@ -815,7 +815,7 @@ Full integrated locked tests, release wheel, installed-wheel corpus and independ
 - This supersedes focused-only lock evidence for local acceptance. All seven comment kinds retain tested appearances and pixels across transformed pages; native lock refusals preserve staged state. Inventory/initial-inspection limits, foreign profiles, links and reply-thread semantics remain outside this mutation profile. Independent review and exact-head/current-main CI remain required before manual merge; PDF6/U10 stay open.
 
 
-## Independent manual merge evidence through PR 72
+## Independent manual merge evidence through PR 73
 
 GitHub merge state was verified on 2026-10-20. Each change passed independent review, required fixes and fresh exact-head/current-main CI before manual merge; repository auto-merge remains disabled. These gates complete the corresponding delivery tasks, not broader roadmap criteria. Historical artifact sections above retain their original validation scope.
 
@@ -829,6 +829,7 @@ GitHub merge state was verified on 2026-10-20. Each change passed independent re
 | [70](https://github.com/narain1/pydoccraft/pull/70) | `c99ba86f2c341c1229f6a24e5436cf98dae73c14` | 276 / 386 |
 | [71](https://github.com/narain1/pydoccraft/pull/71) | `e402268f5bc33f756f34587594761c41308a2a1e` | 280 / 393 |
 | [72](https://github.com/narain1/pydoccraft/pull/72) | `d0a8ec6de3e72f2472d411a7fe9577f638af8ad2` | 280 / 402 |
+| [73](https://github.com/narain1/pydoccraft/pull/73) | `0a47b4b001c52b1fa21ab40829d502620022c37e` | 282 / 405 |
 
 Formatting, warnings-denied Clippy, strict installed-package typing and the unchanged 264-package runtime/build license audit passed in each final CI run. PR69 changes source-audit documentation/data only.
 
@@ -942,3 +943,14 @@ PR72 final head `9588c1c54de9d0dd819fa8e096bbd4120abf2a04` passed [current-main 
 The isolated DOCX letter_spacing profile reuses native optional character spacing with [-100, 100] point bounds and 0.05 pt precision; no method/handle/dependency is added. Three native groups cover all 4,001 integer-twip values through native write/read, native cluster/source/PDF ink and default/style/table-region precedence plus rollback. Six public workflows pass, and a 60-test related suite passes in 43.836 seconds against the copied debug extension/facade. Formatting, all-targets warnings-denied Clippy, debug compilation and a pinned mypy 1.18.2 strict copied-package consumer pass. Root's complete locked release/clean installed-wheel artifact and independent current-main review remain required.
 
 Raw condensed-text probes found negative native advances but no source/PDF ink mismatch beyond one channel unit. Large negative spacing intentionally overlaps/reverses glyph positions; inferred PDF extraction order/spaces differs independently of exact source Unicode. No unsupported-negative guard was added from a monotonicity heuristic. In the combined nested-table/note fixture, source/PDF grayscale grid pixels differed by 109 at 72 DPI, with exactly the same 4,530-pixel count of differences after all character spacing was removed. Therefore rich-context acceptance compares exact chromatic text bounds and every chromatic text channel, while isolated text retains full-image channel comparisons. These observations do not broaden table-stroke fidelity or typography completion claims.
+
+
+## Native character spacing — complete local artifact
+
+Runtime commit `d8333dceda02962880e472d60928251cbc6a7f77` passed **302 Rust tests and 432 clean installed-wheel Python tests**, zero failures/errors/skips. The Python corpus ran in 122.144 seconds on Linux x86_64 / Python 3.11.2 / Rust 1.95. Installed facade/native files match the wheel exactly. Formatting, locked/offline all-target warnings-denied Clippy, release build, strict installed-package typing and the unchanged 264-package license audit pass. The full corpus verifies PDF/DOCX/PPTX extraction, PNG rendering and reopened conversions, including the independently corrected outline raster test.
+
+Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,517,771 bytes**; native extension **40,616,104 bytes**; SHA-256 `6d2e1a54c6e065917499d7102d50b21a96c15b643f2c64d224e8df1ea8fa5768`. Lock SHA-256 remains `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. All upstream revisions remain pinned above; dependencies, attribution and the prohibited-runtime audit are unchanged.
+
+Spacing is native shaping/writing through the existing formatting patch. The rich-context chromatic-text comparisons do not certify grayscale table-rule parity; extreme condensation can reverse physical glyph positions and inferred PDF reading order. Final independent review and exact-head/current-main CI remain required. TXT6 stays partial.
+
+PR73 final head `c5cbc8bf8a8d156e9bb438df91ff0eb9080ac1e4` passed [current-main CI 39506841575](https://github.com/narain1/pydoccraft/actions/runs/39506841575): 282 Rust / 405 installed-wheel Python tests and all required checks. Independent review cleared the conditional-border correction, and PR73 was manually merged as `0a47b4b001c52b1fa21ab40829d502620022c37e`. Auto-merge remains disabled; native conditional-edge selection and broader TBL7 remain open.
