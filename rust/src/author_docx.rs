@@ -65,6 +65,7 @@ const MAX_STYLES: usize = 1024;
 const MAX_FORMAT_PATCH_BYTES: usize = 16 * 1024;
 const MAX_SECTIONS: usize = 128;
 const MAX_NOTES: usize = 10_000;
+const MAX_NOTE_CONVERSION_WORK: usize = 2_000_000;
 const MAX_BOOKMARKS: usize = 1000;
 const MAX_BOOKMARK_WORK: usize = 2_000_000;
 const MAX_TABLE_PATCH_BYTES: usize = 128 * 1024;
@@ -2443,6 +2444,36 @@ impl EditableDocx {
         Ok(note)
     }
 
+    /// Convert the owned note collection through the native semantic operation.
+    /// Stable part/path identities survive; an empty conversion has no revision effect.
+    pub fn convert_notes(&mut self, kind: &str) -> PyResult<usize> {
+        let original = self.document()?;
+        let (destination, target, _, _) = note_kind_values(kind)?;
+        let changed = original
+            .parts
+            .values()
+            .filter(|part| {
+                matches!(part.kind, PartKind::Footnote | PartKind::Endnote)
+                    && part.kind != destination
+            })
+            .count();
+        if changed == 0 {
+            return Ok(0);
+        }
+        validate_note_conversion_work(original, target)?;
+        let mut candidate = original.clone();
+        let actual =
+            candidate.convert_notes(target == NoteKind::Endnote, target == NoteKind::Footnote);
+        if actual != changed {
+            return Err(EngineError::Unsupported(
+                "native note conversion changed an unexpected number of notes".into(),
+            )
+            .into());
+        }
+        self.commit_with_note_conversion(candidate, None, Some(target))?;
+        Ok(changed)
+    }
+
     #[pyo3(signature = (kind=None))]
     pub fn note_ids(&self, kind: Option<&str>) -> PyResult<Vec<u32>> {
         let filter = kind.map(note_kind_values).transpose()?.map(|value| value.0);
@@ -3929,9 +3960,26 @@ impl EditableDocx {
 
     fn commit_checked(
         &mut self,
-        mut document: Document,
+        document: Document,
         removed_bookmark: Option<&str>,
     ) -> PyResult<()> {
+        self.commit_with_note_conversion(document, removed_bookmark, None)
+    }
+
+    fn commit_with_note_conversion(
+        &mut self,
+        mut document: Document,
+        removed_bookmark: Option<&str>,
+        converted_notes: Option<NoteKind>,
+    ) -> PyResult<()> {
+        if let Some(target) = converted_notes {
+            if removed_bookmark.is_some() {
+                return Err(PyValueError::new_err(
+                    "note conversion cannot remove a bookmark",
+                ));
+            }
+            validate_note_conversion_anchors(self.document()?, &document, target)?;
+        }
         validate_bookmark_links(&document)?;
         let media_bytes = if document.media.is_empty() && document.settings.page_picture.is_none() {
             0
@@ -3958,7 +4006,7 @@ impl EditableDocx {
                 ));
             }
         }
-        if !existing.is_empty() {
+        if converted_notes.is_none() && !existing.is_empty() {
             let next = semantic_anchors(&document);
             if existing.iter().any(|(key, count)| {
                 !(removed_bookmark == Some(key.1.as_str()) && matches!(key.0, 2 | 3))
@@ -5537,6 +5585,152 @@ fn validate_bookmark_layout(
             &target_work,
             &mut work,
         )?;
+    }
+    Ok(())
+}
+
+/// The native conversion scans all reference offsets for each affected run.
+/// Charge that product before its otherwise linear all-story operation. Public
+/// para_paths is complete for the adapter's existing <=16-level authored tables.
+fn validate_note_conversion_work(document: &Document, target: NoteKind) -> PyResult<()> {
+    let source = if target == NoteKind::Footnote {
+        PartKind::Endnote
+    } else {
+        PartKind::Footnote
+    };
+    let converted: BTreeSet<_> = document
+        .parts
+        .iter()
+        .filter_map(|(id, part)| (part.kind == source).then_some(*id))
+        .collect();
+    let mut work = 0usize;
+    for story in
+        std::iter::once(StoryRef::Body).chain(document.parts.keys().copied().map(StoryRef::Part))
+    {
+        for path in document.para_paths(story) {
+            let paragraph = document.para(story, &path).ok_or_else(|| {
+                PyValueError::new_err("note conversion encountered an invalid paragraph path")
+            })?;
+            let references = paragraph.objects.iter().filter(|object| {
+                matches!(object, InlineObject::NoteRef { id, .. } if converted.contains(id))
+            }).count();
+            work = work
+                .saturating_add(1)
+                .saturating_add(paragraph.objects.len());
+            if references != 0 || matches!(story, StoryRef::Part(id) if converted.contains(&id)) {
+                work = work
+                    .saturating_add(paragraph.runs.len())
+                    .saturating_add(references.saturating_mul(paragraph.runs.len()));
+            }
+            if work > MAX_NOTE_CONVERSION_WORK {
+                return Err(limit(
+                    "note conversion exceeds 2000000 paragraph/object/run comparison units",
+                ));
+            }
+            if references != 0 {
+                // Native conversion swaps the style of the entire containing run.
+                // Permit that only when it cannot restyle text or unrelated objects.
+                let offsets = paragraph.object_offsets();
+                if offsets.len() != paragraph.objects.len() {
+                    return Err(PyValueError::new_err(
+                        "note conversion encountered mismatched object offsets",
+                    ));
+                }
+                let selected: BTreeSet<_> = offsets
+                    .into_iter()
+                    .zip(&paragraph.objects)
+                    .filter_map(|(offset, object)| {
+                        matches!(object, InlineObject::NoteRef { id, .. } if converted.contains(id))
+                            .then_some(offset)
+                    })
+                    .collect();
+                let mut start = 0usize;
+                for run in &paragraph.runs {
+                    let end = start
+                        .checked_add(run.len)
+                        .filter(|end| *end <= paragraph.text.len())
+                        .ok_or_else(|| {
+                            PyValueError::new_err(
+                                "note conversion encountered an invalid formatting run",
+                            )
+                        })?;
+                    if matches!(
+                        run.props.style.as_deref(),
+                        Some(
+                            "FootnoteText"
+                                | "EndnoteText"
+                                | "FootnoteReference"
+                                | "EndnoteReference"
+                        )
+                    ) {
+                        let count = selected.range(start..end).count();
+                        if count != 0
+                            && count.saturating_mul(wordcraft_doc::para::OBJ.len_utf8()) != run.len
+                        {
+                            return Err(EngineError::Unsupported("native note conversion would restyle ordinary text or an unrelated marker in a shared standard-style run; use a custom style or separate formatting first".into()).into());
+                        }
+                    }
+                    start = end;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Conversion alone may change note kinds. Require every original part identity
+/// and the exact full semantic-anchor multiset, with only that known kind change.
+fn validate_note_conversion_anchors(
+    before: &Document,
+    after: &Document,
+    target: NoteKind,
+) -> PyResult<()> {
+    let error = || {
+        EngineError::Unsupported(
+            "note conversion must preserve owned part IDs and every semantic anchor".into(),
+        )
+    };
+    if before.parts.len() != after.parts.len() {
+        return Err(error().into());
+    }
+    let target_part = if target == NoteKind::Footnote {
+        PartKind::Footnote
+    } else {
+        PartKind::Endnote
+    };
+    for (id, part) in &before.parts {
+        let expected = if matches!(part.kind, PartKind::Footnote | PartKind::Endnote) {
+            target_part
+        } else {
+            part.kind
+        };
+        if after.parts.get(id).is_none_or(|next| next.kind != expected) {
+            return Err(error().into());
+        }
+    }
+    let mut expected = BTreeMap::new();
+    for ((kind, name), count) in semantic_anchors(before) {
+        let next_kind = if kind <= 1 {
+            let id: u32 = name.parse().map_err(|_| error())?;
+            let part = before.parts.get(&id).ok_or_else(error)?;
+            let source = if kind == 0 {
+                PartKind::Footnote
+            } else {
+                PartKind::Endnote
+            };
+            if part.kind != source {
+                return Err(error().into());
+            }
+            u8::from(target == NoteKind::Endnote)
+        } else {
+            kind
+        };
+        if expected.insert((next_kind, name), count).is_some() {
+            return Err(error().into());
+        }
+    }
+    if expected != semantic_anchors(after) {
+        return Err(error().into());
     }
     Ok(())
 }
@@ -15960,5 +16154,534 @@ mod tests {
             }
             assert!(validate_outline_layout(&changed, &targets).is_err());
         }
+    }
+
+    #[test]
+    fn raw_note_conversion_preserves_ids_paths_and_standard_custom_styles() {
+        pyo3::prepare_freethreaded_python();
+        let mut owned = EditableDocx::new();
+        let body = owned.add_paragraph("First anchor. Last anchor.").unwrap();
+        let foot = owned
+            .add_note(
+                body,
+                0,
+                5,
+                owned.revision().unwrap(),
+                "Foot body",
+                "footnote",
+            )
+            .unwrap();
+        let end = owned
+            .add_note(
+                body,
+                15,
+                19,
+                owned.revision().unwrap(),
+                "End body",
+                "endnote",
+            )
+            .unwrap();
+        let table = owned.add_table(vec![vec!["Outer".into()]]).unwrap();
+        let nested = owned
+            .cell_add_table(table, 0, 0, vec![vec!["Nested anchor".into()]])
+            .unwrap();
+        let nested_para = owned.cell_paragraph_ids(nested, 0, 0).unwrap()[0];
+        let nested_note = owned
+            .add_note(
+                nested_para,
+                0,
+                6,
+                owned.revision().unwrap(),
+                "Nested note body",
+                "footnote",
+            )
+            .unwrap();
+        let mut raw = owned.document().unwrap().clone();
+        let custom = raw.para_mut(StoryRef::Part(foot), &Path::top(0)).unwrap();
+        custom.props.style = Some("CustomNote".into());
+        custom.runs[0].props.bold = Some(true);
+        let ids: Vec<_> = raw.parts.keys().copied().collect();
+        let before_text: Vec<_> = ids
+            .iter()
+            .map(|id| raw.plain_text(StoryRef::Part(*id)))
+            .collect();
+        let body_text = raw.plain_text(StoryRef::Body);
+        let paths = raw.para_paths(StoryRef::Body);
+        assert_eq!(raw.convert_notes(true, false), 2);
+        assert_eq!(raw.parts.keys().copied().collect::<Vec<_>>(), ids);
+        assert_eq!(raw.para_paths(StoryRef::Body), paths);
+        assert_eq!(raw.plain_text(StoryRef::Body), body_text);
+        assert_eq!(
+            ids.iter()
+                .map(|id| raw.plain_text(StoryRef::Part(*id)))
+                .collect::<Vec<_>>(),
+            before_text
+        );
+        for id in [foot, end, nested_note] {
+            assert_eq!(raw.parts[&id].kind, PartKind::Endnote);
+        }
+        assert_eq!(
+            raw.para(StoryRef::Part(foot), &Path::top(0))
+                .unwrap()
+                .props
+                .style
+                .as_deref(),
+            Some("CustomNote")
+        );
+        assert_eq!(
+            raw.para(StoryRef::Part(foot), &Path::top(0)).unwrap().runs[0]
+                .props
+                .bold,
+            Some(true)
+        );
+        assert_eq!(
+            raw.para(StoryRef::Part(nested_note), &Path::top(0))
+                .unwrap()
+                .props
+                .style
+                .as_deref(),
+            Some("EndnoteText")
+        );
+        assert_eq!(raw.convert_notes(true, false), 0);
+        assert_eq!(raw.convert_notes(false, true), 3);
+        for id in [foot, end, nested_note] {
+            assert_eq!(raw.parts[&id].kind, PartKind::Footnote);
+        }
+        let data = wordcraft_docx::write(&raw).unwrap();
+        let reopened = wordcraft_docx::read(&data).unwrap();
+        assert_eq!(
+            reopened
+                .parts
+                .values()
+                .filter(|p| p.kind == PartKind::Footnote)
+                .count(),
+            3
+        );
+        let pdf = crate::docx::to_pdf(&data, None).unwrap();
+        let extracted = crate::pdf::extract(&pdf, None).unwrap();
+        let text = extracted
+            .pages
+            .iter()
+            .flat_map(|p| &p.blocks)
+            .map(|b| b.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        for text_part in ["Foot body", "End body", "Nested note body"] {
+            assert_eq!(text.matches(text_part).count(), 1, "{text}");
+        }
+    }
+
+    #[test]
+    fn raw_note_conversion_placement_counters_and_long_continuation() {
+        pyo3::prepare_freethreaded_python();
+        let mut owned = EditableDocx::new();
+        owned.set_page_size(300.0, 360.0).unwrap();
+        owned.set_margins(24.0, 24.0, 24.0, 24.0).unwrap();
+        owned
+            .set_section_note_options(
+                0,
+                "footnote",
+                r#"{"start":3,"numbering":"decimal","placement":"page_bottom"}"#,
+            )
+            .unwrap();
+        owned
+            .set_section_note_options(
+                0,
+                "endnote",
+                r#"{"start":7,"numbering":"decimal","placement":"document_end"}"#,
+            )
+            .unwrap();
+        let body = owned.add_paragraph("Citation").unwrap();
+        let note = owned
+            .add_note(
+                body,
+                0,
+                8,
+                owned.revision().unwrap(),
+                "DetailFirst",
+                "footnote",
+            )
+            .unwrap();
+        owned.add_page_break().unwrap();
+        owned.add_paragraph("FinalBody").unwrap();
+        for target in ["footnote", "endnote"] {
+            let mut raw = owned.document().unwrap().clone();
+            if target == "endnote" {
+                assert_eq!(raw.convert_notes(true, false), 1);
+            }
+            let data = wordcraft_docx::write(&raw).unwrap();
+            let reopened = wordcraft_docx::read(&data).unwrap();
+            let layout =
+                wordcraft_layout::layout(&reopened, &mut Default::default(), &Default::default());
+            let native_note = reopened
+                .parts
+                .iter()
+                .find(|(_, p)| matches!(p.kind, PartKind::Footnote | PartKind::Endnote))
+                .unwrap()
+                .0;
+            let places: Vec<_> = layout
+                .pages
+                .iter()
+                .enumerate()
+                .flat_map(|(page, p)| {
+                    p.items.iter().filter_map(move |item| match item {
+                        wordcraft_layout::Placed::Lines {
+                            story: StoryRef::Part(id),
+                            y,
+                            ..
+                        } if id == native_note => Some((page, *y)),
+                        _ => None,
+                    })
+                })
+                .collect();
+            eprintln!("{target} placements {places:?}");
+            assert_eq!(places.len(), 1);
+            assert_eq!(places[0].0, if target == "footnote" { 0 } else { 1 });
+            if target == "footnote" {
+                assert!(places[0].1 > 250.0);
+            } else {
+                assert!(places[0].1 < 100.0);
+            }
+            let pdf = crate::docx::to_pdf(&data, None).unwrap();
+            let extracted = crate::pdf::extract(&pdf, None).unwrap();
+            let note_page = if target == "footnote" { 0 } else { 1 };
+            let text = extracted.pages[note_page]
+                .blocks
+                .iter()
+                .map(|b| b.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            eprintln!("{target} text {text:?}");
+            assert!(text.contains("DetailFirst"));
+            assert!(text.contains(if target == "footnote" { "3" } else { "7" }));
+            assert!(
+                crate::docx::render(&data, note_page, 72.0, None)
+                    .unwrap()
+                    .len()
+                    > 100
+            );
+        }
+        for index in 0..45 {
+            owned
+                .story_add_paragraph(note, &format!("Continuation{index:02} complete text."))
+                .unwrap();
+        }
+        for end in [false, true] {
+            let mut raw = owned.document().unwrap().clone();
+            raw.convert_notes(end, !end);
+            let data = wordcraft_docx::write(&raw).unwrap();
+            let reopened = wordcraft_docx::read(&data).unwrap();
+            let layout =
+                wordcraft_layout::layout(&reopened, &mut Default::default(), &Default::default());
+            let pages: BTreeSet<_> = layout
+                .pages
+                .iter()
+                .enumerate()
+                .filter_map(|(page, p)| {
+                    p.items
+                        .iter()
+                        .any(|i| {
+                            matches!(
+                                i,
+                                wordcraft_layout::Placed::Lines {
+                                    story: StoryRef::Part(_),
+                                    ..
+                                }
+                            )
+                        })
+                        .then_some(page)
+                })
+                .collect();
+            eprintln!("end={end} long pages {pages:?}");
+            assert!(pages.len() > 1);
+            let pdf = crate::docx::to_pdf(&data, None).unwrap();
+            let extracted = crate::pdf::extract(&pdf, None).unwrap();
+            let text = extracted
+                .pages
+                .iter()
+                .flat_map(|p| &p.blocks)
+                .map(|b| b.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            for index in 0..45 {
+                assert_eq!(
+                    text.matches(&format!("Continuation{index:02}")).count(),
+                    1,
+                    "{index}: {text}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn note_conversion_owned_noop_handles_accounting_and_exact_work_budget() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditableDocx::new();
+        assert_eq!(document.convert_notes("endnote").unwrap(), 0);
+        assert_eq!(document.revision().unwrap(), 0);
+        let body = document.add_paragraph("Anchor").unwrap();
+        let note = document
+            .add_note(
+                body,
+                0,
+                6,
+                document.revision().unwrap(),
+                "Detail",
+                "footnote",
+            )
+            .unwrap();
+        let note_para = document.story_paragraph_ids(note).unwrap()[0];
+        let before = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        let usage = (
+            document.text_bytes,
+            document.cell_count,
+            document.media_bytes,
+        );
+        let locations = document.locations.clone();
+        let copied = document.copy().unwrap();
+        assert_eq!(document.convert_notes("footnote").unwrap(), 0);
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.to_bytes().unwrap(), before);
+        for kind in ["", "Footnote", "swap", "endnote\0", &"x".repeat(100)] {
+            assert!(document.convert_notes(kind).is_err());
+        }
+        assert_eq!(document.convert_notes("endnote").unwrap(), 1);
+        assert_eq!(document.revision().unwrap(), revision + 1);
+        assert_eq!(document.locations, locations);
+        assert_eq!(
+            (
+                document.text_bytes,
+                document.cell_count,
+                document.media_bytes
+            ),
+            usage
+        );
+        assert_eq!(document.paragraph_text(note_para).unwrap(), "Detail");
+        assert_eq!(document.paragraph_style(note_para).unwrap(), "Endnote Text");
+        assert_eq!(copied.note_ids(Some("footnote")).unwrap(), vec![note]);
+        assert_eq!(document.note_ids(Some("endnote")).unwrap(), vec![note]);
+        assert!(document.text_range(note_para, 0, 1).is_ok());
+        let mut raw = copied.document().unwrap().clone();
+        let p = raw.para_mut(StoryRef::Body, &Path::top(body)).unwrap();
+        p.text = "\u{fffc}".repeat(1997);
+        p.objects = vec![
+            InlineObject::NoteRef {
+                kind: NoteKind::Footnote,
+                id: note,
+                custom: String::new()
+            };
+            1997
+        ];
+        p.runs = (0..1000)
+            .map(|i| wordcraft_doc::para::Run {
+                len: if i < 997 { 6 } else { 3 },
+                props: CharProps::default(),
+            })
+            .collect();
+        // Body:1+1997+1000+(1997*1000); converted note:1+1. Exactly2million.
+        validate_note_conversion_work(&raw, NoteKind::Endnote).unwrap();
+        raw.body.push(wordcraft_doc::para_block(Paragraph::new()));
+        assert!(validate_note_conversion_work(&raw, NoteKind::Endnote).is_err());
+        let mut over = copied.copy().unwrap();
+        over.document = Some(raw);
+        let revision = over.revision().unwrap();
+        let original = wordcraft_docx::write(over.document().unwrap()).unwrap();
+        assert!(over.convert_notes("endnote").is_err());
+        assert_eq!(over.revision().unwrap(), revision);
+        assert_eq!(
+            wordcraft_docx::write(over.document().unwrap()).unwrap(),
+            original
+        );
+        document.close();
+        assert!(document.convert_notes("footnote").is_err());
+    }
+
+    #[test]
+    fn note_conversion_only_allows_exact_kind_remapping_and_rolls_back_field_scope() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditableDocx::new();
+        let body = document.add_paragraph("Anchor").unwrap();
+        let note = document
+            .add_note(
+                body,
+                0,
+                6,
+                document.revision().unwrap(),
+                "Detail",
+                "footnote",
+            )
+            .unwrap();
+        let bookmark = document.add_paragraph("Target").unwrap();
+        document
+            .set_bookmark("Mark", bookmark, 0, 6, document.revision().unwrap())
+            .unwrap();
+        let bytes = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        for malformed in 0..6 {
+            let mut raw = document.document().unwrap().clone();
+            raw.convert_notes(true, false);
+            match malformed {
+                0 => {
+                    raw.parts.remove(&note);
+                }
+                1 => {
+                    raw.insert_object(
+                        &Pos::body(body, 0),
+                        InlineObject::NoteRef {
+                            kind: NoteKind::Endnote,
+                            id: note,
+                            custom: String::new(),
+                        },
+                        &Default::default(),
+                    )
+                    .unwrap();
+                }
+                2 => {
+                    raw.parts.get_mut(&note).unwrap().kind = PartKind::Footnote;
+                }
+                3 => {
+                    raw.insert_object(
+                        &Pos::body(body, 0),
+                        InlineObject::BookmarkStart {
+                            name: "Extra".into(),
+                        },
+                        &Default::default(),
+                    )
+                    .unwrap();
+                }
+                4 => {
+                    raw.delete_range(&Pos::body(body, 6), &Pos::body(body, 9))
+                        .unwrap();
+                }
+                _ => {
+                    raw.insert_object(
+                        &Pos::body(body, 0),
+                        InlineObject::CommentStart { id: 42 },
+                        &Default::default(),
+                    )
+                    .unwrap();
+                }
+            }
+            assert!(
+                document
+                    .commit_with_note_conversion(raw, None, Some(NoteKind::Endnote))
+                    .is_err(),
+                "case{malformed}"
+            );
+            assert_eq!(document.revision().unwrap(), revision);
+            assert_eq!(document.to_bytes().unwrap(), bytes);
+        }
+        let mut raw = document.document().unwrap().clone();
+        raw.convert_notes(true, false);
+        assert!(
+            document.commit(raw).is_err(),
+            "ordinary edits cannot change anchor kind"
+        );
+        let note_para = document.story_paragraph_ids(note).unwrap()[0];
+        document
+            .add_paragraph_field(note_para, "section_page_count")
+            .unwrap();
+        let section = document.add_section("continuous").unwrap();
+        document.add_paragraph("Last continuous section").unwrap();
+        document
+            .set_section_note_options(section, "endnote", r#"{"placement":"section_end"}"#)
+            .unwrap();
+        let before = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        assert!(document.convert_notes("endnote").is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.to_bytes().unwrap(), before);
+        assert_eq!(document.note_ids(Some("footnote")).unwrap(), vec![note]);
+        document
+            .set_section_props(section, r#"{"start":"next_page"}"#)
+            .unwrap();
+        assert_eq!(document.convert_notes("endnote").unwrap(), 1);
+    }
+
+    #[test]
+    fn upstream_note_conversion_restyles_whole_shared_reference_run() {
+        pyo3::prepare_freethreaded_python();
+        let mut owned = EditableDocx::new();
+        let p = owned.add_paragraph("Ordinary before after").unwrap();
+        owned
+            .add_note(
+                p,
+                9,
+                15,
+                owned.revision().unwrap(),
+                "Foot detail",
+                "footnote",
+            )
+            .unwrap();
+        owned
+            .add_note(
+                p,
+                17,
+                22,
+                owned.revision().unwrap(),
+                "End detail",
+                "endnote",
+            )
+            .unwrap();
+        owned
+            .format_style(
+                "FootnoteReference",
+                r##"{"color":"#FF0000","font_size":16}"##,
+                None,
+            )
+            .unwrap();
+        owned
+            .format_style(
+                "EndnoteReference",
+                r##"{"color":"#0000FF","font_size":16}"##,
+                None,
+            )
+            .unwrap();
+        let end = owned.paragraph_text(p).unwrap().chars().count();
+        owned
+            .format_range_patch(
+                p,
+                0,
+                end,
+                owned.revision().unwrap(),
+                r#"{"style":"FootnoteReference"}"#,
+            )
+            .unwrap();
+        let before = owned.document().unwrap().clone();
+        let mut after = before.clone();
+        assert_eq!(after.convert_notes(true, false), 1);
+        let before_para = before.para(StoryRef::Body, &Path::top(p)).unwrap();
+        let after_para = after.para(StoryRef::Body, &Path::top(p)).unwrap();
+        assert_eq!(before_para.text, after_para.text);
+        assert_eq!(before_para.runs.len(), 1);
+        assert_eq!(after_para.runs.len(), 1);
+        assert_eq!(
+            before_para.runs[0].props.style.as_deref(),
+            Some("FootnoteReference")
+        );
+        assert_eq!(
+            after_para.runs[0].props.style.as_deref(),
+            Some("EndnoteReference")
+        );
+        // Raw native output bypasses the local guard, retaining the upstream defect.
+        for pdf in [false, true] {
+            for (raw, visible, absent) in [(&before, 0, 2), (&after, 2, 0)] {
+                let bytes = wordcraft_docx::write(raw).unwrap();
+                let png = if pdf {
+                    crate::pdf::render(&crate::docx::to_pdf(&bytes, None).unwrap(), 0, 144.0, None)
+                        .unwrap()
+                } else {
+                    crate::docx::render(&bytes, 0, 144.0, None).unwrap()
+                };
+                assert!(border_pixels(png.clone(), visible) > 100);
+                assert_eq!(border_pixels(png, absent), 0);
+            }
+        }
+        assert!(owned.convert_notes("endnote").is_err());
+        assert_eq!(
+            owned.document().unwrap().plain_text(StoryRef::Body),
+            before.plain_text(StoryRef::Body)
+        );
     }
 }

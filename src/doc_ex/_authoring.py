@@ -1358,6 +1358,25 @@ class Notes(_Collection["Note"]):
     def __init__(self, owner: WordDocument):
         super().__init__(owner, lambda: owner._call("note_ids"), Note)
 
+    def convert(self, *, kind: Literal["footnote", "endnote"]) -> int:
+        """Convert all notes to one kind; return the count changed, retaining handles.
+
+        Destination numbering and placement follow section.note_options(). A no-op
+        keeps ranges and render caches valid; actual conversion invalidates ranges.
+        """
+        self._owner._ensure_open()
+        if not isinstance(kind, str):
+            raise TypeError("note kind must be a string")
+        if str.__len__(kind) > 8:
+            raise ValueError("note kind must be footnote or endnote")
+        kind = str.__str__(kind)
+        if kind not in {"footnote", "endnote"}:
+            raise ValueError("note kind must be footnote or endnote")
+        changed = self._owner._call("convert_notes", kind)
+        if changed:
+            self._owner._invalidate()
+        return changed
+
     def add(self, reference: TextRange, text: str = "", *, kind: str = "footnote") -> Note:
         """Attach a note at a same-document body range's end, retaining its text."""
         if not isinstance(reference, TextRange) or not isinstance(reference._paragraph, Paragraph):
