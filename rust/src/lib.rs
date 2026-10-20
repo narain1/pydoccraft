@@ -101,11 +101,34 @@ fn extract(data: &[u8], filetype: &str, password: Option<&str>) -> PyResult<Stri
 #[pyo3(signature = (data, pages=None, password=None))]
 fn extract_text(
     data: &[u8],
-    pages: Option<Vec<isize>>,
+    pages: Option<Bound<'_, PyAny>>,
     password: Option<&str>,
 ) -> PyResult<String> {
     limits::validate_input_size(data.len())?;
-    pdf::extract_text(data, password, pages.as_deref()).map_err(Into::into)
+    let selected = pages
+        .map(|pages| -> PyResult<Vec<isize>> {
+            let mut selected = Vec::new();
+            for value in pages.try_iter()? {
+                if selected.len() == pdf::MAX_SELECTED_PAGES {
+                    return Err(EngineError::ResourceLimit(
+                        "selected page count exceeds 10000".into(),
+                    )
+                    .into());
+                }
+                let value = value?;
+                let index = value.extract::<isize>().map_err(|error| {
+                    if error.is_instance_of::<pyo3::exceptions::PyOverflowError>(value.py()) {
+                        pyo3::exceptions::PyIndexError::new_err("page index is out of range")
+                    } else {
+                        error
+                    }
+                })?;
+                selected.push(index);
+            }
+            Ok(selected)
+        })
+        .transpose()?;
+    pdf::extract_text(data, password, selected.as_deref()).map_err(Into::into)
 }
 
 #[pyfunction]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import operator
+import sys
 from pathlib import Path
 from typing import BinaryIO
 
@@ -29,6 +30,8 @@ __version__ = "0.2.1"
 
 
 _MAX_INPUT_BYTES = 128 * 1024 * 1024
+_MAX_SELECTED_PAGES = 10_000
+_MAX_TEXT_OUTPUT_BYTES = 64 * 1024 * 1024
 
 
 def _read(source, *, limit: int | None = None) -> tuple[bytes, str]:
@@ -95,6 +98,36 @@ def open(path_or_bytes: str | Path | bytes | bytearray | memoryview | BinaryIO, 
     return Document(pages, metadata, data, kind, password, stories=stories, _render_session=render_session)
 
 
+def _selected_pages(pages):
+    if pages is None:
+        return None
+    selected = []
+    for value in pages:
+        if len(selected) == _MAX_SELECTED_PAGES:
+            raise UnsafeArchiveError("selected page count exceeds 10000")
+        index = operator.index(value)
+        if not -sys.maxsize - 1 <= index <= sys.maxsize:
+            raise IndexError("page index is out of range")
+        selected.append(index)
+    return selected
+
+
+def _bounded_text_join(texts):
+    parts = []
+    used = 0
+    for text in texts:
+        used += bool(parts)
+        # Bound the temporary UTF-8 encoding too; keep the original owned strings.
+        for start in range(0, len(text), 4096):
+            used += len(text[start:start + 4096].encode("utf-8"))
+            if used > _MAX_TEXT_OUTPUT_BYTES:
+                raise UnsafeArchiveError("selected text exceeds the 64 MiB output limit")
+        if used > _MAX_TEXT_OUTPUT_BYTES:
+            raise UnsafeArchiveError("selected text exceeds the 64 MiB output limit")
+        parts.append(text)
+    return "\f".join(parts)
+
+
 def extract_text(
     source: str | Path | bytes | bytearray | memoryview | BinaryIO,
     *,
@@ -102,15 +135,17 @@ def extract_text(
     password: str | None = None,
     pages=None,
 ) -> str:
-    """Extract selected pages as form-feed-separated text without building public models."""
+    """Extract selected text; PDF skips public models, while Office uses eager extraction."""
+    indices = _selected_pages(pages)
     data, suffix = _read(source)
     kind = _kind(data, suffix, filetype)
-    indices = None if pages is None else [operator.index(page) for page in pages]
     if kind == "pdf":
         return _native(lambda: _core.extract_text(data, indices, password))
     with open(data, filetype=kind, password=password) as document:
         selected = range(document.page_count) if indices is None else indices
-        return "\f".join(document[index].get_text("text") for index in selected)
+        if len(selected) > _MAX_SELECTED_PAGES:
+            raise UnsafeArchiveError("selected page count exceeds 10000")
+        return _bounded_text_join(document[index].get_text("text") for index in selected)
 
 
 def convert(source: str | Path | bytes | bytearray | memoryview | BinaryIO, output_format: str, *, filetype: str | None = None, password: str | None = None) -> bytes:
