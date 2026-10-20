@@ -175,11 +175,16 @@ PDF `copy(pages=...)` and page insertion accept up to 10,000 selected indexes, p
 
 Without a supplied font, PDF text uses the upstream Helvetica/WinAnsi path and rejects unsupported characters or text that cannot fit. `page.draw_text(text, at=(x, y), font_size=12, font=font_bytes_or_path, color="black")` accepts an explicitly supplied embeddable font and uses upstream shaping, glyph mapping and embedding. Font input is bounded to 16 MiB and subject to PdfCraft's declared-license/embedding checks. This route handles explicit newline rows without automatic wrapping, rejects missing glyphs/overflow, and has tested Latin extended, Greek, Cyrillic, combining accents and ligature words. It does not assert broad complex-script conformance. PDF image insertion accepts bounded PNG/JPEG inputs. Page subsets/imports do not promise preservation of all document-level outlines, tags, forms or metadata. Background readback is supported for backgrounds managed by this editable owner; unknown imported content is not guessed from its appearance.
 
+PDF extraction exposes the native display label in `page.metadata["label"]`; `page.number` remains the zero-based physical index. Full editable copies preserve labels. Native page movement keeps label ranges at document positions rather than attaching labels to moved content; deletion adjusts the ranges and continues numbering. Page subsets and imports do not copy the source document's label tree. No label writer or alias is exposed. Invalid/oversized native label trees can fall back to physical numbering; label readback is not a complete preservation report.
+
+The import-safe [label assembly reproducer](../tools/reproduce_pdf_page_label_assembly.py) uses distinct page widths to show these behaviors with Roman and prefixed decimal labels. Formatting/range adjustment remains in the pinned [native label implementation](https://github.com/storytold/pdfcraft/blob/645016addcfb9078c557f0189559ab47cdcee057/crates/organize/src/labels.rs); the script only constructs synthetic test input.
+
 ### PDF annotations
 
 `page.annotations` is an ordered collection. `add("note" | "highlight" | "rectangle" | "ellipse", box=..., text="", author="", color="#FFD200")` and `add_link(box=..., uri=... | page=...)` return checked annotation handles. A link needs exactly one target; page targets are zero-based. Handles expose `kind`, `box`, `text`, `author`, `color`, `uri` and `target_page`; `update(...)` applies a compound mutation atomically. `del page.annotations[index]` invalidates previously retrieved annotation handles on that page, including those retrieved through another page wrapper.
 
 Notes use the upstream fixed 20×20 PDF-user-unit icon size. Notes and highlights can be moved but not resized; links, rectangles and ellipses can be resized. Unsupported type-specific edits fail before changing the document. Readback can include other native annotation kinds, but mutation is limited to the documented profile. A highlight or comment is not secure redaction. Extracted internal links use `#page=N` with a one-based fragment and zero-based `metadata.target_page`.
+
 
 ### PDF paths, metadata and bookmarks
 
