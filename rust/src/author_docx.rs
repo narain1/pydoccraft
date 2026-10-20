@@ -5513,6 +5513,7 @@ impl CharPatch {
                     | "italic"
                     | "font"
                     | "font_size"
+                    | "language"
                     | "color"
                     | "underline"
                     | "strike"
@@ -5533,6 +5534,19 @@ impl CharPatch {
             match key.as_str() {
                 "bold" => patch.values.bold = bool_value(value)?,
                 "italic" => patch.values.italic = bool_value(value)?,
+                "language" => {
+                    let tag = text_value(value)?;
+                    if tag.is_empty()
+                        || tag.len() > 63
+                        || !tag.split('-').all(|part| {
+                            !part.is_empty()
+                                && part.bytes().all(|byte| byte.is_ascii_alphanumeric())
+                        })
+                    {
+                        return Err(PyValueError::new_err("language must be a 1..63-byte ASCII alphanumeric tag with single hyphen separators"));
+                    }
+                    patch.values.lang = Some(tag.to_owned());
+                }
                 "strike" => {
                     let (single, double) = match (value.as_bool(), value.as_str()) {
                         (Some(enabled), _) => (enabled, false),
@@ -5628,6 +5642,7 @@ impl CharPatch {
                 "bold" => props.bold = None,
                 "italic" => props.italic = None,
                 "font" => props.font = None,
+                "language" => props.lang = None,
                 "font_size" => props.size = None,
                 "color" => props.color = None,
                 "underline" => props.underline = None,
@@ -5650,6 +5665,7 @@ fn is_paragraph_key(key: &str) -> bool {
     matches!(
         key,
         "alignment"
+            | "direction"
             | "indent_left"
             | "indent_right"
             | "indent_first"
@@ -5687,6 +5703,15 @@ impl ParaPatch {
                 continue;
             }
             match key.as_str() {
+                "direction" => {
+                    patch.values.bidi = Some(match text_value(value)? {
+                        "rtl" => true,
+                        "ltr" => false,
+                        _ => {
+                            return Err(PyValueError::new_err("direction must be rtl, ltr or None"))
+                        }
+                    });
+                }
                 "alignment" => {
                     patch.values.align = Some(match text_value(value)? {
                         "left" => Align::Left,
@@ -5758,6 +5783,7 @@ impl ParaPatch {
         for key in &self.clear {
             match key.as_str() {
                 "alignment" => props.align = None,
+                "direction" => props.bidi = None,
                 "indent_left" => {
                     props.indent_left = None;
                     props.indent_left_chars = None;
@@ -5863,6 +5889,7 @@ fn char_snapshot(props: &CharProps) -> Map<String, Value> {
         ("bold", json!(props.bold)),
         ("italic", json!(props.italic)),
         ("font", json!(props.font)),
+        ("language", json!(props.lang)),
         ("font_size", json!(props.size)),
         ("color", json!(props.color.map(color_string))),
         ("underline", json!(props.underline.map(underline_name))),
@@ -5886,6 +5913,7 @@ fn resolved_char_snapshot(props: &wordcraft_doc::resolve::ResolvedChar) -> Map<S
         ("bold", json!(props.bold)),
         ("italic", json!(props.italic)),
         ("font", json!(props.font)),
+        ("language", json!(props.lang)),
         ("font_size", json!(props.size)),
         ("color", json!(color_string(props.color))),
         ("underline", json!(underline_name(props.underline))),
@@ -5921,6 +5949,10 @@ fn para_snapshot(props: &ParaProps) -> PyResult<Map<String, Value>> {
                 .unwrap_or(Value::Null),
         ),
         ("alignment", json!(props.align.map(alignment_name))),
+        (
+            "direction",
+            json!(props.bidi.map(|rtl| if rtl { "rtl" } else { "ltr" })),
+        ),
         ("indent_left", json!(props.indent_left)),
         ("indent_right", json!(props.indent_right)),
         ("indent_first", json!(props.indent_first)),
@@ -5949,6 +5981,7 @@ fn resolved_para_snapshot(
         ("borders", borders_snapshot(props.borders, false)),
         ("tabs", tabs_snapshot(&props.tabs)),
         ("alignment", json!(alignment_name(props.align))),
+        ("direction", json!(if props.bidi { "rtl" } else { "ltr" })),
         ("indent_left", json!(props.indent_left)),
         ("indent_right", json!(props.indent_right)),
         ("indent_first", json!(props.indent_first)),
@@ -13355,5 +13388,325 @@ mod tests {
             .caption = Some("x".repeat(MAX_TABLE_METADATA_BYTES + 1));
         assert!(document.commit(candidate).is_err());
         assert_eq!(document.table(table).unwrap().props.caption, None);
+    }
+    #[test]
+    fn direction_language_inheritance_roundtrip_and_native_bidi_geometry() {
+        let mut document = EditableDocx::new();
+        document.set_page_size(300.0, 300.0).unwrap();
+        document.set_margins(30.0, 30.0, 30.0, 30.0).unwrap();
+        document
+            .format_defaults(r#"{"direction":"rtl","language":"fa-IR"}"#)
+            .unwrap();
+        assert!(
+            document
+                .document()
+                .unwrap()
+                .styles
+                .resolve_para(&ParaProps::default())
+                .bidi
+        );
+        assert_eq!(
+            document
+                .document()
+                .unwrap()
+                .styles
+                .resolve_char(None, &CharProps::default())
+                .lang
+                .as_deref(),
+            Some("fa-IR")
+        );
+        let style = document
+            .add_style("Mixed scripts", "paragraph", Some("Normal"))
+            .unwrap();
+        document
+            .format_style(
+                &style,
+                r##"{"direction":"rtl","language":"fa-IR","color":"#FF0000","font_size":18}"##,
+                None,
+            )
+            .unwrap();
+        let paragraph = document.add_paragraph("سلام Word 250").unwrap();
+        document.set_paragraph_style(paragraph, &style).unwrap();
+        let direct: Value =
+            serde_json::from_str(&document.paragraph_formatting(paragraph, false).unwrap())
+                .unwrap();
+        let effective: Value =
+            serde_json::from_str(&document.paragraph_formatting(paragraph, true).unwrap()).unwrap();
+        assert!(direct["direction"].is_null());
+        assert_eq!(effective["direction"], "rtl");
+        let layout = wordcraft_layout::layout(
+            document.document().unwrap(),
+            &mut Default::default(),
+            &Default::default(),
+        );
+        let para = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                wordcraft_layout::Placed::Lines { path, para, .. }
+                    if path == &Path::top(paragraph) =>
+                {
+                    Some(para)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(para.rp.bidi);
+        assert!(!para.glyphs.is_empty());
+        assert!(
+            para.glyphs.iter().all(|glyph| glyph.gid != 0),
+            "fixture must use real bundled glyphs, not missing-glyph boxes"
+        );
+        assert!(para
+            .styles
+            .iter()
+            .all(|style| style.rc.lang.as_deref() == Some("fa-IR")));
+        let line = &para.lines[0];
+        let cluster_x = |offset| {
+            let k = (line.c0..line.c1)
+                .find(|&k| para.clusters[k].start == offset)
+                .unwrap();
+            line.cl_left(k).unwrap()
+        };
+        assert!(
+            cluster_x(0) > cluster_x("سلا".len()),
+            "Persian glyph clusters advance right to left"
+        );
+        assert!(
+            cluster_x("سلام ".len()) < cluster_x("سلام Wor".len()),
+            "Latin embedded run keeps left to right order"
+        );
+        assert!(
+            cluster_x("سلام Word ".len()) < cluster_x("سلام Word 25".len()),
+            "digits keep left to right order"
+        );
+        assert!((layout.caret(&Pos::body(paragraph, 0)).unwrap().x - 270.0).abs() < 1.0);
+        let output = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&output).unwrap();
+        let p = reopened
+            .para(StoryRef::Body, &Path::top(paragraph))
+            .unwrap();
+        assert_eq!(p.text, "سلام Word 250");
+        assert!(reopened.styles.resolve_para(&p.props).bidi);
+        assert_eq!(
+            reopened
+                .styles
+                .resolve_char(p.props.style.as_deref(), p.props_of_char(0))
+                .lang
+                .as_deref(),
+            Some("fa-IR")
+        );
+        let pdf = crate::docx::to_pdf(&output, None).unwrap();
+        assert!(border_pixels(crate::docx::render(&output, 0, 144.0, None).unwrap(), 0) > 100);
+        assert!(border_pixels(crate::pdf::render(&pdf, 0, 144.0, None).unwrap(), 0) > 100);
+        document
+            .format_paragraph(paragraph, r#"{"direction":"ltr"}"#)
+            .unwrap();
+        assert_eq!(
+            document.paragraph(paragraph).unwrap().props.bidi,
+            Some(false)
+        );
+        document
+            .format_paragraph(paragraph, r#"{"direction":null}"#)
+            .unwrap();
+        assert_eq!(document.paragraph(paragraph).unwrap().props.bidi, None);
+        document
+            .format_defaults(r#"{"direction":null,"language":null}"#)
+            .unwrap();
+        let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+        assert_eq!(reopened.styles.default_chr.lang, None);
+        assert_eq!(reopened.styles.default_para.bidi, None);
+        assert!(!reopened.styles.resolve_para(&ParaProps::default()).bidi);
+    }
+
+    #[test]
+    fn direction_language_table_region_context_and_local_precedence() {
+        let mut document = EditableDocx::new();
+        let style = document.add_style("RTL table text", "table", None).unwrap();
+        document
+            .format_style(&style, r#"{"direction":"rtl","language":"ar-SA"}"#, None)
+            .unwrap();
+        document
+            .format_style(&style, r#"{"language":"he-IL"}"#, Some("first_row"))
+            .unwrap();
+        let table = document
+            .add_table(vec![
+                vec!["First".into(), "Second".into()],
+                vec!["Third".into(), "Fourth".into()],
+            ])
+            .unwrap();
+        document
+            .table_format_patch(
+                table,
+                &json!({"style":style,"look":{"header_row":true}}).to_string(),
+            )
+            .unwrap();
+        let first = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
+        let second = document.cell_paragraph_ids(table, 0, 1).unwrap()[0];
+        document
+            .format_paragraph(first, r#"{"direction":"ltr"}"#)
+            .unwrap();
+        let (_, _, revision) = document
+            .add_run_patch(first, " Local", r#"{"language":"en-GB"}"#)
+            .unwrap();
+        let layout = wordcraft_layout::layout(
+            document.document().unwrap(),
+            &mut Default::default(),
+            &Default::default(),
+        );
+        let mut xs = [0.0; 2];
+        for item in &layout.pages[0].items {
+            if let wordcraft_layout::Placed::Cell {
+                table: path,
+                row: 0,
+                cell,
+                rect,
+                ..
+            } = item
+            {
+                if path == &Path::top(table) && *cell < 2 {
+                    xs[*cell] = rect.x;
+                }
+            }
+        }
+        assert!(
+            xs[0] < xs[1],
+            "paragraph direction must not reverse table cell order"
+        );
+        for (id, rtl) in [(first, false), (second, true)] {
+            let (_, path) = document.location(id).unwrap();
+            let para = layout.pages[0]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    wordcraft_layout::Placed::Lines { path: p, para, .. } if p == &path => {
+                        Some(para)
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(para.rp.bidi, rtl);
+            assert!(para
+                .styles
+                .iter()
+                .any(|s| s.rc.lang.as_deref() == Some("he-IL")));
+            if id == first {
+                assert!(para
+                    .styles
+                    .iter()
+                    .any(|s| s.rc.lang.as_deref() == Some("en-GB")));
+            }
+        }
+        document
+            .format_range_patch(first, 5, 11, revision, r#"{"language":null}"#)
+            .unwrap();
+        document
+            .format_paragraph(first, r#"{"direction":null}"#)
+            .unwrap();
+        let snapshot: Value =
+            serde_json::from_str(&document.paragraph_formatting(first, true).unwrap()).unwrap();
+        assert_eq!(snapshot["direction"], "rtl");
+        let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+        let reopened_layout =
+            wordcraft_layout::layout(&reopened, &mut Default::default(), &Default::default());
+        let (_, first_path) = document.location(first).unwrap();
+        let cleared = reopened_layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                wordcraft_layout::Placed::Lines { path, para, .. } if path == &first_path => {
+                    Some(para)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(cleared.rp.bidi);
+        assert!(cleared
+            .styles
+            .iter()
+            .all(|style| style.rc.lang.as_deref() == Some("he-IL")));
+        let native_style = reopened.styles.get(&style).unwrap();
+        assert_eq!(native_style.para.bidi, Some(true));
+        assert_eq!(
+            native_style
+                .table_part(TablePart::FirstRow)
+                .chr
+                .lang
+                .as_deref(),
+            Some("he-IL")
+        );
+        let before = document.to_bytes().unwrap();
+        assert!(document
+            .format_style(&style, r#"{"direction":"ltr"}"#, Some("first_row"))
+            .is_err());
+        assert_eq!(document.to_bytes().unwrap(), before);
+    }
+
+    #[test]
+    fn direction_language_bounds_reset_and_failed_patches_are_atomic() {
+        let mut document = EditableDocx::new();
+        let paragraph = document.add_paragraph("Preserve 😀 e\u{301}").unwrap();
+        let tag = "a".repeat(63);
+        let (_, _, revision) = document
+            .add_run_patch(paragraph, "tail", &json!({"language":tag}).to_string())
+            .unwrap();
+        let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+        assert_eq!(
+            reopened
+                .para(StoryRef::Body, &Path::top(paragraph))
+                .unwrap()
+                .runs
+                .last()
+                .unwrap()
+                .props
+                .lang
+                .as_deref(),
+            Some(tag.as_str())
+        );
+        let before = document.to_bytes().unwrap();
+        for value in [
+            json!("a".repeat(64)),
+            json!(""),
+            json!(" en"),
+            json!("en_Us"),
+            json!("en--US"),
+            json!("-en"),
+            json!("en-"),
+            json!("日本"),
+            json!(false),
+            json!(123),
+        ] {
+            assert!(document
+                .add_run_patch(
+                    paragraph,
+                    "changed",
+                    &json!({"language":value,"bold":true}).to_string()
+                )
+                .is_err());
+            assert!(document
+                .format_defaults(&json!({"language":value}).to_string())
+                .is_err());
+            assert_eq!(document.to_bytes().unwrap(), before);
+            assert_eq!(document.revision().unwrap(), revision);
+        }
+        for value in [json!("auto"), json!("RTL"), json!(true), json!(1)] {
+            assert!(document
+                .format_paragraph(
+                    paragraph,
+                    &json!({"direction":value,"alignment":"right"}).to_string()
+                )
+                .is_err());
+            assert_eq!(document.to_bytes().unwrap(), before);
+        }
+        let mut copied = document.copy().unwrap();
+        copied
+            .format_paragraph(paragraph, r#"{"direction":"rtl"}"#)
+            .unwrap();
+        assert_eq!(document.paragraph(paragraph).unwrap().props.bidi, None);
+        document.close();
+        assert!(document
+            .format_paragraph(paragraph, r#"{"direction":"rtl"}"#)
+            .is_err());
+        assert!(copied.to_bytes().is_ok());
     }
 }

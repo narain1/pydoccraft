@@ -336,3 +336,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add bounded story/line operation cells with distinct artifacts, exact fixture fingerprints and existing roadmap/reference joins.
 - [x] Keep unsupported imported edits, unassessed semantic extraction and broader native fidelity gaps explicit.
 - [x] Verify cached reference locations, generated guides and installed-wheel development checks; record unchanged runtime evidence.
+
+
+## Native direction and language formatting
+
+- [x] Reuse existing DOCX format parsers, native properties, inheritance and direct/effective snapshots for direction/language.
+- [x] Validate native mixed-script geometry, conditional table-language precedence and explicit unsupported paragraph-region direction.
+- [x] Verify complete locked/native and clean installed-wheel corpus plus typed consumers; record artifact evidence.
+- [ ] Retain broader complex-script/CJK font controls, missing-glyph diagnostics and TXT6 parity as open work.

@@ -330,3 +330,10 @@ The existing authored pagination guard activates for numbered sections and share
 ## 53. Story and line-number evidence joins
 
 Two bounded DOCX profiles extend the existing development ledger to nine profiles and 63 operation cells. Each cites its own frozen wheel/source commit and unchanged test fingerprints. Three additional roadmap criteria gain profile joins, retaining their existing canonical owner and unchecked broad scope. The headers/footers and page-fields reference families connect to these profiles; LineNumberType is cited from the already pinned SDK schema snapshot. No runtime metadata API or duplicate capability database is introduced.
+
+
+## 54. Shared formatting keys for direction and language
+
+CharPatch maps language to native CharProps.lang; ParaPatch maps direction to ParaProps.bidi. Existing parse/clear/overlay and direct/resolved snapshot helpers carry both fields. Explicit ltr stores Some(false), while None clears inheritance. The language profile prevents values of 64 or more bytes from disappearing in the pinned reader; case and spelling remain caller-owned. Existing Python formatting TypedDicts and consumer checks gain the keys without another method family.
+
+Native paragraph bidi resolves through styles/defaults and whole-table paragraph properties. PartFormat conditional regions retain their current special alignment support and character properties: language is supported there, direction remains explicitly invalid. Native shaping and logical alignment determine visible placement; TableProps.bidi_visual and cell text orientation remain separate. Concrete mixed Persian/Latin/digit glyph geometry and visible PNG/PDF extents validate this bounded profile, while Hebrew/emoji/combining source preservation does not imply complete typography coverage.

@@ -32,6 +32,7 @@ class _CharacterProperties(TypedDict, total=False):
     italic: bool | None
     font_size: float | None
     font: str | None
+    language: str | None
     color: str | tuple[int, int, int] | None
     underline: bool | str | None
     strike: bool | str | None
@@ -51,6 +52,7 @@ class TabStop(TypedDict, total=False):
 
 
 class ParagraphFormatting(TypedDict, total=False):
+    direction: Literal["ltr", "rtl"] | None
     borders: dict[str, BorderFormatting | None] | None
     tabs: list[TabStop] | None
     alignment: str | None
@@ -877,7 +879,11 @@ class Paragraph:
         return json.loads(self._owner._call("paragraph_formatting", self._id, True))
 
     def format(self, **formatting: Unpack[ParagraphFormatting]) -> None:
-        """Set paragraph properties; None restores inheritance."""
+        """Set paragraph properties; None restores inheritance.
+
+        DOCX direction is ltr/rtl; native alignment, indents and tabs are
+        measured from the paragraph start edge.
+        """
         self._owner._call("format_paragraph", self._id, _format_patch(formatting), _change=True)
 
     def add_run(self, text: str, **formatting: Unpack[CharacterFormatting]) -> TextRange:
@@ -947,7 +953,11 @@ class TextRange:
         self._revision = paragraph._owner._call("set_range_link", *paragraph._range_args, self._start, self._end, self._revision, url, _change=True, **getattr(paragraph, "_range_kwargs", {}))
 
     def format(self, **formatting: Unpack[CharacterFormatting]) -> None:
-        """Set character properties; omitted values stay and None inherits."""
+        """Set character properties; omitted values stay and None inherits.
+
+        DOCX language is a literal ASCII alphanumeric/hyphen tag of at most
+        63 bytes, not a complete BCP47 validator or font-selection guarantee.
+        """
         paragraph = self._paragraph
         self._revision = paragraph._owner._call("format_range_patch", *paragraph._range_args, self._start, self._end, self._revision, _format_patch(formatting, rgb_highlight=paragraph._owner._format == "pptx"), _change=True, **getattr(paragraph, "_range_kwargs", {}))
 
