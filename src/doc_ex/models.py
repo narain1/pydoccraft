@@ -91,6 +91,13 @@ class Table:
             column = 0
             for cell in row:
                 grid_column = cell.metadata.get("grid_column", column)
+                if (
+                    not isinstance(grid_column, int) or not 0 <= grid_column < 1000
+                    or not isinstance(cell.col_span, int) or not 1 <= cell.col_span <= 1000
+                    or grid_column + cell.col_span > 1000
+                    or not isinstance(cell.row_span, int) or not 1 <= cell.row_span <= 32767
+                ):
+                    raise ValueError("structured table spans must fit a 1000-column, 32767-row grid")
                 while column < grid_column:
                     if column not in occupied:
                         output.append("<td></td>")

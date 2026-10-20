@@ -91,6 +91,16 @@ fn validate_table_depth(blocks: &Blocks) -> Result<(), EngineError> {
                     ));
                 }
                 for row in &table.rows {
+                    let columns = row.cells.iter().fold(
+                        (row.props.grid_before as usize)
+                            .saturating_add(row.props.grid_after as usize),
+                        |count, cell| count.saturating_add(cell.props.span.max(1) as usize),
+                    );
+                    if columns > wordcraft_doc::table::MAX_COLS {
+                        return Err(EngineError::ResourceLimit(
+                            "DOCX table grid exceeds 63 columns".into(),
+                        ));
+                    }
                     for cell in &row.cells {
                         pending.push((&cell.blocks, depth + 1));
                     }

@@ -168,6 +168,16 @@ class StructureTests(unittest.TestCase):
         self.assertEqual(document.to_markdown().count("images/shared.png"), 2)
         self.assertIn("images/shared.png", second.get_text("markdown"))
 
+    def test_excessive_docx_grid_is_rejected_before_markdown_allocation(self) -> None:
+        body = '<w:tbl><w:tr><w:trPr><w:gridBefore w:val="4294967295"/></w:trPr><w:tc>' + paragraph("Text") + '</w:tc></w:tr></w:tbl>'
+        with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "grid exceeds 63"):
+            doc_ex.open(structure_fixture(body))
+
+    def test_manually_constructed_cell_rejects_excessive_grid_position(self) -> None:
+        table = Table([["Text"]], cells=[[Cell([Block("paragraph", "Text")], metadata={"grid_column": 4294967295})]])
+        with self.assertRaisesRegex(ValueError, "1000-column"):
+            table.to_markdown()
+
 
 if __name__ == "__main__":
     unittest.main()
