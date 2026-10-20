@@ -1,5 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
+use std::sync::Mutex;
 
 use base64::Engine;
 use serde_json::{json, Map, Value};
@@ -15,23 +16,134 @@ use crate::model::{
 };
 use crate::EngineError;
 
+#[cfg(test)]
+thread_local! {
+    static SESSION_BUILDS: Cell<(u64, u64)> = const { Cell::new((0, 0)) };
+}
+
 pub fn read(data: &[u8], password: Option<&str>) -> Result<Document, EngineError> {
     crate::ooxml::preflight(data)?;
+    #[cfg(test)]
+    SESSION_BUILDS.with(|counts| {
+        let (parses, layouts) = counts.get();
+        counts.set((parses + 1, layouts));
+    });
     wordcraft_docx::read_with_password(data, password).map_err(docx_error)
 }
 
+struct RenderState {
+    document: Document,
+    layout: DocLayout,
+    render_requests: u64,
+}
+
+impl RenderState {
+    fn open(data: &[u8], password: Option<&str>) -> Result<Self, EngineError> {
+        crate::limits::validate_input_size(data.len())?;
+        let document = read(data, password)?;
+        validate_stories(&document)?;
+        #[cfg(test)]
+        SESSION_BUILDS.with(|counts| {
+            let (parses, layouts) = counts.get();
+            counts.set((parses, layouts + 1));
+        });
+        // The temporary measurement cache is not needed to render the owned layout.
+        let layout = wordcraft_layout::layout(
+            &document,
+            &mut LayoutCache::new(),
+            &LayoutOptions::default(),
+        );
+        validate_retained_layout(&layout)?;
+        Ok(Self {
+            document,
+            layout,
+            render_requests: 0,
+        })
+    }
+}
+
+// These checks bound retained state, not the peak allocations inside native layout.
+fn validate_retained_layout(layout: &DocLayout) -> Result<(), EngineError> {
+    if layout.pages.len() > 10_000 {
+        return Err(EngineError::ResourceLimit(
+            "DOCX layout exceeds 10000 pages".into(),
+        ));
+    }
+    let mut items = 0usize;
+    for page in &layout.pages {
+        items = items.saturating_add(page.items.len());
+        if items > 1_000_000 {
+            return Err(EngineError::ResourceLimit(
+                "DOCX layout exceeds 1000000 placed items".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub struct DocxSession {
+    state: Mutex<Option<RenderState>>,
+}
+
+impl DocxSession {
+    pub fn open(
+        data: &[u8],
+        password: Option<&str>,
+    ) -> Result<(Self, DocumentPayload), EngineError> {
+        let state = RenderState::open(data, password)?;
+        let mut adapter = Adapter::new(&state.document, &state.layout)?;
+        adapter.visit_blocks(&state.document.body, &[]);
+        adapter.add_comments();
+        let payload = adapter.finish()?;
+        Ok((
+            Self {
+                state: Mutex::new(Some(state)),
+            },
+            payload,
+        ))
+    }
+
+    pub fn render(
+        &self,
+        page: usize,
+        dpi: f64,
+        clip: Option<crate::rendering::Clip>,
+    ) -> Result<Vec<u8>, EngineError> {
+        let mut guard = self
+            .state
+            .lock()
+            .map_err(|_| EngineError::Malformed("DOCX render session is unavailable".into()))?;
+        let state = guard
+            .as_mut()
+            .ok_or_else(|| EngineError::Closed("DOCX render session is closed".into()))?;
+        // Count live attempts, including invalid page/DPI/clip requests. Closed or
+        // poisoned attempts are excluded. There is no retained bitmap cache.
+        state.render_requests = state.render_requests.saturating_add(1);
+        render_with(&state.document, &state.layout, page, dpi, clip)
+    }
+
+    pub fn stats(&self) -> Result<(u64, u64, u64), EngineError> {
+        let guard = self
+            .state
+            .lock()
+            .map_err(|_| EngineError::Malformed("DOCX render session is unavailable".into()))?;
+        let state = guard
+            .as_ref()
+            .ok_or_else(|| EngineError::Closed("DOCX render session is closed".into()))?;
+        Ok((1, 1, state.render_requests))
+    }
+
+    pub fn close(&self) -> Result<(), EngineError> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        Ok(())
+    }
+}
+
 pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, EngineError> {
-    let document = read(data, password)?;
-    validate_stories(&document)?;
-    let layout = wordcraft_layout::layout(
-        &document,
-        &mut LayoutCache::new(),
-        &LayoutOptions::default(),
-    );
-    let mut adapter = Adapter::new(&document, &layout)?;
-    adapter.visit_blocks(&document.body, &[]);
-    adapter.add_comments();
-    adapter.finish()
+    DocxSession::open(data, password).map(|(_, payload)| payload)
 }
 
 pub fn render(
@@ -61,12 +173,18 @@ fn render_impl(
     clip: Option<crate::rendering::Clip>,
 ) -> Result<Vec<u8>, EngineError> {
     crate::rendering::validate_dpi(dpi)?;
-    let document = read(data, password)?;
-    let layout = wordcraft_layout::layout(
-        &document,
-        &mut LayoutCache::new(),
-        &LayoutOptions::default(),
-    );
+    let state = RenderState::open(data, password)?;
+    render_with(&state.document, &state.layout, page, dpi, clip)
+}
+
+fn render_with(
+    document: &Document,
+    layout: &DocLayout,
+    page: usize,
+    dpi: f64,
+    clip: Option<crate::rendering::Clip>,
+) -> Result<Vec<u8>, EngineError> {
+    crate::rendering::validate_dpi(dpi)?;
     let page = layout
         .pages
         .get(page)
@@ -84,7 +202,7 @@ fn render_impl(
             wordcraft_render::MAX_SIDE,
         )?;
         let rendered = wordcraft_render::render_region(
-            &document,
+            document,
             page,
             region.width,
             region.height,
@@ -108,7 +226,7 @@ fn render_impl(
             wordcraft_render::MAX_SIDE,
         )?;
         wordcraft_render::render_page(
-            &document,
+            document,
             page,
             scale,
             &wordcraft_render::RenderOptions::default(),
@@ -1423,6 +1541,170 @@ fn docx_error(error: wordcraft_docx::DocxError) -> EngineError {
         | wordcraft_docx::DocxError::MissingPart(message)
         | wordcraft_docx::DocxError::Xml(message)
         | wordcraft_docx::DocxError::Encryption(message) => EngineError::Malformed(message),
+    }
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+    use std::sync::{Arc, Barrier};
+
+    fn fixture() -> Vec<u8> {
+        let mut document = Document::from_text("First page Ω\nSecond page 🦀");
+        let Block::Para(paragraph) = Arc::make_mut(&mut document.body[1]) else {
+            unreachable!()
+        };
+        paragraph.props.page_break_before = Some(true);
+        document.last_section.page_w = 300.0;
+        document.last_section.page_h = 240.0;
+        wordcraft_docx::write(&document).unwrap()
+    }
+
+    #[test]
+    fn session_reuses_one_parse_and_layout_for_full_and_region_renders() {
+        fn send_sync<T: Send + Sync>() {}
+        send_sync::<DocxSession>();
+        let data = fixture();
+        let expected: Vec<_> = [72.0, 144.0, 300.0]
+            .into_iter()
+            .flat_map(|dpi| [0, 1].into_iter().map(move |page| (page, dpi)))
+            .map(|(page, dpi)| {
+                (
+                    page,
+                    dpi,
+                    render(&data, page, dpi, None).unwrap(),
+                    render_region(&data, page, dpi, None, (65.0, 65.0, 130.0, 115.0)).unwrap(),
+                )
+            })
+            .collect();
+        SESSION_BUILDS.with(|counts| counts.set((0, 0)));
+        let (session, payload) = DocxSession::open(&data, None).unwrap();
+        drop(data);
+        assert_eq!(payload.pages.len(), 2);
+        for (page, dpi, full, region) in expected {
+            assert_eq!(session.render(page, dpi, None).unwrap(), full);
+            assert_eq!(
+                session
+                    .render(page, dpi, Some((65.0, 65.0, 130.0, 115.0)))
+                    .unwrap(),
+                region
+            );
+        }
+        assert_eq!(SESSION_BUILDS.with(Cell::get), (1, 1));
+        assert_eq!(session.stats().unwrap(), (1, 1, 12));
+        let weak = {
+            let guard = session.state.lock().unwrap();
+            Arc::downgrade(&guard.as_ref().unwrap().document.body[0])
+        };
+        session.close().unwrap();
+        session.close().unwrap();
+        assert!(weak.upgrade().is_none());
+        assert!(payload.pages[0]
+            .blocks
+            .iter()
+            .any(|block| block.text.contains("First page")));
+        assert!(matches!(
+            session.render(0, 72.0, None),
+            Err(EngineError::Closed(_))
+        ));
+        assert!(matches!(session.stats(), Err(EngineError::Closed(_))));
+    }
+
+    #[test]
+    fn session_keeps_render_error_order_and_accepts_small_regions_of_oversized_pages() {
+        let data = fixture();
+        let (session, _) = DocxSession::open(&data, None).unwrap();
+        for (page, dpi, clip) in [
+            (99, f64::NAN, None),
+            (99, 72.0, None),
+            (0, 72.0, Some((0.0, 0.0, 0.0, 10.0))),
+            (0, 72.0, Some((500.0, 500.0, 510.0, 510.0))),
+        ] {
+            let expected = render_impl(&data, page, dpi, None, clip)
+                .unwrap_err()
+                .to_string();
+            assert_eq!(
+                session.render(page, dpi, clip).unwrap_err().to_string(),
+                expected
+            );
+        }
+        assert_eq!(session.stats().unwrap(), (1, 1, 4));
+        let mut big = Document::from_text("Small region of a large page");
+        big.last_section.page_w = 1584.0;
+        big.last_section.page_h = 1584.0;
+        let bytes = wordcraft_docx::write(&big).unwrap();
+        let (large, _) = DocxSession::open(&bytes, None).unwrap();
+        assert!(matches!(
+            large.render(0, 1200.0, None),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        assert_eq!(
+            large.render(0, 1200.0, Some((0.0, 0.0, 8.0, 8.0))).unwrap(),
+            render_region(&bytes, 0, 1200.0, None, (0.0, 0.0, 8.0, 8.0)).unwrap()
+        );
+        assert!(DocxSession::open(b"not a DOCX", None).is_err());
+        let (plain_password, _) = DocxSession::open(&data, Some("unused password")).unwrap();
+        plain_password.close().unwrap();
+    }
+
+    #[test]
+    fn session_close_races_are_serialized_and_poisoned_close_releases_state() {
+        let (session, _) = DocxSession::open(&fixture(), None).unwrap();
+        let session = Arc::new(session);
+        let barrier = Arc::new(Barrier::new(2));
+        let rendering = {
+            let session = session.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                for _ in 0..4 {
+                    match session.render(0, 72.0, None) {
+                        Ok(bytes) => assert!(bytes.starts_with(b"\x89PNG")),
+                        Err(EngineError::Closed(_)) => return,
+                        Err(error) => panic!("unexpected render failure: {error}"),
+                    }
+                }
+            })
+        };
+        barrier.wait();
+        session.close().unwrap();
+        rendering.join().unwrap();
+        let (poisoned, _) = DocxSession::open(&fixture(), None).unwrap();
+        let poisoned = Arc::new(poisoned);
+        let weak = {
+            let guard = poisoned.state.lock().unwrap();
+            Arc::downgrade(&guard.as_ref().unwrap().document.body[0])
+        };
+        let poisoner = poisoned.clone();
+        assert!(std::thread::spawn(move || {
+            let _guard = poisoner.state.lock().unwrap();
+            panic!("intentional lock poison");
+        })
+        .join()
+        .is_err());
+        assert!(matches!(
+            poisoned.render(0, 72.0, None),
+            Err(EngineError::Malformed(_))
+        ));
+        poisoned.close().unwrap();
+        assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn retained_layout_page_budget_rejects_before_payload_or_render() {
+        let native = Document::new();
+        let mut layout =
+            wordcraft_layout::layout(&native, &mut LayoutCache::new(), &LayoutOptions::default());
+        // Empty pages keep the fixture small while exercising the retained-layout boundary.
+        let mut page = layout.pages[0].clone();
+        page.items.clear();
+        layout.pages = vec![page; 10_001];
+        assert!(matches!(
+            validate_retained_layout(&layout),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        layout.pages.pop();
+        validate_retained_layout(&layout).unwrap();
     }
 }
 

@@ -245,3 +245,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Make existing owned PDF field boxes writable through native appearance regeneration and atomic geometry/fit checks.
 - [x] Verify complete locked/native and installed-wheel read/render/export corpus and record artifact evidence.
 - [ ] Retain native DOCX rotation fidelity, floating-image/opacity and broader imported/multi-widget PDF form gaps.
+
+
+## Private Office render reuse
+
+- [x] Retain bounded native DOCX model/layout and PPTX model from extraction with shared checked rendering and synchronized close.
+- [x] Reuse the existing private facade dispatch, release source/password ownership, and close sessions on failed hydration.
+- [x] Verify native parse/layout counts, PNG parity, resource boundaries, owned snapshots and close races in the complete installed-wheel corpus.
+- [x] Record separate-process synthetic latency/native RSS evidence while retaining broad P1/peak-layout guarantees as open work.
