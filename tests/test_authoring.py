@@ -36,7 +36,7 @@ class AuthoringTests(unittest.TestCase):
             heading = document.add_paragraph("Quarterly report", style="Heading 1")
             heading.alignment = "center"
             paragraph = document.add_paragraph("Prepared for ")
-            run = paragraph.add_run("Café", bold=True, size=14, color="navy")
+            run = paragraph.add_run("Café", bold=True, font_size=14, color="navy")
             self.assertEqual(run.text, "Café")
             table = document.add_table([["Item", "Total"], ["Support", "$200"]])
             table[-1, -1].text = "$250"

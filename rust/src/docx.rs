@@ -7,6 +7,7 @@ use wordcraft_doc::props::VMerge;
 use wordcraft_doc::{Block, Blocks, Document, PartKind, Path, StoryRef, Table};
 use wordcraft_layout::{DocLayout, LayoutCache, LayoutOptions};
 
+use crate::diagnostics::Diagnostics;
 use crate::model::{
     BlockPayload, CellPayload, DocumentPayload, ImagePayload, LinkPayload, PagePayload,
     StoryPayload, TablePayload,
@@ -76,6 +77,107 @@ struct Adapter<'a> {
     layout: &'a DocLayout,
     pages: Vec<PagePayload>,
     comment_pages: HashMap<u32, usize>,
+}
+
+fn extraction_diagnostics(document: &Document) -> Value {
+    let mut diagnostics = Diagnostics::default();
+    diagnose_blocks(
+        document,
+        &document.body,
+        &[],
+        &json!({"story": "body"}),
+        &mut diagnostics,
+    );
+    for (id, part) in &document.parts {
+        diagnose_blocks(
+            document,
+            &part.blocks,
+            &[],
+            &json!({"story_part_id": id}),
+            &mut diagnostics,
+        );
+    }
+    for (kind, role, blocks) in separator_stories(document) {
+        diagnose_blocks(
+            document,
+            blocks,
+            &[],
+            &json!({"story_kind": kind, "story_role": role}),
+            &mut diagnostics,
+        );
+    }
+    diagnostics.into_json()
+}
+
+fn diagnose_blocks(
+    document: &Document,
+    blocks: &Blocks,
+    prefix: &[u32],
+    story: &Value,
+    diagnostics: &mut Diagnostics,
+) {
+    for (index, block) in blocks.iter().enumerate() {
+        let path = [prefix, &[index as u32]].concat();
+        match block.as_ref() {
+            Block::Table(table) => {
+                for (row, value) in table.rows.iter().enumerate() {
+                    for (column, cell) in value.cells.iter().enumerate() {
+                        diagnose_blocks(
+                            document,
+                            &cell.blocks,
+                            &[path.as_slice(), &[row as u32, column as u32]].concat(),
+                            story,
+                            diagnostics,
+                        );
+                    }
+                }
+            }
+            Block::Para(paragraph) => {
+                for (index, object) in paragraph.objects.iter().enumerate() {
+                    let mut source = story.clone();
+                    source["source_path"] = json!(path);
+                    source["object_path"] = json!([index]);
+                    diagnose_object(document, object, source, diagnostics);
+                }
+            }
+        }
+    }
+}
+
+fn diagnose_object(
+    document: &Document,
+    object: &InlineObject,
+    source: Value,
+    diagnostics: &mut Diagnostics,
+) {
+    let notice = match object {
+        InlineObject::Graphic { graphic, .. } => Some(match graphic.kind {
+            wordcraft_doc::graphic::GraphicKind::Chart => ("chart_data_omitted", "warning", "Semantic extraction omits chart data and chart drawing content."),
+            wordcraft_doc::graphic::GraphicKind::Diagram => ("diagram_structure_omitted", "warning", "Semantic extraction omits diagram structure and drawing content."),
+            wordcraft_doc::graphic::GraphicKind::Ink => ("ink_geometry_omitted", "warning", "Semantic extraction omits ink strokes and their graphic preview."),
+        }),
+        InlineObject::Shape { .. } => Some(("shape_geometry_omitted", "info", "Semantic extraction omits drawing shape geometry; text box stories are exposed separately.")),
+        InlineObject::Opaque { .. } => Some(("opaque_content_text_only", "warning", "An opaque object contributes only its stored text fallback; its structure is not extracted.")),
+        InlineObject::Equation { .. } => Some(("equation_linearized", "info", "An equation contributes its linear text; structured mathematics is not extracted.")),
+        InlineObject::Ruby { .. } => Some(("ruby_annotation_omitted", "warning", "Ruby text contributes the base text; the phonetic annotation is not extracted.")),
+        InlineObject::Field { dirty: true, .. } | InlineObject::FieldStart { dirty: true, .. } => Some(("dirty_field_cached_result", "warning", "A field marked dirty contributes cached result text; extraction does not refresh it.")),
+        InlineObject::Image { ole: Some(_), .. } => Some(("embedded_object_preview_only", "warning", "An embedded object contributes its image preview; embedded document data is not extracted.")),
+        _ => None,
+    };
+    if let Some((code, severity, message)) = notice {
+        diagnostics.record(code, severity, message, source.clone());
+    }
+    match object {
+        InlineObject::Image { media, .. } if !document.media.contains_key(media) => diagnostics.record("missing_image_data", "warning", "An image reference has no media bytes in the parsed model and is omitted from extraction.", source),
+        InlineObject::Group { children, .. } => {
+            for (index, child) in children.iter().enumerate() {
+                let mut child_source = source.clone();
+                if let Some(path) = child_source["object_path"].as_array_mut() { path.push(json!(index)); }
+                diagnose_object(document, &child.obj, child_source, diagnostics);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn validate_stories(document: &Document) -> Result<(), EngineError> {
@@ -401,6 +503,7 @@ impl<'a> Adapter<'a> {
             Value::String("wordcraft-layout; blocks assigned to their first computed page".into()),
         );
         let stories = self.stories();
+        metadata.insert("diagnostics".into(), extraction_diagnostics(self.document));
         DocumentPayload {
             format: "docx".into(),
             metadata,
@@ -944,6 +1047,131 @@ fn docx_error(error: wordcraft_docx::DocxError) -> EngineError {
         | wordcraft_docx::DocxError::MissingPart(message)
         | wordcraft_docx::DocxError::Xml(message)
         | wordcraft_docx::DocxError::Encryption(message) => EngineError::Malformed(message),
+    }
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+    use std::sync::Arc;
+    use wordcraft_doc::graphic::{Embedded, Graphic, GraphicKind};
+
+    #[test]
+    fn native_chart_file_reports_omission_at_its_body_source() {
+        let mut document = Document::new();
+        let spec = wordcraft_doc::chart::ChartSpec::sample(wordcraft_doc::chart::ChartType::Column);
+        let mut paragraph = Paragraph::new();
+        paragraph
+            .insert_object(
+                0,
+                InlineObject::Graphic {
+                    w: 300.0,
+                    h: 200.0,
+                    alt: "Sales".into(),
+                    float: Default::default(),
+                    graphic: Arc::new(Graphic {
+                        kind: GraphicKind::Chart,
+                        items: wordcraft_docx::chart_items(
+                            &spec,
+                            &document.settings.theme_colors,
+                            300.0,
+                            200.0,
+                        ),
+                        w: 300.0,
+                        h: 200.0,
+                        chart: Some(Arc::new(spec)),
+                        ..Graphic::default()
+                    }),
+                },
+                &Default::default(),
+            )
+            .unwrap();
+        document.body = vec![wordcraft_doc::para_block(paragraph)];
+        let bytes = wordcraft_docx::write(&document).unwrap();
+        let extracted = extract(&bytes, None).unwrap();
+        assert_eq!(
+            extracted.metadata["diagnostics"][0]["code"],
+            "chart_data_omitted"
+        );
+        assert_eq!(extracted.metadata["diagnostics"][0]["count"], 1);
+        assert_eq!(
+            extracted.metadata["diagnostics"][0]["sources"][0]["source_path"],
+            json!([0])
+        );
+    }
+
+    #[test]
+    fn identifies_graphic_fallbacks_and_missing_embedded_media() {
+        let document = Document::new();
+        let mut diagnostics = Diagnostics::default();
+        for (index, kind) in [GraphicKind::Chart, GraphicKind::Diagram, GraphicKind::Ink]
+            .into_iter()
+            .enumerate()
+        {
+            let object = InlineObject::Graphic {
+                w: 10.0,
+                h: 10.0,
+                alt: "Graphic".into(),
+                float: Default::default(),
+                graphic: Arc::new(Graphic {
+                    kind,
+                    ..Graphic::default()
+                }),
+            };
+            diagnose_object(
+                &document,
+                &object,
+                json!({"story_part_id": 9, "source_path": [0], "object_path": [index]}),
+                &mut diagnostics,
+            );
+        }
+        let image = InlineObject::Image {
+            media: "missing.png".into(),
+            w: 10.0,
+            h: 10.0,
+            alt: String::new(),
+            float: Default::default(),
+            crop: [0.0; 4],
+            ole: Some(Arc::new(Embedded::default())),
+        };
+        diagnose_object(
+            &document,
+            &image,
+            json!({"story": "body", "source_path": [1], "object_path": [0]}),
+            &mut diagnostics,
+        );
+        let opaque = InlineObject::Opaque {
+            format: "docx".into(),
+            xml: "<opaque/>".into(),
+            text: "Fallback".into(),
+        };
+        diagnose_object(
+            &document,
+            &opaque,
+            json!({"story": "body", "source_path": [2], "object_path": [0]}),
+            &mut diagnostics,
+        );
+        let values = diagnostics.into_json();
+        let values = values.as_array().unwrap();
+        let codes: Vec<_> = values
+            .iter()
+            .map(|value| value["code"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            codes,
+            [
+                "chart_data_omitted",
+                "diagram_structure_omitted",
+                "ink_geometry_omitted",
+                "embedded_object_preview_only",
+                "missing_image_data",
+                "opaque_content_text_only"
+            ]
+        );
+        assert_eq!(values[0]["sources"][0]["story_part_id"], 9);
+        assert!(values
+            .iter()
+            .all(|value| value["count"] == 1 && value["operation"] == "extract"));
     }
 }
 

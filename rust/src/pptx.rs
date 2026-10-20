@@ -3,6 +3,7 @@ use deckcraft_model::text::{Action, Hyperlink, RunKind, TextBody};
 use deckcraft_model::{Comment, Presentation, Shape, ShapeKind};
 use serde_json::{json, Map, Value};
 
+use crate::diagnostics::Diagnostics;
 use crate::model::{
     BlockPayload, CellPayload, DocumentPayload, ImagePayload, LinkPayload, PagePayload,
     TablePayload,
@@ -62,10 +63,111 @@ pub fn extract(data: &[u8]) -> Result<DocumentPayload, EngineError> {
         metadata: Map::from_iter([
             ("width".into(), json!(presentation.slide_size.width)),
             ("height".into(), json!(presentation.slide_size.height)),
+            ("diagnostics".into(), extraction_diagnostics(&presentation)),
         ]),
         pages,
         stories: Vec::new(),
     })
+}
+
+fn extraction_diagnostics(presentation: &Presentation) -> Value {
+    let mut diagnostics = Diagnostics::default();
+    for (slide, value) in presentation.slides.iter().enumerate() {
+        for shape in &value.shapes {
+            diagnose_shape(presentation, shape, slide, &mut diagnostics);
+        }
+        diagnose_text(
+            &value.notes,
+            &json!({"slide": slide, "story": "notes"}),
+            true,
+            &mut diagnostics,
+        );
+    }
+    diagnostics.into_json()
+}
+
+fn diagnose_shape(
+    presentation: &Presentation,
+    shape: &Shape,
+    slide: usize,
+    diagnostics: &mut Diagnostics,
+) {
+    let source = json!({"slide": slide, "shape_id": shape.id.0});
+    let notice = match &shape.kind {
+        ShapeKind::Chart(_) => Some(("chart_data_omitted", "Semantic extraction omits chart data and chart drawing content.")),
+        ShapeKind::Media(_) => Some(("media_content_omitted", "Semantic extraction omits audio/video data and poster content.")),
+        ShapeKind::Ink { .. } => Some(("ink_geometry_omitted", "Semantic extraction omits ink stroke geometry.")),
+        ShapeKind::Model3d { .. } => Some(("model3d_content_omitted", "Semantic extraction omits 3-D model data and its fallback poster.")),
+        ShapeKind::Opaque { .. } => Some(("opaque_content_omitted", "Semantic extraction omits an opaque object's structure and preview; any ordinary shape text remains available.")),
+        _ => None,
+    };
+    if let Some((code, message)) = notice {
+        diagnostics.record(code, "warning", message, source.clone());
+    }
+    if shape.diagram.is_some() {
+        diagnostics.record("diagram_structure_omitted", "warning", "Semantic extraction omits diagram structure; ordinary child shape text remains available.", source.clone());
+    }
+    if shape.xfrm.is_some_and(|xfrm| {
+        xfrm.rot != 0.0
+            || (matches!(shape.kind, ShapeKind::Group { .. }) && (xfrm.flip_h || xfrm.flip_v))
+    }) {
+        diagnostics.record("transformed_bbox_approximation", "warning", "Extracted bounding boxes do not account for this shape's rotation or group reflection.", source.clone());
+    }
+    if shape.click.as_ref().is_some_and(|link| url(link).is_none()) {
+        diagnostics.record(
+            "non_url_link_omitted",
+            "warning",
+            "A non-URL hyperlink action is not included in extracted links.",
+            source.clone(),
+        );
+    }
+    if let Some(text) = &shape.text {
+        diagnose_text(text, &source, false, diagnostics);
+    }
+    match &shape.kind {
+        ShapeKind::Group { children, .. } => {
+            for child in children { diagnose_shape(presentation, child, slide, diagnostics); }
+        }
+        ShapeKind::Table(table) => {
+            for (row, value) in table.rows.iter().enumerate() {
+                for (column, cell) in value.cells.iter().enumerate() {
+                    let mut cell_source = source.clone();
+                    cell_source["row"] = json!(row);
+                    cell_source["column"] = json!(column);
+                    diagnose_text(&cell.text, &cell_source, false, diagnostics);
+                }
+            }
+        }
+        ShapeKind::Picture { fill } if presentation.media(fill.media).is_none() => diagnostics.record("missing_image_data", "warning", "An image reference has no media bytes in the parsed model and is omitted from extraction.", source),
+        _ => {}
+    }
+}
+
+fn diagnose_text(body: &TextBody, source: &Value, auxiliary: bool, diagnostics: &mut Diagnostics) {
+    for (paragraph, value) in body.paragraphs.iter().enumerate() {
+        for (run, value) in value.runs.iter().enumerate() {
+            let mut source = source.clone();
+            source["paragraph"] = json!(paragraph);
+            source["run"] = json!(run);
+            match &value.kind {
+                RunKind::Math { .. } => diagnostics.record("equation_text_only", "info", "An equation contributes its stored text; structured mathematics is not extracted.", source.clone()),
+                RunKind::Field { .. } => diagnostics.record("field_cached_result", "info", "A field contributes stored result text; extraction does not refresh the field.", source.clone()),
+                _ => {}
+            }
+            if let Some(link) = &value.props.link {
+                if auxiliary {
+                    diagnostics.record("auxiliary_link_omitted", "warning", "A notes hyperlink contributes its text label but is not included in extracted links.", source);
+                } else if url(link).is_none() {
+                    diagnostics.record(
+                        "non_url_link_omitted",
+                        "warning",
+                        "A non-URL hyperlink action is not included in extracted links.",
+                        source,
+                    );
+                }
+            }
+        }
+    }
 }
 
 pub fn render(data: &[u8], page: usize, dpi: f64) -> Result<Vec<u8>, EngineError> {
@@ -524,6 +626,79 @@ mod tests {
     use deckcraft_model::text::{Run, RunProps};
     use deckcraft_model::{LayoutType, ShapeId, Size, Table, Theme, Xfrm};
     use std::sync::Arc;
+
+    #[test]
+    fn diagnostics_identify_model_constructs_without_claiming_rendering_failure() {
+        let mut document = presentation(Table::new(1, 1, 100.0, 30.0));
+        let kinds = [
+            ShapeKind::Chart(Box::default()),
+            ShapeKind::Media(Default::default()),
+            ShapeKind::Ink {
+                strokes: Vec::new(),
+            },
+            ShapeKind::Model3d {
+                media: deckcraft_model::MediaId(900),
+                poster: None,
+            },
+            ShapeKind::Opaque {
+                xml: "<opaque/>".into(),
+                preview: None,
+                label: "Object".into(),
+                parts: Vec::new(),
+            },
+        ];
+        for kind in kinds {
+            let id = ShapeId(document.alloc_id().unwrap());
+            Arc::make_mut(&mut document.slides[0]).shapes.push(Shape {
+                id,
+                kind,
+                ..Shape::default()
+            });
+        }
+        let values = extraction_diagnostics(&document);
+        let codes: Vec<_> = values
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value["code"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            codes,
+            [
+                "chart_data_omitted",
+                "media_content_omitted",
+                "ink_geometry_omitted",
+                "model3d_content_omitted",
+                "opaque_content_omitted"
+            ]
+        );
+        assert!(values
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|value| value["count"] == 1
+                && value["sources"][0]["slide"] == 0
+                && value["operation"] == "extract"));
+    }
+
+    #[test]
+    fn native_chart_file_emits_semantic_omission_diagnostic() {
+        let mut document = presentation(Table::new(1, 1, 100.0, 30.0));
+        let id = ShapeId(document.alloc_id().unwrap());
+        Arc::make_mut(&mut document.slides[0]).shapes.push(Shape {
+            id,
+            kind: ShapeKind::Chart(Box::default()),
+            xfrm: Some(Xfrm::new(20.0, 80.0, 300.0, 200.0)),
+            ..Shape::default()
+        });
+        let bytes = deckcraft_pptx::export(&document).unwrap();
+        let extracted = extract(&bytes).unwrap();
+        assert_eq!(
+            extracted.metadata["diagnostics"][0]["code"],
+            "chart_data_omitted"
+        );
+        assert_eq!(extracted.metadata["diagnostics"][0]["count"], 1);
+    }
 
     fn presentation(table: Table) -> Presentation {
         let mut document = deckcraft_model::defaults::blank_presentation(

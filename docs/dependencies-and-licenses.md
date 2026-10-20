@@ -21,7 +21,7 @@ Git dependencies use immutable `rev` values. Do not replace them with branches o
 
 The runtime does not link ArtCraft desktop applications or their CLI, MCP, automation, UI, updater, networking, OCR, JavaScript, printing, or signing packages. Lower-level rendering and font dependencies required by the selected crates remain part of the native graph.
 
-`pdfcraft-engine` is deliberately excluded because its un-gated dependency graph includes unrelated application capabilities. PDF→DOCX instead maps public PdfCraft extraction values into the smaller `pdfcraft-export` writer. Native PDF authoring uses the pinned `pdfcraft-create`, `pdfcraft-edit`, `pdfcraft-organize` and `pdfcraft-annot` libraries. `tools/audit_licenses.py` checks normal/build dependency traversal, reviewed SPDX choices and prohibited application packages against locked Cargo metadata.
+`pdfcraft-engine` is deliberately excluded because its un-gated dependency graph includes unrelated application capabilities. PDF→DOCX instead maps public PdfCraft extraction values into the smaller `pdfcraft-export` writer. Native PDF authoring uses the pinned `pdfcraft-create`, `pdfcraft-edit`, `pdfcraft-organize`, `pdfcraft-annot`, `pdfcraft-content` and `pdfcraft-fonts` libraries. `tools/audit_licenses.py` checks normal/build dependency traversal, reviewed SPDX choices and prohibited application packages against locked Cargo metadata.
 
 ## Package license
 

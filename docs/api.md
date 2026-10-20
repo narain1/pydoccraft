@@ -22,7 +22,7 @@ doc_ex.open(
 ) -> Document
 ```
 
-`path_or_bytes` accepts `str`, `pathlib.Path`, `bytes`, `bytearray`, or `memoryview`. Paths are expanded with `Path.expanduser()` and missing paths raise `FileNotFoundError`.
+`path_or_bytes` accepts `str`, `pathlib.Path`, `bytes`, `bytearray`, `memoryview`, or a binary stream. Streams are read from their current position, handle short reads and remain open; text streams are rejected. Input is bounded to 128 MiB, including memoryview byte size. Paths are expanded with `Path.expanduser()` and missing paths raise `FileNotFoundError`.
 
 Recognized explicit `filetype` values are:
 
@@ -215,3 +215,9 @@ All native failures are mapped to stable Python exceptions:
 Source block order is preserved within each part. Parts use the upstream model's part-ID order, recorded in metadata; original cross-part archive order is unavailable. Each header/footer part occurs once even if rendered on multiple pages. Links/images/table values have `page=None` in stories, and asset source paths include `story_part_id` for identity. Body note references carry `story_refs` offsets and part IDs when exposed by WordCraft.
 
 Body `Document.to_markdown()` retains its existing projection. Comment stories additionally carry `legacy_page_projection=True` because comments remain in the compatibility page output. Callers combining both projections should choose their desired comment scope explicitly. Stories and their model values remain readable after source closure.
+
+## Extraction diagnostics (unreleased)
+
+DOCX/PPTX `document.metadata["diagnostics"]` contains bounded factual notices for constructs observed in the upstream model. Each has `code`, `operation="extract"`, `severity`, `message`, `count` and bounded `sources` locators. Examples distinguish omitted chart data, linearized equations, omitted ruby annotations, cached dirty fields, preview-only embedded objects, unsupported PPTX actions and approximate transformed geometry. Counts remain exact when source examples reach the 100-example total limit.
+
+These notices describe semantic extraction only. They do not claim that rendering/export is correct, that all unsupported source markup is detectable, or that a document is safe for lossless editing. Parser, encryption, conversion and resource failures remain errors; a notice never replaces them. Native normalized JSON output stops at 64 MiB before its output buffer exceeds that budget.

@@ -3,6 +3,7 @@ mod author_pdf;
 mod author_pptx;
 #[path = "convert.rs"]
 mod conversion;
+mod diagnostics;
 mod docx;
 mod limits;
 mod model;
@@ -43,15 +44,14 @@ impl From<EngineError> for PyErr {
 #[pyfunction]
 #[pyo3(signature = (data, filetype, password=None))]
 fn extract(data: &[u8], filetype: &str, password: Option<&str>) -> PyResult<String> {
+    limits::validate_input_size(data.len())?;
     let payload = match normalize(filetype)? {
         "pdf" => pdf::extract(data, password),
         "docx" => docx::extract(data, password),
         "pptx" => pptx::extract(data),
         _ => unreachable!(),
     }?;
-    serde_json::to_string(&payload).map_err(|error| {
-        EngineError::Malformed(format!("payload serialization failed: {error}")).into()
-    })
+    limits::bounded_json(&payload, limits::MAX_PAYLOAD_SIZE).map_err(Into::into)
 }
 
 #[pyfunction]
@@ -62,6 +62,7 @@ fn convert(
     target_format: &str,
     password: Option<&str>,
 ) -> PyResult<Vec<u8>> {
+    limits::validate_input_size(data.len())?;
     let source = normalize(source_format)?;
     let target = normalize(target_format)?;
     match (source, target) {
@@ -81,6 +82,7 @@ fn render(
     dpi: f64,
     password: Option<&str>,
 ) -> PyResult<Vec<u8>> {
+    limits::validate_input_size(data.len())?;
     match normalize(filetype)? {
         "pdf" => pdf::render(data, page, dpi, password).map_err(Into::into),
         "docx" => docx::render(data, page, dpi, password).map_err(Into::into),
@@ -91,6 +93,7 @@ fn render(
 
 #[pyfunction]
 fn detect(data: &[u8]) -> PyResult<String> {
+    limits::validate_input_size(data.len())?;
     if data.starts_with(b"%PDF-") {
         return Ok("pdf".into());
     }

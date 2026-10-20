@@ -23,9 +23,11 @@ deckcraft-pptx = { git = "https://github.com/storytold/deckcraft", rev = "22db92
 deckcraft-render = { git = "https://github.com/storytold/deckcraft", rev = "22db9261f9d1a214c296fd390173130c45d76d66" }
 pdfcraft-annot = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
 pdfcraft-cos = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
+pdfcraft-content = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
 pdfcraft-create = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
 pdfcraft-edit = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
 pdfcraft-export = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
+pdfcraft-fonts = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
 pdfcraft-organize = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
 pdfcraft-render = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
 png = "=0.18.1"

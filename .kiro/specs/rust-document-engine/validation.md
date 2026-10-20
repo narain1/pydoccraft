@@ -1,5 +1,15 @@
 # Validation evidence
 
+## 2026-10-20 text/vector content and diagnostics (unreleased)
+
+- Validated offline on Linux x86_64 with Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1; all four upstream revisions remain unchanged.
+- Formatting, 63 Rust tests, warnings-denied Clippy and the locked release build passed. Installed-wheel validation passed 85 Python tests with zero skips and verified imported package members against the artifact.
+- Coverage includes DOCX lists/links, explicit initial/consecutive blank pages, native report DOCX/PDF order and single table text, supplied-font searchable Unicode and visible glyphs, vector pixels/invalid-edit rollback, metadata/bookmark persistence, nonmutating absent-story lookup, stable originating child collections, bounded inputs/JSON and structured extraction diagnostics. Existing PDF/DOCX/PPTX extraction/render/conversion checks remain passing.
+- Wheel: `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`, 16,600,451 bytes. Native extension: 38,425,016 bytes. Wheel SHA-256: `390dbe8015a307f7512d94741070c50592fbe3ae43aed37acb5aaecc21cb8a84`. Lockfile SHA-256: `07d283b629c33e1994e4bd2b9e3e8f16876ee5efda73c46428581e20869fcdf8`.
+- `pdfcraft-content` and `pdfcraft-fonts` become direct dependencies at the same pinned revision; both were already transitive. The regenerated/reviewed normal/build inventory remains 263 packages, with no prohibited application crates or non-permissive-only license. NOTICE and the adjacent complete OFL license cover the unmodified Inter regression fixture from pinned PdfCraft; the runtime asset set is unchanged.
+- Diagnostics cover detectable native model constructs, not unknown markup discarded by upstream readers. Full conversion diagnostics, arbitrary Office source editing, complex-script conformance, advanced styles/sections/fields/review, attachment resource controls and unchecked roadmap criteria remain open. This is feature validation, not a release declaration.
+
+
 ## 2026-10-20 PR19 independent review corrections (unreleased)
 
 - Reviewed runtime commit `c00e2dee4e1659668ebfb0a2939370020de083d3` against merged main `2340edd867f40cf43b33a5017c190ca01b1d769d`. [CI run 39447521531](https://github.com/narain1/pydoccraft/actions/runs/39447521531) passed formatting, all 45 Rust tests, warnings-denied Clippy, the locked license audit (263 normal/build packages), release wheel build and all 71 installed-wheel Python tests with no skips.

@@ -34,7 +34,7 @@ Bundled and linked third-party material
 - Foxit standard-14 substitute fonts: Copyright 2014 PDFium Authors; original code copyright 2014 Foxit Software Inc. BSD-3-Clause.
 - Adobe CMap resources: Copyright 1990-2023 Adobe. BSD-3-Clause. Neither Adobe nor contributor names may be used to endorse derived products without prior written permission.
 - Source Sans 3 and Source Serif 4: Adobe and their respective project authors. SIL Open Font License 1.1.
-- Inter: The Inter Project Authors. SIL Open Font License 1.1.
+- Inter: The Inter Project Authors. SIL Open Font License 1.1. The unmodified tests/fixtures/fonts/Inter-Regular.ttf fixture comes from the pinned PdfCraft assets/fonts directory; its full license and copyright are retained alongside it as OFL-Inter.txt.
 - JetBrains Mono: The JetBrains Mono Project Authors. SIL Open Font License 1.1.
 - Ubuntu Light: Dalton Maag Ltd for Canonical. Ubuntu Font Licence 1.0.
 - Hack, Noto Emoji, and the egui emoji icon font through epaint_default_fonts: MIT/Bitstream Vera, SIL Open Font License 1.1, and MIT respectively.

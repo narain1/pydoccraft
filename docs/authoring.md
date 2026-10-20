@@ -25,7 +25,7 @@ with doc_ex.new("docx") as report:
 
 `copy()` returns independent native state, including media. Child handles keep their owner alive, but access after explicit `close()` raises `DocumentClosedError`. Saving does not close the document. Rendering and conversion serialize a snapshot through the same upstream pipelines as existing read-only documents. Mutation invalidates the cached extraction snapshot.
 
-A new PDF starts with one Letter page. A new DOCX has a default section and styles; its required blank paragraph is omitted from the user paragraph collection. An explicitly inserted empty paragraph is retained. A presentation starts with no slides and must have at least one slide before serialization.
+A new PDF starts with one Letter page unless `size` is supplied. `pdf.pages.add()` defaults to Letter independently of the first page; pass `size` explicitly for another size. A new DOCX has a default section and styles; its required blank paragraph is omitted from the user paragraph collection. An explicitly inserted empty paragraph is retained. A presentation starts with no slides and must have at least one slide before serialization.
 
 ## Units, colors and collections
 
@@ -33,15 +33,15 @@ Lengths are finite numbers in points (72 points per inch); `pt`, `mm`, `cm` and 
 
 Paragraph, table, image, page and slide collections support iteration, negative indexing and slices returning lists of handles. A table cell is addressed as `table[row, column]`. `table.rows` is a text snapshot, so editing that list does not mutate the document. Use `table[row, column].text`.
 
-DOCX and PPTX text accepts LF newlines and rejects carriage returns (CR/CRLF); normalize external text to LF before insertion. This prevents inconsistent writer/parser paragraph normalization. Compound mutations validate before committing. Invalid styles, colors, geometry, text or media must leave the prior document usable. Native resource limits also apply to programmatic creation; a document's serializable model is not an unlimited storage container.
+DOCX and PPTX text accept LF newlines and rejects carriage returns (CR/CRLF); normalize external text to LF before insertion. This prevents inconsistent writer/parser paragraph normalization. Compound mutations validate before committing. Invalid styles, colors, geometry, text or media must leave the prior document usable. Native resource limits also apply to programmatic creation; a document's serializable model is not an unlimited storage container.
 
 ## DOCX text and page layout
 
-`document.add_paragraph(text="", style=None)` returns a paragraph. Its `text`, `style` and `alignment` properties are writable; styles must already exist in the upstream default style set. Setting paragraph text intentionally replaces run formatting. `add_run(text, bold=False, italic=False, size=None, font=None, color=None)` returns a revision-bound text range.
+`document.add_paragraph(text="", style=None)` returns a paragraph. Its `text`, `style` and `alignment` properties are writable; styles must already exist in the upstream default style set. Setting paragraph text intentionally replaces run formatting. `add_run(text, bold=False, italic=False, font_size=None, font=None, color=None)` returns a revision-bound text range. `paragraph.set_list("bullet" | "numbered", level=0, restart=False)` controls native list membership; `None` clears it. Ordinary items continue the nearest matching sequence in the same story; restart creates a separate sequence. `paragraph.list_style` returns the current kind and level.
 
-`paragraph.find(literal)` returns non-overlapping Unicode-character ranges. A range exposes writable `text` and `format(bold=None, italic=None, size=None, font=None, color=None)`. An edit invalidates other existing ranges; stale access fails explicitly. `paragraph.replace_text(old, new)` replaces literal matches across run boundaries atomically and returns the count, preserving surrounding formatting. This is a paragraph-scoped primitive, not a template engine or a promise to preserve arbitrary input DOCX packages.
+`paragraph.find(literal)` returns non-overlapping Unicode-character ranges. A range exposes writable `text` and `format(bold=None, italic=None, font_size=None, font=None, color=None)`. An edit invalidates other existing ranges; stale access fails explicitly. `paragraph.replace_text(old, new)` replaces literal matches across run boundaries atomically and returns the count, preserving surrounding formatting. A range's `link` property reads/sets/clears an HTTP, HTTPS or mailto URL while preserving surrounding formatting. Mixed targets, stale ranges and unsafe URLs fail explicitly. This is a paragraph-scoped primitive, not a template engine or a promise to preserve arbitrary input DOCX packages.
 
-`document.background` sets solid page color. `document.sections[0].page_size` and `.margins` control the first section. Margins accept a uniform number or `(top, right, bottom, left)`. Multiple-section creation is not implemented. Paragraph `spacing` uses `(before_points, after_points, line_multiplier)`; `page_break_before` starts a paragraph on a new page. `document.add_page_break()` inserts an explicit break and preserves leading or consecutive blank pages; its returned paragraph contains the `\f` marker. `section.header(variant="default")` and `.footer(...)` return paragraph containers; variants are `default`, `first` and `even`. First/even variants enable the corresponding native section/settings behavior. Header/footer text is saved and included in native rendering/PDF export. Reopened DOCX exposes auxiliary content separately in `document.stories`; body Markdown does not automatically repeat it.
+`document.background` sets solid page color. `document.sections[0].page_size` and `.margins` control the first section. Margins accept a uniform number or `(top, right, bottom, left)`. Multiple-section creation is not implemented. Paragraph `spacing` uses `(before_points, after_points, line_multiplier)`; `page_break_before` controls paragraph placement. `document.add_page_break()` inserts the upstream explicit break marker (`\f`), preserving initial and consecutive blank pages. `section.header(variant="default")` and `.footer(...)` return paragraph containers; variants are `default`, `first` and `even`. First/even variants enable the corresponding native section/settings behavior. Header/footer text is saved and included in native rendering/PDF export. Reopened DOCX exposes auxiliary content separately in `document.stories`; body Markdown does not automatically repeat it.
 
 `document.add_image(png_bytes_or_path, width=None, height=None, alt="")` returns a picture with writable `size` and `alt`. A single requested dimension preserves aspect ratio. PNG data is decoded and checked before insertion. DOCX authoring currently accepts PNG only, unlike the broader extraction surface.
 
@@ -65,13 +65,21 @@ with doc_ex.new("pdf", size=(300, 400)) as pdf:
 
 `doc_ex.open(source).edit()` creates an independent editable PDF using original bytes, not extracted text. The conservative initial edit profile refuses encrypted documents, AcroForms, signatures and certification permissions. `edit()` for existing DOCX/PPTX remains unsupported until preservation diagnostics can prevent lossy saves. A new authored Office document can be copied and edited throughout its lifetime.
 
-PDF text currently uses the upstream Helvetica/WinAnsi path and rejects unsupported characters or text that cannot fit. It does not yet provide general Unicode font embedding. PDF image insertion accepts bounded PNG/JPEG inputs. Page subsets/imports do not promise preservation of all document-level outlines, tags, forms or metadata. Background readback is supported for backgrounds managed by this editable owner; unknown imported content is not guessed from its appearance.
+Without a supplied font, PDF text uses the upstream Helvetica/WinAnsi path and rejects unsupported characters or text that cannot fit. `page.draw_text(text, at=(x, y), font_size=12, font=font_bytes_or_path)` accepts an explicitly supplied embeddable font and uses upstream shaping, glyph mapping and embedding. Font input is bounded to 16 MiB and subject to PdfCraft's declared-license/embedding checks. This route handles explicit newline rows without automatic wrapping, rejects missing glyphs/overflow, and has tested Latin extended, Greek, Cyrillic, combining accents and ligature words. It does not assert broad complex-script conformance. PDF image insertion accepts bounded PNG/JPEG inputs. Page subsets/imports do not promise preservation of all document-level outlines, tags, forms or metadata. Background readback is supported for backgrounds managed by this editable owner; unknown imported content is not guessed from its appearance.
 
 ### PDF annotations
 
 `page.annotations` is an ordered collection. `add("note" | "highlight", box=..., text="", author="", color="#FFD200")` and `add_link(box=..., uri=... | page=...)` return checked annotation handles. A link needs exactly one target; page targets are zero-based. Handles expose `kind`, `box`, `text`, `author`, `color`, `uri` and `target_page`; `update(...)` applies a compound mutation atomically. `del page.annotations[index]` invalidates previously retrieved annotation handles on that page, including those retrieved through another page wrapper.
 
 Notes use the upstream fixed 20×20 PDF-user-unit icon size. Notes and highlights can be moved but not resized; links can be resized. Unsupported type-specific edits fail before changing the document. Readback can include other native annotation kinds, but mutation is limited to the documented profile. A highlight or comment is not secure redaction. Extracted internal links use `#page=N` with a one-based fragment and zero-based `metadata.target_page`.
+
+### PDF paths, metadata and bookmarks
+
+`page.draw_path(commands, stroke="black", fill=None, width=1, close=False)` accepts ordinary tuples: `("move", x, y)`, `("line", x, y)` and `("curve", x1, y1, x2, y2, x, y)`. Coordinates are top-left points; native typed content operators serialize the drawing. The current profile uses opaque RGB, round caps/joins and nonzero winding fill. Paths and strokes must fit inside the page; commands and serialized input are bounded.
+
+`pdf.metadata` is a snapshot. `pdf.update_metadata(title=..., author=..., subject=..., keywords=...)` updates supported document-info fields, with `None` or an empty string clearing a field. Unknown keys and invalid batches fail atomically.
+
+`pdf.bookmarks` is an ordered hierarchy. `bookmarks.add(title, page, index=None)` returns an entry with `title`, `page`, `expanded` and `children`. Child collections support the same insertion, deletion and `move(index, destination, to=another_collection)` operations. Structural outline edits invalidate existing bookmark handles; retrieve them again. Targets track native page organization. Native write depth is limited to 32, and imported outlines deeper than the upstream listing limit are not advertised as fully inspectable. Attachments require a separately bounded upstream API.
 
 ## PPTX slides and typed shapes
 
@@ -99,4 +107,27 @@ Slides expose `number`, `size`, writable `name`, `notes`, `hidden` and solid `ba
 
 ## Limits and evidence
 
-Do not infer complete Open XML parity from successful serialization. Lists, many advanced formatting properties, arbitrary source Office edits, field evaluation, review operations, charts and diagram fidelity remain roadmap items. No desktop application crates, external document tools, runtime downloads or fallback backends are used. See [validation evidence](../.kiro/specs/rust-document-engine/validation.md) and the operation-specific [readiness audits](content-readiness.md).
+Do not infer complete Open XML parity from successful serialization. Advanced numbering/formatting properties, arbitrary source Office edits, field evaluation, review operations, charts and diagram fidelity remain roadmap items. No desktop application crates, external document tools, runtime downloads or fallback backends are used. See [validation evidence](../.kiro/specs/rust-document-engine/validation.md) and the operation-specific [readiness audits](content-readiness.md).
+
+## A report recipe
+
+Reports are ordinary Python composition. Format values before inserting them; no separate report schema is needed:
+
+```python
+from pathlib import Path
+import doc_ex
+
+items = [("Support", 2, 125), ("Training", 1, 300)]
+with doc_ex.new("docx") as report:
+    report.add_paragraph("Invoice", style="Heading 1")
+    rows = [["Item", "Quantity", "Total"]]
+    rows += [[name, str(qty), f"${qty * price:.2f}"] for name, qty, price in items]
+    report.add_table(rows)
+    report.add_paragraph(f"Grand total: ${sum(qty * price for _, qty, price in items):.2f}")
+    link = report.add_paragraph().add_run("Payment terms")
+    link.link = "https://example.com/terms"
+    report.save("invoice.docx")
+    Path("invoice.pdf").write_bytes(report.convert("pdf"))
+```
+
+The installed-wheel recipe test reopens both outputs, checks table rows appear once, verifies the link and renders both. DOCX reflows through WordCraft; the PDF is fixed output from its native layout, with the same documented font/layout limitations.
