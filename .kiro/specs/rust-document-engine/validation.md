@@ -396,3 +396,8 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 
 - Exact runtime head `bca6a47e7b39d596d37f97b5c9e48ad7ab4e0928` passed CI 39467518674: formatting, 172 Rust tests, warnings-denied Clippy, 187 installed-wheel Python tests (no skips), and 264-package license audit. Independent review also ran all 176 Python tests against the original frozen feature wheel. The later main merge added only PDF review evidence.
 - CPython 3.11.17 / Linux x86_64 artifact: wheel 17,290,310 bytes; native extension 40,109,520 bytes; wheel SHA-256 `020b291f27eac331d8a5260f836d8dfe310af45ddec012050d17223e810a13fd`. No dependencies changed in the border feature; integrated dependency and upstream revisions match reviewed main.
+
+### Picture lifecycle and ownership independent review
+
+- Independently ran all 196 Python tests against the frozen installed package for `ef0b577ac5cf11ba45936bb2541ec1c72a6d4535`; all passed. CI 39467831926 on that exact head also passed formatting, 177 Rust tests, warnings-denied Clippy, 196 installed-wheel Python tests (no skips) and the 264-package locked license audit. Integration of the reviewed PR35/36 histories changed no runtime, tests, dependency or attribution files.
+- CI artifact: CPython 3.11.17 / Linux x86_64, wheel 17,299,520 bytes, native extension 40,130,544 bytes, wheel SHA-256 `6191b9e0be1ba7a56b6fe7ab4df64cbbc87cb7b6dc65842aabe5041133d699e3`. Reviewed native reference traversal, bounded media accounting, retained paragraph anchors and generation-captured iteration; no additional findings.
