@@ -833,6 +833,7 @@ GitHub merge state was verified on 2026-10-20. Each change passed independent re
 | [74](https://github.com/narain1/pydoccraft/pull/74) | `57fcc94216e58d74b967b24cf2ced68f9f45b742` | 285 / 409 |
 | [75](https://github.com/narain1/pydoccraft/pull/75) | `c34ef0bc722963ed6f0213da9934f52c361167ba` | 285 / 409 |
 | [76](https://github.com/narain1/pydoccraft/pull/76) | `65d9535e87d502af92d1c252bc06c7e8ab76b7d9` | 285 / 409 |
+| [77](https://github.com/narain1/pydoccraft/pull/77) | `7d77625313b99fcc3e09f216b891389b7b870cda` | 288 / 413 |
 
 Formatting, warnings-denied Clippy, strict installed-package typing and the unchanged 264-package runtime/build license audit passed in each final CI run. PR69 changes source-audit documentation/data only.
 
@@ -1051,3 +1052,16 @@ PR76 final head `5f5503c05788db0f26588582737fac30e5b19420` passed [current-main 
 A supported text-field call reproduced retargeting against /opt/slidecellappendlifetimetest (the reviewed 439-test release): a float-subclass coordinate moved original page zero to one, but page.fields.add reused its earlier zero ordinal and created the field on the unrelated page. The original page handle correctly reported itself stale afterward, establishing the missing final check.
 
 The isolated facade correction preserves initial validation, normalizes options/coordinates, then validates the original page again before native creation. Three new public test groups pass against a copied 439-release extension (0.020 seconds); 22 related field, geometry, tooltip, read-only and PDF drawing ownership tests pass (3.435 seconds). Coordinate and options-iterator callbacks cover move/delete/close and exceptions; already-invalid handles do not evaluate inputs. Both pages' post-callback bytes, text and small cached PNGs remain unchanged by rejected outer creation, and independent copies leave valid original targets usable. Only Python code/tests/docs change; there is no Cargo build, dependency or pin change for this correction. Full integrated release packaging/installed-wheel validation and independent review remain required.
+
+
+## PDF field creation ownership — complete local artifact
+
+Facade `bc41deee162201dd280a8d27f910aa1e5040abfe` passes **449 clean installed-wheel Python tests**, zero failures/errors/skips, in 148.216 seconds on Linux x86_64 / Python 3.11.2. The native extension is byte-identical to the preceding `6c27539c9b0ffefaaf05ae1f62f5d422c567c829` artifact that passed **312 locked Rust tests**, formatting and warnings-denied Clippy: extension SHA-256 `11c5d452fdfcf7a621f3e8cf8874e49a9de63ac988f55fce1e303d31be2f5ee3`. Those native checks are unchanged applicable evidence, not a new rerun. Locked/offline release packaging and strict installed-package typing pass; installed facade/native bytes match the wheel.
+
+Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,520,725 bytes**; extension **40,620,200 bytes**; SHA-256 `6443eb26c9a26bf1f79ccdd485d30b698eae05368472c430507953e2948daaf3`. Lock SHA-256 remains `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. All upstream pins and the audited 264-package license graph remain unchanged; no dependency/attribution changes.
+
+All three formats' extraction, PNG rendering and reopened conversion checks remain passing alongside the new callback workflows. This fixes the original-page recheck for field creation; it does not introduce broader form support or a universal callback-order guarantee. Independent review and exact-head/current-main CI remain required before manual merge.
+
+PR88 independent source review and all 446 tests against its copied frozen package pass in 148.876 seconds, with strict typing, evidence checks and matching wheel hash. Review also corrected the current rendering overview to describe the already-implemented retained Office sessions. Final main integration/CI remains queued.
+
+PR77 final head `a9f69bf84596ca7e6ffaa0dbb48866ac0cbac053` passed [current-main CI 39510345858](https://github.com/narain1/pydoccraft/actions/runs/39510345858): 288 Rust / 413 installed-wheel Python tests and all required checks. After independent review it was manually merged as `7d77625313b99fcc3e09f216b891389b7b870cda`. Auto-merge remains disabled; broader PDF6 stays open.
