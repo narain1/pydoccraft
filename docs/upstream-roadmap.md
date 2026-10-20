@@ -278,6 +278,16 @@ U10/E2: public PageText.find_opts_limited and line_rects at the pinned PdfCraft 
 
 Native [TextDevice](https://github.com/storytold/pdfcraft/blob/645016addcfb9078c557f0189559ab47cdcee057/crates/render/src/text.rs) includes clipped/invisible text and yields glyph em/advance geometry. Simple ActualText replacement, ligatures and column-order cases now have local probes. Search must not be described as visible-ink filtering or offsets into normalized table/Markdown text. A future richer native provenance/visibility contract needs its own evidence; no local clip evaluator, matcher or geometry reconstruction is proposed.
 
+
+## Owned form metadata, radio groups and annotation replies
+
+U10/PDF6: public [FieldProps.tooltip/set_props](https://github.com/storytold/pdfcraft/blob/645016addcfb9078c557f0189559ab47cdcee057/crates/forms/src/author.rs#L852) already writes/clears field help text, and the native Field reader preserves it. The owned tooltip property is local integration, not a missing upstream metadata API. set_props also regenerates appearance streams; local staging and resource accounting retain that behavior.
+
+Native [NewField::Radio](https://github.com/storytold/pdfcraft/blob/645016addcfb9078c557f0189559ab47cdcee057/crates/forms/src/author.rs#L25), radio values and whole-group deletion already exist. Remaining local integration must reconcile multiple widgets with the current one-widget page/box/flatten contract and verify export-state identity, duplicate/escaped names, clearing and page-organization behavior. A public targeted widget lifecycle and bounded fallible imported inventory remain upstream candidates; do not request another radio writer or imply source inspection proves safe radio support.
+
+Public [add_reply](https://github.com/storytold/pdfcraft/blob/645016addcfb9078c557f0189559ab47cdcee057/crates/annot/src/lib.rs#L1607) creates a reply with an empty appearance. Summary parent names are not unambiguous imported identities; [ordinary Text appearance rebuilding](https://github.com/storytold/pdfcraft/blob/645016addcfb9078c557f0189559ab47cdcee057/crates/annot/src/appearance.rs#L324) does not establish reply-icon preservation. Bounded inventory/parent identity, deletion work and a reply-aware appearance contract need validation before exposing threads through existing annotation handles. These radio/reply findings are source audits, not executed fidelity or secure-deletion certificates; no upstream post or new reply framework is introduced.
+
+
 ### PDF page labels during assembly
 
 U10/PDF8/P2: native display labels already appear in `page.metadata["label"]`; physical indexes remain unchanged. The pinned [label implementation](https://github.com/storytold/pdfcraft/blob/645016addcfb9078c557f0189559ab47cdcee057/crates/organize/src/labels.rs) owns numbering and range adjustment. Full copies preserve labels, movement retains ranges at document positions, deletion adjusts them, and subsets/imports omit the source label tree. These are current assembly semantics, not evidence that position-based labels are defective. The [synthetic reproducer](../tools/reproduce_pdf_page_label_assembly.py) demonstrates each case without adding a second label API.
