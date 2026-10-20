@@ -48,7 +48,7 @@ At the initial extraction-only checkpoint, navigation links, images, semantic XH
 - Added strict bounded UTF-8 container, selected OPF, and chapter XHTML scans with DTD, attribute, token, and depth rejection before LexePub handling.
 - Preserved readable list, quote, preformatted, caption, definition, and table-cell text alongside headings/paragraphs; verified Unicode link offsets and case-insensitive external schemes.
 - Authoring now rejects XML-illegal controls, active SVG, and mislabeled PNG/JPEG/GIF bytes; each image is capped at 16 MiB, aggregate encoded media at 64 MiB, content at 64 MiB, and conservative/actual output at 128 MiB. Image mutations stage every validation/allocation before committing chapter/resource state.
-- Rust 1.95 exact-state checks passed: formatting, 238 locked tests, and warnings-denied all-targets Clippy.
-- A clean Linux ARM64 CPython 3.13 installed wheel passed 291 tests with zero failures/errors/skips. Wheel size was 16,330,786 bytes; uncompressed native extension size was 35,733,128 bytes.
+- After merging current `main`, Rust 1.95 exact-state checks passed: formatting, 243 locked tests, and warnings-denied all-targets Clippy.
+- A clean Linux ARM64 CPython 3.13 installed wheel passed 309 tests with zero failures/errors/skips. Wheel size was 16,342,372 bytes; uncompressed native extension size was 35,733,128 bytes.
 - The locked license audit reviewed 298 normal/build packages; the two license inventories remain byte-identical with no prohibited runtime license.
 - Remaining upstream limits are explicit: LexePub materializes/clones its complete CSS/chapter AST before adapter output limits, and rbook writes into an in-memory vector. The profile does not claim hard intermediate-allocation ceilings until bounded upstream traversal/sink APIs exist.
