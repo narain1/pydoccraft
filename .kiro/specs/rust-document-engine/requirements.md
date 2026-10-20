@@ -413,3 +413,10 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 
 1. New tested profiles SHALL join the existing operation ledger and reference families without duplicating ownership or broad completion state. Header/footer content and line numbering SHALL cite their distinct exact historical artifacts and fingerprinted tests.
 2. Supported read/create/edit/preserve/render/export claims SHALL remain separate; unassessed auxiliary extraction, unsupported imported editing and known native fidelity limits SHALL remain explicit. Reference members SHALL retain immutable source citations and shall not stand in for local capability tests.
+
+
+## 54. Native paragraph direction and run language
+
+1. Existing DOCX paragraph formatting SHALL accept direction rtl/ltr/None, preserving explicit LTR versus inherited direction. Existing character formatting SHALL accept language/None, with nonempty ASCII alphanumeric subtags separated by single hyphens and at most 63 bytes. No full BCP47, font selection or spelling guarantee SHALL be implied.
+2. Native property inheritance SHALL apply through existing styles/defaults and owned paragraphs/ranges in body/cell/story/note scopes. Whole-table paragraph direction and conditional table character language SHALL reuse current native dispatch; conditional paragraph direction SHALL remain rejected. Direct/effective snapshots SHALL expose the fields. Table visual order and vertical cell orientation SHALL remain distinct.
+3. Native layout SHALL own bidirectional ordering and logical start-edge alignment/indent/tab behavior; adapters SHALL not rewrite coordinates, source Unicode or alignment. Tests SHALL verify native glyph geometry, actual PNG/PDF placement, source roundtrip, defaults/styles/reset, copies, callbacks and atomic invalid values. Broad TXT6 script/font/diagnostic scope SHALL remain open.
