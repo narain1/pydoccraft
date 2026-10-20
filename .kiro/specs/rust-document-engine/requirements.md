@@ -522,3 +522,10 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 
 1. Existing operation evidence SHALL add bounded profiles for DOCX endpoint/whole-paragraph bookmark navigation, owned header/footer clear, PDF object-stream serialization, native PDF search and DOCX decimal outlines. Joins SHALL reuse current coverage IDs, owners and reference families without changing criterion completion. The explicit unsupported redaction profile SHALL remain present.
 2. Artifact citations SHALL identify the exact validated runtime/wheel and reviewed test-file fingerprints. Authored bookmark lookup SHALL remain distinct from imported source inventory; same-format serialization SHALL be assessed as preservation rather than conversion. Search rectangles SHALL not imply visible-only matching, normalized source offsets or OCR. Narrow list-label evidence SHALL not certify auxiliary Office coverage.
+
+
+## 69. Scoped field-tooltip and comment-lock evidence
+
+1. The existing owned-field evidence profile SHALL incorporate tooltip read/edit/preservation/render assertions against the exact completed tooltip artifact, preserving its historical creation citation and unsupported imported/conversion scope. Evidence SHALL not claim imported tooltip inventory from saved-output rendering alone.
+2. One orthogonal comment-lock mutation profile SHALL reuse PDF6 and the existing annotation reference family without replacing geometric creation/style evidence. Imported coverage SHALL distinguish the dedicated canonical rectangle fixture from saved/reopened native seven-kind output. Creation and conversion cells SHALL remain not applicable for this flag-only profile.
+3. New test fingerprints and artifact citations SHALL match reviewed assertions and exact validated source snapshots. Existing historical artifacts, coverage IDs, owners and completion flags SHALL remain unchanged. Generated support/reference guides SHALL stay consistent; broad form/annotation, security and imported-inventory claims SHALL remain excluded.

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "audited_commit": "1e28d49b0f9c87403e66b78c23749e6fdb350b81",
+  "audited_commit": "a21fc5c80abe556ac03b471f1906a7ec6b6a3f16",
   "references": {
     "pdfcraft": {
       "revision": "645016addcfb9078c557f0189559ab47cdcee057",
@@ -69,6 +69,20 @@
       "kind": "artifact",
       "source_commit": "a94a5ba65d332e5cc897cb19fd368d771b911d0b",
       "date": "2026-10-20"
+    },
+    "field-tooltips-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#owned-pdf-field-tooltips--complete-local-artifact",
+      "wheel_sha256": "850d56884901018551cecea6beb1e741023ab4c01f444c286c539acee1c20f37",
+      "kind": "artifact",
+      "source_commit": "b3917b84379a356f2b7a00d36b757d5bf66d4550",
+      "date": "2026-10-20"
+    },
+    "comment-locks-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#annotation-editing-locks--complete-local-artifact",
+      "wheel_sha256": "2c54fbb1b41472fd5a07e7ba8e9019c91bdfa125eebc45c4bb770203cb759d5f",
+      "kind": "artifact",
+      "source_commit": "a21fc5c80abe556ac03b471f1906a7ec6b6a3f16",
+      "date": "2026-10-20"
     }
   },
   "test_sources": {
@@ -87,7 +101,9 @@
     "tests/test_story_clear.py": "0f0946902c79f8516fc963104402f7cf31d77ab621e51bd82a7e7d0c188b239e",
     "tests/test_pdf_output_options.py": "f840e55128bc8a4bd000e73ee0cb9d38e6b96746823e1153e8525f65e2848bb4",
     "tests/test_pdf_search.py": "58fef2f3633a8578ceff0f2c5494f19c5cc8980bc6a3a6d1c154cf8134b4df29",
-    "tests/test_decimal_outline.py": "b03eefe5b3da5c3b5d236394ae2e204dfa4061cb8b2c044c9a32efa91bc070e4"
+    "tests/test_decimal_outline.py": "b03eefe5b3da5c3b5d236394ae2e204dfa4061cb8b2c044c9a32efa91bc070e4",
+    "tests/test_field_tooltips.py": "569ecc1cfbc33a6a22f32fe456639a7c2560ff11c0af1cecfcc9b22bf56f28f4",
+    "tests/test_annotation_lock.py": "b10af9191b773aac61be358a7fe3123e581628a8a636f2756b082c3373efd3d9"
   },
   "profiles": [
     {
@@ -483,11 +499,12 @@
     {
       "id": "pdf.owned-fields",
       "format": "pdf",
-      "scope": "Owned single-widget text/checkbox/choice fields with fixed appearances; no radio/script/multiline profile.",
+      "scope": "Owned single-widget text/checkbox/choice fields with fixed appearances and bounded Unicode tooltip metadata; no radio/script/multiline profile.",
       "public_members": [
         "new(\"pdf\").pages[0].fields.add(...)",
         "field.value",
         "field.box",
+        "field.tooltip",
         "pdf.fields.flatten()"
       ],
       "native_sources": {
@@ -523,21 +540,39 @@
             "PageRenderer",
             "RenderRequest"
           ]
+        },
+        "tooltip": {
+          "reference": "pdfcraft",
+          "path": "crates/forms/src/author.rs",
+          "symbols": [
+            "FieldProps",
+            "set_props"
+          ]
+        },
+        "tooltip_read": {
+          "reference": "pdfcraft",
+          "path": "crates/forms/src/lib.rs",
+          "symbols": [
+            "Field"
+          ]
         }
       },
       "operations": {
         "read": {
           "status": "partial",
-          "scope": "Owned field handles expose bounded values/options and current-view geometry. This is not imported AcroForm extraction.",
+          "scope": "Owned field handles expose bounded values/options, current-view geometry and Unicode tooltip metadata; absent/cleared tooltips read as empty strings. This is not imported AcroForm extraction.",
           "tests": [
             "tests/test_pdf_fields.py::PdfFieldTests.test_owned_forms_render_copy_and_flatten",
-            "tests/test_field_geometry.py::FieldGeometryTests.test_rotated_cropped_userunit_pages_use_display_coordinates"
+            "tests/test_field_geometry.py::FieldGeometryTests.test_rotated_cropped_userunit_pages_use_display_coordinates",
+            "tests/test_field_tooltips.py::FieldTooltipTests.test_metadata_preserves_all_kinds_rotated_geometry_pixels_and_followup_edits"
           ],
-          "artifact": "cookbook-2026-10-20",
+          "artifact": "field-tooltips-2026-10-20",
           "native": [
             "author",
             "inspect",
-            "flatten"
+            "flatten",
+            "tooltip",
+            "tooltip_read"
           ]
         },
         "create": {
@@ -555,16 +590,22 @@
         },
         "edit_authored": {
           "status": "verified",
-          "scope": "Fill, resize/move, delete and flatten the supported owned profile atomically; preserve widget orientation when pages rotate.",
+          "scope": "Fill, resize/move, delete and flatten the supported owned profile atomically; preserve widget orientation when pages rotate. Set/clear bounded Unicode tooltips with strict type/Unicode/4096-byte checks and subclass/lifetime guards; this does not add multiline painted values.",
           "tests": [
             "tests/test_pdf_fields.py::PdfFieldTests.test_owned_forms_render_copy_and_flatten",
-            "tests/test_field_geometry.py::FieldGeometryTests.test_rotated_cropped_userunit_pages_use_display_coordinates"
+            "tests/test_field_geometry.py::FieldGeometryTests.test_rotated_cropped_userunit_pages_use_display_coordinates",
+            "tests/test_field_tooltips.py::FieldTooltipTests.test_metadata_preserves_all_kinds_rotated_geometry_pixels_and_followup_edits",
+            "tests/test_field_tooltips.py::FieldTooltipTests.test_utf8_limits_bad_values_and_warm_cache_are_atomic",
+            "tests/test_field_tooltips.py::FieldTooltipTests.test_subclasses_cannot_run_callbacks_or_hide_size",
+            "tests/test_field_tooltips.py::FieldTooltipTests.test_closed_stale_deleted_and_copied_handles_keep_identity"
           ],
-          "artifact": "cookbook-2026-10-20",
+          "artifact": "field-tooltips-2026-10-20",
           "native": [
             "author",
             "inspect",
-            "flatten"
+            "flatten",
+            "tooltip",
+            "tooltip_read"
           ]
         },
         "edit_imported": {
@@ -573,28 +614,33 @@
         },
         "preserve": {
           "status": "partial",
-          "scope": "Owned copies/page organization retain tested values/widgets. This does not establish arbitrary field-dictionary or imported form preservation.",
+          "scope": "Owned copies/page organization retain tested values/widgets and tooltip metadata; later widget geometry/value edits retain tooltips. Saved outputs preserve tested pixels, but this is not arbitrary field-dictionary or imported-form metadata preservation.",
           "tests": [
             "tests/test_pdf_fields.py::PdfFieldTests.test_owned_forms_render_copy_and_flatten",
-            "tests/test_pdf_fields.py::PdfFieldTests.test_fields_follow_page_organization"
+            "tests/test_pdf_fields.py::PdfFieldTests.test_fields_follow_page_organization",
+            "tests/test_field_tooltips.py::FieldTooltipTests.test_metadata_preserves_all_kinds_rotated_geometry_pixels_and_followup_edits"
           ],
-          "artifact": "cookbook-2026-10-20",
+          "artifact": "field-tooltips-2026-10-20",
           "native": [
             "author",
             "inspect",
-            "flatten"
+            "flatten",
+            "tooltip",
+            "tooltip_read"
           ]
         },
         "render": {
           "status": "verified",
-          "scope": "Visible text/checkbox/choice appearances and tested flattening render as expected, including rotated/cropped/UserUnit geometry.",
+          "scope": "Visible text/checkbox/choice appearances and tested flattening render as expected, including rotated/cropped/UserUnit geometry. Tooltip-only updates/clear preserve exact fixture PNG bytes; flatten output matches the same control without tooltip metadata.",
           "tests": [
             "tests/test_pdf_fields.py::PdfFieldTests.test_owned_forms_render_copy_and_flatten",
-            "tests/test_field_geometry.py::FieldGeometryTests.test_rotated_cropped_userunit_pages_use_display_coordinates"
+            "tests/test_field_geometry.py::FieldGeometryTests.test_rotated_cropped_userunit_pages_use_display_coordinates",
+            "tests/test_field_tooltips.py::FieldTooltipTests.test_metadata_preserves_all_kinds_rotated_geometry_pixels_and_followup_edits"
           ],
-          "artifact": "cookbook-2026-10-20",
+          "artifact": "field-tooltips-2026-10-20",
           "native": [
-            "raster"
+            "raster",
+            "tooltip"
           ]
         },
         "export": {
@@ -607,10 +653,12 @@
           "checked_owned_fields",
           "add_field",
           "set_field_box",
-          "flatten_fields"
+          "flatten_fields",
+          "field_payload",
+          "set_field_tooltip"
         ]
       },
-      "fixture_provenance": "Synthetic PDFs authored in test_pdf_fields.py and test_field_geometry.py; the latter uses local PDF geometry fixtures with rotation/CropBox/UserUnit. Assertions inspect actual PNG pixels, metadata, owned copy independence and flattening results."
+      "fixture_provenance": "Synthetic PDFs authored in test_pdf_fields.py and test_field_geometry.py; the latter uses local PDF geometry fixtures with rotation/CropBox/UserUnit. Assertions inspect actual PNG pixels, metadata, owned copy independence and flattening results. Tooltip fixtures additionally author all three kinds on four rotated CropBox/UserUnit pages, assert owned metadata/copy/readback/clear/resize/value behavior and exact PNG/flatten-control equality. Saved AcroForms still reject editable reopening; native TU roundtrip has separate artifact-level Rust evidence, not an imported-field Python certification."
     },
     {
       "id": "slides.layouts",
@@ -1947,6 +1995,136 @@
       }
     },
     {
+      "id": "pdf.comment-locks",
+      "format": "pdf",
+      "scope": "Strict boolean native editing lock for canonical notes, four text-markup kinds, rectangles and ellipses. Flag mutation only; no general annotation creation/style or security certification.",
+      "public_members": [
+        "annotation.locked"
+      ],
+      "adapter_sources": {
+        "rust/src/author_pdf.rs": [
+          "annotations",
+          "set_annotation_locked",
+          "checked_lock_target",
+          "geometric_dict_peak"
+        ],
+        "src/doc_ex/_authoring.py": [
+          "Annotation"
+        ]
+      },
+      "native_sources": {
+        "lock": {
+          "reference": "pdfcraft",
+          "path": "crates/annot/src/lib.rs",
+          "symbols": [
+            "Summary",
+            "summaries",
+            "set_locked",
+            "set_contents",
+            "set_info",
+            "move_annotation",
+            "set_rect",
+            "set_style",
+            "delete_annotation"
+          ]
+        },
+        "cos": {
+          "reference": "pdfcraft",
+          "path": "crates/cos/src/document.rs",
+          "symbols": [
+            "Document",
+            "update_dict"
+          ]
+        },
+        "raster": {
+          "reference": "pdfcraft",
+          "path": "crates/render/src/raster.rs",
+          "symbols": [
+            "PageRenderer",
+            "RenderRequest"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic native-created seven-kind comments use the local rotated CropBox/UserUnit PDF fixture and exact pre/post PNG comparisons, saved reopen, copies and blocked mutation controls. Imported acceptance separately uses the existing minimal canonical rectangle fixture plus saved/reopened native seven-kind output. Malformed/unsupported imported rectangle variants assert unchanged bytes/warm cache. No new geometric creation or foreign appearance regeneration certification.",
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "Read the native Locked bit for the seven supported comment kinds through existing handles, including stale/closed identity checks. Global imported summaries/initial inspection remain bounded-inventory upstream work; permissive native flag interpretation is not canonical-profile certification.",
+          "artifact": "comment-locks-2026-10-20",
+          "tests": [
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_all_kinds_preserve_pixels_and_metadata_in_rotated_crop_userunit_views",
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_strict_bool_lifetime_and_page_identity",
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_imported_profiles_link_exclusion_and_warm_cache_rollback"
+          ],
+          "native": [
+            "lock"
+          ]
+        },
+        "create": {
+          "status": "not_applicable",
+          "scope": "This profile mutates an existing comment flag. Fixture creation does not certify a new annotation creation API; geometric creation evidence remains in pdf.geometric-comments."
+        },
+        "edit_authored": {
+          "status": "verified",
+          "scope": "Toggle the strict boolean within the canonical target profile. Text remains editable; box/color/author/deletion and compound blocked updates fail atomically while locked, then work after unlock. Non-bool inputs never run truth-value callbacks; this does not inhibit document-level operations or grant security.",
+          "artifact": "comment-locks-2026-10-20",
+          "tests": [
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_locked_text_is_editable_but_geometry_style_author_delete_are_atomic",
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_strict_bool_lifetime_and_page_identity"
+          ],
+          "native": [
+            "lock",
+            "cos"
+          ]
+        },
+        "edit_imported": {
+          "status": "partial",
+          "scope": "Toggle only the tested canonical imported rectangle and saved/reopened native seven-kind outputs. Malformed flags, nested extensions, replies and noncanonical geometry styles fail atomically in tested rectangle variants; links reject this property. No arbitrary imported note/markup/thread certification.",
+          "artifact": "comment-locks-2026-10-20",
+          "tests": [
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_all_kinds_preserve_pixels_and_metadata_in_rotated_crop_userunit_views",
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_imported_profiles_link_exclusion_and_warm_cache_rollback"
+          ],
+          "native": [
+            "lock",
+            "cos"
+          ]
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Flag toggles retain tested metadata/geometry and exact fixture pixels through saved reopen and independent copies; rejected updates retain bytes/cache. Page organization invalidates old handles and retains the flag on the fresh handle. No generic foreign-dictionary, descendant-lock or custom-appearance preservation claim.",
+          "artifact": "comment-locks-2026-10-20",
+          "tests": [
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_all_kinds_preserve_pixels_and_metadata_in_rotated_crop_userunit_views",
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_locked_text_is_editable_but_geometry_style_author_delete_are_atomic",
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_strict_bool_lifetime_and_page_identity",
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_imported_profiles_link_exclusion_and_warm_cache_rollback"
+          ],
+          "native": [
+            "lock",
+            "cos"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "Toggling/clearing the lock leaves actual seven-kind fixture ink byte-identical at 144 DPI across all four rotations with CropBox/UserUnit. This does not certify arbitrary foreign appearance rendering or annotation drawing/style features.",
+          "artifact": "comment-locks-2026-10-20",
+          "tests": [
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_all_kinds_preserve_pixels_and_metadata_in_rotated_crop_userunit_views",
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_locked_text_is_editable_but_geometry_style_author_delete_are_atomic"
+          ],
+          "native": [
+            "lock",
+            "raster"
+          ]
+        },
+        "export": {
+          "status": "not_applicable",
+          "scope": "Lock mutation adds no conversion pair. Same-format save/reopen evidence is under preserve; no lock-preservation claim for PDF-to-DOCX."
+        }
+      }
+    },
+    {
       "id": "pdf.vertical-redaction",
       "format": "pdf",
       "scope": "Secure removal of vertical-writing text beneath a redaction mark; no public package redaction API currently.",
@@ -2547,9 +2725,10 @@
     "PDF6": {
       "profiles": [
         "pdf.owned-fields",
-        "pdf.geometric-comments"
+        "pdf.geometric-comments",
+        "pdf.comment-locks"
       ],
-      "remaining": "Unassessed: acceptance scope beyond linked profiles, including native fidelity and diagnostic limitations."
+      "remaining": "Unassessed: broader imported annotation/form inventories, radio/widget lifecycle, replies, arbitrary appearances and remaining PDF6 acceptance beyond the bounded linked profiles."
     },
     "PDF7": {
       "profiles": [

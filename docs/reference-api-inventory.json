@@ -1849,6 +1849,11 @@
           "name": "set_border",
           "source": "pm:docs/annot.rst",
           "line": 28
+        },
+        {
+          "name": "set_flags",
+          "source": "pm:docs/annot.rst",
+          "line": 301
         }
       ],
       "coverage": [
@@ -1856,13 +1861,14 @@
         "REV1",
         "REV6"
       ],
-      "local_surface": "Existing note/markup/link and bounded rectangle/ellipse annotation handles and typed properties",
-      "remaining": "Fixed-profile geometric comments do not establish opacity/fill/reply or arbitrary appearance support. Caller-bounded native inventories remain upstream work; PDF annotations are distinct from tracked DOCX review.",
+      "local_surface": "Existing note/markup/link and bounded rectangle/ellipse annotation handles and typed properties; strict boolean lock for seven canonical comment kinds",
+      "remaining": "Fixed-profile geometric comments do not establish opacity/fill/reply or arbitrary appearance support. Caller-bounded native inventories remain upstream work; PDF annotations are distinct from tracked DOCX review. Local locked exposes only the native editing-lock bit, excludes links, and is not arbitrary flag editing or access control.",
       "upstream_candidates": [
         "U10"
       ],
       "profiles": [
-        "pdf.geometric-comments"
+        "pdf.geometric-comments",
+        "pdf.comment-locks"
       ],
       "disposition": "implemented_subset"
     },
@@ -1899,6 +1905,11 @@
           "name": "update",
           "source": "pm:docs/widget.rst",
           "line": 58
+        },
+        {
+          "name": "field_label",
+          "source": "pm:docs/widget.rst",
+          "line": 100
         }
       ],
       "coverage": [
@@ -1906,8 +1917,8 @@
         "FORM3",
         "PKG5"
       ],
-      "local_surface": "PdfFields/PdfField owned text/checkbox/choice profile with geometry/value updates",
-      "remaining": "Imported enumeration silently truncates/loses widgets/unknown kinds; require public fallible bounded inventory before safe general source-form editing. Script/signature behavior is excluded.",
+      "local_surface": "PdfFields/PdfField owned text/checkbox/choice profile with geometry/value updates and bounded Unicode tooltip metadata",
+      "remaining": "Imported enumeration silently truncates/loses widgets/unknown kinds; require public fallible bounded inventory before safe general source-form editing. Script/signature behavior is excluded. The local tooltip is an empty string when absent; this is not a promise to match the reference field-label fallback or imported metadata behavior.",
       "upstream_candidates": [
         "U10"
       ],
@@ -2020,5 +2031,5 @@
       "disposition": "reference_comparison"
     }
   ],
-  "audited_commit": "1e28d49b0f9c87403e66b78c23749e6fdb350b81"
+  "audited_commit": "a21fc5c80abe556ac03b471f1906a7ec6b6a3f16"
 }
