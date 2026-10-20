@@ -147,7 +147,7 @@ struct NumberingDefinition<'a> {
 
 fn numbering_limit() -> EngineError {
     EngineError::ResourceLimit(
-        "DOCX numbering exceeds bounded paths, placements or metadata bytes".into(),
+        "DOCX numbering exceeds bounded paths, placements, metadata bytes or native lookup work".into(),
     )
 }
 
