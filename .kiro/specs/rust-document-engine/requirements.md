@@ -407,3 +407,9 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 2. Numbered sections SHALL be single-column. After earlier numbering, a continuous each_page section SHALL require an immediately preceding each_page section, preventing verified stale-counter behavior. All mutations and serialization SHALL recheck the supported combinations atomically. Native defect repros and mixed-section positive controls SHALL be retained.
 3. Before either authored-document full-layout validation path, numbered top-level body paragraphs SHALL remain within 100,000 work units: four per UTF-8 source byte, one per paragraph and one per inline object. Suppressed paragraphs SHALL still count. This additional label-work bound SHALL not be represented as a total-memory guarantee.
 4. The existing serialization layout pass SHALL inspect actual native line-label logical extents and reject off-page/wrapped labels, preserving explicit errors and existing page/item limits. Tests SHALL verify source/PNG/PDF output, automatic pages, restarts/intervals, tables/suppression, copies/reset, callback closure, bounds and rollback. Semantic DOCX extraction SHALL not invent layout labels; PDF ordering/classification SHALL remain native.
+
+
+## 53. Incremental operation evidence
+
+1. New tested profiles SHALL join the existing operation ledger and reference families without duplicating ownership or broad completion state. Header/footer content and line numbering SHALL cite their distinct exact historical artifacts and fingerprinted tests.
+2. Supported read/create/edit/preserve/render/export claims SHALL remain separate; unassessed auxiliary extraction, unsupported imported editing and known native fidelity limits SHALL remain explicit. Reference members SHALL retain immutable source citations and shall not stand in for local capability tests.

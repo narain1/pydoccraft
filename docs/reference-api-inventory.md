@@ -4,7 +4,7 @@
 
 This comparison groups related reference members under existing Python handles and formatting properties. It is not an exhaustive member inventory, implementation test, or format-conformance claim. Open XML schema/model APIs do not establish pagination or rendering. Reference products are not runtime dependencies.
 
-Audited local surface: `52d1d9d055413a9a076eab85ae3e90d2f13144c2`. The inventory contains 44 families and 194 representative members from 17 pinned source files. Later implementation changes require review.
+Audited local surface: `17482eb76c264e5c4303b34cf8d7d1b62287e656`. The inventory contains 44 families and 195 representative members from 17 pinned source files. Later implementation changes require review.
 
 - [dotnet/Open-XML-SDK v3.5.1](https://github.com/dotnet/Open-XML-SDK/tree/3139fdfd27414548a41555f7848d5728f6e71a42) — `3139fdfd27414548a41555f7848d5728f6e71a42`
 - [pymupdf/PyMuPDF 2.0](https://github.com/pymupdf/PyMuPDF/tree/b8904b27efa0c4e2258f0e46ab4498a6173ffa22) — `b8904b27efa0c4e2258f0e46ab4498a6173ffa22`
@@ -165,25 +165,29 @@ Headers, footers and page-specific linkage.
 
 **Criteria / owners:** LAY3 (W06), BG5 (W13)
 
-**Audited local surface:** Section.header/footer(default/first/even) reuse Paragraph/TextRange; section copies own independent parts.
+**Audited local surface:** Section.header/footer(default/first/even) reuse paragraphs, tables, rich cells and pictures; copies own independent parts and deleted pictures retain paragraph anchors..
 
-**Disposition:** `local_candidate`. **Remaining:** Header/footer tables and pictures can reuse existing owned content handles with explicit synthetic-placeholder tracking and native geometry guards. Link-to-previous/unlink/clear remain separate acceptance requiring stable story IDs and field-scope checks.
+**Disposition:** `implemented_subset`. **Remaining:** Link-to-previous/unlink/clear and arbitrary block movement remain open. Inactive variants may lack measured cell geometry; oversized physical frames fail explicitly. Rich notes are separate.
 
 **Upstream candidates:** [U02](upstream-roadmap.md), [U04](upstream-roadmap.md)
 
+**Evidence profiles:** [word.rich-stories](support-matrix.md#wordrich-stories)
+
 ## REF-OX-PAGE-FIELDS
 
-Page/count fields and refresh semantics.
+Page/count fields, line numbering and refresh semantics.
 
-**Reference members:** [PageNumberType](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L22787), [SimpleField](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L17739), [FieldChar](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L4518), [FieldCode](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L3885), [UpdateFieldsOnOpen](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L2297)
+**Reference members:** [PageNumberType](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L22787), [SimpleField](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L17739), [FieldChar](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L4518), [FieldCode](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L3885), [UpdateFieldsOnOpen](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L2297), [LineNumberType](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L22696)
 
 **Criteria / owners:** LAY6 (W08), REF3 (W08), REF4 (W08)
 
-**Audited local surface:** Paragraph.add_field(page/page_count/section_page_count), Section.page_number_start.
+**Audited local surface:** Paragraph.add_field(page/page_count/section_page_count), Section.page_number_start; Section.line_numbers reuses native decimal counters.
 
-**Disposition:** `implemented_subset`. **Remaining:** Explicit Arabic supported. Continuous SECTIONPAGES/restarts are rejected; implicit numeral context differs across body/stories; no general field evaluator.
+**Disposition:** `implemented_subset`. **Remaining:** Explicit Arabic supported. Continuous SECTIONPAGES/restarts are rejected; implicit numeral context differs across body/stories; no general field evaluator. Numbered sections are single-column; affected continuous each_page resumes are rejected. Line-label bounds/work do not imply complete numbering parity.
 
 **Upstream candidates:** [U07](upstream-roadmap.md)
+
+**Evidence profiles:** [word.line-numbers](support-matrix.md#wordline-numbers)
 
 ## REF-OX-NOTES
 
