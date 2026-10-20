@@ -1170,7 +1170,138 @@ impl EditableDocx {
 
     pub fn style_info(&self, id: &str) -> PyResult<String> {
         let style = supported_style(&self.document()?.styles, id)?;
-        Ok(json!({"id":style.id,"name":style.name,"kind":match style.kind {StyleKind::Paragraph => "paragraph", StyleKind::Character => "character", StyleKind::Table => "table", _ => "unsupported"},"based_on":style.based_on,"builtin":style.builtin}).to_string())
+        Ok(json!({"id":style.id,"name":style.name,"kind":match style.kind {StyleKind::Paragraph => "paragraph", StyleKind::Character => "character", StyleKind::Table => "table", _ => "unsupported"},"based_on":style.based_on,"next":style.next,"linked":style.linked,"builtin":style.builtin}).to_string())
+    }
+
+    pub fn style_relations_patch(&mut self, id: &str, patch: &str) -> PyResult<()> {
+        let document = self.document()?;
+        let style = supported_style(&document.styles, id)?;
+        let (id, kind) = (style.id.clone(), style.kind);
+        let values = format_patch(patch)?;
+        if values
+            .keys()
+            .any(|key| !matches!(key.as_str(), "next" | "linked"))
+        {
+            return Err(PyValueError::new_err(
+                "style relations accept only next and linked",
+            ));
+        }
+        let mut candidate = document.clone();
+        if let Some(value) = values.get("next") {
+            if kind != StyleKind::Paragraph {
+                return Err(PyValueError::new_err("next requires a paragraph style"));
+            }
+            let next = if value.is_null() {
+                None
+            } else {
+                let next = supported_style(&document.styles, text_value(value)?)?;
+                if next.kind != StyleKind::Paragraph {
+                    return Err(PyValueError::new_err(
+                        "next must reference a paragraph style",
+                    ));
+                }
+                Some(next.id.clone())
+            };
+            candidate
+                .styles
+                .get_mut(&id)
+                .ok_or_else(|| PyValueError::new_err("unknown style"))?
+                .next = next;
+        }
+        if let Some(value) = values.get("linked") {
+            if !matches!(kind, StyleKind::Paragraph | StyleKind::Character) {
+                return Err(PyValueError::new_err(
+                    "linked requires a paragraph or character style",
+                ));
+            }
+            let target = if value.is_null() {
+                None
+            } else {
+                let target = supported_style(&document.styles, text_value(value)?)?;
+                if !matches!(
+                    (kind, target.kind),
+                    (StyleKind::Paragraph, StyleKind::Character)
+                        | (StyleKind::Character, StyleKind::Paragraph)
+                ) {
+                    return Err(PyValueError::new_err(
+                        "linked styles must pair paragraph and character styles",
+                    ));
+                }
+                if target
+                    .linked
+                    .as_deref()
+                    .is_some_and(|partner| partner != id)
+                {
+                    return Err(PyValueError::new_err(
+                        "linked target already belongs to another style; clear that link first",
+                    ));
+                }
+                Some(target.id.clone())
+            };
+            // Remove only the source's reciprocal old relation; never disconnect an
+            // unrelated partner. Pinned built-in headings may name an absent
+            // HeadingNChar: clearing that dangling source reference is safe.
+            if let Some(previous) = &style.linked {
+                if let Some(partner) = candidate.styles.get_mut(previous) {
+                    if partner.linked.as_deref() == Some(id.as_str()) {
+                        partner.linked = None;
+                    }
+                }
+            }
+            candidate
+                .styles
+                .get_mut(&id)
+                .ok_or_else(|| PyValueError::new_err("unknown style"))?
+                .linked = target.clone();
+            if let Some(target) = target {
+                candidate
+                    .styles
+                    .get_mut(&target)
+                    .ok_or_else(|| PyValueError::new_err("unknown linked style"))?
+                    .linked = Some(id);
+            }
+        }
+        // next is a follow-on paragraph hint, not an inheritance edge: self
+        // references and cycles are valid and do not enter style resolution.
+        self.commit(candidate)
+    }
+
+    pub fn default_formatting(&self) -> PyResult<String> {
+        let styles = &self.document()?.styles;
+        let mut values = char_snapshot(&styles.default_chr);
+        values.remove("style");
+        values.extend(para_snapshot(&styles.default_para)?);
+        Ok(Value::Object(values).to_string())
+    }
+
+    pub fn format_defaults(&mut self, patch: &str) -> PyResult<()> {
+        let document = self.document()?;
+        let values = format_patch(patch)?;
+        if values.get("font_size").is_some_and(Value::is_null) {
+            return Err(EngineError::Unsupported(
+                "clearing document-default font_size is unavailable: pinned upstream native resolution uses 11pt but DOCX reopening substitutes 10pt; set an explicit font_size".into(),
+            ).into());
+        }
+        let (mut character, mut paragraph) = (Map::new(), Map::new());
+        for (key, value) in values {
+            if is_paragraph_key(&key) {
+                paragraph.insert(key, value);
+            } else {
+                character.insert(key, value);
+            }
+        }
+        let has_paragraph = !paragraph.is_empty();
+        let character = CharPatch::parse(&document.styles, &character, false)?;
+        let paragraph = ParaPatch::parse(&paragraph)?;
+        let mut candidate = document.clone();
+        character.apply(&mut candidate.styles.default_chr);
+        paragraph.apply(&mut candidate.styles.default_para);
+        if has_paragraph {
+            candidate.styles.default_para_present = true;
+        }
+        validate_document_tabs(&candidate)?;
+        validate_style_tables(document, &candidate)?;
+        self.commit(candidate)
     }
 
     #[pyo3(signature = (name, kind="paragraph", based_on=None))]
@@ -5110,6 +5241,430 @@ fn range_offsets(text: &str, start: usize, end: usize) -> PyResult<(usize, usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn style_relations_are_reciprocal_bounded_and_roundtrip() {
+        let mut document = EditableDocx::new();
+        let first = document
+            .add_style("First paragraph", "paragraph", None)
+            .unwrap();
+        let second = document
+            .add_style("Second paragraph", "paragraph", None)
+            .unwrap();
+        let character = document
+            .add_style("Linked character", "character", None)
+            .unwrap();
+        let replacement = document
+            .add_style("Replacement character", "character", None)
+            .unwrap();
+        let table = document
+            .add_style("Unrelated table", "table", None)
+            .unwrap();
+        document
+            .style_relations_patch(
+                &first,
+                &json!({"next":"Second paragraph","linked":"Linked character"}).to_string(),
+            )
+            .unwrap();
+        document
+            .style_relations_patch(&second, &json!({"next":first}).to_string())
+            .unwrap();
+        let info: Value = serde_json::from_str(&document.style_info(&first).unwrap()).unwrap();
+        assert_eq!(info["next"], second);
+        assert_eq!(info["linked"], character);
+        assert_eq!(
+            document
+                .document()
+                .unwrap()
+                .styles
+                .get(&character)
+                .unwrap()
+                .linked
+                .as_deref(),
+            Some(first.as_str())
+        );
+        let before = document.document().unwrap().clone();
+        let revision = document.revision().unwrap();
+        for (id, patch) in [
+            (&second, json!({"linked":character})),
+            (&first, json!({"next":first,"linked":second})),
+            (&character, json!({"next":first})),
+            (&table, json!({"linked":null})),
+            (&first, json!({"next":character})),
+            (&first, json!({"linked":"missing"})),
+            (&first, json!({"linked":false})),
+            (&first, json!({"based_on":second})),
+        ] {
+            assert!(document
+                .style_relations_patch(id, &patch.to_string())
+                .is_err());
+            assert_eq!(document.document().unwrap(), &before);
+            assert_eq!(document.revision().unwrap(), revision);
+        }
+        assert!(document
+            .style_relations_patch(&first, &" ".repeat(MAX_FORMAT_PATCH_BYTES + 1))
+            .is_err());
+        document
+            .style_relations_patch(
+                &first,
+                &json!({"linked":replacement,"next":first}).to_string(),
+            )
+            .unwrap();
+        assert_eq!(
+            document
+                .document()
+                .unwrap()
+                .styles
+                .get(&character)
+                .unwrap()
+                .linked,
+            None
+        );
+        let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+        assert_eq!(
+            reopened.styles.get(&first).unwrap().next.as_deref(),
+            Some(first.as_str())
+        );
+        assert_eq!(
+            reopened.styles.get(&first).unwrap().linked.as_deref(),
+            Some(replacement.as_str())
+        );
+        assert_eq!(
+            reopened.styles.get(&replacement).unwrap().linked.as_deref(),
+            Some(first.as_str())
+        );
+        let mut copy = document.copy().unwrap();
+        copy.style_relations_patch(&replacement, r#"{"linked":null}"#)
+            .unwrap();
+        assert_eq!(
+            copy.document().unwrap().styles.get(&first).unwrap().linked,
+            None
+        );
+        assert_eq!(
+            document
+                .document()
+                .unwrap()
+                .styles
+                .get(&first)
+                .unwrap()
+                .linked
+                .as_deref(),
+            Some(replacement.as_str())
+        );
+        document
+            .style_relations_patch(&first, r#"{"next":null,"linked":null}"#)
+            .unwrap();
+        assert_eq!(
+            document
+                .document()
+                .unwrap()
+                .styles
+                .get(&first)
+                .unwrap()
+                .next,
+            None
+        );
+        assert_eq!(
+            document
+                .document()
+                .unwrap()
+                .styles
+                .get(&replacement)
+                .unwrap()
+                .linked,
+            None
+        );
+        document.close();
+        assert!(document.style_relations_patch(&first, "{}").is_err());
+        assert!(document.default_formatting().is_err());
+        assert!(document.format_defaults("{}").is_err());
+        assert!(copy.style_info(&first).is_ok());
+    }
+
+    #[test]
+    fn builtin_dangling_style_links_can_be_cleared_or_repaired() {
+        let mut document = EditableDocx::new();
+        // The pinned built-in generator references companions it never creates.
+        assert_eq!(
+            document
+                .document()
+                .unwrap()
+                .styles
+                .get("Heading1")
+                .unwrap()
+                .linked
+                .as_deref(),
+            Some("Heading1Char")
+        );
+        assert!(document
+            .document()
+            .unwrap()
+            .styles
+            .get("Heading1Char")
+            .is_none());
+        document
+            .style_relations_patch("Heading1", r#"{"linked":null}"#)
+            .unwrap();
+        assert!(document
+            .document()
+            .unwrap()
+            .styles
+            .get("Heading1")
+            .unwrap()
+            .linked
+            .is_none());
+        let character = document
+            .add_style("Heading companion", "character", None)
+            .unwrap();
+        document
+            .style_relations_patch("Heading2", &json!({"linked":character}).to_string())
+            .unwrap();
+        let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+        assert_eq!(
+            reopened.styles.get("Heading2").unwrap().linked.as_deref(),
+            Some(character.as_str())
+        );
+        assert_eq!(
+            reopened.styles.get(&character).unwrap().linked.as_deref(),
+            Some("Heading2")
+        );
+    }
+
+    #[test]
+    fn document_defaults_roundtrip_inherit_and_clear_without_overwriting_direct_values() {
+        let mut document = EditableDocx::new();
+        let style = document
+            .add_style("Inheriting body", "paragraph", Some("Normal"))
+            .unwrap();
+        let first = document.add_paragraph("Inherited text").unwrap();
+        document.set_paragraph_style(first, &style).unwrap();
+        let second = document.add_paragraph("").unwrap();
+        document
+            .add_run_patch(
+                second,
+                "Direct text",
+                r##"{"font_size":16,"color":"#0000FF"}"##,
+            )
+            .unwrap();
+        document
+            .format_paragraph(second, r#"{"space_after":3}"#)
+            .unwrap();
+        document.format_defaults(r##"{"font_size":28,"bold":false,"color":"#FF0000","space_after":11,"line_spacing":1,"background":"#FFFFFF","tabs":[{"position":72}]}"##).unwrap();
+        let before = document.default_formatting().unwrap();
+        let direct: Value = serde_json::from_str(&before).unwrap();
+        assert_eq!(direct["font_size"], 28.0);
+        assert_eq!(direct["bold"], false);
+        assert_eq!(direct["space_after"], 11.0);
+        assert!(!direct.as_object().unwrap().contains_key("style"));
+        document.format_defaults(&before).unwrap();
+        assert_eq!(document.default_formatting().unwrap(), before);
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        assert!(reopened.styles.default_para_present);
+        assert_eq!(reopened.styles.default_chr.size, Some(28.0));
+        assert_eq!(reopened.styles.default_chr.bold, Some(false));
+        assert_eq!(reopened.styles.default_para.space_after, Some(11.0));
+        assert_eq!(
+            reopened.styles.default_para.tabs.as_ref().unwrap()[0].pos,
+            72.0
+        );
+        let inherited = reopened.para(StoryRef::Body, &Path::top(first)).unwrap();
+        let resolved = reopened
+            .styles
+            .resolve_char(inherited.props.style.as_deref(), inherited.props_of_char(0));
+        assert_eq!(resolved.size, 28.0);
+        assert_eq!(resolved.color, TextColor::Rgb(Rgb(255, 0, 0)));
+        let explicit = reopened.para(StoryRef::Body, &Path::top(second)).unwrap();
+        let resolved = reopened
+            .styles
+            .resolve_char(explicit.props.style.as_deref(), explicit.props_of_char(0));
+        assert_eq!(resolved.size, 16.0);
+        assert_eq!(resolved.color, TextColor::Rgb(Rgb(0, 0, 255)));
+        assert_eq!(
+            reopened.styles.resolve_para(&explicit.props).space_after,
+            3.0
+        );
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        let extracted = crate::pdf::extract(&pdf, None).unwrap();
+        let text = extracted
+            .pages
+            .iter()
+            .flat_map(|page| &page.blocks)
+            .map(|block| block.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(text.matches("Inherited text").count(), 1);
+        assert_eq!(text.matches("Direct text").count(), 1);
+        for png in [
+            crate::docx::render(&bytes, 0, 72.0, None).unwrap(),
+            crate::pdf::render(&pdf, 0, 72.0, None).unwrap(),
+        ] {
+            let mut reader = png::Decoder::new(Cursor::new(png)).read_info().unwrap();
+            let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+            let frame = reader.next_frame(&mut pixels).unwrap();
+            let pixels = &pixels[..frame.buffer_size()];
+            assert!(pixels
+                .chunks_exact(4)
+                .any(|p| p[0] > 200 && p[1] < 80 && p[2] < 80));
+            assert!(pixels
+                .chunks_exact(4)
+                .any(|p| p[2] > 200 && p[0] < 80 && p[1] < 80));
+        }
+        let mut copy = document.copy().unwrap();
+        copy.format_defaults(r#"{"font_size":20,"bold":true}"#)
+            .unwrap();
+        assert_eq!(document.default_formatting().unwrap(), before);
+        let revision = document.revision().unwrap();
+        assert!(document
+            .format_defaults(r#"{"font_size":null,"bold":true}"#)
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.default_formatting().unwrap(), before);
+        document
+            .format_defaults(r#"{"bold":null,"space_after":null,"background":null,"tabs":null}"#)
+            .unwrap();
+        let cleared: Value = serde_json::from_str(&document.default_formatting().unwrap()).unwrap();
+        for key in ["bold", "space_after", "background", "tabs"] {
+            assert!(cleared[key].is_null());
+        }
+        let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+        assert!(reopened.styles.default_para_present);
+        assert_eq!(reopened.styles.default_chr.size, Some(28.0));
+        assert_eq!(reopened.styles.default_para.space_after, None);
+        assert_eq!(document.paragraph_text(second).unwrap(), "Direct text");
+    }
+
+    #[test]
+    fn upstream_omitted_default_font_size_resolves_inconsistently() {
+        // Reproducer for the upstream blocker; the public default patch rejects
+        // this mutation until native resolution and reader defaults agree.
+        let mut document = Document::new();
+        document.styles.default_chr.size = None;
+        assert_eq!(
+            document
+                .styles
+                .resolve_char(None, &CharProps::default())
+                .size,
+            11.0
+        );
+        let bytes = wordcraft_docx::write(&document).unwrap();
+        let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
+        let mut xml = String::new();
+        std::io::Read::read_to_string(&mut archive.by_name("word/styles.xml").unwrap(), &mut xml)
+            .unwrap();
+        let defaults = xml
+            .split("<w:docDefaults>")
+            .nth(1)
+            .unwrap()
+            .split("</w:docDefaults>")
+            .next()
+            .unwrap();
+        assert!(
+            !defaults.contains("<w:sz "),
+            "clearing removes the direct font size"
+        );
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        assert!(reopened.styles.default_para_present);
+        assert_eq!(reopened.styles.default_chr.size, Some(10.0));
+        assert_eq!(
+            reopened
+                .styles
+                .resolve_char(None, &CharProps::default())
+                .size,
+            10.0
+        );
+    }
+
+    #[test]
+    fn supported_default_clears_preserve_effective_native_readback() {
+        let mut original = EditableDocx::new();
+        original.format_defaults(r##"{"font":"Aptos","font_size":18,"bold":true,"italic":true,"color":"#123456","underline":"double","strike":"double","script":"superscript","highlight":"yellow","alignment":"center","indent_left":12,"indent_right":6,"indent_first":-2,"space_before":4,"space_after":6,"line_spacing":1.5,"keep_with_next":true,"keep_together":true,"widow_control":false,"page_break_before":true,"background":"#EEEEEE","tabs":[{"position":72}]}"##).unwrap();
+        let keys = serde_json::from_str::<Value>(&original.default_formatting().unwrap()).unwrap();
+        for key in keys
+            .as_object()
+            .unwrap()
+            .keys()
+            .filter(|key| key.as_str() != "font_size")
+        {
+            let mut document = original.copy().unwrap();
+            document
+                .format_defaults(&json!({key:Value::Null}).to_string())
+                .unwrap();
+            let current = document.document().unwrap();
+            let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+            let expected_char =
+                resolved_char_snapshot(&current.styles.resolve_char(None, &CharProps::default()));
+            let actual_char =
+                resolved_char_snapshot(&reopened.styles.resolve_char(None, &CharProps::default()));
+            assert_eq!(
+                actual_char, expected_char,
+                "character defaults after clearing {key}"
+            );
+            let expected_para =
+                resolved_para_snapshot(&current.styles.resolve_para(&ParaProps::default()))
+                    .unwrap();
+            let actual_para =
+                resolved_para_snapshot(&reopened.styles.resolve_para(&ParaProps::default()))
+                    .unwrap();
+            assert_eq!(
+                actual_para, expected_para,
+                "paragraph defaults after clearing {key}"
+            );
+        }
+    }
+
+    #[test]
+    fn document_defaults_validate_patches_tabs_and_table_geometry_atomically() {
+        let mut document = EditableDocx::new();
+        let paragraph = document.add_paragraph("Kept").unwrap();
+        let stops = (0..64)
+            .map(|n| json!({"position":n * 2}))
+            .collect::<Vec<_>>();
+        document
+            .format_paragraph(paragraph, &json!({"tabs":stops}).to_string())
+            .unwrap();
+        let before = document.document().unwrap().clone();
+        let revision = document.revision().unwrap();
+        for patch in [
+            r#"{"font_size":24,"tabs":[{"position":200}]}"#,
+            r#"{"font_size":24,"style":"Normal"}"#,
+            r#"{"region":"first_row"}"#,
+            r#"{"margins":12}"#,
+            r#"{"row_band_size":2}"#,
+            r#"{"bold":"false"}"#,
+            r#"{"font_size":10000}"#,
+            r#"{"background":"bad"}"#,
+        ] {
+            assert!(document.format_defaults(patch).is_err(), "{patch}");
+            assert_eq!(document.document().unwrap(), &before);
+            assert_eq!(document.revision().unwrap(), revision);
+        }
+        assert!(document
+            .format_defaults(&" ".repeat(MAX_FORMAT_PATCH_BYTES + 1))
+            .is_err());
+        document
+            .format_paragraph(paragraph, r#"{"tabs":null}"#)
+            .unwrap();
+        document.set_page_size(300.0, 400.0).unwrap();
+        document.set_margins(24.0, 24.0, 24.0, 24.0).unwrap();
+        let table = document
+            .add_table(vec![vec!["".into(), "NNNNNNNN".into()]])
+            .unwrap();
+        let nested = document
+            .cell_add_table(table, 0, 0, vec![vec!["Nested".into()]])
+            .unwrap();
+        let nested_paragraph = document.cell_paragraph_ids(nested, 0, 0).unwrap()[0];
+        document.set_paragraph_text(nested_paragraph, "").unwrap();
+        document
+            .add_run_patch(nested_paragraph, "Nested", r#"{"font_size":12}"#)
+            .unwrap();
+        let before = document.document().unwrap().clone();
+        let revision = document.revision().unwrap();
+        assert!(document.format_defaults(r#"{"font_size":144}"#).is_err());
+        assert_eq!(document.document().unwrap(), &before);
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.cell_text(nested, 0, 0).unwrap(), "Nested");
+    }
 
     #[test]
     fn paragraph_and_table_creation_roundtrip_and_copy_independence() {

@@ -56,7 +56,11 @@ class ParagraphFormatting(TypedDict, total=False):
     background: str | tuple[int, int, int] | None
 
 
-class StyleFormatting(_CharacterProperties, ParagraphFormatting, total=False):
+class _StyleProperties(_CharacterProperties, ParagraphFormatting, total=False):
+    pass
+
+
+class StyleFormatting(_StyleProperties, total=False):
     vertical_alignment: str | None
     borders: dict[str, BorderFormatting | None] | None
     margins: float | tuple[float, float, float, float] | None
@@ -600,6 +604,15 @@ class Styles(_Collection["Style"]):
         identifier = self._owner._call("add_style", name, kind, _style_reference(based_on, self._owner), _change=True)
         return Style(self._owner, identifier)
 
+    @property
+    def defaults(self) -> dict:
+        """Direct native document character and paragraph defaults."""
+        return json.loads(self._owner._call("default_formatting"))
+
+    def format_defaults(self, **formatting: Unpack[_StyleProperties]) -> None:
+        """Update defaults; None clears properties except unsupported font-size reset."""
+        self._owner._call("format_defaults", _style_format_patch(formatting), _change=True)
+
 
 class Style:
     """A native named style with an immutable ID, name and kind."""
@@ -633,6 +646,37 @@ class Style:
     @based_on.setter
     def based_on(self, value: str | Style | None):
         self._owner._call("set_style_base", self._id, _style_reference(value, self._owner), _change=True)
+
+    def _set_relation(self, key: str, value: str | Style | None) -> None:
+        target = _style_reference(value, self._owner)
+        if target is not None and len(target) > 1024:
+            raise ValueError("style relation must be a bounded style name/ID or None")
+        self._owner._call("style_relations_patch", self._id,
+                          json.dumps({key: target}, ensure_ascii=False), _change=True)
+
+    @property
+    def next(self) -> Style | None:
+        """Stored next-paragraph style; inserting text does not apply it automatically."""
+        identifier = self._info()["next"]
+        return None if identifier is None else Style(self._owner, identifier)
+
+    @next.setter
+    def next(self, value: str | Style | None):
+        self._set_relation("next", value)
+
+    @property
+    def linked(self) -> Style | None:
+        """Reciprocal paragraph/character style partner, if present."""
+        identifier = self._info()["linked"]
+        if identifier is None:
+            return None
+        if identifier not in self._owner._call("style_ids"):
+            raise UnsupportedFormatError(f"native linked style {identifier!r} is undefined; clear or replace the link")
+        return Style(self._owner, identifier)
+
+    @linked.setter
+    def linked(self, value: str | Style | None):
+        self._set_relation("linked", value)
 
     @property
     def formatting(self) -> dict:

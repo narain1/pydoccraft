@@ -1,5 +1,13 @@
 # Validation evidence
 
+## 2026-10-20 style relationships and document defaults (unreleased)
+
+- Offline Linux x86_64, Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1: formatting, 143 Rust tests, warnings-denied Clippy, locked release build and 157 installed-wheel Python tests passed with zero skips and verified artifact identity.
+- Existing Style handles expose next/linked relationships with atomic reciprocal updates, valid next-style cycles, name/ID lookup, occupied-target rejection, copy independence and explicit closed-owner errors. Native XML/readback preserves both ends. Undefined native built-in heading companions are reported explicitly; clearing/replacing safely repairs the link.
+- Existing Styles exposes direct document defaults and shared character/paragraph patches. Native inherited values, named/direct overrides, false versus clear, visible red/blue PNG/PDF output, exactly-once extracted content, cache invalidation and independent copies pass. Invalid patches, effective tab overflow and nested-table geometry changes leave documents unchanged.
+- Every supported default clear is compared through native effective character/paragraph snapshots before and after DOCX serialization. A separate upstream regression proves omitted font size changes from raw 11pt to reopened 10pt. Default font-size reset is rejected atomically; explicit sizes and named-style reset remain supported. Automatic Enter behavior and arbitrary default-kind selection remain upstream work. STY2 stays open for the documented reset inconsistency.
+- Wheel: `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`, 17,210,759 bytes; native extension: 39,866,488 bytes. SHA-256: `b23c4ecd7a85856ebd667f9430887080114db80e9784ebdbcc9fbeb2b813f636`. Lockfile SHA-256: `74b1b0b0d3986082768c09a4f4642cd10c1a36ce1bf63bdff22f43438e7c0d97`. Dependencies, all four upstream revisions and the reviewed 264-package permissive license graph are unchanged.
+
 ## 2026-10-20 region rendering and DOCX tabs/breaks (unreleased)
 
 - Offline Linux x86_64, Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1: formatting, 137 Rust tests, warnings-denied Clippy, locked release build and 153 installed-wheel Python tests passed with zero skips and exact artifact identity.

@@ -62,7 +62,7 @@ with doc_ex.new("docx") as document:
     selected.format(italic=None)  # restore inherited italics
 ```
 
-`document.styles` iterates paragraph/character/table styles in native order and supports integer/slice access or lookup by ID/name. `styles.add(name, kind="paragraph", based_on=None)` returns a style with immutable `id`, `name`, `kind`, `builtin`, writable `based_on`, and `format(**properties)`. IDs and display names are distinct. Passing a Style handle from another document is rejected. Table styles use the same collection and formatting methods, with conditional regions described below. Next/linked styles, theme changes and style deletion/import remain open.
+`document.styles` iterates paragraph/character/table styles in native order and supports integer/slice access or lookup by ID/name. `styles.add(name, kind="paragraph", based_on=None)` returns a style with immutable `id`, `name`, `kind`, `builtin`, writable `based_on`, `next`, `linked`, and `format(**properties)`. IDs and display names are distinct. Passing a Style handle from another document is rejected. Table styles use the same collection and formatting methods, with conditional regions described below. Theme changes and style deletion/import remain open.
 
 `style.formatting` returns direct values; `None` indicates inheritance. `style.resolved_formatting` asks the upstream resolver for effective properties. `based_on` returns another Style or `None`. Duplicate/ambiguous names, wrong-kind or missing bases, inheritance cycles and chains exceeding 32 styles fail before mutation. A document accepts at most 1,024 named styles.
 
@@ -313,3 +313,27 @@ Paragraph and whole-table/paragraph style formatting accept `tabs`, an ordered l
 `paragraph.add_break("line" | "page" | "column")` appends a native break and returns a revision-bound `TextRange`, sharing existing range invalidation. The default is `line`. Page/column breaks currently require a top-level body paragraph; line breaks also work in cells and auxiliary stories. Raw editable paragraph text contains LF, form-feed or U+000E respectively, each occupying one Python character; generic text setters still reject raw page/column control characters. Native layout determines page/column transitions. Existing `document.add_page_break()` remains available.
 
 DOCX extraction separates explicit page/column-break segments and assigns them using upstream placed-line byte ranges, including when earlier content wraps automatically. It does not assume that each column break advances a page. Automatically wrapped text inside a segment still belongs to its first computed page; exact automatic paragraph slicing remains a documented limitation.
+
+### Style relationships and document defaults
+
+```python
+with doc_ex.new("docx") as document:
+    document.styles.format_defaults(font_size=11, space_after=8)
+    body = document.styles.add("Report body", based_on="Normal")
+    heading = document.styles.add("Report heading", based_on=body)
+    heading.format(font_size=18, bold=True, keep_with_next=True)
+    heading.next = body
+    character = document.styles.add("Report heading character", kind="character")
+    heading.linked = character
+    document.add_paragraph("Overview", style=heading)
+    document.add_paragraph("Report text.", style=body)
+    document.save("report.docx")
+```
+
+`style.next` stores a paragraph-to-paragraph relationship and returns an existing Style handle or `None`. It accepts a same-document handle, ID, name or `None`; self-reference and next-style cycles are valid because they do not participate in inheritance. Paragraph creation still uses its explicitly selected/default style; automatic next-style application on Enter is outside this document API.
+
+`style.linked` joins a paragraph style and a character style reciprocally. Setting a free partner clears the caller's previous reciprocal relationship atomically. Clearing either side clears both sides. Selecting a partner already linked to another style fails without disconnecting that pair. Wrong-kind, unknown, foreign-owner and oversized references fail before publication. Native DOCX serialization preserves both relationships; `based_on` retains its separate same-kind, acyclic inheritance rules.
+
+`document.styles.defaults` returns direct native document character/paragraph defaults. `styles.format_defaults(...)` accepts the existing character and paragraph properties, including tabs; omission preserves a property, `None` clears a direct default except font size, and `False` explicitly disables a boolean. Resetting the document default font size is explicitly unsupported: the pinned native reader changes an omitted size from the resolver’s 11pt fallback to 10pt on reopen. Set an explicit size instead; clearing named-style sizes remains supported. Background means paragraph shading here. Table-region, table-only and style-assignment properties are unsupported. Named styles and direct formatting keep their normal precedence over defaults; resolved style/paragraph snapshots use upstream resolution. Default changes validate affected table geometry and effective tab limits before committing, invalidate cached rendering and preserve independent copies. Arbitrary default-style selection through the native default-kind flag remains unavailable because the pinned resolver's fallback is `Normal`.
+
+Some native built-in headings refer to absent companion character styles. Reading such a `linked` property raises `UnsupportedFormatError`; clear or replace the link to repair it. No companion style is fabricated.
