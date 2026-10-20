@@ -164,3 +164,10 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Guard all drawing entry points against incompatible existing resource replacement, including inherited bindings.
 - [x] Verify native collision reproductions, atomic rollback, unchanged original pixels and bounded matching checks.
 - [x] Promote the already-locked model crate, review regenerated license inventories and record locked installed-wheel validation.
+
+## DOCX pagination acceptance and overflow
+
+- [x] Complete LAY5 actual-pagination acceptance and fitting/splittable cell continuation fixtures.
+- [x] Reject verified oversized unmerged unsplittable-row output through native placed-cell bounds before serialization.
+- [x] Validate recovery, later style/content/page changes, existing save destinations, intentional clipping, merges and full installed-wheel corpus; record artifact evidence.
+- [ ] Keep complete merged-row overflow and native allocation budgets tracked upstream; TBL6 remains open.

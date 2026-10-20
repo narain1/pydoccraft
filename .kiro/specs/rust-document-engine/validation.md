@@ -1,5 +1,13 @@
 # Validation evidence
 
+## 2026-10-20 DOCX pagination acceptance and overflow guard (unreleased)
+
+- Offline Linux x86_64, Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1: formatting, 153 Rust tests, warnings-denied Clippy, locked release build and 168 installed-wheel Python tests passed with zero skips and verified artifact identity.
+- LAY5 acceptance now covers heading/table keep-with-next, fitting paragraph keep-together, both widow/orphan edges and page-break-before reset. Native DOCX/PDF page counts, exact ordered labels, in-page PDF text bounds and visible PNGs are checked. Fitting non-splitting rows move intact; splitting cell paragraphs continue across pages without loss or duplication.
+- A native upstream reproducer confirms an oversized unsplittable row places the final PDF line around y353–365 on a 300pt page. Before authoring serialization, public native placed-cell geometry now rejects physical-page overflow in unmerged non-splitting, exact-height and repeated-header rows. This protects save, preview, page count and PDF export after text/font/margin changes. Failed saves preserve existing files; enabling splitting recovers complete visible output.
+- Intentional exact-height clipping within a page, ordinary header/footer tables and multi-page vertical merges pass. The narrow guard excludes vertical-merge geometry and checks 10,000-page/2,000,000-item traversal limits after native layout, not before allocation. Guarded documents incur an extra layout pass on serialization. TBL6 remains open for complete merged-row overflow semantics and upstream resource improvements.
+- Wheel: `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`, 17,216,051 bytes; native extension: 39,884,920 bytes. SHA-256: `796226eb1d731a250a2c8b2583c74ad9126b184925e77a65138f0061097bf036`. Lockfile SHA-256: `f5a35e9549115b905196b81ceebfad1475f01571a5c6416e6e15e10da1bdc984`. Dependencies, all four upstream revisions and the reviewed 264-package permissive license graph are unchanged.
+
 ## 2026-10-20 PDF drawing resource preservation (unreleased)
 
 - Offline Linux x86_64, Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1: formatting, 148 Rust tests, warnings-denied Clippy, locked release build and 159 installed-wheel Python tests passed with zero skips and verified artifact identity.
