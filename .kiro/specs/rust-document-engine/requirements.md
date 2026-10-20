@@ -557,6 +557,15 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 4. Tests SHALL cover native inheritance and save/reopen/PNG/PDF output, explicit-versus-inherited getter semantics, shared media and final reclamation, copy/lifetime/callback behavior and atomic invalid/resource failures. Broader SLIDE4/theme/imported preservation SHALL remain open.
 
 
+
+## 72. Native DOCX character spacing
+
+1. Existing character-format patches SHALL accept letter_spacing/None for DOCX add_run, ranges, paragraph/character styles, defaults and supported whole-table/conditional character regions. No new handle or formatting method SHALL be added; PPTX SHALL explicitly reject the key before mutation, including reset requests.
+2. Values SHALL be finite points in [-100, 100] on the native one-twip (0.05 pt) grid. Machine-precision arithmetic noise SHALL be accepted without accepting user-visible finer precision. Canonicalization SHALL precede native f32 storage; direct/resolved snapshots SHALL expose canonical points. Omission, explicit 0 and None SHALL preserve their existing unchanged/override/reset semantics.
+3. Native shaping/layout/writing SHALL own cluster advances and serialized output. Negative spacing SHALL retain intentional condensed/overlapping behavior; source Unicode SHALL stay unchanged. Inferred PDF reading order/spaces SHALL not be promised identical when visual positions overlap or spread. Existing semantic-anchor, geometry and resource guards SHALL remain unchanged.
+4. Tests SHALL cover all 4,001 accepted twips through native write/read; real cluster and source/PDF ink at bounds and ordinary values; inheritance/default/style/region precedence; body/story/note/cell scopes; copied/stale/closed ownership and callback/invalid-batch rollback. Broader TXT6 typography parity SHALL remain open.
+
+
 ## 73. Field-state, note-kind and slide-reset operation evidence
 
 1. Existing pdf.owned-fields evidence SHALL add read-only state using its exact 423-test artifact while retaining historical creation and unsupported imported/export scopes. New word.note-kind-conversion and slides.background-reset profiles SHALL describe only their existing mutations and measured output behavior. Notes.convert SHALL be classified as note-kind editing, with separate existing DOCX-to-PDF evidence in the export cell.

@@ -518,3 +518,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Extend owned-fields and add two scoped mutation profiles, reusing current criteria/reference families without changing feature completion or unrelated historical profiles.
 - [x] Validate 19-profile/133-cell generated guides, cached immutable sources and offline evidence drift checks; preserve independently corrected outline evidence.
 - [ ] Complete independent evidence review; broader feature/API/QA acceptance remains open.
+
+
+## Native DOCX character spacing
+
+- [x] Probe native cluster advances, expanded/condensed PNG/PDF output and twip write/read semantics without a local positioning algorithm.
+- [x] Reuse CharPatch, snapshots, existing style/default/region dispatch and public typing; retain explicit PPTX rejection and all existing guards.
+- [x] Add three focused native groups and six public workflows covering precision, output, scopes, inheritance, callbacks, ownership and atomic failures; run related regressions and strict copied-package typing.
+- [ ] Complete integrated locked native/release/clean installed-wheel validation and independent review/current-main CI.
+- [ ] Keep broader TXT6 font/shaping controls and diagnostics under their existing owner.

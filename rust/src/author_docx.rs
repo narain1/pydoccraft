@@ -6361,6 +6361,31 @@ const HIGHLIGHTS: &[(&str, Highlight)] = &[
     ("white", Highlight::White),
 ];
 
+// DOCX stores character spacing in integer twips. Accept only that precision,
+// with a few f64 ULPs for ordinary arithmetic such as 0.1 + 0.2; retain the
+// canonical value before conversion to the native f32 model.
+fn letter_spacing(value: &Value) -> PyResult<f32> {
+    let points = value
+        .as_f64()
+        .ok_or_else(|| PyValueError::new_err("letter_spacing must be a number or None"))?;
+    if !points.is_finite() || !(-100.0..=100.0).contains(&points) {
+        return Err(PyValueError::new_err(
+            "letter_spacing must be finite and between -100 and 100 points",
+        ));
+    }
+    let canonical = (points * 20.0).round() / 20.0;
+    if (canonical - points).abs() > 4.0 * f64::EPSILON * points.abs().max(1.0) {
+        return Err(PyValueError::new_err(
+            "letter_spacing requires 0.05-point (one-twip) increments",
+        ));
+    }
+    Ok(canonical as f32)
+}
+
+fn spacing_points(value: f32) -> f64 {
+    f64::from((value * 20.0).round()) / 20.0
+}
+
 #[derive(Default)]
 struct CharPatch {
     values: CharProps,
@@ -6382,6 +6407,7 @@ impl CharPatch {
                     | "font"
                     | "font_size"
                     | "language"
+                    | "letter_spacing"
                     | "color"
                     | "underline"
                     | "strike"
@@ -6402,6 +6428,7 @@ impl CharPatch {
             match key.as_str() {
                 "bold" => patch.values.bold = bool_value(value)?,
                 "italic" => patch.values.italic = bool_value(value)?,
+                "letter_spacing" => patch.values.spacing = Some(letter_spacing(value)?),
                 "language" => {
                     let tag = text_value(value)?;
                     if tag.is_empty()
@@ -6511,6 +6538,7 @@ impl CharPatch {
                 "italic" => props.italic = None,
                 "font" => props.font = None,
                 "language" => props.lang = None,
+                "letter_spacing" => props.spacing = None,
                 "font_size" => props.size = None,
                 "color" => props.color = None,
                 "underline" => props.underline = None,
@@ -6758,6 +6786,7 @@ fn char_snapshot(props: &CharProps) -> Map<String, Value> {
         ("italic", json!(props.italic)),
         ("font", json!(props.font)),
         ("language", json!(props.lang)),
+        ("letter_spacing", json!(props.spacing.map(spacing_points))),
         ("font_size", json!(props.size)),
         ("color", json!(props.color.map(color_string))),
         ("underline", json!(props.underline.map(underline_name))),
@@ -6782,6 +6811,7 @@ fn resolved_char_snapshot(props: &wordcraft_doc::resolve::ResolvedChar) -> Map<S
         ("italic", json!(props.italic)),
         ("font", json!(props.font)),
         ("language", json!(props.lang)),
+        ("letter_spacing", json!(spacing_points(props.spacing))),
         ("font_size", json!(props.size)),
         ("color", json!(color_string(props.color))),
         ("underline", json!(underline_name(props.underline))),
@@ -16683,5 +16713,223 @@ mod tests {
             owned.document().unwrap().plain_text(StoryRef::Body),
             before.plain_text(StoryRef::Body)
         );
+    }
+}
+
+#[cfg(test)]
+mod letter_spacing_tests {
+    use super::*;
+
+    fn first_para(layout: &wordcraft_layout::DocLayout) -> &wordcraft_layout::ParaLayout {
+        layout
+            .pages
+            .iter()
+            .flat_map(|page| &page.items)
+            .find_map(|item| match item {
+                wordcraft_layout::Placed::Lines { para, .. } => Some(para.as_ref()),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn letter_spacing_all_twips_native_write_read_and_scalar_limits() {
+        let mut native = Document::new();
+        native.body.clear();
+        for twip in -2000..=2000 {
+            let value = f64::from(twip) / 20.0;
+            let spacing = letter_spacing(&json!(value)).unwrap();
+            assert_eq!(spacing_points(spacing), value);
+            native
+                .body
+                .push(wordcraft_doc::para_block(Paragraph::with_text(
+                    "x",
+                    CharProps {
+                        spacing: Some(spacing),
+                        ..Default::default()
+                    },
+                )));
+        }
+        let read = wordcraft_docx::read(&wordcraft_docx::write(&native).unwrap()).unwrap();
+        for (index, twip) in (-2000..=2000).enumerate() {
+            let p = read.para(StoryRef::Body, &Path::top(index)).unwrap();
+            assert_eq!(
+                spacing_points(p.props_of_char(0).spacing.unwrap()),
+                f64::from(twip) / 20.0
+            );
+        }
+        assert_eq!(
+            spacing_points(letter_spacing(&json!(0.1_f64 + 0.2)).unwrap()),
+            0.3
+        );
+        assert_eq!(
+            spacing_points(letter_spacing(&json!(-0.1_f64 - 0.2)).unwrap()),
+            -0.3
+        );
+        for bad in [
+            json!(true),
+            json!("1"),
+            json!(100.05),
+            json!(-100.05),
+            json!(0.301),
+            json!(-0.001),
+        ] {
+            assert!(letter_spacing(&bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn letter_spacing_native_clusters_and_visible_source_pdf_parity() {
+        use std::io::Cursor;
+        let pixels = |bytes: Vec<u8>| {
+            let mut read = png::Decoder::new(Cursor::new(bytes)).read_info().unwrap();
+            let mut data = vec![0; read.output_buffer_size().unwrap()];
+            let frame = read.next_frame(&mut data).unwrap();
+            assert_eq!(frame.color_type, png::ColorType::Rgba);
+            data.truncate(frame.buffer_size());
+            (frame.width, frame.height, data)
+        };
+        for text in ["e\u{301} office", "سلام Word", "A\u{200b}B"] {
+            let mut previous = None;
+            for spacing in [-100.0_f32, -0.05, 0.0, 2.0, 100.0] {
+                let mut native = Document::from_text(text);
+                let section = native.section_mut(0);
+                section.page_w = 1584.0;
+                section.page_h = 400.0;
+                section.margin_left = 1000.0;
+                section.margin_right = 30.0;
+                section.margin_top = 30.0;
+                section.margin_bottom = 30.0;
+                native.styles.default_chr.spacing = Some(spacing);
+                let layout =
+                    wordcraft_layout::layout(&native, &mut Default::default(), &Default::default());
+                let p = first_para(&layout);
+                let ranges: Vec<_> = p.clusters.iter().map(|c| (c.start, c.end)).collect();
+                if let Some(previous) = &previous {
+                    assert_eq!(&ranges, previous);
+                }
+                previous = Some(ranges);
+                assert!(p
+                    .lines
+                    .iter()
+                    .all(|line| line.xs.iter().all(|x| x.is_finite())));
+                if text.starts_with('e') {
+                    assert!(p
+                        .clusters
+                        .iter()
+                        .any(|c| c.start == 0 && c.end == "e\u{301}".len()));
+                }
+                let raw = wordcraft_docx::write(&native).unwrap();
+                let reopened = wordcraft_docx::read(&raw).unwrap();
+                assert_eq!(
+                    reopened.para(StoryRef::Body, &Path::top(0)).unwrap().text,
+                    text
+                );
+                let source = pixels(crate::docx::render(&raw, 0, 144.0, None).unwrap());
+                let pdf = crate::docx::to_pdf(&raw, None).unwrap();
+                let exported = pixels(crate::pdf::render(&pdf, 0, 144.0, None).unwrap());
+                assert_eq!((source.0, source.1), (exported.0, exported.1));
+                assert_eq!(source.2.len(), exported.2.len());
+                assert!(source.2.chunks_exact(4).filter(|px| px[0] < 128).count() > 20);
+                assert!(source
+                    .2
+                    .iter()
+                    .zip(&exported.2)
+                    .all(|(a, b)| a.abs_diff(*b) <= 1));
+            }
+        }
+    }
+
+    #[test]
+    fn letter_spacing_style_default_table_precedence_and_atomic_failure() {
+        let mut d = EditableDocx::new();
+        d.format_defaults(r#"{"letter_spacing":0.05}"#).unwrap();
+        let base = d.add_style("Spaced", "paragraph", Some("Normal")).unwrap();
+        d.format_style(&base, r#"{"letter_spacing":2}"#, None)
+            .unwrap();
+        let child = d
+            .add_style("Inherited spacing", "paragraph", Some(&base))
+            .unwrap();
+        let character = d.add_style("Condensed", "character", None).unwrap();
+        d.format_style(&character, r#"{"letter_spacing":-0.3}"#, None)
+            .unwrap();
+        let id = d.add_paragraph("").unwrap();
+        d.set_paragraph_style(id, &child).unwrap();
+        let (start, end, revision) = d
+            .add_run_patch(
+                id,
+                "Scope",
+                &json!({"style":character,"letter_spacing":0}).to_string(),
+            )
+            .unwrap();
+        let effective = |doc: &EditableDocx| {
+            let p = doc.paragraph(id).unwrap();
+            doc.document()
+                .unwrap()
+                .styles
+                .resolve_char(p.props.style.as_deref(), p.props_of_char(0))
+                .spacing
+        };
+        assert_eq!(effective(&d), 0.0);
+        d.format_range_patch(id, start, end, revision, r#"{"letter_spacing":null}"#)
+            .unwrap();
+        assert_eq!(spacing_points(effective(&d)), -0.3);
+        d.format_style(&character, r#"{"letter_spacing":null}"#, None)
+            .unwrap();
+        assert_eq!(effective(&d), 2.0);
+        d.format_style(&base, r#"{"letter_spacing":null}"#, None)
+            .unwrap();
+        assert_eq!(spacing_points(effective(&d)), 0.05);
+        d.format_defaults(r#"{"letter_spacing":null}"#).unwrap();
+        assert_eq!(effective(&d), 0.0);
+        let style = d.add_style("Conditional spacing", "table", None).unwrap();
+        d.format_style(&style, r#"{"letter_spacing":1}"#, None)
+            .unwrap();
+        d.format_style(&style, r#"{"letter_spacing":3}"#, Some("first_row"))
+            .unwrap();
+        let table = d
+            .add_table(vec![vec!["Header".into()], vec!["Body".into()]])
+            .unwrap();
+        d.table_format_patch(
+            table,
+            &json!({"style":style,"look":{"header_row":true}}).to_string(),
+        )
+        .unwrap();
+        let raw = d.to_bytes().unwrap();
+        let native = wordcraft_docx::read(&raw).unwrap();
+        let layout =
+            wordcraft_layout::layout(&native, &mut Default::default(), &Default::default());
+        let mut seen = Vec::new();
+        for page in &layout.pages {
+            for item in &page.items {
+                if let wordcraft_layout::Placed::Lines {
+                    story, path, para, ..
+                } = item
+                {
+                    if let Some(p) = native.para(*story, path) {
+                        seen.push((p.text.clone(), para.styles[0].rc.spacing));
+                    }
+                }
+            }
+        }
+        assert!(seen
+            .iter()
+            .any(|(text, spacing)| text == "Header" && *spacing == 3.0));
+        assert!(seen
+            .iter()
+            .any(|(text, spacing)| text == "Body" && *spacing == 1.0));
+        let before = d.document().unwrap().clone();
+        let revision = d.revision().unwrap();
+        for patch in [
+            r#"{"bold":true,"letter_spacing":true}"#,
+            r#"{"letter_spacing":100.05}"#,
+            r#"{"letter_spacing":0.301}"#,
+        ] {
+            assert!(d.format_defaults(patch).is_err());
+            assert!(d.format_style(&base, patch, None).is_err());
+            assert!(d.format_range_patch(id, 0, 5, revision, patch).is_err());
+            assert_eq!(d.document().unwrap(), &before);
+            assert_eq!(d.revision().unwrap(), revision);
+        }
     }
 }
