@@ -19,7 +19,7 @@ Maintain `reference-api-inventory.json`; run `python tools/reference_inventory.p
 
 Package lifecycle and templates.
 
-**Reference members:** [Create](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs#L58), [Open](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs#L129), [CreateFromTemplate](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs#L181), [ChangeDocumentType](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs#L319)
+**Reference members:** [Create](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs#L88), [Open](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs#L239), [CreateFromTemplate](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs#L181), [ChangeDocumentType](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs#L319)
 
 **Criteria / owners:** API2 (W01), API3 (W01), API5 (W03), API6 (W03), DOC1 (W03), DOC2 (W03), DOC3 (W03), DOC4 (W03), DOC6 (W04), DOC8 (W03), C1 (W01), C2 (W13), C5 (W13), PKG1 (W03), PKG3 (W03)
 
@@ -417,7 +417,7 @@ Package/schema validation boundary.
 
 PDF opening, creating, saving and serialization.
 
-**Reference members:** [__init__](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/document.rst#L197), [new_page](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/document.rst#L109), [save](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/document.rst#L53), [tobytes](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/document.rst#L145), [close](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/document.rst#L55)
+**Reference members:** [__init__](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/document.rst#L197), [new_page](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/document.rst#L109), [save](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/document.rst#L122), [tobytes](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/document.rst#L145), [close](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/document.rst#L55)
 
 **Criteria / owners:** API2 (W01), API3 (W01), DOC1 (W03), DOC2 (W03), DOC3 (W03), DOC4 (W03), PDF1 (W10), PKG7 (W03)
 
@@ -461,7 +461,7 @@ Positioned text and font authoring.
 
 Flowed HTML/story reports and tables.
 
-**Reference members:** [place](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/story-class.rst#L17), [draw](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/story-class.rst#L18), [write](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/story-class.rst#L18), [fit](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/story-class.rst#L17)
+**Reference members:** [place](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/story-class.rst#L17), [draw](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/story-class.rst#L18), [write](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/story-class.rst#L21), [fit](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/story-class.rst#L25)
 
 **Criteria / owners:** PDF4 (W13), C4 (W13), TBL11 (W13), FORM6 (W13), API10 (W01)
 
@@ -533,7 +533,7 @@ DPI rasterization, clipping and alpha behavior.
 
 Text geometry, links, tables and source grounding.
 
-**Reference members:** [get_text](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/page.rst#L31), [get_links](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/page.rst#L91), [find_tables](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/page.rst#L83), [search_for](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/page.rst#L113)
+**Reference members:** [get_text](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/page.rst#L94), [get_links](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/page.rst#L91), [find_tables](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/page.rst#L83), [search_for](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/page.rst#L113)
 
 **Criteria / owners:** E1 (W09), E2 (W09), E4 (W09), P4 (W02), LAY8 (W06), REF8 (W07)
 
@@ -575,7 +575,7 @@ Links, outlines, metadata and page labels.
 
 Annotation operations and appearances.
 
-**Reference members:** [update](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L40), [set_colors](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L30), [set_opacity](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L35), [set_border](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L28)
+**Reference members:** [update](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L41), [set_colors](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L30), [set_opacity](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L35), [set_border](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L28)
 
 **Criteria / owners:** PDF6 (W10), REV1 (W07), REV6 (W13)
 
@@ -589,7 +589,7 @@ Annotation operations and appearances.
 
 Interactive widgets and field values.
 
-**Reference members:** [field_name](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L34), [field_value](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L30), [field_type](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L114), [rect](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L134), [choice_values](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L88), [update](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L58)
+**Reference members:** [field_name](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L92), [field_value](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L104), [field_type](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L114), [rect](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L134), [choice_values](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L88), [update](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L58)
 
 **Criteria / owners:** PDF6 (W10), FORM3 (W08), PKG5 (W03)
 

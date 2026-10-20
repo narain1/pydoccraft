@@ -144,12 +144,12 @@
         {
           "name": "Create",
           "source": "ox:src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs",
-          "line": 58
+          "line": 88
         },
         {
           "name": "Open",
           "source": "ox:src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs",
-          "line": 129
+          "line": 239
         },
         {
           "name": "CreateFromTemplate",
@@ -1392,7 +1392,7 @@
         {
           "name": "save",
           "source": "pm:docs/document.rst",
-          "line": 53
+          "line": 122
         },
         {
           "name": "tobytes",
@@ -1529,12 +1529,12 @@
         {
           "name": "write",
           "source": "pm:docs/story-class.rst",
-          "line": 18
+          "line": 21
         },
         {
           "name": "fit",
           "source": "pm:docs/story-class.rst",
-          "line": 17
+          "line": 25
         }
       ],
       "coverage": [
@@ -1694,7 +1694,7 @@
         {
           "name": "get_text",
           "source": "pm:docs/page.rst",
-          "line": 31
+          "line": 94
         },
         {
           "name": "get_links",
@@ -1813,7 +1813,7 @@
         {
           "name": "update",
           "source": "pm:docs/annot.rst",
-          "line": 40
+          "line": 41
         },
         {
           "name": "set_colors",
@@ -1851,12 +1851,12 @@
         {
           "name": "field_name",
           "source": "pm:docs/widget.rst",
-          "line": 34
+          "line": 92
         },
         {
           "name": "field_value",
           "source": "pm:docs/widget.rst",
-          "line": 30
+          "line": 104
         },
         {
           "name": "field_type",

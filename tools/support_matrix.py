@@ -226,8 +226,8 @@ def generate(root: Path, ledger: dict) -> str:
     """Render validated evidence; ownership/title/checkbox state is always joined."""
     def esc(value):
         return str(value).replace('|', '\\|').replace('\n', ' ')
-    ownership = json.loads((root / 'docs/roadmap-workstreams.json').read_text())
-    inventory = json.loads((root / 'docs/reference-api-inventory.json').read_text())
+    ownership = json.loads((root / 'docs/roadmap-workstreams.json').read_text(encoding='utf-8'))
+    inventory = json.loads((root / 'docs/reference-api-inventory.json').read_text(encoding='utf-8'))
     reference_inventory.validate(root, inventory, profile_ids={p['id'] for p in ledger['profiles']})
     reference_families = inventory['families']
     owners = {c: (w['id'], w['feature_roles'][c]) for w in ownership['workstreams'] for c in w['coverage']}
@@ -276,7 +276,7 @@ def generate(root: Path, ledger: dict) -> str:
         if families:
             lines += ['', '**Comparison families:** ' + ', '.join(families)]
     lines += ['', '## Roadmap coverage joins', '', 'Owners, roles and checkboxes below come from existing roadmap files. A checked criterion does not verify every operation, and an unseeded criterion is not presumed unimplemented. The remainder is deliberately unassessed, including recipes and acceptance gates.', '', '| ID / current criterion | Owner / role | Roadmap | Profiles | Remaining audit |', '|---|---|---|---|---|']
-    for mark, identifier, title in COVERAGE.findall((root / 'TODO.md').read_text()):
+    for mark, identifier, title in COVERAGE.findall((root / 'TODO.md').read_text(encoding='utf-8')):
         item = ledger['coverage'][identifier]
         profiles = ', '.join('[' + p + '](#' + anchor(p) + ')' for p in item['profiles']) or '—'
         lines.append(f'| {identifier}: {esc(title)} | {owners[identifier][0]} / {owners[identifier][1]} | {"checked" if mark.lower() == "x" else "open"} | {profiles} | {esc(item["remaining"])} |')
@@ -289,7 +289,7 @@ def main() -> int:
     parser.add_argument('--write', action='store_true', help='write the matrix only after successful validation')
     args = parser.parse_args()
     try:
-        ledger = json.loads((args.root / 'docs/support-ledger.json').read_text())
+        ledger = json.loads((args.root / 'docs/support-ledger.json').read_text(encoding='utf-8'))
         errors = validate(args.root, ledger)
         if errors:
             print('\n'.join('ERROR: ' + e for e in errors), file=sys.stderr)
