@@ -296,3 +296,34 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 1. Existing Link values SHALL normalize resolved native slide actions to one-based #page=N URIs and zero-based target_page metadata in current presentation order, including hidden/self targets. Source page, exact Unicode label offsets, table source paths and grouped-shape traversal SHALL remain unchanged.
 2. A bounded native SlideId index SHALL be shared by payload projection and diagnostics. Duplicate native identities SHALL fail explicitly. Contextual actions SHALL remain diagnosed omissions rather than invented fixed destinations; native reader discards SHALL be documented as upstream gaps.
 3. Tests SHALL cover source relationship variants, reorder/hidden/self links, repeated labels, table/group links, URLs, omission diagnostics and model bounds. No raw XML link parser or new public navigation API SHALL be introduced.
+
+## 37. Explicit native list starts
+
+1. Existing Paragraph.set_list SHALL accept an optional non-boolean integer start in 1..32767 for top-level numbered lists. Supplying start SHALL allocate a fresh native abstract/instance sequence and level-zero start override; omitted start SHALL retain existing nearest-sequence continuation. No existing paragraph SHALL be reassigned implicitly.
+2. Unsupported list kinds/levels and invalid integers SHALL fail before mutation. Supplied starts in header/footer stories, including nested cells, SHALL fail explicitly until native measurement preserves the requested visible counter. Existing omission behavior SHALL remain unchanged.
+3. Native list-definition budgets, story identity, copies, closed/deleted handles and atomic failures SHALL remain enforced. Tests SHALL verify saved native overrides, extracted labels, visible PDF text, body/cell/note scope, continuation and rollback without a local counter algorithm.
+
+## 38. PPTX source slide-count preflight
+
+1. PPTX input SHALL reject more than 10,000 source slide references before the native reader silently truncates them. The check SHALL use bounded generic XML events, retain native prefix/encoding recognition, and avoid reproducing private package relationship resolution or alternate-content selection.
+2. A conservative count of every sldId element beneath each presentation root SHALL cover alternate branches and section lists as well as the primary list; unused presentation parts and redundant references count toward this stricter profile. Other-format/detection preflight SHALL retain its existing path. Binary media SHALL NOT be rejected merely for not being XML.
+3. Eligible member inflation, UTF-16 decoding, prolog, token and nesting work SHALL be bounded. Tests SHALL cover 10,000/+1, relocation and unusual part names, UTF-8/UTF-16, leading text, alternate content, large media and all public processing paths. A shared XML parser is a safety dependency only; document semantics remain in DeckCraft.
+
+## 39. DOCX picture crop and mirroring
+
+1. Existing Picture handles SHALL expose crop and boolean horizontal/vertical flips using the same vocabulary as presentation pictures. Crop SHALL use finite LTRB fractions in 0..0.45 with None reset; original media and uncropped frame size SHALL remain intact. Replacement SHALL retain transforms.
+2. Native public image/Float properties SHALL own serialization and rendering. DOCX frame dimensions below the native one-point minimum SHALL be rejected on insertion/resize instead of silently enlarged. Rotation SHALL remain unavailable until its native edge-loss fixture is fixed; no local rotation/resampling engine SHALL be added.
+3. Tests SHALL verify native readback, original bytes, actual asymmetric PNG/PDF pixels, replacements, copies, cell/story containment, cache invalidation, deleted/closed handles and atomic invalid values. Existing media and geometry budgets SHALL remain enforced.
+
+## 40. Owned PDF field geometry
+
+1. Existing PdfField.box SHALL be writable in current-page displayed coordinates. Moving/resizing SHALL retain native field/widget identity, name, value, options and appearance orientation; it SHALL NOT transfer the field to another page or broaden the single-widget owned-form profile.
+2. Native public field properties and appearance regeneration SHALL operate on staged state. Bounds, current value and all choice-option fit SHALL be validated before commit. Failed geometry/resource changes SHALL preserve the document and caches; caller coordinate conversions SHALL finish before final stale-handle validation.
+3. Tests SHALL cover text/checkbox/choice widgets, actual old/new pixels, native save/readback and flattening, rotation/CropBox/UserUnit, copies, warmed caches, stale/deleted/closed handles, callback changes and atomic fit failures.
+
+## 41. Private Office render sessions
+
+1. Opening DOCX/PPTX SHALL retain the native parsed model used for eager extraction and, for DOCX, its completed layout. Existing public rendering methods SHALL reuse that state without reparsing or repagination. No public session class or additional render vocabulary SHALL be introduced.
+2. Shared checked render helpers SHALL preserve one-shot PNG output, clipping, DPI/dimension/index errors and source preflight. DOCX retained state SHALL reject more than 10,000 laid-out pages or one million placed items after native layout; these are not peak-layout allocation guarantees. Temporary layout caches SHALL not be retained.
+3. Close SHALL serialize with render, release owned native state and private source/password references, and be idempotent. Already extracted values SHALL remain owned and usable. Python projection failure SHALL close unreturned sessions even if its traceback survives. Global/thread-local renderer caches are outside the session lifetime guarantee.
+4. Validation SHALL prove one native parse/layout, mixed-page full/clip PNG parity, source lifetime, concurrent close, resource/error behavior and installed-wheel acceptance. Separate-process synthetic measurements SHALL distinguish open, cold/warm/multi-page latency and native RSS/peak RSS. P1 remains open pending representative large-corpus evidence.

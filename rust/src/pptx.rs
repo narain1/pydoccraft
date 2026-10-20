@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Mutex};
 
 use base64::Engine;
 use deckcraft_model::text::{Action, Hyperlink, RunKind, TextBody};
@@ -12,11 +12,81 @@ use crate::model::{
 };
 use crate::EngineError;
 
+pub struct PptxSession {
+    state: Mutex<Option<SessionState>>,
+}
+
+struct SessionState {
+    presentation: Presentation,
+    render_requests: u64,
+}
+
+impl PptxSession {
+    pub fn open(data: &[u8]) -> Result<(Self, DocumentPayload), EngineError> {
+        let presentation = read(data)?;
+        let payload = extract_with(&presentation)?;
+        Ok((
+            Self {
+                state: Mutex::new(Some(SessionState {
+                    presentation,
+                    render_requests: 0,
+                })),
+            },
+            payload,
+        ))
+    }
+
+    pub fn render(
+        &self,
+        page: usize,
+        dpi: f64,
+        clip: Option<crate::rendering::Clip>,
+    ) -> Result<Vec<u8>, EngineError> {
+        let mut guard = self
+            .state
+            .lock()
+            .map_err(|_| EngineError::Malformed("PPTX render session is unavailable".into()))?;
+        let state = guard
+            .as_mut()
+            .ok_or_else(|| EngineError::Closed("PPTX render session is closed".into()))?;
+        state.render_requests = state.render_requests.saturating_add(1);
+        render_with(&state.presentation, page, dpi, clip)
+    }
+
+    pub fn stats(&self) -> Result<(u64, u64, u64), EngineError> {
+        let guard = self
+            .state
+            .lock()
+            .map_err(|_| EngineError::Malformed("PPTX render session is unavailable".into()))?;
+        let state = guard
+            .as_ref()
+            .ok_or_else(|| EngineError::Closed("PPTX render session is closed".into()))?;
+        Ok((1, 0, state.render_requests))
+    }
+
+    pub fn close(&self) -> Result<(), EngineError> {
+        // Drop our owned model even after a poisoned render lock. DeckCraft's separate,
+        // private thread-local renderer/cache has no public clear hook and can outlive this.
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static PARSE_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub fn read(data: &[u8]) -> Result<Presentation, EngineError> {
     if deckcraft_pptx::is_encrypted(data) {
         return Err(EngineError::Encrypted);
     }
-    crate::ooxml::preflight(data)?;
+    crate::ooxml::preflight_pptx(data)?;
+    #[cfg(test)]
+    PARSE_BUILDS.with(|counter| counter.set(counter.get() + 1));
     let presentation = deckcraft_pptx::import(data).map_err(pptx_error)?;
     if presentation.slides.is_empty() {
         return Err(EngineError::Malformed(
@@ -30,9 +100,12 @@ pub fn read(data: &[u8]) -> Result<Presentation, EngineError> {
 }
 
 pub fn extract(data: &[u8]) -> Result<DocumentPayload, EngineError> {
-    let presentation = read(data)?;
-    validate_tables(&presentation)?;
-    let targets = slide_targets(&presentation)?;
+    PptxSession::open(data).map(|(_, payload)| payload)
+}
+
+fn extract_with(presentation: &Presentation) -> Result<DocumentPayload, EngineError> {
+    validate_tables(presentation)?;
+    let targets = slide_targets(presentation)?;
     let pages = presentation
         .slides
         .iter()
@@ -50,7 +123,7 @@ pub fn extract(data: &[u8]) -> Result<DocumentPayload, EngineError> {
             };
             for shape in &slide.shapes {
                 visit_shape(
-                    &presentation,
+                    presentation,
                     &targets,
                     shape,
                     number,
@@ -72,7 +145,7 @@ pub fn extract(data: &[u8]) -> Result<DocumentPayload, EngineError> {
             ("height".into(), json!(presentation.slide_size.height)),
             (
                 "diagnostics".into(),
-                extraction_diagnostics(&presentation, &targets),
+                extraction_diagnostics(presentation, &targets),
             ),
         ]),
         pages,
@@ -219,6 +292,16 @@ fn render_impl(
 ) -> Result<Vec<u8>, EngineError> {
     crate::rendering::validate_dpi(dpi)?;
     let presentation = read(data)?;
+    render_with(&presentation, page, dpi, clip)
+}
+
+fn render_with(
+    presentation: &Presentation,
+    page: usize,
+    dpi: f64,
+    clip: Option<crate::rendering::Clip>,
+) -> Result<Vec<u8>, EngineError> {
+    crate::rendering::validate_dpi(dpi)?;
     if page >= presentation.slides.len() {
         return Err(EngineError::Unsupported(format!(
             "page {page} does not exist"
@@ -252,7 +335,7 @@ fn render_impl(
         )?;
     }
     let image = deckcraft_render::render_slide(
-        &presentation,
+        presentation,
         page,
         &deckcraft_render::RenderOpts {
             scale,
@@ -750,6 +833,161 @@ mod tests {
     use deckcraft_model::text::{Run, RunProps};
     use deckcraft_model::{LayoutType, ShapeId, Size, Table, Theme, Xfrm};
     use std::sync::Arc;
+
+    fn session_fixture() -> Vec<u8> {
+        let mut table = Table::new(1, 1, 120.0, 30.0);
+        table.rows[0].cells[0].text = TextBody::from_text("Retained table");
+        let mut presentation = presentation(table);
+        presentation.slide_size = Size::new(240.0, 180.0);
+        let layout =
+            deckcraft_model::defaults::layout_of_kind(&presentation, LayoutType::Blank).unwrap();
+        let mut slide = deckcraft_model::defaults::new_slide(&mut presentation, layout).unwrap();
+        slide.hidden = true;
+        slide.shapes.push(Shape {
+            id: ShapeId(presentation.alloc_id().unwrap()),
+            xfrm: Some(Xfrm::new(20.0, 30.0, 180.0, 60.0)),
+            text: Some(TextBody::from_text("Second slide")),
+            ..Shape::default()
+        });
+        presentation.slides.push(Arc::new(slide));
+        deckcraft_pptx::export(&presentation).unwrap()
+    }
+
+    #[test]
+    fn render_session_reuses_one_import_and_matches_full_and_region_rasters() {
+        let source = session_fixture();
+        PARSE_BUILDS.with(|counter| counter.set(0));
+        let (session, payload) = PptxSession::open(&source).unwrap();
+        assert_eq!(payload.pages.len(), 2);
+        assert_eq!(payload.pages[1].metadata["hidden"], true);
+        assert_eq!(session.stats().unwrap(), (1, 0, 0));
+        assert_eq!(PARSE_BUILDS.with(|counter| counter.get()), 1);
+        let mut requests = 0;
+        for page in [0, 1, 0] {
+            for dpi in [72.0, 144.0, 300.0] {
+                for clip in [None, Some((5.25, 10.5, 90.25, 55.75))] {
+                    let before = PARSE_BUILDS.with(|counter| counter.get());
+                    let actual = session.render(page, dpi, clip).unwrap();
+                    assert_eq!(PARSE_BUILDS.with(|counter| counter.get()), before);
+                    let expected = render_impl(&source, page, dpi, clip).unwrap();
+                    assert_eq!(actual, expected, "page {page}, dpi {dpi}, clip {clip:?}");
+                    requests += 1;
+                }
+            }
+        }
+        assert_eq!(session.stats().unwrap(), (1, 0, requests));
+        assert_eq!(
+            PARSE_BUILDS.with(|counter| counter.get()),
+            1 + requests as usize
+        );
+        drop(source);
+        session.render(1, 72.0, None).unwrap();
+        session.close().unwrap();
+        assert_eq!(payload.pages[0].tables[0].rows[0][0], "Retained table");
+    }
+
+    #[test]
+    fn render_session_preserves_errors_limits_and_oversized_full_small_region_behavior() {
+        assert!(matches!(
+            PptxSession::open(b"not an archive"),
+            Err(EngineError::Malformed(_))
+        ));
+        let mut presentation = presentation(Table::new(1, 1, 100.0, 30.0));
+        presentation.slide_size = Size::new(2000.0, 2000.0);
+        let source = deckcraft_pptx::export(&presentation).unwrap();
+        let (session, _) = PptxSession::open(&source).unwrap();
+        assert!(matches!(
+            session.render(0, 1200.0, None),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        let clip = Some((0.0, 0.0, 10.0, 10.0));
+        assert_eq!(
+            session.render(0, 1200.0, clip).unwrap(),
+            render_impl(&source, 0, 1200.0, clip).unwrap()
+        );
+        for (page, dpi, clip) in [
+            (1, 72.0, None),
+            (0, f64::NAN, None),
+            (0, 0.0, None),
+            (0, 72.0, Some((0.0, 0.0, -1.0, 10.0))),
+            (0, 72.0, Some((3000.0, 3000.0, 10.0, 10.0))),
+        ] {
+            assert_eq!(
+                session.render(page, dpi, clip).unwrap_err().to_string(),
+                render_impl(&source, page, dpi, clip)
+                    .unwrap_err()
+                    .to_string()
+            );
+        }
+        assert_eq!(session.stats().unwrap(), (1, 0, 7));
+        session.close().unwrap();
+        session.close().unwrap();
+        assert!(matches!(
+            session.render(0, 72.0, None),
+            Err(EngineError::Closed(_))
+        ));
+        assert!(matches!(session.stats(), Err(EngineError::Closed(_))));
+    }
+
+    #[test]
+    fn render_session_close_releases_model_and_recovers_poisoned_lock() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<PptxSession>();
+        let (session, payload) = PptxSession::open(&session_fixture()).unwrap();
+        let slide = {
+            let state = session.state.lock().unwrap();
+            Arc::downgrade(&state.as_ref().unwrap().presentation.slides[0])
+        };
+        session.render(0, 72.0, None).unwrap();
+        assert!(slide.upgrade().is_some());
+        session.close().unwrap();
+        assert!(slide.upgrade().is_none());
+        assert_eq!(payload.pages[0].tables[0].rows[0][0], "Retained table");
+
+        let (session, _) = PptxSession::open(&session_fixture()).unwrap();
+        let slide = {
+            let state = session.state.lock().unwrap();
+            Arc::downgrade(&state.as_ref().unwrap().presentation.slides[0])
+        };
+        let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = session.state.lock().unwrap();
+            panic!("test intentional session lock poison");
+        }));
+        assert!(poisoned.is_err());
+        assert!(matches!(
+            session.render(0, 72.0, None),
+            Err(EngineError::Malformed(_))
+        ));
+        session.close().unwrap();
+        assert!(slide.upgrade().is_none());
+        session.close().unwrap();
+    }
+
+    #[test]
+    fn render_session_close_and_render_are_serialized_across_threads() {
+        let (session, _) = PptxSession::open(&session_fixture()).unwrap();
+        let session = Arc::new(session);
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let rendering = {
+            let session = Arc::clone(&session);
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                session.render(0, 72.0, None)
+            })
+        };
+        barrier.wait();
+        session.close().unwrap();
+        match rendering.join().unwrap() {
+            Ok(png) => assert!(png.starts_with(b"\x89PNG")),
+            Err(EngineError::Closed(_)) => {}
+            Err(error) => panic!("unexpected concurrent render result: {error}"),
+        }
+        assert!(matches!(
+            session.render(0, 72.0, None),
+            Err(EngineError::Closed(_))
+        ));
+    }
 
     #[test]
     fn diagnostics_identify_model_constructs_without_claiming_rendering_failure() {

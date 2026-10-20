@@ -231,3 +231,25 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Project resolved PPTX internal slide targets through existing links and omission diagnostics, retaining text/table/group provenance.
 - [x] Validate both slices in the complete locked installed-wheel corpus and record artifact evidence.
 - [ ] Retain broader E3/TXT5 list authoring, native reader preservation and pre-import slide-count gaps until their acceptance cases are complete.
+
+## List starting values and source presentation limits
+
+- [x] Extend existing native list membership with independent starting values and explicit header/footer fidelity errors.
+- [x] Reject excessive source slide references before native import, covering alternate content without another OOXML resolver.
+- [x] Validate native/read/render/export, malformed/bounded input and full installed-wheel regressions; record artifact and reviewed dependency evidence.
+- [ ] Retain custom-level numbering, header/footer counter fidelity and general upstream allocation/reporting gaps.
+
+## Picture transforms and owned field geometry
+
+- [x] Add verified DOCX crop/flip properties and reject silent native sub-point image scaling.
+- [x] Make existing owned PDF field boxes writable through native appearance regeneration and atomic geometry/fit checks.
+- [x] Verify complete locked/native and installed-wheel read/render/export corpus and record artifact evidence.
+- [ ] Retain native DOCX rotation fidelity, floating-image/opacity and broader imported/multi-widget PDF form gaps.
+
+
+## Private Office render reuse
+
+- [x] Retain bounded native DOCX model/layout and PPTX model from extraction with shared checked rendering and synchronized close.
+- [x] Reuse the existing private facade dispatch, release source/password ownership, and close sessions on failed hydration.
+- [x] Verify native parse/layout counts, PNG parity, resource boundaries, owned snapshots and close races in the complete installed-wheel corpus.
+- [x] Record separate-process synthetic latency/native RSS evidence while retaining broad P1/peak-layout guarantees as open work.

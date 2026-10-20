@@ -307,6 +307,17 @@ def _index(index, length: int) -> int:
     return index
 
 
+def _picture_crop(value):
+    if value is None:
+        value = (0, 0, 0, 0)
+    if not isinstance(value, (tuple, list)) or len(value) != 4:
+        raise TypeError("crop must be (left, top, right, bottom) fractions or None")
+    values = tuple(map(pt, value))
+    if any(fraction < 0 or fraction > 0.45 for fraction in values):
+        raise ValueError("crop fractions must be between 0 and 0.45")
+    return values
+
+
 def _rows(rows, columns: int | None = None) -> list[list[str]]:
     if columns is not None:
         if isinstance(rows, bool) or isinstance(columns, bool):
@@ -791,9 +802,17 @@ class Paragraph:
         """The direct list kind/level, or None for an ordinary paragraph."""
         return self._owner._call("paragraph_list", self._id)
 
-    def set_list(self, kind: str | None = None, *, level: int = 0, restart: bool = False):
-        """Set bullet/numbered list membership; None removes it."""
-        self._owner._call("set_paragraph_list", self._id, kind, operator.index(level), restart, _change=True)
+    def set_list(self, kind: str | None = None, *, level: int = 0, restart: bool = False,
+                 start: int | None = None):
+        """Set list membership; start creates a new top-level numbered sequence."""
+        level = operator.index(level)
+        if start is not None:
+            if isinstance(start, bool):
+                raise TypeError("list start must be an integer, not a boolean")
+            start = operator.index(start)
+            if not 1 <= start <= 32767:
+                raise ValueError("list start must be between 1 and 32767")
+        self._owner._call("set_paragraph_list", self._id, kind, level, restart, start, _change=True)
 
     @property
     def page_break_before(self):
@@ -1232,6 +1251,35 @@ class Picture:
     @alt.setter
     def alt(self, value: str):
         self._owner._call("set_image_alt", self._id, value, _change=True)
+
+    @property
+    def crop(self) -> tuple[float, float, float, float]:
+        return self._owner._call("image_crop", self._id)
+
+    @crop.setter
+    def crop(self, value) -> None:
+        values = _picture_crop(value)
+        self._owner._call("set_image_crop", self._id, values, _change=True)
+
+    @property
+    def flip_h(self) -> bool:
+        return self._owner._call("image_flips", self._id)[0]
+
+    @flip_h.setter
+    def flip_h(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("flip_h must be a boolean")
+        self._owner._call("set_image_flips", self._id, flip_h=value, _change=True)
+
+    @property
+    def flip_v(self) -> bool:
+        return self._owner._call("image_flips", self._id)[1]
+
+    @flip_v.setter
+    def flip_v(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("flip_v must be a boolean")
+        self._owner._call("set_image_flips", self._id, flip_v=value, _change=True)
 
 
 class EditableTable:
@@ -1698,7 +1746,17 @@ class PdfField:
 
     @property
     def box(self) -> tuple[float, float, float, float]:
+        """Widget (x, y, width, height) in current page view points."""
         return tuple(self._info()["widgets"][0]["box"])
+
+    @box.setter
+    def box(self, value) -> None:
+        if not isinstance(value, (tuple, list)) or len(value) != 4:
+            raise TypeError("box must be (x, y, width, height) in top-left points")
+        coordinates = tuple(map(pt, value))
+        # Coordinate conversion can execute caller code, including structural edits.
+        self._check()
+        self._owner._call("set_field_box", self._name, coordinates, _change=True)
 
     @property
     def value(self) -> str | bool | None:
@@ -2470,13 +2528,7 @@ class SlidePicture(Shape):
 
     @crop.setter
     def crop(self, value) -> None:
-        if value is None:
-            value = (0, 0, 0, 0)
-        if not isinstance(value, (tuple, list)) or len(value) != 4:
-            raise TypeError("crop must be (left, top, right, bottom) fractions or None")
-        values = tuple(map(pt, value))
-        if any(fraction < 0 or fraction > 0.45 for fraction in values):
-            raise ValueError("crop fractions must be between 0 and 0.45")
+        values = _picture_crop(value)
         self._owner._call("set_picture_crop", self._slide_number, self._id, values, _change=True)
 
     @property

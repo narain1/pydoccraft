@@ -1508,6 +1508,7 @@ dependencies = [
  "pdfcraft-render",
  "png",
  "pyo3",
+ "quick-xml",
  "serde",
  "serde_json",
  "skrifa 0.44.0",
