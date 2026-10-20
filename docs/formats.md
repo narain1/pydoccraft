@@ -42,7 +42,7 @@ This deliberately favors false negatives over fabricated tables. Borderless, irr
 
 ### PDF links
 
-PdfCraft exposes link destinations and rectangles, but `pydoccraft` does not currently recover the text under each rectangle. `Link.text` is commonly empty for PDF links, so Markdown places them in a final **Links** section instead of rewriting page text inline.
+PdfCraft exposes link destinations, rectangles and text geometry. The adapter recovers unambiguous labels with normalized Unicode character offsets, including repeated labels and contiguous multiline labels, and Markdown attaches those targets inline. Accepted multiline annotations coalesce their consecutive paragraph blocks while retaining native spaces/newlines and unchanged plain text. Neighboring links retain correct offsets. Links inside inferred PDF table cells retain empty labels to avoid duplicating cell text. Overlapping, noncontiguous or ambiguous geometry-only links also retain empty labels and appear in the final **Links** section; the adapter does not infer a reading order across columns or guess omitted glyphs.
 
 ### PDF images
 
@@ -111,7 +111,7 @@ Both methods return encoded PNG bytes.
 - DPI must be finite and between 1 and 1200.
 - Out-of-range pages are rejected in Python before native dispatch.
 
-DPI controls raster scale and embedded PNG resolution metadata for all three formats. Pixel dimensions follow each engine's rounding; physical resolution uses integer pixels per meter. The multi-DPI corpus checks dimensions, metadata, decoded PNG data and visible content. Rotated/landscape and broader fidelity cases remain in the [rendering validation TODOs](../TODO.md#p0--rendering-at-a-requested-dpi).
+DPI controls raster scale and embedded PNG resolution metadata for all three formats. Pixel dimensions follow each engine's rounding; physical resolution uses integer pixels per meter. The multi-DPI corpus checks dimensions, metadata, decoded PNG data and visible content. PDF rotation, crop offsets and UserUnit are covered by the geometry corpus; broader cross-format fidelity remains in the [rendering validation TODOs](../TODO.md#p0--rendering-at-a-requested-dpi).
 
 Each output is bounded to 64 million RGBA pixels in addition to upstream maximum-side limits. DOCX/PPTX dimensions are checked before rasterization; PDF uses upstream oversize rejection. DeckCraft can internally replace a rendering panic with a blank image: this remains a documented upstream blocker, because an intentionally blank slide is also valid output.
 

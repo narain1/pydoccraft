@@ -171,3 +171,18 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 4. Newly created PDF models and their full copies SHALL support bounded text, checkbox and choice fields through native forms APIs, with one widget per field, immutable unique names and strict typed values. Imported models SHALL NOT acquire trusted ownership merely by loading bytes.
 5. Field edits SHALL be staged; unsupported glyphs, clipping/overflow, incomplete appearances, unsupported actions and invalid geometry SHALL fail explicitly. Flatten SHALL verify complete removal of terminal fields/widgets and preserve visible content within documented measured raster precision.
 6. Field creation SHALL retain the pinned upstream revision and permissive dependency graph. Page organization SHALL validate supported owned fields before committing; active-field subsets SHALL remain unavailable until identity-remapping semantics are validated.
+
+## 18. Table formatting and outline-aware imports
+
+1. Table construction SHALL accept bounded row/column counts as a convenience over the same native rectangular-grid constructor. Python row/column slices SHALL return ordered checked cell handles with existing merged-anchor and structural-generation semantics.
+2. DOCX direct table/cell formatting SHALL use bounded atomic native property patches, distinguish inheritance from explicit border suppression, and validate effective geometry rather than only declared grid widths. Metadata SHALL remain separate from visible cell text.
+3. Content fitting SHALL call public native measurement/autofit functions, reject the native measurement cutoff and overflowing minimum widths, and never implement an adapter text-width algorithm. Unsupported table shading/spacing/border-fidelity cases SHALL stay explicit.
+4. Optional PDF outline import SHALL call the public native file-page insertion operation and preserve supported destinations/structure under a named container. It SHALL reject incomplete inspection, unsupported source semantics and post-copy discrepancies before committing. Duplicate and omitted selections SHALL follow documented native destination mapping.
+
+## 19. Conditional styles and multiline PDF labels
+
+1. Named DOCX table styles SHALL share existing style IDs, same-kind inheritance and bounded patches. Whole-table and conditional regions SHALL use public native model/resolution, preserve explicit false/clear semantics and reject unsupported region properties atomically.
+2. Table assignment and look flags SHALL reuse table formatting. Native region precedence and direct cell overrides SHALL be verified in serialized DOCX, PNG and exported PDF; header styling SHALL remain independent of repeating header rows.
+3. Style/base changes SHALL validate all affected table geometry, including nested tables without registered Python handles, before committing. Existing section/grid/alignment validation SHALL use the same effective native geometry checks.
+4. PDF multiline link labels SHALL preserve native text order, exact Unicode offsets, spaces and newlines. Only unambiguous consecutive surviving paragraph spans SHALL be coalesced; neighboring links SHALL be remapped without changing plain text or duplicating table content.
+5. Overlapping, noncontiguous, empty or ambiguous labels SHALL remain explicitly unresolved. Link association work and intermediate indexes SHALL remain bounded; no custom column-reading or paragraph-layout algorithm SHALL be introduced.

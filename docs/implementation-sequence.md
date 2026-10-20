@@ -1,14 +1,12 @@
 # Implementation sequence and ownership
 
-Status: implementation plan, not an available authoring API. The existing extraction,
+Status: historical implementation plan; see [the authoring guide](authoring.md) for implemented APIs. The existing extraction,
 conversion and PNG rendering contracts remain the baseline. This document makes the
 [API direction](authoring-api-design.md) actionable; the
 [workstream ledger](roadmap-workstreams.json) remains the only feature ownership list.
 Source feasibility is distinct from an installed-wheel acceptance result.
 
-This batch adds planning validation and implementation sequencing only; it does
-not add any authoring runtime API. Native rendering/extraction changes are tracked
-by their separate owners and evidence.
+The original planning batch added sequencing only. Subsequent authoring and native rendering/extraction implementations are tracked by their owners and [validation evidence](../.kiro/specs/rust-document-engine/validation.md).
 
 Run `python tools/check_roadmap.py` to check that every TODO ID has one owner, every
 role and upstream reference is valid, and prerequisites contain no cycle. The check

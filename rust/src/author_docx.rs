@@ -11,11 +11,11 @@ use pyo3::prelude::*;
 use serde_json::{json, Map, Value};
 use wordcraft_doc::para::{Float, InlineObject, NoteKind};
 use wordcraft_doc::props::{
-    Border, BorderStyle, Borders, HeightRule, Highlight, LineSpacing, NumRef, Underline, VAlign,
-    VMerge, VertAlign,
+    Border, BorderStyle, Borders, HeightRule, Highlight, LineSpacing, NumRef, TextDirection,
+    Underline, VAlign, VMerge, VertAlign,
 };
 use wordcraft_doc::section::{NotePos, NoteRestart, NumFormat, SectionProps, SectionStart};
-use wordcraft_doc::styles::{Style, StyleSheet};
+use wordcraft_doc::styles::{Style, StyleSheet, TablePart};
 use wordcraft_doc::{
     Align, Block, CharProps, Document, ListKind, ParaProps, Paragraph, PartKind, Path, Pos, Rgb,
     StoryRef, StyleKind, Table, TextColor,
@@ -37,6 +37,8 @@ const MAX_STYLES: usize = 1024;
 const MAX_FORMAT_PATCH_BYTES: usize = 16 * 1024;
 const MAX_SECTIONS: usize = 128;
 const MAX_NOTES: usize = 10_000;
+const MAX_TABLE_PATCH_BYTES: usize = 128 * 1024;
+const MAX_TABLE_METADATA_BYTES: usize = 16 * 1024 * 1024;
 
 #[pyclass]
 pub struct EditableDocx {
@@ -381,7 +383,265 @@ impl EditableDocx {
                 column = end;
             }
         }
+        self.validate_table_layout(&candidate, id)?;
         self.commit(candidate)
+    }
+
+    pub fn table_formatting(&self, id: usize) -> PyResult<String> {
+        let props = &self.table(id)?.props;
+        Ok(json!({
+            "alignment": props.align.map(alignment_name), "indent": props.indent,
+            "width": props.width, "width_percent": props.width_pct,
+            "layout": if props.fixed { "fixed" } else { "autofit" },
+            "rtl": props.bidi_visual, "title": props.caption, "description": props.description,
+            "borders": borders_snapshot(props.borders, true),
+            "style": props.style, "look": table_look_snapshot(&props.look),
+        })
+        .to_string())
+    }
+
+    pub fn table_format_patch(&mut self, id: usize, patch: &str) -> PyResult<()> {
+        let values = table_patch(patch)?;
+        let assigned_style = values
+            .get("style")
+            .map(|value| table_style_reference(&self.document()?.styles, value))
+            .transpose()?;
+        let mut candidate = self.document()?.clone();
+        let table = self.table_mut(&mut candidate, id)?;
+        if values.get("width").is_some_and(|v| !v.is_null())
+            && values.get("width_percent").is_some_and(|v| !v.is_null())
+        {
+            return Err(PyValueError::new_err(
+                "set width or width_percent, not both",
+            ));
+        }
+        for (key, value) in &values {
+            match key.as_str() {
+                "alignment" => table.props.align = nullable_alignment(value, false)?,
+                "indent" => table.props.indent = nullable_point(value, 0.0, 1584.0, "indent")?,
+                "width" => table.props.width = nullable_point(value, 6.0, 1584.0, "width")?,
+                "width_percent" => {
+                    table.props.width_pct = nullable_point(value, 0.02, 100.0, "width_percent")?
+                }
+                "layout" => {
+                    table.props.fixed = match value.as_str() {
+                        Some("fixed") => true,
+                        Some("autofit") => false,
+                        _ => return Err(PyValueError::new_err("layout must be fixed or autofit")),
+                    }
+                }
+                "rtl" => table.props.bidi_visual = strict_bool(value, "rtl")?,
+                "title" => table.props.caption = table_alt(value)?,
+                "description" => table.props.description = table_alt(value)?,
+                "borders" => apply_border_patch(&mut table.props.borders, value, true)?,
+                "style" => table.props.style = assigned_style.clone().flatten(),
+                "look" => patch_table_look(&mut table.props.look, value)?,
+                _ => {
+                    return Err(PyValueError::new_err(format!(
+                        "unknown table format property: {key}"
+                    )))
+                }
+            }
+        }
+        // Setting one width preference also clears the old competing preference,
+        // independent of JSON map order. Null alone clears only the named preference.
+        if values.get("width").is_some_and(|v| !v.is_null()) {
+            table.props.width_pct = None;
+        }
+        if values.get("width_percent").is_some_and(|v| !v.is_null()) {
+            table.props.width = None;
+        }
+        if table
+            .props
+            .width_pct
+            .is_some_and(|v| ((v * 50.0).round() - v * 50.0).abs() > 0.001)
+        {
+            return Err(PyValueError::new_err(
+                "width_percent requires 0.02-percent increments",
+            ));
+        }
+        if values.keys().any(|key| {
+            matches!(
+                key.as_str(),
+                "width" | "width_percent" | "indent" | "layout" | "alignment"
+            )
+        }) {
+            self.validate_table_layout(&candidate, id)?;
+        }
+        if values.contains_key("style") || values.contains_key("look") {
+            validate_style_tables(self.document()?, &candidate)?;
+        }
+        self.commit(candidate)
+    }
+
+    pub fn cell_formatting(&self, id: usize, row: usize, column: usize) -> PyResult<String> {
+        let table = self.table(id)?;
+        let (row, cell) = cell_anchor(table, row, column)?;
+        let props = &table.rows[row].cells[cell].props;
+        Ok(json!({
+            "background": props.shading.map(rgb_string),
+            "margins": props.margins.map(|[top,left,bottom,right]| [top,right,bottom,left]),
+            "alignment": self.cell_alignment(id, row, column)?,
+            "vertical_alignment": props.valign.map(vertical_alignment_name),
+            "text_direction": if props.text_direction_set { Some(text_direction_name(props.text_direction)) } else { None },
+            "no_wrap": props.no_wrap,
+            "borders": borders_snapshot(props.borders, false),
+        }).to_string())
+    }
+
+    pub fn cell_format_patch(
+        &mut self,
+        id: usize,
+        row: usize,
+        column: usize,
+        patch: &str,
+    ) -> PyResult<()> {
+        let values = table_patch(patch)?;
+        let (row, cell_index) = cell_anchor(self.table(id)?, row, column)?;
+        let allocated_width = if values.contains_key("margins") {
+            let (story, path) = self.location(id)?;
+            Some(native_cell_width(
+                &native_cell_widths(self.document()?)?,
+                story,
+                &path,
+                row,
+                cell_index,
+            )?)
+        } else {
+            None
+        };
+        let mut candidate = self.document()?.clone();
+        let cell = &mut self.table_mut(&mut candidate, id)?.rows[row].cells[cell_index];
+        for (key, value) in &values {
+            match key.as_str() {
+                "background" => {
+                    cell.props.shading = if value.is_null() {
+                        None
+                    } else {
+                        Some(parse_rgb(value.as_str().ok_or_else(|| {
+                            PyValueError::new_err("background requires a color or None")
+                        })?)?)
+                    }
+                }
+                "margins" => {
+                    cell.props.margins = if value.is_null() {
+                        None
+                    } else {
+                        let [top, right, bottom, left] = section_numbers::<4>(value, "margins")?;
+                        Some([top, left, bottom, right])
+                    }
+                }
+                "alignment" => {
+                    let alignment = nullable_alignment(value, true)?;
+                    for block in &mut cell.blocks {
+                        if let Block::Para(paragraph) = Arc::make_mut(block) {
+                            paragraph.props.align = alignment;
+                            paragraph.touch();
+                        }
+                    }
+                }
+                "vertical_alignment" => {
+                    cell.props.valign = if value.is_null() {
+                        None
+                    } else {
+                        Some(match value.as_str() {
+                            Some("top") => VAlign::Top,
+                            Some("center") => VAlign::Center,
+                            Some("bottom") => VAlign::Bottom,
+                            _ => {
+                                return Err(PyValueError::new_err(
+                                    "vertical_alignment must be top, center, bottom or None",
+                                ))
+                            }
+                        })
+                    }
+                }
+                "text_direction" => {
+                    cell.props.text_direction_set = !value.is_null();
+                    cell.props.text_direction = match value.as_str() {
+                        None if value.is_null() => TextDirection::Horizontal,
+                        Some("horizontal") => TextDirection::Horizontal,
+                        Some("down") => TextDirection::Down,
+                        Some("up") => TextDirection::Up,
+                        _ => {
+                            return Err(PyValueError::new_err(
+                                "text_direction must be horizontal, down, up or None",
+                            ))
+                        }
+                    };
+                }
+                "no_wrap" => cell.props.no_wrap = strict_bool(value, "no_wrap")?,
+                "borders" => apply_border_patch(&mut cell.props.borders, value, false)?,
+                _ => {
+                    return Err(PyValueError::new_err(format!(
+                        "unknown cell format property: {key}"
+                    )))
+                }
+            }
+        }
+        if let Some(width) = allocated_width {
+            let (story, path) = self.location(id)?;
+            let table = candidate
+                .table(story, &path)
+                .ok_or_else(|| PyIndexError::new_err("table no longer exists"))?;
+            // Margins change within the current allocation. An explicit fit operation
+            // is required to redistribute columns around previously fixed child content.
+            let margins = wordcraft_layout::cell_margins(&candidate, table, row, cell_index);
+            let available = width - margins[1] - margins[3];
+            if available <= 0.0 {
+                return Err(PyValueError::new_err(
+                    "cell margins must leave positive content width",
+                ));
+            }
+            blocks_fit_width(&table.rows[row].cells[cell_index].blocks, available)?;
+        }
+        if values.keys().any(|key| {
+            matches!(
+                key.as_str(),
+                "margins" | "text_direction" | "no_wrap" | "alignment"
+            )
+        }) {
+            self.validate_table_layout(&candidate, id)?;
+        }
+        self.commit(candidate)
+    }
+
+    pub fn fit_table(&mut self, id: usize) -> PyResult<Vec<f64>> {
+        let table = self.table(id)?;
+        let measured_paragraphs = table
+            .rows
+            .iter()
+            .flat_map(|row| &row.cells)
+            .flat_map(|cell| &cell.blocks)
+            .filter(|block| block.as_para().is_some())
+            .count();
+        if measured_paragraphs > 4000 {
+            return Err(limit(
+                "native content fitting supports at most 4000 direct cell paragraphs",
+            ));
+        }
+        let available = self.container_width(id)? - active_table_indent(table);
+        let measured = wordcraft_layout::measure_table_columns(self.document()?, table);
+        let widths = wordcraft_layout::autofit_widths(&measured, available);
+        if widths
+            .iter()
+            .any(|width| !width.is_finite() || *width < 6.0)
+            || widths.iter().sum::<f32>() > available + 0.001
+        {
+            return Err(PyValueError::new_err(
+                "table content minimum widths exceed available room",
+            ));
+        }
+        let mut candidate = self.document()?.clone();
+        let table = self.table_mut(&mut candidate, id)?;
+        table.grid = widths;
+        synchronize_grid_widths(table);
+        table.props.width = None;
+        table.props.width_pct = None;
+        table.props.fixed = false;
+        self.validate_table_layout(&candidate, id)?;
+        self.commit(candidate)?;
+        self.column_widths(id)
     }
 
     pub fn row_height(&self, id: usize, row: usize) -> PyResult<(Option<f64>, &'static str)> {
@@ -490,31 +750,30 @@ impl EditableDocx {
 
     #[pyo3(signature = (id, color="#000000", width=0.5))]
     pub fn set_table_borders(&mut self, id: usize, color: &str, width: f64) -> PyResult<()> {
-        self.table(id)?;
-        let color = parse_rgb(color)?;
-        if !width.is_finite() || !(0.125..=12.0).contains(&width) || (width * 8.0).fract() != 0.0 {
-            return Err(PyValueError::new_err(
-                "border width must be 0.125..12 points in eighth-point increments",
-            ));
+        if !width.is_finite() {
+            return Err(PyValueError::new_err("border width must be finite"));
         }
-        let mut candidate = self.document()?.clone();
-        let mut border = Border::single(width as f32);
-        border.color = Some(color);
-        self.table_mut(&mut candidate, id)?.props.borders = Some(Borders::all(border));
-        self.commit(candidate)
+        let border = json!({"style":"single","color":color,"width":width});
+        self.table_format_patch(
+            id,
+            &json!({"borders":{
+                "top":border,"right":border,"bottom":border,"left":border,
+                "inside_horizontal":border,"inside_vertical":border,
+            }})
+            .to_string(),
+        )
     }
 
     pub fn clear_table_borders(&mut self, id: usize) -> PyResult<()> {
-        self.table(id)?;
-        let mut candidate = self.document()?.clone();
-        let border = Border {
-            style: BorderStyle::None,
-            width: 0.0,
-            color: None,
-            space: 0.0,
-        };
-        self.table_mut(&mut candidate, id)?.props.borders = Some(Borders::all(border));
-        self.commit(candidate)
+        let border = json!({"style":"none"});
+        self.table_format_patch(
+            id,
+            &json!({"borders":{
+                "top":border,"right":border,"bottom":border,"left":border,
+                "inside_horizontal":border,"inside_vertical":border,
+            }})
+            .to_string(),
+        )
     }
 
     pub fn cell_text(&self, id: usize, row: usize, column: usize) -> PyResult<String> {
@@ -595,10 +854,12 @@ impl EditableDocx {
     ) -> PyResult<usize> {
         let table = self.table(id)?;
         let (anchor_row, cell) = cell_anchor(table, row, column)?;
-        let start = table.grid_col(anchor_row, cell);
-        let end = start + table.rows[anchor_row].cells[cell].span();
         let margins = wordcraft_layout::cell_margins(self.document()?, table, anchor_row, cell);
-        let width = table.grid[start..end].iter().sum::<f32>() - margins[1] - margins[3];
+        let (story, table_path) = self.location(id)?;
+        let widths = native_cell_widths(self.document()?)?;
+        let width = native_cell_width(&widths, story, &table_path, anchor_row, cell)?
+            - margins[1]
+            - margins[3];
         let (_, path) = self.location(id)?;
         if path.depth() >= 15 {
             return Err(limit("DOCX table nesting exceeds 16 levels"));
@@ -632,12 +893,14 @@ impl EditableDocx {
         let (paragraph, media) = self.make_image(data, width, height, alt)?;
         let table = self.table(id)?;
         let (anchor_row, cell) = cell_anchor(table, row, column)?;
-        let start = table.grid_col(anchor_row, cell);
-        let end = start + table.rows[anchor_row].cells[cell].span();
         let margins = wordcraft_layout::cell_margins(self.document()?, table, anchor_row, cell);
+        let (story, table_path) = self.location(id)?;
+        let widths = native_cell_widths(self.document()?)?;
         validate_picture_width(
             &paragraph,
-            table.grid[start..end].iter().sum::<f32>() - margins[1] - margins[3],
+            native_cell_width(&widths, story, &table_path, anchor_row, cell)?
+                - margins[1]
+                - margins[3],
         )?;
         self.add_cell_block(
             id,
@@ -758,39 +1021,18 @@ impl EditableDocx {
         column: usize,
         margins: Option<(f64, f64, f64, f64)>,
     ) -> PyResult<()> {
-        let (row, cell) = cell_anchor(self.table(id)?, row, column)?;
-        let margins = margins
-            .map(|(top, right, bottom, left)| {
-                if [top, right, bottom, left]
-                    .iter()
-                    .any(|n| !n.is_finite() || !(0.0..=1584.0).contains(n))
-                {
-                    return Err(PyValueError::new_err(
-                        "cell margins must be finite and between 0 and 1584 points",
-                    ));
-                }
-                Ok([top as f32, left as f32, bottom as f32, right as f32])
-            })
-            .transpose()?;
-        let mut candidate = self.document()?.clone();
-        self.table_mut(&mut candidate, id)?.rows[row].cells[cell]
-            .props
-            .margins = margins;
-        let (story, path) = self.location(id)?;
-        let table = candidate
-            .table(story, &path)
-            .ok_or_else(|| PyIndexError::new_err("table no longer exists"))?;
-        let margins = wordcraft_layout::cell_margins(&candidate, table, row, cell);
-        let start = table.grid_col(row, cell);
-        let end = start + table.rows[row].cells[cell].span();
-        let available = table.grid[start..end].iter().sum::<f32>() - margins[1] - margins[3];
-        if available <= 0.0 {
-            return Err(PyValueError::new_err(
-                "cell margins must leave positive content width",
-            ));
+        if margins.is_some_and(|(top, right, bottom, left)| {
+            [top, right, bottom, left].iter().any(|v| !v.is_finite())
+        }) {
+            return Err(PyValueError::new_err("cell margins must be finite"));
         }
-        blocks_fit_width(&table.rows[row].cells[cell].blocks, available)?;
-        self.commit(candidate)
+        self.cell_format_patch(
+            id,
+            row,
+            column,
+            &json!({"margins": margins.map(|(top,right,bottom,left)| [top,right,bottom,left])})
+                .to_string(),
+        )
     }
 
     pub fn cell_alignment(
@@ -832,28 +1074,12 @@ impl EditableDocx {
         column: usize,
         alignment: Option<&str>,
     ) -> PyResult<()> {
-        let (row, cell) = cell_anchor(self.table(id)?, row, column)?;
-        let alignment = match alignment {
-            None => None,
-            Some("left") => Some(Align::Left),
-            Some("right") => Some(Align::Right),
-            Some("center") => Some(Align::Center),
-            Some("justify") => Some(Align::Justify),
-            Some("distribute") => Some(Align::Distribute),
-            _ => {
-                return Err(PyValueError::new_err(
-                    "cell alignment must be left, right, center, justify, distribute or None",
-                ))
-            }
-        };
-        let mut candidate = self.document()?.clone();
-        for block in &mut self.table_mut(&mut candidate, id)?.rows[row].cells[cell].blocks {
-            if let Block::Para(paragraph) = Arc::make_mut(block) {
-                paragraph.props.align = alignment;
-                paragraph.touch();
-            }
-        }
-        self.commit(candidate)
+        self.cell_format_patch(
+            id,
+            row,
+            column,
+            &json!({"alignment": alignment}).to_string(),
+        )
     }
 
     pub fn cell_background(
@@ -878,13 +1104,7 @@ impl EditableDocx {
         column: usize,
         color: Option<&str>,
     ) -> PyResult<()> {
-        let (row, cell) = cell_anchor(self.table(id)?, row, column)?;
-        let color = color.map(parse_rgb).transpose()?;
-        let mut candidate = self.document()?.clone();
-        self.table_mut(&mut candidate, id)?.rows[row].cells[cell]
-            .props
-            .shading = color;
-        self.commit(candidate)
+        self.cell_format_patch(id, row, column, &json!({"background": color}).to_string())
     }
 
     pub fn cell_vertical_alignment(
@@ -911,22 +1131,12 @@ impl EditableDocx {
         column: usize,
         alignment: &str,
     ) -> PyResult<()> {
-        let (row, cell) = cell_anchor(self.table(id)?, row, column)?;
-        let alignment = match alignment {
-            "top" => VAlign::Top,
-            "center" => VAlign::Center,
-            "bottom" => VAlign::Bottom,
-            _ => {
-                return Err(PyValueError::new_err(
-                    "vertical alignment must be top, center or bottom",
-                ))
-            }
-        };
-        let mut candidate = self.document()?.clone();
-        self.table_mut(&mut candidate, id)?.rows[row].cells[cell]
-            .props
-            .valign = Some(alignment);
-        self.commit(candidate)
+        self.cell_format_patch(
+            id,
+            row,
+            column,
+            &json!({"vertical_alignment": alignment}).to_string(),
+        )
     }
 
     pub fn paragraph_style(&self, id: usize) -> PyResult<String> {
@@ -948,8 +1158,10 @@ impl EditableDocx {
             .styles
             .iter()
             .filter(|style| {
-                matches!(style.kind, StyleKind::Paragraph | StyleKind::Character)
-                    && wanted.is_none_or(|kind| kind == style.kind)
+                matches!(
+                    style.kind,
+                    StyleKind::Paragraph | StyleKind::Character | StyleKind::Table
+                ) && wanted.is_none_or(|kind| kind == style.kind)
             })
             .map(|style| style.id.clone())
             .collect())
@@ -957,7 +1169,7 @@ impl EditableDocx {
 
     pub fn style_info(&self, id: &str) -> PyResult<String> {
         let style = supported_style(&self.document()?.styles, id)?;
-        Ok(json!({"id":style.id,"name":style.name,"kind":if style.kind == StyleKind::Paragraph {"paragraph"} else {"character"},"based_on":style.based_on,"builtin":style.builtin}).to_string())
+        Ok(json!({"id":style.id,"name":style.name,"kind":match style.kind {StyleKind::Paragraph => "paragraph", StyleKind::Character => "character", StyleKind::Table => "table", _ => "unsupported"},"based_on":style.based_on,"builtin":style.builtin}).to_string())
     }
 
     #[pyo3(signature = (name, kind="paragraph", based_on=None))]
@@ -1018,13 +1230,36 @@ impl EditableDocx {
             .ok_or_else(|| PyValueError::new_err("unknown style"))?
             .based_on = base;
         validate_style_chains(&candidate.styles)?;
+        if kind == StyleKind::Table {
+            validate_style_tables(self.document()?, &candidate)?;
+        }
         self.commit(candidate)
     }
 
-    pub fn format_style(&mut self, id: &str, patch: &str) -> PyResult<()> {
+    #[pyo3(signature = (id, patch, region=None))]
+    pub fn format_style(&mut self, id: &str, patch: &str, region: Option<&str>) -> PyResult<()> {
         let document = self.document()?;
         let style = supported_style(&document.styles, id)?;
         let id = style.id.clone();
+        if style.kind == StyleKind::Table {
+            let part = table_region(region.unwrap_or("whole_table"))?;
+            let values = table_patch(patch)?;
+            let mut candidate = document.clone();
+            patch_table_style(
+                candidate
+                    .styles
+                    .get_mut(&id)
+                    .ok_or_else(|| PyValueError::new_err("unknown table style"))?,
+                &document.styles,
+                part,
+                values,
+            )?;
+            validate_style_tables(document, &candidate)?;
+            return self.commit(candidate);
+        }
+        if region.is_some() {
+            return Err(PyValueError::new_err("regions require a table style"));
+        }
         let values = format_patch(patch)?;
         let (mut character, mut paragraph) = (Map::new(), Map::new());
         for (key, value) in values {
@@ -1046,10 +1281,22 @@ impl EditableDocx {
         self.commit(candidate)
     }
 
-    #[pyo3(signature = (id, resolved=false))]
-    pub fn style_formatting(&self, id: &str, resolved: bool) -> PyResult<String> {
+    #[pyo3(signature = (id, resolved=false, region=None))]
+    pub fn style_formatting(
+        &self,
+        id: &str,
+        resolved: bool,
+        region: Option<&str>,
+    ) -> PyResult<String> {
         let document = self.document()?;
         let style = supported_style(&document.styles, id)?;
+        if style.kind == StyleKind::Table {
+            return table_style_snapshot(&document.styles, style, resolved, region)
+                .map(|v| v.to_string());
+        }
+        if region.is_some() {
+            return Err(PyValueError::new_err("regions require a table style"));
+        }
         let mut values = if resolved {
             let character = if style.kind == StyleKind::Paragraph {
                 document
@@ -2277,6 +2524,11 @@ impl EditableDocx {
             .ok_or_else(|| PyIndexError::new_err("section index out of bounds"))
     }
 
+    fn validate_table_layout(&self, document: &Document, id: usize) -> PyResult<()> {
+        let (story, path) = self.location(id)?;
+        validate_native_table_layout(document, &native_cell_widths(document)?, story, path)
+    }
+
     fn row(&self, id: usize, row: usize) -> PyResult<&wordcraft_doc::Row> {
         self.table(id)?
             .rows
@@ -2309,10 +2561,9 @@ impl EditableDocx {
             .document()?
             .table(story, &parent)
             .ok_or_else(|| PyIndexError::new_err("parent table no longer exists"))?;
-        let start = table.grid_col(row, cell);
-        let end = start + table.rows[row].cells[cell].span();
         let margins = wordcraft_layout::cell_margins(self.document()?, table, row, cell);
-        Ok(table.grid[start..end].iter().sum::<f32>() - margins[1] - margins[3])
+        let widths = native_cell_widths(self.document()?)?;
+        Ok(native_cell_width(&widths, story, &parent, row, cell)? - margins[1] - margins[3])
     }
 
     fn cell_container(&self, id: usize, row: usize, column: usize) -> PyResult<(StoryRef, Path)> {
@@ -2354,7 +2605,12 @@ impl EditableDocx {
         let table = self.table_mut(&mut candidate, id)?;
         operation(table)?;
         validate_editable_grid(table)?;
+        let width_percent = table.props.width_pct;
         synchronize_grid_widths(table);
+        if let Some(percent) = width_percent {
+            table.props.width = None;
+            table.props.width_pct = Some(percent);
+        }
         let after = table_usage(table);
         let text_bytes = self.updated_text_bytes(before.0, after.0)?;
         let cells = self
@@ -2383,6 +2639,7 @@ impl EditableDocx {
                     .is_some_and(|block| hidden.contains(&(Arc::as_ptr(block) as usize)))
             })
             .collect::<Vec<_>>();
+        self.validate_table_layout(&candidate, id)?;
         self.commit(candidate)?;
         self.invalidate_descendants(story, &path);
         self.cell_placeholders
@@ -2638,6 +2895,7 @@ impl EditableDocx {
         document.table_mut(story, &path).map_err(model_error)
     }
     fn commit(&mut self, document: Document) -> PyResult<()> {
+        validate_table_metadata_budget(&document)?;
         // Native generic range/table edits do not repair semantic references. Existing
         // marker identities and multiplicities must survive every ordinary mutation.
         // New notes may add an identity; removing or duplicating one is unsupported.
@@ -2718,6 +2976,455 @@ impl EditableDocx {
             return Err(limit("document text exceeds 16 MiB"));
         }
         Ok(total)
+    }
+}
+
+fn table_patch(patch: &str) -> PyResult<Map<String, Value>> {
+    if patch.len() > MAX_TABLE_PATCH_BYTES {
+        return Err(limit("table format patch exceeds 128 KiB"));
+    }
+    let value: Value = serde_json::from_str(patch)
+        .map_err(|_| PyValueError::new_err("table formatting requires a JSON object"))?;
+    value
+        .as_object()
+        .cloned()
+        .ok_or_else(|| PyValueError::new_err("table formatting requires a JSON object"))
+}
+
+fn strict_bool(value: &Value, key: &str) -> PyResult<bool> {
+    value
+        .as_bool()
+        .ok_or_else(|| PyValueError::new_err(format!("{key} requires a bool")))
+}
+
+fn nullable_point(value: &Value, minimum: f32, maximum: f32, key: &str) -> PyResult<Option<f32>> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    value
+        .as_f64()
+        .filter(|v| v.is_finite() && *v >= f64::from(minimum) && *v <= f64::from(maximum))
+        .map(|v| Some(v as f32))
+        .ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "{key} must be a finite number between {minimum} and {maximum}, or None"
+            ))
+        })
+}
+
+fn nullable_alignment(value: &Value, paragraph: bool) -> PyResult<Option<Align>> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    Ok(Some(match value.as_str() {
+        Some("left") => Align::Left,
+        Some("center") => Align::Center,
+        Some("right") => Align::Right,
+        Some("justify") if paragraph => Align::Justify,
+        Some("distribute") if paragraph => Align::Distribute,
+        _ => {
+            return Err(PyValueError::new_err(if paragraph {
+                "alignment must be left, center, right, justify, distribute or None"
+            } else {
+                "table alignment must be left, center, right or None"
+            }))
+        }
+    }))
+}
+
+fn vertical_alignment_name(value: VAlign) -> &'static str {
+    match value {
+        VAlign::Top => "top",
+        VAlign::Center => "center",
+        VAlign::Bottom => "bottom",
+    }
+}
+fn text_direction_name(value: TextDirection) -> &'static str {
+    match value {
+        TextDirection::Horizontal => "horizontal",
+        TextDirection::Down => "down",
+        TextDirection::Up => "up",
+    }
+}
+fn table_alt(value: &Value) -> PyResult<Option<String>> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    let text = value
+        .as_str()
+        .ok_or_else(|| PyValueError::new_err("table title/description must be text or None"))?;
+    validate_text(text)?;
+    if text.chars().count() > wordcraft_doc::para::MAX_ALT_TEXT {
+        return Err(PyValueError::new_err(
+            "table title/description exceeds 10000 characters",
+        ));
+    }
+    Ok(Some(text.into()))
+}
+
+const BORDER_STYLES: &[(&str, BorderStyle)] = &[
+    ("none", BorderStyle::None),
+    ("single", BorderStyle::Single),
+    ("double", BorderStyle::Double),
+    ("dotted", BorderStyle::Dotted),
+    ("dashed", BorderStyle::Dashed),
+    ("thick", BorderStyle::Thick),
+    ("triple", BorderStyle::Triple),
+    ("dot_dash", BorderStyle::DotDash),
+    ("wave", BorderStyle::Wave),
+];
+fn border_value(value: &Value) -> PyResult<Option<Border>> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    let fields = value.as_object().ok_or_else(|| {
+        PyValueError::new_err("border must be a style/color/width object or None")
+    })?;
+    if fields
+        .keys()
+        .any(|key| !matches!(key.as_str(), "style" | "color" | "width"))
+    {
+        return Err(PyValueError::new_err(
+            "border fields must be style, color or width",
+        ));
+    }
+    let style = match fields.get("style") {
+        None => BorderStyle::Single,
+        Some(value) => BORDER_STYLES
+            .iter()
+            .find(|(name, _)| Some(*name) == value.as_str())
+            .map(|(_, style)| *style)
+            .ok_or_else(|| PyValueError::new_err("unsupported border style"))?,
+    };
+    let color = match fields.get("color") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(parse_rgb(value.as_str().ok_or_else(|| {
+            PyValueError::new_err("border color requires #RRGGBB or None")
+        })?)?),
+    };
+    let width = match fields.get("width") {
+        None => {
+            if style == BorderStyle::None {
+                0.0
+            } else {
+                0.5
+            }
+        }
+        Some(value) => value
+            .as_f64()
+            .ok_or_else(|| PyValueError::new_err("border width requires a number"))?,
+    };
+    if style == BorderStyle::None {
+        if width != 0.0 {
+            return Err(PyValueError::new_err("a hidden border requires zero width"));
+        }
+    } else if !width.is_finite() || !(0.125..=12.0).contains(&width) || (width * 8.0).fract() != 0.0
+    {
+        return Err(PyValueError::new_err(
+            "border width must be 0.125..12 points in eighth-point increments",
+        ));
+    }
+    Ok(Some(Border {
+        style,
+        width: width as f32,
+        color,
+        space: 0.0,
+    }))
+}
+fn apply_border_patch(target: &mut Option<Borders>, value: &Value, inner: bool) -> PyResult<()> {
+    if value.is_null() {
+        *target = None;
+        return Ok(());
+    }
+    let values = value
+        .as_object()
+        .ok_or_else(|| PyValueError::new_err("borders requires a side mapping or None"))?;
+    let mut borders = target.unwrap_or_default();
+    for (key, value) in values {
+        let side = match key.as_str() {
+            "top" => &mut borders.top,
+            "right" => &mut borders.right,
+            "bottom" => &mut borders.bottom,
+            "left" => &mut borders.left,
+            "inside_horizontal" if inner => &mut borders.between,
+            "inside_vertical" if inner => &mut borders.inside_v,
+            _ => {
+                return Err(PyValueError::new_err(format!(
+                    "unsupported border side: {key}"
+                )))
+            }
+        };
+        *side = border_value(value)?;
+    }
+    *target = (borders != Borders::default()).then_some(borders);
+    Ok(())
+}
+fn borders_snapshot(borders: Option<Borders>, inner: bool) -> Value {
+    let Some(borders) = borders else {
+        return Value::Null;
+    };
+    let mut out = Map::new();
+    for (name, border) in [
+        ("top", borders.top),
+        ("right", borders.right),
+        ("bottom", borders.bottom),
+        ("left", borders.left),
+        ("inside_horizontal", borders.between),
+        ("inside_vertical", borders.inside_v),
+    ] {
+        if !inner && name.starts_with("inside_") {
+            continue;
+        }
+        let value = border.map(|border| json!({
+            "style": BORDER_STYLES.iter().find(|(_,style)| *style == border.style).map(|(name,_)| *name).unwrap_or("none"),
+            "color": border.color.map(rgb_string), "width": border.width,
+        })).unwrap_or(Value::Null);
+        out.insert(name.into(), value);
+    }
+    Value::Object(out)
+}
+fn active_table_indent(table: &Table) -> f32 {
+    if matches!(table.props.align, Some(Align::Center | Align::Right)) {
+        0.0
+    } else {
+        table.props.indent.unwrap_or(0.0)
+    }
+}
+fn validate_table_metadata_budget(document: &Document) -> PyResult<()> {
+    let mut bytes = 0_usize;
+    let mut pending: Vec<&Block> = document
+        .body
+        .iter()
+        .chain(document.parts.values().flat_map(|part| part.blocks.iter()))
+        .map(AsRef::as_ref)
+        .collect();
+    while let Some(block) = pending.pop() {
+        if let Block::Table(table) = block {
+            for value in [&table.props.caption, &table.props.description]
+                .into_iter()
+                .flatten()
+            {
+                bytes = bytes
+                    .checked_add(value.len())
+                    .filter(|bytes| *bytes <= MAX_TABLE_METADATA_BYTES)
+                    .ok_or_else(|| limit("table titles and descriptions exceed 16 MiB"))?;
+            }
+            pending.extend(
+                table
+                    .rows
+                    .iter()
+                    .flat_map(|row| &row.cells)
+                    .flat_map(|cell| &cell.blocks)
+                    .map(AsRef::as_ref),
+            );
+        }
+    }
+    Ok(())
+}
+
+type LayoutCellKey = (StoryRef, Path, usize, usize);
+fn native_table_roots(document: &Document) -> Vec<(StoryRef, Path)> {
+    let mut roots = Vec::new();
+    for (index, block) in document.body.iter().enumerate() {
+        if matches!(block.as_ref(), Block::Table(_)) {
+            roots.push((StoryRef::Body, Path::top(index)));
+        }
+    }
+    for (id, part) in &document.parts {
+        for (index, block) in part.blocks.iter().enumerate() {
+            if matches!(block.as_ref(), Block::Table(_)) {
+                roots.push((StoryRef::Part(*id), Path::top(index)));
+            }
+        }
+    }
+    roots
+}
+
+fn validate_style_tables(original: &Document, candidate: &Document) -> PyResult<()> {
+    let roots = native_table_roots(candidate);
+    if roots.is_empty() {
+        return Ok(());
+    }
+    let widths = native_cell_widths(candidate)?;
+    let mut previous_widths = None;
+    for ((story, path, row, index), width) in &widths {
+        let table = candidate
+            .table(*story, path)
+            .ok_or_else(|| PyValueError::new_err("native layout references a missing table"))?;
+        let cell = table
+            .rows
+            .get(*row)
+            .and_then(|r| r.cells.get(*index))
+            .ok_or_else(|| PyValueError::new_err("native layout references a missing cell"))?;
+        let margins = wordcraft_layout::cell_margins(candidate, table, *row, *index);
+        let inner = width - margins[1] - margins[3];
+        if inner <= 0.0 {
+            return Err(PyValueError::new_err(
+                "table style margins must leave positive cell content width",
+            ));
+        }
+        blocks_fit_width(&cell.blocks, inner)?;
+        if let Some(old_table) = original.table(*story, path) {
+            let old_margins = wordcraft_layout::cell_margins(original, old_table, *row, *index);
+            if old_margins != margins {
+                if previous_widths.is_none() {
+                    previous_widths = Some(native_cell_widths(original)?);
+                }
+                if let Some(previous_widths) = &previous_widths {
+                    let previous = native_cell_width(previous_widths, *story, path, *row, *index)?;
+                    let available = previous - margins[1] - margins[3];
+                    if available <= 0.0 {
+                        return Err(PyValueError::new_err(
+                            "table style margins exceed the previous cell allocation",
+                        ));
+                    }
+                    blocks_fit_width(&cell.blocks, available)?;
+                }
+            }
+        }
+    }
+    for (story, path) in roots {
+        validate_native_table_layout(candidate, &widths, story, path)?;
+    }
+    Ok(())
+}
+
+fn validate_native_table_layout(
+    document: &Document,
+    widths: &BTreeMap<LayoutCellKey, f32>,
+    story: StoryRef,
+    path: Path,
+) -> PyResult<()> {
+    let mut pending = vec![path];
+    while let Some(path) = pending.pop() {
+        let table = document
+            .table(story, &path)
+            .ok_or_else(|| PyIndexError::new_err("table no longer exists"))?;
+        let available =
+            native_container_width(document, widths, story, &path)? - active_table_indent(table);
+        for (row_index, row) in table.rows.iter().enumerate() {
+            let mut total = 0.0;
+            for (cell_index, cell) in row.cells.iter().enumerate() {
+                let width = native_cell_width(widths, story, &path, row_index, cell_index)?;
+                total += width;
+                if width + 0.001 < cell.span() as f32 * 6.0 {
+                    return Err(PyValueError::new_err(
+                        "native table layout must leave at least 6 points per column",
+                    ));
+                }
+                let margins =
+                    wordcraft_layout::cell_margins(document, table, row_index, cell_index);
+                let inner = width - margins[1] - margins[3];
+                if inner <= 0.0 {
+                    return Err(PyValueError::new_err(
+                        "table layout must leave positive width inside effective cell margins",
+                    ));
+                }
+                for (index, block) in cell.blocks.iter().enumerate() {
+                    match block.as_ref() {
+                        Block::Para(paragraph) => validate_picture_width(paragraph, inner)?,
+                        Block::Table(_) => pending.push(Path(
+                            [
+                                path.0.as_slice(),
+                                &[row_index as u32, cell_index as u32, index as u32],
+                            ]
+                            .concat(),
+                        )),
+                    }
+                }
+            }
+            if total > available + 0.01 || available <= 0.0 {
+                return Err(PyValueError::new_err(
+                    "native table layout exceeds its section or cell width",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn native_cell_widths(document: &Document) -> PyResult<BTreeMap<LayoutCellKey, f32>> {
+    let layout = wordcraft_layout::layout(
+        document,
+        &mut wordcraft_layout::LayoutCache::new(),
+        &wordcraft_layout::LayoutOptions::default(),
+    );
+    let mut widths = BTreeMap::new();
+    for page in &layout.pages {
+        for item in page.items.iter().chain(&page.header).chain(&page.footer) {
+            if let wordcraft_layout::Placed::Cell {
+                story,
+                table,
+                row,
+                cell,
+                rect,
+                ..
+            } = item
+            {
+                if !rect.w.is_finite() || rect.w <= 0.0 {
+                    return Err(PyValueError::new_err(
+                        "native layout produced invalid cell width",
+                    ));
+                }
+                widths
+                    .entry((*story, table.clone(), *row, *cell))
+                    .and_modify(|width: &mut f32| *width = width.min(rect.w))
+                    .or_insert(rect.w);
+                if widths.len() > MAX_CELLS {
+                    return Err(limit("native layout exceeds 100000 table cells"));
+                }
+            }
+        }
+    }
+    Ok(widths)
+}
+fn native_cell_width(
+    widths: &BTreeMap<LayoutCellKey, f32>,
+    story: StoryRef,
+    path: &Path,
+    row: usize,
+    cell: usize,
+) -> PyResult<f32> {
+    widths
+        .get(&(story, path.clone(), row, cell))
+        .copied()
+        .ok_or_else(|| {
+            EngineError::Unsupported(
+                "native layout did not expose the requested table cell geometry".into(),
+            )
+            .into()
+        })
+}
+fn native_container_width(
+    document: &Document,
+    widths: &BTreeMap<LayoutCellKey, f32>,
+    story: StoryRef,
+    path: &Path,
+) -> PyResult<f32> {
+    if let Some((parent, row, cell)) = path.cell() {
+        let table = document
+            .table(story, &parent)
+            .ok_or_else(|| PyIndexError::new_err("parent table no longer exists"))?;
+        let margins = wordcraft_layout::cell_margins(document, table, row, cell);
+        return Ok(native_cell_width(widths, story, &parent, row, cell)? - margins[1] - margins[3]);
+    }
+    match story {
+        StoryRef::Body => {
+            let sections = document.sections();
+            let index = document.section_index_of(path.0[0] as usize);
+            Ok(column_width(sections[index].1))
+        }
+        StoryRef::Part(id) => document
+            .sections()
+            .iter()
+            .find_map(|(_, section)| {
+                let h = section.headers;
+                let f = section.footers;
+                [h.default, h.first, h.even, f.default, f.first, f.even]
+                    .contains(&Some(id))
+                    .then(|| section.text_width())
+            })
+            .ok_or_else(|| PyIndexError::new_err("story has no owning section")),
     }
 }
 
@@ -2850,12 +3557,244 @@ fn semantic_anchors(document: &Document) -> BTreeMap<(u8, String), usize> {
     anchors
 }
 
+const TABLE_REGIONS: &[(&str, TablePart)] = &[
+    ("whole_table", TablePart::WholeTable),
+    ("odd_columns", TablePart::Band1Vert),
+    ("even_columns", TablePart::Band2Vert),
+    ("odd_rows", TablePart::Band1Horz),
+    ("even_rows", TablePart::Band2Horz),
+    ("first_column", TablePart::FirstCol),
+    ("last_column", TablePart::LastCol),
+    ("first_row", TablePart::FirstRow),
+    ("last_row", TablePart::LastRow),
+    ("top_right", TablePart::NeCell),
+    ("top_left", TablePart::NwCell),
+    ("bottom_right", TablePart::SeCell),
+    ("bottom_left", TablePart::SwCell),
+];
+
+fn table_region(name: &str) -> PyResult<TablePart> {
+    TABLE_REGIONS
+        .iter()
+        .find(|(key, _)| *key == name)
+        .map(|(_, part)| *part)
+        .ok_or_else(|| PyValueError::new_err("unknown table style region"))
+}
+
+fn table_style_reference(styles: &StyleSheet, value: &Value) -> PyResult<Option<String>> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    let name = value.as_str().ok_or_else(|| {
+        PyValueError::new_err("table style requires a style name, identifier or None")
+    })?;
+    let style = styles
+        .find(name)
+        .filter(|s| s.kind == StyleKind::Table)
+        .ok_or_else(|| PyValueError::new_err("unknown table style"))?;
+    Ok(Some(style.id.clone()))
+}
+
+fn table_look_snapshot(look: &wordcraft_doc::props::TableLook) -> Value {
+    json!({"header_row":look.header_row,"total_row":look.total_row,"banded_rows":look.banded_rows,
+        "first_column":look.first_column,"last_column":look.last_column,"banded_columns":look.banded_columns})
+}
+
+fn patch_table_look(look: &mut wordcraft_doc::props::TableLook, value: &Value) -> PyResult<()> {
+    if value.is_null() {
+        *look = Default::default();
+        return Ok(());
+    }
+    let values = value
+        .as_object()
+        .ok_or_else(|| PyValueError::new_err("look requires a flag mapping or None"))?;
+    for (key, value) in values {
+        let target = match key.as_str() {
+            "header_row" => &mut look.header_row,
+            "total_row" => &mut look.total_row,
+            "banded_rows" => &mut look.banded_rows,
+            "first_column" => &mut look.first_column,
+            "last_column" => &mut look.last_column,
+            "banded_columns" => &mut look.banded_columns,
+            _ => return Err(PyValueError::new_err("unknown table look flag")),
+        };
+        *target = strict_bool(value, key)?;
+    }
+    Ok(())
+}
+
+fn patch_table_style(
+    style: &mut Style,
+    styles: &StyleSheet,
+    part: TablePart,
+    values: Map<String, Value>,
+) -> PyResult<()> {
+    let whole = part == TablePart::WholeTable;
+    let mut format = style.table_part(part);
+    let (mut character, mut paragraph) = (Map::new(), Map::new());
+    let (mut margins, mut band_size) = (None, None);
+    for (key, value) in values {
+        match key.as_str() {
+            "background" => {
+                format.fill = if value.is_null() {
+                    None
+                } else {
+                    Some(parse_rgb(value.as_str().ok_or_else(|| {
+                        PyValueError::new_err("background requires a color or None")
+                    })?)?)
+                }
+            }
+            "alignment" => format.align = nullable_alignment(&value, true)?,
+            "vertical_alignment" => {
+                format.v_align = match value.as_str() {
+                    None if value.is_null() => None,
+                    Some("top") => Some(VAlign::Top),
+                    Some("center") => Some(VAlign::Center),
+                    Some("bottom") => Some(VAlign::Bottom),
+                    _ => {
+                        return Err(PyValueError::new_err(
+                            "vertical_alignment must be top, center, bottom or None",
+                        ))
+                    }
+                }
+            }
+            "borders" => apply_border_patch(&mut format.borders, &value, true)?,
+            "margins" if whole => {
+                margins = Some(if value.is_null() {
+                    None
+                } else {
+                    let values = if value.is_number() {
+                        json!([value, value, value, value])
+                    } else {
+                        value
+                    };
+                    let [top, right, bottom, left] = section_numbers::<4>(&values, "margins")?;
+                    if [top, right, bottom, left].iter().any(|v| *v < 0.0) {
+                        return Err(PyValueError::new_err(
+                            "table style margins must be nonnegative",
+                        ));
+                    }
+                    Some([top, left, bottom, right])
+                });
+            }
+            "row_band_size" if whole => {
+                band_size = Some(if value.is_null() {
+                    None
+                } else {
+                    Some(
+                        value
+                            .as_u64()
+                            .filter(|n| (1..=1000).contains(n))
+                            .ok_or_else(|| {
+                                PyValueError::new_err(
+                                    "row_band_size requires an integer from 1 to 1000 or None",
+                                )
+                            })? as u32,
+                    )
+                });
+            }
+            _ if is_paragraph_key(&key) => {
+                if !whole {
+                    return Err(PyValueError::new_err(
+                        "conditional table regions support only paragraph alignment",
+                    ));
+                }
+                paragraph.insert(key, value);
+            }
+            _ => {
+                character.insert(key, value);
+            }
+        }
+    }
+    CharPatch::parse(styles, &character, false)?.apply(&mut format.chr);
+    ParaPatch::parse(&paragraph)?.apply(&mut style.para);
+    style.set_table_part(part, format);
+    if margins.is_some() || band_size.is_some() {
+        let table = style.table.get_or_insert_with(Default::default);
+        if let Some(value) = margins {
+            table.cell_margins = value;
+        }
+        if let Some(value) = band_size {
+            table.band_size = value;
+        }
+        if *table == Default::default() {
+            style.table = None;
+        }
+    }
+    Ok(())
+}
+
+fn table_part_snapshot(style: &Style, part: TablePart) -> PyResult<Map<String, Value>> {
+    let format = style.table_part(part);
+    let mut values = char_snapshot(&format.chr);
+    values.remove("style");
+    if part == TablePart::WholeTable {
+        values.extend(para_snapshot(&style.para)?);
+        values.insert(
+            "margins".into(),
+            json!(style
+                .table
+                .as_ref()
+                .and_then(|t| t.cell_margins)
+                .map(|[t, l, b, r]| [t, r, b, l])),
+        );
+        values.insert(
+            "row_band_size".into(),
+            json!(style.table.as_ref().and_then(|t| t.band_size)),
+        );
+    }
+    values.insert("background".into(), json!(format.fill.map(rgb_string)));
+    values.insert("alignment".into(), json!(format.align.map(alignment_name)));
+    values.insert(
+        "vertical_alignment".into(),
+        json!(format.v_align.map(vertical_alignment_name)),
+    );
+    values.insert("borders".into(), borders_snapshot(format.borders, true));
+    Ok(values)
+}
+
+fn table_style_snapshot(
+    styles: &StyleSheet,
+    style: &Style,
+    resolved: bool,
+    region: Option<&str>,
+) -> PyResult<Value> {
+    let merged;
+    let style = if resolved {
+        let native = styles
+            .table_style(&style.id)
+            .ok_or_else(|| PyValueError::new_err("unknown table style"))?;
+        merged = Style {
+            chr: native.chr,
+            para: native.para,
+            table: Some(native.parts),
+            ..style.clone()
+        };
+        &merged
+    } else {
+        style
+    };
+    let mut values = table_part_snapshot(style, table_region(region.unwrap_or("whole_table"))?)?;
+    if region.is_none() {
+        let regions = TABLE_REGIONS
+            .iter()
+            .filter(|(_, part)| *part != TablePart::WholeTable)
+            .map(|(name, part)| {
+                table_part_snapshot(style, *part).map(|v| (name.to_string(), Value::Object(v)))
+            })
+            .collect::<PyResult<Map<String, Value>>>()?;
+        values.insert("regions".into(), Value::Object(regions));
+    }
+    Ok(Value::Object(values))
+}
+
 fn style_kind(kind: &str) -> PyResult<StyleKind> {
     match kind {
         "paragraph" => Ok(StyleKind::Paragraph),
         "character" => Ok(StyleKind::Character),
+        "table" => Ok(StyleKind::Table),
         _ => Err(PyValueError::new_err(
-            "style kind must be paragraph or character",
+            "style kind must be paragraph, character or table",
         )),
     }
 }
@@ -2863,8 +3802,13 @@ fn style_kind(kind: &str) -> PyResult<StyleKind> {
 fn supported_style<'a>(styles: &'a StyleSheet, id: &str) -> PyResult<&'a Style> {
     styles
         .find(id)
-        .filter(|style| matches!(style.kind, StyleKind::Paragraph | StyleKind::Character))
-        .ok_or_else(|| PyValueError::new_err("unknown paragraph or character style"))
+        .filter(|style| {
+            matches!(
+                style.kind,
+                StyleKind::Paragraph | StyleKind::Character | StyleKind::Table
+            )
+        })
+        .ok_or_else(|| PyValueError::new_err("unknown paragraph, character or table style"))
 }
 
 fn style_base(
@@ -3648,7 +4592,10 @@ fn validate_picture_width(paragraph: &Paragraph, width: f32) -> PyResult<()> {
 fn blocks_fit_width(blocks: &[Arc<Block>], width: f32) -> PyResult<()> {
     for block in blocks {
         let exceeds = match block.as_ref() {
-            Block::Table(table) => table.total_width() > width + 0.001,
+            Block::Table(table) => {
+                table.props.width_pct.is_none()
+                    && table.props.width.unwrap_or_else(|| table.total_width()) > width + 0.001
+            }
             Block::Para(paragraph) => paragraph.objects.iter().any(
                 |object| matches!(object, InlineObject::Image { w, .. } if *w > width + 0.001),
             ),
@@ -3681,6 +4628,12 @@ fn validate_section_content(document: &Document, section: usize) -> PyResult<()>
         sections[section - 1].0 + 1
     };
     blocks_fit_width(&document.body[begin..=end], column_width(props))?;
+    let mut tables = document.body[begin..=end]
+        .iter()
+        .enumerate()
+        .filter(|(_, block)| matches!(block.as_ref(), Block::Table(_)))
+        .map(|(index, _)| (StoryRef::Body, Path::top(begin + index)))
+        .collect::<Vec<_>>();
     let h = props.headers;
     let f = props.footers;
     for id in [h.default, h.first, h.even, f.default, f.first, f.even]
@@ -3692,6 +4645,16 @@ fn validate_section_content(document: &Document, section: usize) -> PyResult<()>
             .get(&id)
             .ok_or_else(|| PyValueError::new_err("section references a missing story"))?;
         blocks_fit_width(&part.blocks, props.text_width())?;
+        tables.extend(part.blocks.iter().enumerate().filter_map(|(index, block)| {
+            matches!(block.as_ref(), Block::Table(_))
+                .then_some((StoryRef::Part(id), Path::top(index)))
+        }));
+    }
+    if !tables.is_empty() {
+        let widths = native_cell_widths(document)?;
+        for (story, path) in tables {
+            validate_native_table_layout(document, &widths, story, path)?;
+        }
     }
     Ok(())
 }
@@ -4895,7 +5858,7 @@ mod tests {
         let base = document
             .add_style("Report & \"Base\"", "paragraph", Some("Normal"))
             .unwrap();
-        document.format_style(&base, r##"{"bold":true,"font_size":18,"color":"#123456","space_after":5,"keep_with_next":true,"background":"#EEFFEE"}"##).unwrap();
+        document.format_style(&base, r##"{"bold":true,"font_size":18,"color":"#123456","space_after":5,"keep_with_next":true,"background":"#EEFFEE"}"##, None).unwrap();
         let derived = document
             .add_style("Report Body", "paragraph", Some(&base))
             .unwrap();
@@ -4908,9 +5871,11 @@ mod tests {
             .unwrap()
             .contains(&derived));
         let direct: Value =
-            serde_json::from_str(&document.style_formatting(&derived, false).unwrap()).unwrap();
+            serde_json::from_str(&document.style_formatting(&derived, false, None).unwrap())
+                .unwrap();
         let resolved: Value =
-            serde_json::from_str(&document.style_formatting(&derived, true).unwrap()).unwrap();
+            serde_json::from_str(&document.style_formatting(&derived, true, None).unwrap())
+                .unwrap();
         assert!(direct["bold"].is_null());
         assert!(direct["font_size"].is_null());
         assert!(direct.get("size").is_none());
@@ -4995,15 +5960,18 @@ mod tests {
                 .keep_next
         );
         let mut copy = document.copy().unwrap();
-        copy.format_style(&base, r#"{"font_size":22}"#).unwrap();
+        copy.format_style(&base, r#"{"font_size":22}"#, None)
+            .unwrap();
         assert_eq!(
-            serde_json::from_str::<Value>(&document.style_formatting(&derived, true).unwrap())
-                .unwrap()["font_size"],
+            serde_json::from_str::<Value>(
+                &document.style_formatting(&derived, true, None).unwrap()
+            )
+            .unwrap()["font_size"],
             18.0
         );
         assert_eq!(
-            serde_json::from_str::<Value>(&copy.style_formatting(&derived, true).unwrap()).unwrap()
-                ["font_size"],
+            serde_json::from_str::<Value>(&copy.style_formatting(&derived, true, None).unwrap())
+                .unwrap()["font_size"],
             22.0
         );
         let bytes = document.to_bytes().unwrap();
@@ -5039,11 +6007,13 @@ mod tests {
         let character = document
             .add_style("Annotation", "character", Some("Emphasis"))
             .unwrap();
-        document.format_style(&character, r##"{"underline":"double_wave","strike":true,"script":"superscript","highlight":"yellow","background":"#102030","color":"auto","font_size":15.5}"##).unwrap();
+        document.format_style(&character, r##"{"underline":"double_wave","strike":true,"script":"superscript","highlight":"yellow","background":"#102030","color":"auto","font_size":15.5}"##, None).unwrap();
         let direct: Value =
-            serde_json::from_str(&document.style_formatting(&character, false).unwrap()).unwrap();
+            serde_json::from_str(&document.style_formatting(&character, false, None).unwrap())
+                .unwrap();
         let resolved: Value =
-            serde_json::from_str(&document.style_formatting(&character, true).unwrap()).unwrap();
+            serde_json::from_str(&document.style_formatting(&character, true, None).unwrap())
+                .unwrap();
         assert_eq!(direct["underline"], "double_wave");
         assert_eq!(direct["background"], "#102030");
         assert!(direct["italic"].is_null());
@@ -5142,7 +6112,9 @@ mod tests {
         assert!(document
             .add_style("Missing base", "paragraph", Some("Missing"))
             .is_err());
-        assert!(document.add_style("Table style", "table", None).is_err());
+        assert!(document
+            .add_style("Numbering style", "numbering", None)
+            .is_err());
         for patch in [
             r#"{"size":20}"#,
             r#"{"font_size":true}"#,
@@ -5155,7 +6127,10 @@ mod tests {
             "[]",
             r#"{"font_size":NaN}"#,
         ] {
-            assert!(document.format_style(&root, patch).is_err(), "{patch}");
+            assert!(
+                document.format_style(&root, patch, None).is_err(),
+                "{patch}"
+            );
             assert!(
                 document
                     .format_range_patch(paragraph, 0, 1, revision, patch)
@@ -5164,7 +6139,7 @@ mod tests {
             );
         }
         assert!(document
-            .format_style(&root, r#"{"style":"Strong"}"#)
+            .format_style(&root, r#"{"style":"Strong"}"#, None)
             .is_err());
         assert!(document
             .format_paragraph(paragraph, r#"{"bold":true}"#)
@@ -5176,7 +6151,7 @@ mod tests {
             .format_range_patch(paragraph, 0, 1, revision, r#"{"style":"Normal"}"#)
             .is_err());
         assert!(document
-            .format_style(&root, &" ".repeat(MAX_FORMAT_PATCH_BYTES + 1))
+            .format_style(&root, &" ".repeat(MAX_FORMAT_PATCH_BYTES + 1), None)
             .is_err());
         assert_eq!(document.revision().unwrap(), revision);
         assert_eq!(document.paragraph_text(paragraph).unwrap(), "Unchanged");
@@ -5193,6 +6168,9 @@ mod tests {
         let revision = document.revision().unwrap();
         assert!(document
             .add_style("One too many", "paragraph", None)
+            .is_err());
+        assert!(document
+            .add_style("One table too many", "table", None)
             .is_err());
         assert_eq!(document.revision().unwrap(), revision);
     }
@@ -5240,7 +6218,7 @@ mod tests {
             .add_style("Cell Body", "paragraph", Some("Normal"))
             .unwrap();
         document
-            .format_style(&style, r#"{"space_after":3}"#)
+            .format_style(&style, r#"{"space_after":3}"#, None)
             .unwrap();
         document.set_paragraph_style(paragraph, &style).unwrap();
         assert_eq!(
@@ -5255,7 +6233,7 @@ mod tests {
         let style = document.add_style("Marked", "character", None).unwrap();
         for (name, _) in UNDERLINES {
             document
-                .format_style(&style, &json!({"underline":name}).to_string())
+                .format_style(&style, &json!({"underline":name}).to_string(), None)
                 .unwrap();
             let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
             assert_eq!(
@@ -5265,7 +6243,7 @@ mod tests {
         }
         for (name, _) in HIGHLIGHTS {
             document
-                .format_style(&style, &json!({"highlight":name}).to_string())
+                .format_style(&style, &json!({"highlight":name}).to_string(), None)
                 .unwrap();
             let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
             assert_eq!(
@@ -5274,26 +6252,30 @@ mod tests {
             );
         }
         document
-            .format_style(&style, r#"{"strike":"double"}"#)
+            .format_style(&style, r#"{"strike":"double"}"#, None)
             .unwrap();
         let inherited = document
             .add_style("Inherited Mark", "character", Some(&style))
             .unwrap();
         assert_eq!(
-            serde_json::from_str::<Value>(&document.style_formatting(&inherited, true).unwrap())
-                .unwrap()["strike"],
+            serde_json::from_str::<Value>(
+                &document.style_formatting(&inherited, true, None).unwrap()
+            )
+            .unwrap()["strike"],
             "double"
         );
         document
-            .format_style(&inherited, r#"{"strike":false}"#)
+            .format_style(&inherited, r#"{"strike":false}"#, None)
             .unwrap();
         assert_eq!(
-            serde_json::from_str::<Value>(&document.style_formatting(&inherited, true).unwrap())
-                .unwrap()["strike"],
+            serde_json::from_str::<Value>(
+                &document.style_formatting(&inherited, true, None).unwrap()
+            )
+            .unwrap()["strike"],
             false
         );
         document
-            .format_style(&inherited, r#"{"strike":null}"#)
+            .format_style(&inherited, r#"{"strike":null}"#, None)
             .unwrap();
         let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
         let resolved = reopened.styles.resolve_char(
@@ -5306,7 +6288,7 @@ mod tests {
         assert!(resolved.double_strike);
         assert!(!resolved.strike);
         assert!(document
-            .format_style(&style, r#"{"strike":"triple"}"#)
+            .format_style(&style, r#"{"strike":"triple"}"#, None)
             .is_err());
     }
     #[test]
@@ -6354,5 +7336,883 @@ mod tests {
             .is_err());
         assert_eq!(document.note_ids(None).unwrap().len(), MAX_NOTES);
         assert_eq!(document.revision().unwrap(), revision);
+    }
+
+    #[test]
+    fn table_geometry_entry_points_reject_overflow_before_commit() {
+        let mut document = EditableDocx::new();
+        let table = document
+            .add_table(vec![vec!["a".into(), "b".into()]])
+            .unwrap();
+        document
+            .table_format_patch(table, r#"{"alignment":"center","indent":400}"#)
+            .unwrap();
+        let before = document.document().unwrap().clone();
+        let revision = document.revision().unwrap();
+        for alignment in [r#"{"alignment":"left"}"#, r#"{"alignment":null}"#] {
+            assert!(document.table_format_patch(table, alignment).is_err());
+            assert_eq!(document.document().unwrap(), &before);
+            assert_eq!(document.revision().unwrap(), revision);
+        }
+        let mut document = EditableDocx::new();
+        let table = document.add_table(vec![vec!["a".into()]]).unwrap();
+        document
+            .table_format_patch(table, r#"{"width_percent":50,"layout":"fixed"}"#)
+            .unwrap();
+        document
+            .set_cell_margins(table, 0, 0, Some((0.0, 100.0, 0.0, 100.0)))
+            .unwrap();
+        let before = document.document().unwrap().clone();
+        let revision = document.revision().unwrap();
+        for patch in [
+            r#"{"margins":[72,180,72,180]}"#,
+            r#"{"page_size":[400,792]}"#,
+            r#"{"columns":[2,24,false]}"#,
+        ] {
+            assert!(document.set_section_props(0, patch).is_err(), "{patch}");
+            assert_eq!(document.document().unwrap(), &before);
+            assert_eq!(document.revision().unwrap(), revision);
+        }
+        let mut document = EditableDocx::new();
+        let table = document
+            .add_table(vec![vec!["a".into(), "b".into()]])
+            .unwrap();
+        document
+            .table_format_patch(table, r#"{"layout":"fixed"}"#)
+            .unwrap();
+        document.merge_cells(table, 0, 0, 0, 1).unwrap();
+        let nested = document
+            .cell_add_table(table, 0, 0, vec![vec!["nested".into()]])
+            .unwrap();
+        document
+            .table_format_patch(nested, r#"{"width_percent":100,"layout":"fixed"}"#)
+            .unwrap();
+        document
+            .set_cell_margins(nested, 0, 0, Some((0.0, 150.0, 0.0, 150.0)))
+            .unwrap();
+        let before = document.document().unwrap().clone();
+        let revision = document.revision().unwrap();
+        let generation = document.table_generation(table).unwrap();
+        assert!(document.split_cell(table, 0, 0, 2).is_err());
+        assert_eq!(document.document().unwrap(), &before);
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.table_generation(table).unwrap(), generation);
+        assert_eq!(document.cell_text(nested, 0, 0).unwrap(), "nested");
+    }
+
+    #[test]
+    fn table_formatting_preserves_direct_preferences_metadata_and_native_output() {
+        let mut document = EditableDocx::new();
+        let table = document
+            .add_table(vec![
+                vec!["LEFT".into(), "RIGHT".into()],
+                vec!["one".into(), "two".into()],
+            ])
+            .unwrap();
+        let generation = document.table_generation(table).unwrap();
+        document.table_format_patch(table, r##"{"alignment":"center","width":240,"layout":"fixed","rtl":true,"title":"Résumé totals","description":"Accessible description","borders":{"top":{"style":"double","color":"#123456","width":1.5},"inside_vertical":{"style":"dotted","width":0.5}}}"##).unwrap();
+        let value: Value =
+            serde_json::from_str(&document.table_formatting(table).unwrap()).unwrap();
+        assert_eq!(value["width"], 240.0);
+        assert!(value["width_percent"].is_null());
+        assert_eq!(value["title"], "Résumé totals");
+        assert_eq!(value["layout"], "fixed");
+        assert_eq!(document.table_generation(table).unwrap(), generation);
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        let native = reopened.table(StoryRef::Body, &Path::top(table)).unwrap();
+        assert_eq!(native.props.align, Some(Align::Center));
+        assert_eq!(native.props.width, Some(240.0));
+        assert!(native.props.bidi_visual);
+        assert_eq!(native.props.caption.as_deref(), Some("Résumé totals"));
+        assert_eq!(
+            native.props.description.as_deref(),
+            Some("Accessible description")
+        );
+        assert_eq!(
+            native.props.borders.unwrap().top.unwrap().style,
+            BorderStyle::Double
+        );
+        let layout = wordcraft_layout::layout(
+            &reopened,
+            &mut wordcraft_layout::LayoutCache::new(),
+            &wordcraft_layout::LayoutOptions::default(),
+        );
+        let mut x = [None, None];
+        for item in &layout.pages[0].items {
+            if let wordcraft_layout::Placed::Cell {
+                table: path,
+                row: 0,
+                cell,
+                rect,
+                ..
+            } = item
+            {
+                if path == &Path::top(table) {
+                    x[*cell] = Some(rect.x);
+                }
+            }
+        }
+        assert!(
+            x[0].unwrap() > x[1].unwrap(),
+            "RTL keeps logical column zero on the right"
+        );
+        assert!(crate::docx::render(&bytes, 0, 72.0, None)
+            .unwrap()
+            .starts_with(b"\x89PNG\r\n\x1a\n"));
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        let extracted = crate::pdf::extract(&pdf, None).unwrap();
+        let text = extracted
+            .pages
+            .iter()
+            .flat_map(|page| &page.blocks)
+            .flat_map(|block| {
+                std::iter::once(block.text.as_str()).chain(
+                    block
+                        .table
+                        .iter()
+                        .flat_map(|table| &table.rows)
+                        .flatten()
+                        .map(String::as_str),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(text.matches("LEFT").count(), 1, "{text:?}");
+        assert_eq!(text.matches("RIGHT").count(), 1, "{text:?}");
+        assert!(!text.contains("Accessible description"));
+    }
+
+    #[test]
+    fn table_formatting_width_precedence_and_invalid_patches_are_atomic() {
+        let mut document = EditableDocx::new();
+        let table = document
+            .add_table(vec![vec!["a".into(), "b".into()]])
+            .unwrap();
+        document
+            .table_format_patch(
+                table,
+                r#"{"width_percent":50,"width":null,"layout":"fixed"}"#,
+            )
+            .unwrap();
+        assert_eq!(document.table(table).unwrap().props.width_pct, Some(50.0));
+        document
+            .table_format_patch(table, r#"{"width_percent":null,"width":200}"#)
+            .unwrap();
+        assert_eq!(document.table(table).unwrap().props.width, Some(200.0));
+        assert_eq!(document.table(table).unwrap().props.width_pct, None);
+        document
+            .table_format_patch(table, r#"{"width_percent":50}"#)
+            .unwrap();
+        assert_eq!(document.table(table).unwrap().props.width, None);
+        let before = document.document().unwrap().clone();
+        let revision = document.revision().unwrap();
+        for patch in [
+            r#"{"width":200,"width_percent":50}"#,
+            r#"{"width_percent":0.03}"#,
+            r#"{"width_percent":101}"#,
+            r#"{"width_percent":0.02}"#,
+            r#"{"width":1500}"#,
+            r#"{"indent":1500}"#,
+            r#"{"alignment":"justify"}"#,
+            r#"{"layout":"guess"}"#,
+            r#"{"rtl":1}"#,
+            r##"{"background":"#FFFFFF"}"##,
+            r#"{"borders":{"top":{"style":"doubleWave"}}}"#,
+            r#"{"borders":{"top":{"width":0.1}}}"#,
+        ] {
+            assert!(
+                document.table_format_patch(table, patch).is_err(),
+                "{patch}"
+            );
+            assert_eq!(document.document().unwrap(), &before, "{patch}");
+            assert_eq!(document.revision().unwrap(), revision);
+        }
+        document
+            .table_format_patch(table, r#"{"width":200,"alignment":"left","indent":12}"#)
+            .unwrap();
+        let widths = native_cell_widths(document.document().unwrap()).unwrap();
+        assert!(
+            (native_cell_width(&widths, StoryRef::Body, &Path::top(table), 0, 0).unwrap() - 100.0)
+                .abs()
+                < 0.01
+        );
+    }
+
+    #[test]
+    fn cell_formatting_reuses_direct_properties_borders_and_native_directions() {
+        let mut document = EditableDocx::new();
+        let table = document
+            .add_table(vec![vec!["Turned text".into(), "Normal text".into()]])
+            .unwrap();
+        document.cell_format_patch(table,0,0,r##"{"background":"#ABCDEF","margins":[2,3,4,5],"alignment":"center","vertical_alignment":"bottom","text_direction":"down","no_wrap":true,"borders":{"left":{"style":"wave","color":"#123456","width":1},"top":{"style":"none"}}}"##).unwrap();
+        let value: Value =
+            serde_json::from_str(&document.cell_formatting(table, 0, 0).unwrap()).unwrap();
+        assert_eq!(value["background"], "#ABCDEF");
+        assert_eq!(value["margins"], json!([2.0, 3.0, 4.0, 5.0]));
+        assert_eq!(value["text_direction"], "down");
+        assert_eq!(value["borders"]["top"]["style"], "none");
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        let cell = &reopened
+            .table(StoryRef::Body, &Path::top(table))
+            .unwrap()
+            .rows[0]
+            .cells[0];
+        assert_eq!(cell.props.margins, Some([2.0, 5.0, 4.0, 3.0]));
+        assert_eq!(cell.props.text_direction, TextDirection::Down);
+        assert!(cell.props.no_wrap);
+        assert_eq!(
+            cell.props.borders.unwrap().left.unwrap().style,
+            BorderStyle::Wave
+        );
+        assert!(crate::docx::render(&bytes, 0, 72.0, None)
+            .unwrap()
+            .starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(crate::docx::to_pdf(&bytes, None)
+            .unwrap()
+            .starts_with(b"%PDF-"));
+        document.cell_format_patch(table,0,0,r#"{"background":null,"margins":null,"alignment":null,"vertical_alignment":null,"text_direction":null,"borders":{"left":null}}"#).unwrap();
+        let value: Value =
+            serde_json::from_str(&document.cell_formatting(table, 0, 0).unwrap()).unwrap();
+        for key in [
+            "background",
+            "margins",
+            "alignment",
+            "vertical_alignment",
+            "text_direction",
+        ] {
+            assert!(value[key].is_null(), "{key}");
+        }
+        assert!(value["borders"]["left"].is_null());
+        assert_eq!(value["borders"]["top"]["style"], "none");
+        let revision = document.revision().unwrap();
+        for patch in [
+            r#"{"margins":[-1,0,0,0]}"#,
+            r#"{"margins":[0,2000,0,0]}"#,
+            r#"{"vertical_alignment":"middle"}"#,
+            r#"{"text_direction":"rtl"}"#,
+            r#"{"no_wrap":null}"#,
+            r#"{"borders":{"inside_vertical":{"style":"single"}}}"#,
+        ] {
+            assert!(
+                document.cell_format_patch(table, 0, 0, patch).is_err(),
+                "{patch}"
+            );
+            assert_eq!(document.revision().unwrap(), revision);
+        }
+    }
+
+    #[test]
+    fn table_formatting_checks_effective_parent_width_and_preserves_nested_content() {
+        let mut document = EditableDocx::new();
+        let table = document.add_table(vec![vec!["Parent".into()]]).unwrap();
+        document
+            .table_format_patch(table, r#"{"width_percent":50,"layout":"fixed"}"#)
+            .unwrap();
+        let nested = document
+            .cell_add_table(table, 0, 0, vec![vec!["Nested".into()]])
+            .unwrap();
+        assert!(document.table(nested).unwrap().total_width() < 234.0);
+        let before = document.document().unwrap().clone();
+        let revision = document.revision().unwrap();
+        assert!(document
+            .table_format_patch(table, r#"{"width_percent":25}"#)
+            .is_err());
+        assert!(document
+            .cell_format_patch(table, 0, 0, r#"{"margins":[0,200,0,200]}"#)
+            .is_err());
+        assert_eq!(document.document().unwrap(), &before);
+        assert_eq!(document.revision().unwrap(), revision);
+        let png = crate::rendering::encode_png(1, 1, &[0, 0, 0, 255], 72.0).unwrap();
+        assert!(document
+            .cell_add_image(table, 0, 0, &png, Some(300.0), Some(10.0), "")
+            .is_err());
+        let image = document
+            .cell_add_image(table, 0, 0, &png, Some(20.0), Some(10.0), "")
+            .unwrap();
+        assert!(document.set_image_size(image, 300.0, 10.0).is_err());
+        document
+            .table_format_patch(nested, r#"{"width":80,"layout":"fixed"}"#)
+            .unwrap();
+        document
+            .table_format_patch(table, r#"{"width_percent":25}"#)
+            .unwrap();
+        let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+        assert!(reopened.plain_text(StoryRef::Body).contains("Nested"));
+    }
+
+    #[test]
+    fn table_native_fit_measures_content_and_rejects_truncation_and_overflow() {
+        let mut document = EditableDocx::new();
+        let table = document
+            .add_table(vec![vec!["a".into(), "Longer text".into()]])
+            .unwrap();
+        document
+            .table_format_patch(table, r#"{"width_percent":100,"layout":"fixed"}"#)
+            .unwrap();
+        let widths = document.fit_table(table).unwrap();
+        assert_eq!(widths.len(), 2);
+        assert!(widths[1] > widths[0]);
+        assert!(widths.iter().sum::<f64>() < 468.0);
+        assert_eq!(document.table(table).unwrap().props.width_pct, None);
+        assert_eq!(document.table(table).unwrap().props.width, None);
+        assert!(!document.table(table).unwrap().props.fixed);
+        document
+            .set_cell_text(table, 0, 1, &"W".repeat(200))
+            .unwrap();
+        let revision = document.revision().unwrap();
+        assert!(document.fit_table(table).is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        let mut document = EditableDocx::new();
+        let table = document
+            .add_table((0..4001).map(|_| vec!["x".into()]).collect())
+            .unwrap();
+        let revision = document.revision().unwrap();
+        assert!(document.fit_table(table).is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+    }
+
+    #[test]
+    fn conditional_table_styles_roundtrip_all_regions_and_clear_inheritance() {
+        let mut document = EditableDocx::new();
+        let base = document
+            .add_style("Table résumé", "table", Some("TableGrid"))
+            .unwrap();
+        document.format_style(&base,r##"{"font_size":11,"space_after":2,"alignment":"center","background":"#F1F2F3","margins":[1,2,3,4],"row_band_size":2,"vertical_alignment":"bottom"}"##,None).unwrap();
+        for (index, (region, _)) in TABLE_REGIONS.iter().enumerate().skip(1) {
+            document.format_style(&base,&json!({"bold":true,"italic":false,"color":"#123456","alignment":"right","vertical_alignment":"center","background":format!("#{:06X}",0x120000+index),"borders":{"top":{"style":"double","width":1.0}}}).to_string(),Some(region)).unwrap();
+        }
+        let derived = document
+            .add_style("Derived table", "table", Some(&base))
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&document.style_info(&derived).unwrap()).unwrap()["kind"],
+            "table"
+        );
+        assert!(document.style_ids(None).unwrap().contains(&derived));
+        assert!(document.style_ids(Some("table")).unwrap().contains(&base));
+        assert!(!document
+            .style_ids(Some("paragraph"))
+            .unwrap()
+            .contains(&base));
+        let direct: Value =
+            serde_json::from_str(&document.style_formatting(&derived, false, None).unwrap())
+                .unwrap();
+        let resolved: Value =
+            serde_json::from_str(&document.style_formatting(&derived, true, None).unwrap())
+                .unwrap();
+        assert!(direct["background"].is_null());
+        assert_eq!(direct["regions"].as_object().unwrap().len(), 12);
+        assert_eq!(resolved["background"], "#F1F2F3");
+        assert_eq!(resolved["space_after"], 2.0);
+        assert_eq!(resolved["margins"], json!([1.0, 2.0, 3.0, 4.0]));
+        assert_eq!(resolved["regions"]["first_row"]["bold"], true);
+        document
+            .format_style(
+                &derived,
+                r#"{"bold":false,"borders":{"top":{"style":"none"}}}"#,
+                Some("first_row"),
+            )
+            .unwrap();
+        let inherited = document
+            .document()
+            .unwrap()
+            .styles
+            .table_style(&derived)
+            .unwrap()
+            .part(TablePart::FirstRow);
+        assert_eq!(inherited.chr.bold, Some(false));
+        assert_eq!(
+            inherited.borders.unwrap().top.unwrap().style,
+            BorderStyle::None
+        );
+        document
+            .format_style(
+                &derived,
+                r#"{"bold":null,"borders":{"top":null}}"#,
+                Some("first_row"),
+            )
+            .unwrap();
+        assert_eq!(
+            document
+                .document()
+                .unwrap()
+                .styles
+                .table_style(&derived)
+                .unwrap()
+                .part(TablePart::FirstRow)
+                .chr
+                .bold,
+            Some(true)
+        );
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        for (_, part) in TABLE_REGIONS {
+            assert_eq!(
+                reopened.styles.get(&base).unwrap().table_part(*part),
+                document
+                    .document()
+                    .unwrap()
+                    .styles
+                    .get(&base)
+                    .unwrap()
+                    .table_part(*part)
+            );
+        }
+        assert_eq!(
+            reopened
+                .styles
+                .get(&base)
+                .unwrap()
+                .table
+                .as_ref()
+                .unwrap()
+                .cell_margins,
+            Some([1.0, 4.0, 3.0, 2.0])
+        );
+        assert_eq!(
+            reopened
+                .styles
+                .get(&base)
+                .unwrap()
+                .table
+                .as_ref()
+                .unwrap()
+                .band_size,
+            Some(2)
+        );
+        assert!(document
+            .copy()
+            .unwrap()
+            .style_ids(Some("table"))
+            .unwrap()
+            .contains(&derived));
+    }
+
+    fn table_style_cell_fill(
+        layout: &wordcraft_layout::DocLayout,
+        table: usize,
+        row: usize,
+        cell: usize,
+    ) -> Option<Rgb> {
+        let items = &layout.pages[0].items;
+        let rect = items
+            .iter()
+            .find_map(|item| match item {
+                wordcraft_layout::Placed::Cell {
+                    table: path,
+                    row: r,
+                    cell: c,
+                    rect,
+                    ..
+                } if path == &Path::top(table) && *r == row && *c == cell => Some(rect),
+                _ => None,
+            })
+            .unwrap();
+        items.iter().find_map(|item| match item {
+            wordcraft_layout::Placed::Fill { rect: fill, color }
+                if (fill.x - rect.x).abs() < 0.01
+                    && (fill.y - rect.y).abs() < 0.01
+                    && (fill.w - rect.w).abs() < 0.01 =>
+            {
+                Some(*color)
+            }
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn conditional_table_styles_native_precedence_look_rtl_and_direct_overrides() {
+        let mut document = EditableDocx::new();
+        let style = document
+            .add_style("Conditional palette", "table", None)
+            .unwrap();
+        for (region, color) in [
+            ("whole_table", "#111111"),
+            ("odd_columns", "#222222"),
+            ("odd_rows", "#333333"),
+            ("even_rows", "#444444"),
+            ("first_column", "#555555"),
+            ("first_row", "#666666"),
+            ("top_left", "#777777"),
+        ] {
+            document
+                .format_style(
+                    &style,
+                    &json!({"background":color}).to_string(),
+                    Some(region),
+                )
+                .unwrap();
+        }
+        document
+            .format_style(
+                &style,
+                r#"{"bold":true,"alignment":"right"}"#,
+                Some("first_row"),
+            )
+            .unwrap();
+        let table = document
+            .add_table(
+                (0..4)
+                    .map(|r| (0..3).map(|c| format!("Cell{r}{c}")).collect())
+                    .collect(),
+            )
+            .unwrap();
+        document
+            .table_format_patch(
+                table,
+                &json!({"style":style,"rtl":true,"look":{"banded_columns":true}}).to_string(),
+            )
+            .unwrap();
+        let layout = wordcraft_layout::layout(
+            document.document().unwrap(),
+            &mut Default::default(),
+            &Default::default(),
+        );
+        for (r, c, color) in [
+            (0, 0, "#777777"),
+            (0, 1, "#666666"),
+            (1, 0, "#555555"),
+            (1, 1, "#333333"),
+            (2, 1, "#444444"),
+        ] {
+            assert_eq!(
+                table_style_cell_fill(&layout, table, r, c),
+                Some(parse_rgb(color).unwrap())
+            );
+        }
+        let mut xs = [None, None];
+        for item in &layout.pages[0].items {
+            if let wordcraft_layout::Placed::Cell {
+                table: path,
+                row: 0,
+                cell,
+                rect,
+                ..
+            } = item
+            {
+                if path == &Path::top(table) && *cell < 2 {
+                    xs[*cell] = Some(rect.x);
+                }
+            }
+        }
+        assert!(xs[0].unwrap() > xs[1].unwrap());
+        document
+            .format_style(&style, r#"{"row_band_size":2}"#, None)
+            .unwrap();
+        let bands = wordcraft_layout::layout(
+            document.document().unwrap(),
+            &mut Default::default(),
+            &Default::default(),
+        );
+        assert_eq!(
+            table_style_cell_fill(&bands, table, 2, 1),
+            Some(parse_rgb("#333333").unwrap())
+        );
+        assert_eq!(
+            table_style_cell_fill(&bands, table, 3, 1),
+            Some(parse_rgb("#444444").unwrap())
+        );
+        let paragraph = document.cell_paragraph_ids(table, 0, 1).unwrap()[0];
+        let (_, path) = document.location(paragraph).unwrap();
+        let formatted = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                wordcraft_layout::Placed::Lines { path: p, para, .. } if p == &path => Some(para),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(formatted.rp.align, Align::Right);
+        assert!(formatted.styles.iter().any(|s| s.rc.bold));
+        document
+            .set_cell_background(table, 0, 0, Some("#ABCDEF"))
+            .unwrap();
+        document
+            .format_paragraph(paragraph, r#"{"alignment":"left"}"#)
+            .unwrap();
+        let revision = document.revision().unwrap();
+        document
+            .format_range_patch(paragraph, 0, 6, revision, r#"{"bold":false}"#)
+            .unwrap();
+        let layout = wordcraft_layout::layout(
+            document.document().unwrap(),
+            &mut Default::default(),
+            &Default::default(),
+        );
+        assert_eq!(
+            table_style_cell_fill(&layout, table, 0, 0),
+            Some(parse_rgb("#ABCDEF").unwrap())
+        );
+        let formatted = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                wordcraft_layout::Placed::Lines { path: p, para, .. } if p == &path => Some(para),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(formatted.rp.align, Align::Left);
+        assert!(formatted.styles.iter().all(|s| !s.rc.bold));
+        document
+            .table_format_patch(
+                table,
+                r#"{"look":{"header_row":false,"first_column":false}}"#,
+            )
+            .unwrap();
+        assert!(!document.table(table).unwrap().rows[0].props.header);
+        document.set_row_repeat_header(table, 0, true).unwrap();
+        assert!(!document.table(table).unwrap().props.look.header_row);
+        document
+            .table_format_patch(table, r#"{"look":null}"#)
+            .unwrap();
+        assert_eq!(
+            document.table(table).unwrap().props.look,
+            Default::default()
+        );
+        document.merge_cells(table, 2, 0, 2, 1).unwrap();
+        document
+            .table_format_patch(table, r#"{"look":{"first_column":true}}"#)
+            .unwrap();
+        let layout = wordcraft_layout::layout(
+            document.document().unwrap(),
+            &mut Default::default(),
+            &Default::default(),
+        );
+        assert_eq!(
+            table_style_cell_fill(&layout, table, 2, 0),
+            Some(parse_rgb("#555555").unwrap())
+        );
+    }
+
+    #[test]
+    fn conditional_table_styles_native_output_and_base_mutations() {
+        let mut document = EditableDocx::new();
+        let base = document
+            .add_style("Base report", "table", Some("TableGrid"))
+            .unwrap();
+        let child = document
+            .add_style("Child report", "table", Some(&base))
+            .unwrap();
+        let table = document
+            .add_table(vec![
+                vec!["LabelA".into(), "LabelB".into()],
+                vec!["DataA".into(), "DataB".into()],
+            ])
+            .unwrap();
+        document
+            .table_format_patch(table, &json!({"style":child}).to_string())
+            .unwrap();
+        document
+            .format_style(
+                &base,
+                r##"{"background":"#C0D0E0","bold":true}"##,
+                Some("first_row"),
+            )
+            .unwrap();
+        let layout = wordcraft_layout::layout(
+            document.document().unwrap(),
+            &mut Default::default(),
+            &Default::default(),
+        );
+        assert_eq!(
+            table_style_cell_fill(&layout, table, 0, 1),
+            Some(parse_rgb("#C0D0E0").unwrap())
+        );
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        assert_eq!(
+            reopened
+                .table(StoryRef::Body, &Path::top(table))
+                .unwrap()
+                .props
+                .style
+                .as_deref(),
+            Some(child.as_str())
+        );
+        assert!(crate::docx::render(&bytes, 0, 72.0, None)
+            .unwrap()
+            .starts_with(b"\x89PNG\r\n\x1a\n"));
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        let extracted = crate::pdf::extract(&pdf, None).unwrap();
+        let text = extracted
+            .pages
+            .iter()
+            .flat_map(|p| &p.blocks)
+            .flat_map(|b| {
+                std::iter::once(b.text.as_str()).chain(
+                    b.table
+                        .iter()
+                        .flat_map(|t| &t.rows)
+                        .flatten()
+                        .map(String::as_str),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        for label in ["LabelA", "LabelB", "DataA", "DataB"] {
+            assert_eq!(text.matches(label).count(), 1, "{text:?}");
+        }
+        document.set_style_base(&child, None).unwrap();
+        let layout = wordcraft_layout::layout(
+            document.document().unwrap(),
+            &mut Default::default(),
+            &Default::default(),
+        );
+        assert_eq!(table_style_cell_fill(&layout, table, 0, 1), None);
+        document
+            .table_format_patch(table, r#"{"style":null}"#)
+            .unwrap();
+        assert!(document.table(table).unwrap().props.style.is_none());
+    }
+
+    #[test]
+    fn conditional_table_style_geometry_preserves_unregistered_nested_content_atomically() {
+        let mut document = EditableDocx::new();
+        let style = document.add_style("Narrow cells", "table", None).unwrap();
+        let derived = document
+            .add_style("Inherited cells", "table", Some(&style))
+            .unwrap();
+        let outer = document
+            .add_table(vec![vec!["".into(), "Outer".into()]])
+            .unwrap();
+        document
+            .table_format_patch(outer, &json!({"style":derived}).to_string())
+            .unwrap();
+        let inner = document
+            .cell_add_table(outer, 0, 0, vec![vec!["Nested".into()]])
+            .unwrap();
+        let (_, path) = document.location(inner).unwrap();
+        // Style validation cannot depend on whether a Python wrapper registered this child.
+        document.locations.remove(&inner);
+        let before = document.document().unwrap().clone();
+        let revision = document.revision().unwrap();
+        assert!(document
+            .format_style(&style, r#"{"margins":[0,150,0,150]}"#, None)
+            .is_err());
+        assert_eq!(document.document().unwrap(), &before);
+        assert_eq!(document.revision().unwrap(), revision);
+        let impossible = document
+            .add_style("Impossible margins", "table", None)
+            .unwrap();
+        document
+            .format_style(&impossible, r#"{"margins":150}"#, None)
+            .unwrap();
+        let revision = document.revision().unwrap();
+        assert!(document
+            .set_style_base(&derived, Some(&impossible))
+            .is_err());
+        assert!(document
+            .table_format_patch(outer, &json!({"style":impossible}).to_string())
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        assert!(document
+            .document()
+            .unwrap()
+            .table(StoryRef::Body, &path)
+            .is_some());
+        document
+            .format_style(&style, r#"{"margins":0}"#, None)
+            .unwrap();
+    }
+
+    #[test]
+    fn conditional_table_styles_validate_kind_regions_limits_and_atomic_patches() {
+        let mut document = EditableDocx::new();
+        let style = document.add_style("Bounds table", "table", None).unwrap();
+        let child = document
+            .add_style("Bounds child", "table", Some(&style))
+            .unwrap();
+        let table = document.add_table(vec![vec!["Data".into()]]).unwrap();
+        let before = document.document().unwrap().clone();
+        let revision = document.revision().unwrap();
+        for (patch, region) in [
+            (r#"{"space_after":3}"#, Some("first_row")),
+            (r#"{"margins":3}"#, Some("odd_rows")),
+            (r#"{"row_band_size":2}"#, Some("first_row")),
+            (r#"{"row_band_size":0}"#, None),
+            (r#"{"row_band_size":1001}"#, None),
+            (r#"{"row_band_size":true}"#, None),
+            (r#"{"row_band_size":1.5}"#, None),
+            (r#"{"margins":-1}"#, None),
+            (r#"{"margins":[0,0,0,1585]}"#, None),
+            (r#"{"style":"Normal"}"#, None),
+            (r#"{"bold":true}"#, Some("unknown")),
+            (r#"{"vertical_alignment":"baseline"}"#, None),
+        ] {
+            assert!(
+                document.format_style(&style, patch, region).is_err(),
+                "{patch} {region:?}"
+            );
+            assert_eq!(document.document().unwrap(), &before);
+        }
+        assert!(document
+            .format_style("Normal", r#"{"bold":true}"#, Some("first_row"))
+            .is_err());
+        assert!(document
+            .style_formatting("Normal", false, Some("whole_table"))
+            .is_err());
+        assert!(document.set_style_base(&style, Some(&child)).is_err());
+        assert!(document.set_style_base(&style, Some("Normal")).is_err());
+        assert!(document
+            .add_style("Invalid table", "table", Some("Normal"))
+            .is_err());
+        for patch in [
+            r#"{"style":"Normal"}"#,
+            r#"{"style":"missing"}"#,
+            r#"{"look":{"header_row":null}}"#,
+            r#"{"look":{"header_row":1}}"#,
+            r#"{"look":{"unknown":true}}"#,
+        ] {
+            assert!(document.table_format_patch(table, patch).is_err());
+        }
+        assert!(document
+            .format_style(&style, &" ".repeat(MAX_TABLE_PATCH_BYTES + 1), None)
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+    }
+
+    #[test]
+    fn table_metadata_budgets_and_border_reset_semantics_are_explicit() {
+        let mut document = EditableDocx::new();
+        let table = document.add_table(vec![vec!["Data".into()]]).unwrap();
+        let text = "😀".repeat(10_000);
+        document
+            .table_format_patch(table, &json!({"title":text,"description":text}).to_string())
+            .unwrap();
+        let revision = document.revision().unwrap();
+        assert!(document
+            .table_format_patch(table, &json!({"title":"x".repeat(10_001)}).to_string())
+            .is_err());
+        assert!(document
+            .table_format_patch(table, &" ".repeat(MAX_TABLE_PATCH_BYTES + 1))
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        document.clear_table_borders(table).unwrap();
+        assert!(document
+            .table(table)
+            .unwrap()
+            .props
+            .borders
+            .unwrap()
+            .top
+            .is_some_and(|border| border.style == BorderStyle::None));
+        document
+            .table_format_patch(table, r#"{"borders":null,"title":null,"description":null}"#)
+            .unwrap();
+        assert_eq!(document.table(table).unwrap().props.borders, None);
+        assert!(
+            document.table_borders(table).unwrap().is_some(),
+            "clearing direct borders restores TableGrid inheritance"
+        );
+        let mut candidate = document.document().unwrap().clone();
+        document
+            .table_mut(&mut candidate, table)
+            .unwrap()
+            .props
+            .caption = Some("x".repeat(MAX_TABLE_METADATA_BYTES + 1));
+        assert!(document.commit(candidate).is_err());
+        assert_eq!(document.table(table).unwrap().props.caption, None);
     }
 }

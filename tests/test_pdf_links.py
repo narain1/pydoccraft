@@ -57,10 +57,59 @@ class PdfLinkTests(unittest.TestCase):
             self.assertIn("same alone", markdown)
             self.assertNotIn("**Links:**", markdown)
 
-    def test_multiline_empty_and_overlapping_annotations_remain_unresolved(self) -> None:
+    def test_multiline_labels_use_exact_native_newlines_and_preserve_plain_text(self) -> None:
+        lines = [(40, 180, "First line"), (40, 160, "Second line")]
+        with doc_ex.open(linked_pdf(lines, [])) as plain, doc_ex.open(linked_pdf(
+            lines, [((38, 157, 120, 194), "https://example.com/multiline")]
+        )) as linked:
+            page = linked[0]
+            self.assertEqual(page.get_text(), plain[0].get_text())
+            self.assertEqual(len(page.blocks), 1)
+            link = page.get_links()[0]
+            self.assertEqual((link.text, link.metadata["start"], link.metadata["end"]), ("First line\nSecond line", 0, 22))
+            self.assertEqual(page.blocks[0].text, link.text)
+            self.assertIn("[First line\nSecond line](https://example.com/multiline)", page.get_text("markdown"))
+            self.assertNotIn("**Links:**", page.get_text("markdown"))
+
+    def test_partial_multiline_unicode_labels_remap_neighboring_links(self) -> None:
+        lines = [(40, 220, "café same"), (66, 200, "same café"), (40, 180, "same alone")]
+        annotations = [
+            ((65, 197, 97, 234), "https://example.com/multiline"),
+            ((38, 217, 65, 234), "https://example.com/before"),
+            ((98, 197, 123, 214), "https://example.com/after"),
+        ]
+        with doc_ex.open(linked_pdf(lines, [])) as plain, doc_ex.open(linked_pdf(lines, annotations)) as linked:
+            page = linked[0]
+            self.assertEqual(page.get_text(), plain[0].get_text())
+            self.assertEqual([block.text for block in page.blocks], ["café same\nsame café", "same alone"])
+            self.assertEqual([(link.text, link.metadata["start"], link.metadata["end"]) for link in page.get_links()], [
+                ("same\nsame", 5, 14), ("café", 0, 4), ("café", 15, 19),
+            ])
+            for link in page.get_links():
+                block = page.blocks[link.metadata["block"]]
+                self.assertEqual(block.text[link.metadata["start"]:link.metadata["end"]], link.text)
+                self.assertEqual(link.metadata["label_status"], "resolved")
+            self.assertNotIn("**Links:**", page.get_text("markdown"))
+
+    def test_disjoint_multiline_labels_can_share_a_boundary_line(self) -> None:
+        lines = [(40, 220, "AAAA"), (40, 200, "AAAABBBB"), (72, 180, "BBBB")]
+        annotations = [
+            ((38, 197, 72, 234), "https://example.com/first"),
+            ((72, 177, 106, 214), "https://example.com/second"),
+        ]
+        with doc_ex.open(linked_pdf(lines, [])) as plain, doc_ex.open(linked_pdf(lines, annotations)) as linked:
+            page = linked[0]
+            self.assertEqual(page.get_text(), plain[0].get_text())
+            self.assertEqual(len(page.blocks), 1)
+            self.assertEqual([(link.text, link.metadata["start"], link.metadata["end"]) for link in page.get_links()], [
+                ("AAAA\nAAAA", 0, 9), ("BBBB\nBBBB", 9, 18),
+            ])
+            self.assertEqual(page.get_text("markdown"), "[AAAA\nAAAA](https://example.com/first)[BBBB\nBBBB](https://example.com/second)")
+
+    def test_empty_noncontiguous_and_overlapping_annotations_remain_unresolved(self) -> None:
         cases = [
-            ([(40, 180, "First line"), (40, 160, "Second line")],
-             [((38, 157, 120, 194), "https://example.com/multiline")]),
+            ([(40, 220, "AAAA BBBB"), (40, 200, "AAAA BBBB")],
+             [((38, 197, 73, 234), "https://example.com/column")]),
             ([(40, 250, "same")],
              [((38, 247, 75, 263), "https://example.com/one"),
               ((38, 247, 75, 263), "https://example.com/two")]),
@@ -80,6 +129,9 @@ class PdfLinkTests(unittest.TestCase):
                     self.assertNotIn("end", link.metadata)
                     self.assertEqual(link.metadata["label_status"], "unresolved_geometry")
                 self.assertTrue(all(not block.links for block in page.blocks))
+                with doc_ex.open(linked_pdf(lines, [])) as plain:
+                    self.assertEqual([block.text for block in page.blocks], [block.text for block in plain[0].blocks])
+                    self.assertEqual(page.get_text(), plain[0].get_text())
 
     def test_internal_page_destinations_keep_uri_fragment_and_zero_based_target(self) -> None:
         data = linked_pdf([(40, 250, "same")], [((38, 247, 75, 263), "#page=1")])
