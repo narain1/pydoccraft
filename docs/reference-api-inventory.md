@@ -4,7 +4,7 @@
 
 This comparison groups related reference members under existing Python handles and formatting properties. It is not an exhaustive member inventory, implementation test, or format-conformance claim. Open XML schema/model APIs do not establish pagination or rendering. Reference products are not runtime dependencies.
 
-Audited local surface: `17482eb76c264e5c4303b34cf8d7d1b62287e656`. The inventory contains 44 families and 195 representative members from 17 pinned source files. Later implementation changes require review.
+Audited local surface: `789ea8ce3222aab47315549f6b66ae5850cf6ec9`. The inventory contains 44 families and 195 representative members from 17 pinned source files. Later implementation changes require review.
 
 - [dotnet/Open-XML-SDK v3.5.1](https://github.com/dotnet/Open-XML-SDK/tree/3139fdfd27414548a41555f7848d5728f6e71a42) — `3139fdfd27414548a41555f7848d5728f6e71a42`
 - [pymupdf/PyMuPDF 2.0](https://github.com/pymupdf/PyMuPDF/tree/b8904b27efa0c4e2258f0e46ab4498a6173ffa22) — `b8904b27efa0c4e2258f0e46ab4498a6173ffa22`
@@ -51,11 +51,13 @@ Character and paragraph properties.
 
 **Criteria / owners:** TXT2 (W04), TXT3 (W04), TXT6 (W04), LAY5 (W06), API4 (W01)
 
-**Audited local surface:** Paragraph.format and TextRange.format; keep/spacing/borders through common patches.
+**Audited local surface:** Paragraph/TextRange/Style formatting and shared defaults; direction and language reuse native properties.
 
-**Disposition:** `implemented_subset`. **Remaining:** Complex-script/language/typography conformance requires fixtures; do not create one wrapper per XML property. Native vertical/border styles have explicit supported subset.
+**Disposition:** `implemented_subset`. **Remaining:** Bounded direction/language evidence covers selected mixed-script layout. Broader complex-script/CJK typography, font controls and diagnostics remain open; no wrapper per XML property.
 
 **Upstream candidates:** [U02](upstream-roadmap.md), [U04](upstream-roadmap.md)
+
+**Evidence profiles:** [word.direction-language](support-matrix.md#worddirection-language)
 
 ## REF-OX-STYLES
 
@@ -583,11 +585,13 @@ Annotation operations and appearances.
 
 **Criteria / owners:** PDF6 (W10), REV1 (W07), REV6 (W13)
 
-**Audited local surface:** Owned note/highlight/link/markup annotation subset and typed properties.
+**Audited local surface:** Existing note/markup/link and bounded rectangle/ellipse annotation handles and typed properties.
 
-**Disposition:** `implemented_subset`. **Remaining:** Do not call PDF annotations equivalent to tracked DOCX review. Broader appearances/quads/replies/rotation require native fixtures.
+**Disposition:** `implemented_subset`. **Remaining:** Fixed-profile geometric comments do not establish opacity/fill/reply or arbitrary appearance support. Caller-bounded native inventories remain upstream work; PDF annotations are distinct from tracked DOCX review.
 
 **Upstream candidates:** [U10](upstream-roadmap.md)
+
+**Evidence profiles:** [pdf.geometric-comments](support-matrix.md#pdfgeometric-comments)
 
 ## REF-PM-FORMS
 
