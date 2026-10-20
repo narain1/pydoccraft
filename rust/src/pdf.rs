@@ -15,7 +15,7 @@ use crate::model::{
 use crate::EngineError;
 
 pub struct PdfSession {
-    renderer: Mutex<PageRenderer>,
+    renderer: Mutex<Option<PageRenderer>>,
     page_sizes: Vec<[f32; 2]>,
 }
 
@@ -107,7 +107,7 @@ impl PdfSession {
         }
         Ok((
             Self {
-                renderer: Mutex::new(renderer),
+                renderer: Mutex::new(Some(renderer)),
                 page_sizes: info
                     .pages
                     .iter()
@@ -129,7 +129,9 @@ impl PdfSession {
             .lock()
             .map_err(|_| EngineError::Malformed("PDF render session is unavailable".into()))?;
         render_with(
-            &mut renderer,
+            renderer
+                .as_mut()
+                .ok_or_else(|| EngineError::Closed("PDF render session is closed".into()))?,
             self.page_sizes.get(page).copied(),
             page,
             dpi,
@@ -138,10 +140,22 @@ impl PdfSession {
     }
 
     pub fn stats(&self) -> Result<pdfcraft_render::RenderStats, EngineError> {
+        let renderer = self
+            .renderer
+            .lock()
+            .map_err(|_| EngineError::Malformed("PDF render session is unavailable".into()))?;
+        renderer
+            .as_ref()
+            .map(PageRenderer::stats)
+            .ok_or_else(|| EngineError::Closed("PDF render session is closed".into()))
+    }
+
+    pub fn close(&self) -> Result<(), EngineError> {
         self.renderer
             .lock()
-            .map(|renderer| renderer.stats())
-            .map_err(|_| EngineError::Malformed("PDF render session is unavailable".into()))
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        Ok(())
     }
 }
 
