@@ -45,7 +45,7 @@ Path("slides.pdf").write_bytes(doc_ex.convert("slides.pptx", "pdf"))
 | OCR | No | — | — |
 | Create a new document from scratch (unreleased branch) | Basic | Basic | Basic |
 
-PDF table detection is conservative. PDF links retain destinations and geometry; unambiguous single-line labels have exact character offsets. Ambiguous or multiline regions remain unresolved. DOCX computed pagination cannot split one automatically wrapped paragraph into exact normalized page slices. PPTX exposes URL links but not every PowerPoint action. Conversion uses upstream semantic exporters and is not pixel-perfect.
+PDF table detection is conservative. PDF links retain destinations and geometry; unambiguous single-line and contiguous multiline labels have exact character offsets. Ambiguous regions remain unresolved. DOCX computed pagination cannot split one automatically wrapped paragraph into exact normalized page slices. PPTX exposes URL links but not every PowerPoint action. Conversion uses upstream semantic exporters and is not pixel-perfect.
 
 ## Render a page at a chosen DPI
 
@@ -58,9 +58,10 @@ import doc_ex
 with doc_ex.open("report.docx") as document:  # also .pdf or .pptx
     Path("page-1.png").write_bytes(document.render_page(0, dpi=300))
     # Equivalent: document[0].get_pixmap(dpi=300)
+    Path("detail.png").write_bytes(document.render_page(0, dpi=300, clip=(36, 36, 144, 72)))
 ```
 
-Indexes are zero-based; negative indexes are supported. DPI defaults to 144 and must be finite and between 1 and 1200, subject to output-size limits. Both methods return PNG bytes. DOCX pagination follows WordCraft layout and may differ from Microsoft Word. See [rendering details](docs/formats.md#rendering).
+Indexes are zero-based; negative indexes are supported. DPI defaults to 144 and must be finite and between 1 and 1200, subject to output-size limits. Both methods return PNG bytes. Optional `clip=(x, y, width, height)` selects a region in displayed-page points. DOCX pagination follows WordCraft layout and may differ from Microsoft Word. See [rendering details](docs/formats.md#rendering).
 
 The unreleased branch adds native authoring through `doc_ex.new("docx" | "pdf" | "pptx")`, including text, tables, images, backgrounds, explicit saving and independent copies. See [the authoring API](docs/authoring.md) for examples, the supported edit profile and current limits. Published 0.2.1 does not include these additions.
 

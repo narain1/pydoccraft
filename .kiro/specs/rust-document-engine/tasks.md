@@ -141,3 +141,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Recover unambiguous multiline PDF labels with bounded native provenance, exact offsets and neighboring-link remapping.
 - [x] Validate installed-wheel conditional-style rendering/export, multiline links, full regression corpus and locked artifact; record evidence (128 Rust, 138 Python tests).
 - [ ] Complete remaining theme/next-linked style semantics and upstream table fidelity gaps without adding redundant API abstractions.
+
+## Native region rendering and DOCX tabs/breaks
+
+- [x] Add optional native clip rendering through existing PNG methods for PDF/DOCX/PPTX with geometry, limits and DPI tests.
+- [x] Add bounded DOCX paragraph/style tab stops and explicit line/page/column insertion through existing formatting/ranges; reject verified native decimal/bar failures.
+- [x] Verify native placement, inheritance/clear semantics, invalid-edit rollback, full corpus and installed-wheel artifact: 137 Rust and 153 Python tests.
+- [x] Promote already-locked kurbo 0.13.1 for the public WordCraft region transform; regenerate/review license inventories, unchanged at 264 packages, and retain all upstream revisions.
+- [ ] Complete upstream transparency/background, decimal/bar-tab and other fidelity gaps separately; no silent approximation.
+
+- [x] Complete LAY9 warmed-cache repagination acceptance and audit merged TBL3/TBL5/STY4/PDF5 coverage; retain documented scope and remaining pagination fixtures.

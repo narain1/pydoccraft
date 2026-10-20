@@ -11,11 +11,11 @@ use pyo3::prelude::*;
 use serde_json::{json, Map, Value};
 use wordcraft_doc::para::{Float, InlineObject, NoteKind};
 use wordcraft_doc::props::{
-    Border, BorderStyle, Borders, HeightRule, Highlight, LineSpacing, NumRef, TextDirection,
-    Underline, VAlign, VMerge, VertAlign,
+    Border, BorderStyle, Borders, HeightRule, Highlight, LineSpacing, NumRef, TabAlign, TabLeader,
+    TabStop, TextDirection, Underline, VAlign, VMerge, VertAlign, TAB_POS_EPS,
 };
 use wordcraft_doc::section::{NotePos, NoteRestart, NumFormat, SectionProps, SectionStart};
-use wordcraft_doc::styles::{Style, StyleSheet, TablePart};
+use wordcraft_doc::styles::{PartFormat, PartSet, Style, StyleSheet, TablePart};
 use wordcraft_doc::{
     Align, Block, CharProps, Document, ListKind, ParaProps, Paragraph, PartKind, Path, Pos, Rgb,
     StoryRef, StyleKind, Table, TextColor,
@@ -39,6 +39,7 @@ const MAX_SECTIONS: usize = 128;
 const MAX_NOTES: usize = 10_000;
 const MAX_TABLE_PATCH_BYTES: usize = 128 * 1024;
 const MAX_TABLE_METADATA_BYTES: usize = 16 * 1024 * 1024;
+const MAX_TAB_STOPS: usize = 64;
 
 #[pyclass]
 pub struct EditableDocx {
@@ -1230,9 +1231,7 @@ impl EditableDocx {
             .ok_or_else(|| PyValueError::new_err("unknown style"))?
             .based_on = base;
         validate_style_chains(&candidate.styles)?;
-        if kind == StyleKind::Table {
-            validate_style_tables(self.document()?, &candidate)?;
-        }
+        validate_style_tables(self.document()?, &candidate)?;
         self.commit(candidate)
     }
 
@@ -1278,6 +1277,9 @@ impl EditableDocx {
             .ok_or_else(|| PyValueError::new_err("unknown style"))?;
         character.apply(&mut style.chr);
         paragraph.apply(&mut style.para);
+        if paragraph.values.tabs.is_some() || paragraph.clear.contains("tabs") {
+            validate_style_tables(document, &candidate)?;
+        }
         self.commit(candidate)
     }
 
@@ -1337,7 +1339,28 @@ impl EditableDocx {
         let paragraph = self.paragraph_mut(&mut candidate, id)?;
         formatting.apply(&mut paragraph.props);
         paragraph.touch();
+        if formatting.values.tabs.is_some() || formatting.clear.contains("tabs") {
+            validate_style_tables(self.document()?, &candidate)?;
+        }
         self.commit(candidate)
+    }
+
+    #[pyo3(signature = (id, resolved=false))]
+    pub fn paragraph_formatting(&self, id: usize, resolved: bool) -> PyResult<String> {
+        let paragraph = self.paragraph(id)?;
+        let values = if resolved {
+            let document = self.document()?;
+            let (story, path) = self.location(id)?;
+            let table = paragraph_table_context(document, story, &path);
+            resolved_para_snapshot(
+                &document
+                    .styles
+                    .resolve_para_in(&paragraph.props, table.as_ref()),
+            )?
+        } else {
+            para_snapshot(&paragraph.props)?
+        };
+        Ok(Value::Object(values).to_string())
     }
 
     pub fn paragraph_list(&self, id: usize) -> PyResult<Option<(&'static str, u8)>> {
@@ -1515,16 +1538,41 @@ impl EditableDocx {
         // A paragraph's page_break_before is ignored at the start of a document/page.
         // Use the upstream explicit break character so leading and consecutive breaks
         // retain their blank pages; the DOCX writer emits w:br with type="page".
-        let text = wordcraft_doc::para::PAGE_BREAK.to_string();
-        let text_bytes = candidate.updated_text_bytes(0, text.len())?;
-        let mut document = candidate.document()?.clone();
-        document
-            .insert_text(&candidate.position(id, 0)?, &text, &CharProps::default())
-            .map_err(model_error)?;
-        candidate.commit(document)?;
-        candidate.text_bytes = text_bytes;
+        candidate.add_paragraph_break(id, "page")?;
         *self = candidate;
         Ok(id)
+    }
+
+    #[pyo3(signature = (id, kind="line"))]
+    pub fn add_paragraph_break(&mut self, id: usize, kind: &str) -> PyResult<(usize, usize, u64)> {
+        let paragraph = self.paragraph(id)?;
+        let marker = match kind {
+            "line" => wordcraft_doc::para::LINE_BREAK,
+            "page" => wordcraft_doc::para::PAGE_BREAK,
+            "column" => wordcraft_doc::para::COLUMN_BREAK,
+            _ => {
+                return Err(PyValueError::new_err(
+                    "break kind must be line, page or column",
+                ))
+            }
+        };
+        let (story, path) = self.location(id)?;
+        if kind != "line" && (story != StoryRef::Body || path.0.len() != 1) {
+            return Err(EngineError::Unsupported(
+                "page and column breaks require a top-level body paragraph".into(),
+            )
+            .into());
+        }
+        let (offset, start) = (paragraph.text.len(), paragraph.text.chars().count());
+        let text = marker.to_string();
+        let text_bytes = self.updated_text_bytes(0, text.len())?;
+        let mut candidate = self.document()?.clone();
+        candidate
+            .insert_text(&self.position(id, offset)?, &text, &CharProps::default())
+            .map_err(model_error)?;
+        self.commit(candidate)?;
+        self.text_bytes = text_bytes;
+        Ok((start, start + 1, self.revision))
     }
 
     pub fn paragraph_spacing(&self, id: usize) -> PyResult<(f64, f64, f64)> {
@@ -2896,6 +2944,7 @@ impl EditableDocx {
     }
     fn commit(&mut self, document: Document) -> PyResult<()> {
         validate_table_metadata_budget(&document)?;
+        validate_document_tabs(&document)?;
         // Native generic range/table edits do not repair semantic references. Existing
         // marker identities and multiplicities must survive every ordinary mutation.
         // New notes may add an identity; removing or duplicating one is unsupported.
@@ -3874,6 +3923,163 @@ fn validate_style_chains(styles: &StyleSheet) -> PyResult<()> {
     Ok(())
 }
 
+const TAB_ALIGNMENTS: &[(&str, TabAlign)] = &[
+    ("left", TabAlign::Left),
+    ("center", TabAlign::Center),
+    ("right", TabAlign::Right),
+    ("decimal", TabAlign::Decimal),
+    ("clear", TabAlign::Clear),
+];
+const TAB_LEADERS: &[(&str, TabLeader)] = &[
+    ("none", TabLeader::None),
+    ("dot", TabLeader::Dot),
+    ("hyphen", TabLeader::Hyphen),
+    ("underscore", TabLeader::Underscore),
+    ("middle_dot", TabLeader::MiddleDot),
+];
+
+fn parse_tabs(value: &Value) -> PyResult<Vec<TabStop>> {
+    let values = value
+        .as_array()
+        .ok_or_else(|| PyValueError::new_err("tabs requires a list or None"))?;
+    if values.len() > MAX_TAB_STOPS {
+        return Err(PyValueError::new_err("tabs cannot exceed 64 direct stops"));
+    }
+    let mut tabs: Vec<TabStop> = Vec::with_capacity(values.len());
+    for value in values {
+        let entry = value
+            .as_object()
+            .ok_or_else(|| PyValueError::new_err("each tab stop requires a property mapping"))?;
+        if entry
+            .keys()
+            .any(|key| !matches!(key.as_str(), "position" | "alignment" | "leader"))
+        {
+            return Err(PyValueError::new_err("unknown tab stop property"));
+        }
+        let position = entry
+            .get("position")
+            .and_then(Value::as_f64)
+            .filter(|v| v.is_finite() && (-1584.0..=1584.0).contains(v))
+            .ok_or_else(|| {
+                PyValueError::new_err(
+                    "tab position must be finite and between -1584 and 1584 points",
+                )
+            })?;
+        let twips = position * 20.0;
+        if (twips - twips.round()).abs() > 0.000001 {
+            return Err(PyValueError::new_err(
+                "tab position requires 0.05-point increments",
+            ));
+        }
+        let alignment = entry
+            .get("alignment")
+            .map(|v| v.as_str())
+            .unwrap_or(Some("left"));
+        let align=TAB_ALIGNMENTS.iter().find(|(name,value)|Some(*name)==alignment && *value != TabAlign::Decimal).map(|(_,value)|*value)
+            .ok_or_else(||PyValueError::new_err("tab alignment must be left, center, right or clear; decimal and bar tabs are not correctly rendered upstream"))?;
+        let leader = entry
+            .get("leader")
+            .map(|v| v.as_str())
+            .unwrap_or(Some("none"));
+        let leader = TAB_LEADERS
+            .iter()
+            .find(|(name, _)| Some(*name) == leader)
+            .map(|(_, value)| *value)
+            .ok_or_else(|| {
+                PyValueError::new_err(
+                    "tab leader must be none, dot, hyphen, underscore or middle_dot",
+                )
+            })?;
+        if align == TabAlign::Clear && leader != TabLeader::None {
+            return Err(PyValueError::new_err(
+                "clearing an inherited tab requires leader none",
+            ));
+        }
+        let pos = (twips.round() / 20.0) as f32;
+        if tabs.iter().any(|tab| (tab.pos - pos).abs() < TAB_POS_EPS) {
+            return Err(PyValueError::new_err(
+                "tab positions must differ by at least 0.5 points",
+            ));
+        }
+        tabs.push(TabStop { pos, align, leader });
+    }
+    tabs.sort_by(|a, b| a.pos.total_cmp(&b.pos));
+    Ok(tabs)
+}
+
+fn tabs_snapshot(tabs: &[TabStop]) -> Value {
+    Value::Array(tabs.iter().map(|tab|json!({"position":tab.pos,
+        "alignment":TAB_ALIGNMENTS.iter().find(|(_,value)|*value==tab.align).map_or("bar",|(name,_)|*name),
+        "leader":TAB_LEADERS.iter().find(|(_,value)|*value==tab.leader).map_or("none",|(name,_)|*name),
+    })).collect())
+}
+
+fn paragraph_table_context(document: &Document, story: StoryRef, path: &Path) -> Option<ParaProps> {
+    let (path, row, cell) = path.cell()?;
+    let table = document.table(story, &path)?;
+    let style = document.styles.table_style(table.props.style.as_deref()?)?;
+    let current = table.rows.get(row)?.cells.get(cell)?;
+    let regions = PartSet::of_cell(
+        &table.props.look,
+        style.parts.band_size.unwrap_or(1),
+        (row, table.rows.len()),
+        (table.grid_col(row, cell), current.span(), table.cols()),
+    );
+    let mut merged = PartFormat::default();
+    for part in regions.iter() {
+        merged.overlay(&style.part(part));
+    }
+    let mut paragraph = style.para;
+    paragraph.align = merged.align.or(paragraph.align);
+    Some(paragraph)
+}
+
+fn check_tab_count(tabs: Option<&[TabStop]>) -> PyResult<()> {
+    if tabs.is_some_and(|tabs| tabs.len() > MAX_TAB_STOPS) {
+        return Err(PyValueError::new_err(
+            "direct and effective tab stops cannot exceed 64",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_document_tabs(document: &Document) -> PyResult<()> {
+    let styles = &document.styles;
+    check_tab_count(styles.default_para.tabs.as_deref())?;
+    let mut inherited = styles.default_para.tabs.is_some();
+    for style in &styles.styles {
+        check_tab_count(style.para.tabs.as_deref())?;
+        inherited |= style.para.tabs.is_some();
+        if style.kind == StyleKind::Paragraph {
+            let resolved = styles.resolve_para(&ParaProps {
+                style: Some(style.id.clone()),
+                ..Default::default()
+            });
+            check_tab_count(Some(&resolved.tabs))?;
+        } else if style.kind == StyleKind::Table {
+            if let Some(resolved) = styles.table_style(&style.id) {
+                check_tab_count(resolved.para.tabs.as_deref())?;
+            }
+        }
+    }
+    for story in
+        std::iter::once(StoryRef::Body).chain(document.parts.keys().map(|id| StoryRef::Part(*id)))
+    {
+        for path in document.para_paths(story) {
+            let paragraph = document
+                .para(story, &path)
+                .ok_or_else(|| PyValueError::new_err("paragraph no longer exists"))?;
+            check_tab_count(paragraph.props.tabs.as_deref())?;
+            if inherited || paragraph.props.tabs.is_some() {
+                let table = paragraph_table_context(document, story, &path);
+                let resolved = styles.resolve_para_in(&paragraph.props, table.as_ref());
+                check_tab_count(Some(&resolved.tabs))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn format_patch(input: &str) -> PyResult<Map<String, Value>> {
     if input.len() > MAX_FORMAT_PATCH_BYTES {
         return Err(limit("format patch exceeds 16 KiB"));
@@ -3885,10 +4091,12 @@ fn format_patch(input: &str) -> PyResult<Map<String, Value>> {
         return Err(PyValueError::new_err("format patch must be a JSON object"));
     };
     if values
-        .values()
-        .any(|value| value.is_array() || value.is_object())
+        .iter()
+        .any(|(key, value)| value.is_object() || (value.is_array() && key != "tabs"))
     {
-        return Err(PyValueError::new_err("format patch values must be scalar"));
+        return Err(PyValueError::new_err(
+            "format patch values must be scalar, except the tabs list",
+        ));
     }
     Ok(values)
 }
@@ -4123,6 +4331,7 @@ fn is_paragraph_key(key: &str) -> bool {
             | "widow_control"
             | "page_break_before"
             | "background"
+            | "tabs"
     )
 }
 
@@ -4185,6 +4394,14 @@ impl ParaPatch {
                 "widow_control" => patch.values.widow_control = bool_value(value)?,
                 "page_break_before" => patch.values.page_break_before = bool_value(value)?,
                 "background" => patch.values.shading = Some(parse_rgb(text_value(value)?)?),
+                "tabs" => {
+                    let tabs = parse_tabs(value)?;
+                    if tabs.is_empty() {
+                        patch.clear.insert(key.clone());
+                    } else {
+                        patch.values.tabs = Some(tabs);
+                    }
+                }
                 _ => unreachable!(),
             }
         }
@@ -4221,6 +4438,7 @@ impl ParaPatch {
                 "widow_control" => props.widow_control = None,
                 "page_break_before" => props.page_break_before = None,
                 "background" => props.shading = None,
+                "tabs" => props.tabs = None,
                 _ => {}
             }
         }
@@ -4333,6 +4551,14 @@ fn resolved_char_snapshot(props: &wordcraft_doc::resolve::ResolvedChar) -> Map<S
 
 fn para_snapshot(props: &ParaProps) -> PyResult<Map<String, Value>> {
     Ok(snapshot([
+        (
+            "tabs",
+            props
+                .tabs
+                .as_deref()
+                .map(tabs_snapshot)
+                .unwrap_or(Value::Null),
+        ),
         ("alignment", json!(props.align.map(alignment_name))),
         ("indent_left", json!(props.indent_left)),
         ("indent_right", json!(props.indent_right)),
@@ -4359,6 +4585,7 @@ fn resolved_para_snapshot(
     props: &wordcraft_doc::resolve::ResolvedPara,
 ) -> PyResult<Map<String, Value>> {
     Ok(snapshot([
+        ("tabs", tabs_snapshot(&props.tabs)),
         ("alignment", json!(alignment_name(props.align))),
         ("indent_left", json!(props.indent_left)),
         ("indent_right", json!(props.indent_right)),
@@ -8170,6 +8397,435 @@ mod tests {
         assert!(document
             .format_style(&style, &" ".repeat(MAX_TABLE_PATCH_BYTES + 1), None)
             .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+    }
+
+    #[test]
+    fn tabs_roundtrip_inherit_clear_and_resolve_conditional_table_context() {
+        let mut document = EditableDocx::new();
+        let base = document
+            .add_style("Tabs base", "paragraph", Some("Normal"))
+            .unwrap();
+        document
+            .format_style(
+                &base,
+                r#"{"tabs":[{"position":144,"alignment":"right","leader":"dot"},{"position":72}]}"#,
+                None,
+            )
+            .unwrap();
+        let derived = document
+            .add_style("Tabs child", "paragraph", Some(&base))
+            .unwrap();
+        document.format_style(&derived,r#"{"tabs":[{"position":72,"alignment":"clear"},{"position":216,"alignment":"center","leader":"hyphen"}]}"#,None).unwrap();
+        let paragraph = document.add_paragraph("α\t😀\tValue").unwrap();
+        document.set_paragraph_style(paragraph, &derived).unwrap();
+        let direct: Value =
+            serde_json::from_str(&document.paragraph_formatting(paragraph, false).unwrap())
+                .unwrap();
+        assert!(direct["tabs"].is_null());
+        let effective: Value =
+            serde_json::from_str(&document.paragraph_formatting(paragraph, true).unwrap()).unwrap();
+        assert_eq!(effective["tabs"].as_array().unwrap().len(), 2);
+        assert_eq!(effective["tabs"][0]["position"], 144.0);
+        assert_eq!(effective["tabs"][1]["leader"], "hyphen");
+        document.format_paragraph(paragraph,r#"{"tabs":[{"position":144,"alignment":"clear"},{"position":-72.05,"leader":"middle_dot"}]}"#).unwrap();
+        let before = document.paragraph(paragraph).unwrap().props.tabs.clone();
+        let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+        assert_eq!(
+            reopened
+                .para(StoryRef::Body, &Path::top(paragraph))
+                .unwrap()
+                .props
+                .tabs,
+            before
+        );
+        assert_eq!(
+            reopened
+                .para(StoryRef::Body, &Path::top(paragraph))
+                .unwrap()
+                .text,
+            "α\t😀\tValue"
+        );
+        for reset in [r#"{"tabs":[]}"#, r#"{"tabs":null}"#] {
+            document.format_paragraph(paragraph, reset).unwrap();
+            assert!(document.paragraph(paragraph).unwrap().props.tabs.is_none());
+        }
+        let table_style = document.add_style("Tab table", "table", None).unwrap();
+        document
+            .format_style(
+                &table_style,
+                r#"{"tabs":[{"position":36}],"space_after":0,"alignment":"left"}"#,
+                None,
+            )
+            .unwrap();
+        document
+            .format_style(&table_style, r#"{"alignment":"right"}"#, Some("first_row"))
+            .unwrap();
+        document
+            .format_style(&table_style, r#"{"alignment":"center"}"#, Some("top_left"))
+            .unwrap();
+        let table = document.add_table(vec![vec!["A\tB".into()]]).unwrap();
+        document
+            .table_format_patch(table, &json!({"style":table_style}).to_string())
+            .unwrap();
+        let cell = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
+        let effective: Value =
+            serde_json::from_str(&document.paragraph_formatting(cell, true).unwrap()).unwrap();
+        assert_eq!(effective["tabs"][0]["position"], 36.0);
+        assert_eq!(effective["alignment"], "center");
+        document
+            .format_paragraph(cell, r#"{"alignment":"left"}"#)
+            .unwrap();
+        let effective: Value =
+            serde_json::from_str(&document.paragraph_formatting(cell, true).unwrap()).unwrap();
+        assert_eq!(effective["alignment"], "left");
+        assert!(document
+            .format_style(&table_style, r#"{"tabs":[]}"#, Some("first_row"))
+            .is_err());
+    }
+
+    #[test]
+    fn tabs_native_alignment_and_leaders_reach_render_and_pdf() {
+        let mut document = EditableDocx::new();
+        let mut ids = Vec::new();
+        for (alignment, leader, label) in [
+            ("left", "dot", "Left"),
+            ("center", "hyphen", "Center"),
+            ("right", "underscore", "Right"),
+            ("left", "middle_dot", "Middle"),
+        ] {
+            let id = document.add_paragraph(&format!("\t{label}")).unwrap();
+            document
+                .format_paragraph(
+                    id,
+                    &json!({"tabs":[{"position":144,"alignment":alignment,"leader":leader}]})
+                        .to_string(),
+                )
+                .unwrap();
+            ids.push((id, alignment, leader));
+        }
+        let layout = wordcraft_layout::layout(
+            document.document().unwrap(),
+            &mut Default::default(),
+            &Default::default(),
+        );
+        for (id, alignment, leader) in ids {
+            let para = layout.pages[0]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    wordcraft_layout::Placed::Lines { path, para, .. }
+                        if path == &Path::top(id) =>
+                    {
+                        Some(para)
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            let line = &para.lines[0];
+            let text: Vec<_> = (line.c0..line.c1)
+                .filter(|k| para.clusters[*k].kind == wordcraft_layout::para::ClKind::Text)
+                .collect();
+            let left = line.cl_left(text[0]).unwrap();
+            let right = line.cl_right(*text.last().unwrap()).unwrap();
+            let actual = match alignment {
+                "left" => left,
+                "center" => (left + right) / 2.0,
+                _ => right,
+            };
+            assert!((actual - 144.0).abs() < 0.1, "{alignment}: {actual}");
+            let wanted = TAB_LEADERS
+                .iter()
+                .find(|(name, _)| *name == leader)
+                .unwrap()
+                .1;
+            assert!(line.leaders.iter().any(|(_, value)| *value == wanted));
+        }
+        let bytes = document.to_bytes().unwrap();
+        assert!(crate::docx::render(&bytes, 0, 72.0, None)
+            .unwrap()
+            .starts_with(b"\x89PNG\r\n\x1a\n"));
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        let extracted = crate::pdf::extract(&pdf, None).unwrap();
+        let text = extracted
+            .pages
+            .iter()
+            .flat_map(|p| &p.blocks)
+            .map(|b| b.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        for label in ["Left", "Center", "Right", "Middle"] {
+            assert_eq!(text.matches(label).count(), 1, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn tabs_decimal_upstream_finalization_gap_is_explicitly_rejected() {
+        let mut document = EditableDocx::new();
+        let id = document.add_paragraph("\t12.34").unwrap();
+        let revision = document.revision().unwrap();
+        assert!(document
+            .format_paragraph(id, r#"{"tabs":[{"position":144,"alignment":"decimal"}]}"#)
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        // Reproduce the pinned upstream limitation without exposing it as working authoring:
+        // resolve_tab finalizes Decimal as Right, moving the decimal point off its stop.
+        let mut native = document.document().unwrap().clone();
+        native
+            .para_mut(StoryRef::Body, &Path::top(id))
+            .unwrap()
+            .props
+            .tabs = Some(vec![TabStop {
+            pos: 144.0,
+            align: TabAlign::Decimal,
+            leader: TabLeader::None,
+        }]);
+        let layout =
+            wordcraft_layout::layout(&native, &mut Default::default(), &Default::default());
+        let para = layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                wordcraft_layout::Placed::Lines { path, para, .. } if path == &Path::top(id) => {
+                    Some(para)
+                }
+                _ => None,
+            })
+            .unwrap();
+        let line = &para.lines[0];
+        let dot = para.clusters.iter().position(|c| c.dot).unwrap();
+        assert!(
+            (line.cl_left(dot).unwrap() - 144.0).abs() > 1.0,
+            "review decimal-tab support when upstream fixes this placement"
+        );
+        assert!((line.end_x() - 144.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn tabs_bounds_effective_chains_and_invalid_patches_are_atomic() {
+        let mut document = EditableDocx::new();
+        let paragraph = document.add_paragraph("Tabs").unwrap();
+        let revision = document.revision().unwrap();
+        let before = document.document().unwrap().clone();
+        for tabs in [
+            json!({}),
+            json!([null]),
+            json!([{}]),
+            json!([{"position":true}]),
+            json!([{"position":1584.05}]),
+            json!([{"position":0.01}]),
+            json!([{"position":72,"alignment":"bar"}]),
+            json!([{"position":72,"alignment":"clear","leader":"dot"}]),
+            json!([{"position":72,"leader":"heavy"}]),
+            json!([{"position":72,"unknown":1}]),
+            json!([{"position":72},{"position":72.45}]),
+        ] {
+            assert!(document
+                .format_paragraph(
+                    paragraph,
+                    &json!({"tabs":tabs,"alignment":"right"}).to_string()
+                )
+                .is_err());
+            assert_eq!(document.document().unwrap(), &before);
+            assert_eq!(document.revision().unwrap(), revision);
+        }
+        let stops: Vec<_> = (0..65).map(|i| json!({"position":i*2})).collect();
+        assert!(document
+            .format_paragraph(paragraph, &json!({"tabs":stops}).to_string())
+            .is_err());
+        let base = document.add_style("Many tabs", "paragraph", None).unwrap();
+        document
+            .format_style(&base, &json!({"tabs":&stops[..64]}).to_string(), None)
+            .unwrap();
+        let child = document
+            .add_style("One extra tab", "paragraph", Some(&base))
+            .unwrap();
+        let revision = document.revision().unwrap();
+        assert!(document
+            .format_style(&child, r#"{"tabs":[{"position":200}]}"#, None)
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        document
+            .format_style(
+                &child,
+                r#"{"tabs":[{"position":0,"alignment":"clear"},{"position":200}]}"#,
+                None,
+            )
+            .unwrap();
+        document.set_paragraph_style(paragraph, &child).unwrap();
+        let before = document.document().unwrap().clone();
+        assert!(document
+            .format_paragraph(paragraph, r#"{"tabs":[{"position":300}]}"#)
+            .is_err());
+        assert_eq!(document.document().unwrap(), &before);
+        let resolved: Value =
+            serde_json::from_str(&document.style_formatting(&child, true, None).unwrap()).unwrap();
+        assert_eq!(resolved["tabs"].as_array().unwrap().len(), 64);
+        assert!(resolved["tabs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|v| v["alignment"] != "clear"));
+        document.set_paragraph_style(paragraph, "Normal").unwrap();
+        document
+            .format_paragraph(
+                paragraph,
+                r#"{"tabs":[{"position":0,"alignment":"clear"},{"position":0.5}]}"#,
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn paragraph_breaks_native_columns_pages_lines_unicode_and_roundtrip() {
+        let mut document = EditableDocx::new();
+        document
+            .set_section_props(0, r#"{"columns":[2,24,false]}"#)
+            .unwrap();
+        let paragraph = document.add_paragraph("LEFT α😀").unwrap();
+        let (start, end, revision) = document.add_paragraph_break(paragraph, "column").unwrap();
+        assert_eq!((start, end), (7, 8));
+        assert_eq!(
+            document
+                .range_text(paragraph, start, end, revision)
+                .unwrap(),
+            "\u{e}"
+        );
+        document.add_run_patch(paragraph, "RIGHT", "{}").unwrap();
+        document.add_paragraph_break(paragraph, "column").unwrap();
+        document
+            .add_run_patch(paragraph, "NEXT PAGE", "{}")
+            .unwrap();
+        document.add_paragraph_break(paragraph, "line").unwrap();
+        document
+            .add_run_patch(paragraph, "NEXT LINE", "{}")
+            .unwrap();
+        document.add_paragraph_break(paragraph, "page").unwrap();
+        document
+            .add_run_patch(paragraph, "AFTER PAGE", "{}")
+            .unwrap();
+        let layout = wordcraft_layout::layout(
+            document.document().unwrap(),
+            &mut Default::default(),
+            &Default::default(),
+        );
+        assert_eq!(layout.pages.len(), 3);
+        let source = &document.paragraph(paragraph).unwrap().text;
+        let mut placements = BTreeMap::new();
+        for (page_number, page) in layout.pages.iter().enumerate() {
+            for item in &page.items {
+                if let wordcraft_layout::Placed::Lines {
+                    path,
+                    para,
+                    l0,
+                    l1,
+                    x,
+                    y,
+                    ..
+                } = item
+                {
+                    if path == &Path::top(paragraph) {
+                        for line in &para.lines[*l0..*l1] {
+                            let text = source.get(line.start..line.stop).unwrap();
+                            for label in ["LEFT", "RIGHT", "NEXT PAGE", "NEXT LINE", "AFTER PAGE"] {
+                                if text.contains(label) {
+                                    placements.insert(label, (page_number, *x, *y + line.top));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(placements["LEFT"].0, 0);
+        assert_eq!(placements["RIGHT"].0, 0);
+        assert!(placements["RIGHT"].1 > placements["LEFT"].1 + 200.0);
+        assert_eq!(placements["NEXT PAGE"].0, 1);
+        assert_eq!(placements["NEXT LINE"].0, 1);
+        assert!(placements["NEXT LINE"].2 > placements["NEXT PAGE"].2);
+        assert_eq!(placements["AFTER PAGE"].0, 2);
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        assert_eq!(
+            reopened
+                .para(StoryRef::Body, &Path::top(paragraph))
+                .unwrap()
+                .text,
+            *source
+        );
+        for page in 0..3 {
+            assert!(crate::docx::render(&bytes, page, 72.0, None)
+                .unwrap()
+                .starts_with(b"\x89PNG\r\n\x1a\n"));
+        }
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        let extracted = crate::pdf::extract(&pdf, None).unwrap();
+        assert_eq!(extracted.pages.len(), 3);
+        for (page, labels) in [
+            (0, vec!["LEFT", "RIGHT"]),
+            (1, vec!["NEXT PAGE", "NEXT LINE"]),
+            (2, vec!["AFTER PAGE"]),
+        ] {
+            let text = extracted.pages[page]
+                .blocks
+                .iter()
+                .map(|b| b.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            for label in labels {
+                assert_eq!(text.matches(label).count(), 1, "{text:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn paragraph_breaks_consecutive_pages_scope_budgets_and_anchors_are_atomic() {
+        for kind in ["column", "page"] {
+            let mut document = EditableDocx::new();
+            let paragraph = document.add_paragraph("").unwrap();
+            document.add_paragraph_break(paragraph, kind).unwrap();
+            document.add_paragraph_break(paragraph, kind).unwrap();
+            document
+                .add_run_patch(paragraph, "Third page", "{}")
+                .unwrap();
+            let layout = wordcraft_layout::layout(
+                document.document().unwrap(),
+                &mut Default::default(),
+                &Default::default(),
+            );
+            assert_eq!(layout.pages.len(), 3, "{kind}");
+        }
+        let mut document = EditableDocx::new();
+        let table = document.add_table(vec![vec!["Cell".into()]]).unwrap();
+        let cell = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
+        let revision = document.revision().unwrap();
+        assert!(document.add_paragraph_break(cell, "column").is_err());
+        assert!(document.add_paragraph_break(cell, "page").is_err());
+        assert!(document.add_paragraph_break(cell, "unknown").is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        document.add_paragraph_break(cell, "line").unwrap();
+        let paragraph = document.add_paragraph("Note α😀").unwrap();
+        let revision = document.revision().unwrap();
+        let note = document
+            .add_note(paragraph, 0, 1, revision, "Note body", "footnote")
+            .unwrap();
+        let anchors = semantic_anchors(document.document().unwrap());
+        document.add_paragraph_break(paragraph, "line").unwrap();
+        assert_eq!(semantic_anchors(document.document().unwrap()), anchors);
+        let note_paragraph = document.story_paragraph_ids(note).unwrap()[0];
+        assert!(document
+            .add_paragraph_break(note_paragraph, "page")
+            .is_err());
+        document
+            .add_paragraph_break(note_paragraph, "line")
+            .unwrap();
+        assert!(document.add_run_patch(paragraph, "\u{e}", "{}").is_err());
+        assert!(document.add_run_patch(paragraph, "\u{c}", "{}").is_err());
+        document.text_bytes = MAX_DOCUMENT_TEXT_BYTES;
+        let before = document.document().unwrap().clone();
+        let revision = document.revision().unwrap();
+        assert!(document.add_paragraph_break(paragraph, "line").is_err());
+        assert!(document.add_page_break().is_err());
+        assert_eq!(document.document().unwrap(), &before);
         assert_eq!(document.revision().unwrap(), revision);
     }
 

@@ -100,6 +100,7 @@ Only URL hyperlink actions are normalized. Internal navigation, media actions, c
 ```python
 png = document.render_page(0, dpi=144)
 png = document[0].get_pixmap(dpi=144)
+detail = document.render_page(0, dpi=300, clip=(36, 36, 144, 72))
 ```
 
 Both methods return encoded PNG bytes.
@@ -114,6 +115,12 @@ Both methods return encoded PNG bytes.
 DPI controls raster scale and embedded PNG resolution metadata for all three formats. Pixel dimensions follow each engine's rounding; physical resolution uses integer pixels per meter. The multi-DPI corpus checks dimensions, metadata, decoded PNG data and visible content. PDF rotation, crop offsets and UserUnit are covered by the geometry corpus; broader cross-format fidelity remains in the [rendering validation TODOs](../TODO.md#p0--rendering-at-a-requested-dpi).
 
 Each output is bounded to 64 million RGBA pixels in addition to upstream maximum-side limits. DOCX/PPTX dimensions are checked before rasterization; PDF uses upstream oversize rejection. DeckCraft can internally replace a rendering panic with a blank image: this remains a documented upstream blocker, because an intentionally blank slide is also valid output.
+
+Optional `clip=(x, y, width, height)` is available on both methods, including editable document/page/slide wrappers. Coordinates use displayed-page points with a top-left origin; PDF rotation, CropBox and UserUnit are already applied. The rectangle is intersected with the displayed page and snapped outward to its native pixel grid at the requested DPI. Empty intersections, nonfinite values and nonpositive dimensions raise `ValueError`. At page edges, each backend retains its full-page rounding convention; fractional boundaries can add an edge pixel.
+
+Clips use native PdfCraft tiles, WordCraft region rendering and DeckCraft offsets, without allocating a full-page raster first. PDF clips are limited to 4,096 pixels per side and exactly representable tile offsets; Office clips retain the 16,000-pixel side and 64-million-pixel limits. Valid but excessive requests raise the existing resource-limit exception. The returned PNG keeps requested DPI metadata and native page/slide background. Arbitrary background replacement and faithful transparent rendering remain unavailable; clipping does not emulate them by recoloring white pixels. Native parsing/layout still processes the document, so clipping is not selective extraction or a complete memory bound.
+
+Region and full-page rasterization can differ slightly at antialiased edges after native transform translation. The measured PDF text fixture differed by at most two pixels and the fractional-DPI PPTX rectangle by 124 pixels on one edge row, each by at most 1/255 in RGB with identical alpha. Those fixtures use explicit tolerances; full-page/boundary and rotated-PDF shape comparisons remain exact. Fractional PPTX slide edges can retain native partial alpha. These measurements do not establish universal pixel identity or fidelity tolerances for arbitrary effects.
 
 The returned value is not a PyMuPDF `Pixmap`; write it directly or load it with an image library:
 
@@ -145,4 +152,4 @@ Conversion is not pixel-perfect. Font substitution, unsupported PDF constructs, 
 
 ## Document creation
 
-The conversion methods produce new files from existing documents. There is currently no public builder for creating a DOCX or PDF from scratch, nor a mutation/save API for writing changes to extracted Python objects back to a document. [Creation TODOs](../TODO.md#p1--create-docx-and-pdf-documents) cover upstream-backed authoring of modern DOCX and PDF; legacy `.doc` output is outside the current scope.
+`doc_ex.new("docx" | "pdf" | "pptx")` creates an owned editable native document with insertion, formatting, copy, conversion and atomic path saving. See the supported methods and limitations in [Authoring](authoring.md). Extracted Python values remain independent snapshots; arbitrary source-Office editing is still unavailable, while PDF `Document.edit()` uses a conservative preservation profile. Remaining [creation TODOs](../TODO.md#p1--create-docx-and-pdf-documents) cover broader features; legacy `.doc` output is outside the current scope.

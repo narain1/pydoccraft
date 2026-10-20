@@ -34,7 +34,14 @@ class CharacterFormatting(_CharacterProperties, total=False):
     style: str | None
 
 
+class TabStop(TypedDict, total=False):
+    position: float
+    alignment: str
+    leader: str
+
+
 class ParagraphFormatting(TypedDict, total=False):
+    tabs: list[TabStop] | None
     alignment: str | None
     indent_left: float | None
     indent_right: float | None
@@ -172,6 +179,22 @@ def _format_patch(values, *, rgb_highlight: bool = False) -> str:
         raise ValueError("too many formatting properties")
     patch = {}
     for key, value in values.items():
+        if key == "tabs" and value is not None:
+            if not isinstance(value, (list, tuple)) or len(value) > 64:
+                raise ValueError("tabs must contain at most 64 tab-stop mappings")
+            stops = []
+            for stop in value:
+                if not isinstance(stop, dict) or stop.keys() - TabStop.__annotations__.keys() or "position" not in stop:
+                    raise ValueError("each tab requires position and optional alignment/leader")
+                item = {"position": pt(stop["position"])}
+                for name in ("alignment", "leader"):
+                    if name in stop:
+                        if not isinstance(stop[name], str) or len(stop[name]) > 32:
+                            raise ValueError("tab alignment and leader must be supported names")
+                        item[name] = stop[name]
+                stops.append(item)
+            patch[key] = stops
+            continue
         if isinstance(value, str) and len(value) > 16384:
             raise ValueError("formatting value exceeds the patch limit")
         if (key in {"color", "background"} or (rgb_highlight and key == "highlight")) and value is not None:
@@ -437,8 +460,8 @@ class EditableDocument:
         """Return an independent native model; child handles retain their own owner."""
         return type(self)(self._call("copy"))
 
-    def render_page(self, index: int, dpi: float = 144) -> bytes:
-        return self._snapshot().render_page(index, dpi=dpi)
+    def render_page(self, index: int, dpi: float = 144, *, clip: tuple[float, float, float, float] | None = None) -> bytes:
+        return self._snapshot().render_page(index, dpi=dpi, clip=clip)
 
     def convert(self, output_format: str) -> bytes:
         from . import convert
@@ -691,12 +714,27 @@ class Paragraph:
     def _range_args(self):
         return (self._id,)
 
+    @property
+    def formatting(self) -> dict:
+        """Direct paragraph properties; None denotes inheritance."""
+        return json.loads(self._owner._call("paragraph_formatting", self._id))
+
+    @property
+    def resolved_formatting(self) -> dict:
+        """Paragraph properties resolved through native defaults and styles."""
+        return json.loads(self._owner._call("paragraph_formatting", self._id, True))
+
     def format(self, **formatting: Unpack[ParagraphFormatting]) -> None:
         """Set paragraph properties; None restores inheritance."""
         self._owner._call("format_paragraph", self._id, _format_patch(formatting), _change=True)
 
     def add_run(self, text: str, **formatting: Unpack[CharacterFormatting]) -> TextRange:
         start, end, revision = self._owner._call("add_run_patch", self._id, text, _format_patch(formatting), _change=True)
+        return TextRange(self, start, end, revision)
+
+    def add_break(self, kind: str = "line") -> TextRange:
+        """Append a native line, page or column break and return its text range."""
+        start, end, revision = self._owner._call("add_paragraph_break", self._id, kind, _change=True)
         return TextRange(self, start, end, revision)
 
     _native_text_method = "paragraph_text"
@@ -1751,9 +1789,9 @@ class PdfPage:
         data, _ = _read(source)
         self._owner._call("add_image", self._id, data, *map(pt, box), _change=True)
 
-    def get_pixmap(self, dpi: float = 144) -> bytes:
+    def get_pixmap(self, dpi: float = 144, *, clip: tuple[float, float, float, float] | None = None) -> bytes:
         self._check()
-        return self._owner.render_page(self._id, dpi)
+        return self._owner.render_page(self._id, dpi, clip=clip)
 
     def get_text(self, option: str = "text"):
         self._check()
@@ -1995,8 +2033,8 @@ class Slide:
         identifier = self._owner._call("add_image", self.number, data, *map(pt, box), alt, _change=True)
         return Shape(self._owner, self._id, identifier)
 
-    def get_pixmap(self, dpi: float = 144) -> bytes:
-        return self._owner.render_page(self.number, dpi)
+    def get_pixmap(self, dpi: float = 144, *, clip: tuple[float, float, float, float] | None = None) -> bytes:
+        return self._owner.render_page(self.number, dpi, clip=clip)
 
     def get_text(self, option: str = "text"):
         return self._owner._snapshot()[self.number].get_text(option)

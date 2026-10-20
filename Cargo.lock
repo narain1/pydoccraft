@@ -1494,6 +1494,7 @@ dependencies = [
  "deckcraft-pdf",
  "deckcraft-pptx",
  "deckcraft-render",
+ "kurbo",
  "pdfcraft-annot",
  "pdfcraft-content",
  "pdfcraft-cos",
