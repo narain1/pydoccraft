@@ -444,6 +444,8 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 4. Shared native layout SHALL validate actual physical-page carets, linked source orientation, unsupported linked display wrappers and a conservative 10,000 nonempty linked glyph batches per page. All links and repeated stories SHALL count. Pair creation/movement and internal-link assignment SHALL stage these checks; later layout edits SHALL fail explicitly on output and permit recovery. Native preallocation, complete glyph containment or arbitrary transformed navigation SHALL not be claimed.
 5. Tests SHALL verify Unicode/source ordering, source link offsets, pair movement and deletion, native PDF destinations after repagination, nested-cell annotation geometry, copies/grid staleness/media/fields/notes, callback closure, counts and saved-file atomicity. Native missing/header targets, clipped hit areas, lost vertical links and silent annotation caps SHALL have direct repros.
 
+6. Bookmark layout validation SHALL conservatively bound cumulative native caret lookup and adapter geometry/display scans before repeating them, including repeated destination resolution during PDF export. At-limit/+1 and repeated-target regressions SHALL preserve revision/content on refusal and demonstrate recovery; this SHALL not be claimed as a preallocation bound on native layout or global document inventory.
+
 
 ## 58. Native PDF object-stream output choice
 

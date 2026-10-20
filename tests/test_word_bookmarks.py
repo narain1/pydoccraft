@@ -7,7 +7,7 @@ from zipfile import ZipFile
 
 import doc_ex
 from doc_ex._authoring import TextRange
-from doc_ex.errors import DocumentClosedError, UnsupportedFormatError
+from doc_ex.errors import DocumentClosedError, UnsupportedFormatError, UnsafeArchiveError
 from test_picture_media import media_parts, red_picture
 from test_render_geometry import rgba_pixels
 from test_rendering import png_chunks
@@ -287,3 +287,18 @@ class WordBookmarkTests(unittest.TestCase):
                 document.bookmarks['Closed'] = closing
             with self.assertRaises(DocumentClosedError):
                 list(document.bookmarks)
+
+    def test_repeated_long_target_lookup_work_rejects_atomically_and_recovers(self):
+        with doc_ex.new('docx', size=(300, 300)) as document:
+            document.sections[0].margins = 30
+            target = document.add_paragraph('Before\n' * 700 + 'Target')
+            document.bookmarks['Late'] = target.find('Target')[0]
+            label = document.add_paragraph('Jump\n' * 30)
+            selected = label[:]
+            before = document.to_bytes()
+            with self.assertRaisesRegex(UnsafeArchiveError, 'lookup and geometry scans'):
+                selected.link = '#Late'
+            self.assertEqual(document.to_bytes(), before)
+            self.assertIsNone(selected.link)
+            label[:4].link = '#Late'
+            self.assertTrue(document.to_bytes().startswith(b'PK'))
