@@ -129,7 +129,7 @@ Unchecked items below remain incomplete even when an initial slice is implemente
 - [ ] **TXT5: Bullets and numbering.** Support multi-level lists, custom markers, restart/continue, starting numbers and indentation. Preserve numbering identities during edits/copying; verify rendered labels and structured extraction separately.
 - [ ] **TXT6: Language and typography.** Support language metadata, RTL direction, mixed-script runs, CJK settings and supported font/shaping options. Record missing glyphs and unsupported shaping explicitly; no system-font dependency or silently substituted layout claims.
 - [x] **TXT7: Find and replace.** Start with literal search/replacement across runs and explicit story scope. Preserve surrounding formatting/anchors, report replacement counts and reject ambiguous edits. Callers may use Python regex for match selection over documented offsets; do not add a separate regex/template engine.
-- [ ] **TXT8: Rich-text ranges.** Expose revision-bound ranges for styling, links, comments and removal without manual run splitting. Define Unicode offsets and explicit invalidation after incompatible edits; test repeated text, emoji, combining marks and paragraph boundaries. Avoid a live range-tracking framework.
+- [ ] **TXT8: Rich-text ranges.** Contiguous paragraph slices reuse revision-bound ranges for insertion/deletion, formatting and links; comments and cross-paragraph ranges remain open. Expose revision-bound ranges for styling, links, comments and removal without manual run splitting. Define Unicode offsets and explicit invalidation after incompatible edits; test repeated text, emoji, combining marks and paragraph boundaries. Avoid a live range-tracking framework.
 
 ### STY — Styles, themes and fonts (P1)
 

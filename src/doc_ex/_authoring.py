@@ -843,6 +843,10 @@ class Paragraph:
 
     _native_text_method = "paragraph_text"
 
+    def __getitem__(self, key: slice) -> TextRange:
+        """Select Unicode characters using a contiguous slice; empty slices insert text."""
+        return _slice_range(self, key, TextRange)
+
     def find(self, text: str) -> list[TextRange]:
         """Find non-overlapping literal matches; later edits invalidate ranges."""
         return _find_ranges(self, text, TextRange)
@@ -885,6 +889,22 @@ class TextRange:
         """Set character properties; omitted values stay and None inherits."""
         paragraph = self._paragraph
         self._revision = paragraph._owner._call("format_range_patch", *paragraph._range_args, self._start, self._end, self._revision, _format_patch(formatting, rgb_highlight=isinstance(paragraph, Shape)), _change=True)
+
+
+def _slice_range(content, key: slice, factory):
+    if not isinstance(key, slice):
+        raise TypeError("text selection requires a slice")
+    revision = content._owner._call("revision")
+    text = content.text
+    start, stop, step = key.indices(len(text))
+    if step != 1:
+        raise ValueError("text selection requires a slice step of 1")
+    # A forward slice with a stop before its start is empty, at the start.
+    stop = max(start, stop)
+    selected, current_revision = content._owner._call("text_range", *content._range_args, start, stop)
+    if current_revision != revision or selected != text[start:stop]:
+        raise ValueError("text changed during selection")
+    return factory(content, start, stop, current_revision)
 
 
 def _find_ranges(content, text: str, factory):
@@ -2207,28 +2227,38 @@ class Slide:
     def add_shape(self, kind: str, *, box, fill=None, stroke=None, stroke_width: float = 1):
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
-        identifier = self._owner._call("add_shape", self.number, kind, *map(pt, box), None if fill is None else _color(fill), None if stroke is None else _color(stroke), pt(stroke_width), _change=True)
+        coordinates = tuple(map(pt, box))
+        fill = None if fill is None else _color(fill)
+        stroke = None if stroke is None else _color(stroke)
+        stroke_width = pt(stroke_width)
+        identifier = self._owner._call("add_shape", self.number, kind, *coordinates, fill, stroke, stroke_width, _change=True)
         return Shape(self._owner, self._id, identifier)
 
     def add_text(self, text: str, *, box, font_size: float = 18):
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
-        identifier = self._owner._call("add_text", self.number, text, *map(pt, box), pt(font_size), _change=True)
+        coordinates = tuple(map(pt, box))
+        font_size = pt(font_size)
+        identifier = self._owner._call("add_text", self.number, text, *coordinates, font_size, _change=True)
         return Shape(self._owner, self._id, identifier)
 
     def add_table(self, rows, *, columns: int | None = None, box, font_size: float = 18):
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
-        identifier = self._owner._call("add_table", self.number, _rows(rows, columns), *map(pt, box), pt(font_size), _change=True)
+        rows = _rows(rows, columns)
+        coordinates = tuple(map(pt, box))
+        font_size = pt(font_size)
+        identifier = self._owner._call("add_table", self.number, rows, *coordinates, font_size, _change=True)
         return SlideTable(self._owner, identifier, self._id)
 
-    def add_image(self, source, *, box, alt: str = ""):
+    def add_image(self, source, *, box, alt: str = "") -> SlidePicture:
         from . import _read
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
-        data, _ = _read(source)
-        identifier = self._owner._call("add_image", self.number, data, *map(pt, box), alt, _change=True)
-        return Shape(self._owner, self._id, identifier)
+        coordinates = tuple(map(pt, box))
+        data, _ = _read(source, limit=16 * 1024 * 1024)
+        identifier = self._owner._call("add_image", self.number, data, *coordinates, alt, _change=True)
+        return SlidePicture(self._owner, self._id, identifier)
 
     def get_pixmap(self, dpi: float = 144, *, clip: tuple[float, float, float, float] | None = None) -> bytes:
         return self._owner.render_page(self.number, dpi, clip=clip)
@@ -2244,6 +2274,8 @@ class Shapes(_Collection["Shape | SlideTable"]):
             identifier, kind = pair
             if kind == "table":
                 return SlideTable(owner, identifier, slide._id)
+            if kind == "image":
+                return SlidePicture(owner, slide._id, identifier)
             return Shape(owner, slide._id, identifier)
         super().__init__(slide._owner, lambda: slide._owner._call("shape_ids", slide.number), factory)
 
@@ -2275,6 +2307,10 @@ class Shape:
         return self._slide_number, self._id
 
     _native_text_method = "shape_text"
+
+    def __getitem__(self, key: slice) -> _SlideTextRange:
+        """Select contiguous Unicode text across runs and LF-separated paragraphs."""
+        return _slice_range(self, key, _SlideTextRange)
 
     def add_run(self, text: str, **formatting: Unpack[CharacterFormatting]) -> _SlideTextRange:
         start, end, revision = self._owner._call("add_run_patch", *self._range_args, text, _format_patch(formatting, rgb_highlight=True), _change=True)
@@ -2404,6 +2440,64 @@ class Shape:
     @font.setter
     def font(self, value: str):
         self._owner._call("set_text_format", self._slide_number, self._id, font=value, _change=True)
+
+
+class SlidePicture(Shape):
+    """A native picture placement retaining its source and editable transforms."""
+
+    @property
+    def data(self) -> bytes:
+        return bytes(self._owner._call("picture_data", self._slide_number, self._id))
+
+    @data.setter
+    def data(self, source) -> None:
+        from . import _read
+        self._owner._ensure_open()
+        data, _ = _read(source, limit=16 * 1024 * 1024)
+        self._owner._call("set_picture_data", self._slide_number, self._id, data, _change=True)
+
+    @property
+    def alt(self) -> str:
+        return self._owner._call("picture_alt", self._slide_number, self._id)
+
+    @alt.setter
+    def alt(self, value: str) -> None:
+        self._owner._call("set_picture_alt", self._slide_number, self._id, value, _change=True)
+
+    @property
+    def crop(self) -> tuple[float, float, float, float]:
+        return self._owner._call("picture_crop", self._slide_number, self._id)
+
+    @crop.setter
+    def crop(self, value) -> None:
+        if value is None:
+            value = (0, 0, 0, 0)
+        if not isinstance(value, (tuple, list)) or len(value) != 4:
+            raise TypeError("crop must be (left, top, right, bottom) fractions or None")
+        values = tuple(map(pt, value))
+        if any(fraction < 0 or fraction > 0.45 for fraction in values):
+            raise ValueError("crop fractions must be between 0 and 0.45")
+        self._owner._call("set_picture_crop", self._slide_number, self._id, values, _change=True)
+
+    @property
+    def flip_h(self) -> bool:
+        return self._owner._call("picture_flips", self._slide_number, self._id)[0]
+
+    @flip_h.setter
+    def flip_h(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("flip_h must be a boolean")
+        self._owner._call("set_picture_flips", self._slide_number, self._id, flip_h=value, _change=True)
+
+    @property
+    def flip_v(self) -> bool:
+        return self._owner._call("picture_flips", self._slide_number, self._id)[1]
+
+    @flip_v.setter
+    def flip_v(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("flip_v must be a boolean")
+        self._owner._call("set_picture_flips", self._slide_number, self._id, flip_v=value, _change=True)
 
 
 class SlideTable(EditableTable, Shape):

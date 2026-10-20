@@ -272,3 +272,15 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 1. The installed-wheel corpus SHALL generate invoice, merged-header, nested, long repeated-header, RTL and image-cell fixtures through existing public APIs. No fixture-specific runtime methods or external processors SHALL be added.
 2. Saved DOCX and exported PDF SHALL reopen with matching page counts and exactly-once body content. Semantic table spans/order SHALL remain distinct from rendered RTL placement and intentional repeated PDF headers. Every rendered page SHALL have checked visible representative fills; nested/image source pixels SHALL survive export.
 3. The fixture index SHALL record covered combinations and distinguish this acceptance from broader table fidelity, accessibility and import-preservation criteria.
+
+## 33. Owned presentation picture editing
+
+1. Existing slide image insertion/shape collections SHALL return an owned picture handle sharing data/alt vocabulary with DOCX pictures and existing shape geometry/link/order behavior. Source replacement SHALL preserve all placement properties and unrelated shared picture/background references. Slide identity SHALL be resolved after caller source/coordinate conversion so callbacks cannot redirect placement after reordering.
+2. Picture crop SHALL use checked native LTRB fractions in 0..0.45; None SHALL reset. Boolean flips SHALL use native transforms together with existing rotation. Original bytes SHALL remain available, and native serialization precision SHALL be documented.
+3. Input validation, native media deduplication/pruning and live encoded-byte budgets SHALL precede staged commit. Tests SHALL verify source/XML preservation, asymmetric transform pixels in PNG/PDF, source kinds, ownership, cache invalidation, reclaimed/shared media and atomic invalid/limit failures.
+
+## 34. Contiguous paragraph and slide text selection
+
+1. Paragraph and text-bearing shape slicing SHALL return their existing revision-bound ranges through existing native range operations. Normal Python Unicode-character slice normalization SHALL apply; integer indexing and steps other than one SHALL be rejected. Empty forward slices SHALL select an insertion point.
+2. Existing range text/format/link operations SHALL retain their semantics, stale-owner checks and semantic-anchor guards. Removing all text SHALL preserve the paragraph; no DOCX cross-paragraph range, new Run class or duplicate insertion/deletion method SHALL be introduced. Slide ranges SHALL retain their existing LF-separated paragraph behavior, internal links and tooltips; table indexing SHALL remain unchanged.
+3. Tests SHALL cover Unicode/whitespace, clamped/negative bounds, insertion/deletion, surrounding formatting, links, copies, auxiliary/cell scopes, invalid inputs, mutation during index conversion, semantic-anchor rollback, slide ordering/placeholder preservation and unsupported nontext selection.
