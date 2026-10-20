@@ -408,6 +408,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [ ] Complete independent review and exact-head/current-main CI before manual merge.
 - [ ] Retain Office search geometry, normalized source offsets and broad E2 grounding parity as open work.
 
+## PDF3 native drawing-style boundary audit
+
+- [x] Recheck pinned public/private placement and style-writing boundaries against existing drawing APIs; retain existing U10/PDF3 ownership.
+- [ ] Request typed native path painting/fill rules, collision-safe opacity resources and public native placement; do not extend local PDF operator construction.
+- [ ] Verify stroke work/bounds, contour pixels, rotated CropBox/UserUnit geometry, resource preservation and default compatibility before exposing additional drawing keywords. PDF3 remains open.
+
 
 ## PDF mutation ownership after caller normalization
 
