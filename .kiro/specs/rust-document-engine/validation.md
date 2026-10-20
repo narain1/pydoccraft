@@ -20,8 +20,13 @@
 
 - Independent review reproduced stacked combining marks rendering 26 points above a requested text box. Boxed static TrueType text now checks actual native shaped outlines against the box before commit, retaining legacy point placement. Built-in fonts still use logical metrics; boxed CFF is explicitly unavailable until native evaluation can be bounded.
 - Resource validation uses public parsed component iterators before recursive outline lookup: 4,096 distinct glyphs, 100,000 composite visits, depth 16, 8,192 points per glyph, 100,000 aggregate path operations, at most 16,384 operations per glyph and 1 MiB scratch per glyph. Native unhinted outlines and Kurbo curve extrema supply geometry; no glyph parser or replacement shaping engine is added.
-- All 44 PDF native tests, formatting and locked all-targets warnings-denied Clippy passed. A public regression covers two/six stacked marks, cached-output rollback, four rotations with CropBox/UserUnit, ordinary Unicode and unchanged point placement; its installed-wheel run is pending combined validation.
+- All 44 PDF native tests, formatting and locked all-targets warnings-denied Clippy passed. A public regression covers two/six stacked marks, cached-output rollback, four rotations with CropBox/UserUnit, ordinary Unicode and unchanged point placement; its installed-wheel run passed in the exact-head integration validation below.
 - The only lockfile change adds a direct edge to already-locked skrifa 0.44.0 (MIT OR Apache-2.0). Regenerated and reviewed license inventories are byte-identical at 264 permissive normal/build packages, with no prohibited crates. NOTICE records direct outline use; all upstream revisions remain unchanged.
+
+### PDF text-box integration review
+
+- Exact runtime head `52fd5f801000f28fcdc79364df909010090a095a` passed CI 39467474191: formatting, 165 Rust tests, warnings-denied Clippy, 184 installed-wheel Python tests (no skips), and the regenerated 264-package license audit. Both review corrections and current main's parser-session/selective-extraction changes are included.
+- CPython 3.11.17 / Linux x86_64 artifact: wheel 17,286,676 bytes; native extension 40,094,512 bytes; wheel SHA-256 `2bb96a9e6457a5ea196454cd7ed4ac4877709a88c23a296c852f4febfaa8e836`. The only dependency change is the already-locked Skrifa direct edge; all upstream revisions remain unchanged.
 
 ## 2026-10-20 DOCX paragraph borders (unreleased)
 
@@ -393,3 +398,13 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 - Focused regressions cover generator lookahead, direct native conversion, large signed indexes, duplicate non-ASCII Office output, all-page fallback caps, empty-page separators, UTF-8 chunk boundaries, native page-count limits and glyph-budget checks. Upstream text-device construction can still allocate before output preflight; P4 remains open for peak-memory/streaming guarantees. Reviewed runtime head `57efdc8e6872bfad09275b07d2646ccf0a90d356` passed CI 39466407602: 155 Rust tests, 178 installed-wheel Python tests (no skips), formatting, warnings-denied Clippy and the unchanged 264-package locked license audit. The later main merge changed no files.
 
 - CI artifact: CPython 3.11.17 / Linux x86_64, wheel 17,224,825 bytes, native extension 39,902,544 bytes, wheel SHA-256 `60935ab53de271b8727d5dc5bfbd5328eb9f2d6ac94a848e4fbfe58d9e752544`. Upstream revisions and runtime dependency graph remain unchanged. Historical private-corpus timing claims remain author-reported.
+
+### Paragraph border integration review
+
+- Exact runtime head `bca6a47e7b39d596d37f97b5c9e48ad7ab4e0928` passed CI 39467518674: formatting, 172 Rust tests, warnings-denied Clippy, 187 installed-wheel Python tests (no skips), and 264-package license audit. Independent review also ran all 176 Python tests against the original frozen feature wheel. The later main merge added only PDF review evidence.
+- CPython 3.11.17 / Linux x86_64 artifact: wheel 17,290,310 bytes; native extension 40,109,520 bytes; wheel SHA-256 `020b291f27eac331d8a5260f836d8dfe310af45ddec012050d17223e810a13fd`. No dependencies changed in the border feature; integrated dependency and upstream revisions match reviewed main.
+
+### Picture lifecycle and ownership independent review
+
+- Independently ran all 196 Python tests against the frozen installed package for `ef0b577ac5cf11ba45936bb2541ec1c72a6d4535`; all passed. CI 39467831926 on that exact head also passed formatting, 177 Rust tests, warnings-denied Clippy, 196 installed-wheel Python tests (no skips) and the 264-package locked license audit. Integration of the reviewed PR35/36 histories changed no runtime, tests, dependency or attribution files.
+- CI artifact: CPython 3.11.17 / Linux x86_64, wheel 17,299,520 bytes, native extension 40,130,544 bytes, wheel SHA-256 `6191b9e0be1ba7a56b6fe7ab4df64cbbc87cb7b6dc65842aabe5041133d699e3`. Reviewed native reference traversal, bounded media accounting, retained paragraph anchors and generation-captured iteration; no additional findings.
