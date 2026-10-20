@@ -5681,7 +5681,38 @@ fn patch_table_style(
                     }
                 }
             }
-            "borders" => apply_border_patch(&mut format.borders, &value, true)?,
+            "borders" => {
+                apply_border_patch(&mut format.borders, &value, true)?;
+                // Native region_borders maps these edges into per-cell left/right,
+                // but layout_table reads rb.inside_v at interior boundaries. It drops
+                // visible borders and explicit nil suppression alike. Clearing a
+                // direct side/group remains safe; whole-table borders are unaffected.
+                if value.as_object().is_some_and(|sides| {
+                    sides.iter().any(|(side, border)| {
+                        !border.is_null()
+                            && match part {
+                                TablePart::FirstRow
+                                | TablePart::LastRow
+                                | TablePart::Band1Horz
+                                | TablePart::Band2Horz => side == "inside_vertical",
+                                TablePart::FirstCol | TablePart::NwCell | TablePart::SwCell => {
+                                    side == "right"
+                                }
+                                TablePart::LastCol | TablePart::NeCell | TablePart::SeCell => {
+                                    side == "left"
+                                }
+                                TablePart::Band1Vert | TablePart::Band2Vert => {
+                                    matches!(side.as_str(), "left" | "right")
+                                }
+                                TablePart::WholeTable => false,
+                            }
+                    })
+                }) {
+                    return Err(EngineError::Unsupported(
+                        "native DOCX conditional table styles cannot preserve this interior vertical border; use direct cell or whole-table borders".into(),
+                    ).into());
+                }
+            }
             "margins" if whole => {
                 margins = Some(if value.is_null() {
                     None
@@ -13349,6 +13380,246 @@ mod tests {
         let revision = document.revision().unwrap();
         assert!(document.fit_table(table).is_err());
         assert_eq!(document.revision().unwrap(), revision);
+    }
+
+    #[test]
+    fn conditional_vertical_border_guard_is_atomic_and_allows_resets() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditableDocx::new();
+        let style = document
+            .add_style("Checked conditional edges", "table", None)
+            .unwrap();
+        let table = document
+            .add_table(vec![vec!["Kept".into(), "Other".into()]])
+            .unwrap();
+        document
+            .table_format_patch(table, &json!({"style":style}).to_string())
+            .unwrap();
+        let affected = [
+            ("first_row", "inside_vertical"),
+            ("last_row", "inside_vertical"),
+            ("odd_rows", "inside_vertical"),
+            ("even_rows", "inside_vertical"),
+            ("first_column", "right"),
+            ("last_column", "left"),
+            ("top_left", "right"),
+            ("bottom_left", "right"),
+            ("top_right", "left"),
+            ("bottom_right", "left"),
+            ("odd_columns", "left"),
+            ("odd_columns", "right"),
+            ("even_columns", "left"),
+            ("even_columns", "right"),
+        ];
+        let before = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        for (region, side) in affected {
+            for border in [
+                json!({"style":"single","color":"#FF0000","width":4}),
+                json!({"style":"none"}),
+            ] {
+                let error = document
+                    .format_style(
+                        &style,
+                        &json!({"background":"#00FF00","borders":{side:border}}).to_string(),
+                        Some(region),
+                    )
+                    .unwrap_err();
+                assert!(error.to_string().contains("conditional table styles"));
+                assert_eq!(document.revision().unwrap(), revision);
+                assert_eq!(document.to_bytes().unwrap(), before);
+                assert_eq!(document.table_rows(table).unwrap()[0][0], "Kept");
+            }
+        }
+        for (region, side) in affected {
+            document
+                .format_style(
+                    &style,
+                    &json!({"borders":{side:null}}).to_string(),
+                    Some(region),
+                )
+                .unwrap();
+            document
+                .format_style(&style, r#"{"borders":null}"#, Some(region))
+                .unwrap();
+        }
+        for (region, side) in [
+            ("first_row", "left"),
+            ("last_row", "right"),
+            ("odd_rows", "left"),
+            ("even_rows", "right"),
+            ("first_column", "left"),
+            ("last_column", "right"),
+            ("top_left", "left"),
+            ("bottom_left", "left"),
+            ("top_right", "right"),
+            ("bottom_right", "right"),
+            ("odd_columns", "top"),
+            ("even_columns", "bottom"),
+        ] {
+            document
+                .format_style(
+                    &style,
+                    &json!({"borders":{side:{"color":"#FF0000","width":4}}}).to_string(),
+                    Some(region),
+                )
+                .unwrap();
+        }
+        document
+            .format_style(
+                &style,
+                r##"{"borders":{"inside_vertical":{"color":"#FF0000","width":4}}}"##,
+                None,
+            )
+            .unwrap();
+        document
+            .table_format_patch(
+                table,
+                r##"{"borders":{"inside_vertical":{"color":"#0000FF","width":2}}}"##,
+            )
+            .unwrap();
+        document
+            .cell_format_patch(table, 0, 0, r#"{"borders":{"right":{"style":"none"}}}"#)
+            .unwrap();
+        document.set_table_borders(table, "#123456", 1.0).unwrap();
+        assert_eq!(
+            document.table_borders(table).unwrap(),
+            Some(("#123456".into(), 1.0))
+        );
+    }
+
+    #[test]
+    fn upstream_conditional_vertical_borders_are_serialized_but_dropped() {
+        fn raw(part: TablePart, side: &str) -> (Document, String) {
+            let mut owned = EditableDocx::new();
+            let id = owned.add_style("Raw native border", "table", None).unwrap();
+            let table = owned.add_table(vec![vec![String::new(); 3]; 3]).unwrap();
+            owned.table_format_patch(table,&json!({"style":id,"look":{"header_row":true,"first_column":true,"last_column":true,"banded_columns":true,"banded_rows":false}}).to_string()).unwrap();
+            owned.set_column_widths(table, vec![80.0; 3]).unwrap();
+            for row in 0..3 {
+                owned
+                    .set_row_height(table, row, Some(30.0), "exact")
+                    .unwrap();
+            }
+            let mut native = owned.document().unwrap().clone();
+            let style = native
+                .styles
+                .styles
+                .iter_mut()
+                .find(|style| style.id == id)
+                .unwrap();
+            let mut format = style.table_part(part);
+            apply_border_patch(
+                &mut format.borders,
+                &json!({side:{"color":"#FF0000","width":4}}),
+                true,
+            )
+            .unwrap();
+            style.set_table_part(part, format);
+            (native, id)
+        }
+        for (part, side, visible) in [
+            (TablePart::WholeTable, "inside_vertical", true),
+            (TablePart::FirstRow, "inside_vertical", false),
+            (TablePart::FirstCol, "right", false),
+            (TablePart::LastCol, "left", false),
+            (TablePart::NwCell, "right", false),
+            (TablePart::NeCell, "left", false),
+            (TablePart::Band1Vert, "right", false),
+            (TablePart::FirstCol, "left", true),
+            (TablePart::NeCell, "right", true),
+            (TablePart::FirstRow, "top", true),
+        ] {
+            let (native, id) = raw(part, side);
+            let bytes = wordcraft_docx::write(&native).unwrap();
+            let reopened = wordcraft_docx::read(&bytes).unwrap();
+            assert_eq!(
+                reopened.styles.find(&id).unwrap().table_part(part).borders,
+                native.styles.find(&id).unwrap().table_part(part).borders
+            );
+            let layout =
+                wordcraft_layout::layout(&reopened, &mut Default::default(), &Default::default());
+            let red_rules = layout.pages.iter().flat_map(|page| &page.items).filter(|item| {
+                matches!(item, wordcraft_layout::Placed::Rule {border,..} if border.color==Some(Rgb(255,0,0)))
+            }).count();
+            assert_eq!(red_rules > 0, visible, "{part:?}/{side}");
+            let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+            for png in [
+                crate::docx::render(&bytes, 0, 144.0, None).unwrap(),
+                crate::pdf::render(&pdf, 0, 144.0, None).unwrap(),
+            ] {
+                assert_eq!(border_pixels(png, 0) > 100, visible, "{part:?}/{side}");
+            }
+        }
+        // Explicit nil is also lost: unlike direct-cell nil it cannot suppress the
+        // inherited table edge. Readback proves that serialization did not drop it.
+        let (mut native, id) = raw(TablePart::WholeTable, "inside_vertical");
+        let original =
+            wordcraft_layout::layout(&native, &mut Default::default(), &Default::default());
+        let style = native
+            .styles
+            .styles
+            .iter_mut()
+            .find(|style| style.id == id)
+            .unwrap();
+        let mut part = style.table_part(TablePart::FirstRow);
+        part.borders = Some(Borders {
+            inside_v: Some(Border::default()),
+            ..Default::default()
+        });
+        style.set_table_part(TablePart::FirstRow, part);
+        let bytes = wordcraft_docx::write(&native).unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        assert_eq!(
+            reopened
+                .styles
+                .find(&id)
+                .unwrap()
+                .table_part(TablePart::FirstRow)
+                .borders
+                .unwrap()
+                .inside_v
+                .unwrap()
+                .style,
+            BorderStyle::None
+        );
+        let ignored =
+            wordcraft_layout::layout(&reopened, &mut Default::default(), &Default::default());
+        fn red_rules(layout: &wordcraft_layout::DocLayout) -> Vec<(f32, f32, f32, f32)> {
+            layout
+                .pages
+                .iter()
+                .flat_map(|page| &page.items)
+                .filter_map(|item| match item {
+                    wordcraft_layout::Placed::Rule {
+                        x0,
+                        y0,
+                        x1,
+                        y1,
+                        border,
+                    } if border.color == Some(Rgb(255, 0, 0)) => Some((*x0, *y0, *x1, *y1)),
+                    _ => None,
+                })
+                .collect()
+        }
+        assert_eq!(red_rules(&original), red_rules(&ignored));
+        for block in &mut native.body {
+            if let Block::Table(table) = Arc::make_mut(block) {
+                for cell in &mut table.rows[0].cells {
+                    cell.props.borders = Some(Borders {
+                        left: Some(Border::default()),
+                        right: Some(Border::default()),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+        let direct =
+            wordcraft_layout::layout(&native, &mut Default::default(), &Default::default());
+        assert!(
+            red_rules(&direct).len() < red_rules(&original).len(),
+            "direct-cell nil must still suppress its edges"
+        );
     }
 
     #[test]

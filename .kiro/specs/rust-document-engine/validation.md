@@ -772,6 +772,20 @@ Independent exact-head CI then exposed a substantive native shaping defect: addi
 - This supersedes focused-only evidence for local acceptance. Independent review and exact-head/current-main CI remain required before manual merge. Stable slide/shape IDs and native range revision checks retain their distinct semantics; no broad parity criterion is newly completed.
 
 
+## Conditional table vertical borders — focused correction evidence
+
+- Read-only audit confirms per-edge border mappings already exist on table/cell/style formatting, so no new surface is needed. Pinned native conditional region mapping stores vertical edges on per-cell left/right, but interior selection reads cleared inside_v. Installed-wheel probes show first-row inside-vertical and interior-facing column/corner borders serialize yet produce zero red pixels in both DOCX and PDF, while direct/outer controls remain visible. Explicit nil suppression is also lost.
+- The 31-line staged parser guard rejects 14 affected region/side combinations, including explicit nil, and preserves None resets and direct/whole-table controls. Two native groups, warnings-denied all-targets Clippy, debug build and 18 related public tests pass in isolation (three new public workflows). A committed raw-native test bypasses the guard and retains source/readback, placed-rule and actual PNG/PDF evidence; public tests cover failed compound updates, ownership/ranges/caches/copies and inherited/explicit border controls.
+- No dependency, revision, API or conversion-matrix change. Complete integrated artifact and independent review remain pending. TBL7 stays open; the correction does not provide patterned shading or full shared-edge conflict resolution.
+
+
+## Conditional table vertical borders — complete local artifact
+
+- Runtime `1cef0262d2a73c0aab2d5fbe4b838ee858e2f732` passes all 282 locked Rust tests and 405 clean installed-wheel Python tests, zero skips/failures/errors, with exact installed-byte matching. Formatting, all-targets warnings-denied Clippy, strict installed-package typing, roadmap/support/cached-reference checks and the unchanged 264-package license audit pass.
+- Linux x86_64 / CPython 3.11.2 wheel: 17,485,323 bytes; extension: 40,563,912; SHA-256 `2411b9c817d58c9d8be1aea9b1dd44526d6c83a5a917e37c8545100b0a37cadb`; lock SHA-256 `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. Evidence: `dist/docx-conditional-borders/validation.json` and `/opt/docxconditionalborderstest`. No upstream revision, dependency or conversion-matrix change.
+- This supersedes focused-only correction evidence for local acceptance. The raw native regression retains both dropped visible borders and failed nil suppression, while supported direct/whole-table controls remain visible. Independent review and exact-head/current-main CI remain required before manual merge; U02/TBL7 remain open.
+
+
 ## Decimal-outline raster comparison — independent CI correction
 
 Final-main CI runs `39503201911` and diagnostic-only `39504027755` exposed an overstrict aggregate ink-count assertion in the nine-level/max-start fixture. At LTR 144 DPI, source and PDF ink bounds were exactly `(145, 662, 150, 548)`, but thresholded counts were 5481 versus 5482. Full-image diagnostics found 140 changed pixels with maximum RGBA-channel difference 1: exactly one pixel at `(267, 248)` crossed from `(128,128,128,255)` to `(127,127,127,255)`. Independent repeated local probes also found deterministic one-channel differences while their aggregate counts happened to match. This is renderer coverage quantization, not evidence of a layout or shaping change.

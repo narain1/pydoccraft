@@ -403,3 +403,10 @@ Assignment validates staged geometry; every commit rechecks cheap scope, and sav
 PPTX handles retain stable slide and shape IDs, unlike the conservative PDF page-generation model. For Slide.background and Shape.rotation/fill/box/color/font_size/add_run, the facade first validates a slide through its existing number lookup or a shape through the cheap native shape_placeholder lookup. It then normalizes numeric/color/format inputs and resolves the current slide index again for native mutation. Existing native per-slide shape lookup rejects deleted shapes; no identifier-to-ordinal cache or replacement handle is added.
 
 The same callback discipline applies to generic range formatting: an initial existing revision query provides fast stale/closed rejection without retrieving text, while the native mutation still enforces the captured range revision after callbacks. Changes made by the caller are preserved; this is not automatic rollback of callback effects.
+
+
+## 64. Guard native conditional-edge loss in the existing style parser
+
+The staged conditional table-style border branch first runs the shared border parser, then examines only explicitly supplied non-null sides against the native TablePart. Unsupported combinations raise the existing unsupported error before candidate commit. There is no table-layout scan or new resource accounting: the restriction follows the reusable style definition independently of current attachments.
+
+Pinned region_borders converts conditional edges into cell left/right values and clears inside_v; subsequent interior selection reads the cleared inside_v instead of those mapped values. The adapter records and rejects that native limitation, retaining native source generation and layout as the sole authorities. Explicit nil suppression is affected in the same way; None remains a safe removal of the direct override.
