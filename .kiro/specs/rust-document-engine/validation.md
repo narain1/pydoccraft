@@ -13,8 +13,13 @@
 
 - Independent review reproduced stacked combining marks rendering 26 points above a requested text box. Boxed static TrueType text now checks actual native shaped outlines against the box before commit, retaining legacy point placement. Built-in fonts still use logical metrics; boxed CFF is explicitly unavailable until native evaluation can be bounded.
 - Resource validation uses public parsed component iterators before recursive outline lookup: 4,096 distinct glyphs, 100,000 composite visits, depth 16, 8,192 points per glyph, 100,000 aggregate path operations, at most 16,384 operations per glyph and 1 MiB scratch per glyph. Native unhinted outlines and Kurbo curve extrema supply geometry; no glyph parser or replacement shaping engine is added.
-- All 44 PDF native tests, formatting and locked all-targets warnings-denied Clippy passed. A public regression covers two/six stacked marks, cached-output rollback, four rotations with CropBox/UserUnit, ordinary Unicode and unchanged point placement; its installed-wheel run is pending combined validation.
+- All 44 PDF native tests, formatting and locked all-targets warnings-denied Clippy passed. A public regression covers two/six stacked marks, cached-output rollback, four rotations with CropBox/UserUnit, ordinary Unicode and unchanged point placement; its installed-wheel run passed in the exact-head integration validation below.
 - The only lockfile change adds a direct edge to already-locked skrifa 0.44.0 (MIT OR Apache-2.0). Regenerated and reviewed license inventories are byte-identical at 264 permissive normal/build packages, with no prohibited crates. NOTICE records direct outline use; all upstream revisions remain unchanged.
+
+### PDF text-box integration review
+
+- Exact runtime head `52fd5f801000f28fcdc79364df909010090a095a` passed CI 39467474191: formatting, 165 Rust tests, warnings-denied Clippy, 184 installed-wheel Python tests (no skips), and the regenerated 264-package license audit. Both review corrections and current main's parser-session/selective-extraction changes are included.
+- CPython 3.11.17 / Linux x86_64 artifact: wheel 17,286,676 bytes; native extension 40,094,512 bytes; wheel SHA-256 `2bb96a9e6457a5ea196454cd7ed4ac4877709a88c23a296c852f4febfaa8e836`. The only dependency change is the already-locked Skrifa direct edge; all upstream revisions remain unchanged.
 
 ## 2026-10-20 DOCX paragraph borders (unreleased)
 
