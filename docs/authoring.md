@@ -616,3 +616,11 @@ Tooltips are limited to 4,096 UTF-8 bytes and reject NUL or malformed Unicode. T
 Links and other annotation kinds do not support this property. The setter accepts only canonical native-style comment dictionaries with bounded metadata/geometry and indirect page annotation entries. Imported replies, unknown nested properties, noncanonical flags/styles and unsupported appearance structures fail explicitly before mutation. Existing native annotation inventory and initial-inspection allocation limitations still apply; this target guard is not a general imported-PDF safety guarantee.
 
 This is an annotation editing flag, not encryption or access control. Page/document operations are not prevented, and other software can clear the flag. Existing copies remain independent; page organization and annotation deletion keep their usual stale-handle rules. Values other than actual `True`/`False` raise `TypeError` without invoking truth-value callbacks.
+
+### Owned PDF read-only fields
+
+`field.read_only` is a strict boolean property for owned text, checkbox and choice fields. It starts as `False`. Setting it to `True` disables native filling, including valid `field.value = ...` assignments through this Python API. Assigning the existing value or clearing a choice also fails with `DocExError` while read-only. Set `field.read_only = False` before filling again. Invalid types and values retain their existing earlier validation errors.
+
+Read-only fields still allow tooltip and box changes, copies, deletion and flattening. Their flag survives supported page organization and serialization; normal stale-handle rules still apply. This property is distinct from a widget's Locked flag and is not encryption or access control. Imported AcroForms, multiwidget/radio fields and additional field flags remain unsupported.
+
+The native property setter regenerates appearances even when only this flag changes. Existing conservative appearance reservations and actual generated-byte accounting apply; raw appearance references may change, while tested values, metadata and visible output remain unchanged. Repeated assignments can allocate and invalidate cached snapshots. Non-boolean values raise `TypeError` without invoking truth-value callbacks.

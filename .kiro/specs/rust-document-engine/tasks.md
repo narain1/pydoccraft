@@ -496,3 +496,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete integrated locked native/release/clean installed-wheel validation: 293 Rust / 419 Python tests, strict typing and unchanged license audit.
 - [ ] Complete independent review/current-main CI after resolving prerequisite PR71 raster discrepancy.
 - [ ] Retain semantic note deletion and arbitrary anchored-fragment remapping under existing LAY7/U02/U07 ownership.
+
+
+## Owned PDF field read-only state
+
+- [x] Verify native READ_ONLY/set_props/set_value contracts and reuse existing owned-field accounting and postconditions.
+- [x] Permit only READ_ONLY in addition to existing kind flags; preserve imported/multiwidget/script restrictions and native filling refusal.
+- [x] Complete focused native/public/typing tests for fidelity, saved flags, allowed edits, recovery and atomic bounds/lifetime errors.
+- [x] Complete integrated locked native/release/installed-wheel checks: 296 Rust / 423 Python tests, strict typing and unchanged license audit.
+- [ ] Complete independent review and fresh current-main CI before manual merge.
+- [ ] Keep broader PDF6/U10 field/widget capabilities open.

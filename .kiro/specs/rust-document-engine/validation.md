@@ -884,6 +884,24 @@ Wheel: `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`, **17,506,182 by
 This local artifact retains the original decimal-outline assertion, which passes here. It does **not** resolve prerequisite PR71's current-main CI raster discrepancy; that investigation and independent final current-main CI remain merge gates for this stacked branch. LAY7 deletion/adoption and broader parity remain open.
 
 
+## Owned PDF field read-only state — isolated focused validation
+
+On 2026-10-20, an isolated source snapshot based on `d0ce053` passed three new native test groups, formatting, locked/offline all-targets warnings-denied Clippy and a debug extension build with Rust 1.95. The matching copied Python facade/extension passed 17 focused tests: four new read-only groups plus existing field, tooltip and geometry regressions. Strict mypy consumer checks passed against a temporary environment containing that same package, including bool getter/setter assertions. These are focused development results, not a new installed release artifact or a complete-corpus certification.
+
+Fixtures cover text, checkbox and choice fields across all four rotations with nonzero CropBox/UserUnit geometry; exact before/after pixels; native saved-source flags, values, options and tooltip; complete field equality except READ_ONLY; and unchanged regenerated appearance contents. They verify native refusal of identical, different and clear-value assignments, recovery after clearing the flag, independent copy, allowed tooltip/box edits, deletion, flattening, page organization, strict bool/lifetime behavior and atomic resource rejection. Unsupported additional flags remain rejected. Flatten comparisons use a matching flag-cleared control so the existing native transformed-page rounding behavior is not broadened into a pixel-perfect conversion claim.
+
+The existing public native `FieldProps.read_only`/`set_props` path regenerates appearances, including repeated assignments; references, constant allocation and cache-preserving no-ops are not promised. Existing owned-field/model/text, peak appearance and actual raw appearance accounting remain in force. Read-only is native field editing behavior, not security or encryption. Imported AcroForms, multiwidget/radio forms and broader PDF6/U10 capabilities remain outside this slice. No dependency, upstream revision, conversion or license-graph change. Complete integrated locked tests, release wheel, clean installed corpus and independent review remain pending.
+
+
+## Owned PDF field read-only state — complete local artifact
+
+Runtime commit `6af0b8d313fd585dcdedf138aad27f3205b76873` passed **296 Rust tests and 423 clean installed-wheel Python tests**, zero failures/errors/skips. The Python corpus ran in 121.134 seconds on Linux x86_64 / Python 3.11.2 / Rust 1.95; installed facade/native bytes match the wheel. Formatting, locked/offline all-target warnings-denied Clippy, release build, strict installed-package typing and the unchanged 264-package license audit pass. The complete corpus verifies PDF/DOCX/PPTX extraction, PNG rendering and reopened converted outputs, including the new read-only workflows.
+
+Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,507,974 bytes**, native extension **40,610,984 bytes**, SHA-256 `52d36a6006b504e2de511846845e77705abe5228db89ac6472c6fbe8f65466c4`. Lock SHA-256 remains `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. PdfCraft/WordCraft/DeckCraft/craft-libs revisions remain pinned above; no dependency, attribution or prohibited-runtime change.
+
+This historical local artifact uses the original decimal-outline test. PR71's independent diagnostic review has identified one-level coverage quantization and is validating a corrected spatial comparison separately; this artifact does not replace its current-main CI gate. Independent review and fresh current-main CI remain required for this branch. Broader PDF6 form/imported/widget work stays open.
+
+
 ## Decimal-outline raster comparison — corrected CI artifact
 
 - Corrected final-main head `d5912b9aad74520b13a9753e6b6ee4b27c2caa3d` passes [CI 39504970072](https://github.com/narain1/pydoccraft/actions/runs/39504970072): all 280 locked Rust tests and 393 installed-wheel Python tests, zero failures/errors/skips, formatting, warnings-denied Clippy, strict typing and the unchanged 264-package audit. Independent corrected-test verification against the copied local release also passes all 393 tests (79.069s). PR71 was manually merged as `e402268f5bc33f756f34587594761c41308a2a1e`; auto-merge remains disabled.
