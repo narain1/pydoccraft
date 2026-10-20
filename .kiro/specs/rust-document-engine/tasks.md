@@ -303,3 +303,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Generate the readable operation matrix and add offline validation of references, evidence drift, optional cells and calendar dates.
 - [x] Run development checks and the complete installed-wheel corpus, recording that runtime code and artifact are unchanged.
 - [ ] Expand audited profiles and reference-member dispositions before claiming complete API1/API7/QA1/QA8 coverage.
+
+
+## Pinned reference-family discovery
+
+- [x] Group representative Open XML SDK/PyMuPDF members under existing roadmap and evidence profiles with immutable source provenance.
+- [x] Derive ownership/reverse joins and connect the operation matrix without copying tested behavior statuses.
+- [x] Verify source hashes/member lines, malformed-reference regressions and complete installed-wheel corpus; record evidence.
+- [ ] Retain full member disposition, richer native operation audits and broader API1/QA1 parity work.

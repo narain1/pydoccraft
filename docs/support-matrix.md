@@ -10,7 +10,7 @@ Operations: **read** normalized content; **create** native-format serialization;
 
 Statuses: **verified** for the stated scope; **partial** with a stated gap; **unsupported** in the current facade; **blocked upstream** for a cited native constraint; **unassessed** without adequate evidence; **n/a** where the operation has no meaning.
 
-The pinned SDK feature-family crosswalk remains in [API design](authoring-api-design.md). Complete SDK/PyMuPDF member dispositions remain separate unfinished work. No public capability-query API is introduced.
+The pinned SDK feature-family crosswalk remains in [API design](authoring-api-design.md). The [pinned reference-family inventory](reference-api-inventory.md) groups representative SDK/PyMuPDF members; complete member dispositions remain unfinished work. No public capability-query API is introduced.
 
 Maintain `docs/support-ledger.json`; run `python tools/support_matrix.py` to check and `python tools/support_matrix.py --write` to regenerate. A changed test-file digest requires review of its assertions/fixture provenance and relevant artifact evidence, not a blind hash refresh. Native citations were source-audited at their immutable pins; the offline checker validates their references, not native code execution or remote symbol existence.
 
@@ -42,6 +42,8 @@ PNG rendering of a page-view rectangle; not content-stream clipping.
 | Render | **verified** — Display-space rectangles honor CropBox, rotations and UserUnit; finite/positive/intersection/resource checks. Tested tolerances are fixture-specific, not universal pixel identity. [RenderClippingTests.test_pdf_clips_follow_crop_user_units_and_all_rotations](../tests/test_render_clipping.py); [RenderClippingTests.test_invalid_empty_and_oversized_clips_fail_explicitly](../tests/test_render_clipping.py); [historical artifact: 2026-10-20](../.kiro/specs/rust-document-engine/validation.md#2026-10-20-executable-cookbook-and-api10-usability); [PageRenderer, RenderRequest](https://github.com/storytold/pdfcraft/blob/645016addcfb9078c557f0189559ab47cdcee057/crates/render/src/raster.rs) |
 | Export | **n/a** — This row evaluates region rendering, not document mutation, extraction or format conversion. |
 
+**Comparison families:** [REF-PM-RASTER](reference-api-inventory.md#ref-pm-raster)
+
 ## word.properties
 
 Strict scalar custom properties, separate from core/extended metadata.
@@ -59,6 +61,8 @@ Strict scalar custom properties, separate from core/extended metadata.
 | Preserve | **unassessed** — Arbitrary source custom-property parts, unsupported variants and raw package identity are not covered by authored round-trip tests. |
 | Render | **n/a** — Custom properties are nonvisible metadata. |
 | Export | **n/a** — This row does not promise a PDF mapping for DOCX custom properties. |
+
+**Comparison families:** [REF-OX-PROPERTIES](reference-api-inventory.md#ref-ox-properties)
 
 ## word.table-alternative-text
 
@@ -78,6 +82,8 @@ Native table caption/description projected as metadata; absent differs from empt
 | Render | **n/a** — Alternative text is nonvisible metadata. |
 | Export | **unassessed** — No evidence here establishes PDF accessibility tags or an alternate-text conversion mapping. |
 
+**Comparison families:** [REF-OX-TABLE-ACCESSIBILITY](reference-api-inventory.md#ref-ox-table-accessibility)
+
 ## pdf.page-assembly
 
 Page insertion/selection and optional outline-preserving imports within the conservative editable source profile.
@@ -95,6 +101,8 @@ Page insertion/selection and optional outline-preserving imports within the cons
 | Preserve | **partial** — Tested page content, links and selected outline destinations survive. Optional outline import can omit destinations outside the selection; document-wide tags/metadata are not implied. [PdfOutlineImportTests.test_native_import_preserves_nested_outlines_and_destinations](../tests/test_pdf_outline_import.py); [PdfOutlineImportTests.test_subset_reorder_delete_preserve_links_and_rendered_content](../tests/test_pdf_outline_import.py); [historical artifact: 2026-10-20](../.kiro/specs/rust-document-engine/validation.md#2026-10-20-executable-cookbook-and-api10-usability); [insert_file_pages, FieldConflicts::Rename, extract_pages](https://github.com/storytold/pdfcraft/blob/645016addcfb9078c557f0189559ab47cdcee057/crates/organize/src/import.rs) |
 | Render | **verified** — Tested imported/reordered page content renders after serialization. [PdfOutlineImportTests.test_subset_reorder_delete_preserve_links_and_rendered_content](../tests/test_pdf_outline_import.py); [historical artifact: 2026-10-20](../.kiro/specs/rust-document-engine/validation.md#2026-10-20-executable-cookbook-and-api10-usability); [PageRenderer, RenderRequest](https://github.com/storytold/pdfcraft/blob/645016addcfb9078c557f0189559ab47cdcee057/crates/render/src/raster.rs) |
 | Export | **n/a** — Native PDF serialization is part of create/edit; this profile makes no PDF-to-DOCX conversion claim. |
+
+**Comparison families:** [REF-PM-PAGE-ASSEMBLY](reference-api-inventory.md#ref-pm-page-assembly)
 
 ## pdf.owned-fields
 
@@ -114,6 +122,8 @@ Owned single-widget text/checkbox/choice fields with fixed appearances; no radio
 | Render | **verified** — Visible text/checkbox/choice appearances and tested flattening render as expected, including rotated/cropped/UserUnit geometry. [PdfFieldTests.test_owned_forms_render_copy_and_flatten](../tests/test_pdf_fields.py); [FieldGeometryTests.test_rotated_cropped_userunit_pages_use_display_coordinates](../tests/test_field_geometry.py); [historical artifact: 2026-10-20](../.kiro/specs/rust-document-engine/validation.md#2026-10-20-executable-cookbook-and-api10-usability); [PageRenderer, RenderRequest](https://github.com/storytold/pdfcraft/blob/645016addcfb9078c557f0189559ab47cdcee057/crates/render/src/raster.rs) |
 | Export | **unsupported** — PDF-to-DOCX conversion rejects active forms; native PDF save and flatten are different operations. |
 
+**Comparison families:** [REF-PM-FORMS](reference-api-inventory.md#ref-pm-forms)
+
 ## slides.layouts
 
 Authored blank/title/title_and_content/two_content layouts and inherited placeholders.
@@ -132,6 +142,8 @@ Authored blank/title/title_and_content/two_content layouts and inherited placeho
 | Render | **verified** — Actual placeholder content renders for all four tested layouts. [SlideLayoutTests.test_layout_placeholders_render_and_preserve_inheritance_in_pptx_and_pdf](../tests/test_slide_layouts.py); [SlideLayoutTests.test_blank_compatibility_invalid_layout_atomicity_and_handle_identity](../tests/test_slide_layouts.py); [historical artifact: 2026-10-20](../.kiro/specs/rust-document-engine/validation.md#2026-10-20-executable-cookbook-and-api10-usability); [render_slide](https://github.com/storytold/deckcraft/blob/22db9261f9d1a214c296fd390173130c45d76d66/crates/render/src/lib.rs) |
 | Export | **verified** — PPTX-to-PDF fixture content reopens and renders; no pixel-perfect Office equivalence is claimed. [SlideLayoutTests.test_layout_placeholders_render_and_preserve_inheritance_in_pptx_and_pdf](../tests/test_slide_layouts.py); [historical artifact: 2026-10-20](../.kiro/specs/rust-document-engine/validation.md#2026-10-20-executable-cookbook-and-api10-usability); [export](https://github.com/storytold/deckcraft/blob/22db9261f9d1a214c296fd390173130c45d76d66/crates/pdf/src/lib.rs); [import, export](https://github.com/storytold/deckcraft/blob/22db9261f9d1a214c296fd390173130c45d76d66/crates/pptx/src/lib.rs) |
 
+**Comparison families:** [REF-OX-PRESENTATION](reference-api-inventory.md#ref-ox-presentation)
+
 ## pdf.vertical-redaction
 
 Secure removal of vertical-writing text beneath a redaction mark; no public package redaction API currently.
@@ -149,6 +161,8 @@ Secure removal of vertical-writing text beneath a redaction mark; no public pack
 | Preserve | **unassessed** — No package redaction operation or preservation corpus exists for this profile. |
 | Render | **n/a** — An opaque overlay is not evidence that underlying content was removed. |
 | Export | **n/a** — A format conversion is not a secure-redaction guarantee. |
+
+**Comparison families:** [REF-PM-REDACTION](reference-api-inventory.md#ref-pm-redaction)
 
 ## Roadmap coverage joins
 
