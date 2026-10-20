@@ -54,8 +54,19 @@ pub struct ImagePayload {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TablePayload {
     pub rows: Vec<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cells: Vec<Vec<CellPayload>>,
     pub bbox: Option<[f64; 4]>,
     pub page: Option<usize>,
+    pub metadata: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CellPayload {
+    pub blocks: Vec<BlockPayload>,
+    pub col_span: usize,
+    pub row_span: usize,
+    pub covered: bool,
     pub metadata: Map<String, Value>,
 }
 

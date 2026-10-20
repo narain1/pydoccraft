@@ -66,17 +66,19 @@ pub fn extract(data: &[u8]) -> Result<DocumentPayload, EngineError> {
 }
 
 pub fn render(data: &[u8], page: usize, dpi: f64) -> Result<Vec<u8>, EngineError> {
-    if !dpi.is_finite() || !(1.0..=1200.0).contains(&dpi) {
-        return Err(EngineError::ResourceLimit(
-            "DPI must be finite and between 1 and 1200".into(),
-        ));
-    }
+    crate::rendering::validate_dpi(dpi)?;
     let presentation = read(data)?;
     if page >= presentation.slides.len() {
         return Err(EngineError::Unsupported(format!(
             "page {page} does not exist"
         )));
     }
+    // Reject oversized requests before the upstream rasterizer allocates or clamps them.
+    crate::rendering::validate_size(
+        presentation.slide_size.width * dpi / 72.0,
+        presentation.slide_size.height * dpi / 72.0,
+        deckcraft_render::MAX_SIDE,
+    )?;
     let image = deckcraft_render::render_slide(
         &presentation,
         page,
@@ -85,14 +87,7 @@ pub fn render(data: &[u8], page: usize, dpi: f64) -> Result<Vec<u8>, EngineError
             ..deckcraft_render::RenderOpts::default()
         },
     );
-    if image.width == 0 || image.height == 0 {
-        return Err(EngineError::Malformed("PPTX rendering failed".into()));
-    }
-    if image.width >= deckcraft_render::MAX_SIDE || image.height >= deckcraft_render::MAX_SIDE {
-        return Err(EngineError::ResourceLimit(
-            "PPTX render exceeds the image dimension limit".into(),
-        ));
-    }
+    crate::rendering::validate_rgba(image.width, image.height, &image.pixels)?;
     let png = image.to_png_at(dpi);
     if png.is_empty() {
         return Err(EngineError::Malformed("PPTX PNG encoding failed".into()));
@@ -228,6 +223,7 @@ fn visit_shape(
                 bbox,
                 page: Some(page_number),
                 metadata,
+                ..TablePayload::default()
             };
             page.tables.push(payload.clone());
             page.blocks.push(BlockPayload {

@@ -1,0 +1,595 @@
+{
+  "schema_version": 1,
+  "source": "TODO.md",
+  "policy": "One canonical workstream owner per coverage ID. Feature coverage does not imply one public API per feature.",
+  "workstreams": [
+    {
+      "id": "W01",
+      "title": "Compact Python API and one feature coverage ledger",
+      "priority": "P0",
+      "area": "Python facade",
+      "kind": "implementation",
+      "depends_on": [],
+      "coverage": [
+        "C1",
+        "API1",
+        "API2",
+        "API3",
+        "API4",
+        "API7",
+        "API10",
+        "QA1",
+        "QA8"
+      ],
+      "scope": "Define a small lifecycle and semantic content primitives, units and ownership conventions. Maintain one development ledger and published support matrix. Do not add a public capability framework, schema mirror, report builder or one method per feature.",
+      "upstream_candidates": [],
+      "feature_roles": {
+        "C1": "milestone",
+        "API1": "implementation",
+        "API2": "implementation",
+        "API3": "implementation",
+        "API4": "implementation",
+        "API7": "implementation",
+        "API10": "implementation",
+        "QA1": "implementation",
+        "QA8": "implementation"
+      },
+      "github_issue": {
+        "number": 3,
+        "url": "https://github.com/narain1/pydoccraft/issues/3"
+      }
+    },
+    {
+      "id": "W02",
+      "title": "Rendering correctness, bounded execution and reuse",
+      "priority": "P0",
+      "area": "Adapters",
+      "kind": "implementation",
+      "depends_on": [],
+      "coverage": [
+        "R1",
+        "R2",
+        "R3",
+        "R4",
+        "P1",
+        "P2",
+        "P4"
+      ],
+      "scope": "Strengthen existing PNG/DPI methods, pixel and memory limits, private parse/layout reuse and measured selective processing. R1 is the baseline; track verified slices and remaining scope in the coverage checklist. No new rendered-image class or render alias.",
+      "upstream_candidates": [
+        "U09"
+      ],
+      "feature_roles": {
+        "R1": "existing",
+        "R2": "implementation",
+        "R3": "implementation",
+        "R4": "implementation",
+        "P1": "implementation",
+        "P2": "implementation",
+        "P4": "implementation"
+      },
+      "github_issue": {
+        "number": 4,
+        "url": "https://github.com/narain1/pydoccraft/issues/4"
+      }
+    },
+    {
+      "id": "W03",
+      "title": "Editable lifecycle, safe persistence and diagnostics",
+      "priority": "P1",
+      "area": "Facade and adapters",
+      "kind": "implementation",
+      "depends_on": [
+        "W01"
+      ],
+      "coverage": [
+        "DOC1",
+        "DOC2",
+        "DOC3",
+        "DOC4",
+        "DOC7",
+        "DOC8",
+        "API5",
+        "API6",
+        "API8",
+        "LAY9",
+        "PKG1",
+        "PKG2",
+        "PKG3",
+        "PKG4",
+        "PKG5",
+        "PKG6",
+        "PKG7",
+        "PKG8",
+        "E5"
+      ],
+      "scope": "Create/copy/save documents through native models, own handles safely and invalidate layout after edits. Separate blank creation from editing existing documents: editing requires verified preservation. Use one diagnostic model. Audit advanced compatibility/protection without silently stripping unsupported content.",
+      "upstream_candidates": [
+        "U01",
+        "U09",
+        "U11"
+      ],
+      "feature_roles": {
+        "DOC1": "implementation",
+        "DOC2": "implementation",
+        "DOC3": "implementation",
+        "DOC4": "implementation",
+        "DOC7": "implementation",
+        "DOC8": "implementation",
+        "API5": "implementation",
+        "API6": "implementation",
+        "API8": "implementation",
+        "LAY9": "implementation",
+        "PKG1": "implementation",
+        "PKG2": "implementation",
+        "PKG3": "implementation",
+        "PKG4": "implementation",
+        "PKG5": "implementation",
+        "PKG6": "implementation",
+        "PKG7": "implementation",
+        "PKG8": "implementation",
+        "E5": "implementation"
+      },
+      "github_issue": {
+        "number": 5,
+        "url": "https://github.com/narain1/pydoccraft/issues/5"
+      }
+    },
+    {
+      "id": "W04",
+      "title": "Rich text, styles, numbering and safe content copying",
+      "priority": "P1",
+      "area": "WordCraft adapter",
+      "kind": "implementation",
+      "depends_on": [
+        "W03"
+      ],
+      "coverage": [
+        "TXT1",
+        "TXT2",
+        "TXT3",
+        "TXT4",
+        "TXT5",
+        "TXT6",
+        "STY1",
+        "STY2",
+        "STY3",
+        "STY5",
+        "STY6",
+        "DOC5",
+        "DOC6"
+      ],
+      "scope": "Provide paragraph/run properties, styles and list semantics. Reuse one reference-safe content-copy operation for document composition, style import and repetition. Keep formatting presets in examples.",
+      "upstream_candidates": [
+        "U02"
+      ],
+      "feature_roles": {
+        "TXT1": "implementation",
+        "TXT2": "implementation",
+        "TXT3": "implementation",
+        "TXT4": "implementation",
+        "TXT5": "implementation",
+        "TXT6": "implementation",
+        "STY1": "implementation",
+        "STY2": "implementation",
+        "STY3": "implementation",
+        "STY5": "implementation",
+        "STY6": "implementation",
+        "DOC5": "implementation",
+        "DOC6": "implementation"
+      },
+      "github_issue": {
+        "number": 6,
+        "url": "https://github.com/narain1/pydoccraft/issues/6"
+      }
+    },
+    {
+      "id": "W05",
+      "title": "Semantic table structure, formatting and pagination",
+      "priority": "P1",
+      "area": "WordCraft adapter",
+      "kind": "implementation",
+      "depends_on": [
+        "W04"
+      ],
+      "coverage": [
+        "TBL1",
+        "TBL2",
+        "TBL3",
+        "TBL4",
+        "TBL5",
+        "TBL6",
+        "TBL7",
+        "TBL8",
+        "TBL9",
+        "TBL10"
+      ],
+      "scope": "Provide table/row/column/cell primitives with rich content, merges, widths and styling. Reuse paragraph formatting inside cells; pagination consumes section/layout support from W06. Share semantic definitions with extraction W09 while keeping editable objects separate.",
+      "upstream_candidates": [
+        "U03"
+      ],
+      "feature_roles": {
+        "TBL1": "implementation",
+        "TBL2": "implementation",
+        "TBL3": "implementation",
+        "TBL4": "implementation",
+        "TBL5": "implementation",
+        "TBL6": "implementation",
+        "TBL7": "implementation",
+        "TBL8": "implementation",
+        "TBL9": "implementation",
+        "TBL10": "implementation"
+      },
+      "github_issue": {
+        "number": 7,
+        "url": "https://github.com/narain1/pydoccraft/issues/7"
+      }
+    },
+    {
+      "id": "W06",
+      "title": "Sections, layout, drawings and native backgrounds",
+      "priority": "P1",
+      "area": "WordCraft adapter",
+      "kind": "implementation",
+      "depends_on": [
+        "W04"
+      ],
+      "coverage": [
+        "LAY1",
+        "LAY2",
+        "LAY3",
+        "LAY4",
+        "LAY5",
+        "LAY8",
+        "LAY10",
+        "MED1",
+        "MED2",
+        "MED3",
+        "MED4",
+        "MED5",
+        "MED8",
+        "BG1",
+        "BG7"
+      ],
+      "scope": "Implement section/header semantics, native page color and ordinary image/shape placement. Drawing properties provide anchor/layer/opacity/fit; watermarks and background images are recipes. Source geometry is reused by W09. Caption evaluation belongs to W08.",
+      "upstream_candidates": [
+        "U04",
+        "U05"
+      ],
+      "feature_roles": {
+        "LAY1": "implementation",
+        "LAY2": "implementation",
+        "LAY3": "implementation",
+        "LAY4": "implementation",
+        "LAY5": "implementation",
+        "LAY8": "implementation",
+        "LAY10": "implementation",
+        "MED1": "implementation",
+        "MED2": "implementation",
+        "MED3": "implementation",
+        "MED4": "implementation",
+        "MED5": "implementation",
+        "MED8": "implementation",
+        "BG1": "implementation",
+        "BG7": "implementation"
+      },
+      "github_issue": {
+        "number": 8,
+        "url": "https://github.com/narain1/pydoccraft/issues/8"
+      }
+    },
+    {
+      "id": "W07",
+      "title": "Text ranges, links, notes and review operations",
+      "priority": "P1",
+      "area": "WordCraft adapter",
+      "kind": "implementation",
+      "depends_on": [
+        "W04"
+      ],
+      "coverage": [
+        "TXT7",
+        "TXT8",
+        "REF1",
+        "REF2",
+        "REF8",
+        "LAY7",
+        "REV1",
+        "REV2",
+        "REV3",
+        "REV4",
+        "REV5"
+      ],
+      "scope": "Use revision-bound text ranges for literal replacement, links, bookmarks and comments; expose explicit invalidation rather than a live-range framework. Keep advanced tracked-change transformations gated by public upstream support. Navigation export uses W06 layout.",
+      "upstream_candidates": [
+        "U06"
+      ],
+      "feature_roles": {
+        "TXT7": "implementation",
+        "TXT8": "implementation",
+        "REF1": "implementation",
+        "REF2": "implementation",
+        "REF8": "implementation",
+        "LAY7": "implementation",
+        "REV1": "implementation",
+        "REV2": "implementation",
+        "REV3": "implementation",
+        "REV4": "implementation",
+        "REV5": "implementation"
+      },
+      "github_issue": {
+        "number": 9,
+        "url": "https://github.com/narain1/pydoccraft/issues/9"
+      }
+    },
+    {
+      "id": "W08",
+      "title": "Native fields, content controls and calculated references",
+      "priority": "P2",
+      "area": "WordCraft upstream candidates",
+      "kind": "implementation",
+      "depends_on": [
+        "W06",
+        "W07"
+      ],
+      "coverage": [
+        "FORM3",
+        "FORM4",
+        "FORM5",
+        "REF3",
+        "REF4",
+        "REF5",
+        "REF6",
+        "REF7",
+        "LAY6"
+      ],
+      "scope": "Expose native fields and content controls only where the backend supports them. Coordinate field evaluation and pagination upstream, including bounded convergence; never implement a Python field/layout engine. Native controls remain distinct from placeholder recipes.",
+      "upstream_candidates": [
+        "U07"
+      ],
+      "feature_roles": {
+        "FORM3": "implementation",
+        "FORM4": "implementation",
+        "FORM5": "implementation",
+        "REF3": "implementation",
+        "REF4": "implementation",
+        "REF5": "implementation",
+        "REF6": "implementation",
+        "REF7": "implementation",
+        "LAY6": "implementation"
+      },
+      "github_issue": {
+        "number": 10,
+        "url": "https://github.com/narain1/pydoccraft/issues/10"
+      }
+    },
+    {
+      "id": "W09",
+      "title": "Extraction structure, source locations and portable output",
+      "priority": "P1",
+      "area": "Adapters",
+      "kind": "implementation",
+      "depends_on": [],
+      "coverage": [
+        "E1",
+        "E2",
+        "E3",
+        "E4",
+        "E6"
+      ],
+      "scope": "Improve extraction independently of authoring. Reuse table hierarchy, source-location definitions and common diagnostics. Preserve existing owned model contracts. Markdown/media results may be assembled in Python without a new directory-export framework.",
+      "upstream_candidates": [
+        "U05",
+        "U10"
+      ],
+      "feature_roles": {
+        "E1": "implementation",
+        "E2": "implementation",
+        "E3": "milestone",
+        "E4": "implementation",
+        "E6": "implementation"
+      },
+      "github_issue": {
+        "number": 11,
+        "url": "https://github.com/narain1/pydoccraft/issues/11"
+      }
+    },
+    {
+      "id": "W10",
+      "title": "PDF authoring, page assembly and advanced capability audit",
+      "priority": "P1",
+      "area": "PdfCraft adapter",
+      "kind": "implementation",
+      "depends_on": [
+        "W01",
+        "W03"
+      ],
+      "coverage": [
+        "C3",
+        "P3",
+        "PDF1",
+        "PDF2",
+        "PDF3",
+        "PDF5",
+        "PDF6",
+        "PDF7",
+        "PDF8"
+      ],
+      "scope": "Use fixed-page primitives and page collections for creation and assembly. Keep forms, real redaction, conformance and advanced preservation as explicit independently verified upstream capabilities. Do not build a flow layout engine for PDF.",
+      "upstream_candidates": [
+        "U10"
+      ],
+      "feature_roles": {
+        "C3": "milestone",
+        "P3": "implementation",
+        "PDF1": "implementation",
+        "PDF2": "implementation",
+        "PDF3": "implementation",
+        "PDF5": "implementation",
+        "PDF6": "implementation",
+        "PDF7": "implementation",
+        "PDF8": "implementation"
+      },
+      "github_issue": {
+        "number": 12,
+        "url": "https://github.com/narain1/pydoccraft/issues/12"
+      }
+    },
+    {
+      "id": "W11",
+      "title": "PPTX authoring and preservation",
+      "priority": "P2",
+      "area": "DeckCraft adapter",
+      "kind": "implementation",
+      "depends_on": [
+        "W01",
+        "W03"
+      ],
+      "coverage": [
+        "SLIDE1",
+        "SLIDE2",
+        "SLIDE3",
+        "SLIDE4",
+        "SLIDE5",
+        "SLIDE6"
+      ],
+      "scope": "Use slide collections, editable text/table/picture objects and format-specific placement. Audit writer, master/theme and advanced-content preservation separately; do not assume a writer is missing or that export preserves every feature.",
+      "upstream_candidates": [
+        "U11"
+      ],
+      "feature_roles": {
+        "SLIDE1": "implementation",
+        "SLIDE2": "implementation",
+        "SLIDE3": "implementation",
+        "SLIDE4": "implementation",
+        "SLIDE5": "implementation",
+        "SLIDE6": "implementation"
+      },
+      "github_issue": {
+        "number": 13,
+        "url": "https://github.com/narain1/pydoccraft/issues/13"
+      }
+    },
+    {
+      "id": "W12",
+      "title": "Advanced Office object support audit",
+      "priority": "P2",
+      "area": "WordCraft upstream candidates",
+      "kind": "implementation",
+      "depends_on": [
+        "W01",
+        "W03"
+      ],
+      "coverage": [
+        "MED6",
+        "MED7"
+      ],
+      "scope": "Audit chart/data consistency, equations and diagrams for each operation. Existing backend capabilities should be adapted; absent format behavior belongs upstream. Keep blocked features visible without adding speculative Python methods.",
+      "upstream_candidates": [
+        "U08"
+      ],
+      "feature_roles": {
+        "MED6": "implementation",
+        "MED7": "implementation"
+      },
+      "github_issue": {
+        "number": 14,
+        "url": "https://github.com/narain1/pydoccraft/issues/14"
+      }
+    },
+    {
+      "id": "W13",
+      "title": "Composed workflows and cookbook coverage",
+      "priority": "P1",
+      "area": "Recipes",
+      "kind": "recipe",
+      "depends_on": [
+        "W04",
+        "W05",
+        "W06",
+        "W07"
+      ],
+      "coverage": [
+        "C2",
+        "C4",
+        "C5",
+        "API9",
+        "STY4",
+        "TBL11",
+        "BG2",
+        "BG3",
+        "BG4",
+        "BG5",
+        "BG6",
+        "FORM1",
+        "FORM2",
+        "FORM6",
+        "REV6",
+        "PDF4"
+      ],
+      "scope": "Deliver reports, basic templates, repeated rows, batch generation, watermarks, presets and Pillow interoperability as recipes over the core. C2/C4/C5 are workflow acceptance goals, not new APIs. Advanced privacy cleanup also requires W03 and verified W07 review operations.",
+      "upstream_candidates": [],
+      "feature_roles": {
+        "C2": "milestone",
+        "C4": "milestone",
+        "C5": "milestone",
+        "API9": "recipe",
+        "STY4": "recipe",
+        "TBL11": "recipe",
+        "BG2": "recipe",
+        "BG3": "recipe",
+        "BG4": "recipe",
+        "BG5": "recipe",
+        "BG6": "recipe",
+        "FORM1": "recipe",
+        "FORM2": "recipe",
+        "FORM6": "recipe",
+        "REV6": "recipe",
+        "PDF4": "recipe"
+      },
+      "github_issue": {
+        "number": 15,
+        "url": "https://github.com/narain1/pydoccraft/issues/15"
+      }
+    },
+    {
+      "id": "W14",
+      "title": "Shared validation harness and release evidence",
+      "priority": "P0",
+      "area": "Validation",
+      "kind": "validation",
+      "depends_on": [],
+      "coverage": [
+        "QA2",
+        "QA3",
+        "QA4",
+        "QA5",
+        "QA6",
+        "QA7",
+        "TBL12",
+        "BG8"
+      ],
+      "scope": "Maintain shared corpus/harness and release evidence. Each implementation workstream owns its tests; this workstream does not duplicate feature implementations. Its infrastructure begins immediately and release verification runs throughout.",
+      "upstream_candidates": [],
+      "feature_roles": {
+        "QA2": "acceptance",
+        "QA3": "acceptance",
+        "QA4": "acceptance",
+        "QA5": "acceptance",
+        "QA6": "acceptance",
+        "QA7": "acceptance",
+        "TBL12": "acceptance",
+        "BG8": "acceptance"
+      },
+      "github_issue": {
+        "number": 16,
+        "url": "https://github.com/narain1/pydoccraft/issues/16"
+      }
+    }
+  ],
+  "github_project": {
+    "owner": "narain1",
+    "number": 8,
+    "url": "https://github.com/users/narain1/projects/8"
+  }
+}

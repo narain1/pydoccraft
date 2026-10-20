@@ -1,5 +1,74 @@
 # Validation evidence
 
+## 2026-10-20 PR preparation against updated main
+
+Rebased the completed roadmap foundation and feature commits onto `f0baff5` (community guidelines and package URL metadata). Repeated formatting, locked Rust tests (5 passed), Clippy, the locked release build, and all 36 Python tests in a new clean CPython 3.11 environment. Container networking remained disconnected. The runtime dependency graph and upstream revisions are unchanged.
+
+The resulting Linux x86_64 wheel is 14,411,717 bytes, with a 33,068,744-byte native extension. SHA-256: `d216dea47b1882808df2984cc8e0a8cd7f2f7ad317bac487a3e4179b69385cd8`. The installed-wheel identity check passed. This supersedes the pre-rebase artifact below for PR review; the broader authoring workstreams remain open.
+
+## 2026-10-20 first agent implementation batch (unreleased)
+
+Three agents covered the W01/W03/W04/W07/W08, W02/W06/W10/W11, and W09/W05/W12/W13 portfolios; the integrator owned W14. Implementation in this working tree is limited to rendering metadata/bounds, recursive DOCX extraction, roadmap validation and the installed-wheel harness. Dependent authoring portfolios have pinned-source readiness audits, not completed runtime features. No new `new`, `edit`, or save API is advertised.
+
+Validation used Rust 1.95.0 in `rust:1.95-bookworm`, CPython 3.11.2, Maturin 1.8.1 and Linux x86_64. The committed `Cargo.lock` and all four upstream revisions remain unchanged. The final installed-wheel corpus ran with the container disconnected from its Docker network.
+
+| Check | Result |
+|---|---|
+| Formatting, `cargo test --locked`, Clippy with warnings denied | Passed; 5 Rust tests |
+| Release wheel build with committed lockfile | Passed |
+| Clean installed-wheel suite | 36 passed, zero skipped: 28 runtime/API tests and 8 roadmap-validator tests |
+| DPI metadata and dimensions | PDF/DOCX/PPTX at 72, 144, 150.5 and 300 DPI; decoded PNG data and representative visible output checked |
+| Render errors/lifetimes | Invalid DPI, oversize requests, indexes and closed documents checked; intentional blank DOCX page remains valid |
+| Recursive tables | Nested content, source order, exact links, images, merged cells including omitted leading grid cells, cross-page fallback deduplication, owned lifetime and 16/17-level boundary checked |
+| Conversion reopen | Existing three advertised pairs plus nested DOCX-to-PDF no-duplication assertion passed |
+| Artifact identity | Harness compares installed package/native members with wheel; deliberately mismatched wheel rejected before tests/evidence output |
+| Coverage ledger | 139 IDs, 14 workstreams, unique owners, valid roles/upstream references, acyclic dependencies |
+| Attribution | Wheel LICENSE/NOTICE/LICENSE-THIRD-PARTY match source; third-party wheel copy matches reviewed inventory |
+| Repository checks | Workflow YAML parses; `git diff --check` passes |
+
+Artifact: `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`, 14,411,386 bytes; native extension 33,068,744 bytes. Wheel SHA-256: `22d11eb7e734f41339b576fe2445dfa17db77228cca4348bd5d4d6814028e5d5`. Lockfile SHA-256: `36084d8fdc39107d12a67bcb28e8454d919e8ee888828992e90a75c2ea81e13d`. Machine-readable evidence is generated at `dist/validation.json` and remains a build artifact. The previous size baseline was AArch64, so these sizes are not a same-platform regression comparison.
+
+Review corrected a PyO3 module-name collision, cross-page table asset duplication and omitted-grid merge positioning. WordCraft adds a required empty paragraph after a nested table; the structural regression deliberately retains and asserts that normalization instead of dropping empty paragraphs.
+
+R3 is complete for this tested working-tree artifact. R2/R4 remain open for rotated/landscape/nonstandard geometry coverage and the upstream DeckCraft silent blank-on-panic contract. E1 remains partial for broader PPTX/PDF semantics and pagination coverage. The 16-level table guard applies to DOCX body extraction normalization, not all parser/stories/operations. No dependency upgrade, new runtime library or upstream issue was introduced. Remote CI/release matrices, cross-platform visual baselines and broad authoring acceptance remain unverified; this is not a release declaration.
+
+GitHub progress was read back after updating all 14 issues: each remains open, 139 coverage IDs remain unique, and only R1/R3 are checked. Project W01/W02/W09/W14 are In Progress; dependent authoring work remains Todo with source-audit findings attached. Issue notes explicitly identify these changes as local, uncommitted and unreleased. Local documentation checks covered 73 file links and parsed the readiness-document Python snippets.
+
+## 2026-10-20 GitHub roadmap issue publication
+
+- Published and read back 14 canonical roadmap issues in `narain1/pydoccraft`, numbers 3–16. The [workstream map](../../../docs/roadmap-workstreams.md) links each issue; its JSON records the issue URLs.
+- Verified issue bodies against the generated scope/checklists: all 139 coverage IDs are owned exactly once, preserving 138 open goals and existing rendering capability R1. Added priorities, backend labels, qualified upstream-candidate labels, related-work links and prerequisite baselines.
+- Used native GitHub blocking relationships only for whole-issue API-contract prerequisites. Existing rendering and extraction work remain independent; partial prerequisites are explicit body links rather than broad blockers.
+- Local checks passed: 61 local links/anchors across 14 Markdown files, draft Python example syntax, exhaustive unique coverage, acyclic workstream dependencies and whitespace checks. No runtime tests or native builds were rerun for these planning changes.
+- After user authorization, created [pydoccraft Roadmap, project 8](https://github.com/users/narain1/projects/8) and linked it to the repository. The project retains GitHub's private visibility default.
+- Added all 14 issue workstreams exactly once and read back every item's status, priority, work kind, ownership and upstream-candidate fields. Verified the repository link, project README, Backlog table, Roadmap timeline and filtered Upstream work view. Start/target dates remain unset; no delivery commitments were invented.
+
+## 2026-10-19 overlap, API surface and upstream source review
+
+- Three explicitly requested agents reviewed duplicated scope, public API breadth and dependencies, then inspected the pinned WordCraft/PdfCraft/DeckCraft repositories through GitHub APIs.
+- Consolidated all 139 coverage IDs into 14 canonical workstreams, each ID with one owner. Higher-level workflows, wrappers and data conveniences were reduced to recipes or acceptance checks; existing API contracts remain unchanged.
+- Recorded source evidence and ownership in [upstream-roadmap.md](../../../docs/upstream-roadmap.md). Writers and many model/edit/background operations already exist. Narrow verified candidates include PdfCraft's private table detector, DeckCraft's sized blank-image fallback on caught render panics, and WordCraft formatting-revision algorithms located in engine code.
+- This is source inspection and planning, not new runtime evidence. No native behavior/dependencies/upstream revisions changed and no issue was filed in an upstream repository.
+
+## 2026-10-19 Open XML feature-parity planning (documentation only)
+
+- Reviewed Microsoft's `dotnet/Open-XML-SDK` repository README, `WordprocessingDocument.cs`, WordprocessingML schema inventory, and official feature references for text/styles, tables/cells, backgrounds, sections, fields, content controls, revisions and validation. Reviewed Pillow's Image API for ergonomic conventions. Source links and review scope are recorded in [authoring-api-design.md](../../../docs/authoring-api-design.md).
+- Expanded the feature roadmap with grouped acceptance TODOs and milestones for a Pythonic authoring/editing API. Added draft creation, table/background, edit-copy, PDF and slide workflows; all are explicitly marked unimplemented.
+- Recorded the sole-backend policy: WordCraft/PdfCraft/DeckCraft public library APIs. Open XML SDK is a feature reference, not a runtime or required validation dependency. No upstream feature availability was inferred from Open XML support.
+- Added explicit per-operation coverage requirements for read/create/edit/preserve/render/export and blockers for missing upstream APIs. Rendering existing files remains implemented; new authoring capabilities have not been implemented or runtime-validated.
+- Updated requirements to distinguish permitted programmatic library editing from prohibited desktop editor-state dependencies. No source code, dependency, lockfile, license, attribution asset or upstream revision changed in this planning extension.
+- Documentation validation passed: 38 local links/anchors, balanced code fences across nine Markdown files, syntax checks for six Python examples, 139 unique roadmap IDs (138 open, one implemented), and whitespace checks. Draft authoring examples were not executed; no native builds or runtime tests were rerun for these documentation changes.
+
+## 2026-10-19 feature roadmap review (documentation only)
+
+- Reviewed the Python facade, native dispatch and all three rendering adapters, conversion dispatch, existing tests, and format documentation.
+- Confirmed source implementations of `Document.render_page(index, dpi=144)` and `Page.get_pixmap(dpi=144)` for PDF, DOCX, and PPTX, including finite 1–1200 DPI validation and `dpi / 72` scaling.
+- Existing tests assert PNG signatures, default/72 DPI behavior, negative indexes, and zero-DPI rejection. They do not establish multi-DPI dimensions, visual fidelity, or consistent PNG physical-resolution metadata; these remain roadmap R2–R4.
+- Confirmed there is no public authoring/mutation/save API. Added DOCX/PDF creation TODOs C1–C5 and prioritized extraction/performance work in [TODO.md](../../../TODO.md).
+- Compared capabilities with linked official PyMuPDF documentation. PDF rendering/creation already exist there; Office rendering is also documented. The roadmap distinguishes parity work from candidate differentiation and makes no market-wide uniqueness claim.
+- This change adds documentation only. No native build or runtime tests were rerun; historical installed-wheel results below remain separate evidence. No dependencies, lockfile, licenses, or upstream revisions changed.
+- Documentation checks passed: 22 local links (including referenced headings), balanced code fences across seven Markdown files, 19 unique roadmap IDs (one implemented and 18 open), and `git diff --check`.
+
 ## 2026-10-19 repository and CI initialization
 
 This is pre-release validation for the initial GitHub publication, not a declaration that task 10 or every release-candidate platform check is complete.

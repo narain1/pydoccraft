@@ -6,6 +6,7 @@ mod model;
 mod ooxml;
 mod pdf;
 mod pptx;
+mod rendering;
 
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;

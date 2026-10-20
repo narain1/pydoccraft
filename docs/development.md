@@ -37,10 +37,10 @@ A source-tree Python test is useful during development but is not release eviden
 ```bash
 python -m venv /tmp/pydoccraft-test
 /tmp/pydoccraft-test/bin/python -m pip install --no-index --find-links dist pydoccraft
-PYTHONPATH= /tmp/pydoccraft-test/bin/python -m unittest discover -s tests -v
+PYTHONPATH= /tmp/pydoccraft-test/bin/python tools/validate_installed.py --wheel-dir dist --output dist/validation.json
 ```
 
-The tests generate their PDF, DOCX, and PPTX fixtures locally. They require no office applications, external document binaries, cloud credentials, or runtime network access.
+The harness verifies that the imported Python/native files match the supplied wheel, rejects source-tree imports, runs the corpus, and records test counts, platform, wheel/native sizes, hashes and pinned upstream revisions. Use a wheel directory containing exactly one artifact. The tests generate their PDF, DOCX, and PPTX fixtures locally. They require no office applications, external document binaries, cloud credentials, or runtime network access.
 
 ## What the suite must cover
 
@@ -79,7 +79,7 @@ This is a platform-specific baseline, not a release declaration. See `.kiro/spec
 
 `.github/workflows/ci.yml` runs on pull requests and pushes to `main`. It installs Rust 1.95 and Python 3.11, checks formatting, runs locked Rust tests and Clippy, builds a release wheel, installs that wheel without consulting an index, and runs the Python suite.
 
-The tagged release workflow builds wheels for Python 3.11–3.13 on Linux, macOS, and Windows. At present those matrix jobs perform an import smoke test; the complete suite runs in CI's Python 3.11 job.
+The tagged release workflow builds wheels for Python 3.11–3.13 on Linux, macOS, and Windows. Each matrix job runs the installed-wheel corpus and uploads validation evidence before its wheel can be published. A local Linux pass does not establish that those remote jobs have passed.
 
 ## Release checklist
 
