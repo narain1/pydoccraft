@@ -2,7 +2,7 @@
 
 ## Summary
 
-`doc-ex` is a mixed Python/Rust package licensed under Apache-2.0. Python retains the stable PyMuPDF-style API and Markdown rendering. A private PyO3 extension, `doc_ex._core`, adapts pinned upstream ArtCraft engine crates from PdfCraft, WordCraft, and DeckCraft. No desktop UI, CLI, MCP, networking, updater, or subprocess component is linked.
+`pydoccraft` is a mixed Python/Rust package licensed under Apache-2.0. Python retains the stable PyMuPDF-style `doc_ex` API and Markdown rendering. A private PyO3 extension, `doc_ex._core`, adapts pinned upstream ArtCraft engine crates from PdfCraft, WordCraft, and DeckCraft. No desktop UI, CLI, MCP, networking, updater, or subprocess component is linked.
 
 ```mermaid
 flowchart LR
@@ -29,7 +29,7 @@ Every upstream repository is pinned to an immutable release commit:
 - DeckCraft v0.8.0: `22db9261f9d1a214c296fd390173130c45d76d66`
 - Craft PDF backend patches use the immutable `craft-libs` revision required by WordCraft/DeckCraft.
 
-Cargo features separate extraction from rendering and conversion. Only operation-specific crates are linked. A locked license audit must permit Apache-2.0, MIT, BSD, ISC, Zlib, Unicode, and similarly permissive licenses; GPL, AGPL, and LGPL-only dependencies are rejected.
+Rendering and conversion dependencies are currently unconditional in the release wheel; only operation-specific upstream crates are linked, and no application umbrella crate is used. A locked license audit must permit Apache-2.0, MIT, BSD, ISC, Zlib, Unicode, and similarly permissive licenses; GPL, AGPL, and LGPL-only dependencies are rejected.
 
 ## Native adapters
 
@@ -59,7 +59,7 @@ JSON remains the narrow extraction ABI. Images are base64 encoded only across th
 
 | Source | Target | Upstream implementation |
 |---|---|---|
-| PDF | DOCX | PdfCraft engine Office export |
+| PDF | DOCX | PdfCraft public extraction values mapped into the `pdfcraft-export` DOCX writer |
 | DOCX | PDF | WordCraft PDF export |
 | PPTX | PDF | DeckCraft PDF export |
 
@@ -67,7 +67,7 @@ Other pairs fail explicitly. Conversion fidelity and warnings are those of the p
 
 ## Rendering
 
-`Page.get_pixmap(dpi=144)` and `Document.render_page(page, dpi=144)` return PNG bytes. PDF uses PdfCraft rendering, DOCX uses WordCraft layout/render, and PPTX uses DeckCraft rendering. Rendering is feature-gated so extraction-only wheels can be evaluated separately if footprint becomes excessive.
+`Page.get_pixmap(dpi=144)` and `Document.render_page(page, dpi=144)` return PNG bytes. PDF uses PdfCraft rendering, DOCX uses WordCraft layout/render, and PPTX uses DeckCraft rendering. These dependencies are included unconditionally in the current wheel; extraction-only feature builds are not implemented.
 
 ## Normalized model
 
@@ -75,7 +75,7 @@ The normalized payload preserves zero-based pages, ordered blocks, links, images
 
 ## Safety and errors
 
-Upstream bounded parsers handle object/package limits and malformed content. The adapter applies additional input-byte and output-image limits before allocating Python payloads. No native adapter performs network access. Upstream errors are mapped to stable categories: unsupported, malformed, encrypted, resource limit, and conversion failure.
+Upstream bounded parsers handle object/package limits and malformed content. The adapter adds OOXML archive preflight limits and validates render DPI and output dimensions; whole-input, aggregate image-byte, normalized JSON-size, and total execution-time limits remain the caller's responsibility. No native adapter performs network access. Upstream errors are mapped to stable categories: unsupported, malformed, encrypted, resource limit, and conversion failure.
 
 ## Testing
 

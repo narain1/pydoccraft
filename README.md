@@ -1,18 +1,18 @@
-# doc-ex
+# pydoccraft
 
-[![CI](https://github.com/narain1/doc-ex/actions/workflows/ci.yml/badge.svg)](https://github.com/narain1/doc-ex/actions/workflows/ci.yml)
+[![CI](https://github.com/narain1/pydoccraft/actions/workflows/ci.yml/badge.svg)](https://github.com/narain1/pydoccraft/actions/workflows/ci.yml)
 
-`doc-ex` 0.2.0 is a Python 3.11+ mixed Python/Rust package for eager, in-process structured extraction from PDF, DOCX, and PPTX. It exposes a small PyMuPDF-style API and semantic PDF↔DOCX conversion. It performs no downloads, networking, subprocess execution, font discovery, or OCR.
+`pydoccraft` 0.2.1 is an Apache-2.0 Python/Rust package for eager, in-process structured extraction, rendering, and semantic conversion of PDF, DOCX, and PPTX files. It exposes the compatible `doc_ex` PyMuPDF-style API and uses pinned PdfCraft, WordCraft, and DeckCraft library crates—without external executables, runtime downloads, networking, cloud credentials, or OCR.
 
 ## Install
 
 ```console
-python -m pip install doc_ex-0.2.0-*.whl
+python -m pip install pydoccraft
 ```
 
-The platform wheel contains the private `doc_ex._core` native extension; no office suite or external executable is required.
+The wheel contains the private `doc_ex._core` native extension. No office suite, Pandoc, or Craft CLI is required.
 
-## API
+## Quick start
 
 ```python
 from pathlib import Path
@@ -20,44 +20,54 @@ import doc_ex
 
 with doc_ex.open("report.pdf") as document:
     print(document.page_count)
-    print(document[0].get_text("text"))
+    print(document[0].get_text())
     print(document[0].get_text("markdown"))
-    print(document[0].get_text("dict"))
     print(document[0].get_links())
-    print(document[0].get_images(full=True))
     print(document[0].find_tables())
-    png_bytes = document[0].get_pixmap(dpi=144)
-    docx_bytes = document.convert("docx")
+    Path("page.png").write_bytes(document[0].get_pixmap(dpi=144))
+    Path("report.docx").write_bytes(document.convert("docx"))
 
-pdf_bytes = doc_ex.convert(Path("report.docx").read_bytes(), "pdf", filetype="docx")
+Path("report.pdf").write_bytes(doc_ex.convert("report.docx", "pdf"))
+Path("slides.pdf").write_bytes(doc_ex.convert("slides.pptx", "pdf"))
 ```
 
-`Document` supports context management, iteration, integer and negative indexing, `load_page`, `page_count`, `metadata`, `to_markdown`, `convert`, and idempotent `close`. `Page.number` is zero-based. Returned `Block`, `Table`, `Link`, and `Image` values own their data and remain independent of source and temporary files.
+`Document` supports context management, iteration, integer and negative indexing, `load_page`, `page_count`, metadata, Markdown, PNG rendering, conversion, and idempotent close. `Page.number` is zero-based. Returned `Block`, `Table`, `Link`, and `Image` objects own their extracted data.
 
-DOCX uses WordCraft layout for computed pages, explicit `PAGE_BREAK` characters, and inherited `page_break_before` styles. Normalized blocks are emitted once on the first computed page they occupy because WordCraft does not expose exact per-page text slices for automatically wrapped paragraphs. PPTX returns one page per slide in presentation order. DOCX→PDF uses WordCraft layout and export, including Unicode text and empty explicit pages. PDF table detection is conservative and only reports stable positioned rows. Scan-only PDFs are not OCRed. Password-protected PDFs and DOCX files require the matching password.
+## Supported operations
 
-## Safety limits
+| Operation | PDF | DOCX | PPTX |
+|---|---:|---:|---:|
+| Structured text, links, images, and tables | Yes | Yes | Yes |
+| PNG page/slide rendering | Yes | Yes | Yes |
+| Convert to PDF | — | Yes | Yes |
+| Convert to DOCX | Yes | — | No |
+| Password input | Yes | Yes | Encrypted PPTX unsupported |
+| OCR | No | — | — |
 
-OOXML archives are rejected above 10,000 members, 128 MiB per member, 512 MiB aggregate uncompressed data, or a 1,000:1 suspicious compression ratio. Absolute and parent-traversing relationship targets are rejected. Parsing is memory-only after Python reads the source.
+PDF table detection is conservative. PDF links usually retain destination and geometry but not label text. DOCX computed pagination cannot split one automatically wrapped paragraph into exact normalized page slices. PPTX exposes URL links but not every PowerPoint action. Conversion uses upstream semantic exporters and is not pixel-perfect.
 
-## Runtime licenses
+## Documentation
 
-The package itself is Apache-2.0. Native runtime crates are pinned in `Cargo.toml`; PdfCraft v0.9.0 is pinned to revision `645016addcfb9078c557f0189559ab47cdcee057` and WordCraft v0.8.0 is pinned to revision `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`. Distributions must include `LICENSE` and `NOTICE`; the latter retains PdfCraft, PDFium/Foxit font, and Adobe CMap attribution notices. `THIRD_PARTY_LICENSES.md` must be regenerated and reviewed under task 9 before release.
+- [Python API](docs/api.md)
+- [Formats, rendering, and conversion](docs/formats.md)
+- [Safety and resource behavior](docs/safety.md)
+- [Dependencies, licensing, and attribution](docs/dependencies-and-licenses.md)
+- [Development and release validation](docs/development.md)
 
-## Test
+## Development
 
 ```console
 cargo fmt --all -- --check
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
-maturin build --release --locked
+maturin build --release --locked --out dist
 python -m unittest discover -s tests -v
 ```
 
-Tests generate all PDF, DOCX, and PPTX fixtures locally and require no network, cloud credentials, or external document binaries.
+Release validation must install the built wheel into a clean environment and run the suite against that installed package. Tests generate their own fixtures and require no external document tools.
 
-## Releases
+## License
 
-Every pull request and push to `main` runs Rust formatting, locked tests, Clippy, a release wheel build, and the Python suite against the installed wheel. Tags matching the package version (for example, `v0.2.0`) build and smoke-test Python 3.11–3.13 wheels on Linux, macOS, and Windows, then attach them to a GitHub release.
+`pydoccraft` is licensed under Apache-2.0. Distributions include [`LICENSE`](LICENSE), [`NOTICE`](NOTICE), and the wheel-compatible [`LICENSE-THIRD-PARTY`](LICENSE-THIRD-PARTY) copy of the audited [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md) inventory. Upstream dependency names identify their source and are not `pydoccraft` branding.
 
-The release workflow also uses PyPI trusted publishing through the `pypi` GitHub environment. Before the first tag, configure `narain1/doc-ex` and `.github/workflows/release.yml` as a trusted publisher for the `doc-ex` project on PyPI.
+The source repository is [`narain1/pydoccraft`](https://github.com/narain1/pydoccraft). PyPI trusted publishing is configured for project `pydoccraft`, repository `pydoccraft`, workflow `release.yml`, and environment `pypi`.

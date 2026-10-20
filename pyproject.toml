@@ -3,13 +3,13 @@ requires = ["maturin==1.8.1"]
 build-backend = "maturin"
 
 [project]
-name = "doc-ex"
-version = "0.2.0"
+name = "pydoccraft"
+version = "0.2.1"
 description = "Compact in-process PDF and OOXML document extraction"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "Apache-2.0"}
-authors = [{name = "doc-ex contributors"}]
+authors = [{name = "pydoccraft contributors"}]
 dependencies = []
 classifiers = [
   "License :: OSI Approved :: Apache Software License",
@@ -22,12 +22,16 @@ classifiers = [
 ]
 
 [project.urls]
-Repository = "https://github.com/narain1/doc-ex"
-Issues = "https://github.com/narain1/doc-ex/issues"
+Repository = "https://github.com/narain1/pydoccraft"
+Issues = "https://github.com/narain1/pydoccraft/issues"
 
 [tool.maturin]
-    include = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md"]
-    module-name = "doc_ex._core"
+include = [
+  { path = "LICENSE", format = ["sdist", "wheel"] },
+  { path = "NOTICE", format = ["sdist", "wheel"] },
+  { path = "LICENSE-THIRD-PARTY", format = ["sdist", "wheel"] },
+]
+module-name = "doc_ex._core"
 python-source = "src"
 features = ["extension-module"]
 strip = true

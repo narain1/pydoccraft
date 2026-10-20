@@ -22,7 +22,7 @@ __all__ = [
     "DocExError", "DocumentClosedError", "MalformedDocumentError", "UnsafeArchiveError",
     "UnsupportedFormatError", "ToolExecutionError", "ToolNotFoundError",
 ]
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 
 def _read(source: str | Path | bytes | bytearray | memoryview) -> tuple[bytes, str]:

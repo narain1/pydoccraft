@@ -36,5 +36,30 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 
 - GitHub CI must confirm the clean Python 3.11 installed-wheel path after the initial push.
 - Tagged release jobs must confirm Python 3.11–3.13 wheels on GitHub-hosted Linux, macOS, and Windows runners.
-- PyPI trusted publishing must be configured for `narain1/doc-ex` and the `pypi` GitHub environment before the first release tag.
+- PyPI trusted publishing must be configured for the `pydoccraft` project from `narain1/pydoccraft` and the `pypi` GitHub environment before the first release tag.
 - Known upstream fidelity limitations remain those documented in `README.md` and `design.md`; conversion is not claimed to be pixel-perfect.
+
+## 2026-10-20 pydoccraft 0.2.1 packaging validation
+
+- Renamed the PyPI distribution to `pydoccraft`; the compatible Python import remains `doc_ex`.
+- Package, crate, lockfile, and Python versions agree on `0.2.1`.
+- Replaced invalid Git patches to PdfCraft's excluded `vendor/` directory with exact vendored Apache/MIT snapshots of Hayro and lopdf from PdfCraft revision `645016addcfb9078c557f0189559ab47cdcee057`.
+- Built `pydoccraft-0.2.1-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl` with Rust 1.95 and Maturin 1.8.1.
+- Installed the wheel in a clean Python 3.11 container; `importlib.metadata.version("pydoccraft")` and `doc_ex.__version__` both returned `0.2.1`.
+- Installed-wheel test suite passed: 13 tests.
+- Wheel size: 13,198,306 bytes.
+- Wheel metadata reports Apache-2.0 and includes `LICENSE`, `NOTICE`, and `LICENSE-THIRD-PARTY`; the latter matches `THIRD_PARTY_LICENSES.md` byte-for-byte.
+- `pydoccraft` was not yet published when checked. First publication requires a matching pending PyPI Trusted Publisher for repository `narain1/pydoccraft`, workflow `release.yml`, and environment `pypi`.
+
+## 2026-10-20 final v0.2.1 release validation
+
+- Repository renamed to `narain1/pydoccraft`; local origin, `main`, GitHub environment, existing v0.2.0 tag, and release were verified after the rename.
+- Rust 1.95 clean-target validation passed: formatting, 3 Rust tests, and Clippy with warnings denied.
+- Final CPython 3.11 Linux AArch64 wheel built with the committed lockfile and installed in a clean container.
+- Installed-wheel Python suite passed: 13 tests covering extraction, rendering, lifecycle, safety, and reopenable PDF→DOCX, DOCX→PDF, and PPTX→PDF conversions.
+- Final wheel size: 13,198,994 bytes; native extension remains 28,648,840 bytes uncompressed.
+- Wheel metadata reports `pydoccraft` 0.2.1 under Apache-2.0.
+- Wheel includes `LICENSE`, the reviewed `NOTICE`, and `LICENSE-THIRD-PARTY`; the latter matches `THIRD_PARTY_LICENSES.md` byte-for-byte.
+- Final lockfile contains 246 unique package names and no prohibited engine, UI, CLI, MCP, automation, OCR, JavaScript, print, signing, or WinPrint package.
+- Documentation links, workflow YAML, and `git diff --check` passed.
+- PyPI trusted publishing was reported configured for project `pydoccraft`, owner `narain1`, repository `pydoccraft`, workflow `release.yml`, and environment `pypi`.

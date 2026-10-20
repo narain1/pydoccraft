@@ -45,7 +45,7 @@
 2. WHEN `doc_ex.convert(source, "pdf", filetype="docx")` is called, THE SYSTEM SHALL return a valid PDF containing the DOCX text with deterministic pagination.
 3. THE SYSTEM SHALL expose `Document.convert(output_format)` as a convenience over the same native conversion engine.
 4. THE SYSTEM SHALL reject unsupported conversion pairs explicitly.
-5. Conversion SHALL preserve semantic text and page separation; pixel-perfect source layout is not required for version 0.2.0.
+5. Conversion SHALL preserve semantic text and page separation; pixel-perfect source layout is not required for version 0.2.1.
 
 ## 5. Footprint, safety, and performance
 

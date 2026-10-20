@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`doc-ex` is a compact Python/Rust document extraction and conversion package. It exposes a PyMuPDF-style Python API while delegating format behavior to selected upstream ArtCraft engine crates. The package is licensed under Apache-2.0 and must remain usable without external executables, runtime downloads, network access, or cloud credentials.
+`pydoccraft` is a compact Python/Rust document extraction and conversion package. It exposes a PyMuPDF-style Python API through the compatible `doc_ex` import while delegating format behavior to selected upstream ArtCraft engine crates. The package is licensed under Apache-2.0 and must remain usable without external executables, runtime downloads, network access, or cloud credentials.
 
 The active feature specification is [`.kiro/specs/rust-document-engine/`](.kiro/specs/rust-document-engine/). Keep requirements, design, tasks, and validation evidence synchronized with implementation changes.
 
@@ -10,7 +10,7 @@ The active feature specification is [`.kiro/specs/rust-document-engine/`](.kiro/
 - **Do not link complete applications.** Never add ArtCraft desktop UI, CLI, MCP, automation server, updater, networking, printing, JavaScript, OCR-model, signing, or editor-state crates unless a reviewed requirement explicitly needs one.
 - **Pin upstream Git dependencies to immutable commit revisions.** Never track `main`, a floating branch, or an unpinned tag.
 - **Keep the runtime license graph permissive.** GPL, AGPL, and LGPL-only runtime dependencies are prohibited. Regenerate and review `THIRD_PARTY_LICENSES.md` whenever `Cargo.lock` changes.
-- **Retain required attribution.** Update `NOTICE` when adding or changing upstream crates, fonts, icons, CMaps, sample assets, or other attributed material.
+- **Retain required attribution.** Update `NOTICE`, `THIRD_PARTY_LICENSES.md`, and its wheel copy `LICENSE-THIRD-PARTY` when adding or changing upstream crates, fonts, icons, CMaps, sample assets, or other attributed material.
 - **Do not use ArtCraft, PdfCraft, WordCraft, or DeckCraft trademarks as this package's branding.** Names may be used only to describe upstream dependencies.
 - **No subprocess document processing.** Extraction, rendering, and conversion run in-process through `doc_ex._core`.
 - **No runtime downloads.** Wheels contain the native extension and all required code/assets.

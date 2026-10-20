@@ -1,8 +1,8 @@
-doc-ex
-Copyright 2026 doc-ex contributors
+pydoccraft
+Copyright 2026 pydoccraft contributors
 Licensed under the Apache License, Version 2.0.
 
-This product includes software developed by the ArtCraft Team and PdfCraft contributors:
+pydoccraft links selected library crates from the following ArtCraft projects. Their names are used only to identify upstream dependencies and do not imply endorsement.
 
 PdfCraft
 Copyright (c) 2026 ArtCraft Team and the PdfCraft contributors.
@@ -10,15 +10,37 @@ Licensed under the MIT License or the Apache License, Version 2.0, at your optio
 Source: https://github.com/storytold/pdfcraft
 Pinned revision: 645016addcfb9078c557f0189559ab47cdcee057
 
-The linked PdfCraft rendering graph includes these upstream notices:
+WordCraft
+Copyright (c) 2026 ArtCraft Team and the WordCraft contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option.
+Source: https://github.com/storytold/wordcraft
+Pinned revision: f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22
 
-Foxit standard-14 substitute fonts:
-Copyright 2014 PDFium Authors. All rights reserved.
-Original code copyright 2014 Foxit Software Inc.
-Redistributed under the BSD-3-Clause license.
+DeckCraft
+Copyright (c) 2026 ArtCraft Team and the DeckCraft contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option.
+Source: https://github.com/storytold/deckcraft
+Pinned revision: 22db9261f9d1a214c296fd390173130c45d76d66
 
-Adobe CMap resources:
-Copyright 1990-2023 Adobe. All rights reserved.
-Redistributed under the BSD-3-Clause license. Neither the name of Adobe nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+craft-libs PDF backend
+Copyright (c) 2026 ArtCraft Team and craft-libs contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option.
+Source: https://github.com/storytold/craft-libs
+Pinned revision: c3487320b2d1de657b860b3c8abb44e1f2b32bd8
 
-The PdfCraft name and ArtCraft names, wordmarks, and logos are trademarks of their respective owners. No trademark license is granted.
+Bundled and linked third-party material
+
+- Foxit standard-14 substitute fonts: Copyright 2014 PDFium Authors; original code copyright 2014 Foxit Software Inc. BSD-3-Clause.
+- Adobe CMap resources: Copyright 1990-2023 Adobe. BSD-3-Clause. Neither Adobe nor contributor names may be used to endorse derived products without prior written permission.
+- Source Sans 3 and Source Serif 4: Adobe and their respective project authors. SIL Open Font License 1.1.
+- Inter: The Inter Project Authors. SIL Open Font License 1.1.
+- JetBrains Mono: The JetBrains Mono Project Authors. SIL Open Font License 1.1.
+- Ubuntu Light: Dalton Maag Ltd for Canonical. Ubuntu Font Licence 1.0.
+- Hack, Noto Emoji, and the egui emoji icon font through epaint_default_fonts: MIT/Bitstream Vera, SIL Open Font License 1.1, and MIT respectively.
+- WordCraft English hyphenation data derives from Grady Ward's Moby Hyphenator II public-domain list; generated patterns are CC0-1.0.
+- WordCraft Polish and Italian hyphenation patterns are used under MIT; Portuguese patterns are used under BSD-3-Clause. Copyright details remain in the corresponding upstream source files.
+- Krilla 0.8.2 is MIT OR Apache-2.0. Compact ICC Profiles embedded by the PDF backend are by Clinton Ingram and released under CC0-1.0.
+
+The locked crate-by-crate license inventory is distributed as LICENSE-THIRD-PARTY and maintained in source as THIRD_PARTY_LICENSES.md.
+
+The ArtCraft, PdfCraft, WordCraft, and DeckCraft names, wordmarks, and logos are trademarks of their respective owners. No trademark license is granted. No upstream logos or brand assets are included in pydoccraft.

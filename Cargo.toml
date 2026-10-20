@@ -1,6 +1,6 @@
 [package]
-name = "doc-ex-core"
-version = "0.2.0"
+name = "pydoccraft-core"
+version = "0.2.1"
 edition = "2021"
 rust-version = "1.95"
 license = "Apache-2.0"
@@ -39,9 +39,9 @@ wordcraft-render = { git = "https://github.com/storytold/wordcraft", rev = "f2e1
 zip = { version = "=2.2.2", default-features = false, features = ["deflate"] }
 
 [patch.crates-io]
-hayro = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
-hayro-interpret = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
-hayro-jbig2 = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
-hayro-syntax = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
-lopdf = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
+hayro = { path = "vendor/pdfcraft/hayro" }
+hayro-interpret = { path = "vendor/pdfcraft/hayro-interpret" }
+hayro-jbig2 = { path = "vendor/pdfcraft/hayro-jbig2" }
+hayro-syntax = { path = "vendor/pdfcraft/hayro-syntax" }
+lopdf = { path = "vendor/pdfcraft/lopdf" }
 krilla = { git = "https://github.com/storytold/craft-libs", rev = "c3487320b2d1de657b860b3c8abb44e1f2b32bd8" }

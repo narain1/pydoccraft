@@ -51,7 +51,7 @@ jobs:
         run: maturin build --release --locked --out dist
 
       - name: Install built wheel
-        run: python -m pip install --no-index --find-links dist doc-ex
+        run: python -m pip install --no-index --find-links dist pydoccraft
 
       - name: Run tests against installed wheel
         run: python -m unittest discover -s tests -v

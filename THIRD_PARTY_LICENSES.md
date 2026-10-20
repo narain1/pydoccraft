@@ -1,6 +1,6 @@
 # Runtime and build dependency licenses
 
-Generated from the committed `Cargo.lock` using `cargo metadata --locked`. This inventory includes every normal and build dependency reachable from `doc-ex-core`, excludes the root package and dev-only dependencies, and lists simultaneous crate versions separately. License expressions are reproduced exactly from Cargo metadata.
+Generated from the committed `Cargo.lock` using `cargo metadata --locked`. This inventory includes every normal and build dependency reachable from `pydoccraft-core`, excludes the root package and dev-only dependencies, and lists simultaneous crate versions separately. License expressions are reproduced exactly from Cargo metadata.
 
 The resolved graph was reviewed for license declarations and compatibility. GPL-, AGPL-, and LGPL-only dependencies are prohibited; SPDX `OR` expressions remain acceptable when they provide a permissive alternative. Every package in this inventory declares a license, and no GPL-, AGPL-, or LGPL-only dependency was found.
 

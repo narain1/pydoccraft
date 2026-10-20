@@ -530,33 +530,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "doc-ex-core"
-version = "0.2.0"
-dependencies = [
- "base64",
- "deckcraft-model",
- "deckcraft-pdf",
- "deckcraft-pptx",
- "deckcraft-render",
- "pdfcraft-cos",
- "pdfcraft-create",
- "pdfcraft-edit",
- "pdfcraft-export",
- "pdfcraft-render",
- "png",
- "pyo3",
- "serde",
- "serde_json",
- "thiserror",
- "wordcraft-doc",
- "wordcraft-docx",
- "wordcraft-layout",
- "wordcraft-pdf",
- "wordcraft-render",
- "zip 2.2.2",
-]
-
-[[package]]
 name = "ecb"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -842,7 +815,6 @@ dependencies = [
 [[package]]
 name = "hayro"
 version = "0.7.1"
-source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
 dependencies = [
  "bytemuck",
  "hayro-interpret",
@@ -872,7 +844,6 @@ dependencies = [
 [[package]]
 name = "hayro-interpret"
 version = "0.7.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
 dependencies = [
  "bitflags",
  "hayro-cmap",
@@ -890,7 +861,6 @@ dependencies = [
 [[package]]
 name = "hayro-jbig2"
 version = "0.3.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
 dependencies = [
  "fearless_simd",
  "hayro-ccitt",
@@ -914,7 +884,6 @@ checksum = "885c5ef0654933139a9b9546fc2c69e18d37f38aa2520f079092b1be18f1fcaa"
 [[package]]
 name = "hayro-syntax"
 version = "0.7.2"
-source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
 dependencies = [
  "flate2",
  "hayro-ccitt",
@@ -1124,7 +1093,6 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 [[package]]
 name = "lopdf"
 version = "0.45.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
 dependencies = [
  "aes",
  "bitflags",
@@ -1494,6 +1462,33 @@ name = "pxfm"
 version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
+
+[[package]]
+name = "pydoccraft-core"
+version = "0.2.1"
+dependencies = [
+ "base64",
+ "deckcraft-model",
+ "deckcraft-pdf",
+ "deckcraft-pptx",
+ "deckcraft-render",
+ "pdfcraft-cos",
+ "pdfcraft-create",
+ "pdfcraft-edit",
+ "pdfcraft-export",
+ "pdfcraft-render",
+ "png",
+ "pyo3",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "wordcraft-doc",
+ "wordcraft-docx",
+ "wordcraft-layout",
+ "wordcraft-pdf",
+ "wordcraft-render",
+ "zip 2.2.2",
+]
 
 [[package]]
 name = "pyo3"
