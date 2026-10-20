@@ -169,3 +169,8 @@ U02/E3: the local extraction cache bounds repeated native numbering queries and 
 U04/MED3: native Image.crop and Float.flip_h/flip_v support original-media-preserving DOCX picture edits. Inline layout clamps frame dimensions below one point, so authored insertion/resize now rejects that range instead of silently enlarging it. A 90-degree rotation fixture for a solid rectangular image shows missing edge strips in both WordCraft PNG and exported PDF; expose rotation only after the native transform/render path preserves the full rectangle. Keep the fix upstream rather than resampling source images locally.
 
 U10/PDF6: public forms::set_props with a widget rectangle and native appearance regeneration supports moving/resizing existing owned single-widget fields locally. Field/widget identity, values, choices and orientation stay native. Imported-field traversal limits and multi-widget radio-group identity remain distinct upstream/integration work; this geometry property does not imply arbitrary form editing.
+
+
+### Office render lifetime follow-up (P1/R4)
+
+Local sessions can retain WordCraft Document/DocLayout and DeckCraft Presentation using existing public APIs. WordCraft LayoutCache is discarded after pagination. DeckCraft's public render functions use a private thread-local Renderer and resource cache without a public session-owned cache or clear hook. A lower-level bounded, fallible renderer with explicit resource/cache ownership would make memory limits and close reclamation measurable per document. Local session close releases its models/layouts only; native peak-pagination and persistent renderer-cache limits remain upstream work.

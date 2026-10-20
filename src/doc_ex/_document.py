@@ -420,6 +420,8 @@ class Document:
         self._closed = True
         session = self._render_session
         self._render_session = None
+        self._source = b""
+        self._password = None
         if session is not None:
             from . import _native
             _native(session.close)

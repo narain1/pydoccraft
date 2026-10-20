@@ -5,7 +5,7 @@ import unittest
 import doc_ex
 from doc_ex import _core, _native
 from doc_ex.errors import DocumentClosedError, UnsafeArchiveError
-from fixtures import docx_fixture, pdf_fixture, pptx_fixture
+from fixtures import pdf_fixture
 from test_render_geometry import geometry_pdf
 
 
@@ -23,7 +23,7 @@ class PdfRenderSessionTests(unittest.TestCase):
                 self.assertEqual(session._stats()[0], 1)
                 self.assertEqual(session._stats()[2] - initial[2], 6)
 
-    def test_private_session_retains_native_limits_and_office_remains_one_shot(self):
+    def test_private_session_retains_native_limits(self):
         with doc_ex.open(pdf_fixture()) as document:
             session = document._render_session
             before = session._stats()
@@ -36,10 +36,6 @@ class PdfRenderSessionTests(unittest.TestCase):
             with self.assertRaises(doc_ex.UnsupportedFormatError):
                 _native(lambda: session.render(document.page_count, 72))
             self.assertEqual(session._stats(), before)
-        for fixture in (docx_fixture, pptx_fixture):
-            with doc_ex.open(fixture()) as document:
-                self.assertIsNone(document._render_session)
-                self.assertTrue(document.render_page(0, 72, clip=(0, 0, 20, 20)))
 
     def test_shared_session_and_close_have_stable_thread_lifetimes(self):
         document = doc_ex.open(pdf_fixture())

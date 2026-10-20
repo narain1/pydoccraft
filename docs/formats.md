@@ -98,6 +98,8 @@ Resolved native slide targets use `#page=N` and zero-based `target_page` metadat
 
 ## Rendering
 
+An open document reuses its native PDF parser or Office model for repeated rendering. DOCX also reuses the completed pagination layout. The public methods and PNG-byte return type are unchanged. Use a context manager or `close()` to release retained models/layouts and private source/password references; already extracted values remain usable. Retention can increase steady-state memory. Native global/thread-local caches and allocator retention are not released by this contract, and calls do not promise parallel rasterization. See [Office measurements and reproduction](office-performance.md).
+
 ```python
 png = document.render_page(0, dpi=144)
 png = document[0].get_pixmap(dpi=144)
