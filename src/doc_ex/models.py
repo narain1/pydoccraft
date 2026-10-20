@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from html import escape
-from typing import Any
+from typing import Any, Callable
 
 BBox = tuple[float, float, float, float]
 
@@ -56,6 +56,9 @@ class Table:
     cells: list[list[Cell]] = field(default_factory=list)
 
     def to_markdown(self) -> str:
+        return self._markdown()
+
+    def _markdown(self, image_reference: Callable[[Image, tuple], str] | None = None, path: tuple = ()) -> str:
         # Pipe tables cannot represent nested tables, merged cells or rich content.
         # HTML preserves that hierarchy without emitting the flat rows a second time.
         if any(
@@ -64,7 +67,7 @@ class Table:
             or any(block.table or block.links or block.images for block in cell.blocks)
             for row in self.cells for column, cell in enumerate(row)
         ):
-            return self._to_html()
+            return self._to_html(image_reference, path)
         if not self.rows:
             return ""
         width = max(len(row) for row in self.rows)
@@ -82,14 +85,14 @@ class Table:
             value["cells"] = [[cell.to_dict() for cell in row] for row in self.cells]
         return value
 
-    def _to_html(self) -> str:
+    def _to_html(self, image_reference: Callable[[Image, tuple], str] | None = None, path: tuple = ()) -> str:
         rows = self.cells or [[Cell([Block("paragraph", text)]) for text in row] for row in self.rows]
         output = ["<table>"]
         occupied: dict[int, int] = {}
-        for row in rows:
+        for row_number, row in enumerate(rows):
             output.append("<tr>")
             column = 0
-            for cell in row:
+            for cell_number, cell in enumerate(row):
                 grid_column = cell.metadata.get("grid_column", column)
                 if (
                     not isinstance(grid_column, int) or not 0 <= grid_column < 1000
@@ -110,13 +113,15 @@ class Table:
                 if cell.row_span > 1:
                     occupied.update((index, cell.row_span) for index in range(grid_column, column))
                 output.append(f'<td colspan="{cell.col_span}" rowspan="{cell.row_span}">')
-                for block in cell.blocks:
+                for block_number, block in enumerate(cell.blocks):
+                    block_path = path + ("cells", row_number, cell_number, "blocks", block_number)
                     if block.table:
-                        output.append(block.table._to_html())
+                        output.append(block.table._to_html(image_reference, block_path + ("table",)))
                     elif block.text:
                         output.append(f"<p>{_html_text(block.text, block.links)}</p>")
-                    for image in block.images:
-                        output.append(f'<img src="{escape(image.name, quote=True)}" alt="{escape(image.alt, quote=True)}">')
+                    for image_number, image in enumerate(block.images):
+                        reference = image_reference(image, block_path + ("images", image_number)) if image_reference else image.name
+                        output.append(f'<img src="{escape(reference, quote=True)}" alt="{escape(image.alt, quote=True)}">')
                 output.append("</td>")
             output.append("</tr>")
             occupied = {column: remaining - 1 for column, remaining in occupied.items() if remaining > 1}

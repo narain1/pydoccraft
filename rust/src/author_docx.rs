@@ -8,13 +8,16 @@ use std::{
 
 use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
+use serde_json::{json, Map, Value};
 use wordcraft_doc::para::{Float, InlineObject};
 use wordcraft_doc::props::{
-    Border, BorderStyle, Borders, HeightRule, LineSpacing, NumRef, VAlign, VMerge,
+    Border, BorderStyle, Borders, HeightRule, Highlight, LineSpacing, NumRef, Underline, VAlign,
+    VMerge, VertAlign,
 };
+use wordcraft_doc::styles::{Style, StyleSheet};
 use wordcraft_doc::{
-    Align, Block, CharProps, Document, ListKind, Paragraph, PartKind, Path, Pos, Rgb, StoryRef,
-    StyleKind, Table, TextColor,
+    Align, Block, CharProps, Document, ListKind, ParaProps, Paragraph, PartKind, Path, Pos, Rgb,
+    StoryRef, StyleKind, Table, TextColor,
 };
 
 use crate::{DocExNativeError, EngineError};
@@ -29,6 +32,8 @@ const MAX_MEDIA_BYTES: usize = 64 * 1024 * 1024;
 const MAX_IMAGE_PIXELS: u64 = 16_000_000;
 const MAX_LISTS: usize = 10_000;
 const MAX_LINK_BYTES: usize = 16 * 1024 * 1024;
+const MAX_STYLES: usize = 1024;
+const MAX_FORMAT_PATCH_BYTES: usize = 16 * 1024;
 
 #[pyclass]
 pub struct EditableDocx {
@@ -709,6 +714,160 @@ impl EditableDocx {
             .map_or_else(|| style.to_string(), |value| value.name.clone()))
     }
 
+    #[pyo3(signature = (kind=None))]
+    pub fn style_ids(&self, kind: Option<&str>) -> PyResult<Vec<String>> {
+        let document = self.document()?;
+        let wanted = kind.map(style_kind).transpose()?;
+        Ok(document
+            .styles
+            .styles
+            .iter()
+            .filter(|style| {
+                matches!(style.kind, StyleKind::Paragraph | StyleKind::Character)
+                    && wanted.is_none_or(|kind| kind == style.kind)
+            })
+            .map(|style| style.id.clone())
+            .collect())
+    }
+
+    pub fn style_info(&self, id: &str) -> PyResult<String> {
+        let style = supported_style(&self.document()?.styles, id)?;
+        Ok(json!({"id":style.id,"name":style.name,"kind":if style.kind == StyleKind::Paragraph {"paragraph"} else {"character"},"based_on":style.based_on,"builtin":style.builtin}).to_string())
+    }
+
+    #[pyo3(signature = (name, kind="paragraph", based_on=None))]
+    pub fn add_style(
+        &mut self,
+        name: &str,
+        kind: &str,
+        based_on: Option<&str>,
+    ) -> PyResult<String> {
+        let document = self.document()?;
+        validate_style_name(name)?;
+        let kind = style_kind(kind)?;
+        if document.styles.styles.len() >= MAX_STYLES {
+            return Err(limit("document exceeds 1024 named styles"));
+        }
+        if document.styles.styles.iter().any(|style| {
+            style.name.eq_ignore_ascii_case(name) || style.id.eq_ignore_ascii_case(name)
+        }) {
+            return Err(PyValueError::new_err(
+                "style name is already used by a style name or identifier",
+            ));
+        }
+        let id = document.styles.new_id(name);
+        if document
+            .styles
+            .styles
+            .iter()
+            .any(|style| style.id == id || style.name.eq_ignore_ascii_case(&id))
+        {
+            return Err(PyValueError::new_err(
+                "generated style identifier conflicts with an existing style",
+            ));
+        }
+        let base = style_base(&document.styles, based_on, kind)?;
+        let mut candidate = document.clone();
+        candidate.styles.upsert(Style {
+            id: id.clone(),
+            name: name.into(),
+            kind,
+            based_on: base,
+            ..Default::default()
+        });
+        validate_style_chains(&candidate.styles)?;
+        self.commit(candidate)?;
+        Ok(id)
+    }
+
+    #[pyo3(signature = (id, base=None))]
+    pub fn set_style_base(&mut self, id: &str, base: Option<&str>) -> PyResult<()> {
+        let styles = &self.document()?.styles;
+        let style = supported_style(styles, id)?;
+        let (id, kind) = (style.id.clone(), style.kind);
+        let base = style_base(styles, base, kind)?;
+        let mut candidate = self.document()?.clone();
+        candidate
+            .styles
+            .get_mut(&id)
+            .ok_or_else(|| PyValueError::new_err("unknown style"))?
+            .based_on = base;
+        validate_style_chains(&candidate.styles)?;
+        self.commit(candidate)
+    }
+
+    pub fn format_style(&mut self, id: &str, patch: &str) -> PyResult<()> {
+        let document = self.document()?;
+        let style = supported_style(&document.styles, id)?;
+        let id = style.id.clone();
+        let values = format_patch(patch)?;
+        let (mut character, mut paragraph) = (Map::new(), Map::new());
+        for (key, value) in values {
+            if style.kind == StyleKind::Paragraph && is_paragraph_key(&key) {
+                paragraph.insert(key, value);
+            } else {
+                character.insert(key, value);
+            }
+        }
+        let character = CharPatch::parse(&document.styles, &character, false)?;
+        let paragraph = ParaPatch::parse(&paragraph)?;
+        let mut candidate = document.clone();
+        let style = candidate
+            .styles
+            .get_mut(&id)
+            .ok_or_else(|| PyValueError::new_err("unknown style"))?;
+        character.apply(&mut style.chr);
+        paragraph.apply(&mut style.para);
+        self.commit(candidate)
+    }
+
+    #[pyo3(signature = (id, resolved=false))]
+    pub fn style_formatting(&self, id: &str, resolved: bool) -> PyResult<String> {
+        let document = self.document()?;
+        let style = supported_style(&document.styles, id)?;
+        let mut values = if resolved {
+            let character = if style.kind == StyleKind::Paragraph {
+                document
+                    .styles
+                    .resolve_char(Some(&style.id), &CharProps::default())
+            } else {
+                document.styles.resolve_char(
+                    None,
+                    &CharProps {
+                        style: Some(style.id.clone()),
+                        ..Default::default()
+                    },
+                )
+            };
+            resolved_char_snapshot(&character)
+        } else {
+            char_snapshot(&style.chr)
+        };
+        values.remove("style");
+        if style.kind == StyleKind::Paragraph {
+            let paragraph = if resolved {
+                resolved_para_snapshot(&document.styles.resolve_para(&ParaProps {
+                    style: Some(style.id.clone()),
+                    ..Default::default()
+                }))
+            } else {
+                para_snapshot(&style.para)
+            }?;
+            values.extend(paragraph);
+        }
+        Ok(Value::Object(values).to_string())
+    }
+
+    pub fn format_paragraph(&mut self, id: usize, patch: &str) -> PyResult<()> {
+        self.paragraph(id)?;
+        let formatting = ParaPatch::parse(&format_patch(patch)?)?;
+        let mut candidate = self.document()?.clone();
+        let paragraph = self.paragraph_mut(&mut candidate, id)?;
+        formatting.apply(&mut paragraph.props);
+        paragraph.touch();
+        self.commit(candidate)
+    }
+
     pub fn paragraph_list(&self, id: usize) -> PyResult<Option<(&'static str, u8)>> {
         let paragraph = self.paragraph(id)?;
         let document = self.document()?;
@@ -898,7 +1057,16 @@ impl EditableDocx {
 
     pub fn paragraph_spacing(&self, id: usize) -> PyResult<(f64, f64, f64)> {
         let paragraph = self.paragraph(id)?;
-        let props = self.document()?.styles.resolve_para(&paragraph.props);
+        let (story, path) = self.location(id)?;
+        let table_style = path
+            .cell()
+            .and_then(|(table, _, _)| self.document().ok()?.table(story, &table))
+            .and_then(|table| table.props.style.as_deref())
+            .and_then(|style| self.document().ok()?.styles.table_style(style));
+        let props = self.document()?.styles.resolve_para_in(
+            &paragraph.props,
+            table_style.as_ref().map(|style| &style.para),
+        );
         let LineSpacing::Multiple(multiple) = props.line_spacing else {
             return Err(PyValueError::new_err("paragraph uses a point-based line spacing rule; assign spacing to use a line multiple"));
         };
@@ -968,6 +1136,55 @@ impl EditableDocx {
         let paragraph = self.paragraph(id)?;
         let (from, to) = range_offsets(&paragraph.text, start, end)?;
         Ok((paragraph.text[from..to].into(), self.revision))
+    }
+
+    #[pyo3(signature = (id, text, patch="{}"))]
+    pub fn add_run_patch(
+        &mut self,
+        id: usize,
+        text: &str,
+        patch: &str,
+    ) -> PyResult<(usize, usize, u64)> {
+        let paragraph = self.paragraph(id)?;
+        validate_text(text)?;
+        let formatting = CharPatch::parse(&self.document()?.styles, &format_patch(patch)?, true)?;
+        let text_bytes = self.updated_text_bytes(0, text.len())?;
+        let (offset, start) = (paragraph.text.len(), paragraph.text.chars().count());
+        let mut props = CharProps::default();
+        formatting.apply(&mut props);
+        let mut candidate = self.document()?.clone();
+        candidate
+            .insert_text(&self.position(id, offset)?, text, &props)
+            .map_err(model_error)?;
+        self.commit(candidate)?;
+        self.text_bytes = text_bytes;
+        Ok((start, start + text.chars().count(), self.revision))
+    }
+
+    pub fn format_range_patch(
+        &mut self,
+        id: usize,
+        start: usize,
+        end: usize,
+        revision: u64,
+        patch: &str,
+    ) -> PyResult<u64> {
+        self.check_revision(revision)?;
+        let (from, to) = range_offsets(&self.paragraph(id)?.text, start, end)?;
+        if from == to {
+            return Err(PyValueError::new_err("cannot format an empty text range"));
+        }
+        let formatting = CharPatch::parse(&self.document()?.styles, &format_patch(patch)?, true)?;
+        let mut candidate = self.document()?.clone();
+        candidate
+            .format_range(
+                &self.position(id, from)?,
+                &self.position(id, to)?,
+                &|props| formatting.apply(props),
+            )
+            .map_err(model_error)?;
+        self.commit(candidate)?;
+        Ok(self.revision)
     }
 
     pub fn range_text(
@@ -1783,6 +2000,586 @@ impl EditableDocx {
         }
         Ok(total)
     }
+}
+
+fn style_kind(kind: &str) -> PyResult<StyleKind> {
+    match kind {
+        "paragraph" => Ok(StyleKind::Paragraph),
+        "character" => Ok(StyleKind::Character),
+        _ => Err(PyValueError::new_err(
+            "style kind must be paragraph or character",
+        )),
+    }
+}
+
+fn supported_style<'a>(styles: &'a StyleSheet, id: &str) -> PyResult<&'a Style> {
+    styles
+        .find(id)
+        .filter(|style| matches!(style.kind, StyleKind::Paragraph | StyleKind::Character))
+        .ok_or_else(|| PyValueError::new_err("unknown paragraph or character style"))
+}
+
+fn style_base(
+    styles: &StyleSheet,
+    base: Option<&str>,
+    kind: StyleKind,
+) -> PyResult<Option<String>> {
+    base.map(|base| {
+        let style = supported_style(styles, base)?;
+        if style.kind != kind {
+            return Err(PyValueError::new_err(
+                "a style's base must have the same kind",
+            ));
+        }
+        Ok(style.id.clone())
+    })
+    .transpose()
+}
+
+fn validate_style_name(name: &str) -> PyResult<()> {
+    validate_text(name)?;
+    if name.trim().is_empty()
+        || name.len() > 255
+        || name.trim() != name
+        || name.chars().any(char::is_control)
+    {
+        return Err(PyValueError::new_err(
+            "style name requires 1..255 bytes, no control characters or surrounding whitespace",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_style_chains(styles: &StyleSheet) -> PyResult<()> {
+    let by_id = styles
+        .styles
+        .iter()
+        .map(|style| (style.id.as_str(), style))
+        .collect::<BTreeMap<_, _>>();
+    for style in &styles.styles {
+        let mut seen = BTreeSet::new();
+        let mut next = Some(style.id.as_str());
+        while let Some(id) = next {
+            if !seen.insert(id) {
+                return Err(PyValueError::new_err(
+                    "style inheritance cannot contain a cycle",
+                ));
+            }
+            if seen.len() > 32 {
+                return Err(PyValueError::new_err(
+                    "style inheritance cannot exceed 32 levels",
+                ));
+            }
+            next = by_id
+                .get(id)
+                .ok_or_else(|| {
+                    PyValueError::new_err("style inheritance references a missing style")
+                })?
+                .based_on
+                .as_deref();
+        }
+    }
+    Ok(())
+}
+
+fn format_patch(input: &str) -> PyResult<Map<String, Value>> {
+    if input.len() > MAX_FORMAT_PATCH_BYTES {
+        return Err(limit("format patch exceeds 16 KiB"));
+    }
+    let value: Value = serde_json::from_str(input).map_err(|_| {
+        PyValueError::new_err("format patch must be a JSON object of finite scalar values")
+    })?;
+    let Value::Object(values) = value else {
+        return Err(PyValueError::new_err("format patch must be a JSON object"));
+    };
+    if values
+        .values()
+        .any(|value| value.is_array() || value.is_object())
+    {
+        return Err(PyValueError::new_err("format patch values must be scalar"));
+    }
+    Ok(values)
+}
+
+fn bool_value(value: &Value) -> PyResult<Option<bool>> {
+    if value.is_null() {
+        Ok(None)
+    } else {
+        value
+            .as_bool()
+            .map(Some)
+            .ok_or_else(|| PyValueError::new_err("format flag must be a bool or None"))
+    }
+}
+
+fn text_value(value: &Value) -> PyResult<&str> {
+    value
+        .as_str()
+        .ok_or_else(|| PyValueError::new_err("format value must be a string or None"))
+}
+
+fn point_value(value: &Value, low: f64, high: f64) -> PyResult<f32> {
+    let number = value
+        .as_f64()
+        .filter(|number| number.is_finite() && (low..=high).contains(number))
+        .ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "format number must be finite and within {low}..{high}"
+            ))
+        })?;
+    Ok(number as f32)
+}
+
+const UNDERLINES: &[(&str, Underline)] = &[
+    ("none", Underline::None),
+    ("single", Underline::Single),
+    ("words", Underline::Words),
+    ("double", Underline::Double),
+    ("thick", Underline::Thick),
+    ("dotted", Underline::Dotted),
+    ("dash", Underline::Dash),
+    ("dot_dash", Underline::DotDash),
+    ("dot_dot_dash", Underline::DotDotDash),
+    ("wave", Underline::Wave),
+    ("double_wave", Underline::DoubleWave),
+];
+const HIGHLIGHTS: &[(&str, Highlight)] = &[
+    ("none", Highlight::None),
+    ("yellow", Highlight::Yellow),
+    ("bright_green", Highlight::BrightGreen),
+    ("turquoise", Highlight::Turquoise),
+    ("pink", Highlight::Pink),
+    ("blue", Highlight::Blue),
+    ("red", Highlight::Red),
+    ("dark_blue", Highlight::DarkBlue),
+    ("teal", Highlight::Teal),
+    ("green", Highlight::Green),
+    ("violet", Highlight::Violet),
+    ("dark_red", Highlight::DarkRed),
+    ("dark_yellow", Highlight::DarkYellow),
+    ("gray50", Highlight::Gray50),
+    ("gray25", Highlight::Gray25),
+    ("black", Highlight::Black),
+    ("white", Highlight::White),
+];
+
+#[derive(Default)]
+struct CharPatch {
+    values: CharProps,
+    clear: BTreeSet<String>,
+}
+
+impl CharPatch {
+    fn parse(
+        styles: &StyleSheet,
+        values: &Map<String, Value>,
+        allow_style: bool,
+    ) -> PyResult<Self> {
+        let mut patch = Self::default();
+        for (key, value) in values {
+            if !matches!(
+                key.as_str(),
+                "bold"
+                    | "italic"
+                    | "font"
+                    | "font_size"
+                    | "color"
+                    | "underline"
+                    | "strike"
+                    | "script"
+                    | "highlight"
+                    | "background"
+                    | "style"
+            ) || (key == "style" && !allow_style)
+            {
+                return Err(PyValueError::new_err(format!(
+                    "unsupported character format key: {key}"
+                )));
+            }
+            if value.is_null() {
+                patch.clear.insert(key.clone());
+                continue;
+            }
+            match key.as_str() {
+                "bold" => patch.values.bold = bool_value(value)?,
+                "italic" => patch.values.italic = bool_value(value)?,
+                "strike" => {
+                    let (single, double) = match (value.as_bool(), value.as_str()) {
+                        (Some(enabled), _) => (enabled, false),
+                        (_, Some("none")) => (false, false),
+                        (_, Some("single")) => (true, false),
+                        (_, Some("double")) => (false, true),
+                        _ => {
+                            return Err(PyValueError::new_err(
+                                "strike must be bool, none, single, double or None",
+                            ))
+                        }
+                    };
+                    patch.values.strike = Some(single);
+                    patch.values.double_strike = Some(double);
+                }
+                "font" => {
+                    patch.values.font =
+                        run_props(None, None, None, Some(text_value(value)?), None)?.font
+                }
+                "font_size" => {
+                    patch.values.size =
+                        run_props(
+                            None,
+                            None,
+                            Some(value.as_f64().ok_or_else(|| {
+                                PyValueError::new_err("font_size must be numeric")
+                            })?),
+                            None,
+                            None,
+                        )?
+                        .size
+                }
+                "color" => {
+                    patch.values.color = Some(if text_value(value)? == "auto" {
+                        TextColor::Auto
+                    } else {
+                        TextColor::Rgb(parse_rgb(text_value(value)?)?)
+                    })
+                }
+                "background" => patch.values.shading = Some(parse_rgb(text_value(value)?)?),
+                "underline" => {
+                    patch.values.underline = Some(if let Some(enabled) = value.as_bool() {
+                        if enabled {
+                            Underline::Single
+                        } else {
+                            Underline::None
+                        }
+                    } else {
+                        UNDERLINES
+                            .iter()
+                            .find(|(name, _)| Some(*name) == value.as_str())
+                            .map(|(_, value)| *value)
+                            .ok_or_else(|| PyValueError::new_err("unknown underline style"))?
+                    })
+                }
+                "highlight" => {
+                    patch.values.highlight = Some(
+                        HIGHLIGHTS
+                            .iter()
+                            .find(|(name, _)| Some(*name) == value.as_str())
+                            .map(|(_, value)| *value)
+                            .ok_or_else(|| PyValueError::new_err("unknown highlight color"))?,
+                    )
+                }
+                "script" => {
+                    patch.values.vert_align = Some(match text_value(value)? {
+                        "baseline" => VertAlign::Baseline,
+                        "superscript" => VertAlign::Superscript,
+                        "subscript" => VertAlign::Subscript,
+                        _ => {
+                            return Err(PyValueError::new_err(
+                                "script must be baseline, superscript or subscript",
+                            ))
+                        }
+                    })
+                }
+                "style" => {
+                    let style = supported_style(styles, text_value(value)?)?;
+                    if style.kind != StyleKind::Character {
+                        return Err(PyValueError::new_err("run style must be a character style"));
+                    }
+                    patch.values.style = Some(style.id.clone());
+                }
+                _ => unreachable!(),
+            }
+        }
+        Ok(patch)
+    }
+
+    fn apply(&self, props: &mut CharProps) {
+        for key in &self.clear {
+            match key.as_str() {
+                "bold" => props.bold = None,
+                "italic" => props.italic = None,
+                "font" => props.font = None,
+                "font_size" => props.size = None,
+                "color" => props.color = None,
+                "underline" => props.underline = None,
+                "strike" => {
+                    props.strike = None;
+                    props.double_strike = None;
+                }
+                "script" => props.vert_align = None,
+                "highlight" => props.highlight = None,
+                "background" => props.shading = None,
+                "style" => props.style = None,
+                _ => {}
+            }
+        }
+        props.overlay(&self.values);
+    }
+}
+
+fn is_paragraph_key(key: &str) -> bool {
+    matches!(
+        key,
+        "alignment"
+            | "indent_left"
+            | "indent_right"
+            | "indent_first"
+            | "space_before"
+            | "space_after"
+            | "line_spacing"
+            | "keep_with_next"
+            | "keep_together"
+            | "widow_control"
+            | "page_break_before"
+            | "background"
+    )
+}
+
+#[derive(Default)]
+struct ParaPatch {
+    values: ParaProps,
+    clear: BTreeSet<String>,
+}
+
+impl ParaPatch {
+    fn parse(values: &Map<String, Value>) -> PyResult<Self> {
+        let mut patch = Self::default();
+        for (key, value) in values {
+            if !is_paragraph_key(key) {
+                return Err(PyValueError::new_err(format!(
+                    "unsupported paragraph format key: {key}"
+                )));
+            }
+            if value.is_null() {
+                patch.clear.insert(key.clone());
+                continue;
+            }
+            match key.as_str() {
+                "alignment" => {
+                    patch.values.align = Some(match text_value(value)? {
+                        "left" => Align::Left,
+                        "right" => Align::Right,
+                        "center" => Align::Center,
+                        "justify" => Align::Justify,
+                        "distribute" => Align::Distribute,
+                        _ => return Err(PyValueError::new_err("unknown paragraph alignment")),
+                    })
+                }
+                "indent_left" => {
+                    patch.values.indent_left = Some(point_value(value, -1584.0, 1584.0)?);
+                    patch.values.indent_left_chars = Some(0.0);
+                }
+                "indent_right" => {
+                    patch.values.indent_right = Some(point_value(value, -1584.0, 1584.0)?);
+                    patch.values.indent_right_chars = Some(0.0);
+                }
+                "indent_first" => {
+                    patch.values.indent_first = Some(point_value(value, -1584.0, 1584.0)?);
+                    patch.values.indent_first_chars = Some(0.0);
+                }
+                "space_before" => {
+                    patch.values.space_before = Some(point_value(value, 0.0, 1584.0)?);
+                    patch.values.space_before_auto = Some(false);
+                }
+                "space_after" => {
+                    patch.values.space_after = Some(point_value(value, 0.0, 1584.0)?);
+                    patch.values.space_after_auto = Some(false);
+                }
+                "line_spacing" => {
+                    patch.values.line_spacing =
+                        Some(LineSpacing::Multiple(point_value(value, 0.06, 132.0)?))
+                }
+                "keep_with_next" => patch.values.keep_next = bool_value(value)?,
+                "keep_together" => patch.values.keep_lines = bool_value(value)?,
+                "widow_control" => patch.values.widow_control = bool_value(value)?,
+                "page_break_before" => patch.values.page_break_before = bool_value(value)?,
+                "background" => patch.values.shading = Some(parse_rgb(text_value(value)?)?),
+                _ => unreachable!(),
+            }
+        }
+        Ok(patch)
+    }
+
+    fn apply(&self, props: &mut ParaProps) {
+        for key in &self.clear {
+            match key.as_str() {
+                "alignment" => props.align = None,
+                "indent_left" => {
+                    props.indent_left = None;
+                    props.indent_left_chars = None;
+                }
+                "indent_right" => {
+                    props.indent_right = None;
+                    props.indent_right_chars = None;
+                }
+                "indent_first" => {
+                    props.indent_first = None;
+                    props.indent_first_chars = None;
+                }
+                "space_before" => {
+                    props.space_before = None;
+                    props.space_before_auto = None;
+                }
+                "space_after" => {
+                    props.space_after = None;
+                    props.space_after_auto = None;
+                }
+                "line_spacing" => props.line_spacing = None,
+                "keep_with_next" => props.keep_next = None,
+                "keep_together" => props.keep_lines = None,
+                "widow_control" => props.widow_control = None,
+                "page_break_before" => props.page_break_before = None,
+                "background" => props.shading = None,
+                _ => {}
+            }
+        }
+        props.overlay(&self.values);
+    }
+}
+
+fn snapshot<const N: usize>(values: [(&str, Value); N]) -> Map<String, Value> {
+    values
+        .into_iter()
+        .map(|(key, value)| (key.into(), value))
+        .collect()
+}
+fn rgb_string(rgb: Rgb) -> String {
+    format!("#{}", rgb.hex())
+}
+fn color_string(color: TextColor) -> String {
+    match color {
+        TextColor::Auto => "auto".into(),
+        TextColor::Rgb(rgb) => rgb_string(rgb),
+    }
+}
+fn underline_name(value: Underline) -> &'static str {
+    UNDERLINES
+        .iter()
+        .find(|(_, underline)| *underline == value)
+        .map_or("none", |(name, _)| name)
+}
+fn highlight_name(value: Highlight) -> &'static str {
+    HIGHLIGHTS
+        .iter()
+        .find(|(_, highlight)| *highlight == value)
+        .map_or("none", |(name, _)| name)
+}
+fn script_name(value: VertAlign) -> &'static str {
+    match value {
+        VertAlign::Baseline => "baseline",
+        VertAlign::Superscript => "superscript",
+        VertAlign::Subscript => "subscript",
+    }
+}
+fn alignment_name(value: Align) -> &'static str {
+    match value {
+        Align::Left => "left",
+        Align::Right => "right",
+        Align::Center => "center",
+        Align::Justify => "justify",
+        Align::Distribute => "distribute",
+    }
+}
+fn line_multiple(value: LineSpacing) -> PyResult<Value> {
+    match value {
+        LineSpacing::Multiple(multiple) => Ok(json!(multiple)),
+        _ => Err(PyValueError::new_err(
+            "point-based line spacing is not supported by this formatting snapshot",
+        )),
+    }
+}
+
+fn char_snapshot(props: &CharProps) -> Map<String, Value> {
+    snapshot([
+        ("bold", json!(props.bold)),
+        ("italic", json!(props.italic)),
+        ("font", json!(props.font)),
+        ("font_size", json!(props.size)),
+        ("color", json!(props.color.map(color_string))),
+        ("underline", json!(props.underline.map(underline_name))),
+        (
+            "strike",
+            if props.double_strike == Some(true) {
+                json!("double")
+            } else {
+                json!(props.strike)
+            },
+        ),
+        ("script", json!(props.vert_align.map(script_name))),
+        ("highlight", json!(props.highlight.map(highlight_name))),
+        ("background", json!(props.shading.map(rgb_string))),
+        ("style", json!(props.style)),
+    ])
+}
+
+fn resolved_char_snapshot(props: &wordcraft_doc::resolve::ResolvedChar) -> Map<String, Value> {
+    snapshot([
+        ("bold", json!(props.bold)),
+        ("italic", json!(props.italic)),
+        ("font", json!(props.font)),
+        ("font_size", json!(props.size)),
+        ("color", json!(color_string(props.color))),
+        ("underline", json!(underline_name(props.underline))),
+        (
+            "strike",
+            if props.double_strike {
+                json!("double")
+            } else {
+                json!(props.strike)
+            },
+        ),
+        ("script", json!(script_name(props.vert_align))),
+        (
+            "highlight",
+            json!(HIGHLIGHTS
+                .iter()
+                .find(|(_, value)| value.rgb() == props.highlight)
+                .map_or("none", |(name, _)| *name)),
+        ),
+        ("background", json!(props.shading.map(rgb_string))),
+    ])
+}
+
+fn para_snapshot(props: &ParaProps) -> PyResult<Map<String, Value>> {
+    Ok(snapshot([
+        ("alignment", json!(props.align.map(alignment_name))),
+        ("indent_left", json!(props.indent_left)),
+        ("indent_right", json!(props.indent_right)),
+        ("indent_first", json!(props.indent_first)),
+        ("space_before", json!(props.space_before)),
+        ("space_after", json!(props.space_after)),
+        (
+            "line_spacing",
+            props
+                .line_spacing
+                .map(line_multiple)
+                .transpose()?
+                .unwrap_or(Value::Null),
+        ),
+        ("keep_with_next", json!(props.keep_next)),
+        ("keep_together", json!(props.keep_lines)),
+        ("widow_control", json!(props.widow_control)),
+        ("page_break_before", json!(props.page_break_before)),
+        ("background", json!(props.shading.map(rgb_string))),
+    ]))
+}
+
+fn resolved_para_snapshot(
+    props: &wordcraft_doc::resolve::ResolvedPara,
+) -> PyResult<Map<String, Value>> {
+    Ok(snapshot([
+        ("alignment", json!(alignment_name(props.align))),
+        ("indent_left", json!(props.indent_left)),
+        ("indent_right", json!(props.indent_right)),
+        ("indent_first", json!(props.indent_first)),
+        ("space_before", json!(props.space_before)),
+        ("space_after", json!(props.space_after)),
+        ("line_spacing", line_multiple(props.line_spacing)?),
+        ("keep_with_next", json!(props.keep_next)),
+        ("keep_together", json!(props.keep_lines)),
+        ("widow_control", json!(props.widow_control)),
+        ("page_break_before", json!(props.page_break_before)),
+        ("background", json!(props.shading.map(rgb_string))),
+    ]))
 }
 
 fn hyperlink_bytes(document: &Document) -> usize {
@@ -3009,5 +3806,426 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn named_styles_inherit_reset_and_keep_owned_copy_state() {
+        let mut document = EditableDocx::new();
+        let base = document
+            .add_style("Report & \"Base\"", "paragraph", Some("Normal"))
+            .unwrap();
+        document.format_style(&base, r##"{"bold":true,"font_size":18,"color":"#123456","space_after":5,"keep_with_next":true,"background":"#EEFFEE"}"##).unwrap();
+        let derived = document
+            .add_style("Report Body", "paragraph", Some(&base))
+            .unwrap();
+        let info: Value =
+            serde_json::from_str(&document.style_info("Report Body").unwrap()).unwrap();
+        assert_eq!(info["based_on"], base);
+        assert_eq!(info["kind"], "paragraph");
+        assert!(document
+            .style_ids(Some("paragraph"))
+            .unwrap()
+            .contains(&derived));
+        let direct: Value =
+            serde_json::from_str(&document.style_formatting(&derived, false).unwrap()).unwrap();
+        let resolved: Value =
+            serde_json::from_str(&document.style_formatting(&derived, true).unwrap()).unwrap();
+        assert!(direct["bold"].is_null());
+        assert!(direct["font_size"].is_null());
+        assert!(direct.get("size").is_none());
+        assert_eq!(resolved["bold"], true);
+        assert_eq!(resolved["font_size"], 18.0);
+        assert_eq!(resolved["background"], "#EEFFEE");
+        assert_eq!(resolved["space_after"], 5.0);
+        let paragraph = document.add_paragraph("Styled ").unwrap();
+        document.set_paragraph_style(paragraph, &derived).unwrap();
+        let (start, end, revision) = document.add_run_patch(paragraph, "λ日本", "{}").unwrap();
+        let props = document
+            .paragraph(paragraph)
+            .unwrap()
+            .props_of_char("Styled ".len());
+        assert_eq!(props.bold, None, "omitted bold must inherit");
+        assert!(
+            document
+                .document()
+                .unwrap()
+                .styles
+                .resolve_char(Some(&derived), props)
+                .bold
+        );
+        let revision = document
+            .format_range_patch(
+                paragraph,
+                start,
+                end,
+                revision,
+                r#"{"bold":false,"italic":true}"#,
+            )
+            .unwrap();
+        let props = document
+            .paragraph(paragraph)
+            .unwrap()
+            .props_of_char("Styled ".len());
+        assert_eq!(props.bold, Some(false));
+        assert_eq!(props.italic, Some(true));
+        document
+            .format_range_patch(paragraph, start, end, revision, r#"{"bold":null}"#)
+            .unwrap();
+        let props = document
+            .paragraph(paragraph)
+            .unwrap()
+            .props_of_char("Styled ".len());
+        assert_eq!(props.bold, None);
+        assert_eq!(
+            props.italic,
+            Some(true),
+            "omitted key must remain unchanged"
+        );
+        assert!(
+            document
+                .document()
+                .unwrap()
+                .styles
+                .resolve_char(Some(&derived), props)
+                .bold
+        );
+        document
+            .format_paragraph(paragraph, r#"{"space_after":0,"keep_with_next":false}"#)
+            .unwrap();
+        assert_eq!(document.paragraph_spacing(paragraph).unwrap().1, 0.0);
+        assert!(
+            !document
+                .document()
+                .unwrap()
+                .styles
+                .resolve_para(&document.paragraph(paragraph).unwrap().props)
+                .keep_next
+        );
+        document
+            .format_paragraph(paragraph, r#"{"space_after":null,"keep_with_next":null}"#)
+            .unwrap();
+        assert_eq!(document.paragraph_spacing(paragraph).unwrap().1, 5.0);
+        assert!(
+            document
+                .document()
+                .unwrap()
+                .styles
+                .resolve_para(&document.paragraph(paragraph).unwrap().props)
+                .keep_next
+        );
+        let mut copy = document.copy().unwrap();
+        copy.format_style(&base, r#"{"font_size":22}"#).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&document.style_formatting(&derived, true).unwrap())
+                .unwrap()["font_size"],
+            18.0
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&copy.style_formatting(&derived, true).unwrap()).unwrap()
+                ["font_size"],
+            22.0
+        );
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        assert_eq!(
+            reopened.styles.get(&base).unwrap().name,
+            "Report & \"Base\""
+        );
+        assert_eq!(
+            reopened.styles.get(&derived).unwrap().based_on.as_deref(),
+            Some(base.as_str())
+        );
+        assert_eq!(
+            reopened
+                .styles
+                .resolve_char(Some(&derived), &CharProps::default())
+                .size,
+            18.0
+        );
+        assert!(crate::docx::render(&bytes, 0, 72.0, None)
+            .unwrap()
+            .starts_with(b"\x89PNG"));
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        assert_eq!(crate::pdf::extract(&pdf, None).unwrap().pages.len(), 1);
+        document.close();
+        assert!(document.style_ids(None).is_err());
+        assert!(copy.style_info(&base).is_ok());
+    }
+
+    #[test]
+    fn character_style_formatting_roundtrips_and_preserves_links() {
+        let mut document = EditableDocx::new();
+        let character = document
+            .add_style("Annotation", "character", Some("Emphasis"))
+            .unwrap();
+        document.format_style(&character, r##"{"underline":"double_wave","strike":true,"script":"superscript","highlight":"yellow","background":"#102030","color":"auto","font_size":15.5}"##).unwrap();
+        let direct: Value =
+            serde_json::from_str(&document.style_formatting(&character, false).unwrap()).unwrap();
+        let resolved: Value =
+            serde_json::from_str(&document.style_formatting(&character, true).unwrap()).unwrap();
+        assert_eq!(direct["underline"], "double_wave");
+        assert_eq!(direct["background"], "#102030");
+        assert!(direct["italic"].is_null());
+        assert_eq!(resolved["italic"], true);
+        let paragraph = document.add_paragraph("Before ").unwrap();
+        let patch = json!({"style":character}).to_string();
+        let (start, end, revision) = document.add_run_patch(paragraph, "word", &patch).unwrap();
+        let revision = document
+            .set_range_link(paragraph, start, end, revision, Some("https://example.com"))
+            .unwrap();
+        let revision = document
+            .format_range_patch(
+                paragraph,
+                start,
+                end,
+                revision,
+                r#"{"strike":false,"script":"baseline","underline":false,"highlight":"none"}"#,
+            )
+            .unwrap();
+        assert_eq!(
+            document
+                .range_link(paragraph, start, end, revision)
+                .unwrap()
+                .as_deref(),
+            Some("https://example.com")
+        );
+        let props = document
+            .paragraph(paragraph)
+            .unwrap()
+            .props_of_char("Before ".len());
+        let run = document
+            .document()
+            .unwrap()
+            .styles
+            .resolve_char(None, props);
+        assert!(!run.strike);
+        assert_eq!(run.underline, Underline::None);
+        assert_eq!(run.vert_align, VertAlign::Baseline);
+        assert_eq!(run.highlight, None);
+        document
+            .format_range_patch(
+                paragraph,
+                start,
+                end,
+                revision,
+                r#"{"strike":null,"script":null,"underline":null,"highlight":null}"#,
+            )
+            .unwrap();
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        let style = reopened.styles.get(&character).unwrap();
+        assert_eq!(style.chr.underline, Some(Underline::DoubleWave));
+        assert_eq!(style.chr.highlight, Some(Highlight::Yellow));
+        assert_eq!(style.chr.vert_align, Some(VertAlign::Superscript));
+        assert_eq!(style.chr.shading, Some(Rgb(0x10, 0x20, 0x30)));
+        let paragraph = reopened
+            .para(StoryRef::Body, &Path::top(paragraph))
+            .unwrap();
+        let run = reopened
+            .styles
+            .resolve_char(None, paragraph.props_of_char("Before ".len()));
+        assert_eq!(run.underline, Underline::DoubleWave);
+        assert_eq!(run.vert_align, VertAlign::Superscript);
+        assert!(run.strike);
+        assert!(run.italic);
+        assert_eq!(run.highlight, Some(Rgb(255, 255, 0)));
+        assert_eq!(run.link.as_deref(), Some("https://example.com"));
+    }
+
+    #[test]
+    fn style_chains_names_limits_and_invalid_patches_are_atomic() {
+        let mut document = EditableDocx::new();
+        let paragraph = document.add_paragraph("Unchanged").unwrap();
+        let root = document.add_style("Chain00", "paragraph", None).unwrap();
+        let mut previous = root.clone();
+        for index in 1..32 {
+            previous = document
+                .add_style(&format!("Chain{index:02}"), "paragraph", Some(&previous))
+                .unwrap();
+        }
+        let revision = document.revision().unwrap();
+        assert!(document
+            .add_style("Too deep", "paragraph", Some(&previous))
+            .is_err());
+        assert!(
+            document.set_style_base(&root, Some("Normal")).is_err(),
+            "must validate descendants, not just changed style"
+        );
+        assert!(document.set_style_base(&root, Some(&previous)).is_err());
+        assert!(document.add_style("chain00", "paragraph", None).is_err());
+        assert!(document.add_style("Normal", "paragraph", None).is_err());
+        assert!(document.add_style("Bad\nName", "paragraph", None).is_err());
+        assert!(document
+            .add_style("Wrong base", "character", Some("Normal"))
+            .is_err());
+        assert!(document
+            .add_style("Missing base", "paragraph", Some("Missing"))
+            .is_err());
+        assert!(document.add_style("Table style", "table", None).is_err());
+        for patch in [
+            r#"{"size":20}"#,
+            r#"{"font_size":true}"#,
+            r#"{"font_size":1.1}"#,
+            r#"{"underline":"invented"}"#,
+            r#"{"script":"raised"}"#,
+            r##"{"highlight":"#123456"}"##,
+            r#"{"bold":true,"color":"invalid"}"#,
+            r#"{"bold":{"nested":true}}"#,
+            "[]",
+            r#"{"font_size":NaN}"#,
+        ] {
+            assert!(document.format_style(&root, patch).is_err(), "{patch}");
+            assert!(
+                document
+                    .format_range_patch(paragraph, 0, 1, revision, patch)
+                    .is_err(),
+                "{patch}"
+            );
+        }
+        assert!(document
+            .format_style(&root, r#"{"style":"Strong"}"#)
+            .is_err());
+        assert!(document
+            .format_paragraph(paragraph, r#"{"bold":true}"#)
+            .is_err());
+        assert!(document
+            .format_paragraph(paragraph, r#"{"line_spacing":0}"#)
+            .is_err());
+        assert!(document
+            .format_range_patch(paragraph, 0, 1, revision, r#"{"style":"Normal"}"#)
+            .is_err());
+        assert!(document
+            .format_style(&root, &" ".repeat(MAX_FORMAT_PATCH_BYTES + 1))
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.paragraph_text(paragraph).unwrap(), "Unchanged");
+        let mut candidate = document.document().unwrap().clone();
+        while candidate.styles.styles.len() < MAX_STYLES {
+            let index = candidate.styles.styles.len();
+            candidate.styles.upsert(Style {
+                id: format!("Filler{index}"),
+                name: format!("Filler{index}"),
+                ..Default::default()
+            });
+        }
+        document.commit(candidate).unwrap();
+        let revision = document.revision().unwrap();
+        assert!(document
+            .add_style("One too many", "paragraph", None)
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+    }
+
+    #[test]
+    fn table_paragraph_spacing_resolves_native_table_style_and_direct_resets() {
+        let mut document = EditableDocx::new();
+        let table = document.add_table(vec![vec!["Cell".into()]]).unwrap();
+        let paragraph = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
+        assert_eq!(
+            document.paragraph_spacing(paragraph).unwrap(),
+            (0.0, 0.0, 1.0)
+        );
+        document.format_paragraph(paragraph, r##"{"space_before":12,"space_after":6,"line_spacing":1.5,"alignment":"center","indent_left":5,"indent_right":10,"indent_first":-2,"keep_together":true,"widow_control":false,"background":"#ABCDEF"}"##).unwrap();
+        assert_eq!(
+            document.paragraph_spacing(paragraph).unwrap(),
+            (12.0, 6.0, 1.5)
+        );
+        let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+        let props = &reopened
+            .table(StoryRef::Body, &Path::top(table))
+            .unwrap()
+            .rows[0]
+            .cells[0]
+            .blocks[0]
+            .as_para()
+            .unwrap()
+            .props;
+        assert_eq!(props.shading, Some(Rgb(0xAB, 0xCD, 0xEF)));
+        assert_eq!(props.indent_first, Some(-2.0));
+        assert_eq!(props.keep_lines, Some(true));
+        assert_eq!(props.widow_control, Some(false));
+        document
+            .format_paragraph(
+                paragraph,
+                r#"{"space_before":null,"space_after":null,"line_spacing":null}"#,
+            )
+            .unwrap();
+        assert_eq!(
+            document.paragraph_spacing(paragraph).unwrap(),
+            (0.0, 0.0, 1.0)
+        );
+        assert_eq!(document.paragraph_alignment(paragraph).unwrap(), "center");
+        let style = document
+            .add_style("Cell Body", "paragraph", Some("Normal"))
+            .unwrap();
+        document
+            .format_style(&style, r#"{"space_after":3}"#)
+            .unwrap();
+        document.set_paragraph_style(paragraph, &style).unwrap();
+        assert_eq!(
+            document.paragraph_spacing(paragraph).unwrap(),
+            (0.0, 3.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn formatting_enum_values_and_double_strike_roundtrip() {
+        let mut document = EditableDocx::new();
+        let style = document.add_style("Marked", "character", None).unwrap();
+        for (name, _) in UNDERLINES {
+            document
+                .format_style(&style, &json!({"underline":name}).to_string())
+                .unwrap();
+            let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+            assert_eq!(
+                underline_name(reopened.styles.get(&style).unwrap().chr.underline.unwrap()),
+                *name
+            );
+        }
+        for (name, _) in HIGHLIGHTS {
+            document
+                .format_style(&style, &json!({"highlight":name}).to_string())
+                .unwrap();
+            let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+            assert_eq!(
+                highlight_name(reopened.styles.get(&style).unwrap().chr.highlight.unwrap()),
+                *name
+            );
+        }
+        document
+            .format_style(&style, r#"{"strike":"double"}"#)
+            .unwrap();
+        let inherited = document
+            .add_style("Inherited Mark", "character", Some(&style))
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&document.style_formatting(&inherited, true).unwrap())
+                .unwrap()["strike"],
+            "double"
+        );
+        document
+            .format_style(&inherited, r#"{"strike":false}"#)
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&document.style_formatting(&inherited, true).unwrap())
+                .unwrap()["strike"],
+            false
+        );
+        document
+            .format_style(&inherited, r#"{"strike":null}"#)
+            .unwrap();
+        let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+        let resolved = reopened.styles.resolve_char(
+            None,
+            &CharProps {
+                style: Some(inherited),
+                ..Default::default()
+            },
+        );
+        assert!(resolved.double_strike);
+        assert!(!resolved.strike);
+        assert!(document
+            .format_style(&style, r#"{"strike":"triple"}"#)
+            .is_err());
     }
 }

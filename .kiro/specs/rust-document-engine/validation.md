@@ -1,5 +1,21 @@
 # Validation evidence
 
+## 2026-10-20 PR21 independent review corrections (unreleased)
+
+- Reviewed runtime head `00c7f237aed55ca51b7346ad7858625778208bbf` against merged main `76881093b7966b45389e9c4d811ecdb9c185aa47`. [CI run 39450961572](https://github.com/narain1/pydoccraft/actions/runs/39450961572) passed formatting, 76 Rust tests, warnings-denied Clippy, the locked 263-package license audit, the release build and 99 installed-wheel Python tests with zero skips.
+- Independent review corrected two PPTX link defects: explicit range assignment could not replace/clear mixed links, and invalid XML characters in URLs were silently removed on save. Reads still reject mixed targets; assignment preserves a uniform tooltip and clears mixed tooltips. Existing native text validation now rejects U+FFFE/U+FFFF before mutation. Regressions verify stale/invalid ranges, failed-edit atomicity and saved link targets.
+- CI platform: Linux x86_64, Rust 1.95.0 and Python 3.11.17. Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: 16,704,307 bytes; uncompressed extension: 38,704,080 bytes. Wheel SHA-256: `88067a0e3af05a1cdfebef285ce53a183c423c78aaeff81014aeb379a007cda8`. The installed-wheel harness verified artifact identity.
+- Lockfile SHA-256 remains `07d283b629c33e1994e4bd2b9e3e8f16876ee5efda73c46428581e20869fcdf8`; all four pinned upstream revisions, dependencies and attribution assets are unchanged. Broader roadmap and format limitations remain open.
+
+## 2026-10-20 styles, slide ranges and portable Markdown (unreleased)
+
+- Offline Linux x86_64, Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1. Formatting, 75 Rust tests, warnings-denied Clippy and the locked release build passed. Installed-wheel validation passed 97 Python tests with zero skips and matching installed package members.
+- New evidence covers style graph/name validation, native inheritance/reset/false semantics, direct/resolved snapshots, omitted run-property inheritance, table-style spacing, every supported DOCX underline/highlight enum, supplied formatting persistence and DOCX PNG/PDF output. PPTX tests cover Unicode/run-boundary and paragraph replacement, exact URL labels, tooltip persistence, native internal PDF destinations after reorder, referenced-target deletion rejection, copied owners, failed-edit rollback and property/fragmentation limits.
+- Markdown export tests cover actual PDF/DOCX/PPTX extraction, separate story files, nested HTML cells, content deduplication with repeated placements, safe names/escaped image attributes, cross-page inventory suppression, closed lifetimes, missing media, cyclic/deep/ragged tables and byte/node budgets. Existing extraction/conversion/render suites remain passing.
+- Wheel: `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`, 16,703,209 bytes. Native extension: 38,700,424 bytes. Wheel SHA-256: `e6380ff66348ce6616b6001177cd80cde6292ff4346e87cb27953646c7598331`. Lockfile SHA-256: `07d283b629c33e1994e4bd2b9e3e8f16876ee5efda73c46428581e20869fcdf8`. All four immutable upstream revisions and the reviewed 263-package license graph remain unchanged; no new code or attribution assets were added.
+- Table/theme/next-linked styles, general Office source editing, rich PPTX table-cell ranges, full internal-link extraction and broader unchecked roadmap criteria remain open. PPTX run shading is explicitly unsupported; highlighting is distinct. Markdown is a bounded extraction package, not layout reproduction or an HTML sanitizer. This is not a release declaration.
+
+
 ## 2026-10-20 text/vector content and diagnostics (unreleased)
 
 - Validated offline on Linux x86_64 with Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1; all four upstream revisions remain unchanged.

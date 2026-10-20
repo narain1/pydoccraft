@@ -221,3 +221,7 @@ Body `Document.to_markdown()` retains its existing projection. Comment stories a
 DOCX/PPTX `document.metadata["diagnostics"]` contains bounded factual notices for constructs observed in the upstream model. Each has `code`, `operation="extract"`, `severity`, `message`, `count` and bounded `sources` locators. Examples distinguish omitted chart data, linearized equations, omitted ruby annotations, cached dirty fields, preview-only embedded objects, unsupported PPTX actions and approximate transformed geometry. Counts remain exact when source examples reach the 100-example total limit.
 
 These notices describe semantic extraction only. They do not claim that rendering/export is correct, that all unsupported source markup is detectable, or that a document is safe for lossless editing. Parser, encryption, conversion and resource failures remain errors; a notice never replaces them. Native normalized JSON output stops at 64 MiB before its output buffer exceeds that budget.
+
+## Portable Markdown
+
+`document.export_markdown()` returns an owned `dict[str, bytes]` containing body/story Markdown, deduplicated local media and a JSON placement manifest. It reuses existing formatting and leaves `to_markdown()` compatible. See [portable Markdown and media](markdown-assets.md) for the schema, bounds and nested-table behavior.
