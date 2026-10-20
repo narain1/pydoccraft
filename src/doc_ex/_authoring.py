@@ -2288,14 +2288,18 @@ class Annotations(_Collection["Annotation"]):
     def add(self, kind: str, *, box: _Box, text: str = "", author: str = "", color: _Color = "#FFD200") -> Annotation:
         """Add a supported annotation in a top-left (x, y, width, height) point box."""
         self._page._check()
-        identifier = self._owner._call("add_annotation", self._page.number, kind, _annotation_rect(box), text, author, _color(color), _change=True)
+        rect, rgb = _annotation_rect(box), _color(color)
+        self._page._check()
+        identifier = self._owner._call("add_annotation", self._page.number, kind, rect, text, author, rgb, _change=True)
         return Annotation(self._page, identifier)
 
     def add_link(self, *, box: _Box, uri: str | None = None, page: int | None = None) -> Annotation:
         """Add a URL or zero-based page link in a top-left point box."""
         self._page._check()
+        rect = _annotation_rect(box)
         target = None if page is None else _index(page, self._owner.page_count)
-        identifier = self._owner._call("add_link", self._page.number, _annotation_rect(box), uri, target, _change=True)
+        self._page._check()
+        identifier = self._owner._call("add_link", self._page.number, rect, uri, target, _change=True)
         return Annotation(self._page, identifier)
 
     def __delitem__(self, index):
@@ -2330,10 +2334,12 @@ class Annotation:
 
     def update(self, *, text: str | None = None, box=None, color=None, uri: str | None = None, page: int | None = None, author: str | None = None):
         self._check()
+        rect = None if box is None else _annotation_rect(box)
+        rgb = None if color is None else _color(color)
+        target = None if page is None else _index(page, self._page._owner.page_count)
+        self._check()
         self._page._owner._call("update_annotation", self._page.number, self._id,
-            text=text, rect=None if box is None else _annotation_rect(box),
-            color=None if color is None else _color(color), uri=uri,
-            target_page=None if page is None else _index(page, self._page._owner.page_count),
+            text=text, rect=rect, color=rgb, uri=uri, target_page=target,
             author=author, _change=True)
 
     @property

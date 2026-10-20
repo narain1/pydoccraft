@@ -344,3 +344,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Validate native mixed-script geometry, conditional table-language precedence and explicit unsupported paragraph-region direction.
 - [x] Verify complete locked/native and clean installed-wheel corpus plus typed consumers; record artifact evidence.
 - [ ] Retain broader complex-script/CJK font controls, missing-glyph diagnostics and TXT6 parity as open work.
+
+
+## Bounded PDF geometric comments
+
+- [x] Reuse rectangle/ellipse native annotations, existing handles and native geometry/style mutation.
+- [x] Bound canonical target dictionaries and generated appearances, charging compound intermediate streams; retain tiny-path native repro.
+- [x] Preserve initial closed/stale checks and add final post-normalization checks with callback regressions.
+- [x] Verify complete locked/native and clean installed-wheel corpus; record artifact evidence and separate existing inventory limitations.
+- [ ] Retain broader annotation/reply/form fidelity and caller-bounded upstream inventories as open work.

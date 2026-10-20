@@ -902,6 +902,15 @@ impl EditablePdf {
                     icon: pdfcraft_annot::NoteIcon::Note,
                 }
             }
+            "rectangle" | "ellipse" => {
+                let rect = self.geometry[page].view_rect_to_user(rect).map(f64::from);
+                validate_geometric_rect(rect)?;
+                if kind == "rectangle" {
+                    pdfcraft_annot::Shape::Rectangle { rect }
+                } else {
+                    pdfcraft_annot::Shape::Oval { rect }
+                }
+            }
             "highlight" | "underline" | "strikeout" | "squiggly" => pdfcraft_annot::Shape::TextMarkup {
                 kind: match kind {
                     "underline" => pdfcraft_annot::Markup::Underline,
@@ -913,12 +922,15 @@ impl EditablePdf {
             },
             _ => {
                 return Err(EngineError::Unsupported(format!(
-                    "annotation kind {kind}; supported kinds are note, highlight, underline, strikeout and squiggly"
+                    "annotation kind {kind}; supported kinds are note, highlight, underline, strikeout, squiggly, rectangle and ellipse"
                 ))
                 .into())
             }
         };
         let appearance_peak = match &shape {
+            pdfcraft_annot::Shape::Rectangle { .. } | pdfcraft_annot::Shape::Oval { .. } => {
+                GEOMETRIC_APPEARANCE_WORK
+            }
             pdfcraft_annot::Shape::TextMarkup { kind, quads } => {
                 quads.iter().try_fold(4096usize, |total, quad| {
                     markup_quad_peak(quad, *kind == pdfcraft_annot::Markup::Squiggly)
@@ -953,10 +965,16 @@ impl EditablePdf {
         let index = pdfcraft_annot::add_annotation(&mut edited, &annotation, &meta)
             .map_err(annotation_error)?;
         let appearance_bytes = if appearance_peak != 0 {
-            markup_appearance_bytes(&edited, page, index)?
+            annotation_appearance_bytes(&edited, page, index)?
         } else {
             0
         };
+        if matches!(kind, "rectangle" | "ellipse") && appearance_bytes > GEOMETRIC_APPEARANCE_WORK {
+            return Err(EngineError::ResourceLimit(
+                "native geometric annotation appearance exceeded its bound".into(),
+            )
+            .into());
+        }
         let cost = text.len() + author.len() + appearance_bytes;
         self.validate_input(cost)?;
         self.document = Some(edited);
@@ -976,6 +994,8 @@ impl EditablePdf {
             let kind = match annotation.subtype.as_str() {
                 "Text" => "note".to_string(),
                 "Highlight" => "highlight".to_string(),
+                "Square" => "rectangle".to_string(),
+                "Circle" => "ellipse".to_string(),
                 other => other.to_ascii_lowercase(),
             };
             values.push((annotation.index, json!({
@@ -1034,9 +1054,12 @@ impl EditablePdf {
         author: Option<&str>,
     ) -> PyResult<()> {
         let page = self.page_index(page)?;
-        // props() builds an appearance internally: bound direct native QuadPoints first.
-        let appearance_peak =
-            with_annotation_dict(self.document()?, page, index, markup_dict_peak)?;
+        // props() builds an appearance internally. Bound accepted geometry and
+        // imported style dictionaries before calling that native helper.
+        let appearance_peak = with_annotation_dict(self.document()?, page, index, |dict| {
+            let geometric = geometric_dict_peak(self.document()?, dict)?;
+            Ok(geometric.max(markup_dict_peak(dict)?))
+        })?;
         self.validate_input(appearance_peak)?;
         let props = pdfcraft_annot::props(self.document()?, page, index)
             .ok_or_else(|| PyIndexError::new_err("annotation index out of range"))?;
@@ -1060,6 +1083,7 @@ impl EditablePdf {
         let cost = text.map_or(0, str::len) + author.map_or(0, str::len) + uri.map_or(0, str::len);
         self.validate_input(cost.saturating_add(appearance_peak))?;
         let mut edited = self.document()?.clone();
+        let mut resized_appearance_bytes = 0usize;
         if props.subtype == "Link" {
             if text.is_some() || author.is_some() {
                 return Err(EngineError::Unsupported(
@@ -1086,7 +1110,7 @@ impl EditablePdf {
             .map_err(annotation_error)?;
         } else if matches!(
             props.subtype.as_str(),
-            "Text" | "Highlight" | "Underline" | "StrikeOut" | "Squiggly"
+            "Text" | "Highlight" | "Underline" | "StrikeOut" | "Squiggly" | "Square" | "Circle"
         ) {
             if action.is_some() {
                 return Err(EngineError::Unsupported(
@@ -1096,30 +1120,39 @@ impl EditablePdf {
             }
             let meta = pdfcraft_annot::Meta::default();
             if let Some(rect) = user_rect {
-                let original = pdfcraft_annot::summaries(self.document()?)
-                    .into_iter()
-                    .find(|annotation| annotation.page == page && annotation.index == index)
-                    .ok_or_else(|| PyIndexError::new_err("annotation index out of range"))?
-                    .rect
-                    .map(f64::from);
-                if ((rect[2] - rect[0]) - (original[2] - original[0])).abs() > 0.001
-                    || ((rect[3] - rect[1]) - (original[3] - original[1])).abs() > 0.001
-                {
-                    return Err(EngineError::Unsupported(
+                if matches!(props.subtype.as_str(), "Square" | "Circle") {
+                    validate_geometric_rect(rect)?;
+                    pdfcraft_annot::set_rect(&mut edited, page, index, rect, &meta)
+                        .map_err(annotation_error)?;
+                    // A later recolor allocates another native AP object. Charge
+                    // this intermediate stream even when it is replaced.
+                    resized_appearance_bytes = annotation_appearance_bytes(&edited, page, index)?;
+                } else {
+                    let original = pdfcraft_annot::summaries(self.document()?)
+                        .into_iter()
+                        .find(|annotation| annotation.page == page && annotation.index == index)
+                        .ok_or_else(|| PyIndexError::new_err("annotation index out of range"))?
+                        .rect
+                        .map(f64::from);
+                    if ((rect[2] - rect[0]) - (original[2] - original[0])).abs() > 0.001
+                        || ((rect[3] - rect[1]) - (original[3] - original[1])).abs() > 0.001
+                    {
+                        return Err(EngineError::Unsupported(
                         "sticky notes and text markup can be moved, but resizing is not available"
                             .into(),
                     )
                     .into());
+                    }
+                    pdfcraft_annot::move_annotation(
+                        &mut edited,
+                        page,
+                        index,
+                        rect[0] - original[0],
+                        rect[1] - original[1],
+                        &meta,
+                    )
+                    .map_err(annotation_error)?;
                 }
-                pdfcraft_annot::move_annotation(
-                    &mut edited,
-                    page,
-                    index,
-                    rect[0] - original[0],
-                    rect[1] - original[1],
-                    &meta,
-                )
-                .map_err(annotation_error)?;
             }
             if let Some(text) = text {
                 pdfcraft_annot::set_contents(&mut edited, page, index, text, &meta)
@@ -1149,12 +1182,20 @@ impl EditablePdf {
             ))
             .into());
         }
-        // set_style regenerates the appearance. Metadata edits and moves retain it.
+        // Color changes and geometric resizing regenerate the appearance.
+        let geometric = matches!(props.subtype.as_str(), "Square" | "Circle");
         let appearance_bytes = if appearance_peak != 0 && color.is_some() {
-            markup_appearance_bytes(&edited, page, index)?
+            annotation_appearance_bytes(&edited, page, index)?
         } else {
             0
         };
+        let appearance_bytes = appearance_bytes.saturating_add(resized_appearance_bytes);
+        if geometric && appearance_bytes > GEOMETRIC_APPEARANCE_WORK {
+            return Err(EngineError::ResourceLimit(
+                "native geometric annotation appearance exceeded its bound".into(),
+            )
+            .into());
+        }
         let cost = cost.saturating_add(appearance_bytes);
         self.validate_input(cost)?;
         self.document = Some(edited);
@@ -2352,6 +2393,148 @@ impl EditablePdf {
     }
 }
 
+// Pinned appearance::ellipse emits 26 coordinates; n() uses three decimals.
+// With coordinates bounded to +/-1e6, colors in 0..1, a solid 2-unit stroke and
+// no fill, the uncompressed path is below 512 bytes. This conservative allowance
+// covers generated appearance work/storage, NOT zlib or total process memory.
+const GEOMETRIC_APPEARANCE_WORK: usize = 16 * 1024;
+
+fn validate_geometric_rect(rect: [f64; 4]) -> PyResult<()> {
+    // Native inset paths below one user unit can collapse during formatting or
+    // rasterization (a 2.01-unit oval disappears at 72/144/300 DPI). Preserve at
+    // least one unit after the fixed two-unit stroke inset, without rebuilding it.
+    if rect
+        .iter()
+        .any(|value| !value.is_finite() || value.abs() > 1_000_000.0)
+        || rect[2] - rect[0] < 3.0
+        || rect[3] - rect[1] < 3.0
+    {
+        return Err(PyValueError::new_err("rectangle and ellipse dimensions must be at least 3 PDF user units, with coordinates within 1000000 units"));
+    }
+    Ok(())
+}
+
+fn geometric_dict_peak(document: &Document, dict: &pdfcraft_cos::Dict) -> PyResult<usize> {
+    use pdfcraft_cos::Object;
+    if !matches!(dict.name(b"Subtype"), Some(b"Square" | b"Circle")) {
+        return Ok(0);
+    }
+    let unsupported = || {
+        EngineError::Unsupported("editing rectangle/ellipse annotations requires canonical solid, unfilled, opaque 2-user-unit geometry and metadata".into())
+    };
+    if dict.len() > 20 {
+        return Err(EngineError::ResourceLimit(
+            "geometric annotation dictionary exceeds 20 entries".into(),
+        )
+        .into());
+    }
+    // A narrow accepted profile prevents native dict clones/props()/appearance
+    // rebuilds from traversing arbitrary arrays, rich metadata or border graphs.
+    for (key, value) in dict.iter() {
+        match key.as_slice() {
+            b"Type" if value.as_name() == Some(b"Annot") => {}
+            b"Subtype" => {}
+            b"P" if matches!(value, Object::Ref(_)) => {}
+            b"F" if value.as_int() == Some(4) => {}
+            b"CA" if value.as_f64() == Some(1.0) => {}
+            b"Contents" | b"T" | b"NM" | b"M" | b"CreationDate" | b"Subj" => {
+                let bytes = value.as_string().ok_or_else(unsupported)?.bytes.len();
+                let maximum = if key.as_slice() == b"Contents" {
+                    131_074
+                } else {
+                    8194
+                };
+                if bytes > maximum {
+                    return Err(EngineError::ResourceLimit(
+                        "geometric annotation metadata exceeds its bound".into(),
+                    )
+                    .into());
+                }
+            }
+            b"Rect" => {
+                let values = value.as_array().ok_or_else(unsupported)?;
+                if values.len() > 4 {
+                    return Err(EngineError::ResourceLimit(
+                        "geometric annotation Rect exceeds 4 values".into(),
+                    )
+                    .into());
+                }
+                if values.len() != 4 {
+                    return Err(unsupported().into());
+                }
+                let mut rect = [0.0; 4];
+                for (dest, source) in rect.iter_mut().zip(values) {
+                    *dest = source.as_f64().ok_or_else(unsupported)?;
+                }
+                if validate_geometric_rect(rect).is_err() {
+                    return Err(unsupported().into());
+                }
+            }
+            b"C" => {
+                let values = value.as_array().ok_or_else(unsupported)?;
+                if values.len() > 3 {
+                    return Err(EngineError::ResourceLimit(
+                        "geometric annotation color exceeds 3 values".into(),
+                    )
+                    .into());
+                }
+                if values.len() != 3
+                    || values.iter().any(|v| {
+                        !v.as_f64()
+                            .is_some_and(|n| n.is_finite() && (0.0..=1.0).contains(&n))
+                    })
+                {
+                    return Err(unsupported().into());
+                }
+            }
+            b"BS" => {
+                let border = value.as_dict().ok_or_else(unsupported)?;
+                if border.len() > 2 {
+                    return Err(unsupported().into());
+                }
+                if border.len() != 2
+                    || border.get(b"W").and_then(Object::as_f64) != Some(2.0)
+                    || border.name(b"S") != Some(b"S")
+                {
+                    return Err(unsupported().into());
+                }
+            }
+            b"AP" => {
+                let owned = if let Object::Ref(reference) = value {
+                    Some(document.get(*reference))
+                } else {
+                    None
+                };
+                let appearances = owned
+                    .as_deref()
+                    .unwrap_or(value)
+                    .as_dict()
+                    .ok_or_else(unsupported)?;
+                if appearances.len() != 1 {
+                    return Err(unsupported().into());
+                }
+                let normal = appearances
+                    .get(b"N")
+                    .and_then(Object::as_ref)
+                    .ok_or_else(unsupported)?;
+                if !matches!(document.get(normal).as_ref(), Object::Stream(_)) {
+                    return Err(unsupported().into());
+                }
+                // Never decode an imported appearance. Explicit geometry/style
+                // changes replace its normal appearance with the native standard.
+            }
+            _ => return Err(unsupported().into()),
+        }
+    }
+    if ![b"Rect".as_slice(), b"C", b"BS"]
+        .iter()
+        .all(|key| dict.contains(key))
+    {
+        return Err(unsupported().into());
+    }
+    Ok(GEOMETRIC_APPEARANCE_WORK)
+}
+
 const MAX_MARKUP_QUADS: usize = 1024;
 
 // Read only one annotation. Preserve borrowed direct objects rather than cloning an
@@ -2464,10 +2647,10 @@ fn markup_dict_peak(dict: &pdfcraft_cos::Dict) -> PyResult<usize> {
     Ok(total)
 }
 
-fn markup_appearance_bytes(document: &Document, page: usize, index: usize) -> PyResult<usize> {
+fn annotation_appearance_bytes(document: &Document, page: usize, index: usize) -> PyResult<usize> {
     use pdfcraft_cos::Object;
     with_annotation_dict(document, page, index, |dict| {
-        let missing = || EngineError::Conversion("native markup appearance is missing".into());
+        let missing = || EngineError::Conversion("native annotation appearance is missing".into());
         let ap = dict.get(b"AP").ok_or_else(missing)?;
         let owned = if let Object::Ref(reference) = ap {
             Some(document.get(*reference))
@@ -5270,6 +5453,344 @@ mod tests {
     }
 
     #[test]
+    fn geometric_annotations_resize_roundtrip_and_render_in_all_page_views() {
+        use pdfcraft_cos::Object;
+        pyo3::prepare_freethreaded_python();
+        let mut source = pdfcraft_create::blank(300.0, 400.0, 1).unwrap();
+        let page = pdfcraft_organize::pages(&source).unwrap()[0].obj;
+        source
+            .update_dict(page, |dict| {
+                dict.set(
+                    b"CropBox".to_vec(),
+                    Object::Array([20.0, 30.0, 220.0, 330.0].map(Object::Real).to_vec()),
+                );
+                dict.set(b"UserUnit".to_vec(), Object::Real(2.0));
+            })
+            .unwrap();
+        let bytes = resource_fixture_bytes(&source);
+        for rotation in [0, 90, 180, 270] {
+            for kind in ["rectangle", "ellipse"] {
+                let mut document = EditablePdf::from_bytes(&bytes, None).unwrap();
+                document.rotate_page(0, rotation).unwrap();
+                document
+                    .add_text(0, "Preserved body", 20.0, 190.0, 12.0, (0, 0, 0))
+                    .unwrap();
+                let base = pdf2_raster(&document);
+                let index = document
+                    .add_annotation(
+                        0,
+                        kind,
+                        (20.0, 20.0, 140.0, 80.0),
+                        "Comment café",
+                        "Author",
+                        (255, 0, 0),
+                    )
+                    .unwrap();
+                let raw_size =
+                    annotation_appearance_bytes(document.document().unwrap(), 0, index).unwrap();
+                assert!(raw_size > 0 && raw_size < 512);
+                assert_eq!(
+                    with_annotation_dict(document.document().unwrap(), 0, index, |dict| {
+                        geometric_dict_peak(document.document().unwrap(), dict)
+                    })
+                    .unwrap(),
+                    GEOMETRIC_APPEARANCE_WORK
+                );
+                let mut resized_only = document.copy().unwrap();
+                resized_only
+                    .update_annotation(
+                        0,
+                        index,
+                        None,
+                        Some((40.0, 100.0, 200.0, 160.0)),
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                    .unwrap();
+                let resized_cost = resized_only.input_bytes - document.input_bytes;
+                let input_before = document.input_bytes;
+                document
+                    .update_annotation(
+                        0,
+                        index,
+                        Some("Revised ✓"),
+                        Some((40.0, 100.0, 200.0, 160.0)),
+                        Some((0, 0, 255)),
+                        None,
+                        None,
+                        Some("Reviewer"),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    document.input_bytes,
+                    input_before
+                        + resized_cost
+                        + annotation_appearance_bytes(document.document().unwrap(), 0, index)
+                            .unwrap()
+                        + "Revised ✓".len()
+                        + "Reviewer".len()
+                );
+                let bytes = document.to_bytes().unwrap();
+                let mut reopened = EditablePdf::from_bytes(&bytes, None).unwrap();
+                let info: Value = serde_json::from_str(&reopened.annotations(0).unwrap()).unwrap();
+                assert_eq!(info[0]["kind"], kind);
+                assert_eq!(info[0]["text"], "Revised ✓");
+                assert_eq!(info[0]["author"], "Reviewer");
+                for (actual, expected) in info[0]["rect"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .zip([40.0, 100.0, 200.0, 160.0])
+                {
+                    assert!((actual.as_f64().unwrap() - expected).abs() < 0.001);
+                }
+                let (width, height, pixels) = pdf2_raster(&reopened);
+                let ink = (0..height)
+                    .flat_map(|y| (0..width).map(move |x| (x, y)))
+                    .filter(|&(x, y)| {
+                        let p = &pixels[(y * width + x) * 4..][..4];
+                        p[2] > p[0].saturating_add(30)
+                    })
+                    .collect::<Vec<_>>();
+                assert!(ink.len() > 200, "{kind}, rotation {rotation}");
+                assert!(ink
+                    .iter()
+                    .all(|&(x, y)| (40..200).contains(&x) && (100..160).contains(&y)));
+                let center = &pixels[(130 * width + 120) * 4..][..4];
+                assert_eq!(center, &[255, 255, 255, 255]);
+                for y in 180..210 {
+                    assert_eq!(
+                        &pixels[y * width * 4..(y + 1) * width * 4],
+                        &base.2[y * width * 4..(y + 1) * width * 4]
+                    );
+                }
+                let text = crate::pdf::extract(&bytes, None).unwrap().pages[0]
+                    .blocks
+                    .iter()
+                    .map(|b| b.text.clone())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                assert!(text.contains("Preserved body"));
+                reopened.delete_annotation(0, index).unwrap();
+                assert_eq!(pdf2_raster(&reopened), base);
+            }
+        }
+    }
+
+    #[test]
+    fn geometric_native_tiny_oval_collapse_and_supported_minimum() {
+        pyo3::prepare_freethreaded_python();
+        let mut source = pdfcraft_create::blank(100.0, 100.0, 1).unwrap();
+        let shape = pdfcraft_annot::Shape::Oval {
+            rect: [20.0, 77.99, 22.01, 80.0],
+        };
+        let mut style = pdfcraft_annot::Style::default_for(&shape);
+        style.color = [1.0, 0.0, 0.0];
+        pdfcraft_annot::add_annotation(
+            &mut source,
+            &pdfcraft_annot::NewAnnotation {
+                page: 0,
+                shape,
+                style,
+                contents: String::new(),
+                author: String::new(),
+            },
+            &pdfcraft_annot::Meta::default(),
+        )
+        .unwrap();
+        let bytes = resource_fixture_bytes(&source);
+        let mut imported = EditablePdf::from_bytes(&bytes, None).unwrap();
+        let (_, _, pixels) = pdf2_raster(&imported);
+        assert!(
+            !pixels
+                .chunks_exact(4)
+                .any(|p| p[0] > p[1].saturating_add(30)),
+            "native tiny-oval regression changed"
+        );
+        let before = imported.to_bytes().unwrap();
+        assert!(imported
+            .update_annotation(
+                0,
+                0,
+                Some("Do not commit"),
+                None,
+                Some((0, 0, 255)),
+                None,
+                None,
+                None
+            )
+            .is_err());
+        assert_eq!(imported.to_bytes().unwrap(), before);
+        for kind in ["rectangle", "ellipse"] {
+            let mut document = EditablePdf::new(100.0, 100.0).unwrap();
+            assert!(document
+                .add_annotation(0, kind, (20.0, 20.0, 22.01, 22.01), "", "", (255, 0, 0))
+                .is_err());
+            document
+                .add_annotation(0, kind, (20.0, 20.0, 23.0, 23.0), "", "", (255, 0, 0))
+                .unwrap();
+            let (_, _, pixels) = pdf2_raster(&document);
+            assert!(pixels
+                .chunks_exact(4)
+                .any(|p| p[0] > p[1].saturating_add(30)));
+        }
+    }
+
+    #[test]
+    fn geometric_annotation_profiles_and_budgets_reject_before_rebuild() {
+        use pdfcraft_cos::{Dict, Object};
+        pyo3::prepare_freethreaded_python();
+        for kind in ["rectangle", "ellipse"] {
+            let mut document = EditablePdf::new(220.0, 220.0).unwrap();
+            let before = document.to_bytes().unwrap();
+            document.input_bytes = MAX_DOCUMENT_INPUT - GEOMETRIC_APPEARANCE_WORK + 1;
+            assert!(document
+                .add_annotation(0, kind, (20.0, 20.0, 140.0, 80.0), "", "", (255, 0, 0))
+                .unwrap_err()
+                .to_string()
+                .contains("resource_limit:"));
+            assert_eq!(document.to_bytes().unwrap(), before);
+            document.input_bytes = 0;
+            document.items = MAX_ITEMS;
+            assert!(document
+                .add_annotation(0, kind, (20.0, 20.0, 140.0, 80.0), "", "", (255, 0, 0))
+                .is_err());
+            assert_eq!(document.to_bytes().unwrap(), before);
+            document.items = 0;
+            let index = document
+                .add_annotation(0, kind, (20.0, 20.0, 140.0, 80.0), "", "", (255, 0, 0))
+                .unwrap();
+            let initial =
+                annotation_appearance_bytes(document.document().unwrap(), 0, index).unwrap();
+            assert_eq!(document.input_bytes, initial);
+            document
+                .update_annotation(
+                    0,
+                    index,
+                    None,
+                    Some((30.0, 30.0, 150.0, 100.0)),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+            assert_eq!(
+                document.input_bytes,
+                initial
+                    + annotation_appearance_bytes(document.document().unwrap(), 0, index).unwrap()
+            );
+            let before = document.to_bytes().unwrap();
+            for rect in [
+                (20.0, 20.0, 22.0, 80.0),
+                (20.0, 20.0, 140.0, 21.0),
+                (20.0, 20.0, f64::INFINITY, 80.0),
+            ] {
+                assert!(document
+                    .update_annotation(
+                        0,
+                        index,
+                        Some("Do not commit"),
+                        Some(rect),
+                        None,
+                        None,
+                        None,
+                        None
+                    )
+                    .is_err());
+                assert_eq!(document.to_bytes().unwrap(), before);
+            }
+            let canonical = with_annotation_dict(document.document().unwrap(), 0, index, |dict| {
+                Ok(dict.clone())
+            })
+            .unwrap();
+            for (key, value) in [
+                (b"C".to_vec(), Object::Array(vec![Object::Int(0); 100_000])),
+                (
+                    b"Rect".to_vec(),
+                    Object::Array(vec![Object::Int(0); 100_000]),
+                ),
+                (b"RD".to_vec(), Object::Array(vec![Object::Int(0); 4])),
+                (b"IC".to_vec(), Object::Array(vec![Object::Int(1); 3])),
+                (b"CA".to_vec(), Object::Real(0.5)),
+                (b"Measure".to_vec(), Object::Dict(Dict::new())),
+                (b"PCPicture".to_vec(), Object::Bool(true)),
+                (b"AP".to_vec(), Object::Dict(Dict::new())),
+                (
+                    b"Border".to_vec(),
+                    Object::Array(vec![Object::Int(0); 100_000]),
+                ),
+            ] {
+                let mut bad = canonical.clone();
+                bad.set(key.clone(), value.clone());
+                assert!(
+                    geometric_dict_peak(document.document().unwrap(), &bad).is_err(),
+                    "{key:?}"
+                );
+                let mut staged = document.copy().unwrap();
+                let native = staged.document.as_mut().unwrap();
+                let page = native.get(pdfcraft_organize::pages(native).unwrap()[0].obj);
+                let reference = page
+                    .as_dict()
+                    .unwrap()
+                    .get(b"Annots")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()[index]
+                    .as_ref()
+                    .unwrap();
+                native
+                    .update_dict(reference, |dict| {
+                        dict.set(key, value);
+                    })
+                    .unwrap();
+                let before = staged.to_bytes().unwrap();
+                assert!(staged
+                    .update_annotation(
+                        0,
+                        index,
+                        Some("Do not commit"),
+                        None,
+                        Some((0, 0, 255)),
+                        None,
+                        None,
+                        None
+                    )
+                    .is_err());
+                assert_eq!(staged.to_bytes().unwrap(), before);
+                staged.delete_annotation(0, index).unwrap();
+            }
+            let mut bad = canonical.clone();
+            let mut border = Dict::new();
+            border.set(b"W".to_vec(), Object::Real(2.0));
+            border.set(b"S".to_vec(), Object::name("D"));
+            border.set(b"D".to_vec(), Object::Array(vec![Object::Int(1); 100_000]));
+            bad.set(b"BS".to_vec(), Object::Dict(border));
+            assert!(geometric_dict_peak(document.document().unwrap(), &bad).is_err());
+            document.input_bytes = MAX_DOCUMENT_INPUT - 1;
+            let before = document.to_bytes().unwrap();
+            assert!(document
+                .update_annotation(
+                    0,
+                    index,
+                    Some("Do not commit"),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("resource_limit:"));
+            assert_eq!(document.to_bytes().unwrap(), before);
+            document.delete_annotation(0, index).unwrap();
+        }
+    }
+
+    #[test]
     fn markup_annotations_roundtrip_move_recolor_and_delete_without_changing_text() {
         pyo3::prepare_freethreaded_python();
         for kind in ["underline", "strikeout", "squiggly"] {
@@ -5528,7 +6049,8 @@ mod tests {
             let index = document
                 .add_annotation(0, kind, (20.0, 20.0, 140.0, 40.0), "", "", (255, 0, 0))
                 .unwrap();
-            let charged = markup_appearance_bytes(document.document().unwrap(), 0, index).unwrap();
+            let charged =
+                annotation_appearance_bytes(document.document().unwrap(), 0, index).unwrap();
             assert!(charged > 0);
             assert_eq!(document.input_bytes, charged);
             document
@@ -5536,7 +6058,8 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 document.input_bytes,
-                charged + markup_appearance_bytes(document.document().unwrap(), 0, index).unwrap()
+                charged
+                    + annotation_appearance_bytes(document.document().unwrap(), 0, index).unwrap()
             );
             document.input_bytes = MAX_DOCUMENT_INPUT - 1;
             let before = document.to_bytes().unwrap();
