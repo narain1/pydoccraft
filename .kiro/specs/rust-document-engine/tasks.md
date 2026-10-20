@@ -461,3 +461,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add five scoped profiles with reviewed fingerprints and the exact complete a94a5ba artifact; preserve the seven-operation distinction and unsupported redaction evidence.
 - [x] Connect existing roadmap/reference families and remove stale claims that owned clear, bookmarks or native search are absent; do not close broader criteria or duplicate ownership.
 - [x] Validate generated guides, offline evidence checks and focused tests against the existing installed wheel; record the documentation-only result without claiming a new release artifact.
+
+
+## Bounded PDF comment editing locks
+
+- [x] Audit native flag semantics, reference/dictionary clone behavior and link incompatibility; reuse the existing Annotation handle.
+- [x] Stage canonical flag-only mutations with bounded borrowed preflight and unchanged-appearance/target postconditions.
+- [x] Complete focused native/public fidelity, boundary, rollback and lifetime checks.
+- [ ] Complete integrated locked native/release/installed-wheel validation and independent review before merge.
+- [ ] Keep PDF6/U10 broader imported inventory, reply-thread and annotation capabilities open.

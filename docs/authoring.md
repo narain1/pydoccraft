@@ -599,3 +599,11 @@ Presentation slide and shape handles retain stable identities across reordering.
 `field.tooltip` reads or sets Unicode help metadata on an owned text, checkbox or choice field. It defaults to `""`; assigning `""` clears it, while `None` is invalid. Whitespace and newlines are preserved. Tooltips do not change painted field values or add text to the page, and visible output remains unchanged within the tested owned profile.
 
 Tooltips are limited to 4,096 UTF-8 bytes and reject NUL or malformed Unicode. They count toward the existing four MiB aggregate field-text budget. Native metadata updates regenerate the field appearance, so existing mutation and output limits still apply. Copies retain independent metadata; ordinary field structural invalidation rules remain. This does not enable imported forms, radio groups, arbitrary widget editing or viewer-independent tooltip display.
+
+### PDF comment editing locks
+
+`annotation.locked` is a strict boolean property for notes, highlights, underlines, strikeouts, squiggles, rectangles and ellipses. Set it to `True` to inhibit native movement, resizing, color changes, author changes and deletion; set it to `False` to enable those edits again. Comment text remains editable while locked. Compound updates that also request a blocked change fail atomically with `DocExError`. Locking changes the native flag without redrawing the appearance or changing comment metadata, geometry or handle identity.
+
+Links and other annotation kinds do not support this property. The setter accepts only canonical native-style comment dictionaries with bounded metadata/geometry and indirect page annotation entries. Imported replies, unknown nested properties, noncanonical flags/styles and unsupported appearance structures fail explicitly before mutation. Existing native annotation inventory and initial-inspection allocation limitations still apply; this target guard is not a general imported-PDF safety guarantee.
+
+This is an annotation editing flag, not encryption or access control. Page/document operations are not prevented, and other software can clear the flag. Existing copies remain independent; page organization and annotation deletion keep their usual stale-handle rules. Values other than actual `True`/`False` raise `TypeError` without invoking truth-value callbacks.

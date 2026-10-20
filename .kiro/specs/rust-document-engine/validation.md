@@ -793,3 +793,16 @@ Isolated documentation validation on the 1e28d49 source baseline passed 14 suppo
 - Documentation checks pass: roadmap ownership/DAG (139 IDs/14 workstreams), support evidence (11 profiles/139 joins), cached reference inventory (44 families), 14 support-ledger tests and five reference-inventory tests. These checks validate documentation structure only; no behavioral tests or Cargo commands were run for this audit.
 
 Root integration additionally validates the current 16-profile ledger and unchanged 139-ID/44-family joins; no runtime or behavioral evidence changes.
+
+
+### Annotation editing locks — isolated focused evidence (2026-10-20)
+
+Base `fe23c89`; no dependency or upstream revision change. The isolated implementation adds `Annotation.locked` for seven existing comment kinds through public native `set_locked`, a reference-only page-array/canonical target preflight and a staged flag-only dictionary postcondition. Native `set_info` also checks Locked, so author changes are inhibited; comment text remains editable. Links are excluded because their separate native setter does not enforce the flag. This is not access control or a general imported-inventory safety claim.
+
+Rust 1.95 locked/offline focused `annotation_lock` tests: **3 passed**, 285 filtered, 1.38 s. All-target locked/offline Clippy with warnings denied and formatting passed; a debug extension was built. Public tests ran against that isolated extension and matching copied facade: **15 passed** in 29.257 s (`test_annotation_lock`, unchanged `test_pdf_geometric_annotations`, unchanged `test_pdf_markup`), including **4 new groups**. They cover all seven kinds across four rotations with CropBox/UserUnit, actual annotation ink, exact PNG preservation, saved native roundtrips, independent copies, text/blocked compound edits, stale/closed handles, strict bool without callbacks, canonical imported acceptance and malformed/unsupported rollback with warm caches. Native tests additionally compare the complete target dictionary and raw appearance bytes, verify note popup removal after unlock, exercise 10,000/+1 reference counts, 1,024/+1 quadrilateral bounds, encoded metadata maxima, noncanonical flags/arrays and mutation/input-budget failures.
+
+Native `Object::as_int` accepts finite integral Reals. The new mutation deliberately requires direct `Object::Int` canonical flags, with a regression rejecting `/F 4.0`; existing inventory remains permissive. Native lock refusal retains the existing `conversion_failure` → `DocExError` mapping.
+
+Consumer typing assertions cover the bool getter/setter and existing str PdfField.tooltip identity/getter/setter. Strict mypy passed against a separate environment containing the copied matching package/debug extension; it is not release-wheel installation evidence. The parent will repeat the check against the final installed wheel. Documentation append context was rebased onto08ae30d; native/facade sources remain the validated fe23c89 baseline plus this patch.
+
+Full integrated locked tests, release wheel, installed-wheel corpus and independent review remain pending. Existing global annotation summaries and initial inspection can allocate before adapter caps; this slice bounds only the new target mutation and does not close PDF6/U10.
