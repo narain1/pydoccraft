@@ -49,6 +49,62 @@ class TableFormattingTests(unittest.TestCase):
                     self.assertNotIn('Amounts by region', reopened.to_markdown())
                     self.assertTrue(reopened.render_page(0, dpi=72).startswith(b'\x89PNG'))
 
+    def test_alignment_rechecks_newly_active_indent_atomically(self):
+        with doc_ex.new('docx') as document:
+            table = document.add_table([['Left', 'Right']])
+            table.format(alignment='center', indent=400)
+            cell = table[0, 1]
+            before = document.to_bytes()
+            for alignment in ('left', None):
+                with self.subTest(alignment=alignment), self.assertRaises(ValueError):
+                    table.format(alignment=alignment)
+                self.assertEqual(document.to_bytes(), before)
+                self.assertEqual(cell.text, 'Right')
+            table.format(alignment='left', indent=0)
+            with doc_ex.open(document.convert('pdf')) as reopened:
+                self.assertIn('Right', reopened.to_markdown())
+                for block in reopened[0].get_text('dict')['blocks']:
+                    self.assertLessEqual(block['bbox'][2], 612)
+
+    def test_section_geometry_rechecks_percentage_table_margins(self):
+        with doc_ex.new('docx') as document:
+            table = document.add_table([['Keep']])
+            table.format(width_percent=50, layout='fixed')
+            cell = table[0, 0]
+            cell.margins = (0, 100, 0, 100)
+            section = document.sections[0]
+            before = document.to_bytes()
+            for attribute, value in [('margins', (72, 180, 72, 180)),
+                                     ('page_size', (400, 792)), ('columns', (2, 24, False))]:
+                with self.subTest(attribute=attribute), self.assertRaises(ValueError):
+                    setattr(section, attribute, value)
+                self.assertEqual(document.to_bytes(), before)
+                self.assertEqual(cell.margins, (0, 100, 0, 100))
+            cell.margins = 0
+            section.margins = (72, 180, 72, 180)
+            with doc_ex.open(document.to_bytes()) as reopened:
+                self.assertIn('Keep', reopened.to_markdown())
+
+    def test_parent_split_rechecks_nested_percentage_table(self):
+        with doc_ex.new('docx') as document:
+            table = document.add_table([['A', 'B']])
+            table.format(layout='fixed')
+            parent = table.merge((0, 0), (0, 1))
+            nested = parent.add_table([['Nested']])
+            nested.format(width_percent=100, layout='fixed')
+            child = nested[0, 0]
+            child.margins = (0, 150, 0, 150)
+            before = document.to_bytes()
+            with self.assertRaises(ValueError):
+                parent.split()
+            self.assertEqual(document.to_bytes(), before)
+            self.assertEqual(child.text, 'Nested')
+            self.assertEqual(parent.tables[0].formatting['width_percent'], 100)
+            child.margins = 0
+            parent.split()
+            with doc_ex.open(document.to_bytes()) as reopened:
+                self.assertIn('Nested', reopened.to_markdown())
+
     def test_invalid_format_patches_are_atomic(self):
         with doc_ex.new('docx') as document:
             table = document.add_table([['Keep', 'Stable']])

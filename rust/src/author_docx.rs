@@ -456,7 +456,7 @@ impl EditableDocx {
         if values.keys().any(|key| {
             matches!(
                 key.as_str(),
-                "width" | "width_percent" | "indent" | "layout"
+                "width" | "width_percent" | "indent" | "layout" | "alignment"
             )
         }) {
             self.validate_table_layout(&candidate, id)?;
@@ -2480,52 +2480,7 @@ impl EditableDocx {
     fn validate_table_layout(&self, document: &Document, id: usize) -> PyResult<()> {
         let (story, path) = self.location(id)?;
         let widths = native_cell_widths(document)?;
-        let mut pending = vec![path];
-        while let Some(path) = pending.pop() {
-            let table = document
-                .table(story, &path)
-                .ok_or_else(|| PyIndexError::new_err("table no longer exists"))?;
-            let available = native_container_width(document, &widths, story, &path)?
-                - active_table_indent(table);
-            for (row_index, row) in table.rows.iter().enumerate() {
-                let mut total = 0.0;
-                for (cell_index, cell) in row.cells.iter().enumerate() {
-                    let width = native_cell_width(&widths, story, &path, row_index, cell_index)?;
-                    total += width;
-                    if width + 0.001 < cell.span() as f32 * 6.0 {
-                        return Err(PyValueError::new_err(
-                            "native table layout must leave at least 6 points per column",
-                        ));
-                    }
-                    let margins =
-                        wordcraft_layout::cell_margins(document, table, row_index, cell_index);
-                    let inner = width - margins[1] - margins[3];
-                    if cell.props.margins.is_some() && inner <= 0.0 {
-                        return Err(PyValueError::new_err(
-                            "table layout must leave positive width inside explicit cell margins",
-                        ));
-                    }
-                    for (index, block) in cell.blocks.iter().enumerate() {
-                        match block.as_ref() {
-                            Block::Para(paragraph) => validate_picture_width(paragraph, inner)?,
-                            Block::Table(_) => pending.push(Path(
-                                [
-                                    path.0.as_slice(),
-                                    &[row_index as u32, cell_index as u32, index as u32],
-                                ]
-                                .concat(),
-                            )),
-                        }
-                    }
-                }
-                if total > available + 0.01 || available <= 0.0 {
-                    return Err(PyValueError::new_err(
-                        "native table layout exceeds its section or cell width",
-                    ));
-                }
-            }
-        }
-        Ok(())
+        validate_native_table_layout(document, &widths, story, path)
     }
 
     fn row(&self, id: usize, row: usize) -> PyResult<&wordcraft_doc::Row> {
@@ -2638,9 +2593,7 @@ impl EditableDocx {
                     .is_some_and(|block| hidden.contains(&(Arc::as_ptr(block) as usize)))
             })
             .collect::<Vec<_>>();
-        if self.table(id)?.props.width_pct.is_some() {
-            self.validate_table_layout(&candidate, id)?;
-        }
+        self.validate_table_layout(&candidate, id)?;
         self.commit(candidate)?;
         self.invalidate_descendants(story, &path);
         self.cell_placeholders
@@ -3276,6 +3229,60 @@ fn native_cell_width(
             .into()
         })
 }
+fn validate_native_table_layout(
+    document: &Document,
+    widths: &BTreeMap<LayoutCellKey, f32>,
+    story: StoryRef,
+    path: Path,
+) -> PyResult<()> {
+    let mut pending = vec![path];
+    while let Some(path) = pending.pop() {
+        let table = document
+            .table(story, &path)
+            .ok_or_else(|| PyIndexError::new_err("table no longer exists"))?;
+        let available =
+            native_container_width(document, widths, story, &path)? - active_table_indent(table);
+        for (row_index, row) in table.rows.iter().enumerate() {
+            let mut total = 0.0;
+            for (cell_index, cell) in row.cells.iter().enumerate() {
+                let width = native_cell_width(widths, story, &path, row_index, cell_index)?;
+                total += width;
+                if width + 0.001 < cell.span() as f32 * 6.0 {
+                    return Err(PyValueError::new_err(
+                        "native table layout must leave at least 6 points per column",
+                    ));
+                }
+                let margins =
+                    wordcraft_layout::cell_margins(document, table, row_index, cell_index);
+                let inner = width - margins[1] - margins[3];
+                if cell.props.margins.is_some() && inner <= 0.0 {
+                    return Err(PyValueError::new_err(
+                        "table layout must leave positive width inside explicit cell margins",
+                    ));
+                }
+                for (index, block) in cell.blocks.iter().enumerate() {
+                    match block.as_ref() {
+                        Block::Para(paragraph) => validate_picture_width(paragraph, inner)?,
+                        Block::Table(_) => pending.push(Path(
+                            [
+                                path.0.as_slice(),
+                                &[row_index as u32, cell_index as u32, index as u32],
+                            ]
+                            .concat(),
+                        )),
+                    }
+                }
+            }
+            if total > available + 0.01 || available <= 0.0 {
+                return Err(PyValueError::new_err(
+                    "native table layout exceeds its section or cell width",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn native_container_width(
     document: &Document,
     widths: &BTreeMap<LayoutCellKey, f32>,
@@ -4272,6 +4279,12 @@ fn validate_section_content(document: &Document, section: usize) -> PyResult<()>
         sections[section - 1].0 + 1
     };
     blocks_fit_width(&document.body[begin..=end], column_width(props))?;
+    let mut tables = document.body[begin..=end]
+        .iter()
+        .enumerate()
+        .filter(|(_, block)| matches!(block.as_ref(), Block::Table(_)))
+        .map(|(index, _)| (StoryRef::Body, Path::top(begin + index)))
+        .collect::<Vec<_>>();
     let h = props.headers;
     let f = props.footers;
     for id in [h.default, h.first, h.even, f.default, f.first, f.even]
@@ -4283,6 +4296,16 @@ fn validate_section_content(document: &Document, section: usize) -> PyResult<()>
             .get(&id)
             .ok_or_else(|| PyValueError::new_err("section references a missing story"))?;
         blocks_fit_width(&part.blocks, props.text_width())?;
+        tables.extend(part.blocks.iter().enumerate().filter_map(|(index, block)| {
+            matches!(block.as_ref(), Block::Table(_))
+                .then_some((StoryRef::Part(id), Path::top(index)))
+        }));
+    }
+    if !tables.is_empty() {
+        let widths = native_cell_widths(document)?;
+        for (story, path) in tables {
+            validate_native_table_layout(document, &widths, story, path)?;
+        }
     }
     Ok(())
 }
@@ -6945,6 +6968,68 @@ mod tests {
             .is_err());
         assert_eq!(document.note_ids(None).unwrap().len(), MAX_NOTES);
         assert_eq!(document.revision().unwrap(), revision);
+    }
+
+    #[test]
+    fn table_geometry_entry_points_reject_overflow_before_commit() {
+        let mut document = EditableDocx::new();
+        let table = document
+            .add_table(vec![vec!["a".into(), "b".into()]])
+            .unwrap();
+        document
+            .table_format_patch(table, r#"{"alignment":"center","indent":400}"#)
+            .unwrap();
+        let before = document.document().unwrap().clone();
+        let revision = document.revision().unwrap();
+        for alignment in [r#"{"alignment":"left"}"#, r#"{"alignment":null}"#] {
+            assert!(document.table_format_patch(table, alignment).is_err());
+            assert_eq!(document.document().unwrap(), &before);
+            assert_eq!(document.revision().unwrap(), revision);
+        }
+        let mut document = EditableDocx::new();
+        let table = document.add_table(vec![vec!["a".into()]]).unwrap();
+        document
+            .table_format_patch(table, r#"{"width_percent":50,"layout":"fixed"}"#)
+            .unwrap();
+        document
+            .set_cell_margins(table, 0, 0, Some((0.0, 100.0, 0.0, 100.0)))
+            .unwrap();
+        let before = document.document().unwrap().clone();
+        let revision = document.revision().unwrap();
+        for patch in [
+            r#"{"margins":[72,180,72,180]}"#,
+            r#"{"page_size":[400,792]}"#,
+            r#"{"columns":[2,24,false]}"#,
+        ] {
+            assert!(document.set_section_props(0, patch).is_err(), "{patch}");
+            assert_eq!(document.document().unwrap(), &before);
+            assert_eq!(document.revision().unwrap(), revision);
+        }
+        let mut document = EditableDocx::new();
+        let table = document
+            .add_table(vec![vec!["a".into(), "b".into()]])
+            .unwrap();
+        document
+            .table_format_patch(table, r#"{"layout":"fixed"}"#)
+            .unwrap();
+        document.merge_cells(table, 0, 0, 0, 1).unwrap();
+        let nested = document
+            .cell_add_table(table, 0, 0, vec![vec!["nested".into()]])
+            .unwrap();
+        document
+            .table_format_patch(nested, r#"{"width_percent":100,"layout":"fixed"}"#)
+            .unwrap();
+        document
+            .set_cell_margins(nested, 0, 0, Some((0.0, 150.0, 0.0, 150.0)))
+            .unwrap();
+        let before = document.document().unwrap().clone();
+        let revision = document.revision().unwrap();
+        let generation = document.table_generation(table).unwrap();
+        assert!(document.split_cell(table, 0, 0, 2).is_err());
+        assert_eq!(document.document().unwrap(), &before);
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.table_generation(table).unwrap(), generation);
+        assert_eq!(document.cell_text(nested, 0, 0).unwrap(), "nested");
     }
 
     #[test]
