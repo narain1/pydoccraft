@@ -54,14 +54,14 @@ def percentile(values: list[float], fraction: float) -> float:
     return ordered[lower] * (1 - weight) + ordered[upper] * weight
 
 
-def summarize_png(value: tuple[int, bytes]) -> tuple[int, int, int, int]:
+def summarize_png(value: tuple[int, bytes]) -> tuple[int, int, int]:
     pages, data = value
     if not data.startswith(b"\x89PNG\r\n\x1a\n") or len(data) < 24:
         raise RuntimeError("render did not return a complete PNG header")
     width, height = struct.unpack(">II", data[16:24])
     if not width or not height:
         raise RuntimeError("render returned empty dimensions")
-    return pages, width, height, len(data)
+    return pages, width, height
 
 
 def summarize_document(value: tuple[int, int]) -> tuple[int, int]:
@@ -71,13 +71,13 @@ def summarize_document(value: tuple[int, int]) -> tuple[int, int]:
     return value
 
 
-def summarize_conversion(value: tuple[bytes, str]) -> tuple[int, int, int]:
+def summarize_conversion(value: tuple[bytes, str]) -> tuple[int, int]:
     data, filetype = value
     with doc_ex.open(data, filetype=filetype) as document:
         characters = sum(len(page.get_text("text")) for page in document)
         if document.page_count < 1 or characters < 1:
             raise RuntimeError("converted output did not reopen with text")
-        return document.page_count, characters, len(data)
+        return document.page_count, characters
 
 
 def summarize_xlsx(value: tuple[int, int]) -> tuple[int, int]:
@@ -225,7 +225,7 @@ def report(results: list[Result], dpi: int, warmups: int, repeats: int) -> str:
     return "\n".join(lines)
 
 
-def main() -> int:
+def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", type=Path)
     parser.add_argument("--warmups", type=int, default=1)
@@ -233,6 +233,14 @@ def main() -> int:
     parser.add_argument("--dpi", type=int, default=144)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
+    if args.warmups < 0 or args.repeats < 1 or args.dpi < 1:
+        parser.error("warmups must be nonnegative; repeats and DPI must be positive")
+    if args.output is not None and args.output.suffix.lower() == ".md":
+        parser.error("--output must not use .md: JSON and Markdown require distinct paths")
+    return args
+
+
+def run(args: argparse.Namespace) -> int:
     items = load_items(args.directory)
     results = []
     for item in items:
@@ -254,6 +262,18 @@ def main() -> int:
         args.output.write_text(json.dumps({"results": [asdict(result) for result in results]}, indent=2) + "\n")
         args.output.with_suffix(".md").write_text(rendered + "\n")
     return 0
+
+
+def main() -> int:
+    args = parse_arguments()
+    try:
+        return run(args)
+    except Exception as error:
+        # Exceptions from readers and filesystem operations can contain local paths or text.
+        # Keep the public CLI failure as anonymous as its successful report.
+        raise SystemExit(
+            f"local benchmark failed ({type(error).__name__}); document details omitted"
+        ) from None
 
 
 if __name__ == "__main__":

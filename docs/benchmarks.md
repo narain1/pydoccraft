@@ -169,3 +169,14 @@ PYTHONPATH= /tmp/pydoccraft-benchmark/bin/python benchmarks/benchmark_documents.
 The command writes raw JSON and generated Markdown outside the repository. The `--output` path must not end in `.md`, which is reserved for the companion report. Run focused harness checks with `/tmp/pydoccraft-benchmark/bin/python -m unittest discover -s benchmarks -v`. Do not commit generated documents, rendered images, converted outputs, profiles, virtual environments, or timing dumps.
 
 Run results vary with hardware, power state, thermal state, operating system, Python version, library version, and document structure. Ratios are observed-run estimates: scenarios were measured in a fixed sequence, so future harness work should interleave matched libraries and add repeated process-level runs before treating small differences as stable. Repeat on representative real documents and every supported release platform before making broad performance claims.
+
+
+To measure your own files without including their filenames, paths, hashes or extracted text in reports:
+
+```console
+PYTHONPATH= /tmp/pydoccraft-benchmark/bin/python benchmarks/benchmark_test_files.py /path/to/local/corpus \
+  --warmups 1 --repeats 5 --dpi 144 \
+  --output /tmp/pydoccraft-benchmark-results/local.json
+```
+
+The corpus script validates CLI counts and keeps JSON/Markdown output paths distinct. Its Python failure messages omit reader/filesystem exception details; successful reports contain anonymous IDs, format, file size, page/slide/row counts and timings. File sizes/counts are still document metadata, so review reports before sharing them. Third-party backend diagnostics are not a promised redaction boundary. Serialized byte length is excluded from repeatability guards because metadata can change it without changing content.
