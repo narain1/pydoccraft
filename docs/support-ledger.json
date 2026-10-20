@@ -1266,7 +1266,7 @@
         },
         "preserve": {
           "status": "partial",
-          "scope": "Copies, saved/reopened shapes and existing page text/image content retain tested values/pixels. Geometry/style edits regenerate standard appearances and do not promise custom-appearance preservation.",
+          "scope": "Copies, saved/reopened shapes and existing page text/vector content retain tested values/pixels. Geometry/style edits regenerate standard appearances and do not promise custom-appearance preservation.",
           "artifact": "ellipse-2026-10-20",
           "tests": [
             "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_visible_shapes_resize_recolor_reopen_copy_delete",
