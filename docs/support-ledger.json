@@ -2294,7 +2294,7 @@
         },
         "preserve": {
           "status": "partial",
-          "scope": "Retain tested body/nested references, note text/custom styles, existing links, independent copies and saved source reference/style kinds. Native standard note styles intentionally change; arbitrary imported parts, semantic deletion and fragment remapping are outside this profile.",
+          "scope": "Retain tested body/nested references, note text/custom styles, the tested external URL link, independent copies and saved source reference/style kinds. Native standard note styles intentionally change; arbitrary imported parts, semantic deletion and fragment remapping are outside this profile.",
           "artifact": "note-conversion-2026-10-20",
           "tests": [
             "tests/test_note_conversion.py::NoteConversionTests.test_conversion_moves_numbered_visible_notes_and_preserves_cache_on_noop",
