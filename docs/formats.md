@@ -61,6 +61,7 @@ DOCX support is backed by pinned WordCraft 0.8.0 crates.
 - Ordered body paragraphs and tables.
 - Heading levels resolved through style inheritance and clamped to Markdown levels 1–6.
 - Style ID, style name, and outline metadata.
+- Resolved numbering definitions and unambiguous native layout labels, separate from paragraph text. See [numbering extraction](numbering-extraction.md).
 - Exact hyperlink labels and character offsets.
 - Referenced inline and grouped images with bytes, display dimensions, and alt text.
 - Semantic tables, including content from nested table cells.
@@ -85,17 +86,19 @@ PPTX support is backed by pinned DeckCraft 0.8.0 crates.
 - One normalized page per slide in presentation order.
 - Recursive traversal of grouped shapes with transformed geometry.
 - Paragraph and soft-line-break boundaries.
-- Run-level URL hyperlinks with exact labels and offsets.
-- Shape-level URL links.
+- Run-level URL and resolved internal-slide hyperlinks with exact labels and offsets, including table cells.
+- Shape/group URL and resolved internal-slide links.
 - Semantic tables and merge metadata.
 - Referenced picture bytes, MIME type, alt text, intrinsic dimensions when detectable, and slide placement.
 - Speaker notes.
 - Comments and nested replies.
 - Slide dimensions, name, and hidden state.
 
-Only URL hyperlink actions are normalized. Internal navigation, media actions, custom shows, and other PowerPoint actions remain upstream model details and are not exposed as Python `Link` values.
+Resolved native slide targets use `#page=N` and zero-based `target_page` metadata, including self-links and hidden slides in presentation order. Context-dependent next/previous/first/last/last-viewed actions, end-show, media, custom-show and program actions remain explicit omission diagnostics; they are not treated as fixed page targets. Notes retain their existing text-only link behavior. Unknown action strings and unresolved source relationships can be discarded by the pinned reader before the adapter sees them, so their absence cannot be diagnosed completely without upstream preservation reports.
 
 ## Rendering
+
+An open document reuses its native PDF parser or Office model for repeated rendering. DOCX also reuses the completed pagination layout. The public methods and PNG-byte return type are unchanged. Use a context manager or `close()` to release retained models/layouts and private source/password references; already extracted values remain usable. Retention can increase steady-state memory. Native global/thread-local caches and allocator retention are not released by this contract, and calls do not promise parallel rasterization. See [Office measurements and reproduction](office-performance.md).
 
 ```python
 png = document.render_page(0, dpi=144)

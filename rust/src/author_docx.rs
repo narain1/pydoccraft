@@ -6,8 +6,9 @@ use std::{
     sync::Arc,
 };
 
-use pyo3::exceptions::{PyIndexError, PyValueError};
+use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::{PyBool, PyInt};
 use serde_json::{json, Map, Value};
 use wordcraft_doc::para::{Float, InlineObject, NoteKind};
 use wordcraft_doc::props::{
@@ -32,6 +33,27 @@ const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_MEDIA_BYTES: usize = 64 * 1024 * 1024;
 const MAX_IMAGE_PIXELS: u64 = 16_000_000;
 const MAX_LISTS: usize = 10_000;
+
+/// Private boundary value: Python booleans must not become numbering starts.
+#[derive(Clone, Copy)]
+pub struct ListStart(u32);
+
+impl<'py> FromPyObject<'py> for ListStart {
+    fn extract_bound(value: &Bound<'py, PyAny>) -> PyResult<Self> {
+        if value.is_instance_of::<PyBool>() || !value.is_instance_of::<PyInt>() {
+            return Err(PyTypeError::new_err(
+                "list start must be an integer, not a boolean",
+            ));
+        }
+        let start = value.extract::<u32>()?;
+        if !(1..=32767).contains(&start) {
+            return Err(PyValueError::new_err(
+                "list start must be between 1 and 32767",
+            ));
+        }
+        Ok(Self(start))
+    }
+}
 const MAX_LINK_BYTES: usize = 16 * 1024 * 1024;
 const MAX_STYLES: usize = 1024;
 const MAX_FORMAT_PATCH_BYTES: usize = 16 * 1024;
@@ -42,6 +64,9 @@ const MAX_TABLE_METADATA_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TAB_STOPS: usize = 64;
 const MAX_LAYOUT_PAGES: usize = 10_000;
 const MAX_LAYOUT_ITEMS: usize = 2_000_000;
+const MAX_PROPERTY_BYTES: usize = 256 * 1024;
+const MAX_PROPERTY_VALUE_BYTES: usize = 64 * 1024;
+const MAX_CUSTOM_PROPERTIES: usize = 1024;
 
 #[pyclass]
 pub struct EditableDocx {
@@ -105,8 +130,80 @@ impl EditableDocx {
         Ok(self.revision)
     }
 
+    pub fn metadata(&self) -> PyResult<String> {
+        Ok(document_metadata(self.document()?)?.to_string())
+    }
+
+    pub fn update_metadata(&mut self, updates: &str) -> PyResult<()> {
+        self.document()?;
+        let values = property_patch(updates)?;
+        if values.is_empty() {
+            return Ok(());
+        }
+        let mut candidate = self.document()?.clone();
+        for (key, value) in values {
+            if key == "custom" {
+                patch_custom_metadata(&mut candidate, value)?;
+                continue;
+            }
+            if key == "revision" {
+                candidate.core.revision = if value.is_null() {
+                    0
+                } else {
+                    value
+                        .as_u64()
+                        .and_then(|value| u32::try_from(value).ok())
+                        .ok_or_else(|| {
+                            PyValueError::new_err(
+                                "revision requires an unsigned 32-bit integer or null",
+                            )
+                        })?
+                };
+                continue;
+            }
+            let target = match key.as_str() {
+                "title" => &mut candidate.core.title,
+                "author" => &mut candidate.core.creator,
+                "subject" => &mut candidate.core.subject,
+                "keywords" => &mut candidate.core.keywords,
+                "description" => &mut candidate.core.description,
+                "category" => &mut candidate.core.category,
+                "last_modified_by" => &mut candidate.core.last_modified_by,
+                "created" => &mut candidate.core.created,
+                "modified" => &mut candidate.core.modified,
+                _ => {
+                    return Err(PyValueError::new_err(format!(
+                        "unknown metadata key: {key}"
+                    )))
+                }
+            };
+            let text = match &value {
+                Value::Null => "",
+                Value::String(text) => text.as_str(),
+                _ => {
+                    return Err(PyValueError::new_err(
+                        "metadata values require strings or null, except revision",
+                    ))
+                }
+            };
+            validate_property_text(text)?;
+            if text.trim() != text {
+                return Err(PyValueError::new_err("DOCX metadata cannot preserve leading or trailing whitespace at this native revision"));
+            }
+            if matches!(key.as_str(), "created" | "modified") && !text.is_empty() {
+                validate_property_timestamp(text)?;
+            }
+            *target = text.to_owned();
+        }
+        if core_metadata(&candidate).to_string().len() > MAX_PROPERTY_BYTES {
+            return Err(limit("metadata exceeds 256 KiB of serialized values"));
+        }
+        self.commit(candidate)
+    }
+
     pub fn to_bytes(&self) -> PyResult<Vec<u8>> {
         validate_unsplittable_page_bounds(self.document()?)?;
+        validate_unequal_column_tables(self.document()?)?;
         let output = wordcraft_docx::write(self.document()?).map_err(|error| {
             EngineError::Conversion(format!("DOCX serialization failed: {error}"))
         })?;
@@ -181,8 +278,15 @@ impl EditableDocx {
 
     pub fn add_table(&mut self, rows: Vec<Vec<String>>) -> PyResult<usize> {
         self.reserve_block()?;
-        let (table, added_text, cells) =
-            self.make_table(rows, column_width(&self.document()?.last_section))?;
+        let section = &self.document()?.last_section;
+        let width = column_width(section);
+        let (mut table, added_text, cells) = self.make_table(rows, width)?;
+        if !section.columns.widths.is_empty() {
+            // Native autofit can enlarge a new table to its starting column and
+            // retain that width when it flows into a narrower one.
+            table.props.width = Some(width);
+            table.props.fixed = true;
+        }
         let text_bytes = self.updated_text_bytes(0, added_text)?;
         let mut candidate = self.document()?.clone();
         if candidate.body.len() + 2 > MAX_BLOCKS {
@@ -894,7 +998,7 @@ impl EditableDocx {
         height: Option<f64>,
         alt: &str,
     ) -> PyResult<usize> {
-        let (paragraph, media) = self.make_image(data, width, height, alt)?;
+        let paragraph = self.make_image(data, width, height, alt)?;
         let table = self.table(id)?;
         let (anchor_row, cell) = cell_anchor(table, row, column)?;
         let margins = wordcraft_layout::cell_margins(self.document()?, table, anchor_row, cell);
@@ -913,7 +1017,7 @@ impl EditableDocx {
             Block::Para(paragraph),
             0,
             0,
-            Some((media, data.to_vec())),
+            Some(data.to_vec()),
         )
     }
 
@@ -1523,15 +1627,40 @@ impl EditableDocx {
         ))
     }
 
-    #[pyo3(signature = (id, kind=None, level=0, restart=false))]
+    #[pyo3(signature = (id, kind=None, level=0, restart=false, start=None))]
     pub fn set_paragraph_list(
         &mut self,
         id: usize,
         kind: Option<&str>,
         level: u8,
         restart: bool,
+        start: Option<ListStart>,
     ) -> PyResult<()> {
         self.paragraph(id)?;
+        let start = start.map(|value| value.0);
+        if start.is_some_and(|value| !(1..=32767).contains(&value)) {
+            return Err(PyValueError::new_err(
+                "list start must be between 1 and 32767",
+            ));
+        }
+        if start.is_some() && (kind != Some("numbered") || level != 0) {
+            return Err(PyValueError::new_err(
+                "list start requires a top-level numbered list",
+            ));
+        }
+        if start.is_some() {
+            let (story, _) = self.location(id)?;
+            if let StoryRef::Part(part) = story {
+                if self
+                    .document()?
+                    .parts
+                    .get(&part)
+                    .is_some_and(|part| matches!(part.kind, PartKind::Header | PartKind::Footer))
+                {
+                    return Err(EngineError::Unsupported("explicit list starts in headers/footers are unavailable: native measurement advances their counters".into()).into());
+                }
+            }
+        }
         if level > 8 || (kind.is_none() && (level != 0 || restart)) {
             return Err(PyValueError::new_err(
                 "list level must be 0..8; clearing a list requires level=0 and restart=false",
@@ -1553,7 +1682,7 @@ impl EditableDocx {
             let wanted = wordcraft_doc::numbering::levels_for(kind);
             // Preserve the current sequence or continue the closest earlier matching list
             // in this story, including a restart. find_kind always returns the first one.
-            let existing = if restart {
+            let existing = if restart || start.is_some() {
                 None
             } else {
                 candidate
@@ -1581,10 +1710,21 @@ impl EditableDocx {
                 {
                     return Err(limit("document exceeds 10000 native list definitions"));
                 }
-                candidate
+                let id = candidate
                     .numbering
                     .try_add_list(kind)
-                    .map_err(model_error)?
+                    .map_err(model_error)?;
+                if let Some(start) = start {
+                    candidate
+                        .numbering
+                        .nums
+                        .iter_mut()
+                        .find(|number| number.id == id)
+                        .ok_or_else(|| PyValueError::new_err("new list definition is missing"))?
+                        .start_overrides
+                        .push((0, start));
+                }
+                id
             }
         } else {
             0
@@ -2220,8 +2360,12 @@ impl EditableDocx {
             "start": section_start_name(props.start),
             "page_size": [props.page_w, props.page_h],
             "margins": [props.margin_top, props.margin_right, props.margin_bottom, props.margin_left],
+            "gutter": props.gutter,
             "distances": [props.header, props.footer],
-            "columns": [props.columns.count, props.columns.space, props.columns.separator]
+            "columns": [props.columns.count, props.columns.space, props.columns.separator],
+            "column_widths": if props.columns.widths.is_empty() { None } else {
+                Some(props.columns.widths.iter().map(|(width, _)| *width).collect::<Vec<_>>())
+            }
         }).to_string())
     }
 
@@ -2263,6 +2407,18 @@ impl EditableDocx {
                     props.header = header;
                     props.footer = footer;
                 }
+                "gutter" => {
+                    props.gutter = value
+                        .as_f64()
+                        .filter(|number| number.is_finite() && *number >= 0.0 && *number <= 1584.0)
+                        .ok_or_else(|| {
+                            PyValueError::new_err(
+                                "gutter must be finite and between 0 and 1584 points",
+                            )
+                        })? as f32;
+                }
+                // Apply explicit widths after columns, independent of JSON key order.
+                "column_widths" => {}
                 "columns" => {
                     let values = value.as_array().filter(|v| v.len() == 3).ok_or_else(|| {
                         PyValueError::new_err("columns must contain count, gap and separator")
@@ -2295,6 +2451,34 @@ impl EditableDocx {
                     )))
                 }
             }
+        }
+        if let Some(value) = object.get("column_widths") {
+            props.columns.widths = if value.is_null() {
+                Vec::new()
+            } else {
+                let widths = value.as_array().filter(|widths| widths.len() == props.columns.count as usize)
+                    .ok_or_else(|| PyValueError::new_err("column_widths must contain one width for each configured column, or null"))?;
+                widths
+                    .iter()
+                    .enumerate()
+                    .map(|(index, width)| {
+                        let width = width
+                            .as_f64()
+                            .filter(|width| width.is_finite() && *width >= 18.0 && *width <= 1584.0)
+                            .ok_or_else(|| {
+                                PyValueError::new_err(
+                                    "column widths must be finite and between 18 and 1584 points",
+                                )
+                            })?;
+                        let gap = if index + 1 == widths.len() {
+                            0.0
+                        } else {
+                            props.columns.space
+                        };
+                        Ok((width as f32, gap))
+                    })
+                    .collect::<PyResult<Vec<_>>>()?
+            };
         }
         validate_section_geometry(&props)?;
         let mut candidate = self.document()?.clone();
@@ -2437,13 +2621,13 @@ impl EditableDocx {
         alt: &str,
     ) -> PyResult<usize> {
         self.reserve_block()?;
-        let (paragraph, media) = self.make_image(data, width, height, alt)?;
+        let mut paragraph = self.make_image(data, width, height, alt)?;
         validate_picture_width(&paragraph, column_width(&self.document()?.last_section))?;
         let mut candidate = self.document()?.clone();
         if candidate.body.len() >= MAX_BLOCKS {
             return Err(limit("document exceeds 100000 blocks"));
         }
-        candidate.media.insert(media, Arc::new(data.to_vec()));
+        attach_image_media(&mut candidate, &mut paragraph, data.to_vec())?;
         let id = self.placeholder.unwrap_or(candidate.body.len());
         if self.placeholder.is_some() {
             candidate.body[id] = wordcraft_doc::para_block(paragraph);
@@ -2456,8 +2640,56 @@ impl EditableDocx {
         self.placeholder = None;
         self.images.push(id);
         self.locations.insert(id, (StoryRef::Body, Path::top(id)));
-        self.media_bytes += data.len();
         Ok(id)
+    }
+
+    pub fn image_data(&self, id: usize) -> PyResult<Vec<u8>> {
+        let InlineObject::Image { media, .. } = self.image(id)? else {
+            return Err(PyIndexError::new_err(
+                "image index does not identify a picture",
+            ));
+        };
+        self.document()?
+            .media
+            .get(media)
+            .map(|bytes| bytes.as_ref().clone())
+            .ok_or_else(|| PyValueError::new_err("picture references missing native media"))
+    }
+
+    pub fn set_image_data(&mut self, id: usize, data: &[u8]) -> PyResult<()> {
+        self.image(id)?;
+        validate_png(data)?;
+        let mut candidate = self.document()?.clone();
+        let key = candidate.add_media(data.to_vec(), "png");
+        let paragraph = self.paragraph_mut(&mut candidate, id)?;
+        let Some(InlineObject::Image { media, .. }) = paragraph.objects.first_mut() else {
+            return Err(PyIndexError::new_err(
+                "image index does not identify a picture",
+            ));
+        };
+        *media = key;
+        paragraph.touch();
+        self.commit(candidate)
+    }
+
+    pub fn remove_image(&mut self, id: usize) -> PyResult<()> {
+        self.image(id)?;
+        let mut candidate = self.document()?.clone();
+        let paragraph = self.paragraph_mut(&mut candidate, id)?;
+        // Authored pictures occupy one native inline-object paragraph. Removing
+        // the object keeps its anchor and every unrelated stable block locator.
+        if paragraph.text != "\u{fffc}" || paragraph.objects.len() != 1 {
+            return Err(EngineError::Unsupported(
+                "image removal requires an authored inline-picture paragraph".into(),
+            )
+            .into());
+        }
+        paragraph
+            .delete(0, '\u{fffc}'.len_utf8())
+            .map_err(model_error)?;
+        self.commit(candidate)?;
+        self.images.retain(|image| *image != id);
+        Ok(())
     }
 
     pub fn image_ids(&mut self) -> PyResult<Vec<usize>> {
@@ -2494,6 +2726,69 @@ impl EditableDocx {
                 "image index does not identify a picture",
             )),
         }
+    }
+
+    pub fn image_crop(&self, id: usize) -> PyResult<(f64, f64, f64, f64)> {
+        let InlineObject::Image { crop, .. } = self.image(id)? else {
+            return Err(PyIndexError::new_err(
+                "image index does not identify a picture",
+            ));
+        };
+        Ok((
+            f64::from(crop[0]),
+            f64::from(crop[1]),
+            f64::from(crop[2]),
+            f64::from(crop[3]),
+        ))
+    }
+
+    pub fn set_image_crop(&mut self, id: usize, crop: (f64, f64, f64, f64)) -> PyResult<()> {
+        self.image(id)?;
+        let values = [crop.0, crop.1, crop.2, crop.3];
+        if values
+            .iter()
+            .any(|value| !value.is_finite() || !(0.0..=0.45).contains(value))
+        {
+            return Err(PyValueError::new_err("crop fractions must be finite and between 0 and 0.45 in left/top/right/bottom order"));
+        }
+        let mut candidate = self.document()?.clone();
+        let paragraph = self.paragraph_mut(&mut candidate, id)?;
+        if let Some(InlineObject::Image { crop, .. }) = paragraph.objects.first_mut() {
+            *crop = values.map(|value| value as f32);
+        }
+        paragraph.touch();
+        self.commit(candidate)
+    }
+
+    pub fn image_flips(&self, id: usize) -> PyResult<(bool, bool)> {
+        let InlineObject::Image { float, .. } = self.image(id)? else {
+            return Err(PyIndexError::new_err(
+                "image index does not identify a picture",
+            ));
+        };
+        Ok((float.flip_h, float.flip_v))
+    }
+
+    #[pyo3(signature = (id, flip_h=None, flip_v=None))]
+    pub fn set_image_flips(
+        &mut self,
+        id: usize,
+        flip_h: Option<bool>,
+        flip_v: Option<bool>,
+    ) -> PyResult<()> {
+        self.image(id)?;
+        let mut candidate = self.document()?.clone();
+        let paragraph = self.paragraph_mut(&mut candidate, id)?;
+        if let Some(InlineObject::Image { float, .. }) = paragraph.objects.first_mut() {
+            if let Some(value) = flip_h {
+                float.flip_h = value;
+            }
+            if let Some(value) = flip_v {
+                float.flip_v = value;
+            }
+        }
+        paragraph.touch();
+        self.commit(candidate)
     }
 
     pub fn set_image_size(&mut self, id: usize, width: f64, height: f64) -> PyResult<()> {
@@ -2891,10 +3186,10 @@ impl EditableDocx {
         id: usize,
         row: usize,
         column: usize,
-        block: Block,
+        mut block: Block,
         added_text: usize,
         added_cells: usize,
-        media: Option<(String, Vec<u8>)>,
+        media: Option<Vec<u8>>,
     ) -> PyResult<usize> {
         self.reserve_block()?;
         let text_bytes = self.updated_text_bytes(0, added_text)?;
@@ -2911,10 +3206,12 @@ impl EditableDocx {
             .ok_or_else(|| limit("document child identifier limit reached"))?;
         let is_table = block.as_table().is_some();
         let is_image = media.is_some();
-        let media_bytes = media.as_ref().map_or(0, |(_, data)| data.len());
         let mut candidate = self.document()?.clone();
-        if let Some((key, bytes)) = media {
-            candidate.media.insert(key, Arc::new(bytes));
+        if let Some(bytes) = media {
+            let Block::Para(paragraph) = &mut block else {
+                return Err(PyValueError::new_err("picture media requires a paragraph"));
+            };
+            attach_image_media(&mut candidate, paragraph, bytes)?;
         }
         if consume {
             candidate.container_mut(story, &path).map_err(model_error)?[index] = Arc::new(block);
@@ -2944,7 +3241,6 @@ impl EditableDocx {
         self.next_story_block = next;
         self.text_bytes = text_bytes;
         self.cell_count += added_cells;
-        self.media_bytes += media_bytes;
         Ok(identifier)
     }
 
@@ -2954,14 +3250,8 @@ impl EditableDocx {
         width: Option<f64>,
         height: Option<f64>,
         alt: &str,
-    ) -> PyResult<(Paragraph, String)> {
-        if self.document()?.media.len() >= 1000
-            || self.media_bytes.saturating_add(data.len()) > MAX_MEDIA_BYTES
-        {
-            return Err(limit(
-                "document images exceed 1000 images or 64 MiB of encoded media",
-            ));
-        }
+    ) -> PyResult<Paragraph> {
+        self.document()?;
         validate_alt(alt)?;
         let (pixel_width, pixel_height) = validate_png(data)?;
         let (width, height) = match (width, height) {
@@ -2977,13 +3267,12 @@ impl EditableDocx {
             (None, None) => (f64::from(pixel_width), f64::from(pixel_height)),
         };
         validate_image_size(width, height)?;
-        let media = format!("pydoccraft-image-{}.png", self.document()?.media.len());
         let mut paragraph = Paragraph::new();
         paragraph
             .insert_object(
                 0,
                 InlineObject::Image {
-                    media: media.clone(),
+                    media: String::new(),
                     w: width as f32,
                     h: height as f32,
                     alt: alt.into(),
@@ -2994,7 +3283,7 @@ impl EditableDocx {
                 &CharProps::default(),
             )
             .map_err(model_error)?;
-        Ok((paragraph, media))
+        Ok(paragraph)
     }
 
     fn make_table(&self, rows: Vec<Vec<String>>, width: f32) -> PyResult<(Table, usize, usize)> {
@@ -3076,7 +3365,12 @@ impl EditableDocx {
         let (story, path) = self.location(id)?;
         document.table_mut(story, &path).map_err(model_error)
     }
-    fn commit(&mut self, document: Document) -> PyResult<()> {
+    fn commit(&mut self, mut document: Document) -> PyResult<()> {
+        let media_bytes = if document.media.is_empty() {
+            0
+        } else {
+            retain_authored_image_media(&mut document)?
+        };
         validate_table_metadata_budget(&document)?;
         validate_document_tabs(&document)?;
         // Native generic range/table edits do not repair semantic references. Existing
@@ -3102,6 +3396,7 @@ impl EditableDocx {
             .checked_add(1)
             .ok_or_else(|| limit("document revision limit reached"))?;
         self.document = Some(document);
+        self.media_bytes = media_bytes;
         self.revision = revision;
         Ok(())
     }
@@ -3160,6 +3455,256 @@ impl EditableDocx {
         }
         Ok(total)
     }
+}
+
+fn property_patch(updates: &str) -> PyResult<Map<String, Value>> {
+    if updates.len() > MAX_PROPERTY_BYTES {
+        return Err(limit("metadata update exceeds 256 KiB"));
+    }
+    serde_json::from_str(updates)
+        .map_err(|_| PyValueError::new_err("metadata updates require a JSON object"))
+}
+
+fn validate_property_text(text: &str) -> PyResult<()> {
+    if text.len() > MAX_PROPERTY_VALUE_BYTES {
+        return Err(limit("metadata value exceeds 64 KiB"));
+    }
+    validate_text(text)
+}
+
+fn validate_property_timestamp(text: &str) -> PyResult<()> {
+    let bytes = text.as_bytes();
+    let invalid = || {
+        PyValueError::new_err(
+            "metadata timestamps require a valid UTC YYYY-MM-DDTHH:MM:SSZ value (years 0001..9999)",
+        )
+    };
+    if bytes.len() != 20
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes[10] != b'T'
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+        || bytes[19] != b'Z'
+        || bytes
+            .iter()
+            .enumerate()
+            .any(|(index, byte)| ![4, 7, 10, 13, 16, 19].contains(&index) && !byte.is_ascii_digit())
+    {
+        return Err(invalid());
+    }
+    let number = |start: usize, end: usize| {
+        bytes[start..end]
+            .iter()
+            .fold(0u32, |value, byte| value * 10 + u32::from(*byte - b'0'))
+    };
+    let (year, month, day) = (number(0, 4), number(5, 7), number(8, 10));
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days = match month {
+        2 => {
+            if leap {
+                29
+            } else {
+                28
+            }
+        }
+        4 | 6 | 9 | 11 => 30,
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        _ => return Err(invalid()),
+    };
+    if year == 0
+        || day == 0
+        || day > days
+        || number(11, 13) > 23
+        || number(14, 16) > 59
+        || number(17, 19) > 59
+    {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
+fn core_metadata(document: &Document) -> Value {
+    let core = &document.core;
+    let mut values = Map::new();
+    for (key, text) in [
+        ("title", &core.title),
+        ("author", &core.creator),
+        ("subject", &core.subject),
+        ("keywords", &core.keywords),
+        ("description", &core.description),
+        ("category", &core.category),
+        ("last_modified_by", &core.last_modified_by),
+        ("created", &core.created),
+        ("modified", &core.modified),
+    ] {
+        if !text.is_empty() {
+            values.insert(key.into(), json!(text));
+        }
+    }
+    if core.revision > 0 {
+        values.insert("revision".into(), json!(core.revision));
+    }
+    Value::Object(values)
+}
+
+fn custom_metadata(document: &Document) -> PyResult<Value> {
+    let mut values = Map::new();
+    for property in &document.custom_props {
+        let malformed =
+            || PyValueError::new_err("custom metadata is outside the supported scalar profile");
+        let value = match property.kind.as_str() {
+            "lpwstr" => json!(property.value),
+            "bool" => json!(property.value.parse::<bool>().map_err(|_| malformed())?),
+            "i8" => json!(property.value.parse::<i64>().map_err(|_| malformed())?),
+            "r8" => {
+                let value = property.value.parse::<f64>().map_err(|_| malformed())?;
+                if !value.is_finite() {
+                    return Err(malformed());
+                }
+                json!(value)
+            }
+            _ => return Err(malformed()),
+        };
+        values.insert(property.name.clone(), value);
+    }
+    Ok(Value::Object(values))
+}
+
+fn document_metadata(document: &Document) -> PyResult<Value> {
+    let mut values = core_metadata(document);
+    values
+        .as_object_mut()
+        .unwrap()
+        .insert("custom".into(), custom_metadata(document)?);
+    Ok(values)
+}
+
+fn patch_custom_metadata(candidate: &mut Document, value: Value) -> PyResult<()> {
+    if value.is_null() {
+        candidate.custom_props.clear();
+        return Ok(());
+    }
+    let values = value
+        .as_object()
+        .cloned()
+        .ok_or_else(|| PyValueError::new_err("custom metadata requires an object or null"))?;
+    let mut names = BTreeSet::new();
+    for (name, value) in values {
+        validate_property_text(&name)?;
+        if name.is_empty()
+            || name.len() > 255
+            || name.trim() != name
+            || name.chars().any(char::is_control)
+        {
+            return Err(PyValueError::new_err("custom property names require 1..255 UTF-8 bytes, no control characters or surrounding whitespace"));
+        }
+        if !names.insert(name.to_ascii_lowercase()) {
+            return Err(PyValueError::new_err(
+                "custom property updates contain case-insensitive duplicate names",
+            ));
+        }
+        if value.is_null() {
+            candidate.remove_custom_prop(&name);
+            continue;
+        }
+        let (kind, text) = match value {
+                Value::String(text) => {
+                    validate_property_text(&text)?;
+                    ("lpwstr", text)
+                }
+                Value::Bool(value) => ("bool", value.to_string()),
+                Value::Number(value) if value.is_i64() => ("i8", value.to_string()),
+                Value::Number(value) if value.is_f64() && value.as_f64().is_some_and(f64::is_finite) => ("r8", value.to_string()),
+                _ => return Err(PyValueError::new_err("custom properties require strings, bools, signed 64-bit integers, finite floats or null")),
+            };
+        if let Some(property) = candidate
+            .custom_props
+            .iter_mut()
+            .find(|property| property.name.eq_ignore_ascii_case(&name))
+        {
+            property.kind = kind.into();
+            property.value = text;
+        } else {
+            candidate.custom_props.push(wordcraft_doc::CustomProp {
+                name,
+                kind: kind.into(),
+                value: text,
+            });
+        }
+    }
+    if candidate.custom_props.len() > MAX_CUSTOM_PROPERTIES {
+        return Err(limit("document exceeds 1024 custom properties"));
+    }
+    if custom_metadata(candidate)?.to_string().len() > MAX_PROPERTY_BYTES {
+        return Err(limit(
+            "custom properties exceed 256 KiB of serialized values",
+        ));
+    }
+    Ok(())
+}
+
+fn attach_image_media(
+    document: &mut Document,
+    paragraph: &mut Paragraph,
+    data: Vec<u8>,
+) -> PyResult<()> {
+    let Some(InlineObject::Image { media, .. }) = paragraph.objects.first_mut() else {
+        return Err(PyValueError::new_err(
+            "picture media requires an inline image",
+        ));
+    };
+    *media = document.add_media(data, "png");
+    Ok(())
+}
+
+/// Reference accounting for this owner's authored Image/NoteRef profile. Native
+/// paths traverse nested tables; we do not reconstruct an OOXML resource graph.
+fn retain_authored_image_media(document: &mut Document) -> PyResult<usize> {
+    if document.settings.page_picture.is_some() {
+        return Err(EngineError::Unsupported(
+            "media cleanup for page pictures is outside the authored image profile".into(),
+        )
+        .into());
+    }
+    let mut used = BTreeSet::new();
+    let mut references = 0usize;
+    for story in
+        std::iter::once(StoryRef::Body).chain(document.parts.keys().map(|id| StoryRef::Part(*id)))
+    {
+        for path in document.para_paths(story) {
+            let paragraph = document
+                .para(story, &path)
+                .ok_or_else(|| PyValueError::new_err("native paragraph path no longer exists"))?;
+            for object in &paragraph.objects {
+                match object {
+                    InlineObject::Image { media, ole: None, .. } => {
+                        references += 1;
+                        if references > 1000 {
+                            return Err(limit("document exceeds 1000 image placements"));
+                        }
+                        if !document.media.contains_key(media) {
+                            return Err(PyValueError::new_err("picture references missing native media"));
+                        }
+                        used.insert(media.clone());
+                    }
+                    InlineObject::NoteRef { .. } => {}
+                    _ => return Err(EngineError::Unsupported("media cleanup requires the authored image/note profile; other inline objects need upstream reference traversal".into()).into()),
+                }
+            }
+        }
+    }
+    if used.len() > 1000 {
+        return Err(limit("document exceeds 1000 distinct image resources"));
+    }
+    let bytes = used.iter().try_fold(0usize, |total, key| {
+        total
+            .checked_add(document.media[key].len())
+            .filter(|total| *total <= MAX_MEDIA_BYTES)
+            .ok_or_else(|| limit("document images exceed 64 MiB of referenced encoded media"))
+    })?;
+    document.media.retain(|key, _| used.contains(key));
+    Ok(bytes)
 }
 
 fn table_patch(patch: &str) -> PyResult<Map<String, Value>> {
@@ -3307,6 +3852,14 @@ fn border_value(value: &Value) -> PyResult<Option<Border>> {
             "border width must be 0.125..12 points in eighth-point increments",
         ));
     }
+    if matches!(style, BorderStyle::Triple | BorderStyle::DotDash)
+        || (style != BorderStyle::None && width < 0.25)
+        || (style == BorderStyle::Thick && width < 1.5)
+    {
+        return Err(EngineError::Unsupported(
+            "native DOCX borders require width at least 0.25pt (1.5pt for thick); triple and dot_dash styles are unavailable".into(),
+        ).into());
+    }
     Ok(Some(Border {
         style,
         width: width as f32,
@@ -3337,10 +3890,23 @@ fn apply_border_patch(target: &mut Option<Borders>, value: &Value, inner: bool) 
                 )))
             }
         };
-        *side = border_value(value)?;
+        *side = border_for_side(value, key)?;
     }
     *target = (borders != Borders::default()).then_some(borders);
     Ok(())
+}
+fn border_for_side(value: &Value, side: &str) -> PyResult<Option<Border>> {
+    let border = border_value(value)?;
+    if matches!(side, "left" | "right" | "inside_vertical")
+        && border
+            .is_some_and(|border| matches!(border.style, BorderStyle::Double | BorderStyle::Wave))
+    {
+        return Err(EngineError::Unsupported(
+            "native DOCX double and wave borders support only horizontal edges".into(),
+        )
+        .into());
+    }
+    Ok(border)
 }
 fn borders_snapshot(borders: Option<Borders>, inner: bool) -> Value {
     let Some(borders) = borders else {
@@ -3522,6 +4088,33 @@ fn native_table_roots(document: &Document) -> Vec<(StoryRef, Path)> {
         }
     }
     roots
+}
+
+fn validate_unequal_column_tables(document: &Document) -> PyResult<()> {
+    let mut roots = Vec::new();
+    let mut begin = 0;
+    for (end, section) in document.sections() {
+        if !section.columns.widths.is_empty() {
+            let blocks = document
+                .body
+                .get(begin..=end)
+                .ok_or_else(|| PyValueError::new_err("native section has invalid body bounds"))?;
+            roots.extend(blocks.iter().enumerate().filter_map(|(index, block)| {
+                matches!(block.as_ref(), Block::Table(_)).then_some(Path::top(begin + index))
+            }));
+        }
+        begin = end + 1;
+    }
+    if roots.is_empty() {
+        return Ok(());
+    }
+    // Recheck actual public layout at serialization, since edits to preceding
+    // text can move an autofit table to a different-width column.
+    let widths = native_cell_widths(document)?;
+    for path in roots {
+        validate_native_table_layout(document, &widths, StoryRef::Body, path)?;
+    }
+    Ok(())
 }
 
 fn validate_style_tables(original: &Document, candidate: &Document) -> PyResult<()> {
@@ -4325,12 +4918,11 @@ fn format_patch(input: &str) -> PyResult<Map<String, Value>> {
     let Value::Object(values) = value else {
         return Err(PyValueError::new_err("format patch must be a JSON object"));
     };
-    if values
-        .iter()
-        .any(|(key, value)| value.is_object() || (value.is_array() && key != "tabs"))
-    {
+    if values.iter().any(|(key, value)| {
+        (value.is_object() && key != "borders") || (value.is_array() && key != "tabs")
+    }) {
         return Err(PyValueError::new_err(
-            "format patch values must be scalar, except the tabs list",
+            "format patch values must be scalar, except the tabs list and borders mapping",
         ));
     }
     Ok(values)
@@ -4567,6 +5159,7 @@ fn is_paragraph_key(key: &str) -> bool {
             | "page_break_before"
             | "background"
             | "tabs"
+            | "borders"
     )
 }
 
@@ -4574,6 +5167,7 @@ fn is_paragraph_key(key: &str) -> bool {
 struct ParaPatch {
     values: ParaProps,
     clear: BTreeSet<String>,
+    border_sides: BTreeMap<String, Option<Border>>,
 }
 
 impl ParaPatch {
@@ -4629,6 +5223,20 @@ impl ParaPatch {
                 "widow_control" => patch.values.widow_control = bool_value(value)?,
                 "page_break_before" => patch.values.page_break_before = bool_value(value)?,
                 "background" => patch.values.shading = Some(parse_rgb(text_value(value)?)?),
+                "borders" => {
+                    let sides = value.as_object().ok_or_else(|| {
+                        PyValueError::new_err("borders requires a side mapping or None")
+                    })?;
+                    for (side, value) in sides {
+                        if !matches!(side.as_str(), "top" | "right" | "bottom" | "left") {
+                            return Err(PyValueError::new_err(
+                                "paragraph borders support only top, right, bottom and left",
+                            ));
+                        }
+                        let border = border_for_side(value, side)?;
+                        patch.border_sides.insert(side.clone(), border);
+                    }
+                }
                 "tabs" => {
                     let tabs = parse_tabs(value)?;
                     if tabs.is_empty() {
@@ -4674,10 +5282,24 @@ impl ParaPatch {
                 "page_break_before" => props.page_break_before = None,
                 "background" => props.shading = None,
                 "tabs" => props.tabs = None,
+                "borders" => props.borders = None,
                 _ => {}
             }
         }
         props.overlay(&self.values);
+        if !self.border_sides.is_empty() {
+            let mut borders = props.borders.unwrap_or_default();
+            for (side, border) in &self.border_sides {
+                match side.as_str() {
+                    "top" => borders.top = *border,
+                    "right" => borders.right = *border,
+                    "bottom" => borders.bottom = *border,
+                    "left" => borders.left = *border,
+                    _ => unreachable!("validated paragraph border side"),
+                }
+            }
+            props.borders = (borders != Borders::default()).then_some(borders);
+        }
     }
 }
 
@@ -4786,6 +5408,7 @@ fn resolved_char_snapshot(props: &wordcraft_doc::resolve::ResolvedChar) -> Map<S
 
 fn para_snapshot(props: &ParaProps) -> PyResult<Map<String, Value>> {
     Ok(snapshot([
+        ("borders", borders_snapshot(props.borders, false)),
         (
             "tabs",
             props
@@ -4820,6 +5443,7 @@ fn resolved_para_snapshot(
     props: &wordcraft_doc::resolve::ResolvedPara,
 ) -> PyResult<Map<String, Value>> {
     Ok(snapshot([
+        ("borders", borders_snapshot(props.borders, false)),
         ("tabs", tabs_snapshot(&props.tabs)),
         ("alignment", json!(alignment_name(props.align))),
         ("indent_left", json!(props.indent_left)),
@@ -4901,10 +5525,10 @@ fn validate_alt(alt: &str) -> PyResult<()> {
 fn validate_image_size(width: f64, height: f64) -> PyResult<()> {
     if [width, height]
         .iter()
-        .any(|value| !value.is_finite() || !(0.05..=1584.0).contains(value))
+        .any(|value| !value.is_finite() || !(1.0..=1584.0).contains(value))
     {
         return Err(PyValueError::new_err(
-            "image dimensions must be finite and between 0.05 and 1584 points",
+            "image dimensions must be finite and between 1 and 1584 points",
         ));
     }
     Ok(())
@@ -5022,16 +5646,39 @@ fn section_numbers<const N: usize>(value: &Value, key: &str) -> PyResult<[f32; N
 }
 
 fn column_width(section: &SectionProps) -> f32 {
-    (section.text_width() - section.columns.space * (section.columns.count - 1) as f32)
-        / section.columns.count as f32
+    // Content can flow into any column after later edits. In particular native
+    // table layout reuses its initial width when it advances into another column.
+    section
+        .column_boxes()
+        .iter()
+        .map(|(_, width)| *width)
+        .fold(f32::INFINITY, f32::min)
 }
 
 fn validate_section_geometry(section: &SectionProps) -> PyResult<()> {
+    let columns = &section.columns;
+    let text_width = section.page_w - section.margin_left - section.margin_right - section.gutter;
+    let column_width_valid = if columns.widths.is_empty() {
+        text_width - columns.space * columns.count.saturating_sub(1) as f32
+            >= 18.0 * columns.count as f32
+    } else {
+        columns.widths.len() == columns.count as usize
+            && columns.widths.iter().all(|(width, gap)| {
+                width.is_finite() && *width >= 18.0 && gap.is_finite() && *gap >= 0.0
+            })
+            && columns
+                .widths
+                .iter()
+                .map(|(width, gap)| width + gap)
+                .sum::<f32>()
+                <= text_width + 0.001
+    };
     if section.page_w < section.margin_left + section.margin_right + section.gutter + 18.0
         || section.page_h < section.margin_top + section.margin_bottom + 18.0
         || section.header > section.page_h
         || section.footer > section.page_h
-        || column_width(section) < 18.0
+        || !(1..=45).contains(&columns.count)
+        || !column_width_valid
     {
         return Err(PyValueError::new_err("section geometry must leave 18 points per column and of body height; header/footer distances must fit the page"));
     }
@@ -5345,6 +5992,1002 @@ fn range_offsets(text: &str, start: usize, end: usize) -> PyResult<(usize, usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn core_metadata_roundtrips_without_changing_timestamps_or_content() {
+        let mut document = EditableDocx::new();
+        document
+            .add_paragraph("Metadata body remains visible")
+            .unwrap();
+        assert_eq!(document.metadata().unwrap(), r#"{"custom":{}}"#);
+        let values = json!({"title":"Report <&> Ω", "author":"Example Author", "subject":"Subject",
+            "keywords":"one;two", "description":"First line\nSecond line", "category":"Review",
+            "last_modified_by":"Editor", "created":"2024-02-29T01:02:03Z",
+            "modified":"2026-10-20T23:59:59Z", "revision":4294967295u32});
+        document.update_metadata(&values.to_string()).unwrap();
+        let expected = document.metadata().unwrap();
+        let copied = document.copy().unwrap();
+        let bytes = document.to_bytes().unwrap();
+        assert_eq!(document.to_bytes().unwrap(), bytes);
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        assert_eq!(document_metadata(&reopened).unwrap().to_string(), expected);
+        assert_eq!(reopened.core.creator, "Example Author");
+        assert_eq!(reopened.core.created, "2024-02-29T01:02:03Z");
+        crate::docx::render(&bytes, 0, 72.0, None).unwrap();
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        crate::pdf::render(&pdf, 0, 72.0, None).unwrap();
+        document
+            .update_metadata(r#"{"author":null,"title":"","revision":null,"created":null}"#)
+            .unwrap();
+        let updated: Value = serde_json::from_str(&document.metadata().unwrap()).unwrap();
+        for key in ["title", "author", "revision", "created"] {
+            assert!(updated.get(key).is_none());
+        }
+        assert_eq!(updated["modified"], "2026-10-20T23:59:59Z");
+        assert_eq!(copied.metadata().unwrap(), expected);
+        document.close();
+        assert!(document.metadata().is_err());
+        assert!(document.update_metadata("{}").is_err());
+    }
+
+    #[test]
+    fn custom_metadata_scalar_types_clear_and_case_identity_roundtrip() {
+        let mut document = EditableDocx::new();
+        let custom = json!({"Text":"  escaped <&> Ω\ntext  ", "Empty":"", "Flag":false,
+            "Minimum":i64::MIN, "Maximum":i64::MAX, "Ratio":1.25, "NegativeZero":-0.0});
+        document
+            .update_metadata(&json!({"custom":custom}).to_string())
+            .unwrap();
+        let expected: Value = serde_json::from_str(&document.metadata().unwrap()).unwrap();
+        assert_eq!(expected["custom"], custom);
+        let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+        assert_eq!(document_metadata(&reopened).unwrap(), expected);
+        assert_eq!(
+            reopened
+                .custom_props
+                .iter()
+                .find(|p| p.name == "Flag")
+                .unwrap()
+                .kind,
+            "bool"
+        );
+        assert_eq!(
+            reopened
+                .custom_props
+                .iter()
+                .find(|p| p.name == "Maximum")
+                .unwrap()
+                .kind,
+            "i8"
+        );
+        assert_eq!(
+            reopened
+                .custom_props
+                .iter()
+                .find(|p| p.name == "Ratio")
+                .unwrap()
+                .kind,
+            "r8"
+        );
+        document
+            .update_metadata(r#"{"title":"Retained","custom":{"flag":true,"ratio":null}}"#)
+            .unwrap();
+        let values: Value = serde_json::from_str(&document.metadata().unwrap()).unwrap();
+        assert_eq!(values["custom"]["Flag"], true);
+        assert!(values["custom"].get("flag").is_none());
+        assert!(values["custom"].get("Ratio").is_none());
+        document.update_metadata(r#"{"custom":null}"#).unwrap();
+        assert_eq!(
+            document.metadata().unwrap(),
+            r#"{"custom":{},"title":"Retained"}"#
+        );
+        assert!(wordcraft_docx::read(&document.to_bytes().unwrap())
+            .unwrap()
+            .custom_props
+            .is_empty());
+    }
+
+    #[test]
+    fn metadata_invalid_updates_preserve_owner_and_revision() {
+        let mut document = EditableDocx::new();
+        document
+            .update_metadata(r#"{"title":"Original","custom":{"Keep":1}}"#)
+            .unwrap();
+        let bytes = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        let mut invalid = vec![
+            "[]".into(),
+            r#"{"title":"Changed","language":"en"}"#.into(),
+            r#"{"title":" Changed"}"#.into(),
+            r#"{"title":"Changed "}"#.into(),
+            r#"{"title":"\u0000"}"#.into(),
+            r#"{"title":true}"#.into(),
+            r#"{"revision":true}"#.into(),
+            r#"{"revision":-1}"#.into(),
+            r#"{"revision":4294967296}"#.into(),
+            r#"{"revision":1.0}"#.into(),
+            r#"{"custom":{"Key":1,"KEY":2}}"#.into(),
+            r#"{"custom":{"Keep":null,"Nested":[]}}"#.into(),
+            r#"{"custom":{"Huge":9223372036854775808}}"#.into(),
+            r#"{"custom":{"Huge":1e400}}"#.into(),
+            r#"{"custom":[]}"#.into(),
+            r#"{"custom":{"":1}}"#.into(),
+            r#"{"custom":{" bad":1}}"#.into(),
+            r#"{"custom":{"bad\nname":1}}"#.into(),
+        ];
+        for date in [
+            "2023-02-29T00:00:00Z",
+            "1900-02-29T00:00:00Z",
+            "0000-01-01T00:00:00Z",
+            "2024-13-01T00:00:00Z",
+            "2024-04-31T00:00:00Z",
+            "2024-01-00T00:00:00Z",
+            "2024-01-01T24:00:00Z",
+            "2024-01-01T00:60:00Z",
+            "2024-01-01T00:00:60Z",
+            "2024-01-01",
+            "2024-01-01T00:00:00+01:00",
+            "é024-01-01T00:00:00Z",
+        ] {
+            invalid.push(json!({"title":"Changed", "created":date}).to_string());
+        }
+        invalid.push(json!({"title":"x".repeat(MAX_PROPERTY_VALUE_BYTES+1)}).to_string());
+        invalid.push(json!({"custom":{"x".repeat(256):1}}).to_string());
+        for update in invalid {
+            assert!(
+                document.update_metadata(&update).is_err(),
+                "unexpectedly accepted {update}"
+            );
+            assert_eq!(document.revision().unwrap(), revision);
+            assert_eq!(document.to_bytes().unwrap(), bytes);
+        }
+        document.update_metadata("{}").unwrap();
+        assert_eq!(document.revision().unwrap(), revision);
+    }
+
+    #[test]
+    fn metadata_aggregate_and_custom_count_budgets_reclaim_after_clear() {
+        let mut document = EditableDocx::new();
+        let value = "x".repeat(60_000);
+        for name in ["title", "author", "subject", "description"] {
+            document
+                .update_metadata(&json!({name:&value}).to_string())
+                .unwrap();
+        }
+        let revision = document.revision().unwrap();
+        assert!(document
+            .update_metadata(&json!({"keywords":&value}).to_string())
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        document.update_metadata(r#"{"description":null}"#).unwrap();
+        document
+            .update_metadata(&json!({"keywords":&value}).to_string())
+            .unwrap();
+        for name in ["First", "Second", "Third", "Fourth"] {
+            document
+                .update_metadata(&json!({"custom":{name:&value}}).to_string())
+                .unwrap();
+        }
+        assert!(document
+            .update_metadata(&json!({"custom":{"Fifth":&value}}).to_string())
+            .is_err());
+        document.update_metadata(r#"{"custom":null}"#).unwrap();
+        let properties: Map<String, Value> = (0..MAX_CUSTOM_PROPERTIES)
+            .map(|index| (format!("Property{index}"), json!(index)))
+            .collect();
+        document
+            .update_metadata(&json!({"custom":properties}).to_string())
+            .unwrap();
+        assert!(document
+            .update_metadata(r#"{"custom":{"Extra":1}}"#)
+            .is_err());
+        document
+            .update_metadata(r#"{"custom":{"Property0":null,"Extra":1}}"#)
+            .unwrap();
+        assert_eq!(
+            document.document().unwrap().custom_props.len(),
+            MAX_CUSTOM_PROPERTIES
+        );
+        document.to_bytes().unwrap();
+    }
+
+    #[test]
+    fn upstream_core_metadata_reader_trims_supplied_strings() {
+        let mut document = Document::new();
+        document.core.title = "  Title Ω  ".into();
+        document.core.created = "2024-02-29T01:02:03Z".into();
+        let reopened = wordcraft_docx::read(&wordcraft_docx::write(&document).unwrap()).unwrap();
+        assert_eq!(reopened.core.title, "Title Ω");
+        assert_eq!(reopened.core.created, document.core.created);
+    }
+
+    fn media_png(width: u32, height: u32, color: [u8; 4]) -> Vec<u8> {
+        crate::rendering::encode_png(
+            width,
+            height,
+            &color.repeat((width * height) as usize),
+            72.0,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn picture_transforms_roundtrip_preserve_media_and_failed_changes_are_atomic() {
+        let source = media_png(40, 20, [0, 0, 255, 255]);
+        let mut document = EditableDocx::new();
+        let id = document
+            .add_image(&source, Some(96.0), Some(48.0), "Kept")
+            .unwrap();
+        document.set_image_crop(id, (0.25, 0.0, 0.0, 0.0)).unwrap();
+        document
+            .set_image_flips(id, Some(true), Some(true))
+            .unwrap();
+        let copy = document.copy().unwrap();
+        let replacement = media_png(20, 40, [255, 0, 0, 255]);
+        document.set_image_data(id, &replacement).unwrap();
+        document.set_image_size(id, 80.0, 40.0).unwrap();
+        assert_eq!(document.image_crop(id).unwrap(), (0.25, 0.0, 0.0, 0.0));
+        assert_eq!(document.image_flips(id).unwrap(), (true, true));
+        assert_eq!(copy.image_size(id).unwrap(), (96.0, 48.0));
+        assert_eq!(copy.image_data(id).unwrap(), source);
+        let raw = document.to_bytes().unwrap();
+        let native = wordcraft_docx::read(&raw).unwrap();
+        let (story, path) = document.location(id).unwrap();
+        let InlineObject::Image {
+            crop,
+            float,
+            w,
+            h,
+            alt,
+            ..
+        } = &native.para(story, &path).unwrap().objects[0]
+        else {
+            panic!("missing image")
+        };
+        assert_eq!(*crop, [0.25, 0.0, 0.0, 0.0]);
+        assert!(float.flip_h && float.flip_v);
+        assert_eq!((*w, *h, alt.as_str()), (80.0, 40.0, "Kept"));
+        let revision = document.revision().unwrap();
+        for crop in [
+            (f64::NAN, 0.0, 0.0, 0.0),
+            (0.0, f64::INFINITY, 0.0, 0.0),
+            (-0.01, 0.0, 0.0, 0.0),
+            (0.0, 0.0, 0.451, 0.0),
+        ] {
+            assert!(document.set_image_crop(id, crop).is_err());
+        }
+        for (w, h) in [(0.99, 20.0), (20.0, 0.99)] {
+            assert!(document.set_image_size(id, w, h).is_err());
+            assert!(document
+                .add_image(&source, Some(w), Some(h), "Invalid")
+                .is_err());
+        }
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.to_bytes().unwrap(), raw);
+        document.set_image_size(id, 1.0, 1.0).unwrap();
+        document
+            .set_image_crop(id, (0.45, 0.45, 0.45, 0.45))
+            .unwrap();
+        document.set_image_flips(id, Some(false), None).unwrap();
+        assert_eq!(document.image_flips(id).unwrap(), (false, true));
+        document.close();
+        assert!(document.image_crop(id).is_err());
+        assert!(document.set_image_flips(id, Some(true), None).is_err());
+    }
+
+    #[test]
+    fn upstream_picture_frames_below_one_point_are_silently_enlarged() {
+        let mut document = EditableDocx::new();
+        let id = document
+            .add_image(
+                &media_png(2, 2, [0, 0, 255, 255]),
+                Some(1.0),
+                Some(1.0),
+                "Tiny",
+            )
+            .unwrap();
+        let mut raw = document.document().unwrap().clone();
+        let para = document.paragraph_mut(&mut raw, id).unwrap();
+        let InlineObject::Image { w, h, .. } = &mut para.objects[0] else {
+            panic!("missing image")
+        };
+        *w = 0.05;
+        *h = 0.05;
+        para.touch();
+        let native = wordcraft_docx::read(&wordcraft_docx::write(&raw).unwrap()).unwrap();
+        let layout =
+            wordcraft_layout::layout(&native, &mut Default::default(), &Default::default());
+        let frames: Vec<_> = layout
+            .pages
+            .iter()
+            .flat_map(|page| &page.items)
+            .filter_map(|item| {
+                if let wordcraft_layout::Placed::Object { rect, .. } = item {
+                    Some((rect.w, rect.h))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(frames, vec![(1.0, 1.0)]);
+    }
+
+    #[test]
+    fn upstream_quarter_turn_picture_loses_solid_edge_pixels() {
+        // Native Float + writer supplies matching effectExtent/spin_pad. This is not
+        // malformed XML: render/lib.rs and pdf/lib.rs both lose part of a solid edge.
+        let mut document = EditableDocx::new();
+        document.set_page_size(300.0, 300.0).unwrap();
+        document.set_margins(40.0, 40.0, 40.0, 40.0).unwrap();
+        let id = document
+            .add_image(
+                &media_png(40, 20, [0, 0, 255, 255]),
+                Some(96.0),
+                Some(48.0),
+                "Rotation repro",
+            )
+            .unwrap();
+        let mut native = document.document().unwrap().clone();
+        let para = document.paragraph_mut(&mut native, id).unwrap();
+        let InlineObject::Image { float, .. } = &mut para.objects[0] else {
+            panic!("missing image")
+        };
+        float.rot = 90.0;
+        para.touch();
+        let raw = wordcraft_docx::write(&native).unwrap();
+        let pdf = crate::docx::to_pdf(&raw, None).unwrap();
+        for png in [
+            crate::docx::render(&raw, 0, 144.0, None).unwrap(),
+            crate::pdf::render(&pdf, 0, 144.0, None).unwrap(),
+        ] {
+            let mut reader = png::Decoder::new(Cursor::new(png)).read_info().unwrap();
+            let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+            let frame = reader.next_frame(&mut pixels).unwrap();
+            assert_eq!(frame.color_type, png::ColorType::Rgba);
+            let span = |y: usize| {
+                pixels[y * frame.width as usize * 4..(y + 1) * frame.width as usize * 4]
+                    .chunks_exact(4)
+                    .filter(|p| p[0] < 20 && p[1] < 20 && p[2] > 240)
+                    .count()
+            };
+            // A 90-degree turn should give a constant-width solid rectangle.
+            assert!(
+                span(200) >= span(100) + 4,
+                "native edge loss no longer reproduced: {} vs {}",
+                span(100),
+                span(200)
+            );
+        }
+    }
+
+    #[test]
+    fn picture_payload_replacement_preserves_geometry_alt_copy_and_visible_output() {
+        let red = media_png(16, 8, [255, 0, 0, 255]);
+        let blue = media_png(8, 16, [0, 0, 255, 255]);
+        let mut document = EditableDocx::new();
+        let before = document.add_paragraph("Before picture").unwrap();
+        let picture = document
+            .add_image(&red, Some(80.0), None, "Kept alt")
+            .unwrap();
+        let after = document.add_paragraph("After picture").unwrap();
+        let copy = document.copy().unwrap();
+        document.set_image_data(picture, &blue).unwrap();
+        assert_eq!(document.image_data(picture).unwrap(), blue);
+        assert_eq!(document.image_size(picture).unwrap(), (80.0, 40.0));
+        assert_eq!(document.image_alt(picture).unwrap(), "Kept alt");
+        assert_eq!(copy.image_data(picture).unwrap(), red);
+        assert_eq!(document.paragraph_text(before).unwrap(), "Before picture");
+        assert_eq!(document.paragraph_text(after).unwrap(), "After picture");
+        let raw = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&raw).unwrap();
+        assert_eq!(reopened.media.len(), 1);
+        assert_eq!(reopened.media.values().next().unwrap().as_ref(), &blue);
+        let pdf = crate::docx::to_pdf(&raw, None).unwrap();
+        assert!(border_pixels(crate::docx::render(&raw, 0, 72.0, None).unwrap(), 2) > 100);
+        assert!(border_pixels(crate::pdf::render(&pdf, 0, 72.0, None).unwrap(), 2) > 100);
+        let revision = document.revision().unwrap();
+        for invalid in [b"not PNG".as_slice(), &blue[..blue.len() - 8]] {
+            assert!(document.set_image_data(picture, invalid).is_err());
+            assert_eq!(document.revision().unwrap(), revision);
+            assert_eq!(document.to_bytes().unwrap(), raw);
+        }
+    }
+
+    #[test]
+    fn picture_resources_deduplicate_reclaim_and_never_overwrite_live_keys() {
+        let red = media_png(1, 1, [255, 0, 0, 255]);
+        let blue = media_png(1, 1, [0, 0, 255, 255]);
+        let green = media_png(1, 1, [0, 255, 0, 255]);
+        let mut document = EditableDocx::new();
+        let first = document.add_image(&red, None, None, "First").unwrap();
+        let table = document
+            .add_table(vec![vec!["Keep".into()], vec!["Delete".into()]])
+            .unwrap();
+        let second = document
+            .cell_add_image(table, 0, 0, &red, None, None, "Second")
+            .unwrap();
+        assert_eq!(document.document().unwrap().media.len(), 1);
+        assert_eq!(document.media_bytes, red.len());
+        document.set_image_data(first, &blue).unwrap();
+        assert_eq!(document.document().unwrap().media.len(), 2);
+        assert_eq!(document.image_data(second).unwrap(), red);
+        document.set_image_data(second, &blue).unwrap();
+        assert_eq!(document.document().unwrap().media.len(), 1);
+        assert_eq!(document.media_bytes, blue.len());
+        document.remove_image(first).unwrap();
+        assert!(document.image_data(first).is_err());
+        assert_eq!(document.paragraph_text(first).unwrap(), "");
+        assert_eq!(document.image_data(second).unwrap(), blue);
+        document.set_cell_text(table, 0, 0, "Replacement").unwrap();
+        assert!(document.image_data(second).is_err());
+        assert_eq!(document.media_bytes, 0);
+        assert!(document.document().unwrap().media.is_empty());
+        let live = document.add_image(&blue, None, None, "Live").unwrap();
+        let dropped = document
+            .cell_add_image(table, 1, 0, &red, None, None, "Drop")
+            .unwrap();
+        document.delete_row(table, 1).unwrap();
+        assert!(document.image_data(dropped).is_err());
+        let fresh = document.add_image(&green, None, None, "Fresh").unwrap();
+        assert_eq!(document.image_data(live).unwrap(), blue);
+        assert_eq!(document.image_data(fresh).unwrap(), green);
+        assert_eq!(document.media_bytes, blue.len() + green.len());
+    }
+
+    #[test]
+    fn image_reference_accounting_includes_header_footer_and_note_stories() {
+        let png = media_png(1, 1, [255, 0, 0, 255]);
+        let mut document = EditableDocx::new();
+        let body = document.add_image(&png, None, None, "Shared").unwrap();
+        let anchor = document.add_paragraph("Note anchor").unwrap();
+        let note = document
+            .add_note(
+                anchor,
+                0,
+                4,
+                document.revision().unwrap(),
+                "Footnote",
+                "footnote",
+            )
+            .unwrap();
+        let note_info: Value = serde_json::from_str(&document.note_info(note).unwrap()).unwrap();
+        let note_story = note_info["story"].as_u64().unwrap() as u32;
+        let mut copies = Vec::new();
+        let (story, path) = document.location(body).unwrap();
+        let image_para = document
+            .document()
+            .unwrap()
+            .para(story, &path)
+            .unwrap()
+            .clone();
+        for story in [
+            document.ensure_story("header", "default", 0).unwrap(),
+            document.ensure_story("footer", "default", 0).unwrap(),
+            note_story,
+        ] {
+            let mut candidate = document.document().unwrap().clone();
+            let part = candidate.parts.get_mut(&story).unwrap();
+            let index = part.blocks.len();
+            part.blocks.push(Arc::new(Block::Para(image_para.clone())));
+            document.commit(candidate).unwrap();
+            copies.push(
+                document
+                    .register_location(StoryRef::Part(story), Path::top(index), true)
+                    .unwrap(),
+            );
+        }
+        document.remove_image(body).unwrap();
+        assert_eq!(document.document().unwrap().media.len(), 1);
+        for (index, picture) in copies.iter().enumerate() {
+            assert_eq!(document.image_data(*picture).unwrap(), png);
+            document.remove_image(*picture).unwrap();
+            assert_eq!(
+                document.document().unwrap().media.len(),
+                usize::from(index + 1 < copies.len())
+            );
+        }
+        document.to_bytes().unwrap();
+    }
+
+    #[test]
+    fn aggregate_media_budget_is_transactional_and_removed_payloads_release_capacity() {
+        let red = media_png(1, 1, [255, 0, 0, 255]);
+        let blue = media_png(1, 1, [0, 0, 255, 255]);
+        let mut document = EditableDocx::new();
+        let first = document.add_image(&red, None, None, "First").unwrap();
+        let second = document.add_image(&blue, None, None, "Second").unwrap();
+        let keys: Vec<_> = [first, second]
+            .into_iter()
+            .map(|id| match document.image(id).unwrap() {
+                InlineObject::Image { media, .. } => media.clone(),
+                _ => unreachable!(),
+            })
+            .collect();
+        // Synthetic native media isolates encoded-byte accounting from PNG
+        // decoding. Never serialize/render these deliberately non-PNG values.
+        let mut candidate = document.document().unwrap().clone();
+        for key in &keys {
+            candidate
+                .media
+                .insert(key.clone(), Arc::new(vec![0; MAX_MEDIA_BYTES / 2]));
+        }
+        document.commit(candidate).unwrap();
+        assert_eq!(document.media_bytes, MAX_MEDIA_BYTES);
+        let revision = document.revision().unwrap();
+        let original = document.document().unwrap().media[&keys[0]].clone();
+        let mut oversized = document.document().unwrap().clone();
+        oversized
+            .media
+            .insert(keys[0].clone(), Arc::new(vec![1; MAX_MEDIA_BYTES / 2 + 1]));
+        assert!(document.commit(oversized).is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.media_bytes, MAX_MEDIA_BYTES);
+        assert!(Arc::ptr_eq(
+            &document.document().unwrap().media[&keys[0]],
+            &original
+        ));
+        document.remove_image(first).unwrap();
+        assert_eq!(document.media_bytes, MAX_MEDIA_BYTES / 2);
+        assert!(!document.document().unwrap().media.contains_key(&keys[0]));
+        document.set_image_data(second, &blue).unwrap();
+        assert_eq!(document.media_bytes, blue.len());
+        document
+            .add_image(&red, None, None, "Capacity reused")
+            .unwrap();
+        assert_eq!(document.media_bytes, red.len() + blue.len());
+        document.to_bytes().unwrap();
+    }
+
+    #[test]
+    fn removed_picture_resources_release_limits_and_duplicate_placements_are_bounded() {
+        let png = media_png(1, 1, [255, 0, 0, 255]);
+        let mut document = EditableDocx::new();
+        for _ in 0..1001 {
+            let image = document.add_image(&png, None, None, "Transient").unwrap();
+            document.remove_image(image).unwrap();
+            assert_eq!(document.media_bytes, 0);
+        }
+        let mut document = EditableDocx::new();
+        for _ in 0..1000 {
+            document.add_image(&png, None, None, "Shared").unwrap();
+        }
+        assert_eq!(document.document().unwrap().media.len(), 1);
+        assert_eq!(document.media_bytes, png.len());
+        let revision = document.revision().unwrap();
+        assert!(document.add_image(&png, None, None, "Over limit").is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.image_ids().unwrap().len(), 1000);
+    }
+
+    fn border_pixels(png: Vec<u8>, channel: usize) -> usize {
+        let mut reader = png::Decoder::new(Cursor::new(png)).read_info().unwrap();
+        let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+        let frame = reader.next_frame(&mut pixels).unwrap();
+        assert_eq!(frame.color_type, png::ColorType::Rgba);
+        pixels[..frame.buffer_size()]
+            .chunks_exact(4)
+            .filter(|pixel| {
+                // Native preview dims header/footer ink; count clear hue dominance
+                // rather than requiring fully saturated pixels.
+                pixel[channel] > 200
+                    && pixel[channel].saturating_sub(pixel[(channel + 1) % 3]) > 40
+                    && pixel[channel].saturating_sub(pixel[(channel + 2) % 3]) > 40
+            })
+            .count()
+    }
+
+    #[test]
+    fn paragraph_borders_inherit_as_groups_and_reset_direct_sides() {
+        let mut document = EditableDocx::new();
+        let style = document.add_style("Bordered", "paragraph", None).unwrap();
+        document
+            .format_defaults(r##"{"borders":{"top":{"color":"#FF0000","width":2}}}"##)
+            .unwrap();
+        document
+            .format_style(
+                &style,
+                r##"{"borders":{"bottom":{"color":"#00FF00","width":2}}}"##,
+                None,
+            )
+            .unwrap();
+        let inherited = document.add_paragraph("Default border").unwrap();
+        let paragraph = document.add_paragraph("Style border").unwrap();
+        document.set_paragraph_style(paragraph, &style).unwrap();
+        let second = document.add_paragraph("Same style border").unwrap();
+        document.set_paragraph_style(second, &style).unwrap();
+        document
+            .format_paragraph(
+                paragraph,
+                r##"{"borders":{"right":{"color":"#0000FF","width":2}}}"##,
+            )
+            .unwrap();
+        let resolved: Value =
+            serde_json::from_str(&document.paragraph_formatting(paragraph, true).unwrap()).unwrap();
+        assert!(resolved["borders"]["top"].is_null());
+        assert!(resolved["borders"]["bottom"].is_null());
+        assert_eq!(resolved["borders"]["right"]["color"], "#0000FF");
+        document
+            .format_paragraph(
+                paragraph,
+                r##"{"borders":{"left":{"color":"#FF0000","width":1}}}"##,
+            )
+            .unwrap();
+        document
+            .format_paragraph(paragraph, r#"{"borders":{"left":null}}"#)
+            .unwrap();
+        let direct: Value =
+            serde_json::from_str(&document.paragraph_formatting(paragraph, false).unwrap())
+                .unwrap();
+        assert!(direct["borders"]["left"].is_null());
+        assert_eq!(direct["borders"]["right"]["width"], 2.0);
+        let output = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&output).unwrap();
+        for (id, side, color) in [
+            (inherited, "top", "#FF0000"),
+            (paragraph, "right", "#0000FF"),
+            (second, "bottom", "#00FF00"),
+        ] {
+            let para = reopened.para(StoryRef::Body, &Path::top(id)).unwrap();
+            let snapshot =
+                resolved_para_snapshot(&reopened.styles.resolve_para(&para.props)).unwrap();
+            assert_eq!(snapshot["borders"][side]["color"], color);
+        }
+        let pdf = crate::docx::to_pdf(&output, None).unwrap();
+        for channel in 0..3 {
+            assert!(
+                border_pixels(
+                    crate::docx::render(&output, 0, 72.0, None).unwrap(),
+                    channel
+                ) > 10
+            );
+            assert!(border_pixels(crate::pdf::render(&pdf, 0, 72.0, None).unwrap(), channel) > 10);
+        }
+        let mut copy = document.copy().unwrap();
+        copy.format_paragraph(paragraph, r#"{"borders":null}"#)
+            .unwrap();
+        let reset: Value =
+            serde_json::from_str(&copy.paragraph_formatting(paragraph, true).unwrap()).unwrap();
+        assert_eq!(reset["borders"]["bottom"]["color"], "#00FF00");
+        assert!(reset["borders"]["right"].is_null());
+        copy.format_style(&style, r#"{"borders":null}"#, None)
+            .unwrap();
+        let reset: Value =
+            serde_json::from_str(&copy.paragraph_formatting(paragraph, true).unwrap()).unwrap();
+        assert_eq!(reset["borders"]["top"]["color"], "#FF0000");
+        copy.format_defaults(r#"{"borders":null}"#).unwrap();
+        let reset: Value =
+            serde_json::from_str(&copy.paragraph_formatting(paragraph, true).unwrap()).unwrap();
+        assert!(reset["borders"].is_null());
+        let output = copy.to_bytes().unwrap();
+        assert_eq!(
+            border_pixels(crate::docx::render(&output, 0, 72.0, None).unwrap(), 0),
+            0
+        );
+        assert_eq!(
+            document.paragraph_formatting(paragraph, false).unwrap(),
+            Value::Object(direct.as_object().unwrap().clone()).to_string()
+        );
+    }
+
+    #[test]
+    fn paragraph_border_styles_draw_colored_edges_in_docx_and_pdf() {
+        for style in ["single", "double", "dotted", "dashed", "thick", "wave"] {
+            let vertical = if matches!(style, "double" | "wave") {
+                "single"
+            } else {
+                style
+            };
+            let mut document = EditableDocx::new();
+            document.set_page_size(300.0, 300.0).unwrap();
+            document.set_margins(40.0, 40.0, 40.0, 40.0).unwrap();
+            let paragraph = document.add_paragraph("Four colored borders").unwrap();
+            document
+                .format_paragraph(
+                    paragraph,
+                    &json!({"borders":{
+                        "top":{"style":style,"color":"#FF0000","width":2},
+                        "right":{"style":vertical,"color":"#00FF00","width":2},
+                        "bottom":{"style":style,"color":"#0000FF","width":2},
+                        "left":{"style":vertical,"color":"#FF0000","width":2}
+                    }})
+                    .to_string(),
+                )
+                .unwrap();
+            let output = document.to_bytes().unwrap();
+            let reopened = wordcraft_docx::read(&output).unwrap();
+            let props = &reopened
+                .para(StoryRef::Body, &Path::top(paragraph))
+                .unwrap()
+                .props;
+            assert_eq!(
+                borders_snapshot(props.borders, false)["top"]["style"],
+                style
+            );
+            let pdf = crate::docx::to_pdf(&output, None).unwrap();
+            for channel in 0..3 {
+                assert!(
+                    border_pixels(
+                        crate::docx::render(&output, 0, 144.0, None).unwrap(),
+                        channel
+                    ) > 10,
+                    "{style} channel {channel}"
+                );
+                assert!(
+                    border_pixels(crate::pdf::render(&pdf, 0, 144.0, None).unwrap(), channel) > 10,
+                    "{style} PDF channel {channel}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn paragraph_borders_render_in_cell_header_and_footer_scopes() {
+        for scope in ["cell", "header", "footer"] {
+            let mut document = EditableDocx::new();
+            document.add_paragraph("Body text").unwrap();
+            let paragraph = if scope == "cell" {
+                let table = document
+                    .add_table(vec![vec!["Cell paragraph".into()]])
+                    .unwrap();
+                document.cell_paragraph_ids(table, 0, 0).unwrap()[0]
+            } else {
+                let story = document.ensure_story(scope, "default", 0).unwrap();
+                document
+                    .story_add_paragraph(story, "Story paragraph")
+                    .unwrap()
+            };
+            document
+                .format_paragraph(
+                    paragraph,
+                    r##"{"borders":{"bottom":{"color":"#FF0000","width":2}}}"##,
+                )
+                .unwrap();
+            let output = document.to_bytes().unwrap();
+            let pdf = crate::docx::to_pdf(&output, None).unwrap();
+            assert!(
+                border_pixels(crate::docx::render(&output, 0, 144.0, None).unwrap(), 0) > 100,
+                "{scope}"
+            );
+            assert!(
+                border_pixels(crate::pdf::render(&pdf, 0, 144.0, None).unwrap(), 0) > 100,
+                "{scope} PDF"
+            );
+        }
+    }
+
+    #[test]
+    fn paragraph_border_patches_are_atomic_and_preserve_table_border_dispatch() {
+        let mut document = EditableDocx::new();
+        let paragraph = document.add_paragraph("Atomic border").unwrap();
+        let style = document
+            .add_style("Paragraph border", "paragraph", None)
+            .unwrap();
+        let table_style = document.add_style("Table border", "table", None).unwrap();
+        let table = document.add_table(vec![vec!["Table cell".into()]]).unwrap();
+        document
+            .format_style(
+                &table_style,
+                r##"{"borders":{"inside_horizontal":{"color":"#123456","width":1}}}"##,
+                None,
+            )
+            .unwrap();
+        let table_snapshot: Value = serde_json::from_str(
+            &document
+                .style_formatting(&table_style, false, None)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            table_snapshot["borders"]["inside_horizontal"]["color"],
+            "#123456"
+        );
+        assert!(document
+            .document()
+            .unwrap()
+            .styles
+            .get(&table_style)
+            .unwrap()
+            .para
+            .borders
+            .is_none());
+        let before = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        for borders in [
+            json!({"between":{}}),
+            json!({"bar":{}}),
+            json!({"inside_horizontal":{}}),
+            json!({"top":{"style":"triple"}}),
+            json!({"left":{"style":"dot_dash"}}),
+            json!({"right":{"width":0.125}}),
+            json!({"bottom":{"style":"thick","width":1}}),
+            json!({"left":{"style":"double","width":2}}),
+            json!({"right":{"style":"wave","width":2}}),
+            json!({"top":{"space":1}}),
+            json!({"top":{"color":"bad"}}),
+            json!({"top":{"width":13}}),
+        ] {
+            let patch = json!({"space_before":10,"borders":borders}).to_string();
+            assert!(document.format_paragraph(paragraph, &patch).is_err());
+            assert!(document.format_style(&style, &patch, None).is_err());
+            assert!(document.format_defaults(&patch).is_err());
+            assert_eq!(document.revision().unwrap(), revision);
+            assert_eq!(document.to_bytes().unwrap(), before);
+        }
+        document
+            .format_paragraph(paragraph, r#"{"borders":{"top":{"style":"none"}}}"#)
+            .unwrap();
+        let direct: Value =
+            serde_json::from_str(&document.paragraph_formatting(paragraph, false).unwrap())
+                .unwrap();
+        assert_eq!(direct["borders"]["top"]["style"], "none");
+        assert_eq!(direct["borders"]["top"]["width"], 0.0);
+        let before = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        for border in [
+            json!({"style":"triple"}),
+            json!({"style":"dot_dash"}),
+            json!({"width":0.125}),
+            json!({"style":"thick","width":1}),
+        ] {
+            let patch = json!({"borders":{"bottom":border}}).to_string();
+            assert!(document.table_format_patch(table, &patch).is_err());
+            assert!(document.cell_format_patch(table, 0, 0, &patch).is_err());
+            assert!(document
+                .format_style(&table_style, &patch, Some("first_row"))
+                .is_err());
+            assert!(document.format_style(&table_style, &patch, None).is_err());
+            assert_eq!(document.revision().unwrap(), revision);
+            assert_eq!(document.to_bytes().unwrap(), before);
+        }
+        for side in ["left", "right", "inside_vertical"] {
+            for style in ["double", "wave"] {
+                let patch = json!({"borders":{side:{"style":style,"width":2}}}).to_string();
+                assert!(document.table_format_patch(table, &patch).is_err());
+                assert!(document.cell_format_patch(table, 0, 0, &patch).is_err());
+                assert!(document
+                    .format_style(&table_style, &patch, Some("first_row"))
+                    .is_err());
+                assert_eq!(document.revision().unwrap(), revision);
+                assert_eq!(document.to_bytes().unwrap(), before);
+            }
+        }
+    }
+
+    #[test]
+    fn upstream_between_paragraph_border_is_serialized_but_not_drawn() {
+        let mut document = Document::new();
+        let props = ParaProps {
+            borders: Some(Borders {
+                between: Some(Border::single(2.0)),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut paragraph = Paragraph::with_text("Between borders", CharProps::default());
+        paragraph.props = props;
+        document.body = vec![
+            Arc::new(Block::Para(paragraph.clone())),
+            Arc::new(Block::Para(paragraph)),
+        ];
+        let output = wordcraft_docx::write(&document).unwrap();
+        let reopened = wordcraft_docx::read(&output).unwrap();
+        assert!(reopened
+            .para(StoryRef::Body, &Path::top(0))
+            .unwrap()
+            .props
+            .borders
+            .unwrap()
+            .between
+            .is_some());
+        let layout = wordcraft_layout::layout(
+            &reopened,
+            &mut wordcraft_layout::LayoutCache::new(),
+            &wordcraft_layout::LayoutOptions::default(),
+        );
+        assert!(!layout
+            .pages
+            .iter()
+            .flat_map(|page| &page.items)
+            .any(|item| matches!(item, wordcraft_layout::Placed::Rule { .. })));
+    }
+
+    #[test]
+    fn upstream_border_styles_and_widths_are_approximated_in_native_output() {
+        fn raw_border(style: BorderStyle, width: f32) -> Vec<u8> {
+            let mut document = Document::new();
+            let mut paragraph = Paragraph::with_text("Raw native border", CharProps::default());
+            paragraph.props.borders = Some(Borders {
+                bottom: Some(Border {
+                    style,
+                    width,
+                    color: Some(Rgb(255, 0, 0)),
+                    space: 0.0,
+                }),
+                ..Default::default()
+            });
+            document.body = vec![Arc::new(Block::Para(paragraph))];
+            wordcraft_docx::write(&document).unwrap()
+        }
+        for (style, width, substitute, actual_width) in [
+            (BorderStyle::Triple, 2.0, BorderStyle::Double, 2.0),
+            (BorderStyle::DotDash, 2.0, BorderStyle::Dashed, 2.0),
+            (BorderStyle::Single, 0.125, BorderStyle::Single, 0.25),
+            (BorderStyle::Thick, 1.0, BorderStyle::Single, 1.5),
+        ] {
+            let raw = raw_border(style, width);
+            let substitute = raw_border(substitute, actual_width);
+            assert_eq!(
+                crate::docx::render(&raw, 0, 144.0, None).unwrap(),
+                crate::docx::render(&substitute, 0, 144.0, None).unwrap()
+            );
+            let raw_pdf = crate::docx::to_pdf(&raw, None).unwrap();
+            let substitute_pdf = crate::docx::to_pdf(&substitute, None).unwrap();
+            assert_eq!(
+                crate::pdf::render(&raw_pdf, 0, 144.0, None).unwrap(),
+                crate::pdf::render(&substitute_pdf, 0, 144.0, None).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn upstream_vertical_wave_is_empty_and_double_strokes_overlap() {
+        for style in [BorderStyle::Wave, BorderStyle::Double] {
+            let mut document = Document::new();
+            let mut paragraph = Paragraph::with_text("Vertical border", CharProps::default());
+            paragraph.props.borders = Some(Borders {
+                left: Some(Border {
+                    style,
+                    width: 2.0,
+                    color: Some(Rgb(255, 0, 0)),
+                    space: 0.0,
+                }),
+                ..Default::default()
+            });
+            document.body = vec![Arc::new(Block::Para(paragraph))];
+            let raw = wordcraft_docx::write(&document).unwrap();
+            let layout = wordcraft_layout::layout(
+                &document,
+                &mut wordcraft_layout::LayoutCache::new(),
+                &wordcraft_layout::LayoutOptions::default(),
+            );
+            let (x, y) = layout.pages[0]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    wordcraft_layout::Placed::Rule { x0, y0, x1, y1, .. }
+                        if (x0 - x1).abs() < 0.01 =>
+                    {
+                        Some((*x0, (y0 + y1) / 2.0))
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            let png = crate::docx::render(&raw, 0, 144.0, None).unwrap();
+            if style == BorderStyle::Wave {
+                assert_eq!(border_pixels(png, 0), 0);
+                continue;
+            }
+            let mut reader = png::Decoder::new(Cursor::new(png)).read_info().unwrap();
+            let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+            let frame = reader.next_frame(&mut pixels).unwrap();
+            let row = (y * 2.0) as usize;
+            let mut runs = 0;
+            let mut previous = false;
+            for column in ((x - 6.0) * 2.0) as usize..=((x + 6.0) * 2.0) as usize {
+                let offset = (row * frame.width as usize + column) * 4;
+                let p = &pixels[offset..offset + 4];
+                let red = p[0] > 200 && p[1] < 80 && p[2] < 80;
+                if red && !previous {
+                    runs += 1;
+                }
+                previous = red;
+            }
+            assert_eq!(
+                runs, 1,
+                "native vertical double produces one overlapping stroke, not two separated strokes"
+            );
+        }
+    }
 
     fn pagination_row(lines: usize) -> (EditableDocx, usize, usize) {
         let mut document = EditableDocx::new();
@@ -6344,7 +7987,7 @@ mod tests {
         assert_eq!(document.cell_text(table, 0, 0).unwrap(), "Replaced");
         let later = document.add_image(&png, None, None, "Later").unwrap();
         assert_eq!(document.image_alt(later).unwrap(), "Later");
-        assert_eq!(document.document().unwrap().media.len(), 2);
+        assert_eq!(document.document().unwrap().media.len(), 1);
     }
 
     #[test]
@@ -6511,6 +8154,270 @@ mod tests {
     }
 
     #[test]
+    fn list_start_creates_an_independent_native_sequence_with_visible_labels() {
+        let mut document = EditableDocx::new();
+        let mut ids = Vec::new();
+        for text in ["First", "Selected", "Already assigned"] {
+            let id = document.add_paragraph(text).unwrap();
+            document
+                .set_paragraph_list(id, Some("numbered"), 0, false, None)
+                .unwrap();
+            ids.push(id);
+        }
+        let original_num = document
+            .paragraph(ids[2])
+            .unwrap()
+            .props
+            .numbering
+            .unwrap()
+            .num;
+        let original = document.copy().unwrap();
+        document
+            .set_paragraph_list(ids[1], Some("numbered"), 0, false, Some(ListStart(7)))
+            .unwrap();
+        assert_eq!(
+            document
+                .paragraph(ids[2])
+                .unwrap()
+                .props
+                .numbering
+                .unwrap()
+                .num,
+            original_num
+        );
+        assert_eq!(
+            original
+                .paragraph(ids[1])
+                .unwrap()
+                .props
+                .numbering
+                .unwrap()
+                .num,
+            original_num
+        );
+        let selected_num = document
+            .paragraph(ids[1])
+            .unwrap()
+            .props
+            .numbering
+            .unwrap()
+            .num;
+        assert_ne!(selected_num, original_num);
+        assert_ne!(
+            document
+                .document()
+                .unwrap()
+                .numbering
+                .num(selected_num)
+                .unwrap()
+                .abstract_id,
+            document
+                .document()
+                .unwrap()
+                .numbering
+                .num(original_num)
+                .unwrap()
+                .abstract_id
+        );
+        let later = document.add_paragraph("Future assignment").unwrap();
+        document
+            .set_paragraph_list(later, Some("numbered"), 0, false, None)
+            .unwrap();
+        assert_eq!(
+            document
+                .paragraph(later)
+                .unwrap()
+                .props
+                .numbering
+                .unwrap()
+                .num,
+            original_num
+        );
+        document
+            .set_paragraph_list(later, Some("numbered"), 0, true, Some(ListStart(20)))
+            .unwrap();
+        let continuation = document.add_paragraph("Continued start").unwrap();
+        document
+            .set_paragraph_list(continuation, Some("numbered"), 0, false, None)
+            .unwrap();
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        assert_eq!(
+            reopened
+                .numbering
+                .num(selected_num)
+                .unwrap()
+                .start_overrides,
+            [(0, 7)]
+        );
+        let payload = crate::docx::extract(&bytes, None).unwrap();
+        let labels: Vec<_> = payload
+            .pages
+            .iter()
+            .flat_map(|page| &page.blocks)
+            .filter_map(|block| {
+                block
+                    .metadata
+                    .get("numbering")
+                    .map(|value| value["label"].as_str().unwrap())
+            })
+            .collect();
+        assert_eq!(labels, ["1.", "7.", "2.", "20.", "21."]);
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        let payload = crate::pdf::extract(&pdf, None).unwrap();
+        let text = payload
+            .pages
+            .iter()
+            .flat_map(|page| &page.blocks)
+            .map(|block| {
+                block.table.as_ref().map_or_else(
+                    || block.text.clone(),
+                    |table| {
+                        table
+                            .rows
+                            .iter()
+                            .map(|row| row.join(" "))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    },
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        for expected in ["7.", "20.", "21.", "Selected", "Continued start"] {
+            assert!(text.contains(expected), "{text:?}");
+        }
+        assert_ne!(
+            crate::docx::render(&bytes, 0, 72.0, None).unwrap(),
+            crate::docx::render(&original.to_bytes().unwrap(), 0, 72.0, None).unwrap()
+        );
+    }
+
+    #[test]
+    fn header_footer_start_rejection_preserves_native_counter_advance_reproducer() {
+        for (kind, rendered) in [("header", "12."), ("footer", "13.")] {
+            let mut document = EditableDocx::new();
+            document.add_paragraph("Body").unwrap();
+            let story = document.ensure_story(kind, "default", 0).unwrap();
+            let id = document
+                .story_add_paragraph(story, "Auxiliary list")
+                .unwrap();
+            document
+                .set_paragraph_list(id, Some("numbered"), 0, false, None)
+                .unwrap();
+            let bytes = document.to_bytes().unwrap();
+            let revision = document.revision().unwrap();
+            assert!(document
+                .set_paragraph_list(id, Some("numbered"), 0, false, Some(ListStart(11)))
+                .is_err());
+            assert_eq!(document.to_bytes().unwrap(), bytes);
+            assert_eq!(document.revision().unwrap(), revision);
+
+            // The public model/writer preserve11, but native header/footer measurement advances
+            // its counter before the rendered placement. Do not compensate in the adapter.
+            let mut native = wordcraft_docx::read(&bytes).unwrap();
+            let num = native
+                .para(StoryRef::Part(story), &Path::top(0))
+                .unwrap()
+                .props
+                .numbering
+                .unwrap()
+                .num;
+            native
+                .numbering
+                .nums
+                .iter_mut()
+                .find(|number| number.id == num)
+                .unwrap()
+                .start_overrides
+                .push((0, 11));
+            let raw = wordcraft_docx::write(&native).unwrap();
+            assert_eq!(
+                wordcraft_docx::read(&raw)
+                    .unwrap()
+                    .numbering
+                    .num(num)
+                    .unwrap()
+                    .start_overrides,
+                [(0, 11)]
+            );
+            let pdf = crate::docx::to_pdf(&raw, None).unwrap();
+            let text = crate::pdf::extract(&pdf, None).unwrap().pages[0]
+                .blocks
+                .iter()
+                .map(|block| block.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            // PdfCraft infers the gap after a list marker as whitespace on some platforms.
+            // Assert the exact counter and following content independently of that gap.
+            let compact = text.split_whitespace().collect::<String>();
+            assert!(
+                compact.contains(&format!("{rendered}Auxiliarylist")),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn list_start_validation_and_definition_budgets_are_atomic() {
+        let mut document = EditableDocx::new();
+        let id = document.add_paragraph("Stable").unwrap();
+        document
+            .set_paragraph_list(id, Some("numbered"), 0, false, Some(ListStart(32767)))
+            .unwrap();
+        let bytes = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        for (kind, level, start) in [
+            (None, 0, 1),
+            (Some("bullet"), 0, 1),
+            (Some("numbered"), 1, 1),
+            (Some("numbered"), 0, 0),
+            (Some("numbered"), 0, 32768),
+        ] {
+            assert!(document
+                .set_paragraph_list(id, kind, level, false, Some(ListStart(start)))
+                .is_err());
+            assert_eq!(document.to_bytes().unwrap(), bytes);
+            assert_eq!(document.revision().unwrap(), revision);
+        }
+        for abstracts in [false, true] {
+            let mut bounded = document.copy().unwrap();
+            let mut candidate = bounded.document().unwrap().clone();
+            if abstracts {
+                candidate
+                    .numbering
+                    .abstracts
+                    .resize_with(MAX_LISTS, Default::default);
+            } else {
+                candidate
+                    .numbering
+                    .nums
+                    .resize_with(MAX_LISTS, Default::default);
+            }
+            bounded.commit(candidate).unwrap();
+            let revision = bounded.revision().unwrap();
+            assert!(bounded
+                .set_paragraph_list(id, Some("numbered"), 0, false, Some(ListStart(7)))
+                .is_err());
+            assert_eq!(bounded.revision().unwrap(), revision);
+            assert_eq!(
+                bounded
+                    .document()
+                    .unwrap()
+                    .numbering
+                    .num(bounded.paragraph(id).unwrap().props.numbering.unwrap().num)
+                    .unwrap()
+                    .start_overrides,
+                [(0, 32767)]
+            );
+        }
+        document.close();
+        assert!(document
+            .set_paragraph_list(id, Some("numbered"), 0, false, Some(ListStart(7)))
+            .is_err());
+    }
+
+    #[test]
     fn native_lists_continue_restart_and_clear_without_rebuilding_text() {
         let mut document = EditableDocx::new();
         let mut ids = Vec::new();
@@ -6520,7 +8427,7 @@ mod tests {
         {
             let id = document.add_paragraph(label).unwrap();
             document
-                .set_paragraph_list(id, Some("numbered"), 0, index == 2)
+                .set_paragraph_list(id, Some("numbered"), 0, index == 2, None)
                 .unwrap();
             ids.push(id);
         }
@@ -6560,7 +8467,7 @@ mod tests {
             restarted
         );
         document
-            .set_paragraph_list(ids[0], Some("numbered"), 0, false)
+            .set_paragraph_list(ids[0], Some("numbered"), 0, false, None)
             .unwrap();
         assert_eq!(
             document
@@ -6577,17 +8484,19 @@ mod tests {
             .add_run(sub, " bold", true, false, None, None, None)
             .unwrap();
         document
-            .set_paragraph_list(sub, Some("bullet"), 2, false)
+            .set_paragraph_list(sub, Some("bullet"), 2, false, None)
             .unwrap();
         assert_eq!(document.paragraph_list(sub).unwrap(), Some(("bullet", 2)));
         let revision = document.revision().unwrap();
         assert!(document
-            .set_paragraph_list(sub, Some("bullet"), 9, false)
+            .set_paragraph_list(sub, Some("bullet"), 9, false, None)
             .is_err());
         assert!(document
-            .set_paragraph_list(sub, Some("unsupported"), 0, false)
+            .set_paragraph_list(sub, Some("unsupported"), 0, false, None)
             .is_err());
-        assert!(document.set_paragraph_list(sub, None, 0, true).is_err());
+        assert!(document
+            .set_paragraph_list(sub, None, 0, true, None)
+            .is_err());
         assert_eq!(document.revision().unwrap(), revision);
         let bytes = document.to_bytes().unwrap();
         let reopened = wordcraft_docx::read(&bytes).unwrap();
@@ -6610,7 +8519,9 @@ mod tests {
         assert_eq!(labels, ["1.", "2.", "1.", "2."]);
         let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
         assert_eq!(crate::pdf::extract(&pdf, None).unwrap().pages.len(), 1);
-        document.set_paragraph_list(sub, None, 0, false).unwrap();
+        document
+            .set_paragraph_list(sub, None, 0, false, None)
+            .unwrap();
         assert_eq!(document.paragraph_list(sub).unwrap(), None);
         assert_eq!(document.paragraph_text(sub).unwrap(), "Nested bullet bold");
         assert_eq!(
@@ -6627,7 +8538,7 @@ mod tests {
         let story = document.ensure_story("header", "default", 0).unwrap();
         let header = document.story_add_paragraph(story, "Header list").unwrap();
         document
-            .set_paragraph_list(header, Some("numbered"), 0, false)
+            .set_paragraph_list(header, Some("numbered"), 0, false, None)
             .unwrap();
         assert_ne!(
             document
@@ -6657,7 +8568,7 @@ mod tests {
         document.commit(candidate).unwrap();
         let revision = document.revision().unwrap();
         assert!(document
-            .set_paragraph_list(id, Some("numbered"), 0, true)
+            .set_paragraph_list(id, Some("numbered"), 0, true, None)
             .is_err());
         assert_eq!(document.revision().unwrap(), revision);
         assert_eq!(document.paragraph_list(id).unwrap(), None);
@@ -7478,6 +9389,247 @@ mod tests {
         document.add_section("next_page").unwrap();
         assert_eq!(document.paragraph_ids().unwrap(), vec![id]);
         assert_eq!(document.table_rows(table).unwrap(), vec![vec!["Cell"]]);
+    }
+
+    #[test]
+    fn gutter_and_unequal_columns_use_native_positions_and_roundtrip() {
+        let mut document = EditableDocx::new();
+        document.set_section_props(0, r#"{"page_size":[440,300],"margins":[20,20,20,20],"gutter":20,"columns":[2,20,true],"column_widths":[120,240]}"#).unwrap();
+        let paragraph = document.add_paragraph("").unwrap();
+        document
+            .add_run_patch(paragraph, "LEFT", r##"{"color":"#FF0000","font_size":18}"##)
+            .unwrap();
+        document.add_paragraph_break(paragraph, "column").unwrap();
+        document
+            .add_run_patch(
+                paragraph,
+                "RIGHT",
+                r##"{"color":"#00FF00","font_size":18}"##,
+            )
+            .unwrap();
+        document.add_paragraph_break(paragraph, "column").unwrap();
+        document
+            .add_run_patch(paragraph, "NEXT", r##"{"color":"#0000FF","font_size":18}"##)
+            .unwrap();
+        let source = &document.paragraph(paragraph).unwrap().text;
+        let layout = wordcraft_layout::layout(
+            document.document().unwrap(),
+            &mut Default::default(),
+            &Default::default(),
+        );
+        assert_eq!(layout.pages.len(), 2);
+        let mut positions = BTreeMap::new();
+        for (page_number, page) in layout.pages.iter().enumerate() {
+            assert_eq!((page.body.x, page.body.w), (40.0, 380.0));
+            for item in &page.items {
+                if let wordcraft_layout::Placed::Lines {
+                    path,
+                    para,
+                    l0,
+                    l1,
+                    x,
+                    ..
+                } = item
+                {
+                    if path == &Path::top(paragraph) {
+                        for line in &para.lines[*l0..*l1] {
+                            let text = &source[line.start..line.stop];
+                            for label in ["LEFT", "RIGHT", "NEXT"] {
+                                if text.contains(label) {
+                                    positions.insert(label, (page_number, *x));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(positions["LEFT"], (0, 40.0));
+        assert_eq!(positions["RIGHT"], (0, 180.0));
+        assert_eq!(positions["NEXT"], (1, 40.0));
+        let copy = document.copy().unwrap();
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        assert_eq!(reopened.last_section.gutter, 20.0);
+        assert_eq!(
+            reopened.last_section.columns.widths,
+            vec![(120.0, 20.0), (240.0, 0.0)]
+        );
+        assert_eq!(
+            reopened.last_section.column_boxes(),
+            vec![(0.0, 120.0), (140.0, 240.0)]
+        );
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        assert_eq!(crate::pdf::extract(&pdf, None).unwrap().pages.len(), 2);
+        for png in [
+            crate::docx::render(&bytes, 0, 144.0, None).unwrap(),
+            crate::pdf::render(&pdf, 0, 144.0, None).unwrap(),
+        ] {
+            assert!(border_pixels(png.clone(), 0) > 10);
+            assert!(border_pixels(png, 1) > 10);
+        }
+        document
+            .set_section_props(0, r#"{"column_widths":null}"#)
+            .unwrap();
+        assert!(document
+            .document()
+            .unwrap()
+            .last_section
+            .columns
+            .widths
+            .is_empty());
+        assert_eq!(
+            copy.document().unwrap().last_section.columns.widths.len(),
+            2
+        );
+        document
+            .set_section_props(0, r#"{"column_widths":[120,240]}"#)
+            .unwrap();
+        document
+            .set_section_props(0, r#"{"columns":[2,18,false]}"#)
+            .unwrap();
+        assert!(document
+            .document()
+            .unwrap()
+            .last_section
+            .columns
+            .widths
+            .is_empty());
+    }
+
+    #[test]
+    fn unequal_column_and_gutter_geometry_rejects_overflow_atomically() {
+        let mut document = EditableDocx::new();
+        document.set_section_props(0, r#"{"page_size":[440,300],"margins":[20,20,20,20],"columns":[2,20,false],"column_widths":[120,260]}"#).unwrap();
+        let table = document.add_table(vec![vec!["Outer".into()]]).unwrap();
+        assert_eq!(document.column_widths(table).unwrap(), vec![120.0]);
+        let nested = document
+            .cell_add_table(table, 0, 0, vec![vec!["Nested".into()]])
+            .unwrap();
+        let png = media_png(1, 1, [255, 0, 0, 255]);
+        let image = document
+            .add_image(&png, Some(100.0), Some(10.0), "Image")
+            .unwrap();
+        let before = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        for patch in [
+            r#"{"column_widths":[]}"#,
+            r#"{"column_widths":[120]}"#,
+            r#"{"column_widths":[17,260]}"#,
+            r#"{"column_widths":[120,261]}"#,
+            r#"{"column_widths":[true,260]}"#,
+            r#"{"column_widths":[-1,260]}"#,
+            r#"{"gutter":1}"#,
+            r#"{"gutter":-1}"#,
+            r#"{"gutter":null}"#,
+            r#"{"column_widths":[80,260]}"#,
+        ] {
+            assert!(document.set_section_props(0, patch).is_err(), "{patch}");
+            assert_eq!(document.revision().unwrap(), revision);
+            assert_eq!(document.to_bytes().unwrap(), before);
+        }
+        assert!(document.set_image_size(image, 121.0, 10.0).is_err());
+        assert!(document.set_column_widths(table, vec![121.0]).is_err());
+        assert!(document.set_column_widths(nested, vec![120.0]).is_err());
+        document
+            .set_section_props(0, r#"{"gutter":20,"column_widths":[120,240]}"#)
+            .unwrap();
+        assert_eq!(document.table_rows(nested).unwrap(), vec![vec!["Nested"]]);
+    }
+
+    #[test]
+    fn unequal_column_table_preflight_detects_relocation_and_can_recover() {
+        let mut document = EditableDocx::new();
+        document.set_section_props(0, r#"{"page_size":[440,300],"margins":[20,20,20,20],"columns":[2,20,false],"column_widths":[260,120]}"#).unwrap();
+        let before = document.add_paragraph("").unwrap();
+        document.add_paragraph_break(before, "column").unwrap();
+        let table = document
+            .add_table(vec![vec!["WideContent".repeat(5)]])
+            .unwrap();
+        assert!(document.table(table).unwrap().props.fixed);
+        assert_eq!(document.table(table).unwrap().props.width, Some(120.0));
+        document
+            .table_format_patch(table, r#"{"layout":"autofit","width":null}"#)
+            .unwrap();
+        document.to_bytes().unwrap();
+        document
+            .set_paragraph_text(before, "Moved before table")
+            .unwrap();
+        let revision = document.revision().unwrap();
+        assert!(
+            document.to_bytes().is_err(),
+            "relocated table props: {:?}; column boxes: {:?}",
+            document.table(table).unwrap().props,
+            document.document().unwrap().last_section.column_boxes()
+        );
+        assert_eq!(document.revision().unwrap(), revision);
+        document.set_column_widths(table, vec![120.0]).unwrap();
+        let bytes = document.to_bytes().unwrap();
+        crate::docx::render(&bytes, 0, 72.0, None).unwrap();
+        crate::docx::to_pdf(&bytes, None).unwrap();
+    }
+
+    #[test]
+    fn upstream_spanning_table_keeps_starting_width_in_unequal_columns() {
+        let mut native = Document::new();
+        native.last_section.page_w = 440.0;
+        native.last_section.page_h = 200.0;
+        native.last_section.margin_top = 20.0;
+        native.last_section.margin_bottom = 20.0;
+        native.last_section.margin_left = 20.0;
+        native.last_section.margin_right = 20.0;
+        native.last_section.columns.count = 2;
+        native.last_section.columns.widths = vec![(260.0, 20.0), (120.0, 0.0)];
+        let mut table = Table::new(20, 1, 260.0);
+        for (index, row) in table.rows.iter_mut().enumerate() {
+            row.cells[0].blocks = vec![wordcraft_doc::para_block(Paragraph::with_text(
+                &format!("Row {index}"),
+                CharProps::default(),
+            ))];
+        }
+        native.body = vec![Arc::new(Block::Table(table))];
+        let layout =
+            wordcraft_layout::layout(&native, &mut Default::default(), &Default::default());
+        assert!(layout.pages.iter().flat_map(|page| &page.items).any(|item| {
+            matches!(item, wordcraft_layout::Placed::Cell { rect, .. } if rect.x >= 299.0 && rect.w > 120.0 && rect.right() > 440.0)
+        }), "raw native spanning table must reproduce the narrower-column overflow");
+        let mut document = EditableDocx::new();
+        document.set_section_props(0, r#"{"page_size":[440,200],"margins":[20,20,20,20],"columns":[2,20,false],"column_widths":[260,120]}"#).unwrap();
+        let table = document
+            .add_table(
+                (0..20)
+                    .map(|index| vec![format!("Entry{index:02}")])
+                    .collect(),
+            )
+            .unwrap();
+        assert_eq!(document.column_widths(table).unwrap(), vec![120.0]);
+        for row in 0..20 {
+            document
+                .set_row_height(table, row, Some(20.0), "at_least")
+                .unwrap();
+        }
+        let layout = wordcraft_layout::layout(
+            document.document().unwrap(),
+            &mut Default::default(),
+            &Default::default(),
+        );
+        assert!(layout.pages.len() >= 2);
+        let mut reached_right = false;
+        for page in &layout.pages {
+            for item in &page.items {
+                if let wordcraft_layout::Placed::Cell { rect, .. } = item {
+                    reached_right |= rect.x >= 299.0;
+                    // Native TableGrid places the cell rect one half of its
+                    // 0.5pt border beyond the column origin.
+                    assert!(
+                        rect.w <= 120.01 && rect.right() <= 420.26,
+                        "safe table rect: {rect:?}"
+                    );
+                }
+            }
+        }
+        assert!(reached_right);
+        document.to_bytes().unwrap();
     }
 
     #[test]
@@ -8579,7 +10731,19 @@ mod tests {
         let table = document
             .add_table(vec![vec!["Turned text".into(), "Normal text".into()]])
             .unwrap();
-        document.cell_format_patch(table,0,0,r##"{"background":"#ABCDEF","margins":[2,3,4,5],"alignment":"center","vertical_alignment":"bottom","text_direction":"down","no_wrap":true,"borders":{"left":{"style":"wave","color":"#123456","width":1},"top":{"style":"none"}}}"##).unwrap();
+        // The old left-wave fixture checked only serialization and file headers.
+        // Native raster output omits vertical waves, so reject that loss explicitly.
+        let revision = document.revision().unwrap();
+        assert!(document
+            .cell_format_patch(
+                table,
+                0,
+                0,
+                r#"{"borders":{"left":{"style":"wave","width":1}}}"#
+            )
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        document.cell_format_patch(table,0,0,r##"{"background":"#ABCDEF","margins":[2,3,4,5],"alignment":"center","vertical_alignment":"bottom","text_direction":"down","no_wrap":true,"borders":{"left":{"style":"dashed","color":"#123456","width":1},"top":{"style":"none"}}}"##).unwrap();
         let value: Value =
             serde_json::from_str(&document.cell_formatting(table, 0, 0).unwrap()).unwrap();
         assert_eq!(value["background"], "#ABCDEF");
@@ -8598,7 +10762,7 @@ mod tests {
         assert!(cell.props.no_wrap);
         assert_eq!(
             cell.props.borders.unwrap().left.unwrap().style,
-            BorderStyle::Wave
+            BorderStyle::Dashed
         );
         assert!(crate::docx::render(&bytes, 0, 72.0, None)
             .unwrap()

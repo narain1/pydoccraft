@@ -1,9 +1,11 @@
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
+use std::sync::Mutex;
 
 use base64::Engine;
 use serde_json::{json, Map, Value};
 use wordcraft_doc::para::{InlineObject, Paragraph, OBJ};
-use wordcraft_doc::props::VMerge;
+use wordcraft_doc::props::{NumRef, VMerge};
 use wordcraft_doc::{Block, Blocks, Document, PartKind, Path, StoryRef, Table};
 use wordcraft_layout::{DocLayout, LayoutCache, LayoutOptions};
 
@@ -14,23 +16,134 @@ use crate::model::{
 };
 use crate::EngineError;
 
+#[cfg(test)]
+thread_local! {
+    static SESSION_BUILDS: Cell<(u64, u64)> = const { Cell::new((0, 0)) };
+}
+
 pub fn read(data: &[u8], password: Option<&str>) -> Result<Document, EngineError> {
     crate::ooxml::preflight(data)?;
+    #[cfg(test)]
+    SESSION_BUILDS.with(|counts| {
+        let (parses, layouts) = counts.get();
+        counts.set((parses + 1, layouts));
+    });
     wordcraft_docx::read_with_password(data, password).map_err(docx_error)
 }
 
+struct RenderState {
+    document: Document,
+    layout: DocLayout,
+    render_requests: u64,
+}
+
+impl RenderState {
+    fn open(data: &[u8], password: Option<&str>) -> Result<Self, EngineError> {
+        crate::limits::validate_input_size(data.len())?;
+        let document = read(data, password)?;
+        validate_stories(&document)?;
+        #[cfg(test)]
+        SESSION_BUILDS.with(|counts| {
+            let (parses, layouts) = counts.get();
+            counts.set((parses, layouts + 1));
+        });
+        // The temporary measurement cache is not needed to render the owned layout.
+        let layout = wordcraft_layout::layout(
+            &document,
+            &mut LayoutCache::new(),
+            &LayoutOptions::default(),
+        );
+        validate_retained_layout(&layout)?;
+        Ok(Self {
+            document,
+            layout,
+            render_requests: 0,
+        })
+    }
+}
+
+// These checks bound retained state, not the peak allocations inside native layout.
+fn validate_retained_layout(layout: &DocLayout) -> Result<(), EngineError> {
+    if layout.pages.len() > 10_000 {
+        return Err(EngineError::ResourceLimit(
+            "DOCX layout exceeds 10000 pages".into(),
+        ));
+    }
+    let mut items = 0usize;
+    for page in &layout.pages {
+        items = items.saturating_add(page.items.len());
+        if items > 1_000_000 {
+            return Err(EngineError::ResourceLimit(
+                "DOCX layout exceeds 1000000 placed items".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub struct DocxSession {
+    state: Mutex<Option<RenderState>>,
+}
+
+impl DocxSession {
+    pub fn open(
+        data: &[u8],
+        password: Option<&str>,
+    ) -> Result<(Self, DocumentPayload), EngineError> {
+        let state = RenderState::open(data, password)?;
+        let mut adapter = Adapter::new(&state.document, &state.layout)?;
+        adapter.visit_blocks(&state.document.body, &[]);
+        adapter.add_comments();
+        let payload = adapter.finish()?;
+        Ok((
+            Self {
+                state: Mutex::new(Some(state)),
+            },
+            payload,
+        ))
+    }
+
+    pub fn render(
+        &self,
+        page: usize,
+        dpi: f64,
+        clip: Option<crate::rendering::Clip>,
+    ) -> Result<Vec<u8>, EngineError> {
+        let mut guard = self
+            .state
+            .lock()
+            .map_err(|_| EngineError::Malformed("DOCX render session is unavailable".into()))?;
+        let state = guard
+            .as_mut()
+            .ok_or_else(|| EngineError::Closed("DOCX render session is closed".into()))?;
+        // Count live attempts, including invalid page/DPI/clip requests. Closed or
+        // poisoned attempts are excluded. There is no retained bitmap cache.
+        state.render_requests = state.render_requests.saturating_add(1);
+        render_with(&state.document, &state.layout, page, dpi, clip)
+    }
+
+    pub fn stats(&self) -> Result<(u64, u64, u64), EngineError> {
+        let guard = self
+            .state
+            .lock()
+            .map_err(|_| EngineError::Malformed("DOCX render session is unavailable".into()))?;
+        let state = guard
+            .as_ref()
+            .ok_or_else(|| EngineError::Closed("DOCX render session is closed".into()))?;
+        Ok((1, 1, state.render_requests))
+    }
+
+    pub fn close(&self) -> Result<(), EngineError> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        Ok(())
+    }
+}
+
 pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, EngineError> {
-    let document = read(data, password)?;
-    validate_stories(&document)?;
-    let layout = wordcraft_layout::layout(
-        &document,
-        &mut LayoutCache::new(),
-        &LayoutOptions::default(),
-    );
-    let mut adapter = Adapter::new(&document, &layout);
-    adapter.visit_blocks(&document.body, &[]);
-    adapter.add_comments();
-    Ok(adapter.finish())
+    DocxSession::open(data, password).map(|(_, payload)| payload)
 }
 
 pub fn render(
@@ -60,12 +173,18 @@ fn render_impl(
     clip: Option<crate::rendering::Clip>,
 ) -> Result<Vec<u8>, EngineError> {
     crate::rendering::validate_dpi(dpi)?;
-    let document = read(data, password)?;
-    let layout = wordcraft_layout::layout(
-        &document,
-        &mut LayoutCache::new(),
-        &LayoutOptions::default(),
-    );
+    let state = RenderState::open(data, password)?;
+    render_with(&state.document, &state.layout, page, dpi, clip)
+}
+
+fn render_with(
+    document: &Document,
+    layout: &DocLayout,
+    page: usize,
+    dpi: f64,
+    clip: Option<crate::rendering::Clip>,
+) -> Result<Vec<u8>, EngineError> {
+    crate::rendering::validate_dpi(dpi)?;
     let page = layout
         .pages
         .get(page)
@@ -83,7 +202,7 @@ fn render_impl(
             wordcraft_render::MAX_SIDE,
         )?;
         let rendered = wordcraft_render::render_region(
-            &document,
+            document,
             page,
             region.width,
             region.height,
@@ -107,7 +226,7 @@ fn render_impl(
             wordcraft_render::MAX_SIDE,
         )?;
         wordcraft_render::render_page(
-            &document,
+            document,
             page,
             scale,
             &wordcraft_render::RenderOptions::default(),
@@ -127,6 +246,104 @@ struct Adapter<'a> {
     layout: &'a DocLayout,
     pages: Vec<PagePayload>,
     comment_pages: HashMap<u32, usize>,
+    numbering: HashMap<(StoryRef, Path), NumberingObservation>,
+    numbering_bytes: Cell<usize>,
+    numbering_definitions: RefCell<HashMap<(u32, u8), NumberingDefinition<'a>>>,
+    numbering_lookup_work: Cell<usize>,
+    numbering_lookup_cost: usize,
+}
+
+const MAX_NUMBERING_BYTES: usize = 16 * 1024 * 1024;
+const MAX_NUMBERING_STRING: usize = 64 * 1024;
+const MAX_NUMBERING_LOOKUP_WORK: usize = 10_000_000;
+
+#[derive(Clone, Copy)]
+struct NumberingDefinition<'a> {
+    abstract_id: Option<u32>,
+    level: Option<&'a wordcraft_doc::numbering::Level>,
+}
+
+fn numbering_limit() -> EngineError {
+    EngineError::ResourceLimit(
+        "DOCX numbering exceeds bounded paths, placements, metadata bytes or native lookup work"
+            .into(),
+    )
+}
+
+struct NumberingObservation {
+    reference: Option<NumRef>,
+    label: Option<(usize, String)>,
+    ambiguous_label: bool,
+}
+
+fn numbering_observations(
+    layout: &DocLayout,
+) -> Result<HashMap<(StoryRef, Path), NumberingObservation>, EngineError> {
+    let mut observations: HashMap<(StoryRef, Path), NumberingObservation> = HashMap::new();
+    let mut items = 0usize;
+    let mut bytes = 0usize;
+    for page in &layout.pages {
+        for item in &page.items {
+            items += 1;
+            if items > 1_000_000 {
+                return Err(numbering_limit());
+            }
+            let wordcraft_layout::Placed::Lines {
+                story,
+                path,
+                para,
+                l0,
+                l1,
+                ..
+            } = item
+            else {
+                continue;
+            };
+            let reference = para.rp.numbering.filter(|value| value.num != 0);
+            if reference.is_none() && para.label.is_none() {
+                continue;
+            }
+            let observation =
+                observations
+                    .entry((*story, path.clone()))
+                    .or_insert(NumberingObservation {
+                        reference,
+                        label: None,
+                        ambiguous_label: false,
+                    });
+            if observation.reference != reference {
+                return Err(EngineError::Unsupported(
+                    "DOCX paragraph numbering differs between native placements".into(),
+                ));
+            }
+            let line = para.label_line();
+            if *l0 <= line && line < *l1 {
+                if let (Some(label), Some(line)) = (&para.label, para.lines.get(line)) {
+                    if label.text.len() > MAX_NUMBERING_STRING {
+                        return Err(numbering_limit());
+                    }
+                    bytes = bytes.saturating_add(label.text.len());
+                    if bytes > MAX_NUMBERING_BYTES {
+                        return Err(numbering_limit());
+                    }
+                    if !observation.ambiguous_label {
+                        if let Some((offset, text)) = &observation.label {
+                            if *offset != line.start || text != &label.text {
+                                observation.label = None;
+                                observation.ambiguous_label = true;
+                            }
+                        } else {
+                            observation.label = Some((line.start, label.text.clone()));
+                        }
+                    }
+                }
+            }
+            if observations.len() > 100_000 {
+                return Err(numbering_limit());
+            }
+        }
+    }
+    Ok(observations)
 }
 
 fn extraction_diagnostics(document: &Document) -> Value {
@@ -231,6 +448,33 @@ fn diagnose_object(
 }
 
 fn validate_stories(document: &Document) -> Result<(), EngineError> {
+    if document.numbering.nums.len() > 100_000 || document.numbering.abstracts.len() > 100_000 {
+        return Err(numbering_limit());
+    }
+    let mut numbering_bytes = 0usize;
+    let mut levels = 0usize;
+    for level in document
+        .numbering
+        .abstracts
+        .iter()
+        .flat_map(|value| &value.levels)
+        .chain(
+            document
+                .numbering
+                .nums
+                .iter()
+                .flat_map(|value| value.level_overrides.iter().map(|(_, level)| level)),
+        )
+    {
+        levels += 1;
+        numbering_bytes = numbering_bytes.saturating_add(level.text.len());
+        if levels > 100_000
+            || level.text.len() > MAX_NUMBERING_STRING
+            || numbering_bytes > MAX_NUMBERING_BYTES
+        {
+            return Err(numbering_limit());
+        }
+    }
     if document.parts.len() > 10_000 {
         return Err(EngineError::ResourceLimit(
             "DOCX exceeds 10000 auxiliary stories".into(),
@@ -352,6 +596,118 @@ fn validate_table_depth(blocks: &Blocks) -> Result<(), EngineError> {
 }
 
 impl<'a> Adapter<'a> {
+    fn numbering_definition(&self, reference: NumRef) -> Option<NumberingDefinition<'a>> {
+        let key = (reference.num, reference.level);
+        if let Some(value) = self.numbering_definitions.borrow().get(&key) {
+            return Some(*value);
+        }
+        let work = self
+            .numbering_lookup_work
+            .get()
+            .saturating_add(self.numbering_lookup_cost);
+        self.numbering_lookup_work.set(work);
+        if work > MAX_NUMBERING_LOOKUP_WORK || self.numbering_definitions.borrow().len() >= 100_000
+        {
+            self.numbering_lookup_work
+                .set(MAX_NUMBERING_LOOKUP_WORK + 1);
+            return None;
+        }
+        // Keep resolution native, including first-match IDs and level overrides. Cache misses
+        // and unresolved references too; otherwise repeated invalid references rescan all definitions.
+        let value = NumberingDefinition {
+            abstract_id: self
+                .document
+                .numbering
+                .num(reference.num)
+                .map(|num| num.abstract_id),
+            level: self
+                .document
+                .numbering
+                .level(reference.num, reference.level),
+        };
+        self.numbering_definitions.borrow_mut().insert(key, value);
+        Some(value)
+    }
+
+    fn segment_numbering(
+        &self,
+        paragraph: &Paragraph,
+        path: &Path,
+        story: Option<StoryRef>,
+        segments: &[Segment],
+    ) -> Vec<Option<Value>> {
+        let observation = story.and_then(|story| self.numbering.get(&(story, path.clone())));
+        let reference = observation
+            .map(|value| value.reference)
+            .unwrap_or_else(|| {
+                let table = story.and_then(|story| {
+                    let (table, _, _) = path.cell()?;
+                    let table = self.document.table(story, &table)?;
+                    self.document
+                        .styles
+                        .table_style(table.props.style.as_deref()?)
+                });
+                self.document
+                    .styles
+                    .resolve_para_in(&paragraph.props, table.as_ref().map(|style| &style.para))
+                    .numbering
+            })
+            .filter(|value| value.num != 0);
+        let Some(reference) = reference else {
+            return vec![None; segments.len()];
+        };
+        if self.numbering_bytes.get() > MAX_NUMBERING_BYTES {
+            return vec![None; segments.len()];
+        }
+        let Some(definition) = self.numbering_definition(reference) else {
+            return vec![None; segments.len()];
+        };
+        let level = definition.level;
+        let label = observation
+            .and_then(|value| value.label.as_ref())
+            .map(|(offset, text)| {
+                (
+                    segments
+                        .partition_point(|segment| segment.byte_start <= *offset)
+                        .saturating_sub(1),
+                    text,
+                )
+            });
+        segments
+            .iter()
+            .enumerate()
+            .map(|(index, _)| {
+                // Account for escaping and the duplicated page.tables projection before cloning.
+                let strings = level.map_or(0, |level| level.text.len()).saturating_add(
+                    label
+                        .filter(|(segment, _)| *segment == index)
+                        .map_or(0, |(_, text)| text.len()),
+                );
+                let bytes = self
+                    .numbering_bytes
+                    .get()
+                    .saturating_add(strings.saturating_mul(12).saturating_add(512));
+                self.numbering_bytes.set(bytes);
+                if bytes > MAX_NUMBERING_BYTES {
+                    return None;
+                }
+                let mut value = json!({
+                    "num_id": reference.num,
+                    "abstract_id": definition.abstract_id,
+                    "level": reference.level,
+                    "format": level.map(|level| level.format.ooxml()),
+                    "template": level.map(|level| level.text.as_str()),
+                });
+                if let Some((segment, text)) = label {
+                    if segment == index {
+                        value["label"] = json!(text);
+                    }
+                }
+                Some(value)
+            })
+            .collect()
+    }
+
     fn stories(&self) -> Vec<StoryPayload> {
         let comments: HashMap<_, _> = self
             .document
@@ -400,7 +756,13 @@ impl<'a> Adapter<'a> {
                 }
                 StoryPayload {
                     kind: kind.into(),
-                    blocks: self.owned_blocks(&part.blocks, &[], None, Some(&source)),
+                    blocks: self.owned_blocks(
+                        &part.blocks,
+                        &[],
+                        None,
+                        Some(&source),
+                        Some(StoryRef::Part(*id)),
+                    ),
                     metadata,
                 }
             })
@@ -411,7 +773,7 @@ impl<'a> Adapter<'a> {
                 ("story_role".into(), json!(role)),
             ]);
             stories.push(StoryPayload {
-                kind: kind.into(), blocks: self.owned_blocks(blocks, &[], None, Some(&source)),
+                kind: kind.into(), blocks: self.owned_blocks(blocks, &[], None, Some(&source), None),
                 metadata: Map::from_iter([("role".into(), json!(role)), ("ordering".into(), json!("after parts; footnote then endnote; separator, continuation_separator, continuation_notice"))]),
             });
         }
@@ -426,6 +788,7 @@ impl<'a> Adapter<'a> {
         prefix: &[u32],
         page_number: Option<usize>,
         story: Option<&Map<String, Value>>,
+        native_story: Option<StoryRef>,
     ) -> Vec<BlockPayload> {
         let mut output = Vec::new();
         for (index, block) in blocks.iter().enumerate() {
@@ -445,10 +808,15 @@ impl<'a> Adapter<'a> {
                             pages.first().copied().unwrap_or(fallback),
                         )
                     });
+                    let numbering =
+                        self.segment_numbering(paragraph, &path, native_story, &segments);
                     for (segment_index, mut segment) in segments.into_iter().enumerate() {
                         segment.set_source(&path.0, segment_index);
                         let mut payload = BlockPayload::paragraph(segment.text);
                         payload.style = paragraph.props.style.clone();
+                        if let Some(value) = numbering[segment_index].clone() {
+                            payload.metadata.insert("numbering".into(), value);
+                        }
                         if let Some(level) = self
                             .document
                             .styles
@@ -500,6 +868,7 @@ impl<'a> Adapter<'a> {
                             page_number
                                 .map(|_| self.table_page(table, &path).min(self.pages.len() - 1)),
                             story,
+                            native_story,
                         ),
                     ),
                     ..BlockPayload::default()
@@ -509,7 +878,7 @@ impl<'a> Adapter<'a> {
         output
     }
 
-    fn new(document: &'a Document, layout: &'a DocLayout) -> Self {
+    fn new(document: &'a Document, layout: &'a DocLayout) -> Result<Self, EngineError> {
         let page_count = layout.pages.len().max(1);
         let pages = (0..page_count)
             .map(|number| {
@@ -525,15 +894,37 @@ impl<'a> Adapter<'a> {
                 }
             })
             .collect();
-        Self {
+        Ok(Self {
             document,
             layout,
             pages,
             comment_pages: HashMap::new(),
-        }
+            numbering: numbering_observations(layout)?,
+            numbering_bytes: Cell::new(0),
+            numbering_definitions: RefCell::new(HashMap::new()),
+            numbering_lookup_work: Cell::new(0),
+            // num() once plus level()'s two num() scans, an abstract scan and a level-override
+            // scan. This is conservative for the pinned native API, not a local resolver.
+            numbering_lookup_cost: document
+                .numbering
+                .nums
+                .len()
+                .saturating_mul(3)
+                .saturating_add(document.numbering.abstracts.len())
+                .saturating_add(
+                    document
+                        .numbering
+                        .nums
+                        .iter()
+                        .map(|num| num.level_overrides.len())
+                        .max()
+                        .unwrap_or(0),
+                )
+                .max(1),
+        })
     }
 
-    fn finish(self) -> DocumentPayload {
+    fn finish(self) -> Result<DocumentPayload, EngineError> {
         let mut metadata = Map::new();
         for (key, value) in [
             ("title", &self.document.core.title),
@@ -541,10 +932,17 @@ impl<'a> Adapter<'a> {
             ("author", &self.document.core.creator),
             ("keywords", &self.document.core.keywords),
             ("description", &self.document.core.description),
+            ("category", &self.document.core.category),
+            ("last_modified_by", &self.document.core.last_modified_by),
+            ("created", &self.document.core.created),
+            ("modified", &self.document.core.modified),
         ] {
             if !value.is_empty() {
                 metadata.insert(key.into(), Value::String(value.clone()));
             }
+        }
+        if self.document.core.revision > 0 {
+            metadata.insert("revision".into(), json!(self.document.core.revision));
         }
         metadata.insert(
             "pagination".into(),
@@ -552,12 +950,17 @@ impl<'a> Adapter<'a> {
         );
         let stories = self.stories();
         metadata.insert("diagnostics".into(), extraction_diagnostics(self.document));
-        DocumentPayload {
+        if self.numbering_bytes.get() > MAX_NUMBERING_BYTES
+            || self.numbering_lookup_work.get() > MAX_NUMBERING_LOOKUP_WORK
+        {
+            return Err(numbering_limit());
+        }
+        Ok(DocumentPayload {
             format: "docx".into(),
             metadata,
             pages: self.pages,
             stories,
-        }
+        })
     }
 
     fn visit_blocks(&mut self, blocks: &Blocks, prefix: &[u32]) {
@@ -575,12 +978,16 @@ impl<'a> Adapter<'a> {
         let page_indexes = self.paragraph_pages(path);
         let segments = self.paragraph_segments(paragraph, &page_indexes);
         let segment_pages = self.paragraph_segment_pages(path, &segments, page_indexes[0]);
+        let numbering = self.segment_numbering(paragraph, path, Some(StoryRef::Body), &segments);
         for (segment_index, segment) in segments.into_iter().enumerate() {
             let page_number = segment_pages[segment_index].min(self.pages.len() - 1);
             for (id, _) in &segment.comments {
                 self.comment_pages.entry(*id).or_insert(page_number);
             }
             let mut block = BlockPayload::paragraph(segment.text);
+            if let Some(value) = numbering[segment_index].clone() {
+                block.metadata.insert("numbering".into(), value);
+            }
             if !segment.story_refs.is_empty() {
                 block
                     .metadata
@@ -617,6 +1024,7 @@ impl<'a> Adapter<'a> {
             if !block.text.is_empty()
                 || !block.images.is_empty()
                 || block.metadata.contains_key("story_refs")
+                || block.metadata.contains_key("numbering")
             {
                 page.blocks.push(block);
             }
@@ -633,7 +1041,7 @@ impl<'a> Adapter<'a> {
                 );
             }
         }
-        let table = self.table_payload(table, path, Some(page_number), None);
+        let table = self.table_payload(table, path, Some(page_number), None, Some(StoryRef::Body));
         let page = &mut self.pages[page_number];
         page.tables.push(table.clone());
         page.blocks.push(BlockPayload {
@@ -649,6 +1057,7 @@ impl<'a> Adapter<'a> {
         path: &Path,
         page_number: Option<usize>,
         story: Option<&Map<String, Value>>,
+        native_story: Option<StoryRef>,
     ) -> TablePayload {
         let mut cells: Vec<Vec<CellPayload>> = Vec::with_capacity(table.rows.len());
         let mut active_merges: HashMap<(usize, usize), (usize, usize)> = HashMap::new();
@@ -658,7 +1067,8 @@ impl<'a> Adapter<'a> {
             let mut output_row = Vec::with_capacity(row.cells.len());
             for (cell_index, cell) in row.cells.iter().enumerate() {
                 let prefix = [path.0.as_slice(), &[row_index as u32, cell_index as u32]].concat();
-                let blocks = self.owned_blocks(&cell.blocks, &prefix, page_number, story);
+                let blocks =
+                    self.owned_blocks(&cell.blocks, &prefix, page_number, story, native_story);
                 let key = (column, cell.span());
                 let mut covered = false;
                 if cell.props.vmerge == VMerge::Restart {
@@ -1135,6 +1545,346 @@ fn docx_error(error: wordcraft_docx::DocxError) -> EngineError {
 }
 
 #[cfg(test)]
+mod session_tests {
+    use super::*;
+    use std::sync::{Arc, Barrier};
+
+    fn fixture() -> Vec<u8> {
+        let mut document = Document::from_text("First page Ω\nSecond page 🦀");
+        let Block::Para(paragraph) = Arc::make_mut(&mut document.body[1]) else {
+            unreachable!()
+        };
+        paragraph.props.page_break_before = Some(true);
+        document.last_section.page_w = 300.0;
+        document.last_section.page_h = 240.0;
+        wordcraft_docx::write(&document).unwrap()
+    }
+
+    #[test]
+    fn session_reuses_one_parse_and_layout_for_full_and_region_renders() {
+        fn send_sync<T: Send + Sync>() {}
+        send_sync::<DocxSession>();
+        let data = fixture();
+        let expected: Vec<_> = [72.0, 144.0, 300.0]
+            .into_iter()
+            .flat_map(|dpi| [0, 1].into_iter().map(move |page| (page, dpi)))
+            .map(|(page, dpi)| {
+                (
+                    page,
+                    dpi,
+                    render(&data, page, dpi, None).unwrap(),
+                    render_region(&data, page, dpi, None, (65.0, 65.0, 130.0, 115.0)).unwrap(),
+                )
+            })
+            .collect();
+        SESSION_BUILDS.with(|counts| counts.set((0, 0)));
+        let (session, payload) = DocxSession::open(&data, None).unwrap();
+        drop(data);
+        assert_eq!(payload.pages.len(), 2);
+        for (page, dpi, full, region) in expected {
+            assert_eq!(session.render(page, dpi, None).unwrap(), full);
+            assert_eq!(
+                session
+                    .render(page, dpi, Some((65.0, 65.0, 130.0, 115.0)))
+                    .unwrap(),
+                region
+            );
+        }
+        assert_eq!(SESSION_BUILDS.with(Cell::get), (1, 1));
+        assert_eq!(session.stats().unwrap(), (1, 1, 12));
+        let weak = {
+            let guard = session.state.lock().unwrap();
+            Arc::downgrade(&guard.as_ref().unwrap().document.body[0])
+        };
+        session.close().unwrap();
+        session.close().unwrap();
+        assert!(weak.upgrade().is_none());
+        assert!(payload.pages[0]
+            .blocks
+            .iter()
+            .any(|block| block.text.contains("First page")));
+        assert!(matches!(
+            session.render(0, 72.0, None),
+            Err(EngineError::Closed(_))
+        ));
+        assert!(matches!(session.stats(), Err(EngineError::Closed(_))));
+    }
+
+    #[test]
+    fn session_keeps_render_error_order_and_accepts_small_regions_of_oversized_pages() {
+        let data = fixture();
+        let (session, _) = DocxSession::open(&data, None).unwrap();
+        for (page, dpi, clip) in [
+            (99, f64::NAN, None),
+            (99, 72.0, None),
+            (0, 72.0, Some((0.0, 0.0, 0.0, 10.0))),
+            (0, 72.0, Some((500.0, 500.0, 510.0, 510.0))),
+        ] {
+            let expected = render_impl(&data, page, dpi, None, clip)
+                .unwrap_err()
+                .to_string();
+            assert_eq!(
+                session.render(page, dpi, clip).unwrap_err().to_string(),
+                expected
+            );
+        }
+        assert_eq!(session.stats().unwrap(), (1, 1, 4));
+        let mut big = Document::from_text("Small region of a large page");
+        big.last_section.page_w = 1584.0;
+        big.last_section.page_h = 1584.0;
+        let bytes = wordcraft_docx::write(&big).unwrap();
+        let (large, _) = DocxSession::open(&bytes, None).unwrap();
+        assert!(matches!(
+            large.render(0, 1200.0, None),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        assert_eq!(
+            large.render(0, 1200.0, Some((0.0, 0.0, 8.0, 8.0))).unwrap(),
+            render_region(&bytes, 0, 1200.0, None, (0.0, 0.0, 8.0, 8.0)).unwrap()
+        );
+        assert!(DocxSession::open(b"not a DOCX", None).is_err());
+        let (plain_password, _) = DocxSession::open(&data, Some("unused password")).unwrap();
+        plain_password.close().unwrap();
+    }
+
+    #[test]
+    fn session_close_races_are_serialized_and_poisoned_close_releases_state() {
+        let (session, _) = DocxSession::open(&fixture(), None).unwrap();
+        let session = Arc::new(session);
+        let barrier = Arc::new(Barrier::new(2));
+        let rendering = {
+            let session = session.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                for _ in 0..4 {
+                    match session.render(0, 72.0, None) {
+                        Ok(bytes) => assert!(bytes.starts_with(b"\x89PNG")),
+                        Err(EngineError::Closed(_)) => return,
+                        Err(error) => panic!("unexpected render failure: {error}"),
+                    }
+                }
+            })
+        };
+        barrier.wait();
+        session.close().unwrap();
+        rendering.join().unwrap();
+        let (poisoned, _) = DocxSession::open(&fixture(), None).unwrap();
+        let poisoned = Arc::new(poisoned);
+        let weak = {
+            let guard = poisoned.state.lock().unwrap();
+            Arc::downgrade(&guard.as_ref().unwrap().document.body[0])
+        };
+        let poisoner = poisoned.clone();
+        assert!(std::thread::spawn(move || {
+            let _guard = poisoner.state.lock().unwrap();
+            panic!("intentional lock poison");
+        })
+        .join()
+        .is_err());
+        assert!(matches!(
+            poisoned.render(0, 72.0, None),
+            Err(EngineError::Malformed(_))
+        ));
+        poisoned.close().unwrap();
+        assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn retained_layout_page_budget_rejects_before_payload_or_render() {
+        let native = Document::new();
+        let mut layout =
+            wordcraft_layout::layout(&native, &mut LayoutCache::new(), &LayoutOptions::default());
+        // Empty pages keep the fixture small while exercising the retained-layout boundary.
+        let mut page = layout.pages[0].clone();
+        page.items.clear();
+        layout.pages = vec![page; 10_001];
+        assert!(matches!(
+            validate_retained_layout(&layout),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        layout.pages.pop();
+        validate_retained_layout(&layout).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod numbering_tests {
+    use super::*;
+    use std::sync::Arc;
+    use wordcraft_doc::numbering::ListKind;
+
+    fn numbered(text: &str, num: u32, level: u8) -> Arc<Block> {
+        let mut paragraph = Paragraph::new();
+        paragraph.insert_text(0, text, &Default::default()).unwrap();
+        paragraph.props.numbering = Some(NumRef { num, level });
+        wordcraft_doc::para_block(paragraph)
+    }
+
+    #[test]
+    fn labels_come_from_native_layout_and_follow_the_label_line_after_a_break() {
+        let mut document = Document::new();
+        let num = document.numbering.try_add_list(ListKind::Numbered).unwrap();
+        document.body = vec![
+            numbered("\u{c}After break", num, 0),
+            numbered("Second", num, 0),
+            numbered("", num, 0),
+        ];
+        let data = wordcraft_docx::write(&document).unwrap();
+        let payload = extract(&data, None).unwrap();
+        assert_eq!(payload.pages.len(), 2);
+        let blocks: Vec<_> = payload.pages.iter().flat_map(|page| &page.blocks).collect();
+        assert_eq!(
+            blocks
+                .iter()
+                .map(|block| block.text.as_str())
+                .collect::<Vec<_>>(),
+            ["", "After break", "Second", ""]
+        );
+        assert!(!blocks[0].metadata["numbering"]
+            .as_object()
+            .unwrap()
+            .contains_key("label"));
+        for (block, label) in blocks[1..].iter().zip(["1.", "2.", "3."]) {
+            assert_eq!(block.metadata["numbering"]["label"], label);
+            assert_eq!(block.metadata["numbering"]["format"], "decimal");
+            assert_eq!(block.metadata["numbering"]["template"], "%1.");
+            assert_eq!(block.metadata["numbering"]["num_id"], num);
+        }
+    }
+
+    #[test]
+    fn conflicting_repeated_labels_are_not_asserted_and_missing_definitions_are_null() {
+        let mut document = Document::new();
+        let num = document.numbering.try_add_list(ListKind::Numbered).unwrap();
+        document.body = vec![numbered("Repeated", num, 0)];
+        let mut layout = wordcraft_layout::layout(
+            &document,
+            &mut LayoutCache::new(),
+            &LayoutOptions::default(),
+        );
+        let mut repeated = layout.pages[0]
+            .items
+            .iter()
+            .find(|item| matches!(item, wordcraft_layout::Placed::Lines { .. }))
+            .unwrap()
+            .clone();
+        let wordcraft_layout::Placed::Lines { para, .. } = &mut repeated else {
+            unreachable!()
+        };
+        Arc::make_mut(para).label.as_mut().unwrap().text = "99.".into();
+        layout.pages[0].items.push(repeated);
+        let mut adapter = Adapter::new(&document, &layout).unwrap();
+        adapter.visit_blocks(&document.body, &[]);
+        let metadata = &adapter.pages[0].blocks[0].metadata["numbering"];
+        assert_eq!(metadata["format"], "decimal");
+        assert!(!metadata.as_object().unwrap().contains_key("label"));
+
+        document.body = vec![
+            numbered("Missing", 9999, 7),
+            numbered("Missing level", num, 20),
+            numbered("Unnumbered", 0, 0),
+        ];
+        let empty_layout = DocLayout::default();
+        let mut adapter = Adapter::new(&document, &empty_layout).unwrap();
+        adapter.visit_blocks(&document.body, &[]);
+        let missing = &adapter.pages[0].blocks[0].metadata["numbering"];
+        assert_eq!(missing["num_id"], 9999);
+        assert!(missing["abstract_id"].is_null());
+        assert!(missing["format"].is_null());
+        assert!(missing["template"].is_null());
+        let missing_level = &adapter.pages[0].blocks[1].metadata["numbering"];
+        assert!(missing_level["abstract_id"].is_number());
+        assert!(missing_level["format"].is_null());
+        assert!(!adapter.pages[0].blocks[2]
+            .metadata
+            .contains_key("numbering"));
+    }
+
+    #[test]
+    fn repeated_definition_queries_are_cached_and_distinct_query_work_is_bounded() {
+        let mut document = Document::new();
+        document.numbering.try_add_list(ListKind::Numbered).unwrap();
+        let original = document.numbering.nums[0].clone();
+        for id in 2..=2000 {
+            let mut number = original.clone();
+            number.id = id;
+            document.numbering.nums.push(number);
+        }
+        let layout = DocLayout::default();
+        let mut adapter = Adapter::new(&document, &layout).unwrap();
+        let block = numbered("Repeated", 2000, 0);
+        let Block::Para(paragraph) = block.as_ref() else {
+            unreachable!()
+        };
+        for index in 0..2000 {
+            adapter.add_paragraph(paragraph, &Path::top(index));
+        }
+        assert_eq!(
+            adapter.numbering_lookup_work.get(),
+            adapter.numbering_lookup_cost
+        );
+        let missing = NumRef {
+            num: 9999,
+            level: 0,
+        };
+        for _ in 0..2000 {
+            let value = adapter.numbering_definition(missing).unwrap();
+            assert!(value.abstract_id.is_none() && value.level.is_none());
+        }
+        assert_eq!(
+            adapter.numbering_lookup_work.get(),
+            2 * adapter.numbering_lookup_cost
+        );
+        let payload = adapter.finish().unwrap();
+        assert_eq!(payload.pages[0].blocks.len(), 2000);
+        assert!(payload.pages[0]
+            .blocks
+            .iter()
+            .all(|block| block.metadata["numbering"]["num_id"] == 2000
+                && block.metadata["numbering"]["format"] == "decimal"));
+
+        let mut adapter = Adapter::new(&document, &layout).unwrap();
+        for id in 1..=2000 {
+            let block = numbered("Distinct", id, 0);
+            let Block::Para(paragraph) = block.as_ref() else {
+                unreachable!()
+            };
+            adapter.add_paragraph(paragraph, &Path::top((id - 1) as usize));
+        }
+        assert!(matches!(
+            adapter.finish(),
+            Err(EngineError::ResourceLimit(_))
+        ));
+    }
+
+    #[test]
+    fn numbering_templates_and_repeated_output_metadata_are_bounded() {
+        let mut document = Document::new();
+        let num = document.numbering.try_add_list(ListKind::Numbered).unwrap();
+        document.numbering.abstracts[0].levels[0].text = "x".repeat(MAX_NUMBERING_STRING + 1);
+        assert!(matches!(
+            validate_stories(&document),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        document.numbering.abstracts[0].levels[0].text = "x".repeat(1024);
+        let paragraph = numbered("Small paragraph", num, 0);
+        let layout = DocLayout::default();
+        let mut adapter = Adapter::new(&document, &layout).unwrap();
+        let Block::Para(paragraph) = paragraph.as_ref() else {
+            unreachable!()
+        };
+        for index in 0..2000 {
+            adapter.add_paragraph(paragraph, &Path::top(index));
+        }
+        assert!(matches!(
+            adapter.finish(),
+            Err(EngineError::ResourceLimit(_))
+        ));
+    }
+}
+
+#[cfg(test)]
 mod diagnostic_tests {
     use super::*;
     use std::sync::Arc;
@@ -1295,7 +2045,7 @@ mod offset_tests {
         paragraph.mark.link = Some("https://example.com/mark".into());
         let document = Document::new();
         let layout = DocLayout::default();
-        let mut adapter = Adapter::new(&document, &layout);
+        let mut adapter = Adapter::new(&document, &layout).unwrap();
         adapter.add_paragraph(&paragraph, &Path(vec![0]));
         let block = &adapter.pages[0].blocks[0];
         assert_eq!(block.style.as_deref(), Some("TypedParagraph"));
@@ -1344,7 +2094,7 @@ mod offset_tests {
         // The last marker deliberately has no object: it must not panic or invent a reference.
         let document = Document::new();
         let layout = DocLayout::default();
-        let adapter = Adapter::new(&document, &layout);
+        let adapter = Adapter::new(&document, &layout).unwrap();
         let segments = adapter.paragraph_segments(&paragraph, &[0]);
         assert_eq!(segments.len(), 1);
         let segment = &segments[0];

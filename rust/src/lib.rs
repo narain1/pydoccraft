@@ -91,6 +91,74 @@ fn _open_pdf(data: &[u8], password: Option<&str>) -> PyResult<(NativePdfSession,
     Ok((NativePdfSession { inner: session }, encoded))
 }
 
+enum OfficeSession {
+    Docx(Box<docx::DocxSession>),
+    Pptx(Box<pptx::PptxSession>),
+}
+
+#[pyclass(module = "doc_ex._core", name = "_OfficeSession")]
+struct NativeOfficeSession {
+    inner: OfficeSession,
+}
+
+#[pymethods]
+impl NativeOfficeSession {
+    #[pyo3(signature = (page, dpi=144.0, clip=None))]
+    fn render(&self, page: usize, dpi: f64, clip: Option<rendering::Clip>) -> PyResult<Vec<u8>> {
+        if let Some(clip) = clip {
+            rendering::validate_clip(clip)?;
+        }
+        match &self.inner {
+            OfficeSession::Docx(session) => session.render(page, dpi, clip),
+            OfficeSession::Pptx(session) => session.render(page, dpi, clip),
+        }
+        .map_err(Into::into)
+    }
+
+    fn close(&self) -> PyResult<()> {
+        match &self.inner {
+            OfficeSession::Docx(session) => session.close(),
+            OfficeSession::Pptx(session) => session.close(),
+        }
+        .map_err(Into::into)
+    }
+
+    fn _stats(&self) -> PyResult<(u64, u64, u64)> {
+        match &self.inner {
+            OfficeSession::Docx(session) => session.stats(),
+            OfficeSession::Pptx(session) => session.stats(),
+        }
+        .map_err(Into::into)
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (data, filetype, password=None))]
+fn _open_office(
+    data: &[u8],
+    filetype: &str,
+    password: Option<&str>,
+) -> PyResult<(NativeOfficeSession, String)> {
+    limits::validate_input_size(data.len())?;
+    let (inner, payload) = match normalize(filetype)? {
+        "docx" => {
+            let (session, payload) = docx::DocxSession::open(data, password)?;
+            (OfficeSession::Docx(Box::new(session)), payload)
+        }
+        "pptx" => {
+            let (session, payload) = pptx::PptxSession::open(data)?;
+            (OfficeSession::Pptx(Box::new(session)), payload)
+        }
+        _ => {
+            return Err(
+                EngineError::Unsupported("Office session requires DOCX or PPTX".into()).into(),
+            )
+        }
+    };
+    let encoded = limits::bounded_json(&payload, limits::MAX_PAYLOAD_SIZE)?;
+    Ok((NativeOfficeSession { inner }, encoded))
+}
+
 #[pyfunction]
 #[pyo3(signature = (data, filetype, password=None))]
 fn extract(data: &[u8], filetype: &str, password: Option<&str>) -> PyResult<String> {
@@ -227,11 +295,13 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<author_pdf::EditablePdf>()?;
     module.add_class::<author_pptx::EditablePptx>()?;
     module.add_class::<NativePdfSession>()?;
+    module.add_class::<NativeOfficeSession>()?;
     module.add(
         "DocExNativeError",
         module.py().get_type::<DocExNativeError>(),
     )?;
     module.add_function(wrap_pyfunction!(_open_pdf, module)?)?;
+    module.add_function(wrap_pyfunction!(_open_office, module)?)?;
     module.add_function(wrap_pyfunction!(extract, module)?)?;
     module.add_function(wrap_pyfunction!(extract_text, module)?)?;
     module.add_function(wrap_pyfunction!(convert, module)?)?;

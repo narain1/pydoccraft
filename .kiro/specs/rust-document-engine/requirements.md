@@ -221,3 +221,109 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 2. Native logical metric overflow, invalid geometry, unsupported glyphs and excessive wrapping work SHALL fail atomically. Supplied static TrueType box text SHALL additionally reject shaped outline overflow using bounded public native glyph inspection. Boxed CFF evaluation SHALL fail explicitly until aggregate work can be bounded; legacy point placement remains unchanged. Built-in box fonts retain logical metrics, and automatic caller-font wrapping and strict clipping remain unavailable.
 3. Existing add_image SHALL accept bounded visual crop fractions, quarter-turns and flips through native transform properties, preserving source media and existing page resources. Rotation, CropBox and UserUnit SHALL preserve displayed-point semantics.
 4. Tests SHALL verify native wrapping/alignment, explicit-font text, rollback, work limits, asymmetric crop/flip/rotation pixels, outside-box pixels and extraction after serialization. PDF2 SHALL remain open for documented upstream gaps.
+
+## 25. DOCX paragraph border formatting
+
+1. Existing paragraph, paragraph-style and document-default formatting SHALL accept supported four-edge borders with shared color/style/width vocabulary. Direct and effective snapshots SHALL expose native whole-group inheritance and distinguish omission, per-side clearing and group reset.
+2. Table-style border meaning SHALL remain unchanged. Shared DOCX border validation SHALL reject proven rendering substitutions/clamps and invalid vertical double/wave edges before mutation; PPTX rules SHALL remain independent.
+3. Native DOCX readback and visible PNG/PDF tests SHALL cover body, cells, stories, style/default inheritance and atomic invalid changes. Between/bar and other unsupported native borders SHALL remain explicit upstream gaps.
+
+## 26. Ownership and shading consistency acceptance
+
+1. Ordered collection iteration SHALL capture handles before yielding, preserving stable identities and generation checks across structural edits. A pending positional handle SHALL NOT be rebound to the current generation after its original object moved or disappeared.
+2. The API SHALL document live-handle slices, parent ownership, closed/deleted/stale access, independent whole-document copies, unsupported detached child copying/general reparenting and layout invalidation. Existing format-specific operations SHALL remain the only supported exceptions.
+3. Shared run/paragraph/cell background formatting SHALL verify direct clearing restores native inheritance, independently from text highlight and page background. Native DOCX properties and actual PNG/PDF fills SHALL agree without adding a second shading API.
+
+## 27. Inline picture replacement and removal
+
+1. Existing picture handles SHALL expose owned source bytes and accept a replacement through the existing bounded bytes/path/stream reader. Replacement SHALL preserve size and alt text and invalidate derived outputs only after native validation succeeds.
+2. Existing document/cell image collections SHALL support indexed deletion of one inline placement. Native paragraph deletion SHALL preserve the anchor paragraph and unrelated IDs; deleted handles SHALL fail explicitly.
+3. Native media insertion SHALL deduplicate and allocate collision-safe keys. Commit SHALL retain media referenced by supported authored stories, including nested tables and auxiliary parts, and recompute distinct encoded-byte and placement budgets. Unsupported object profiles SHALL fail before cleanup rather than risking unrelated resources.
+4. Tests SHALL verify replacement/removal, shared resources, copy independence, reclaimed budgets, save/read/render consistency and atomic failure; no new image-processing backend SHALL be introduced.
+
+## 28. DOCX core and typed custom properties
+
+1. Existing metadata/update_metadata naming SHALL expose supported native core values and a nested scalar custom mapping. Patches SHALL preserve omitted entries, distinguish clear/reset, preserve custom value types and native name identity, and reject ambiguous or unsupported values atomically.
+2. Core whitespace and timestamp input SHALL be validated against native readback behavior. Saving SHALL retain explicit timestamps/revision without automatically changing them. Source extraction SHALL expose the supported core fields; broader imported custom/language/extended properties remain separately scoped.
+3. Python SHALL bound scalars and aggregate encoding before constructing the native JSON patch; Rust SHALL bound input, stored property bytes and counts. Tests SHALL verify native XML/readback, public extraction, copy/snapshot ownership, rollback, capacity reuse and unchanged content/rendering.
+
+## 29. PDF text-markup kinds and appearance budgets
+
+1. Existing annotation operations SHALL support native underline, strikeout and squiggly kinds with current-view coordinates, metadata changes, movement, recoloring, deletion and reopened persistence. New authoring SHALL use one quadrilateral and reject unsupported resizing/target changes.
+2. Appearance work SHALL be bounded before native property inspection or regeneration. Direct native QuadPoints SHALL have bounded counts and finite geometry; newly generated appearance bytes SHALL count toward document mutation budgets. Deletion SHALL not rebuild an appearance merely to identify its subtype.
+3. Tests SHALL verify actual pixels across rotations/CropBox/UserUnit, preserved page text, cache invalidation, reopened metadata, stale handles and atomic budget/geometry failures. Broader PDF6 form/import/reply criteria SHALL remain open.
+
+4. Imported text-markup mutation SHALL reject quadrilateral coordinates outside ±1,000,000 PDF user units before native appearance evaluation, preventing nonfinite derived geometry; removal SHALL remain available without rebuilding the appearance.
+
+## 30. Section binding space and unequal columns
+
+1. Existing section properties SHALL expose a left gutter and explicit column widths through native SectionProps/Columns. Column widths SHALL match the configured count, retain the shared gap/separator, and fit usable page width without clamping or scaling. Clearing widths or assigning the existing columns tuple SHALL restore equal columns.
+2. Native layout SHALL position and paginate text across columns and explicit breaks. Table/image validation SHALL conservatively use the narrowest body column until upstream reflows continued tables across changing widths; header/footer content SHALL retain full usable width. Geometry changes SHALL validate existing nested content atomically.
+3. Tests SHALL cover native DOCX readback, mixed page geometry, actual text coordinates and PNG/PDF pixels, ordering, continuation, cache invalidation, copies, invalid widths and rollback. Mirrored/top gutters and per-column gaps remain explicitly outside this profile.
+
+## 31. Native authored slide layouts
+
+1. Existing slides.add SHALL accept the verified blank, title, title_and_content and two_content native layouts. Other known layouts SHALL fail explicitly until their fidelity is verified, and unknown names SHALL fail validation. Native constructors SHALL own layout/master relationships and fresh object identities.
+2. Existing shapes SHALL expose a read-only placeholder role and native resolved box/rotation. Text edits SHALL preserve inheritance; geometry edits SHALL materialize only the affected transform while retaining unrelated transform values and placeholder references. No separate placeholder collection or layout engine SHALL be introduced.
+3. Native ID/content budgets SHALL be checked before mutation. Tests SHALL cover actual placeholder text in native PNG/PDF, saved PPTX relationships, unchanged masters, geometry edits, ownership and atomic invalid/limit failures. General slide copy/import and layout/theme editing remain separately scoped.
+
+## 32. Combined table fixture acceptance
+
+1. The installed-wheel corpus SHALL generate invoice, merged-header, nested, long repeated-header, RTL and image-cell fixtures through existing public APIs. No fixture-specific runtime methods or external processors SHALL be added.
+2. Saved DOCX and exported PDF SHALL reopen with matching page counts and exactly-once body content. Semantic table spans/order SHALL remain distinct from rendered RTL placement and intentional repeated PDF headers. Every rendered page SHALL have checked visible representative fills; nested/image source pixels SHALL survive export.
+3. The fixture index SHALL record covered combinations and distinguish this acceptance from broader table fidelity, accessibility and import-preservation criteria.
+
+## 33. Owned presentation picture editing
+
+1. Existing slide image insertion/shape collections SHALL return an owned picture handle sharing data/alt vocabulary with DOCX pictures and existing shape geometry/link/order behavior. Source replacement SHALL preserve all placement properties and unrelated shared picture/background references. Slide identity SHALL be resolved after caller source/coordinate conversion so callbacks cannot redirect placement after reordering.
+2. Picture crop SHALL use checked native LTRB fractions in 0..0.45; None SHALL reset. Boolean flips SHALL use native transforms together with existing rotation. Original bytes SHALL remain available, and native serialization precision SHALL be documented.
+3. Input validation, native media deduplication/pruning and live encoded-byte budgets SHALL precede staged commit. Tests SHALL verify source/XML preservation, asymmetric transform pixels in PNG/PDF, source kinds, ownership, cache invalidation, reclaimed/shared media and atomic invalid/limit failures.
+
+## 34. Contiguous paragraph and slide text selection
+
+1. Paragraph and text-bearing shape slicing SHALL return their existing revision-bound ranges through existing native range operations. Normal Python Unicode-character slice normalization SHALL apply; integer indexing and steps other than one SHALL be rejected. Empty forward slices SHALL select an insertion point.
+2. Existing range text/format/link operations SHALL retain their semantics, stale-owner checks and semantic-anchor guards. Removing all text SHALL preserve the paragraph; no DOCX cross-paragraph range, new Run class or duplicate insertion/deletion method SHALL be introduced. Slide ranges SHALL retain their existing LF-separated paragraph behavior, internal links and tooltips; table indexing SHALL remain unchanged.
+3. Tests SHALL cover Unicode/whitespace, clamped/negative bounds, insertion/deletion, surrounding formatting, links, copies, auxiliary/cell scopes, invalid inputs, mutation during index conversion, semantic-anchor rollback, slide ordering/placeholder preservation and unsupported nontext selection.
+
+## 35. Native DOCX numbering extraction
+
+1. Existing paragraph metadata SHALL expose effective native numbering identity, level, parsed format/template and optional logical layout label without prefixing paragraph text or changing link offsets. Cleared numbering SHALL be absent; missing definitions SHALL remain null rather than guessed.
+2. Native style/table resolution and layout placements SHALL own numbering semantics. Labels SHALL attach to the segment containing the native label line; body, auxiliary stories and nested tables SHALL retain separate identities. Conflicting repeated labels SHALL be omitted, and empty numbered paragraphs SHALL remain represented.
+3. Definitions, observed paths, placements, individual strings, output metadata and adapter-native definition lookup work SHALL be bounded. Repeated and missing definition results SHALL be cached without replacing native resolution. Tests SHALL cover continuation/restart, all nine levels, styles, start overrides, breaks/wrapping, stories, symbol fonts, RTL logical labels and native reader normalization. Broader list authoring and exact automatic page slicing remain separately scoped.
+
+## 36. PPTX fixed internal navigation extraction
+
+1. Existing Link values SHALL normalize resolved native slide actions to one-based #page=N URIs and zero-based target_page metadata in current presentation order, including hidden/self targets. Source page, exact Unicode label offsets, table source paths and grouped-shape traversal SHALL remain unchanged.
+2. A bounded native SlideId index SHALL be shared by payload projection and diagnostics. Duplicate native identities SHALL fail explicitly. Contextual actions SHALL remain diagnosed omissions rather than invented fixed destinations; native reader discards SHALL be documented as upstream gaps.
+3. Tests SHALL cover source relationship variants, reorder/hidden/self links, repeated labels, table/group links, URLs, omission diagnostics and model bounds. No raw XML link parser or new public navigation API SHALL be introduced.
+
+## 37. Explicit native list starts
+
+1. Existing Paragraph.set_list SHALL accept an optional non-boolean integer start in 1..32767 for top-level numbered lists. Supplying start SHALL allocate a fresh native abstract/instance sequence and level-zero start override; omitted start SHALL retain existing nearest-sequence continuation. No existing paragraph SHALL be reassigned implicitly.
+2. Unsupported list kinds/levels and invalid integers SHALL fail before mutation. Supplied starts in header/footer stories, including nested cells, SHALL fail explicitly until native measurement preserves the requested visible counter. Existing omission behavior SHALL remain unchanged.
+3. Native list-definition budgets, story identity, copies, closed/deleted handles and atomic failures SHALL remain enforced. Tests SHALL verify saved native overrides, extracted labels, visible PDF text, body/cell/note scope, continuation and rollback without a local counter algorithm.
+
+## 38. PPTX source slide-count preflight
+
+1. PPTX input SHALL reject more than 10,000 source slide references before the native reader silently truncates them. The check SHALL use bounded generic XML events, retain native prefix/encoding recognition, and avoid reproducing private package relationship resolution or alternate-content selection.
+2. A conservative count of every sldId element beneath each presentation root SHALL cover alternate branches and section lists as well as the primary list; unused presentation parts and redundant references count toward this stricter profile. Other-format/detection preflight SHALL retain its existing path. Binary media SHALL NOT be rejected merely for not being XML.
+3. Eligible member inflation, UTF-16 decoding, prolog, token and nesting work SHALL be bounded. Tests SHALL cover 10,000/+1, relocation and unusual part names, UTF-8/UTF-16, leading text, alternate content, large media and all public processing paths. A shared XML parser is a safety dependency only; document semantics remain in DeckCraft.
+
+## 39. DOCX picture crop and mirroring
+
+1. Existing Picture handles SHALL expose crop and boolean horizontal/vertical flips using the same vocabulary as presentation pictures. Crop SHALL use finite LTRB fractions in 0..0.45 with None reset; original media and uncropped frame size SHALL remain intact. Replacement SHALL retain transforms.
+2. Native public image/Float properties SHALL own serialization and rendering. DOCX frame dimensions below the native one-point minimum SHALL be rejected on insertion/resize instead of silently enlarged. Rotation SHALL remain unavailable until its native edge-loss fixture is fixed; no local rotation/resampling engine SHALL be added.
+3. Tests SHALL verify native readback, original bytes, actual asymmetric PNG/PDF pixels, replacements, copies, cell/story containment, cache invalidation, deleted/closed handles and atomic invalid values. Existing media and geometry budgets SHALL remain enforced.
+
+## 40. Owned PDF field geometry
+
+1. Existing PdfField.box SHALL be writable in current-page displayed coordinates. Moving/resizing SHALL retain native field/widget identity, name, value, options and appearance orientation; it SHALL NOT transfer the field to another page or broaden the single-widget owned-form profile.
+2. Native public field properties and appearance regeneration SHALL operate on staged state. Bounds, current value and all choice-option fit SHALL be validated before commit. Failed geometry/resource changes SHALL preserve the document and caches; caller coordinate conversions SHALL finish before final stale-handle validation.
+3. Tests SHALL cover text/checkbox/choice widgets, actual old/new pixels, native save/readback and flattening, rotation/CropBox/UserUnit, copies, warmed caches, stale/deleted/closed handles, callback changes and atomic fit failures.
+
+## 41. Private Office render sessions
+
+1. Opening DOCX/PPTX SHALL retain the native parsed model used for eager extraction and, for DOCX, its completed layout. Existing public rendering methods SHALL reuse that state without reparsing or repagination. No public session class or additional render vocabulary SHALL be introduced.
+2. Shared checked render helpers SHALL preserve one-shot PNG output, clipping, DPI/dimension/index errors and source preflight. DOCX retained state SHALL reject more than 10,000 laid-out pages or one million placed items after native layout; these are not peak-layout allocation guarantees. Temporary layout caches SHALL not be retained.
+3. Close SHALL serialize with render, release owned native state and private source/password references, and be idempotent. Already extracted values SHALL remain owned and usable. Python projection failure SHALL close unreturned sessions even if its traceback survives. Global/thread-local renderer caches are outside the session lifetime guarantee.
+4. Validation SHALL prove one native parse/layout, mixed-page full/clip PNG parity, source lifetime, concurrent close, resource/error behavior and installed-wheel acceptance. Separate-process synthetic measurements SHALL distinguish open, cold/warm/multi-page latency and native RSS/peak RSS. P1 remains open pending representative large-corpus evidence.

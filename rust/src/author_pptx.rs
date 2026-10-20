@@ -211,6 +211,23 @@ impl EditablePptx {
             .ok_or_else(|| PyValueError::new_err("shape does not exist on this slide"))
     }
 
+    fn picture_fill(&self, slide: usize, id: u32) -> PyResult<&PictureFill> {
+        match &self.shape(slide, id)?.kind {
+            ShapeKind::Picture { fill } => Ok(fill),
+            _ => Err(PyValueError::new_err("shape is not a picture")),
+        }
+    }
+
+    fn shape_transform(&self, slide: usize, id: u32) -> PyResult<Xfrm> {
+        let shape = self.shape(slide, id)?;
+        let document = self.document()?;
+        let context = deckcraft_model::resolve::Ctx::for_slide(document, &document.slides[slide])
+            .ok_or_else(|| {
+            EngineError::Malformed("slide has no native master/layout context".into())
+        })?;
+        Ok(deckcraft_model::resolve::xfrm(&context, shape))
+    }
+
     fn refresh_budgets(&mut self) -> PyResult<()> {
         let document = self.document()?;
         let mut live_tables = HashSet::new();
@@ -406,23 +423,86 @@ impl EditablePptx {
         Ok(output)
     }
 
-    pub fn add_slide(&mut self) -> PyResult<usize> {
-        if self.document()?.slides.len() >= MAX_SLIDES {
+    #[pyo3(signature = (layout="blank"))]
+    pub fn add_slide(&mut self, layout: &str) -> PyResult<usize> {
+        let document = self.document()?;
+        if document.slides.len() >= MAX_SLIDES {
             return Err(
                 EngineError::ResourceLimit("presentation exceeds 10000 slides".into()).into(),
             );
         }
-        self.mutate(|document| {
-            let layout = deckcraft_model::defaults::layout_of_kind(document, LayoutType::Blank)
-                .ok_or_else(|| EngineError::Malformed("default blank layout is missing".into()))?;
-            let slide =
+        let kind = match layout {
+            "blank" => LayoutType::Blank,
+            "title" => LayoutType::Title,
+            "title_and_content" => LayoutType::TitleAndContent,
+            "two_content" => LayoutType::TwoContent,
+            "section_header"
+            | "comparison"
+            | "title_only"
+            | "content_with_caption"
+            | "picture_with_caption"
+            | "title_and_vertical_text"
+            | "vertical_title_and_text"
+            | "custom" => {
+                return Err(EngineError::Unsupported(format!(
+                    "slide layout {layout} is not available in the verified authoring profile"
+                ))
+                .into())
+            }
+            _ => {
+                return Err(PyValueError::new_err(
+                    "layout must be blank, title, title_and_content or two_content",
+                ))
+            }
+        };
+        let layout = deckcraft_model::defaults::layout_of_kind(document, kind)
+            .ok_or_else(|| EngineError::Malformed("native default layout is missing".into()))?;
+        let (_, definition) = document
+            .layout(layout)
+            .ok_or_else(|| EngineError::Malformed("native layout definition is missing".into()))?;
+        let added = definition
+            .shapes
+            .iter()
+            .filter(|shape| {
+                shape
+                    .ph
+                    .as_ref()
+                    .is_some_and(|ph| !ph.kind.is_footer_kind())
+            })
+            .count();
+        if added > MAX_SHAPES.saturating_sub(self.shapes) {
+            return Err(
+                EngineError::ResourceLimit("presentation exceeds 100000 shapes".into()).into(),
+            );
+        }
+        self.check_paragraph_budget(added, 0)?;
+        let identifiers = u32::try_from(added.saturating_add(1))
+            .ok()
+            .and_then(|count| document.next_id.max(1).checked_add(count));
+        if identifiers.is_none() {
+            return Err(
+                EngineError::ResourceLimit("presentation object IDs exhausted".into()).into(),
+            );
+        }
+        let index = self.mutate(|document| {
+            let mut slide =
                 deckcraft_model::defaults::new_slide(document, layout).ok_or_else(|| {
                     EngineError::ResourceLimit("presentation object IDs exhausted".into())
                 })?;
+            // Native layout placeholders start with zero paragraphs. Use the public
+            // editor's empty insertion to create its editable empty paragraph without
+            // adding any direct text-style or geometry overrides.
+            for shape in &mut slide.shapes {
+                if let Some(body) = &mut shape.text {
+                    deckcraft_model::edit::insert(body, (0, 0), "", None);
+                }
+            }
             let index = document.slides.len();
             document.slides.push(Arc::new(slide));
             Ok(index)
-        })
+        })?;
+        self.refresh_budgets()?;
+        Ok(index)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -500,17 +580,7 @@ impl EditablePptx {
                 }),
             });
             prune_media(document);
-            if document
-                .media
-                .iter()
-                .map(|media| media.data.len())
-                .sum::<usize>()
-                > MAX_MEDIA
-            {
-                return Err(
-                    EngineError::ResourceLimit("presentation images exceed 64 MiB".into()).into(),
-                );
-            }
+            check_live_media(document)?;
             Ok(())
         })?;
         self.refresh_budgets()
@@ -585,16 +655,34 @@ impl EditablePptx {
         Ok(id)
     }
 
+    pub fn shape_placeholder(&self, slide: usize, id: u32) -> PyResult<Option<&'static str>> {
+        use deckcraft_model::PhType;
+        Ok(self.shape(slide, id)?.ph.as_ref().map(|ph| match ph.kind {
+            PhType::Title => "title",
+            PhType::CtrTitle => "center_title",
+            PhType::SubTitle => "subtitle",
+            PhType::Body => "body",
+            PhType::Obj => "content",
+            PhType::Chart => "chart",
+            PhType::Table => "table",
+            PhType::ClipArt => "clip_art",
+            PhType::Diagram => "diagram",
+            PhType::Media => "media",
+            PhType::Picture => "picture",
+            PhType::Date => "date",
+            PhType::Footer => "footer",
+            PhType::SlideNum => "slide_number",
+            PhType::Header => "header",
+            PhType::SlideImage => "slide_image",
+        }))
+    }
+
     pub fn shape_rotation(&self, slide: usize, id: u32) -> PyResult<f64> {
-        self.shape(slide, id)?
-            .xfrm
-            .as_ref()
-            .map(|value| value.rot)
-            .ok_or_else(|| PyValueError::new_err("shape has no explicit geometry"))
+        Ok(self.shape_transform(slide, id)?.rot)
     }
 
     pub fn set_shape_rotation(&mut self, slide: usize, id: u32, degrees: f64) -> PyResult<()> {
-        self.shape(slide, id)?;
+        let effective = self.shape_transform(slide, id)?;
         if !degrees.is_finite() || !(-360.0..=360.0).contains(&degrees) {
             return Err(PyValueError::new_err(
                 "rotation must be finite and between -360 and 360 degrees",
@@ -603,8 +691,7 @@ impl EditablePptx {
         self.mutate(|document| {
             shape_mut(document, slide, id)?
                 .xfrm
-                .as_mut()
-                .ok_or_else(|| PyValueError::new_err("shape has no explicit geometry"))?
+                .get_or_insert(effective)
                 .rot = degrees;
             Ok(())
         })
@@ -977,11 +1064,7 @@ impl EditablePptx {
     }
 
     pub fn shape_box(&self, slide: usize, id: u32) -> PyResult<(f64, f64, f64, f64)> {
-        let transform = self
-            .shape(slide, id)?
-            .xfrm
-            .as_ref()
-            .ok_or_else(|| PyValueError::new_err("shape has no explicit geometry"))?;
+        let transform = self.shape_transform(slide, id)?;
         Ok((transform.x, transform.y, transform.w, transform.h))
     }
 
@@ -995,7 +1078,7 @@ impl EditablePptx {
         width: f64,
         height: f64,
     ) -> PyResult<()> {
-        self.shape(slide, id)?;
+        let effective = self.shape_transform(slide, id)?;
         if self.shape(slide, id)?.geom.preset_name() == Some("line") {
             line_geometry(x, y, width, height)?;
         } else {
@@ -1014,9 +1097,7 @@ impl EditablePptx {
                 }
                 validate_table_grid(table)?;
             }
-            let transform = shape
-                .xfrm
-                .get_or_insert_with(|| Xfrm::new(x, y, width, height));
+            let transform = shape.xfrm.get_or_insert(effective);
             transform.x = x;
             transform.y = y;
             transform.w = width;
@@ -1701,12 +1782,19 @@ impl EditablePptx {
         self.check_shape(slide, x, y, width, height)?;
         text_value(alt)?;
         self.check_text_budget(alt.len())?;
-        if data.len() > MAX_MEDIA.saturating_sub(self.media_bytes) {
-            return Err(
-                EngineError::ResourceLimit("presentation images exceed 64 MiB".into()).into(),
-            );
-        }
         validate_png(data)?;
+        if data.len() > MAX_MEDIA.saturating_sub(self.media_bytes)
+            && !self
+                .document()?
+                .media
+                .iter()
+                .any(|media| media.data.as_slice() == data)
+        {
+            return Err(EngineError::ResourceLimit(
+                "presentation images exceed 64 MiB of live media".into(),
+            )
+            .into());
+        }
         let id = self.mutate(|document| {
             let media = document
                 .add_media("image.png", "image/png", data.to_vec())
@@ -1724,13 +1812,128 @@ impl EditablePptx {
                 descr: alt.to_owned(),
                 ..Shape::default()
             };
-            insert_shape(document, slide, shape)
+            let id = insert_shape(document, slide, shape)?;
+            check_live_media(document)?;
+            Ok(id)
         })?;
-        // Count submitted bytes conservatively even when upstream deduplicates media.
-        self.media_bytes += data.len();
-        self.text_bytes += alt.len();
-        self.shapes += 1;
+        self.refresh_budgets()?;
         Ok(id)
+    }
+
+    pub fn picture_data(&self, slide: usize, id: u32) -> PyResult<Vec<u8>> {
+        let fill = self.picture_fill(slide, id)?;
+        let media = self
+            .document()?
+            .media(fill.media)
+            .ok_or_else(|| EngineError::Malformed("picture media is missing".into()))?;
+        if media.link.is_some() || media.content_type != "image/png" {
+            return Err(EngineError::Unsupported(
+                "picture editing requires owned PNG media".into(),
+            )
+            .into());
+        }
+        if media.data.len() > MAX_IMAGE {
+            return Err(EngineError::ResourceLimit("picture data exceeds 16 MiB".into()).into());
+        }
+        Ok(media.data.as_ref().clone())
+    }
+
+    pub fn set_picture_data(&mut self, slide: usize, id: u32, data: &[u8]) -> PyResult<()> {
+        self.picture_fill(slide, id)?;
+        organization_profile(self.document()?)?;
+        validate_png(data)?;
+        self.mutate(|document| {
+            let media = document
+                .add_media("image.png", "image/png", data.to_vec())
+                .ok_or_else(|| {
+                    EngineError::ResourceLimit("presentation object IDs exhausted".into())
+                })?;
+            let ShapeKind::Picture { fill } = &mut shape_mut(document, slide, id)?.kind else {
+                return Err(PyValueError::new_err("shape is not a picture"));
+            };
+            fill.media = media;
+            prune_media(document);
+            check_live_media(document)?;
+            Ok(())
+        })?;
+        self.refresh_budgets()
+    }
+
+    pub fn picture_alt(&self, slide: usize, id: u32) -> PyResult<String> {
+        self.picture_fill(slide, id)?;
+        Ok(self.shape(slide, id)?.descr.clone())
+    }
+
+    pub fn set_picture_alt(&mut self, slide: usize, id: u32, alt: &str) -> PyResult<()> {
+        self.picture_fill(slide, id)?;
+        text_value(alt)?;
+        let old = self.shape(slide, id)?.descr.len();
+        self.check_text_budget(alt.len().saturating_sub(old))?;
+        self.mutate(|document| {
+            shape_mut(document, slide, id)?.descr = alt.to_owned();
+            Ok(())
+        })?;
+        self.refresh_budgets()
+    }
+
+    pub fn picture_crop(&self, slide: usize, id: u32) -> PyResult<(f64, f64, f64, f64)> {
+        let [left, top, right, bottom] = self.picture_fill(slide, id)?.crop;
+        Ok((left, top, right, bottom))
+    }
+
+    pub fn set_picture_crop(
+        &mut self,
+        slide: usize,
+        id: u32,
+        crop: (f64, f64, f64, f64),
+    ) -> PyResult<()> {
+        self.picture_fill(slide, id)?;
+        let crop = [crop.0, crop.1, crop.2, crop.3];
+        if crop
+            .iter()
+            .any(|v| !v.is_finite() || !(0.0..=0.45).contains(v))
+        {
+            return Err(PyValueError::new_err(
+                "crop fractions must be finite and between 0 and 0.45 in left/top/right/bottom order",
+            ));
+        }
+        self.mutate(|document| {
+            let ShapeKind::Picture { fill } = &mut shape_mut(document, slide, id)?.kind else {
+                return Err(PyValueError::new_err("shape is not a picture"));
+            };
+            fill.crop = crop;
+            Ok(())
+        })
+    }
+
+    pub fn picture_flips(&self, slide: usize, id: u32) -> PyResult<(bool, bool)> {
+        self.picture_fill(slide, id)?;
+        let transform = self.shape_transform(slide, id)?;
+        Ok((transform.flip_h, transform.flip_v))
+    }
+
+    #[pyo3(signature = (slide,id,flip_h=None,flip_v=None))]
+    pub fn set_picture_flips(
+        &mut self,
+        slide: usize,
+        id: u32,
+        flip_h: Option<bool>,
+        flip_v: Option<bool>,
+    ) -> PyResult<()> {
+        self.picture_fill(slide, id)?;
+        let effective = self.shape_transform(slide, id)?;
+        self.mutate(|document| {
+            let transform = shape_mut(document, slide, id)?
+                .xfrm
+                .get_or_insert(effective);
+            if let Some(value) = flip_h {
+                transform.flip_h = value;
+            }
+            if let Some(value) = flip_v {
+                transform.flip_v = value;
+            }
+            Ok(())
+        })
     }
 }
 
@@ -2480,6 +2683,20 @@ fn rgb_fill(fill: &Option<Fill>) -> PyResult<Option<(u8, u8, u8)>> {
 
 // Only new presentations are mutable: media references can originate in authored
 // picture shapes and slide backgrounds. Other model profiles are not imported.
+fn check_live_media(document: &Presentation) -> PyResult<usize> {
+    let bytes = document
+        .media
+        .iter()
+        .fold(0usize, |sum, media| sum.saturating_add(media.data.len()));
+    if bytes > MAX_MEDIA {
+        return Err(EngineError::ResourceLimit(
+            "presentation images exceed 64 MiB of live media".into(),
+        )
+        .into());
+    }
+    Ok(bytes)
+}
+
 fn prune_media(document: &mut Presentation) {
     let mut used = HashSet::new();
     for slide in &document.slides {
@@ -2790,11 +3007,477 @@ fn validate_png(data: &[u8]) -> PyResult<()> {
 mod tests {
     use super::*;
 
+    fn picture_fixture(padding: usize, color: [u8; 3]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, 1, 1);
+            encoder.set_color(png::ColorType::Rgb);
+            let mut writer = encoder.write_header().unwrap();
+            if padding > 0 {
+                writer
+                    .write_chunk(png::chunk::ChunkType(*b"caAs"), &vec![0; padding])
+                    .unwrap();
+            }
+            writer.write_image_data(&color).unwrap();
+        }
+        bytes
+    }
+
+    fn picture_quadrants() -> Vec<u8> {
+        let colors = [
+            [255, 0, 0, 255],
+            [0, 255, 0, 255],
+            [0, 0, 255, 255],
+            [255, 255, 0, 255],
+        ];
+        let rgba = (0..20)
+            .flat_map(|y| (0..20).flat_map(move |x| colors[(y / 10) * 2 + x / 10]))
+            .collect::<Vec<_>>();
+        crate::rendering::encode_png(20, 20, &rgba, 72.0).unwrap()
+    }
+
+    fn picture_pixels(png: &[u8]) -> (usize, Vec<u8>) {
+        let mut reader = png::Decoder::new(Cursor::new(png)).read_info().unwrap();
+        let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut pixels).unwrap();
+        assert_eq!(info.color_type, png::ColorType::Rgba);
+        (info.width as usize, pixels)
+    }
+
+    #[test]
+    fn picture_transforms_use_native_crop_then_flips_and_clockwise_rotation() {
+        pyo3::prepare_freethreaded_python();
+        let image = picture_quadrants();
+        let colors = [
+            [255, 0, 0, 255],
+            [0, 255, 0, 255],
+            [0, 0, 255, 255],
+            [255, 255, 0, 255],
+        ];
+        let cases = [
+            (0.0, false, false, (0.0, 0.0, 0.0, 0.0), [0, 1, 2, 3]),
+            (90.0, false, false, (0.0, 0.0, 0.0, 0.0), [2, 0, 3, 1]),
+            (180.0, false, false, (0.0, 0.0, 0.0, 0.0), [3, 2, 1, 0]),
+            (270.0, false, false, (0.0, 0.0, 0.0, 0.0), [1, 3, 0, 2]),
+            (0.0, true, false, (0.0, 0.0, 0.0, 0.0), [1, 0, 3, 2]),
+            (0.0, false, true, (0.0, 0.0, 0.0, 0.0), [2, 3, 0, 1]),
+            (90.0, true, false, (0.0, 0.0, 0.0, 0.0), [3, 1, 2, 0]),
+            (0.0, false, false, (0.45, 0.45, 0.0, 0.0), [3, 3, 3, 3]),
+            (90.0, true, false, (0.45, 0.0, 0.0, 0.0), [3, 1, 3, 1]),
+        ];
+        for (rotation, h, v, crop, expected) in cases {
+            let mut author = EditablePptx::new(160.0, 160.0).unwrap();
+            author.add_slide("blank").unwrap();
+            let id = author
+                .add_image(0, &image, 40.0, 40.0, 80.0, 80.0, "Quadrants")
+                .unwrap();
+            author.set_picture_crop(0, id, crop).unwrap();
+            author.set_picture_flips(0, id, Some(h), Some(v)).unwrap();
+            author.set_shape_rotation(0, id, rotation).unwrap();
+            assert_eq!(author.picture_data(0, id).unwrap(), image);
+            assert_eq!(author.picture_crop(0, id).unwrap(), crop);
+            assert_eq!(author.picture_flips(0, id).unwrap(), (h, v));
+            let bytes = author.to_bytes().unwrap();
+            let reopened = deckcraft_pptx::import(&bytes).unwrap();
+            let shape = &reopened.slides[0].shapes[0];
+            let ShapeKind::Picture { fill } = &shape.kind else {
+                panic!("picture");
+            };
+            assert_eq!(fill.crop, [crop.0, crop.1, crop.2, crop.3]);
+            assert_eq!(
+                (shape.xfrm.unwrap().flip_h, shape.xfrm.unwrap().flip_v),
+                (h, v)
+            );
+            for png in [crate::pptx::render(&bytes, 0, 72.0).unwrap(), {
+                let pdf = deckcraft_pdf::export(
+                    &reopened,
+                    &deckcraft_pdf::PdfOptions {
+                        dpi: 72.0,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+                crate::pdf::render(&pdf, 0, 72.0, None).unwrap()
+            }] {
+                let (width, pixels) = picture_pixels(&png);
+                for ((x, y), color) in [(60, 60), (100, 60), (60, 100), (100, 100)]
+                    .into_iter()
+                    .zip(expected)
+                {
+                    assert_eq!(
+                        &pixels[(y * width + x) * 4..][..4],
+                        &colors[color],
+                        "rotation {rotation}, flip {h}/{v}, crop {crop:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn picture_replacement_preserves_identity_properties_links_and_shared_sources() {
+        pyo3::prepare_freethreaded_python();
+        let old = picture_fixture(0, [255, 0, 0]);
+        let replacement = picture_fixture(0, [0, 255, 0]);
+        let mut author = EditablePptx::new(300.0, 300.0).unwrap();
+        author.add_slide("blank").unwrap();
+        author.set_background_image(0, &old).unwrap();
+        let a = author
+            .add_image(0, &old, 20.0, 20.0, 50.0, 50.0, "Old alt")
+            .unwrap();
+        let b = author
+            .add_image(0, &old, 90.0, 20.0, 50.0, 50.0, "Sibling")
+            .unwrap();
+        assert_eq!(author.document().unwrap().media.len(), 1);
+        assert_eq!(author.media_bytes, old.len());
+        author.set_picture_crop(0, a, (0.1, 0.2, 0.3, 0.4)).unwrap();
+        author.set_picture_flips(0, a, Some(true), None).unwrap();
+        author.set_shape_rotation(0, a, 90.0).unwrap();
+        author
+            .set_shape_link(
+                0,
+                a,
+                Some("https://example.com/picture"),
+                None,
+                "Picture link",
+            )
+            .unwrap();
+        let before = author.shape(0, a).unwrap().clone();
+        let order = author.shape_ids(0).unwrap();
+        let mut independent = author.picture_data(0, a).unwrap();
+        independent[0] = 0;
+        assert_eq!(author.picture_data(0, a).unwrap(), old);
+        author.set_picture_data(0, a, &replacement).unwrap();
+        let after = author.shape(0, a).unwrap();
+        assert_eq!(after.id, before.id);
+        assert_eq!(after.xfrm, before.xfrm);
+        assert_eq!(after.descr, before.descr);
+        assert_eq!(after.click, before.click);
+        assert_eq!(author.picture_crop(0, a).unwrap(), (0.1, 0.2, 0.3, 0.4));
+        assert_eq!(author.shape_ids(0).unwrap(), order);
+        assert_eq!(author.picture_data(0, b).unwrap(), old);
+        assert_eq!(author.background_image(0).unwrap(), Some(old.clone()));
+        assert_eq!(author.document().unwrap().media.len(), 2);
+        author.set_picture_alt(0, a, "New café ✓").unwrap();
+        assert_eq!(author.picture_alt(0, a).unwrap(), "New café ✓");
+        let copy = author.copy().unwrap();
+        author.set_picture_data(0, b, &replacement).unwrap();
+        assert_eq!(author.document().unwrap().media.len(), 2); // background retains old bytes
+        author.background(0, (255, 255, 255)).unwrap();
+        assert_eq!(author.document().unwrap().media.len(), 1);
+        assert_eq!(author.media_bytes, replacement.len());
+        assert_eq!(copy.picture_data(0, b).unwrap(), old);
+        author.delete_shape(0, a).unwrap();
+        assert_eq!(author.document().unwrap().media.len(), 1);
+        author.delete_shape(0, b).unwrap();
+        assert_eq!(author.media_bytes, 0);
+        assert!(author.picture_data(0, a).is_err());
+    }
+
+    #[test]
+    fn picture_invalid_updates_preserve_model_counters_and_revision() {
+        pyo3::prepare_freethreaded_python();
+        let png = picture_fixture(0, [255, 0, 0]);
+        let mut author = EditablePptx::new(200.0, 200.0).unwrap();
+        author.add_slide("blank").unwrap();
+        let id = author
+            .add_image(0, &png, 20.0, 20.0, 50.0, 50.0, "Before")
+            .unwrap();
+        let text = author
+            .add_text(0, "Text", 20.0, 90.0, 100.0, 30.0, 18.0)
+            .unwrap();
+        let before = author.document().unwrap().clone();
+        let counters = (
+            author.text_bytes,
+            author.media_bytes,
+            author.shapes,
+            author.revision,
+        );
+        for crop in [
+            (-0.1, 0.0, 0.0, 0.0),
+            (0.0, 0.46, 0.0, 0.0),
+            (0.0, 0.0, f64::NAN, 0.0),
+            (0.0, 0.0, 0.0, f64::INFINITY),
+        ] {
+            assert!(author.set_picture_crop(0, id, crop).is_err());
+        }
+        assert!(author.set_picture_data(0, id, b"not png").is_err());
+        assert!(author
+            .set_picture_data(0, id, &png[..png.len() - 12])
+            .is_err());
+        assert!(author
+            .set_picture_data(0, id, &vec![0; MAX_IMAGE + 1])
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit:"));
+        assert!(author.set_picture_alt(0, id, "bad\u{0}").is_err());
+        assert!(author
+            .set_picture_alt(0, id, &"x".repeat(MAX_TEXT + 1))
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit:"));
+        assert!(author
+            .set_picture_crop(0, text, (0.0, 0.0, 0.0, 0.0))
+            .is_err());
+        assert!(author.picture_data(0, text).is_err());
+        assert_eq!(author.document().unwrap(), &before);
+        assert_eq!(
+            (
+                author.text_bytes,
+                author.media_bytes,
+                author.shapes,
+                author.revision
+            ),
+            counters
+        );
+        author.close();
+        assert!(author
+            .picture_flips(0, id)
+            .unwrap_err()
+            .to_string()
+            .contains("closed:"));
+    }
+
+    #[test]
+    fn picture_live_media_budget_allows_dedup_and_reclaims_last_replaced_source() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(200.0, 200.0).unwrap();
+        author.add_slide("blank").unwrap();
+        let mut ids = Vec::new();
+        for red in 0..4 {
+            let png = picture_fixture(15 * 1024 * 1024, [red, 0, 0]);
+            ids.push(
+                author
+                    .add_image(0, &png, 20.0, 20.0, 50.0, 50.0, "")
+                    .unwrap(),
+            );
+        }
+        let extra = picture_fixture(15 * 1024 * 1024, [4, 0, 0]);
+        let before = author.document().unwrap().clone();
+        let counters = (author.media_bytes, author.shapes, author.revision);
+        assert!(author
+            .add_image(0, &extra, 20.0, 20.0, 50.0, 50.0, "")
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit:"));
+        assert_eq!(author.document().unwrap(), &before);
+        assert_eq!(
+            (author.media_bytes, author.shapes, author.revision),
+            counters
+        );
+        let shared = author.picture_data(0, ids[0]).unwrap();
+        let duplicate = author
+            .add_image(0, &shared, 20.0, 20.0, 50.0, 50.0, "")
+            .unwrap();
+        assert_eq!(author.media_bytes, counters.0);
+        let before = author.document().unwrap().clone();
+        let revision = author.revision;
+        assert!(author
+            .set_picture_data(0, ids[0], &extra)
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit:"));
+        assert_eq!(author.document().unwrap(), &before);
+        assert_eq!(author.revision, revision);
+        author.delete_shape(0, duplicate).unwrap();
+        author.set_picture_data(0, ids[0], &extra).unwrap();
+        assert_eq!(author.document().unwrap().media.len(), 4);
+        assert_eq!(author.media_bytes, counters.0);
+        assert_eq!(author.picture_data(0, ids[0]).unwrap(), extra);
+    }
+
+    #[test]
+    fn authored_layouts_create_fresh_inherited_placeholders_and_roundtrip() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        let masters = author.document().unwrap().masters.clone();
+        let mut ids = HashSet::new();
+        let cases: [(&str, &[&str]); 4] = [
+            ("blank", &[]),
+            ("title", &["center_title", "subtitle"]),
+            ("title_and_content", &["title", "content"]),
+            ("two_content", &["title", "content", "content"]),
+        ];
+        for (name, roles) in cases {
+            let index = author.add_slide(name).unwrap();
+            assert!(ids.insert(author.slide_id(index).unwrap()));
+            let shapes = author.shape_ids(index).unwrap();
+            assert_eq!(shapes.len(), roles.len());
+            for ((id, kind), role) in shapes.into_iter().zip(roles) {
+                assert!(ids.insert(id));
+                assert_eq!(kind, "text");
+                assert_eq!(author.shape_placeholder(index, id).unwrap(), Some(*role));
+                assert!(author.shape(index, id).unwrap().xfrm.is_none());
+                let rect = author.shape_box(index, id).unwrap();
+                assert!(rect.2 > 0.0 && rect.3 > 0.0);
+                assert_eq!(author.shape_rotation(index, id).unwrap(), 0.0);
+                author
+                    .set_shape_text(index, id, &format!("Label {index} {id}"))
+                    .unwrap();
+                assert!(author.shape(index, id).unwrap().xfrm.is_none());
+            }
+        }
+        assert_eq!(author.shapes, 7);
+        assert_eq!(author.document().unwrap().masters, masters);
+        let reopened = deckcraft_pptx::import(&author.to_bytes().unwrap()).unwrap();
+        assert!(reopened.validate().is_empty());
+        for slide in &reopened.slides {
+            assert!(reopened.layout(slide.layout).is_some());
+            for shape in &slide.shapes {
+                assert!(shape.ph.is_some());
+                assert!(shape.xfrm.is_none());
+                assert!(shape.text.as_ref().unwrap().text().starts_with("Label "));
+            }
+        }
+        let plain = author
+            .add_text(0, "Ordinary", 10.0, 10.0, 200.0, 40.0, 18.0)
+            .unwrap();
+        assert_eq!(author.shape_placeholder(0, plain).unwrap(), None);
+    }
+
+    #[test]
+    fn authored_layouts_render_actual_title_and_column_text_and_export_pdf() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        let mut labels = Vec::new();
+        for layout in ["title", "title_and_content", "two_content"] {
+            let slide = author.add_slide(layout).unwrap();
+            let mut expected = Vec::new();
+            for (order, (id, _)) in author.shape_ids(slide).unwrap().into_iter().enumerate() {
+                let text = format!("Label {} {}", slide + 1, order + 1);
+                author.set_shape_text(slide, id, &text).unwrap();
+                expected.push((text, author.shape_box(slide, id).unwrap()));
+            }
+            labels.push(expected);
+        }
+        let bytes = author.to_bytes().unwrap();
+        for (slide, expected) in labels.iter().enumerate() {
+            let png = crate::pptx::render(&bytes, slide, 72.0).unwrap();
+            let mut reader = png::Decoder::new(Cursor::new(png)).read_info().unwrap();
+            let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+            let info = reader.next_frame(&mut pixels).unwrap();
+            assert_eq!((info.width, info.height), (720, 540));
+            for (_, (x, y, w, h)) in expected {
+                let count = (*y as usize..(y + h).ceil() as usize)
+                    .flat_map(|py| (*x as usize..(x + w).ceil() as usize).map(move |px| (px, py)))
+                    .filter(|&(px, py)| pixels[(py * 720 + px) * 4..][..3].iter().any(|c| *c < 180))
+                    .count();
+                assert!(count > 20, "slide {slide} has no visible placeholder ink");
+            }
+        }
+        let options = deckcraft_pdf::PdfOptions {
+            dpi: 72.0,
+            ..Default::default()
+        };
+        let pdf = deckcraft_pdf::export(author.document().unwrap(), &options).unwrap();
+        let extracted = crate::pdf::extract(&pdf, None).unwrap();
+        assert_eq!(extracted.pages.len(), 3);
+        for (page, expected) in extracted.pages.iter().zip(&labels) {
+            let actual = page
+                .blocks
+                .iter()
+                .map(|b| b.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            for (text, _) in expected {
+                assert_eq!(actual.matches(text).count(), 1, "{actual}");
+            }
+        }
+    }
+
+    #[test]
+    fn placeholder_geometry_changes_resolve_native_inheritance_only_for_edited_shape() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide("title_and_content").unwrap();
+        let shapes = author.shape_ids(0).unwrap();
+        let title = shapes[0].0;
+        let content = shapes[1].0;
+        // Give the native parent a transform not produced by the default fixtures.
+        let layout = author.document().unwrap().slides[0].layout;
+        let native = author.presentation.as_mut().unwrap();
+        let master = Arc::make_mut(&mut native.masters[0]);
+        let definition = master.layouts.iter_mut().find(|l| l.id == layout).unwrap();
+        for shape in &mut definition.shapes {
+            if let Some(transform) = &mut shape.xfrm {
+                transform.rot = 17.0;
+                transform.flip_h = true;
+            }
+        }
+        let masters = author.document().unwrap().masters.clone();
+        let original = author.shape_transform(0, title).unwrap();
+        let placeholder = author.shape(0, title).unwrap().ph.clone();
+        assert_eq!(author.shape_rotation(0, title).unwrap(), 17.0);
+        author.set_shape_rotation(0, title, 35.0).unwrap();
+        assert_eq!(
+            author.shape_box(0, title).unwrap(),
+            (original.x, original.y, original.w, original.h)
+        );
+        assert!(author.shape(0, title).unwrap().xfrm.unwrap().flip_h);
+        assert!(author.shape(0, content).unwrap().xfrm.is_none());
+        author
+            .set_shape_box(0, content, 20.0, 130.0, 300.0, 250.0)
+            .unwrap();
+        assert_eq!(author.shape_rotation(0, content).unwrap(), 17.0);
+        assert!(author.shape(0, content).unwrap().xfrm.unwrap().flip_h);
+        assert_eq!(author.document().unwrap().masters, masters);
+        assert_eq!(author.shape(0, title).unwrap().ph, placeholder);
+        let reopened = deckcraft_pptx::import(&author.to_bytes().unwrap()).unwrap();
+        assert!(reopened.slides[0].shapes.iter().all(|s| s.ph.is_some()));
+        assert_eq!(reopened.slides[0].shapes[0].xfrm.unwrap().rot, 35.0);
+        assert_eq!(reopened.slides[0].shapes[1].xfrm.unwrap().rot, 17.0);
+    }
+
+    #[test]
+    fn authored_layout_validation_id_and_shape_budgets_are_atomic() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide("blank").unwrap();
+        let before = author.document().unwrap().clone();
+        let revision = author.revision;
+        for name in [
+            "unknown",
+            "Title",
+            "",
+            "title_and_vertical_text",
+            "vertical_title_and_text",
+            "picture_with_caption",
+            "custom",
+        ] {
+            assert!(author.add_slide(name).is_err());
+            assert_eq!(author.document().unwrap(), &before);
+            assert_eq!(author.revision, revision);
+        }
+        author.shapes = MAX_SHAPES - 1;
+        assert!(author
+            .add_slide("title")
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit:"));
+        assert_eq!(author.document().unwrap(), &before);
+        author.shapes = 0;
+        author.presentation.as_mut().unwrap().next_id = u32::MAX - 1;
+        let before = author.document().unwrap().clone();
+        assert!(author
+            .add_slide("two_content")
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit:"));
+        assert_eq!(author.document().unwrap(), &before);
+        assert_eq!(author.revision, revision);
+        author.close();
+        assert!(author
+            .add_slide("title")
+            .unwrap_err()
+            .to_string()
+            .contains("closed:"));
+    }
+
     #[test]
     fn saves_native_slides_text_tables_and_background() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        assert_eq!(author.add_slide().unwrap(), 0);
+        assert_eq!(author.add_slide("blank").unwrap(), 0);
         author
             .add_text(0, "Hello λ\nSecond line", 20.0, 20.0, 400.0, 80.0, 18.0)
             .unwrap();
@@ -2833,9 +3516,9 @@ mod tests {
     fn copies_are_independent_and_rejected_changes_are_atomic() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         let mut copied = author.copy().unwrap();
-        copied.add_slide().unwrap();
+        copied.add_slide("blank").unwrap();
         assert_eq!(author.slide_count().unwrap(), 1);
         let before = author.document().unwrap().clone();
         assert!(author
@@ -2870,7 +3553,7 @@ mod tests {
             writer.write_image_data(&[255, 0, 0]).unwrap();
         }
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         author
             .add_image(0, &png, 20.0, 20.0, 100.0, 100.0, "Red pixel")
             .unwrap();
@@ -2898,7 +3581,7 @@ mod tests {
         assert_eq!(author.document().unwrap(), &before);
 
         let mut exhausted = EditablePptx::new(720.0, 540.0).unwrap();
-        exhausted.add_slide().unwrap();
+        exhausted.add_slide("blank").unwrap();
         exhausted.presentation.as_mut().unwrap().next_id = u32::MAX - 1;
         let before = exhausted.document().unwrap().clone();
         assert!(exhausted
@@ -2912,7 +3595,7 @@ mod tests {
     fn updates_typed_objects_without_losing_format_or_geometry() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         let text_id = author
             .add_text(0, "Old", 10.0, 20.0, 300.0, 100.0, 36.0)
             .unwrap();
@@ -2970,7 +3653,7 @@ mod tests {
     fn formatting_reports_mixed_values_without_averaging() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         let id = author
             .add_text(0, "First\nSecond", 0.0, 0.0, 400.0, 100.0, 24.0)
             .unwrap();
@@ -3016,8 +3699,8 @@ mod tests {
     fn slide_organization_preserves_identity_and_rejects_references() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
+        author.add_slide("blank").unwrap();
         let first = author.slide_id(0).unwrap();
         let second = author.slide_id(1).unwrap();
         author.move_slide(0, 1).unwrap();
@@ -3036,7 +3719,7 @@ mod tests {
     fn slide_metadata_notes_and_cell_style_survive_native_round_trip() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         author.set_slide_name(0, "Quarterly λ").unwrap();
         author.set_slide_hidden(0, true).unwrap();
         author
@@ -3082,7 +3765,7 @@ mod tests {
     fn rejects_excessive_paragraphs_before_building_text_model() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         let before = author.document().unwrap().clone();
         assert!(author
             .add_text(
@@ -3102,7 +3785,7 @@ mod tests {
     fn drawings_keep_geometry_style_and_identity_through_stack_changes() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         let rectangle = author
             .add_shape(
                 0,
@@ -3187,7 +3870,7 @@ mod tests {
                 .unwrap();
         }
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         author.set_background_image(0, &png).unwrap();
         let image = author
             .add_image(0, &png, 10.0, 20.0, 100.0, 100.0, "Pixel")
@@ -3215,7 +3898,7 @@ mod tests {
     fn object_replacement_character_is_literal_pptx_text() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         let id = author
             .add_text(0, "Before", 0.0, 0.0, 300.0, 80.0, 18.0)
             .unwrap();
@@ -3237,7 +3920,7 @@ mod tests {
     fn rejects_carriage_returns_without_mutating_presentation() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         let text_id = author
             .add_text(0, "a\nb", 0.0, 0.0, 100.0, 80.0, 18.0)
             .unwrap();
@@ -3269,7 +3952,7 @@ mod tests {
     fn rich_ranges_preserve_unicode_paragraphs_and_roundtrip_formatting() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         let id = author
             .add_text(0, "Aλ", 20.0, 20.0, 500.0, 200.0, 18.0)
             .unwrap();
@@ -3301,7 +3984,7 @@ mod tests {
     fn replacement_at_run_boundary_uses_selected_character_format() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         let id = author
             .add_text(0, "Prefix ", 20.0, 20.0, 500.0, 100.0, 18.0)
             .unwrap();
@@ -3328,7 +4011,7 @@ mod tests {
     fn readable_underline_names_roundtrip_through_native_writer() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         let id = author
             .add_text(0, "Styled", 20.0, 20.0, 500.0, 100.0, 18.0)
             .unwrap();
@@ -3365,8 +4048,8 @@ mod tests {
     fn links_cross_runs_preserve_labels_and_export_native_navigation() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
+        author.add_slide("blank").unwrap();
         let first = author.slide_id(0).unwrap();
         let target = author.slide_id(1).unwrap();
         let id = author
@@ -3429,7 +4112,7 @@ mod tests {
     fn rejects_invalid_ranges_patches_and_links_atomically() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         let id = author
             .add_text(0, "text\nnext", 20.0, 20.0, 500.0, 100.0, 18.0)
             .unwrap();
@@ -3515,7 +4198,7 @@ mod tests {
     fn mixed_link_assignment_lookup_retains_range_and_revision_validation() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         let id = author
             .add_text(0, "AB", 20.0, 20.0, 500.0, 100.0, 18.0)
             .unwrap();
@@ -3557,8 +4240,8 @@ mod tests {
     fn deletion_detects_table_and_nested_group_references() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
+        author.add_slide("blank").unwrap();
         let target = author.slide_id(1).unwrap();
         let id = author
             .add_table(
@@ -3608,7 +4291,7 @@ mod tests {
     fn rich_text_preflights_fragmentation_and_cloned_link_budgets() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         let id = author
             .add_text(0, "text", 20.0, 20.0, 500.0, 100.0, 18.0)
             .unwrap();
@@ -3663,7 +4346,7 @@ mod tests {
     fn table_layout_roundtrips_and_native_rows_expand_to_fit_content() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         let long = "Line one\nLine two\nLine three";
         let id = author
             .add_table(
@@ -3771,7 +4454,7 @@ mod tests {
     fn table_merges_alias_covered_cells_and_split_preserves_text_once() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         let id = author
             .add_table(
                 0,
@@ -3847,8 +4530,8 @@ mod tests {
     fn table_native_grid_edits_preserve_merge_anchors_and_generations() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
+        author.add_slide("blank").unwrap();
         let source = author.slide_id(0).unwrap();
         let id = author
             .add_table(
@@ -3888,7 +4571,7 @@ mod tests {
     fn table_geometry_changes_and_rejected_edits_are_atomic() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         let id = author
             .add_table(
                 0,
@@ -3954,7 +4637,7 @@ mod tests {
     fn table_insertions_preflight_aggregate_cells_even_without_paragraphs() {
         pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
-        author.add_slide().unwrap();
+        author.add_slide("blank").unwrap();
         let mut ids = Vec::new();
         for _ in 0..2 {
             let mut table = Table::new(100, 500, 1000.0, 1.0);

@@ -41,6 +41,7 @@ class TabStop(TypedDict, total=False):
 
 
 class ParagraphFormatting(TypedDict, total=False):
+    borders: dict[str, BorderFormatting | None] | None
     tabs: list[TabStop] | None
     alignment: str | None
     indent_left: float | None
@@ -62,7 +63,6 @@ class _StyleProperties(_CharacterProperties, ParagraphFormatting, total=False):
 
 class StyleFormatting(_StyleProperties, total=False):
     vertical_alignment: str | None
-    borders: dict[str, BorderFormatting | None] | None
     margins: float | tuple[float, float, float, float] | None
     row_band_size: int | None
 
@@ -183,6 +183,9 @@ def _format_patch(values, *, rgb_highlight: bool = False) -> str:
         raise ValueError("too many formatting properties")
     patch = {}
     for key, value in values.items():
+        if key == "borders":
+            patch.update(json.loads(_table_format_patch({key: value}, cell=True)))
+            continue
         if key == "tabs" and value is not None:
             if not isinstance(value, (list, tuple)) or len(value) > 64:
                 raise ValueError("tabs must contain at most 64 tab-stop mappings")
@@ -302,6 +305,17 @@ def _index(index, length: int) -> int:
     if not 0 <= index < length:
         raise IndexError("index out of range")
     return index
+
+
+def _picture_crop(value):
+    if value is None:
+        value = (0, 0, 0, 0)
+    if not isinstance(value, (tuple, list)) or len(value) != 4:
+        raise TypeError("crop must be (left, top, right, bottom) fractions or None")
+    values = tuple(map(pt, value))
+    if any(fraction < 0 or fraction > 0.45 for fraction in values):
+        raise ValueError("crop fractions must be between 0 and 0.45")
+    return values
 
 
 def _rows(rows, columns: int | None = None) -> list[list[str]]:
@@ -504,10 +518,10 @@ class _Collection(Sequence[_Item], Generic[_Item]):
 
     def __iter__(self) -> Iterator[_Item]:
         self._owner._ensure_open()
-        identifiers = self._ids()
-        for identifier in identifiers:
+        items = [self._factory(self._owner, identifier) for identifier in self._ids()]
+        for item in items:
             self._owner._ensure_open()
-            yield self._factory(self._owner, identifier)
+            yield item
 
     @overload
     def __getitem__(self, index: int) -> _Item: ...
@@ -525,6 +539,63 @@ class _Collection(Sequence[_Item], Generic[_Item]):
 
 class WordDocument(EditableDocument):
     _format = "docx"
+
+    @property
+    def metadata(self) -> dict:
+        """Owned core properties and a nested mapping of typed custom properties."""
+        return json.loads(self._call("metadata"))
+
+    def update_metadata(self, **values) -> None:
+        """Patch supported properties; None clears a field or custom entry."""
+        allowed = {"title", "author", "subject", "keywords", "description", "category",
+                   "last_modified_by", "created", "modified", "revision", "custom"}
+        if values.keys() - allowed:
+            raise ValueError("unsupported DOCX metadata key")
+
+        def bounded_string(value, limit):
+            if len(value) > limit or len(value.encode("utf-8")) > limit:
+                raise ValueError(f"metadata string exceeds {limit} UTF-8 bytes")
+
+        for key, value in values.items():
+            if value is None:
+                continue
+            if key == "revision":
+                if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 0xFFFFFFFF:
+                    raise ValueError("revision requires an unsigned 32-bit integer or None")
+            elif key == "custom":
+                if not isinstance(value, dict):
+                    raise TypeError("custom properties require a dictionary or None")
+                if len(value) > 1024:
+                    raise ValueError("custom properties exceed 1024 entries")
+                for name, item in value.items():
+                    if not isinstance(name, str):
+                        raise TypeError("custom property names must be strings")
+                    bounded_string(name, 255)
+                    if isinstance(item, str):
+                        bounded_string(item, 65536)
+                    elif item is None or isinstance(item, bool):
+                        pass
+                    elif isinstance(item, int):
+                        if not -(1 << 63) <= item < (1 << 63):
+                            raise ValueError("custom integers require signed 64-bit values")
+                    elif isinstance(item, float):
+                        if not math.isfinite(item):
+                            raise ValueError("custom floating-point values must be finite")
+                    else:
+                        raise TypeError("custom values require str, bool, int, float or None")
+            else:
+                if not isinstance(value, str):
+                    raise TypeError("core metadata values require strings or None")
+                bounded_string(value, 65536)
+        # Each scalar is bounded before encoding; stop before building an oversized patch.
+        chunks, used = [], 0
+        encoder = json.JSONEncoder(ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+        for chunk in encoder.iterencode(values):
+            used += len(chunk.encode("utf-8"))
+            if used > 256 * 1024:
+                raise ValueError("metadata update exceeds 256 KiB")
+            chunks.append(chunk)
+        self._call("update_metadata", "".join(chunks), _change=True)
 
     @property
     def notes(self) -> Notes:
@@ -547,8 +618,8 @@ class WordDocument(EditableDocument):
         return Sections(self)
 
     @property
-    def images(self) -> _Collection[Picture]:
-        return _Collection(self, lambda: self._call("image_ids"), Picture)
+    def images(self) -> Pictures:
+        return Pictures(self, lambda: self._call("image_ids"))
 
     @property
     def background(self) -> str | None:
@@ -731,9 +802,17 @@ class Paragraph:
         """The direct list kind/level, or None for an ordinary paragraph."""
         return self._owner._call("paragraph_list", self._id)
 
-    def set_list(self, kind: str | None = None, *, level: int = 0, restart: bool = False):
-        """Set bullet/numbered list membership; None removes it."""
-        self._owner._call("set_paragraph_list", self._id, kind, operator.index(level), restart, _change=True)
+    def set_list(self, kind: str | None = None, *, level: int = 0, restart: bool = False,
+                 start: int | None = None):
+        """Set list membership; start creates a new top-level numbered sequence."""
+        level = operator.index(level)
+        if start is not None:
+            if isinstance(start, bool):
+                raise TypeError("list start must be an integer, not a boolean")
+            start = operator.index(start)
+            if not 1 <= start <= 32767:
+                raise ValueError("list start must be between 1 and 32767")
+        self._owner._call("set_paragraph_list", self._id, kind, level, restart, start, _change=True)
 
     @property
     def page_break_before(self):
@@ -783,6 +862,10 @@ class Paragraph:
 
     _native_text_method = "paragraph_text"
 
+    def __getitem__(self, key: slice) -> TextRange:
+        """Select Unicode characters using a contiguous slice; empty slices insert text."""
+        return _slice_range(self, key, TextRange)
+
     def find(self, text: str) -> list[TextRange]:
         """Find non-overlapping literal matches; later edits invalidate ranges."""
         return _find_ranges(self, text, TextRange)
@@ -825,6 +908,22 @@ class TextRange:
         """Set character properties; omitted values stay and None inherits."""
         paragraph = self._paragraph
         self._revision = paragraph._owner._call("format_range_patch", *paragraph._range_args, self._start, self._end, self._revision, _format_patch(formatting, rgb_highlight=isinstance(paragraph, Shape)), _change=True)
+
+
+def _slice_range(content, key: slice, factory):
+    if not isinstance(key, slice):
+        raise TypeError("text selection requires a slice")
+    revision = content._owner._call("revision")
+    text = content.text
+    start, stop, step = key.indices(len(text))
+    if step != 1:
+        raise ValueError("text selection requires a slice step of 1")
+    # A forward slice with a stop before its start is empty, at the start.
+    stop = max(start, stop)
+    selected, current_revision = content._owner._call("text_range", *content._range_args, start, stop)
+    if current_revision != revision or selected != text[start:stop]:
+        raise ValueError("text changed during selection")
+    return factory(content, start, stop, current_revision)
 
 
 def _find_ranges(content, text: str, factory):
@@ -959,6 +1058,15 @@ class Section:
         self._set(margins=_margins(value))
 
     @property
+    def gutter(self) -> float:
+        """Additional left binding space in points."""
+        return self._props()["gutter"]
+
+    @gutter.setter
+    def gutter(self, value):
+        self._set(gutter=pt(value))
+
+    @property
     def header_distance(self) -> float:
         return self._props()["distances"][0]
 
@@ -987,6 +1095,23 @@ class Section:
         if isinstance(count, bool) or not isinstance(separator, bool):
             raise TypeError("column count must be an integer and separator a bool")
         self._set(columns=[operator.index(count), pt(gap), separator])
+
+    @property
+    def column_widths(self) -> tuple[float, ...] | None:
+        """Explicit widths in points, or None for equal-width native columns."""
+        widths = self._props()["column_widths"]
+        return None if widths is None else tuple(widths)
+
+    @column_widths.setter
+    def column_widths(self, value):
+        if value is None:
+            self._set(column_widths=None)
+            return
+        if not isinstance(value, (tuple, list)):
+            raise TypeError("column_widths must be a sequence of point widths or None")
+        if not 1 <= len(value) <= 45:
+            raise ValueError("column_widths requires 1..45 widths")
+        self._set(column_widths=[pt(width) for width in value])
 
     def note_options(self, *, kind: str = "footnote") -> dict:
         """Return resolved native numbering and placement for this section."""
@@ -1086,9 +1211,30 @@ class Note(EditableStory):
         return json.loads(self._owner._call("note_info", self._id))["kind"]
 
 
+class Pictures(_Collection["Picture"]):
+    """Ordered inline pictures; deletion removes the selected placement."""
+    def __init__(self, owner, ids):
+        super().__init__(owner, ids, Picture)
+
+    def __delitem__(self, index: int) -> None:
+        picture = self[operator.index(index)]
+        self._owner._call("remove_image", picture._id, _change=True)
+
+
 class Picture:
     def __init__(self, owner: WordDocument, identifier: int):
         self._owner, self._id = owner, identifier
+
+    @property
+    def data(self) -> bytes:
+        """Owned PNG bytes; assigning a source preserves size and alternative text."""
+        return bytes(self._owner._call("image_data", self._id))
+
+    @data.setter
+    def data(self, source) -> None:
+        from . import _read
+        data, _ = _read(source)
+        self._owner._call("set_image_data", self._id, data, _change=True)
 
     @property
     def size(self):
@@ -1105,6 +1251,35 @@ class Picture:
     @alt.setter
     def alt(self, value: str):
         self._owner._call("set_image_alt", self._id, value, _change=True)
+
+    @property
+    def crop(self) -> tuple[float, float, float, float]:
+        return self._owner._call("image_crop", self._id)
+
+    @crop.setter
+    def crop(self, value) -> None:
+        values = _picture_crop(value)
+        self._owner._call("set_image_crop", self._id, values, _change=True)
+
+    @property
+    def flip_h(self) -> bool:
+        return self._owner._call("image_flips", self._id)[0]
+
+    @flip_h.setter
+    def flip_h(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("flip_h must be a boolean")
+        self._owner._call("set_image_flips", self._id, flip_h=value, _change=True)
+
+    @property
+    def flip_v(self) -> bool:
+        return self._owner._call("image_flips", self._id)[1]
+
+    @flip_v.setter
+    def flip_v(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("flip_v must be a boolean")
+        self._owner._call("set_image_flips", self._id, flip_v=value, _change=True)
 
 
 class EditableTable:
@@ -1339,8 +1514,9 @@ class EditableCell:
         return self._children("table", EditableTable)
 
     @property
-    def images(self) -> _Collection[Picture]:
-        return self._children("image", Picture)
+    def images(self) -> Pictures:
+        owner = self._table._owner
+        return Pictures(owner, lambda: owner._call("cell_image_ids", *self._content_args()))
 
     def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
         style = _style_reference(style, self._table._owner)
@@ -1570,7 +1746,17 @@ class PdfField:
 
     @property
     def box(self) -> tuple[float, float, float, float]:
+        """Widget (x, y, width, height) in current page view points."""
         return tuple(self._info()["widgets"][0]["box"])
+
+    @box.setter
+    def box(self, value) -> None:
+        if not isinstance(value, (tuple, list)) or len(value) != 4:
+            raise TypeError("box must be (x, y, width, height) in top-left points")
+        coordinates = tuple(map(pt, value))
+        # Coordinate conversion can execute caller code, including structural edits.
+        self._check()
+        self._owner._call("set_field_box", self._name, coordinates, _change=True)
 
     @property
     def value(self) -> str | bool | None:
@@ -2023,8 +2209,9 @@ class Slides(_Collection["Slide"]):
     def __init__(self, owner):
         super().__init__(owner, lambda: [owner._call("slide_id", index) for index in range(owner.page_count)], Slide)
 
-    def add(self):
-        index = self._owner._call("add_slide", _change=True)
+    def add(self, *, layout: str = "blank") -> Slide:
+        """Add a slide using one supported native authored layout."""
+        index = self._owner._call("add_slide", layout, _change=True)
         return Slide(self._owner, self._owner._call("slide_id", index))
 
     def __delitem__(self, index):
@@ -2098,28 +2285,38 @@ class Slide:
     def add_shape(self, kind: str, *, box, fill=None, stroke=None, stroke_width: float = 1):
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
-        identifier = self._owner._call("add_shape", self.number, kind, *map(pt, box), None if fill is None else _color(fill), None if stroke is None else _color(stroke), pt(stroke_width), _change=True)
+        coordinates = tuple(map(pt, box))
+        fill = None if fill is None else _color(fill)
+        stroke = None if stroke is None else _color(stroke)
+        stroke_width = pt(stroke_width)
+        identifier = self._owner._call("add_shape", self.number, kind, *coordinates, fill, stroke, stroke_width, _change=True)
         return Shape(self._owner, self._id, identifier)
 
     def add_text(self, text: str, *, box, font_size: float = 18):
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
-        identifier = self._owner._call("add_text", self.number, text, *map(pt, box), pt(font_size), _change=True)
+        coordinates = tuple(map(pt, box))
+        font_size = pt(font_size)
+        identifier = self._owner._call("add_text", self.number, text, *coordinates, font_size, _change=True)
         return Shape(self._owner, self._id, identifier)
 
     def add_table(self, rows, *, columns: int | None = None, box, font_size: float = 18):
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
-        identifier = self._owner._call("add_table", self.number, _rows(rows, columns), *map(pt, box), pt(font_size), _change=True)
+        rows = _rows(rows, columns)
+        coordinates = tuple(map(pt, box))
+        font_size = pt(font_size)
+        identifier = self._owner._call("add_table", self.number, rows, *coordinates, font_size, _change=True)
         return SlideTable(self._owner, identifier, self._id)
 
-    def add_image(self, source, *, box, alt: str = ""):
+    def add_image(self, source, *, box, alt: str = "") -> SlidePicture:
         from . import _read
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
-        data, _ = _read(source)
-        identifier = self._owner._call("add_image", self.number, data, *map(pt, box), alt, _change=True)
-        return Shape(self._owner, self._id, identifier)
+        coordinates = tuple(map(pt, box))
+        data, _ = _read(source, limit=16 * 1024 * 1024)
+        identifier = self._owner._call("add_image", self.number, data, *coordinates, alt, _change=True)
+        return SlidePicture(self._owner, self._id, identifier)
 
     def get_pixmap(self, dpi: float = 144, *, clip: tuple[float, float, float, float] | None = None) -> bytes:
         return self._owner.render_page(self.number, dpi, clip=clip)
@@ -2135,6 +2332,8 @@ class Shapes(_Collection["Shape | SlideTable"]):
             identifier, kind = pair
             if kind == "table":
                 return SlideTable(owner, identifier, slide._id)
+            if kind == "image":
+                return SlidePicture(owner, slide._id, identifier)
             return Shape(owner, slide._id, identifier)
         super().__init__(slide._owner, lambda: slide._owner._call("shape_ids", slide.number), factory)
 
@@ -2153,6 +2352,11 @@ class Shape:
         self._owner, self._slide, self._id = owner, slide, identifier
 
     @property
+    def placeholder(self) -> str | None:
+        """Native inherited placeholder role, or None for an ordinary shape."""
+        return self._owner._call("shape_placeholder", self._slide_number, self._id)
+
+    @property
     def _slide_number(self):
         return self._owner._call("slide_index", self._slide)
 
@@ -2161,6 +2365,10 @@ class Shape:
         return self._slide_number, self._id
 
     _native_text_method = "shape_text"
+
+    def __getitem__(self, key: slice) -> _SlideTextRange:
+        """Select contiguous Unicode text across runs and LF-separated paragraphs."""
+        return _slice_range(self, key, _SlideTextRange)
 
     def add_run(self, text: str, **formatting: Unpack[CharacterFormatting]) -> _SlideTextRange:
         start, end, revision = self._owner._call("add_run_patch", *self._range_args, text, _format_patch(formatting, rgb_highlight=True), _change=True)
@@ -2290,6 +2498,58 @@ class Shape:
     @font.setter
     def font(self, value: str):
         self._owner._call("set_text_format", self._slide_number, self._id, font=value, _change=True)
+
+
+class SlidePicture(Shape):
+    """A native picture placement retaining its source and editable transforms."""
+
+    @property
+    def data(self) -> bytes:
+        return bytes(self._owner._call("picture_data", self._slide_number, self._id))
+
+    @data.setter
+    def data(self, source) -> None:
+        from . import _read
+        self._owner._ensure_open()
+        data, _ = _read(source, limit=16 * 1024 * 1024)
+        self._owner._call("set_picture_data", self._slide_number, self._id, data, _change=True)
+
+    @property
+    def alt(self) -> str:
+        return self._owner._call("picture_alt", self._slide_number, self._id)
+
+    @alt.setter
+    def alt(self, value: str) -> None:
+        self._owner._call("set_picture_alt", self._slide_number, self._id, value, _change=True)
+
+    @property
+    def crop(self) -> tuple[float, float, float, float]:
+        return self._owner._call("picture_crop", self._slide_number, self._id)
+
+    @crop.setter
+    def crop(self, value) -> None:
+        values = _picture_crop(value)
+        self._owner._call("set_picture_crop", self._slide_number, self._id, values, _change=True)
+
+    @property
+    def flip_h(self) -> bool:
+        return self._owner._call("picture_flips", self._slide_number, self._id)[0]
+
+    @flip_h.setter
+    def flip_h(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("flip_h must be a boolean")
+        self._owner._call("set_picture_flips", self._slide_number, self._id, flip_h=value, _change=True)
+
+    @property
+    def flip_v(self) -> bool:
+        return self._owner._call("picture_flips", self._slide_number, self._id)[1]
+
+    @flip_v.setter
+    def flip_v(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("flip_v must be a boolean")
+        self._owner._call("set_picture_flips", self._slide_number, self._id, flip_v=value, _change=True)
 
 
 class SlideTable(EditableTable, Shape):

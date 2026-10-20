@@ -1,6 +1,8 @@
+use std::{collections::HashMap, sync::Mutex};
+
 use base64::Engine;
 use deckcraft_model::text::{Action, Hyperlink, RunKind, TextBody};
-use deckcraft_model::{Comment, Presentation, Shape, ShapeKind};
+use deckcraft_model::{Comment, Presentation, Shape, ShapeKind, SlideId};
 use serde_json::{json, Map, Value};
 
 use crate::diagnostics::Diagnostics;
@@ -10,23 +12,100 @@ use crate::model::{
 };
 use crate::EngineError;
 
+pub struct PptxSession {
+    state: Mutex<Option<SessionState>>,
+}
+
+struct SessionState {
+    presentation: Presentation,
+    render_requests: u64,
+}
+
+impl PptxSession {
+    pub fn open(data: &[u8]) -> Result<(Self, DocumentPayload), EngineError> {
+        let presentation = read(data)?;
+        let payload = extract_with(&presentation)?;
+        Ok((
+            Self {
+                state: Mutex::new(Some(SessionState {
+                    presentation,
+                    render_requests: 0,
+                })),
+            },
+            payload,
+        ))
+    }
+
+    pub fn render(
+        &self,
+        page: usize,
+        dpi: f64,
+        clip: Option<crate::rendering::Clip>,
+    ) -> Result<Vec<u8>, EngineError> {
+        let mut guard = self
+            .state
+            .lock()
+            .map_err(|_| EngineError::Malformed("PPTX render session is unavailable".into()))?;
+        let state = guard
+            .as_mut()
+            .ok_or_else(|| EngineError::Closed("PPTX render session is closed".into()))?;
+        state.render_requests = state.render_requests.saturating_add(1);
+        render_with(&state.presentation, page, dpi, clip)
+    }
+
+    pub fn stats(&self) -> Result<(u64, u64, u64), EngineError> {
+        let guard = self
+            .state
+            .lock()
+            .map_err(|_| EngineError::Malformed("PPTX render session is unavailable".into()))?;
+        let state = guard
+            .as_ref()
+            .ok_or_else(|| EngineError::Closed("PPTX render session is closed".into()))?;
+        Ok((1, 0, state.render_requests))
+    }
+
+    pub fn close(&self) -> Result<(), EngineError> {
+        // Drop our owned model even after a poisoned render lock. DeckCraft's separate,
+        // private thread-local renderer/cache has no public clear hook and can outlive this.
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static PARSE_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub fn read(data: &[u8]) -> Result<Presentation, EngineError> {
     if deckcraft_pptx::is_encrypted(data) {
         return Err(EngineError::Encrypted);
     }
-    crate::ooxml::preflight(data)?;
+    crate::ooxml::preflight_pptx(data)?;
+    #[cfg(test)]
+    PARSE_BUILDS.with(|counter| counter.set(counter.get() + 1));
     let presentation = deckcraft_pptx::import(data).map_err(pptx_error)?;
     if presentation.slides.is_empty() {
         return Err(EngineError::Malformed(
             "presentation contains no slides".into(),
         ));
     }
+    // Defensively reject ambiguous parsed targets before extraction/render/conversion.
+    // This does not detect source entries silently truncated by the pinned reader.
+    slide_targets(&presentation)?;
     Ok(presentation)
 }
 
 pub fn extract(data: &[u8]) -> Result<DocumentPayload, EngineError> {
-    let presentation = read(data)?;
-    validate_tables(&presentation)?;
+    PptxSession::open(data).map(|(_, payload)| payload)
+}
+
+fn extract_with(presentation: &Presentation) -> Result<DocumentPayload, EngineError> {
+    validate_tables(presentation)?;
+    let targets = slide_targets(presentation)?;
     let pages = presentation
         .slides
         .iter()
@@ -44,7 +123,8 @@ pub fn extract(data: &[u8]) -> Result<DocumentPayload, EngineError> {
             };
             for shape in &slide.shapes {
                 visit_shape(
-                    &presentation,
+                    presentation,
+                    &targets,
                     shape,
                     number,
                     Placement::default(),
@@ -63,23 +143,47 @@ pub fn extract(data: &[u8]) -> Result<DocumentPayload, EngineError> {
         metadata: Map::from_iter([
             ("width".into(), json!(presentation.slide_size.width)),
             ("height".into(), json!(presentation.slide_size.height)),
-            ("diagnostics".into(), extraction_diagnostics(&presentation)),
+            (
+                "diagnostics".into(),
+                extraction_diagnostics(presentation, &targets),
+            ),
         ]),
         pages,
         stories: Vec::new(),
     })
 }
 
-fn extraction_diagnostics(presentation: &Presentation) -> Value {
+type SlideTargets = HashMap<SlideId, usize>;
+
+fn slide_targets(presentation: &Presentation) -> Result<SlideTargets, EngineError> {
+    // This protects adapter indexing, not allocations or truncation inside import().
+    if presentation.slides.len() > 10_000 {
+        return Err(EngineError::ResourceLimit(
+            "PPTX exceeds 10000 parsed slides".into(),
+        ));
+    }
+    let mut targets = HashMap::with_capacity(presentation.slides.len());
+    for (page, slide) in presentation.slides.iter().enumerate() {
+        if targets.insert(slide.id, page).is_some() {
+            return Err(EngineError::Malformed(
+                "PPTX has duplicate native slide IDs; internal navigation is ambiguous".into(),
+            ));
+        }
+    }
+    Ok(targets)
+}
+
+fn extraction_diagnostics(presentation: &Presentation, targets: &SlideTargets) -> Value {
     let mut diagnostics = Diagnostics::default();
     for (slide, value) in presentation.slides.iter().enumerate() {
         for shape in &value.shapes {
-            diagnose_shape(presentation, shape, slide, &mut diagnostics);
+            diagnose_shape(presentation, targets, shape, slide, &mut diagnostics);
         }
         diagnose_text(
             &value.notes,
             &json!({"slide": slide, "story": "notes"}),
             true,
+            targets,
             &mut diagnostics,
         );
     }
@@ -88,6 +192,7 @@ fn extraction_diagnostics(presentation: &Presentation) -> Value {
 
 fn diagnose_shape(
     presentation: &Presentation,
+    targets: &SlideTargets,
     shape: &Shape,
     slide: usize,
     diagnostics: &mut Diagnostics,
@@ -113,20 +218,15 @@ fn diagnose_shape(
     }) {
         diagnostics.record("transformed_bbox_approximation", "warning", "Extracted bounding boxes do not account for this shape's rotation or group reflection.", source.clone());
     }
-    if shape.click.as_ref().is_some_and(|link| url(link).is_none()) {
-        diagnostics.record(
-            "non_url_link_omitted",
-            "warning",
-            "A non-URL hyperlink action is not included in extracted links.",
-            source.clone(),
-        );
+    if let Some(link) = &shape.click {
+        diagnose_link(link, targets, source.clone(), diagnostics);
     }
     if let Some(text) = &shape.text {
-        diagnose_text(text, &source, false, diagnostics);
+        diagnose_text(text, &source, false, targets, diagnostics);
     }
     match &shape.kind {
         ShapeKind::Group { children, .. } => {
-            for child in children { diagnose_shape(presentation, child, slide, diagnostics); }
+            for child in children { diagnose_shape(presentation, targets, child, slide, diagnostics); }
         }
         ShapeKind::Table(table) => {
             for (row, value) in table.rows.iter().enumerate() {
@@ -134,7 +234,7 @@ fn diagnose_shape(
                     let mut cell_source = source.clone();
                     cell_source["row"] = json!(row);
                     cell_source["column"] = json!(column);
-                    diagnose_text(&cell.text, &cell_source, false, diagnostics);
+                    diagnose_text(&cell.text, &cell_source, false, targets, diagnostics);
                 }
             }
         }
@@ -143,7 +243,13 @@ fn diagnose_shape(
     }
 }
 
-fn diagnose_text(body: &TextBody, source: &Value, auxiliary: bool, diagnostics: &mut Diagnostics) {
+fn diagnose_text(
+    body: &TextBody,
+    source: &Value,
+    auxiliary: bool,
+    targets: &SlideTargets,
+    diagnostics: &mut Diagnostics,
+) {
     for (paragraph, value) in body.paragraphs.iter().enumerate() {
         for (run, value) in value.runs.iter().enumerate() {
             let mut source = source.clone();
@@ -157,13 +263,8 @@ fn diagnose_text(body: &TextBody, source: &Value, auxiliary: bool, diagnostics: 
             if let Some(link) = &value.props.link {
                 if auxiliary {
                     diagnostics.record("auxiliary_link_omitted", "warning", "A notes hyperlink contributes its text label but is not included in extracted links.", source);
-                } else if url(link).is_none() {
-                    diagnostics.record(
-                        "non_url_link_omitted",
-                        "warning",
-                        "A non-URL hyperlink action is not included in extracted links.",
-                        source,
-                    );
+                } else {
+                    diagnose_link(link, targets, source, diagnostics);
                 }
             }
         }
@@ -191,6 +292,16 @@ fn render_impl(
 ) -> Result<Vec<u8>, EngineError> {
     crate::rendering::validate_dpi(dpi)?;
     let presentation = read(data)?;
+    render_with(&presentation, page, dpi, clip)
+}
+
+fn render_with(
+    presentation: &Presentation,
+    page: usize,
+    dpi: f64,
+    clip: Option<crate::rendering::Clip>,
+) -> Result<Vec<u8>, EngineError> {
+    crate::rendering::validate_dpi(dpi)?;
     if page >= presentation.slides.len() {
         return Err(EngineError::Unsupported(format!(
             "page {page} does not exist"
@@ -224,7 +335,7 @@ fn render_impl(
         )?;
     }
     let image = deckcraft_render::render_slide(
-        &presentation,
+        presentation,
         page,
         &deckcraft_render::RenderOpts {
             scale,
@@ -300,6 +411,7 @@ impl Placement {
 
 fn visit_shape(
     presentation: &Presentation,
+    targets: &SlideTargets,
     shape: &Shape,
     page_number: usize,
     placement: Placement,
@@ -309,7 +421,7 @@ fn visit_shape(
     let mut block_indexes = Vec::new();
     if let Some(text) = &shape.text {
         for paragraph in &text.paragraphs {
-            let (text, links) = paragraph_payload(paragraph, page_number, bbox);
+            let (text, links) = paragraph_payload(paragraph, page_number, bbox, targets);
             if text.is_empty() {
                 continue;
             }
@@ -322,7 +434,7 @@ fn visit_shape(
             page.blocks.push(block);
         }
     }
-    if let Some(link) = shape_link(shape.click.as_ref(), shape, page_number, bbox) {
+    if let Some(link) = shape_link(shape.click.as_ref(), shape, page_number, bbox, targets) {
         page.links.push(link.clone());
         if let Some(index) = block_indexes.first().copied() {
             page.blocks[index].links.push(link);
@@ -332,7 +444,14 @@ fn visit_shape(
         ShapeKind::Group { children, child } => {
             let placement = placement.group(shape, *child);
             for child_shape in children {
-                visit_shape(presentation, child_shape, page_number, placement, page);
+                visit_shape(
+                    presentation,
+                    targets,
+                    child_shape,
+                    page_number,
+                    placement,
+                    page,
+                );
             }
         }
         ShapeKind::Table(table) => {
@@ -371,7 +490,7 @@ fn visit_shape(
             metadata.insert("column_widths".into(), json!(table.cols));
             let payload = TablePayload {
                 rows,
-                cells: table_cells(table, shape.id.0, page_number, page),
+                cells: table_cells(table, shape.id.0, page_number, targets, page),
                 bbox,
                 page: Some(page_number),
                 metadata,
@@ -475,6 +594,7 @@ fn table_cells(
     table: &deckcraft_model::Table,
     shape: u32,
     page_number: usize,
+    targets: &SlideTargets,
     page: &mut PagePayload,
 ) -> Vec<Vec<CellPayload>> {
     table
@@ -492,7 +612,8 @@ fn table_cells(
                         .iter()
                         .enumerate()
                         .map(|(paragraph_index, paragraph)| {
-                            let (text, mut links) = paragraph_payload(paragraph, page_number, None);
+                            let (text, mut links) =
+                                paragraph_payload(paragraph, page_number, None, targets);
                             let path = json!([shape, row_index, column, paragraph_index]);
                             for link in &mut links {
                                 link.metadata.insert("source_path".into(), path.clone());
@@ -557,6 +678,7 @@ fn paragraph_payload(
     paragraph: &deckcraft_model::text::Paragraph,
     page: usize,
     bbox: Option<[f64; 4]>,
+    targets: &SlideTargets,
 ) -> (String, Vec<LinkPayload>) {
     let mut text = String::new();
     let mut links = Vec::new();
@@ -567,16 +689,25 @@ fn paragraph_payload(
             _ => run.text.clone(),
         };
         let length = value.chars().count();
-        if let Some(uri) = run.props.link.as_ref().and_then(url) {
+        if let Some((uri, target)) = run
+            .props
+            .link
+            .as_ref()
+            .and_then(|link| link_destination(link, targets))
+        {
+            let mut metadata = Map::from_iter([
+                ("start".into(), json!(offset)),
+                ("end".into(), json!(offset + length)),
+            ]);
+            if let Some(target) = target {
+                metadata.insert("target_page".into(), json!(target));
+            }
             links.push(LinkPayload {
-                uri: uri.into(),
+                uri,
                 text: value.clone(),
                 bbox,
                 page: Some(page),
-                metadata: Map::from_iter([
-                    ("start".into(), json!(offset)),
-                    ("end".into(), json!(offset + length)),
-                ]),
+                metadata,
             });
         }
         text.push_str(&value);
@@ -590,20 +721,50 @@ fn shape_link(
     shape: &Shape,
     page: usize,
     bbox: Option<[f64; 4]>,
+    targets: &SlideTargets,
 ) -> Option<LinkPayload> {
+    let (uri, target) = link_destination(hyperlink?, targets)?;
+    let mut metadata = Map::from_iter([("shape".into(), Value::Bool(true))]);
+    if let Some(target) = target {
+        metadata.insert("target_page".into(), json!(target));
+    }
     Some(LinkPayload {
-        uri: url(hyperlink?)?.into(),
+        uri,
         text: shape.text.as_ref().map(body_text).unwrap_or_default(),
         bbox,
         page: Some(page),
-        metadata: Map::from_iter([("shape".into(), Value::Bool(true))]),
+        metadata,
     })
 }
 
-fn url(hyperlink: &Hyperlink) -> Option<&str> {
+fn link_destination(
+    hyperlink: &Hyperlink,
+    targets: &SlideTargets,
+) -> Option<(String, Option<usize>)> {
     match &hyperlink.action {
-        Action::Url { url } => Some(url),
+        Action::Url { url } => Some((url.clone(), None)),
+        Action::Slide { slide } => targets
+            .get(slide)
+            .map(|target| (format!("#page={}", target + 1), Some(*target))),
         _ => None,
+    }
+}
+
+fn diagnose_link(
+    link: &Hyperlink,
+    targets: &SlideTargets,
+    source: Value,
+    diagnostics: &mut Diagnostics,
+) {
+    match &link.action {
+        Action::Url { .. } => {},
+        Action::Slide { slide } if targets.contains_key(slide) => {},
+        Action::Slide { .. } => diagnostics.record(
+            "unresolved_slide_link_omitted", "warning",
+            "An internal slide hyperlink has no target in the parsed presentation and is omitted.", source),
+        _ => diagnostics.record(
+            "non_url_link_omitted", "warning",
+            "A hyperlink action other than a URL or resolved slide target is not included in extracted links.", source),
     }
 }
 
@@ -673,6 +834,161 @@ mod tests {
     use deckcraft_model::{LayoutType, ShapeId, Size, Table, Theme, Xfrm};
     use std::sync::Arc;
 
+    fn session_fixture() -> Vec<u8> {
+        let mut table = Table::new(1, 1, 120.0, 30.0);
+        table.rows[0].cells[0].text = TextBody::from_text("Retained table");
+        let mut presentation = presentation(table);
+        presentation.slide_size = Size::new(240.0, 180.0);
+        let layout =
+            deckcraft_model::defaults::layout_of_kind(&presentation, LayoutType::Blank).unwrap();
+        let mut slide = deckcraft_model::defaults::new_slide(&mut presentation, layout).unwrap();
+        slide.hidden = true;
+        slide.shapes.push(Shape {
+            id: ShapeId(presentation.alloc_id().unwrap()),
+            xfrm: Some(Xfrm::new(20.0, 30.0, 180.0, 60.0)),
+            text: Some(TextBody::from_text("Second slide")),
+            ..Shape::default()
+        });
+        presentation.slides.push(Arc::new(slide));
+        deckcraft_pptx::export(&presentation).unwrap()
+    }
+
+    #[test]
+    fn render_session_reuses_one_import_and_matches_full_and_region_rasters() {
+        let source = session_fixture();
+        PARSE_BUILDS.with(|counter| counter.set(0));
+        let (session, payload) = PptxSession::open(&source).unwrap();
+        assert_eq!(payload.pages.len(), 2);
+        assert_eq!(payload.pages[1].metadata["hidden"], true);
+        assert_eq!(session.stats().unwrap(), (1, 0, 0));
+        assert_eq!(PARSE_BUILDS.with(|counter| counter.get()), 1);
+        let mut requests = 0;
+        for page in [0, 1, 0] {
+            for dpi in [72.0, 144.0, 300.0] {
+                for clip in [None, Some((5.25, 10.5, 90.25, 55.75))] {
+                    let before = PARSE_BUILDS.with(|counter| counter.get());
+                    let actual = session.render(page, dpi, clip).unwrap();
+                    assert_eq!(PARSE_BUILDS.with(|counter| counter.get()), before);
+                    let expected = render_impl(&source, page, dpi, clip).unwrap();
+                    assert_eq!(actual, expected, "page {page}, dpi {dpi}, clip {clip:?}");
+                    requests += 1;
+                }
+            }
+        }
+        assert_eq!(session.stats().unwrap(), (1, 0, requests));
+        assert_eq!(
+            PARSE_BUILDS.with(|counter| counter.get()),
+            1 + requests as usize
+        );
+        drop(source);
+        session.render(1, 72.0, None).unwrap();
+        session.close().unwrap();
+        assert_eq!(payload.pages[0].tables[0].rows[0][0], "Retained table");
+    }
+
+    #[test]
+    fn render_session_preserves_errors_limits_and_oversized_full_small_region_behavior() {
+        assert!(matches!(
+            PptxSession::open(b"not an archive"),
+            Err(EngineError::Malformed(_))
+        ));
+        let mut presentation = presentation(Table::new(1, 1, 100.0, 30.0));
+        presentation.slide_size = Size::new(2000.0, 2000.0);
+        let source = deckcraft_pptx::export(&presentation).unwrap();
+        let (session, _) = PptxSession::open(&source).unwrap();
+        assert!(matches!(
+            session.render(0, 1200.0, None),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        let clip = Some((0.0, 0.0, 10.0, 10.0));
+        assert_eq!(
+            session.render(0, 1200.0, clip).unwrap(),
+            render_impl(&source, 0, 1200.0, clip).unwrap()
+        );
+        for (page, dpi, clip) in [
+            (1, 72.0, None),
+            (0, f64::NAN, None),
+            (0, 0.0, None),
+            (0, 72.0, Some((0.0, 0.0, -1.0, 10.0))),
+            (0, 72.0, Some((3000.0, 3000.0, 10.0, 10.0))),
+        ] {
+            assert_eq!(
+                session.render(page, dpi, clip).unwrap_err().to_string(),
+                render_impl(&source, page, dpi, clip)
+                    .unwrap_err()
+                    .to_string()
+            );
+        }
+        assert_eq!(session.stats().unwrap(), (1, 0, 7));
+        session.close().unwrap();
+        session.close().unwrap();
+        assert!(matches!(
+            session.render(0, 72.0, None),
+            Err(EngineError::Closed(_))
+        ));
+        assert!(matches!(session.stats(), Err(EngineError::Closed(_))));
+    }
+
+    #[test]
+    fn render_session_close_releases_model_and_recovers_poisoned_lock() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<PptxSession>();
+        let (session, payload) = PptxSession::open(&session_fixture()).unwrap();
+        let slide = {
+            let state = session.state.lock().unwrap();
+            Arc::downgrade(&state.as_ref().unwrap().presentation.slides[0])
+        };
+        session.render(0, 72.0, None).unwrap();
+        assert!(slide.upgrade().is_some());
+        session.close().unwrap();
+        assert!(slide.upgrade().is_none());
+        assert_eq!(payload.pages[0].tables[0].rows[0][0], "Retained table");
+
+        let (session, _) = PptxSession::open(&session_fixture()).unwrap();
+        let slide = {
+            let state = session.state.lock().unwrap();
+            Arc::downgrade(&state.as_ref().unwrap().presentation.slides[0])
+        };
+        let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = session.state.lock().unwrap();
+            panic!("test intentional session lock poison");
+        }));
+        assert!(poisoned.is_err());
+        assert!(matches!(
+            session.render(0, 72.0, None),
+            Err(EngineError::Malformed(_))
+        ));
+        session.close().unwrap();
+        assert!(slide.upgrade().is_none());
+        session.close().unwrap();
+    }
+
+    #[test]
+    fn render_session_close_and_render_are_serialized_across_threads() {
+        let (session, _) = PptxSession::open(&session_fixture()).unwrap();
+        let session = Arc::new(session);
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let rendering = {
+            let session = Arc::clone(&session);
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                session.render(0, 72.0, None)
+            })
+        };
+        barrier.wait();
+        session.close().unwrap();
+        match rendering.join().unwrap() {
+            Ok(png) => assert!(png.starts_with(b"\x89PNG")),
+            Err(EngineError::Closed(_)) => {}
+            Err(error) => panic!("unexpected concurrent render result: {error}"),
+        }
+        assert!(matches!(
+            session.render(0, 72.0, None),
+            Err(EngineError::Closed(_))
+        ));
+    }
+
     #[test]
     fn diagnostics_identify_model_constructs_without_claiming_rendering_failure() {
         let mut document = presentation(Table::new(1, 1, 100.0, 30.0));
@@ -701,7 +1017,7 @@ mod tests {
                 ..Shape::default()
             });
         }
-        let values = extraction_diagnostics(&document);
+        let values = extraction_diagnostics(&document, &slide_targets(&document).unwrap());
         let codes: Vec<_> = values
             .as_array()
             .unwrap()
@@ -810,6 +1126,220 @@ mod tests {
         assert_eq!(table.cells[1][0].col_span, 2);
         assert_eq!(table.cells[1][0].row_span, 2);
         assert!(table.cells[2][1].covered);
+    }
+
+    fn action_link(action: Action) -> Hyperlink {
+        let mut link = linked_run("https://example.com/").props.link.unwrap();
+        link.action = action;
+        link
+    }
+
+    fn action_run(text: &str, action: Action) -> Run {
+        Run::with(
+            text,
+            RunProps {
+                link: Some(action_link(action)),
+                ..RunProps::default()
+            },
+        )
+    }
+
+    #[test]
+    fn internal_navigation_roundtrips_reordered_hidden_slides_runs_tables_and_groups() {
+        let mut document = presentation(Table::new(1, 1, 400.0, 30.0));
+        let layout =
+            deckcraft_model::defaults::layout_of_kind(&document, LayoutType::Blank).unwrap();
+        for _ in 0..2 {
+            let slide = deckcraft_model::defaults::new_slide(&mut document, layout).unwrap();
+            document.slides.push(Arc::new(slide));
+        }
+        let source = document.slides[0].id;
+        let hidden = document.slides[1].id;
+        let other = document.slides[2].id;
+        Arc::make_mut(&mut document.slides[1]).hidden = true;
+        let ShapeKind::Table(table) = &mut Arc::make_mut(&mut document.slides[0]).shapes[0].kind
+        else {
+            panic!()
+        };
+        table.rows[0].cells[0].text.paragraphs[0].runs =
+            vec![action_run("Cell target", Action::Slide { slide: hidden })];
+        let mut text = TextBody::from_text("");
+        text.paragraphs[0].runs = vec![
+            Run::new("λ "),
+            action_run("Same", Action::Slide { slide: hidden }),
+            Run::new(" / "),
+            linked_run("https://example.com/unchanged"),
+            Run::new(" "),
+            action_run("Ω", Action::Slide { slide: source }),
+        ];
+        let id = ShapeId(document.alloc_id().unwrap());
+        Arc::make_mut(&mut document.slides[0]).shapes.push(Shape {
+            id,
+            text: Some(text),
+            xfrm: Some(Xfrm::new(20.0, 60.0, 400.0, 50.0)),
+            click: Some(action_link(Action::Slide { slide: other })),
+            ..Shape::default()
+        });
+        let mut child_text = TextBody::from_text("");
+        child_text.paragraphs[0].runs =
+            vec![action_run("Child target", Action::Slide { slide: hidden })];
+        let child = Shape {
+            id: ShapeId(document.alloc_id().unwrap()),
+            text: Some(child_text),
+            xfrm: Some(Xfrm::new(5.0, 5.0, 100.0, 30.0)),
+            click: Some(action_link(Action::Slide { slide: other })),
+            ..Shape::default()
+        };
+        let group = Shape {
+            id: ShapeId(document.alloc_id().unwrap()),
+            xfrm: Some(Xfrm::new(30.0, 150.0, 200.0, 100.0)),
+            kind: ShapeKind::Group {
+                children: vec![child],
+                child: Xfrm::new(0.0, 0.0, 200.0, 100.0),
+            },
+            click: Some(action_link(Action::Slide { slide: hidden })),
+            ..Shape::default()
+        };
+        Arc::make_mut(&mut document.slides[0]).shapes.push(group);
+        document.slides.rotate_left(1); // Hidden, Other, Source: stable targets must follow their IDs.
+        let bytes = deckcraft_pptx::export(&document).unwrap();
+        let payload = extract(&bytes).unwrap();
+        assert_eq!(payload.pages.len(), 3);
+        assert_eq!(payload.pages[0].metadata["hidden"], true);
+        assert_eq!(payload.metadata["diagnostics"], json!([]));
+        let page = &payload.pages[2];
+        let expected = [
+            "#page=1",
+            "#page=1",
+            "https://example.com/unchanged",
+            "#page=3",
+            "#page=2",
+            "#page=1",
+            "#page=1",
+            "#page=2",
+        ];
+        assert_eq!(
+            page.links
+                .iter()
+                .map(|link| link.uri.as_str())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        for (index, link) in page.links.iter().enumerate() {
+            assert_eq!(link.page, Some(2));
+            if index == 2 {
+                assert!(!link.metadata.contains_key("target_page"));
+            } else {
+                assert_eq!(
+                    link.metadata["target_page"],
+                    link.uri[6..].parse::<usize>().unwrap() - 1
+                );
+            }
+        }
+        assert_eq!(page.links[1].text, "Same");
+        assert_eq!(page.links[1].metadata["start"], 2);
+        assert_eq!(page.links[1].metadata["end"], 6);
+        assert_eq!(page.links[2].metadata["start"], 9);
+        assert_eq!(page.links[2].metadata["end"], 13);
+        assert_eq!(page.links[3].metadata["start"], 14);
+        assert_eq!(page.links[3].metadata["end"], 15);
+        assert_eq!(
+            page.tables[0].cells[0][0].blocks[0].links[0].metadata["target_page"],
+            0
+        );
+        assert_eq!(
+            page.blocks
+                .iter()
+                .map(|block| block.text.as_str())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>(),
+            ["λ Same / Same Ω", "Child target"]
+        );
+        assert_eq!(page.links[5].text, ""); // Group action has no invented text label.
+        assert_eq!(page.links[6].bbox, Some([35.0, 155.0, 135.0, 185.0]));
+    }
+
+    #[test]
+    fn unresolved_and_contextual_actions_remain_explicit_omissions() {
+        let mut document = presentation(Table::new(1, 1, 100.0, 30.0));
+        let missing = action_link(Action::Slide {
+            slide: SlideId(u32::MAX),
+        });
+        let targets = slide_targets(&document).unwrap();
+        assert!(link_destination(&missing, &targets).is_none());
+        let mut diagnostics = Diagnostics::default();
+        diagnose_link(&missing, &targets, json!({"slide": 0}), &mut diagnostics);
+        assert_eq!(
+            diagnostics.into_json()[0]["code"],
+            "unresolved_slide_link_omitted"
+        );
+        let actions = [
+            Action::NextSlide,
+            Action::PreviousSlide,
+            Action::FirstSlide,
+            Action::LastSlide,
+            Action::EndShow,
+            Action::LastViewed,
+            Action::CustomShow {
+                name: "Show".into(),
+                returns: true,
+            },
+            Action::Program {
+                path: "program.exe".into(),
+            },
+            Action::PlayMedia,
+        ];
+        let mut text = TextBody::from_text("");
+        text.paragraphs[0].runs = actions
+            .into_iter()
+            .enumerate()
+            .map(|(index, action)| action_run(&format!("Action{index} "), action))
+            .collect();
+        let id = ShapeId(document.alloc_id().unwrap());
+        Arc::make_mut(&mut document.slides[0]).shapes.push(Shape {
+            id,
+            text: Some(text),
+            ..Shape::default()
+        });
+        let bytes = deckcraft_pptx::export(&document).unwrap();
+        let payload = extract(&bytes).unwrap();
+        assert!(payload.pages[0].links.is_empty());
+        assert_eq!(
+            payload.metadata["diagnostics"][0]["code"],
+            "non_url_link_omitted"
+        );
+        assert_eq!(payload.metadata["diagnostics"][0]["count"], 9);
+        assert!(payload.pages[0]
+            .blocks
+            .last()
+            .unwrap()
+            .text
+            .contains("Action8"));
+    }
+
+    #[test]
+    fn slide_index_rejects_duplicate_ids_and_bounds_collections() {
+        let mut document = presentation(Table::new(1, 1, 100.0, 30.0));
+        let mut slide = (*document.slides[0]).clone();
+        slide.shapes.clear();
+        document.slides.clear();
+        for id in 0..10_000 {
+            slide.id = SlideId(id);
+            document.slides.push(Arc::new(slide.clone()));
+        }
+        assert_eq!(slide_targets(&document).unwrap().len(), 10_000);
+        slide.id = SlideId(10_000);
+        document.slides.push(Arc::new(slide.clone()));
+        assert!(matches!(
+            slide_targets(&document),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        document.slides.pop();
+        Arc::make_mut(&mut document.slides[9_999]).id = SlideId(0);
+        assert!(matches!(
+            slide_targets(&document),
+            Err(EngineError::Malformed(_))
+        ));
     }
 
     #[test]

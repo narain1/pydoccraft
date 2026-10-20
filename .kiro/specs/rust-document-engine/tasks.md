@@ -178,3 +178,78 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Bound native wrapping work and preserve logical overflow, resource, glyph and media errors atomically.
 - [x] Verify geometry, visible transforms, searchable Unicode, media retention and full installed-wheel artifact; record evidence.
 - [ ] Retain automatic supplied-font wrapping and strict text clipping as upstream gaps; PDF2 remains open.
+
+## DOCX paragraph borders
+
+- [x] Reuse existing paragraph/style/default formatting for supported four-edge borders and native resolved snapshots.
+- [x] Reject shared DOCX border substitutions/clamps and invalid vertical double/wave edges, preserving table-style meaning.
+- [x] Verify native roundtrip, visible body/cell/story colors, inheritance/reset, atomic errors and installed-wheel corpus; record artifact evidence.
+- [ ] Track between/bar and remaining shared-edge/style fidelity gaps upstream.
+
+## Ownership and shading consistency
+
+- [x] Prevent pending positional iterator handles from rebinding after PDF page/annotation/outline changes; verify stable-ID and closed-owner behavior.
+- [x] Document copy/reparent/slice/iteration ownership and validate the complete installed-wheel corpus for API5.
+- [x] Verify BG6 native inherited shading/reset, highlight precedence and independent page backgrounds in DOCX/PDF output.
+
+## Inline picture lifecycle
+
+- [x] Add owned picture bytes/replacement and collection deletion through existing source/ownership conventions.
+- [x] Use native media insertion and supported-story reference accounting to retain live shared media and reclaim unused budgets.
+- [x] Verify replacement/removal, pixels, serialized media, stale handles, copies, source kinds and atomic failures in the locked installed-wheel corpus.
+
+## DOCX metadata and PDF markup
+
+- [x] Add bounded core/custom property patches using existing metadata names; preserve native types, timestamps, clear semantics and source core extraction.
+- [x] Extend existing annotation kinds with native underline/strikeout/squiggly and preflight appearance work before regeneration.
+- [x] Verify native/property/pixel/ownership/rollback regressions in the complete locked installed-wheel corpus and record artifact evidence.
+- [ ] Retain broader DOC7/PDF6 source-property, form, reply and fidelity gaps as explicit remaining work.
+
+## Section geometry and authored slide layouts
+
+- [x] Extend section patches with native left gutter and optional explicit widths, preserving existing equal-column/reset conventions.
+- [x] Validate narrowest-column table/image geometry and native column/page flow without automatic scaling.
+- [x] Add four native authored slide layouts through existing add/shape operations, preserving inherited references and effective geometry.
+- [x] Complete the locked installed-wheel corpus for both slices and record artifact evidence.
+- [ ] Keep top/mirrored gutters, continued-table reflow, general slide copy/import and additional layout/theme fidelity open with upstream evidence.
+
+## Combined table fixtures
+
+- [x] Generate all six TBL12 fixtures and check reopened source/export semantics, spans, logical order and actual visible colors on every page.
+- [x] Verify the fixture pack against the frozen installed section/layout wheel and publish its scope/limitations index.
+
+## Presentation pictures and text selection
+
+- [x] Add owned picture source/alt edits and native crop/flip properties through existing typed shape handles.
+- [x] Validate deduplicated live media accounting, transforms, shared backgrounds, ownership and atomic limits.
+- [x] Add shared contiguous Paragraph/Shape slicing returning existing range types without another native method.
+- [x] Run the complete locked installed-wheel suite and record source/PNG/PDF evidence for these slices.
+
+## Numbering and internal navigation extraction
+
+- [x] Project resolved DOCX list definitions and native logical labels through existing block metadata with story/segment identity and bounded accounting.
+- [x] Project resolved PPTX internal slide targets through existing links and omission diagnostics, retaining text/table/group provenance.
+- [x] Validate both slices in the complete locked installed-wheel corpus and record artifact evidence.
+- [ ] Retain broader E3/TXT5 list authoring, native reader preservation and pre-import slide-count gaps until their acceptance cases are complete.
+
+## List starting values and source presentation limits
+
+- [x] Extend existing native list membership with independent starting values and explicit header/footer fidelity errors.
+- [x] Reject excessive source slide references before native import, covering alternate content without another OOXML resolver.
+- [x] Validate native/read/render/export, malformed/bounded input and full installed-wheel regressions; record artifact and reviewed dependency evidence.
+- [ ] Retain custom-level numbering, header/footer counter fidelity and general upstream allocation/reporting gaps.
+
+## Picture transforms and owned field geometry
+
+- [x] Add verified DOCX crop/flip properties and reject silent native sub-point image scaling.
+- [x] Make existing owned PDF field boxes writable through native appearance regeneration and atomic geometry/fit checks.
+- [x] Verify complete locked/native and installed-wheel read/render/export corpus and record artifact evidence.
+- [ ] Retain native DOCX rotation fidelity, floating-image/opacity and broader imported/multi-widget PDF form gaps.
+
+
+## Private Office render reuse
+
+- [x] Retain bounded native DOCX model/layout and PPTX model from extraction with shared checked rendering and synchronized close.
+- [x] Reuse the existing private facade dispatch, release source/password ownership, and close sessions on failed hydration.
+- [x] Verify native parse/layout counts, PNG parity, resource boundaries, owned snapshots and close races in the complete installed-wheel corpus.
+- [x] Record separate-process synthetic latency/native RSS evidence while retaining broad P1/peak-layout guarantees as open work.

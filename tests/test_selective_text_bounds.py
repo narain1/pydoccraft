@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import doc_ex
 from doc_ex import _core, _native
-from doc_ex.errors import UnsafeArchiveError
+from doc_ex.errors import MalformedDocumentError, UnsafeArchiveError
 from fixtures import pdf_fixture, docx_fixture, pptx_fixture
 
 
@@ -55,6 +55,28 @@ class SelectiveTextBoundsTests(unittest.TestCase):
             with patch.object(doc_ex, '_MAX_SELECTED_PAGES', 0):
                 with self.assertRaises(UnsafeArchiveError):
                     doc_ex.extract_text(source)
+
+    def test_malformed_page_trees_keep_stable_errors_even_for_empty_selection(self):
+        for tree in (b"<< /Type /Pages /Count 1 >>",
+                     b"<< /Type /Pages /Count 1 /Kids [2 0 R] >>"):
+            # Original two-object PDFs with complete xrefs: missing Kids and a cycle.
+            data = bytearray(b"%PDF-1.7\n")
+            offsets = []
+            for index, value in enumerate((b"<< /Type /Catalog /Pages 2 0 R >>", tree), 1):
+                offsets.append(len(data))
+                data.extend(f"{index} 0 obj\n".encode() + value + b"\nendobj\n")
+            startxref = len(data)
+            data.extend(b"xref\n0 3\n0000000000 65535 f \n")
+            for offset in offsets:
+                data.extend(f"{offset:010d} 00000 n \n".encode())
+            data.extend(f"trailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n{startxref}\n%%EOF\n".encode())
+            for selection in (None, [], [0]):
+                with self.subTest(tree=tree, selection=selection):
+                    with self.assertRaises(MalformedDocumentError):
+                        doc_ex.extract_text(bytes(data), pages=selection)
+                    with self.assertRaises(MalformedDocumentError):
+                        _native(lambda: _core.extract_text(bytes(data), selection))
+        self.assertIn('Page one', doc_ex.extract_text(pdf_fixture()))
 
     def test_utf8_chunk_boundaries_and_empty_page_separators_count_toward_output(self):
         with patch.object(doc_ex, '_MAX_TEXT_OUTPUT_BYTES', 8194):
