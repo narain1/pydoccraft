@@ -952,7 +952,12 @@ def _slice_range(content, key: slice, factory):
 
 
 def _find_ranges(content, text: str, factory):
-    if not isinstance(text, str) or not text:
+    if not isinstance(text, str):
+        raise ValueError("search text must be a nonempty string")
+    # Literal matching uses the stored string, not subclass conversion/length
+    # hooks which could edit the owner while ranges or a transaction are built.
+    text = str.__str__(text)
+    if not text:
         raise ValueError("search text must be a nonempty string")
     value = content.text
     args = content._range_args
@@ -969,10 +974,14 @@ def _find_ranges(content, text: str, factory):
 
 
 def _replace_text(content, old: str, new: str) -> int:
-    if not isinstance(old, str) or not old:
+    if not isinstance(old, str):
+        raise ValueError("search text must be a nonempty string")
+    old = str.__str__(old)
+    if not old:
         raise ValueError("search text must be a nonempty string")
     if not isinstance(new, str):
         raise TypeError("replacement text must be a string")
+    new = str.__str__(new)
     args = content._range_args
     def replace(native):
         value = getattr(native, content._native_text_method)(*args, **getattr(content, "_range_kwargs", {}))
