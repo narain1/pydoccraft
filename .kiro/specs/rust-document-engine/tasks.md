@@ -280,3 +280,10 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Extend existing media accounting for the global reference, retaining shared images/fields and explicit bounded/atomic errors.
 - [x] Verify complete locked/native and installed-wheel read/render/export coverage and record artifact evidence.
 - [ ] Retain aspect-preserving fit/placement, tiling and watermark fidelity as broader open/upstream work.
+
+## Presentation cell paragraphs
+
+- [x] Reuse Cell/Paragraph/range vocabulary and public native text editing for rich PPTX cell paragraphs, formatting and links.
+- [x] Validate canonical anchors, body/table generations, native empty-body insertion, budgets, callbacks and explicit unsupported Word members.
+- [x] Verify complete locked/native and installed-wheel source/render/export coverage and record artifact evidence.
+- [ ] Retain paragraph spacing/indent fidelity, rich nested content and broader SLIDE3/grouped-content work.

@@ -38,6 +38,9 @@ type TextFormat = (
 );
 type Stroke = Option<((u8, u8, u8), f64)>;
 type LinkValue = Option<(Option<String>, Option<u32>, String)>;
+// Canonical cell coordinates, paragraph ordinal, grid generation, body generation.
+type CellTarget = (usize, usize, usize, u64, u64);
+type CellParagraphInfo = (usize, usize, u64, u64, usize);
 
 #[pyclass(module = "doc_ex._core")]
 #[derive(Clone)]
@@ -48,6 +51,7 @@ pub struct EditablePptx {
     shapes: usize,
     revision: u64,
     table_generations: HashMap<u32, u64>,
+    cell_generations: HashMap<(u32, usize, usize), u64>,
 }
 
 impl EditablePptx {
@@ -93,6 +97,8 @@ impl EditablePptx {
         })?;
         if structural {
             self.table_generations.insert(id, generation);
+            self.cell_generations
+                .retain(|(table, _, _), _| *table != id);
         }
         self.refresh_budgets()
     }
@@ -141,6 +147,35 @@ impl EditablePptx {
             .text
             .as_ref()
             .ok_or_else(|| PyValueError::new_err("shape has no text body"))
+    }
+
+    fn target_body(&self, slide: usize, id: u32, cell: Option<CellTarget>) -> PyResult<&TextBody> {
+        let Some((row, col, paragraph, grid_generation, body_generation)) = cell else {
+            return self.text_body(slide, id);
+        };
+        let table = self.table(slide, id)?;
+        if self.table_generation(slide, id)? != grid_generation
+            || self
+                .cell_generations
+                .get(&(id, row, col))
+                .copied()
+                .unwrap_or(0)
+                != body_generation
+        {
+            return Err(PyValueError::new_err(
+                "paragraph handle is stale after a cell or table change",
+            ));
+        }
+        if cell_anchor(table, row, col)? != (row, col) {
+            return Err(PyValueError::new_err(
+                "paragraph target must use the canonical cell anchor",
+            ));
+        }
+        let body = &table_cell(table, row, col)?.text;
+        if paragraph >= body.paragraphs.len() {
+            return Err(PyIndexError::new_err("cell paragraph index out of range"));
+        }
+        Ok(body)
     }
 
     fn check_slide(&self, slide: usize) -> PyResult<()> {
@@ -271,6 +306,8 @@ impl EditablePptx {
         self.text_bytes = text_bytes;
         self.table_generations
             .retain(|id, _| live_tables.contains(id));
+        self.cell_generations
+            .retain(|(id, _, _), _| live_tables.contains(id));
         Ok(())
     }
 }
@@ -293,6 +330,7 @@ impl EditablePptx {
             shapes: 0,
             revision: 0,
             table_generations: HashMap::new(),
+            cell_generations: HashMap::new(),
         })
     }
 
@@ -309,6 +347,7 @@ impl EditablePptx {
     pub fn close(&mut self) {
         self.presentation = None;
         self.table_generations.clear();
+        self.cell_generations.clear();
     }
 
     pub fn slide_count(&self) -> PyResult<usize> {
@@ -828,26 +867,31 @@ impl EditablePptx {
         }
     }
 
-    pub fn shape_text(&self, slide: usize, id: u32) -> PyResult<String> {
-        self.shape(slide, id)?
-            .text
-            .as_ref()
-            .map(TextBody::text)
-            .ok_or_else(|| PyValueError::new_err("shape has no text body"))
+    #[pyo3(signature = (slide, id, cell=None))]
+    pub fn shape_text(&self, slide: usize, id: u32, cell: Option<CellTarget>) -> PyResult<String> {
+        let body = self.target_body(slide, id, cell)?;
+        Ok(match cell {
+            Some((_, _, paragraph, _, _)) => body.paragraphs[paragraph].text(),
+            None => body.text(),
+        })
     }
 
+    #[pyo3(signature = (slide, id, start, end, cell=None))]
     pub fn text_range(
         &self,
         slide: usize,
         id: u32,
         start: usize,
         end: usize,
+        cell: Option<CellTarget>,
     ) -> PyResult<(String, u64)> {
-        let body = self.text_body(slide, id)?;
-        let (a, b) = text_positions(body, start, end)?;
+        let body = self.target_body(slide, id, cell)?;
+        let (a, b) = target_positions(body, start, end, cell.map(|target| target.2))?;
         Ok((deckcraft_model::edit::text_range(body, a, b), self.revision))
     }
 
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (slide, id, start, end, revision, cell=None))]
     pub fn range_text(
         &self,
         slide: usize,
@@ -855,32 +899,41 @@ impl EditablePptx {
         start: usize,
         end: usize,
         revision: u64,
+        cell: Option<CellTarget>,
     ) -> PyResult<String> {
         self.check_revision(revision)?;
-        Ok(self.text_range(slide, id, start, end)?.0)
+        Ok(self.text_range(slide, id, start, end, cell)?.0)
     }
 
-    #[pyo3(signature = (slide, id, text, patch="{}"))]
+    #[pyo3(signature = (slide, id, text, patch="{}", cell=None))]
     pub fn add_run_patch(
         &mut self,
         slide: usize,
         id: u32,
         text: &str,
         patch: &str,
+        cell: Option<CellTarget>,
     ) -> PyResult<(usize, usize, u64)> {
         let patch = FormatPatch::parse(patch)?;
-        let start = self.text_body(slide, id)?.char_len();
+        if cell.is_some() {
+            paragraph_text_value(text)?;
+        }
+        let original = self.target_body(slide, id, cell)?;
+        let start = cell.map_or_else(
+            || original.char_len(),
+            |target| original.paragraphs[target.2].char_len(),
+        );
         let body = edited_body(
             self.document()?,
-            slide,
-            id,
+            original,
             start,
             start,
             text,
             Some(&patch),
+            cell.map(|target| target.2),
         )?;
         self.mutate(|document| {
-            shape_mut(document, slide, id)?.text = Some(body);
+            *target_body_mut(document, slide, id, cell)? = body;
             Ok(())
         })?;
         self.refresh_budgets()?;
@@ -888,6 +941,7 @@ impl EditablePptx {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (slide, id, start, end, revision, text, cell=None))]
     pub fn replace_range(
         &mut self,
         slide: usize,
@@ -896,11 +950,23 @@ impl EditablePptx {
         end: usize,
         revision: u64,
         text: &str,
+        cell: Option<CellTarget>,
     ) -> PyResult<(usize, usize, u64)> {
         self.check_revision(revision)?;
-        let body = edited_body(self.document()?, slide, id, start, end, text, None)?;
+        if cell.is_some() {
+            paragraph_text_value(text)?;
+        }
+        let body = edited_body(
+            self.document()?,
+            self.target_body(slide, id, cell)?,
+            start,
+            end,
+            text,
+            None,
+            cell.map(|target| target.2),
+        )?;
         self.mutate(|document| {
-            shape_mut(document, slide, id)?.text = Some(body);
+            *target_body_mut(document, slide, id, cell)? = body;
             Ok(())
         })?;
         self.refresh_budgets()?;
@@ -908,6 +974,7 @@ impl EditablePptx {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (slide, id, start, end, revision, patch, cell=None))]
     pub fn format_range_patch(
         &mut self,
         slide: usize,
@@ -916,11 +983,12 @@ impl EditablePptx {
         end: usize,
         revision: u64,
         patch: &str,
+        cell: Option<CellTarget>,
     ) -> PyResult<u64> {
         self.check_revision(revision)?;
         let patch = FormatPatch::parse(patch)?;
-        let body = self.text_body(slide, id)?;
-        let (a, b) = text_positions(body, start, end)?;
+        let body = self.target_body(slide, id, cell)?;
+        let (a, b) = target_positions(body, start, end, cell.map(|target| target.2))?;
         preflight_format(
             self.document()?,
             body,
@@ -930,10 +998,7 @@ impl EditablePptx {
             false,
         )?;
         self.mutate(|document| {
-            let body = shape_mut(document, slide, id)?
-                .text
-                .as_mut()
-                .ok_or_else(|| PyValueError::new_err("shape has no text body"))?;
+            let body = target_body_mut(document, slide, id, cell)?;
             deckcraft_model::edit::format(body, a, b, &|props| patch.apply(props));
             Ok(())
         })?;
@@ -941,7 +1006,7 @@ impl EditablePptx {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (slide, id, start, end, revision, allow_mixed=false))]
+    #[pyo3(signature = (slide, id, start, end, revision, allow_mixed=false, cell=None))]
     pub fn range_link(
         &self,
         slide: usize,
@@ -950,10 +1015,11 @@ impl EditablePptx {
         end: usize,
         revision: u64,
         allow_mixed: bool,
+        cell: Option<CellTarget>,
     ) -> PyResult<LinkValue> {
         self.check_revision(revision)?;
-        let body = self.text_body(slide, id)?;
-        let (a, b) = text_positions(body, start, end)?;
+        let body = self.target_body(slide, id, cell)?;
+        let (a, b) = target_positions(body, start, end, cell.map(|target| target.2))?;
         if start == end {
             return Err(PyValueError::new_err(
                 "a link requires a nonempty text range",
@@ -984,7 +1050,7 @@ impl EditablePptx {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (slide, id, start, end, revision, url=None, target_slide=None, tooltip=""))]
+    #[pyo3(signature = (slide, id, start, end, revision, url=None, target_slide=None, tooltip="", cell=None))]
     pub fn set_range_link(
         &mut self,
         slide: usize,
@@ -995,11 +1061,12 @@ impl EditablePptx {
         url: Option<&str>,
         target_slide: Option<u32>,
         tooltip: &str,
+        cell: Option<CellTarget>,
     ) -> PyResult<u64> {
         self.check_revision(revision)?;
         let link = make_link(self.document()?, url, target_slide, tooltip)?;
-        let body = self.text_body(slide, id)?;
-        let (a, b) = text_positions(body, start, end)?;
+        let body = self.target_body(slide, id, cell)?;
+        let (a, b) = target_positions(body, start, end, cell.map(|target| target.2))?;
         if start == end || !range_has_text(body, a, b) {
             return Err(PyValueError::new_err(
                 "a link requires a range containing text",
@@ -1014,10 +1081,7 @@ impl EditablePptx {
             true,
         )?;
         self.mutate(|document| {
-            let body = shape_mut(document, slide, id)?
-                .text
-                .as_mut()
-                .ok_or_else(|| PyValueError::new_err("shape has no text body"))?;
+            let body = target_body_mut(document, slide, id, cell)?;
             // A labeled link never changes the insertion/end-mark formatting.
             let ends: Vec<_> = body.paragraphs[a.0..=b.0]
                 .iter()
@@ -1055,7 +1119,15 @@ impl EditablePptx {
 
     pub fn set_shape_text(&mut self, slide: usize, id: u32, text: &str) -> PyResult<()> {
         let end = self.text_body(slide, id)?.char_len();
-        let body = edited_body(self.document()?, slide, id, 0, end, text, None)?;
+        let body = edited_body(
+            self.document()?,
+            self.text_body(slide, id)?,
+            0,
+            end,
+            text,
+            None,
+            None,
+        )?;
         self.mutate(|document| {
             shape_mut(document, slide, id)?.text = Some(body);
             Ok(())
@@ -1469,6 +1541,126 @@ impl EditablePptx {
         })
     }
 
+    pub fn cell_paragraph_info(
+        &self,
+        slide: usize,
+        id: u32,
+        row: usize,
+        col: usize,
+    ) -> PyResult<CellParagraphInfo> {
+        let table = self.table(slide, id)?;
+        let (row, col) = cell_anchor(table, row, col)?;
+        let body = &table_cell(table, row, col)?.text;
+        Ok((
+            row,
+            col,
+            self.table_generation(slide, id)?,
+            self.cell_generations
+                .get(&(id, row, col))
+                .copied()
+                .unwrap_or(0),
+            body.paragraphs.len(),
+        ))
+    }
+
+    pub fn cell_add_paragraph(
+        &mut self,
+        slide: usize,
+        id: u32,
+        row: usize,
+        col: usize,
+        text: &str,
+    ) -> PyResult<CellTarget> {
+        paragraph_text_value(text)?;
+        let (row, col, grid, generation, count) = self.cell_paragraph_info(slide, id, row, col)?;
+        self.check_paragraph_budget(1, 0)?;
+        let original = &table_cell(self.table(slide, id)?, row, col)?.text;
+        self.check_text_budget(text.len().saturating_add(usize::from(count > 0)))?;
+        let body = if count == 0 {
+            // Merge drains covered-cell paragraphs; split can expose an empty body.
+            // Native insert creates its initial paragraph. Do not prepend a separator.
+            let projected = ContentBudget {
+                text: text.len(),
+                paragraphs: 1,
+                runs: usize::from(!text.is_empty()),
+                ..Default::default()
+            };
+            content_budget(self.document()?)?
+                .replacing(body_budget(original), projected)
+                .check()?;
+            let mut body = original.clone();
+            deckcraft_model::edit::insert(&mut body, (0, 0), text, None);
+            body
+        } else {
+            let end = original.char_len();
+            let insertion = format!("\n{text}");
+            let patch = FormatPatch::parse("{}")?;
+            edited_body(
+                self.document()?,
+                original,
+                end,
+                end,
+                &insertion,
+                Some(&patch),
+                None,
+            )?
+        };
+        self.mutate(|document| {
+            cell_mut(document, slide, id, row, col)?.text = body;
+            Ok(())
+        })?;
+        self.refresh_budgets()?;
+        Ok((row, col, count, grid, generation))
+    }
+
+    pub fn cell_paragraph_alignment(
+        &self,
+        slide: usize,
+        id: u32,
+        cell: CellTarget,
+    ) -> PyResult<Option<&'static str>> {
+        Ok(self.target_body(slide, id, Some(cell))?.paragraphs[cell.2]
+            .props
+            .align
+            .map(|value| match value {
+                Align::Left => "left",
+                Align::Center => "center",
+                Align::Right => "right",
+                Align::Justify => "justify",
+                Align::JustLow => "justify_low",
+                Align::Distributed => "distributed",
+            }))
+    }
+
+    #[pyo3(signature = (slide, id, cell, alignment=None))]
+    pub fn set_cell_paragraph_alignment(
+        &mut self,
+        slide: usize,
+        id: u32,
+        cell: CellTarget,
+        alignment: Option<&str>,
+    ) -> PyResult<()> {
+        self.target_body(slide, id, Some(cell))?;
+        let alignment = match alignment {
+            None => None,
+            Some("left") => Some(Align::Left),
+            Some("center") => Some(Align::Center),
+            Some("right") => Some(Align::Right),
+            Some("justify") => Some(Align::Justify),
+            _ => {
+                return Err(PyValueError::new_err(
+                    "alignment must be left, center, right, justify or None",
+                ));
+            }
+        };
+        self.mutate(|document| {
+            target_body_mut(document, slide, id, Some(cell))?.paragraphs[cell.2]
+                .props
+                .align = alignment;
+            Ok(())
+        })
+    }
+
     pub fn set_cell_text(
         &mut self,
         slide: usize,
@@ -1477,6 +1669,14 @@ impl EditablePptx {
         col: usize,
         text: &str,
     ) -> PyResult<()> {
+        let (row, col) = cell_anchor(self.table(slide, id)?, row, col)?;
+        let generation = self
+            .cell_generations
+            .get(&(id, row, col))
+            .copied()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or_else(|| EngineError::ResourceLimit("cell generation limit reached".into()))?;
         let cell = table_cell(self.table(slide, id)?, row, col)?;
         text_value(text)?;
         let count = paragraph_count(text);
@@ -1502,6 +1702,7 @@ impl EditablePptx {
             replace_text(&mut cell.text, text);
             Ok(())
         })?;
+        self.cell_generations.insert((id, row, col), generation);
         self.refresh_budgets()
     }
 
@@ -2136,6 +2337,54 @@ fn text_positions(body: &TextBody, start: usize, end: usize) -> PyResult<TextPos
     Ok((position(start), position(end)))
 }
 
+fn target_positions(
+    body: &TextBody,
+    start: usize,
+    end: usize,
+    paragraph: Option<usize>,
+) -> PyResult<TextPositions> {
+    if let Some(index) = paragraph {
+        let item = body
+            .paragraphs
+            .get(index)
+            .ok_or_else(|| PyIndexError::new_err("cell paragraph index out of range"))?;
+        if start > end || end > item.char_len() {
+            return Err(PyIndexError::new_err(
+                "text range is outside the cell paragraph",
+            ));
+        }
+        Ok(((index, start), (index, end)))
+    } else {
+        text_positions(body, start, end)
+    }
+}
+
+fn target_body_mut(
+    document: &mut Presentation,
+    slide: usize,
+    id: u32,
+    cell: Option<CellTarget>,
+) -> PyResult<&mut TextBody> {
+    if let Some((row, col, _, _, _)) = cell {
+        Ok(&mut cell_mut(document, slide, id, row, col)?.text)
+    } else {
+        shape_mut(document, slide, id)?
+            .text
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("shape has no text body"))
+    }
+}
+
+fn paragraph_text_value(text: &str) -> PyResult<()> {
+    text_value(text)?;
+    if text.contains('\n') {
+        return Err(PyValueError::new_err(
+            "cell paragraph text cannot contain LF; use cell.add_paragraph",
+        ));
+    }
+    Ok(())
+}
+
 fn range_has_text(
     body: &TextBody,
     a: deckcraft_model::edit::Pos,
@@ -2371,23 +2620,18 @@ fn visit_shapes(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn edited_body(
     document: &Presentation,
-    slide: usize,
-    id: u32,
+    body: &TextBody,
     start: usize,
     end: usize,
     text: &str,
     patch: Option<&FormatPatch>,
+    paragraph: Option<usize>,
 ) -> PyResult<TextBody> {
     text_value(text)?;
-    let body = document
-        .slides
-        .get(slide)
-        .and_then(|s| s.shape(ShapeId(id)))
-        .and_then(|s| s.text.as_ref())
-        .ok_or_else(|| PyValueError::new_err("shape has no text body"))?;
-    let (a, b) = text_positions(body, start, end)?;
+    let (a, b) = target_positions(body, start, end, paragraph)?;
     // props_at describes the character before the caret. Replacement takes the
     // first selected character's appearance, including at a run boundary.
     let props_position = if start < end && a.1 < body.paragraphs[a.0].char_len() {
@@ -3005,6 +3249,215 @@ fn validate_png(data: &[u8]) -> PyResult<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cell_paragraph_targets_share_ranges_and_stale_after_reset_or_grid_changes() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide("blank").unwrap();
+        author.add_slide("blank").unwrap();
+        let stable = author.slide_id(0).unwrap();
+        let id = author
+            .add_table(
+                0,
+                vec![vec!["First".into(), "Second".into()]],
+                20.0,
+                20.0,
+                400.0,
+                80.0,
+                18.0,
+            )
+            .unwrap();
+        author.merge_cells(0, id, 0, 0, 0, 1).unwrap();
+        let (row, col, grid, generation, count) = author.cell_paragraph_info(0, id, 0, 1).unwrap();
+        assert_eq!((row, col, count), (0, 0, 2));
+        let first = (row, col, 0, grid, generation);
+        let (_, revision) = author.text_range(0, id, 0, 5, Some(first)).unwrap();
+        let appended = author.cell_add_paragraph(0, id, 0, 1, "λ Tail").unwrap();
+        assert_eq!(appended.2, 2);
+        assert_eq!(author.shape_text(0, id, Some(first)).unwrap(), "First");
+        assert!(author
+            .range_text(0, id, 0, 5, revision, Some(first))
+            .is_err());
+        let (_, _, revision) = author
+            .add_run_patch(
+                0,
+                id,
+                "!",
+                r##"{"bold":true,"color":"#FF0000"}"##,
+                Some(appended),
+            )
+            .unwrap();
+        author
+            .replace_range(0, id, 0, 1, revision, "é", Some(appended))
+            .unwrap();
+        assert_eq!(
+            author.cell_text(0, id, 0, 0).unwrap(),
+            "First\nSecond\né Tail!"
+        );
+        author.move_slide(0, 1).unwrap();
+        assert_eq!(author.slide_index(stable).unwrap(), 1);
+        assert_eq!(author.shape_text(1, id, Some(appended)).unwrap(), "é Tail!");
+        let mut copied = author.copy().unwrap();
+        copied.set_cell_text(1, id, 0, 1, "Reset").unwrap();
+        assert!(copied.shape_text(1, id, Some(first)).is_err());
+        assert_eq!(author.shape_text(1, id, Some(first)).unwrap(), "First");
+        assert_eq!(copied.cell_generations.len(), 1);
+        copied.split_cell(1, id, 0, 0, None).unwrap();
+        assert!(copied.cell_generations.is_empty());
+        assert_eq!(copied.cell_paragraph_info(1, id, 0, 1).unwrap().4, 0);
+        let empty_target = copied
+            .cell_add_paragraph(1, id, 0, 1, "First after split")
+            .unwrap();
+        assert_eq!(empty_target.2, 0);
+        assert_eq!(
+            copied.shape_text(1, id, Some(empty_target)).unwrap(),
+            "First after split"
+        );
+        // Raw targets cannot revive when pruning returns the body generation to zero.
+        assert!(copied.shape_text(1, id, Some(first)).is_err());
+        copied.set_cell_text(1, id, 0, 0, "Live").unwrap();
+        assert_eq!(copied.cell_generations.len(), 1);
+        copied.delete_shape(1, id).unwrap();
+        assert!(copied.cell_generations.is_empty());
+    }
+
+    #[test]
+    fn cell_paragraph_invalid_text_and_budgets_reject_before_mutation() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide("blank").unwrap();
+        let id = author
+            .add_table(0, vec![vec!["First".into()]], 20.0, 20.0, 400.0, 80.0, 18.0)
+            .unwrap();
+        let target = (0, 0, 0, 0, 0);
+        let before = author.document().unwrap().clone();
+        let revision = author.revision().unwrap();
+        for text in ["Line\nBreak", "\r", "\u{b}"] {
+            assert!(author.cell_add_paragraph(0, id, 0, 0, text).is_err());
+            assert!(author
+                .add_run_patch(0, id, text, "{}", Some(target))
+                .is_err());
+            assert!(author
+                .replace_range(0, id, 0, 5, revision, text, Some(target))
+                .is_err());
+            assert_eq!(author.document().unwrap(), &before);
+            assert_eq!(author.revision().unwrap(), revision);
+        }
+        assert!(author
+            .cell_add_paragraph(0, id, 0, 0, &"x".repeat(MAX_TEXT))
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit"));
+        assert_eq!(author.document().unwrap(), &before);
+        assert!(author.shape_text(0, id, Some((0, 0, 1, 0, 0))).is_err());
+        author.cell_generations.insert((id, 0, 0), u64::MAX);
+        assert!(author.set_cell_text(0, id, 0, 0, "No").is_err());
+        assert_eq!(author.document().unwrap(), &before);
+        author.cell_generations.clear();
+        let total = content_budget(author.document().unwrap())
+            .unwrap()
+            .paragraphs;
+        let body = &mut cell_mut(author.presentation.as_mut().unwrap(), 0, id, 0, 0)
+            .unwrap()
+            .text;
+        let first = body.paragraphs[0].clone();
+        body.paragraphs.resize(1 + MAX_PARAGRAPHS - total, first);
+        author.refresh_budgets().unwrap();
+        assert_eq!(
+            content_budget(author.document().unwrap())
+                .unwrap()
+                .paragraphs,
+            MAX_PARAGRAPHS
+        );
+        let revision = author.revision().unwrap();
+        assert!(author
+            .cell_add_paragraph(0, id, 0, 0, "")
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit"));
+        assert_eq!(author.revision().unwrap(), revision);
+        assert_eq!(
+            content_budget(author.document().unwrap())
+                .unwrap()
+                .paragraphs,
+            MAX_PARAGRAPHS
+        );
+    }
+
+    #[test]
+    fn cell_paragraph_links_and_alignment_preserve_neighboring_paragraphs() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide("blank").unwrap();
+        author.add_slide("blank").unwrap();
+        let destination = author.slide_id(1).unwrap();
+        let id = author
+            .add_table(
+                0,
+                vec![vec!["Neighbor".into()]],
+                20.0,
+                20.0,
+                400.0,
+                80.0,
+                18.0,
+            )
+            .unwrap();
+        let target = author.cell_add_paragraph(0, id, 0, 0, "λ label").unwrap();
+        author
+            .set_cell_paragraph_alignment(0, id, target, Some("right"))
+            .unwrap();
+        assert_eq!(
+            author.cell_paragraph_alignment(0, id, target).unwrap(),
+            Some("right")
+        );
+        assert_eq!(
+            author
+                .cell_paragraph_alignment(0, id, (0, 0, 0, 0, 0))
+                .unwrap(),
+            None
+        );
+        let revision = author.revision().unwrap();
+        let revision = author
+            .set_range_link(
+                0,
+                id,
+                2,
+                7,
+                revision,
+                None,
+                Some(destination),
+                "Destination",
+                Some(target),
+            )
+            .unwrap();
+        assert_eq!(
+            author
+                .range_link(0, id, 2, 7, revision, false, Some(target))
+                .unwrap(),
+            Some((None, Some(destination), "Destination".into()))
+        );
+        let (_, _, revision) = author
+            .add_run_patch(0, id, " plain", "{}", Some(target))
+            .unwrap();
+        assert_eq!(
+            author
+                .range_link(0, id, 7, 13, revision, false, Some(target))
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            author.cell_text(0, id, 0, 0).unwrap(),
+            "Neighbor\nλ label plain"
+        );
+        let bytes = author.to_bytes().unwrap();
+        let read = crate::pptx::extract(&bytes).unwrap();
+        assert_eq!(
+            read.pages[0].tables[0].rows,
+            vec![vec!["Neighbor\nλ label plain".to_owned()]]
+        );
+        assert!(read.pages[0].links.iter().any(|link| link.uri == "#page=2"));
+    }
+
     use super::*;
 
     fn picture_fixture(padding: usize, color: [u8; 3]) -> Vec<u8> {
@@ -3603,7 +4056,10 @@ mod tests {
         author
             .set_shape_text(0, text_id, "New λ\nSecond line")
             .unwrap();
-        assert_eq!(author.shape_text(0, text_id).unwrap(), "New λ\nSecond line");
+        assert_eq!(
+            author.shape_text(0, text_id, None).unwrap(),
+            "New λ\nSecond line"
+        );
         assert_eq!(
             author
                 .shape(0, text_id)
@@ -3913,7 +4369,10 @@ mod tests {
         for invalid in ["\0", "\u{fffe}", "\u{ffff}"] {
             assert!(author.set_shape_text(0, id, invalid).is_err());
         }
-        assert_eq!(author.shape_text(0, id).unwrap(), "Literal \u{fffc} text");
+        assert_eq!(
+            author.shape_text(0, id, None).unwrap(),
+            "Literal \u{fffc} text"
+        );
     }
 
     #[test]
@@ -3956,16 +4415,19 @@ mod tests {
         let id = author
             .add_text(0, "Aλ", 20.0, 20.0, 500.0, 200.0, 18.0)
             .unwrap();
-        let (_, _, revision) = author.add_run_patch(0, id, "日本\nSecond", r##"{"bold":true,"italic":true,"font_size":24,"color":"#224466","underline":true,"strike":"double","script":"superscript","highlight":"#FFFF00"}"##).unwrap();
-        assert_eq!(author.text_range(0, id, 1, 7).unwrap().0, "λ日本\nSe");
+        let (_, _, revision) = author.add_run_patch(0, id, "日本\nSecond", r##"{"bold":true,"italic":true,"font_size":24,"color":"#224466","underline":true,"strike":"double","script":"superscript","highlight":"#FFFF00"}"##, None).unwrap();
+        assert_eq!(author.text_range(0, id, 1, 7, None).unwrap().0, "λ日本\nSe");
         let (start, end, current) = author
-            .replace_range(0, id, 1, 7, revision, "é🙂\nX")
+            .replace_range(0, id, 1, 7, revision, "é🙂\nX", None)
             .unwrap();
         assert_eq!((start, end), (1, 5));
-        assert_eq!(author.shape_text(0, id).unwrap(), "Aé🙂\nXcond");
-        assert!(author.range_text(0, id, 1, 7, revision).is_err());
-        let current = author.format_range_patch(0, id, 5, 9, current, r#"{"bold":false,"italic":null,"font_size":null,"underline":false,"strike":false,"script":"baseline","highlight":null}"#).unwrap();
-        assert_eq!(author.range_text(0, id, 5, 9, current).unwrap(), "cond");
+        assert_eq!(author.shape_text(0, id, None).unwrap(), "Aé🙂\nXcond");
+        assert!(author.range_text(0, id, 1, 7, revision, None).is_err());
+        let current = author.format_range_patch(0, id, 5, 9, current, r#"{"bold":false,"italic":null,"font_size":null,"underline":false,"strike":false,"script":"baseline","highlight":null}"#, None).unwrap();
+        assert_eq!(
+            author.range_text(0, id, 5, 9, current, None).unwrap(),
+            "cond"
+        );
         let reopened = deckcraft_pptx::import(&author.to_bytes().unwrap()).unwrap();
         let body = reopened.slides[0].shapes[0].text.as_ref().unwrap();
         assert_eq!(body.text(), "Aé🙂\nXcond");
@@ -3989,10 +4451,10 @@ mod tests {
             .add_text(0, "Prefix ", 20.0, 20.0, 500.0, 100.0, 18.0)
             .unwrap();
         let (_, _, revision) = author
-            .add_run_patch(0, id, "{{name}}", r#"{"bold":true,"font_size":24}"#)
+            .add_run_patch(0, id, "{{name}}", r#"{"bold":true,"font_size":24}"#, None)
             .unwrap();
         author
-            .replace_range(0, id, 7, 15, revision, "Acme")
+            .replace_range(0, id, 7, 15, revision, "Acme", None)
             .unwrap();
         let body = author.text_body(0, id).unwrap();
         assert_eq!(body.text(), "Prefix Acme");
@@ -4018,7 +4480,7 @@ mod tests {
         for (name, native) in UNDERLINES {
             let patch = serde_json::json!({"underline": name}).to_string();
             author
-                .format_range_patch(0, id, 0, 6, author.revision().unwrap(), &patch)
+                .format_range_patch(0, id, 0, 6, author.revision().unwrap(), &patch, None)
                 .unwrap();
             let reopened = deckcraft_pptx::import(&author.to_bytes().unwrap()).unwrap();
             let props = &reopened.slides[0].shapes[0]
@@ -4037,7 +4499,7 @@ mod tests {
         ] {
             let patch = serde_json::json!({"underline": native}).to_string();
             assert!(author
-                .format_range_patch(0, id, 0, 6, revision, &patch)
+                .format_range_patch(0, id, 0, 6, revision, &patch, None)
                 .is_err());
         }
         assert_eq!(author.document().unwrap(), &before);
@@ -4056,17 +4518,21 @@ mod tests {
             .add_text(0, "Before λ", 20.0, 20.0, 500.0, 100.0, 18.0)
             .unwrap();
         let (_, _, revision) = author
-            .add_run_patch(0, id, "日本 after", r#"{"bold":true}"#)
+            .add_run_patch(0, id, "日本 after", r#"{"bold":true}"#, None)
             .unwrap();
         let url = "https://example.com/deck?a=1&b=2";
         let revision = author
-            .set_range_link(0, id, 7, 10, revision, Some(url), None, "Website")
+            .set_range_link(0, id, 7, 10, revision, Some(url), None, "Website", None)
             .unwrap();
         assert_eq!(
-            author.range_link(0, id, 7, 10, revision, false).unwrap(),
+            author
+                .range_link(0, id, 7, 10, revision, false, None)
+                .unwrap(),
             Some((Some(url.into()), None, "Website".into()))
         );
-        assert!(author.range_link(0, id, 6, 10, revision, false).is_err());
+        assert!(author
+            .range_link(0, id, 6, 10, revision, false, None)
+            .is_err());
         author
             .set_shape_link(0, id, None, Some(target), "Last page")
             .unwrap();
@@ -4105,7 +4571,10 @@ mod tests {
             .any(|l| l.uri == "#page=1"));
         author.set_shape_link(1, id, None, None, "").unwrap();
         author.remove_slide(0).unwrap();
-        assert_eq!(author.shape_text(0, id).unwrap(), "Before λ日本 after");
+        assert_eq!(
+            author.shape_text(0, id, None).unwrap(),
+            "Before λ日本 after"
+        );
     }
 
     #[test]
@@ -4130,7 +4599,7 @@ mod tests {
             "[]",
         ] {
             assert!(author
-                .format_range_patch(0, id, 0, 2, revision, patch)
+                .format_range_patch(0, id, 0, 2, revision, patch, None)
                 .is_err());
         }
         for url in [
@@ -4144,16 +4613,28 @@ mod tests {
             "https://x/\u{ffff}",
         ] {
             assert!(author
-                .set_range_link(0, id, 0, 2, revision, Some(url), None, "")
+                .set_range_link(0, id, 0, 2, revision, Some(url), None, "", None)
                 .is_err());
         }
         assert!(author
-            .format_range_patch(0, id, 0, 100, revision, "{}")
+            .format_range_patch(0, id, 0, 100, revision, "{}", None)
             .is_err());
-        assert!(author.replace_range(0, id, 3, 2, revision, "bad").is_err());
-        assert!(author.add_run_patch(0, id, "\r", "{}").is_err());
         assert!(author
-            .set_range_link(0, id, 4, 5, revision, Some("https://example.com"), None, "")
+            .replace_range(0, id, 3, 2, revision, "bad", None)
+            .is_err());
+        assert!(author.add_run_patch(0, id, "\r", "{}", None).is_err());
+        assert!(author
+            .set_range_link(
+                0,
+                id,
+                4,
+                5,
+                revision,
+                Some("https://example.com"),
+                None,
+                "",
+                None
+            )
             .is_err());
         assert!(author
             .set_shape_link(0, id, None, Some(u32::MAX), "")
@@ -4173,23 +4654,47 @@ mod tests {
         assert_eq!(author.document().unwrap(), &before);
         assert_eq!(author.revision().unwrap(), revision);
         let current = author
-            .set_range_link(0, id, 0, 4, revision, Some("https://example.com"), None, "")
+            .set_range_link(
+                0,
+                id,
+                0,
+                4,
+                revision,
+                Some("https://example.com"),
+                None,
+                "",
+                None,
+            )
             .unwrap();
-        assert!(author.range_text(0, id, 0, 4, revision).is_err());
+        assert!(author.range_text(0, id, 0, 4, revision, None).is_err());
         let current = author
-            .set_range_link(0, id, 0, 4, current, None, None, "")
+            .set_range_link(0, id, 0, 4, current, None, None, "", None)
             .unwrap();
         assert_eq!(
-            author.range_link(0, id, 0, 4, current, false).unwrap(),
+            author
+                .range_link(0, id, 0, 4, current, false, None)
+                .unwrap(),
             None
         );
         let current = author
-            .set_range_link(0, id, 5, 9, current, Some("https://example.com"), None, "")
+            .set_range_link(
+                0,
+                id,
+                5,
+                9,
+                current,
+                Some("https://example.com"),
+                None,
+                "",
+                None,
+            )
             .unwrap();
-        let (_, _, latest) = author.add_run_patch(0, id, " extra", "{}").unwrap();
+        let (_, _, latest) = author.add_run_patch(0, id, " extra", "{}", None).unwrap();
         assert!(latest > current);
         assert_eq!(
-            author.range_link(0, id, 9, 15, latest, false).unwrap(),
+            author
+                .range_link(0, id, 9, 15, latest, false, None)
+                .unwrap(),
             None
         );
     }
@@ -4204,34 +4709,79 @@ mod tests {
             .unwrap();
         let revision = author.revision().unwrap();
         let revision = author
-            .set_range_link(0, id, 0, 1, revision, Some("https://a.example"), None, "A")
+            .set_range_link(
+                0,
+                id,
+                0,
+                1,
+                revision,
+                Some("https://a.example"),
+                None,
+                "A",
+                None,
+            )
             .unwrap();
         let revision = author
-            .set_range_link(0, id, 1, 2, revision, Some("https://b.example"), None, "B")
+            .set_range_link(
+                0,
+                id,
+                1,
+                2,
+                revision,
+                Some("https://b.example"),
+                None,
+                "B",
+                None,
+            )
             .unwrap();
-        assert!(author.range_link(0, id, 0, 2, revision, false).is_err());
+        assert!(author
+            .range_link(0, id, 0, 2, revision, false, None)
+            .is_err());
         assert_eq!(
-            author.range_link(0, id, 0, 2, revision, true).unwrap(),
+            author
+                .range_link(0, id, 0, 2, revision, true, None)
+                .unwrap(),
             None
         );
-        assert!(author.range_link(0, id, 0, 3, revision, true).is_err());
+        assert!(author
+            .range_link(0, id, 0, 3, revision, true, None)
+            .is_err());
         let current = author
-            .set_range_link(0, id, 0, 2, revision, Some("https://all.example"), None, "")
+            .set_range_link(
+                0,
+                id,
+                0,
+                2,
+                revision,
+                Some("https://all.example"),
+                None,
+                "",
+                None,
+            )
             .unwrap();
-        assert!(author.range_link(0, id, 0, 2, revision, true).is_err());
+        assert!(author
+            .range_link(0, id, 0, 2, revision, true, None)
+            .is_err());
         assert_eq!(
-            author.range_link(0, id, 0, 2, current, false).unwrap(),
+            author
+                .range_link(0, id, 0, 2, current, false, None)
+                .unwrap(),
             Some((Some("https://all.example".into()), None, "".into()))
         );
         let current = author
-            .set_range_link(0, id, 0, 1, current, None, None, "")
-            .unwrap();
-        assert_eq!(author.range_link(0, id, 0, 2, current, true).unwrap(), None);
-        let current = author
-            .set_range_link(0, id, 0, 2, current, None, None, "")
+            .set_range_link(0, id, 0, 1, current, None, None, "", None)
             .unwrap();
         assert_eq!(
-            author.range_link(0, id, 0, 2, current, false).unwrap(),
+            author.range_link(0, id, 0, 2, current, true, None).unwrap(),
+            None
+        );
+        let current = author
+            .set_range_link(0, id, 0, 2, current, None, None, "", None)
+            .unwrap();
+        assert_eq!(
+            author
+                .range_link(0, id, 0, 2, current, false, None)
+                .unwrap(),
             None
         );
     }
@@ -4316,7 +4866,7 @@ mod tests {
         let before = author.document().unwrap().clone();
         let uri = format!("https://example.com/{}", "x".repeat(8000));
         assert!(author
-            .set_range_link(0, id, 0, 3000, revision, Some(&uri), None, "")
+            .set_range_link(0, id, 0, 3000, revision, Some(&uri), None, "", None)
             .is_err());
         assert_eq!(author.document().unwrap(), &before);
         let paragraph = &mut shape_mut(author.presentation.as_mut().unwrap(), 0, id)
@@ -4337,7 +4887,7 @@ mod tests {
             })
             .collect();
         assert!(author
-            .format_range_patch(0, id, 1, 2, revision, r#"{"italic":true}"#)
+            .format_range_patch(0, id, 1, 2, revision, r#"{"italic":true}"#, None)
             .is_err());
         assert_eq!(author.revision().unwrap(), revision);
     }
