@@ -60,7 +60,7 @@ def _read(source, *, limit: int | None = None) -> tuple[bytes, str]:
 
 def _kind(data: bytes, suffix: str, filetype: str | None) -> str:
     if filetype:
-        aliases = {"pdf": "pdf", "docx": "docx", "word": "docx", "pptx": "pptx", "powerpoint": "pptx"}
+        aliases = {"pdf": "pdf", "docx": "docx", "word": "docx", "pptx": "pptx", "powerpoint": "pptx", "epub": "epub", "ebook": "epub"}
         normalized = filetype.lower().lstrip(".")
         if normalized not in aliases:
             raise UnsupportedFormatError(f"Unsupported file type: {filetype}")
@@ -69,7 +69,7 @@ def _kind(data: bytes, suffix: str, filetype: str | None) -> str:
         if detected != kind:
             raise UnsupportedFormatError(f"Input is {detected}, not {kind}")
         return kind
-    if suffix.lower().lstrip(".") in {"pdf", "docx", "pptx"}:
+    if suffix.lower().lstrip(".") in {"pdf", "docx", "pptx", "epub"}:
         expected = suffix.lower().lstrip(".")
         detected = _native(lambda: _core.detect(data))
         if detected != expected:

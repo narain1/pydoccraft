@@ -153,3 +153,9 @@ Conversion is not pixel-perfect. Font substitution, unsupported PDF constructs, 
 ## Document creation
 
 `doc_ex.new("docx" | "pdf" | "pptx")` creates an owned editable native document with insertion, formatting, copy, conversion and atomic path saving. See the supported methods and limitations in [Authoring](authoring.md). Extracted Python values remain independent snapshots; arbitrary source-Office editing is still unavailable, while PDF `Document.edit()` uses a conservative preservation profile. Remaining [creation TODOs](../TODO.md#p1--create-docx-and-pdf-documents) cover broader features; legacy `.doc` output is outside the current scope.
+
+## EPUB (unreleased extraction scope)
+
+The EPUB feature branch detects EPUB 2/3 containers and maps each spine chapter to one compatibility `Page` in reading order. This is a chapter boundary, not physical pagination. The first native slice extracts plain chapter text and publication metadata through LexePub 0.1.2 after the shared archive safety preflight.
+
+Rendering, fixed-layout pagination, CSS fidelity, navigation links, images, media overlays, authoring, and conversion are intentionally unsupported. Encrypted or DRM-protected resources fail explicitly. See `.kiro/specs/epub-support/` for requirements and deferred work.

@@ -5,6 +5,7 @@ mod author_pptx;
 mod conversion;
 mod diagnostics;
 mod docx;
+mod epub;
 mod limits;
 mod model;
 mod ooxml;
@@ -96,6 +97,7 @@ fn extract(data: &[u8], filetype: &str, password: Option<&str>) -> PyResult<Stri
         "pdf" => pdf::extract(data, password),
         "docx" => docx::extract(data, password),
         "pptx" => pptx::extract(data),
+        "epub" => epub::extract(data, password),
         _ => unreachable!(),
     }?;
     limits::bounded_json(&payload, limits::MAX_PAYLOAD_SIZE).map_err(Into::into)
@@ -141,6 +143,9 @@ fn render(
         ("docx", Some(clip)) => docx::render_region(data, page, dpi, password, clip),
         ("pptx", None) => pptx::render(data, page, dpi),
         ("pptx", Some(clip)) => pptx::render_region(data, page, dpi, clip),
+        ("epub", _) => Err(EngineError::Unsupported(
+            "EPUB rendering is not supported".into(),
+        )),
         _ => unreachable!(),
     };
     output.map_err(Into::into)
@@ -156,6 +161,9 @@ fn detect(data: &[u8]) -> PyResult<String> {
         return Ok("docx".into());
     }
     if data.starts_with(b"PK\x03\x04") {
+        if epub::is_epub(data)? {
+            return Ok("epub".into());
+        }
         if let Some(filetype) = ooxml::document_type(data)? {
             return Ok(filetype.into());
         }
@@ -172,6 +180,7 @@ fn normalize(filetype: &str) -> Result<&'static str, EngineError> {
         "pdf" => Ok("pdf"),
         "docx" | "word" => Ok("docx"),
         "pptx" | "powerpoint" => Ok("pptx"),
+        "epub" | "ebook" => Ok("epub"),
         _ => Err(EngineError::Unsupported(format!("file type {filetype}"))),
     }
 }
