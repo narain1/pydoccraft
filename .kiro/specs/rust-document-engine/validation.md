@@ -318,8 +318,62 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 - openpyxl 3.1.5 was measured only as a separate XLSX baseline because it has no equivalent PDF/DOCX/PPTX parsing, rendering, or conversion operation.
 - Conversion outputs reopened and contained text; render outputs had valid PNG signatures. See `docs/benchmarks.md` for methodology, environment, hashes, limitations, and rough-edge tracking links.
 
+## 2026-10-20 anonymized local-file performance baseline
+
+- Benchmarked five local files without publishing filenames, paths, hashes, or extracted text: three PDFs, one DOCX, and one PPTX.
+- Used one warmup and five measured iterations on Apple M5 Pro / macOS 26.6.2 / CPython 3.13.12; generated outputs were validated after timing and not retained.
+- Across PDFs of 14, 65, and 391 pages, PyMuPDF text extraction was 4.16×, 4.57×, and 3.15× faster respectively.
+- First-page 144-DPI RGBA rendering favored PyMuPDF by 1.93×, 5.41×, and 59.83×. The 391-page result confirms that pydoccraft first-page latency is dominated by eager whole-document extraction plus render reopening.
+- pydoccraft PDF→DOCX conversion medians ranged from 69.38 ms to 759.18 ms. The 2-page DOCX extracted in 5.18 ms, rendered in 16.49 ms, and converted to PDF in 6.65 ms. The 14-slide PPTX extracted in 41.93 ms, rendered in 72.73 ms, and converted to PDF in 168.11 ms.
+- Full anonymized numeric results and methodology are in `docs/benchmarks.md`; the reusable local runner is `benchmarks/benchmark_test_files.py`.
+
 ### PR27 independent benchmark review
 
 - Ran the published-wheel benchmark in a fresh Linux x86_64/CPython 3.13.13 environment with the complete pinned comparator lock; `pip check` passed. A small smoke run and the full default 25-page/25-slide/20,000-cell corpus both completed all 12 scenarios. The full run used two warmups and seven measured iterations; conversions reopened with text and both renderers returned PNG. This independently validates the harness, not the historical macOS timings.
 - Corrected post-save OOXML core timestamps: openpyxl overwrites `modified` during serialization, so ZIP timestamp normalization alone did not yield stable XLSX bytes. A regression injects different writer clocks and verifies identical normalized bytes and exact reopened cell values. Historical recorded hashes remain labeled as pre-correction evidence.
 - Rejected `.md` JSON output paths before generation to prevent the companion Markdown report from overwriting JSON. Both focused benchmark-only regression tests passed; this tooling remains outside runtime dependencies and the normal installed-wheel suite.
+
+### PR28 independent local-corpus benchmark review
+
+- Reviewed owner-authored tooling against merged main without reading or uploading private corpus files. In the previously installed pinned Linux/CPython 3.13.13 benchmark environment, all five focused harness regressions passed. A generated four-format local corpus completed 13 scenarios (one warmup/two measured iterations); a synthetic smoke completed 12 scenarios and recorded the installed native artifact identity. Input filename/path canaries were absent from JSON, Markdown and stdout reports.
+- Corrected the new local harness's JSON/Markdown path collision and unchecked negative/zero CLI counts. Repeatability now compares semantic counts/dimensions, excluding serialization byte lengths that can vary with metadata. Python exception details are suppressed at the local-corpus CLI boundary to avoid exposing document paths/content; backend diagnostics are explicitly outside this report guarantee. Historical private-corpus timing claims were not independently reproduced.
+
+### Anonymous PDF stage profile
+
+- Five-iteration medians isolated detection, native extraction, JSON decode, Python hydration, direct native render, and public open+render on the three local PDFs.
+- Detection was below 0.01 ms. Native eager extraction consumed approximately 98%, 96%, and 73% of public open latency for the 391-, 65-, and 14-page inputs.
+- Public open medians were 1,307.87 ms, 202.44 ms, and 104.78 ms; direct native first-page render medians were 70.63 ms, 26.67 ms, and 70.30 ms. Public open+render was approximately their sum because rendering reopens the source independently.
+- Direct native rendering was 1.61× and 1.28× faster than PyMuPDF's public open+render path on the 65- and 14-page PDFs, but PyMuPDF was 3.24× faster on the 391-page PDF. The major public-path regression is therefore eager extraction plus duplicate open state, not uniformly slow rasterization.
+- JSON decode plus Python hydration added 11.18–28.71 ms. Media-heavy inputs can add separate base64/ownership costs.
+- The prioritized feature improvement remains W02/P1: a bounded private native parse/render session, followed by bounded selected-page/text-only extraction under W09/P4.
+
+## Selective text extraction feature branch
+
+- Added `doc_ex.extract_text(source, filetype=None, password=None, pages=None)` with form-feed page separation, ordered/duplicate selections, negative indexes, stable `IndexError`, 10,000 selected-page limit, and 64 MiB output limit.
+- PDF uses a single PdfCraft text renderer and skips COS table/image traversal, media transfer, bounded JSON serialization, and Python public-model hydration. DOCX/PPTX retain eager compatibility fallback behavior.
+- Independent Rust 1.95 formatting/tests/Clippy and release-wheel validation passed: 128 Rust tests and 139 installed-wheel Python tests.
+- Anonymous Linux ARM64 medians versus eager `open()` were: all-page text 1.95×, 2.25×, and 4.95× faster; first-page text 19.91×, 42.32×, and 41.93× faster across the 391-, 65-, and 14-page PDFs.
+- This PR is independent of PDF render-session reuse. Selective structured extraction, Office fast paths, streaming/chunked output, and peak-memory evidence remain open.
+
+## PDF parser-session reuse feature branch
+
+- Added a private native PDF session that retains the PdfCraft `PageRenderer` used during eager extraction and routes subsequent `Document.render_page` / `Page.get_pixmap` calls through the same parsed document.
+- Public `doc_ex.open`, eager owned values, PNG bytes, negative indexes, errors, conversion/edit source bytes, and idempotent close remain compatible. `close()` releases the private session while previously extracted values remain usable.
+- Rust 1.95 validation passed: 128 tests and Clippy with warnings denied. The installed Linux ARM64 CPython 3.13 wheel passed 139 Python tests, including parser-build-count, repeated render, close, DPI, and output regressions.
+- Anonymous repeated page-1 render medians versus the legacy one-shot native reopen were: 6.52 vs 59.69 ms (9.16×) for 391 pages, 23.62 vs 26.00 ms (1.10×) for 65 pages, and 71.89 vs 78.52 ms (1.09×) for 14 pages. Parser-build count remained one after repeated renders.
+- Scope remains partial: eager full-document extraction still dominates first-render latency; DOCX layout reuse, selected-page/text-only extraction, all-page/peak-RSS evidence, and upstream inspect/COS consolidation remain open.
+
+### PDF session integration review
+
+- Exact review head `29cc3df5e43ef698ae7648fe73dd428620335f5b` passed CI 39465695584: 153 Rust tests, 172 installed-wheel Python tests, formatting, warnings-denied Clippy and the unchanged 264-package locked license audit. Existing full-raster limits, oversized-page small clips, blank pages and cross-format rendering passed alongside the new session tests.
+- Merging current main required retaining native clipping in the session path. A shared renderer helper now uses immutable inspected displayed dimensions and the existing pixel rounding, geometry, precision and output guards for both one-shot and retained rendering. Tests compare exact full/clipped PNG bytes at fractional DPI with CropBox/UserUnit and all rotations; parser-build count remains one.
+- A concurrent author merge added explicit-close expectations while dropping its close implementation. The reviewed correction releases the parser through Mutex<Option<PageRenderer>> and immutable PyO3 borrows, including poisoned-lock cleanup. Python captures a local handle, marks the document closed and detaches its handle before native close; retained handles report stable closed errors. Thread/lifetime tests pass, but this does not claim concurrent raster execution because current extension calls retain the GIL.
+- Historical private-corpus timings above remain author-reported; this integration review validates correctness and reuse counters, not those private performance measurements. No dependency or public API was added by the review corrections.
+
+
+### Selective extraction review corrections
+
+- Review identified unbounded Python/PyO3 page collection, missing Office and all-page selection/output checks, oversized-index error inconsistency, and a PDF string allocation preceding the output check. Both boundaries now consume at most 10,001 inputs; ordinary and arbitrary-size invalid indexes use IndexError; all formats cap selected pages and UTF-8 output. PDF preflights glyph byte lengths and possible separators before the upstream string builder.
+- Focused regressions cover generator lookahead, direct native conversion, large signed indexes, duplicate non-ASCII Office output, all-page fallback caps, empty-page separators, UTF-8 chunk boundaries, native page-count limits and glyph-budget checks. Upstream text-device construction can still allocate before output preflight; P4 remains open for peak-memory/streaming guarantees. Reviewed runtime head `57efdc8e6872bfad09275b07d2646ccf0a90d356` passed CI 39466407602: 155 Rust tests, 178 installed-wheel Python tests (no skips), formatting, warnings-denied Clippy and the unchanged 264-package locked license audit. The later main merge changed no files.
+
+- CI artifact: CPython 3.11.17 / Linux x86_64, wheel 17,224,825 bytes, native extension 39,902,544 bytes, wheel SHA-256 `60935ab53de271b8727d5dc5bfbd5328eb9f2d6ac94a848e4fbfe58d9e752544`. Upstream revisions and runtime dependency graph remain unchanged. Historical private-corpus timing claims remain author-reported.

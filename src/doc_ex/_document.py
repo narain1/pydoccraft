@@ -262,13 +262,14 @@ class Page:
 
 
 class Document:
-    def __init__(self, pages: list[Page], metadata: dict[str, Any], source: bytes, filetype: str, password: str | None, *, stories: list[Story] | None = None) -> None:
+    def __init__(self, pages: list[Page], metadata: dict[str, Any], source: bytes, filetype: str, password: str | None, *, stories: list[Story] | None = None, _render_session=None) -> None:
         self._pages = pages
         self.metadata = metadata
         self.stories = list(stories or [])
         self._source = source
         self._filetype = filetype
         self._password = password
+        self._render_session = _render_session
         self._closed = False
         for page in self._pages:
             page._document = self
@@ -394,6 +395,10 @@ class Document:
             raise IndexError("page index out of range")
         from . import _core, _native
         region = _render_clip(clip)
+        session = self._render_session
+        if session is not None:
+            return bytes(_native(lambda: session.render(page, dpi, region)))
+        self._ensure_open()
         return bytes(_native(lambda: _core.render(self._source, self._filetype, page, dpi, self._password, region)))
 
     def convert(self, output_format: str) -> bytes:
@@ -413,6 +418,11 @@ class Document:
 
     def close(self) -> None:
         self._closed = True
+        session = self._render_session
+        self._render_session = None
+        if session is not None:
+            from . import _native
+            _native(session.close)
 
     def _ensure_open(self) -> None:
         if self._closed:

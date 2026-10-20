@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import base64
 import json
+import operator
+import sys
+from collections.abc import Iterable
 from pathlib import Path
 from typing import BinaryIO
 
@@ -20,7 +23,7 @@ from .models import Block, Cell, Image, Link, Story, Table
 from ._authoring import EditableDocument, new, pt, mm, cm, inches
 
 __all__ = [
-    "open", "convert", "new", "pt", "mm", "cm", "inches", "EditableDocument", "Document", "Page", "Block", "Cell", "Table", "Link", "Image", "Story",
+    "open", "convert", "extract_text", "new", "pt", "mm", "cm", "inches", "EditableDocument", "Document", "Page", "Block", "Cell", "Table", "Link", "Image", "Story",
     "DocExError", "DocumentClosedError", "MalformedDocumentError", "UnsafeArchiveError",
     "UnsupportedFormatError", "ToolExecutionError", "ToolNotFoundError",
 ]
@@ -28,6 +31,8 @@ __version__ = "0.2.1"
 
 
 _MAX_INPUT_BYTES = 128 * 1024 * 1024
+_MAX_SELECTED_PAGES = 10_000
+_MAX_TEXT_OUTPUT_BYTES = 64 * 1024 * 1024
 
 
 def _read(source, *, limit: int | None = None) -> tuple[bytes, str]:
@@ -81,12 +86,67 @@ def _kind(data: bytes, suffix: str, filetype: str | None) -> str:
 def open(path_or_bytes: str | Path | bytes | bytearray | memoryview | BinaryIO, filetype: str | None = None, password: str | None = None) -> Document:
     data, suffix = _read(path_or_bytes)
     kind = _kind(data, suffix, filetype)
-    payload = json.loads(_native(lambda: _core.extract(data, kind, password)))
+    render_session = None
+    if kind == "pdf":
+        render_session, encoded = _native(lambda: _core._open_pdf(data, password))
+    else:
+        encoded = _native(lambda: _core.extract(data, kind, password))
+    payload = json.loads(encoded)
     pages = [_page(value) for value in payload["pages"]]
     metadata = dict(payload.get("metadata", {}))
     metadata.setdefault("format", payload["format"])
     stories = [Story(value["kind"], [_block(block) for block in value.get("blocks", [])], value.get("metadata", {})) for value in payload.get("stories", [])]
-    return Document(pages, metadata, data, kind, password, stories=stories)
+    return Document(pages, metadata, data, kind, password, stories=stories, _render_session=render_session)
+
+
+def _selected_pages(pages):
+    if pages is None:
+        return None
+    selected = []
+    for value in pages:
+        if len(selected) == _MAX_SELECTED_PAGES:
+            raise UnsafeArchiveError("selected page count exceeds 10000")
+        index = operator.index(value)
+        if not -sys.maxsize - 1 <= index <= sys.maxsize:
+            raise IndexError("page index is out of range")
+        selected.append(index)
+    return selected
+
+
+def _bounded_text_join(texts):
+    parts = []
+    used = 0
+    for text in texts:
+        used += bool(parts)
+        # Bound the temporary UTF-8 encoding too; keep the original owned strings.
+        for start in range(0, len(text), 4096):
+            used += len(text[start:start + 4096].encode("utf-8"))
+            if used > _MAX_TEXT_OUTPUT_BYTES:
+                raise UnsafeArchiveError("selected text exceeds the 64 MiB output limit")
+        if used > _MAX_TEXT_OUTPUT_BYTES:
+            raise UnsafeArchiveError("selected text exceeds the 64 MiB output limit")
+        parts.append(text)
+    return "\f".join(parts)
+
+
+def extract_text(
+    source: str | Path | bytes | bytearray | memoryview | BinaryIO,
+    *,
+    filetype: str | None = None,
+    password: str | None = None,
+    pages: Iterable[int] | None = None,
+) -> str:
+    """Extract selected text; PDF skips public models, while Office uses eager extraction."""
+    indices = _selected_pages(pages)
+    data, suffix = _read(source)
+    kind = _kind(data, suffix, filetype)
+    if kind == "pdf":
+        return _native(lambda: _core.extract_text(data, indices, password))
+    with open(data, filetype=kind, password=password) as document:
+        selected = range(document.page_count) if indices is None else indices
+        if len(selected) > _MAX_SELECTED_PAGES:
+            raise UnsafeArchiveError("selected page count exceeds 10000")
+        return _bounded_text_join(document[index].get_text("text") for index in selected)
 
 
 def convert(source: str | Path | bytes | bytearray | memoryview | BinaryIO, output_format: str, *, filetype: str | None = None, password: str | None = None) -> bytes:
@@ -108,6 +168,7 @@ def _native(operation):
             "malformed": MalformedDocumentError,
             "unsafe_archive": UnsafeArchiveError,
             "resource_limit": UnsafeArchiveError,
+            "index": IndexError,
             "encrypted": MalformedDocumentError,
             "conversion_failure": DocExError,
             "closed": DocumentClosedError,
