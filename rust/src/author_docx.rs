@@ -2728,6 +2728,69 @@ impl EditableDocx {
         }
     }
 
+    pub fn image_crop(&self, id: usize) -> PyResult<(f64, f64, f64, f64)> {
+        let InlineObject::Image { crop, .. } = self.image(id)? else {
+            return Err(PyIndexError::new_err(
+                "image index does not identify a picture",
+            ));
+        };
+        Ok((
+            f64::from(crop[0]),
+            f64::from(crop[1]),
+            f64::from(crop[2]),
+            f64::from(crop[3]),
+        ))
+    }
+
+    pub fn set_image_crop(&mut self, id: usize, crop: (f64, f64, f64, f64)) -> PyResult<()> {
+        self.image(id)?;
+        let values = [crop.0, crop.1, crop.2, crop.3];
+        if values
+            .iter()
+            .any(|value| !value.is_finite() || !(0.0..=0.45).contains(value))
+        {
+            return Err(PyValueError::new_err("crop fractions must be finite and between 0 and 0.45 in left/top/right/bottom order"));
+        }
+        let mut candidate = self.document()?.clone();
+        let paragraph = self.paragraph_mut(&mut candidate, id)?;
+        if let Some(InlineObject::Image { crop, .. }) = paragraph.objects.first_mut() {
+            *crop = values.map(|value| value as f32);
+        }
+        paragraph.touch();
+        self.commit(candidate)
+    }
+
+    pub fn image_flips(&self, id: usize) -> PyResult<(bool, bool)> {
+        let InlineObject::Image { float, .. } = self.image(id)? else {
+            return Err(PyIndexError::new_err(
+                "image index does not identify a picture",
+            ));
+        };
+        Ok((float.flip_h, float.flip_v))
+    }
+
+    #[pyo3(signature = (id, flip_h=None, flip_v=None))]
+    pub fn set_image_flips(
+        &mut self,
+        id: usize,
+        flip_h: Option<bool>,
+        flip_v: Option<bool>,
+    ) -> PyResult<()> {
+        self.image(id)?;
+        let mut candidate = self.document()?.clone();
+        let paragraph = self.paragraph_mut(&mut candidate, id)?;
+        if let Some(InlineObject::Image { float, .. }) = paragraph.objects.first_mut() {
+            if let Some(value) = flip_h {
+                float.flip_h = value;
+            }
+            if let Some(value) = flip_v {
+                float.flip_v = value;
+            }
+        }
+        paragraph.touch();
+        self.commit(candidate)
+    }
+
     pub fn set_image_size(&mut self, id: usize, width: f64, height: f64) -> PyResult<()> {
         self.image(id)?;
         validate_image_size(width, height)?;
@@ -5462,10 +5525,10 @@ fn validate_alt(alt: &str) -> PyResult<()> {
 fn validate_image_size(width: f64, height: f64) -> PyResult<()> {
     if [width, height]
         .iter()
-        .any(|value| !value.is_finite() || !(0.05..=1584.0).contains(value))
+        .any(|value| !value.is_finite() || !(1.0..=1584.0).contains(value))
     {
         return Err(PyValueError::new_err(
-            "image dimensions must be finite and between 0.05 and 1584 points",
+            "image dimensions must be finite and between 1 and 1584 points",
         ));
     }
     Ok(())
@@ -6146,6 +6209,155 @@ mod tests {
             72.0,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn picture_transforms_roundtrip_preserve_media_and_failed_changes_are_atomic() {
+        let source = media_png(40, 20, [0, 0, 255, 255]);
+        let mut document = EditableDocx::new();
+        let id = document
+            .add_image(&source, Some(96.0), Some(48.0), "Kept")
+            .unwrap();
+        document.set_image_crop(id, (0.25, 0.0, 0.0, 0.0)).unwrap();
+        document
+            .set_image_flips(id, Some(true), Some(true))
+            .unwrap();
+        let copy = document.copy().unwrap();
+        let replacement = media_png(20, 40, [255, 0, 0, 255]);
+        document.set_image_data(id, &replacement).unwrap();
+        document.set_image_size(id, 80.0, 40.0).unwrap();
+        assert_eq!(document.image_crop(id).unwrap(), (0.25, 0.0, 0.0, 0.0));
+        assert_eq!(document.image_flips(id).unwrap(), (true, true));
+        assert_eq!(copy.image_size(id).unwrap(), (96.0, 48.0));
+        assert_eq!(copy.image_data(id).unwrap(), source);
+        let raw = document.to_bytes().unwrap();
+        let native = wordcraft_docx::read(&raw).unwrap();
+        let (story, path) = document.location(id).unwrap();
+        let InlineObject::Image {
+            crop,
+            float,
+            w,
+            h,
+            alt,
+            ..
+        } = &native.para(story, &path).unwrap().objects[0]
+        else {
+            panic!("missing image")
+        };
+        assert_eq!(*crop, [0.25, 0.0, 0.0, 0.0]);
+        assert!(float.flip_h && float.flip_v);
+        assert_eq!((*w, *h, alt.as_str()), (80.0, 40.0, "Kept"));
+        let revision = document.revision().unwrap();
+        for crop in [
+            (f64::NAN, 0.0, 0.0, 0.0),
+            (0.0, f64::INFINITY, 0.0, 0.0),
+            (-0.01, 0.0, 0.0, 0.0),
+            (0.0, 0.0, 0.451, 0.0),
+        ] {
+            assert!(document.set_image_crop(id, crop).is_err());
+        }
+        for (w, h) in [(0.99, 20.0), (20.0, 0.99)] {
+            assert!(document.set_image_size(id, w, h).is_err());
+            assert!(document
+                .add_image(&source, Some(w), Some(h), "Invalid")
+                .is_err());
+        }
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.to_bytes().unwrap(), raw);
+        document.set_image_size(id, 1.0, 1.0).unwrap();
+        document
+            .set_image_crop(id, (0.45, 0.45, 0.45, 0.45))
+            .unwrap();
+        document.set_image_flips(id, Some(false), None).unwrap();
+        assert_eq!(document.image_flips(id).unwrap(), (false, true));
+        document.close();
+        assert!(document.image_crop(id).is_err());
+        assert!(document.set_image_flips(id, Some(true), None).is_err());
+    }
+
+    #[test]
+    fn upstream_picture_frames_below_one_point_are_silently_enlarged() {
+        let mut document = EditableDocx::new();
+        let id = document
+            .add_image(
+                &media_png(2, 2, [0, 0, 255, 255]),
+                Some(1.0),
+                Some(1.0),
+                "Tiny",
+            )
+            .unwrap();
+        let mut raw = document.document().unwrap().clone();
+        let para = document.paragraph_mut(&mut raw, id).unwrap();
+        let InlineObject::Image { w, h, .. } = &mut para.objects[0] else {
+            panic!("missing image")
+        };
+        *w = 0.05;
+        *h = 0.05;
+        para.touch();
+        let native = wordcraft_docx::read(&wordcraft_docx::write(&raw).unwrap()).unwrap();
+        let layout =
+            wordcraft_layout::layout(&native, &mut Default::default(), &Default::default());
+        let frames: Vec<_> = layout
+            .pages
+            .iter()
+            .flat_map(|page| &page.items)
+            .filter_map(|item| {
+                if let wordcraft_layout::Placed::Object { rect, .. } = item {
+                    Some((rect.w, rect.h))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(frames, vec![(1.0, 1.0)]);
+    }
+
+    #[test]
+    fn upstream_quarter_turn_picture_loses_solid_edge_pixels() {
+        // Native Float + writer supplies matching effectExtent/spin_pad. This is not
+        // malformed XML: render/lib.rs and pdf/lib.rs both lose part of a solid edge.
+        let mut document = EditableDocx::new();
+        document.set_page_size(300.0, 300.0).unwrap();
+        document.set_margins(40.0, 40.0, 40.0, 40.0).unwrap();
+        let id = document
+            .add_image(
+                &media_png(40, 20, [0, 0, 255, 255]),
+                Some(96.0),
+                Some(48.0),
+                "Rotation repro",
+            )
+            .unwrap();
+        let mut native = document.document().unwrap().clone();
+        let para = document.paragraph_mut(&mut native, id).unwrap();
+        let InlineObject::Image { float, .. } = &mut para.objects[0] else {
+            panic!("missing image")
+        };
+        float.rot = 90.0;
+        para.touch();
+        let raw = wordcraft_docx::write(&native).unwrap();
+        let pdf = crate::docx::to_pdf(&raw, None).unwrap();
+        for png in [
+            crate::docx::render(&raw, 0, 144.0, None).unwrap(),
+            crate::pdf::render(&pdf, 0, 144.0, None).unwrap(),
+        ] {
+            let mut reader = png::Decoder::new(Cursor::new(png)).read_info().unwrap();
+            let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+            let frame = reader.next_frame(&mut pixels).unwrap();
+            assert_eq!(frame.color_type, png::ColorType::Rgba);
+            let span = |y: usize| {
+                pixels[y * frame.width as usize * 4..(y + 1) * frame.width as usize * 4]
+                    .chunks_exact(4)
+                    .filter(|p| p[0] < 20 && p[1] < 20 && p[2] > 240)
+                    .count()
+            };
+            // A 90-degree turn should give a constant-width solid rectangle.
+            assert!(
+                span(200) >= span(100) + 4,
+                "native edge loss no longer reproduced: {} vs {}",
+                span(100),
+                span(200)
+            );
+        }
     }
 
     #[test]

@@ -238,3 +238,10 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reject excessive source slide references before native import, covering alternate content without another OOXML resolver.
 - [x] Validate native/read/render/export, malformed/bounded input and full installed-wheel regressions; record artifact and reviewed dependency evidence.
 - [ ] Retain custom-level numbering, header/footer counter fidelity and general upstream allocation/reporting gaps.
+
+## Picture transforms and owned field geometry
+
+- [x] Add verified DOCX crop/flip properties and reject silent native sub-point image scaling.
+- [x] Make existing owned PDF field boxes writable through native appearance regeneration and atomic geometry/fit checks.
+- [x] Verify complete locked/native and installed-wheel read/render/export corpus and record artifact evidence.
+- [ ] Retain native DOCX rotation fidelity, floating-image/opacity and broader imported/multi-widget PDF form gaps.

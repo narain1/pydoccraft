@@ -308,3 +308,15 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 1. PPTX input SHALL reject more than 10,000 source slide references before the native reader silently truncates them. The check SHALL use bounded generic XML events, retain native prefix/encoding recognition, and avoid reproducing private package relationship resolution or alternate-content selection.
 2. A conservative count of every sldId element beneath each presentation root SHALL cover alternate branches and section lists as well as the primary list; unused presentation parts and redundant references count toward this stricter profile. Other-format/detection preflight SHALL retain its existing path. Binary media SHALL NOT be rejected merely for not being XML.
 3. Eligible member inflation, UTF-16 decoding, prolog, token and nesting work SHALL be bounded. Tests SHALL cover 10,000/+1, relocation and unusual part names, UTF-8/UTF-16, leading text, alternate content, large media and all public processing paths. A shared XML parser is a safety dependency only; document semantics remain in DeckCraft.
+
+## 39. DOCX picture crop and mirroring
+
+1. Existing Picture handles SHALL expose crop and boolean horizontal/vertical flips using the same vocabulary as presentation pictures. Crop SHALL use finite LTRB fractions in 0..0.45 with None reset; original media and uncropped frame size SHALL remain intact. Replacement SHALL retain transforms.
+2. Native public image/Float properties SHALL own serialization and rendering. DOCX frame dimensions below the native one-point minimum SHALL be rejected on insertion/resize instead of silently enlarged. Rotation SHALL remain unavailable until its native edge-loss fixture is fixed; no local rotation/resampling engine SHALL be added.
+3. Tests SHALL verify native readback, original bytes, actual asymmetric PNG/PDF pixels, replacements, copies, cell/story containment, cache invalidation, deleted/closed handles and atomic invalid values. Existing media and geometry budgets SHALL remain enforced.
+
+## 40. Owned PDF field geometry
+
+1. Existing PdfField.box SHALL be writable in current-page displayed coordinates. Moving/resizing SHALL retain native field/widget identity, name, value, options and appearance orientation; it SHALL NOT transfer the field to another page or broaden the single-widget owned-form profile.
+2. Native public field properties and appearance regeneration SHALL operate on staged state. Bounds, current value and all choice-option fit SHALL be validated before commit. Failed geometry/resource changes SHALL preserve the document and caches; caller coordinate conversions SHALL finish before final stale-handle validation.
+3. Tests SHALL cover text/checkbox/choice widgets, actual old/new pixels, native save/readback and flattening, rotation/CropBox/UserUnit, copies, warmed caches, stale/deleted/closed handles, callback changes and atomic fit failures.
