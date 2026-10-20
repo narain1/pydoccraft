@@ -22,6 +22,7 @@
 3. THE SYSTEM SHALL expose `Page.number`, `get_text("text"|"markdown"|"dict"|"json")`, `get_links()`, `get_images(full=False)`, and `find_tables()`.
 4. WHEN a closed document is accessed, THE SYSTEM SHALL raise `DocumentClosedError`.
 5. WHEN unsupported or malformed input is supplied, THE SYSTEM SHALL raise a stable `DocExError` subclass rather than a raw native exception.
+6. WHEN `doc_ex.extract_text(source, pages=None)` is called, THE SYSTEM SHALL return form-feed-separated text in selected page order with negative-index support; PDF SHALL use an upstream text-only path without constructing structured public models. All formats SHALL bound explicit or all-page selection to 10,000 entries and UTF-8 output to 64 MiB including separators; Python and native iterable conversion SHALL stop at a 10,001st-item lookahead, and PDF SHALL preflight glyph text before plain-text assembly. These guarantees do not bound upstream parser/glyph-construction peak memory.
 
 ## 3. Structured extraction
 
@@ -213,3 +214,10 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 1. Flow-control acceptance SHALL verify headings followed by tables, keep-together paragraphs, both widow/orphan edges and page-break-before reset using native/PDF pagination, ordered exactly-once text and visible rendering.
 2. Table acceptance SHALL distinguish splitting cell paragraphs, moving fitting rows intact and oversized unsplittable rows. Serialization SHALL reject proven off-page geometry for unmerged non-splitting, exact-height and repeated-header rows before publishing output.
 3. Failed save/render/export SHALL preserve existing destination files and permit recovery by changing content, geometry or row splitting. Later font, margin and text changes SHALL be rechecked. Intentional exact-height clipping and vertically merged geometry SHALL remain distinct; incomplete upstream coverage SHALL stay documented.
+
+## 24. PDF text areas and image transforms
+
+1. Existing draw_text SHALL accept exactly one point or bounded rectangle, retaining existing point behavior. Native built-in fonts SHALL wrap and align; supplied fonts SHALL preserve searchable Unicode through explicit lines with supported alignment.
+2. Native logical metric overflow, invalid geometry, unsupported glyphs and excessive wrapping work SHALL fail atomically. Supplied static TrueType box text SHALL additionally reject shaped outline overflow using bounded public native glyph inspection. Boxed CFF evaluation SHALL fail explicitly until aggregate work can be bounded; legacy point placement remains unchanged. Built-in box fonts retain logical metrics, and automatic caller-font wrapping and strict clipping remain unavailable.
+3. Existing add_image SHALL accept bounded visual crop fractions, quarter-turns and flips through native transform properties, preserving source media and existing page resources. Rotation, CropBox and UserUnit SHALL preserve displayed-point semantics.
+4. Tests SHALL verify native wrapping/alignment, explicit-font text, rollback, work limits, asymmetric crop/flip/rotation pixels, outside-box pixels and extraction after serialization. PDF2 SHALL remain open for documented upstream gaps.

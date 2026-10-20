@@ -39,6 +39,7 @@ png = "=0.18.1"
 pyo3 = { version = "=0.23.5" }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.149"
+skrifa = "=0.44.0"
 thiserror = "=2.0.21"
 wordcraft-doc = { git = "https://github.com/storytold/wordcraft", rev = "f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22" }
 wordcraft-docx = { git = "https://github.com/storytold/wordcraft", rev = "f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22" }

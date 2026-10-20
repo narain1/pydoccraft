@@ -343,3 +343,23 @@ PDF drawing preserves existing page resource bindings, including inherited resou
 DOCX flow controls are verified against native pagination: `keep_with_next` keeps a heading with a following table, `keep_together` moves a fitting paragraph, `widow_control` avoids a single line on either side of a page break, and `page_break_before` supports clearing. This does not promise Word-identical pagination.
 
 A splittable table row can continue its cell paragraphs across pages. A non-splitting row that fits on a fresh page moves intact. The pinned paginator can place an oversized non-splitting row beyond the physical page; authored documents now reject that case before serialization, save, preview or export. Reduce the content/font size, enlarge the page or enable row splitting to recover. The guard also covers exact-height and repeated-header rows without vertical merges. Explicit exact-height clipping within a page remains intentional. Vertical-merge geometry needs separate upstream handling and is outside this narrow overflow check. Documents containing guarded rows incur a native layout pass before saving; traversal limits apply after layout, not before its allocations. Failed saves preserve an existing destination file.
+
+PDF text boxes and image transforms extend the existing drawing methods:
+
+```python
+with doc_ex.new("pdf", size=(600, 800)) as document:
+    page = document.pages[0]
+    page.draw_text("A paragraph that wraps within its area.",
+                   box=(40, 40, 260, 100), font_size=16, align="left")
+    page.add_image("photo.png", box=(40, 180, 200, 150),
+                   crop=(0.1, 0, 0.1, 0), rotation=90, flip_h=True)
+    document.save("layout.pdf")
+```
+
+`draw_text` requires exactly one of `at=(x, y)` or `box=(x, y, width, height)` in current displayed-page points. Box alignment is `left`, `center`, `right` or `justify`; built-in fonts wrap through native layout. With caller-supplied font bytes, boxes support explicit newline-separated lines and left/center/right alignment. Automatic supplied-font wrapping and justification are unavailable. Native logical line widths and vertical metrics must fit; overflow fails atomically. These checks do not clip glyph outlines, so italic/other ink overhang is not a strict clipping guarantee. Native text wrapping has a bounded work budget in addition to text-byte limits, including the existing `at` path.
+
+Image crop is `(left, top, right, bottom)` with each fraction between 0 and 0.45. Rotation is counterclockwise in 0/90/180/270-degree steps; `flip_h` and `flip_v` are booleans. Native transforms keep the embedded source pixels and clip transformed paint to the destination rectangle. Cropping is visual: it does not remove source pixels from the PDF. All geometry uses the current rotated/cropped view, including PDF UserUnit. Existing resource-preservation checks apply to text boxes and transformed images.
+
+Supplied-font PDF drawing rejects pages with 256 or more `PCFull`-prefixed font bindings, including inherited bindings. At this pin, native bounded lookup can miss the full font program on such pages and embed it repeatedly across lines without the expected reuse. The guard runs before embedding and leaves the document unchanged; ordinary repeated font calls remain supported.
+
+Supplied static TrueType fonts additionally require every shaped glyph outline to fit inside a text box. Native unhinted outlines and exact curve bounds include shaping offsets; overflow fails before committing. Boxed CFF fonts are explicitly unsupported because their public native evaluator lacks an aggregate work budget. The existing `at` path is unchanged. Built-in fonts still use native logical metrics and may have small ink overhangs; no path promises clipping. Outline checks cap distinct glyphs, component visits/depth, points, path operations and scratch memory.

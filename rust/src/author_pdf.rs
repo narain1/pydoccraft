@@ -1433,6 +1433,395 @@ impl EditablePdf {
         font_bytes: &[u8],
         color: (u8, u8, u8),
     ) -> PyResult<()> {
+        self.add_text_font_layout(
+            page,
+            text,
+            x,
+            y,
+            size,
+            font_bytes,
+            color,
+            None,
+            pdfcraft_edit::Align::Left,
+        )
+    }
+
+    /// x/y are the top-left of a text box, in points. Text wraps to the page's right edge.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (page, text, x, y, size=12.0, color=(0, 0, 0)))]
+    pub fn add_text(
+        &mut self,
+        page: isize,
+        text: &str,
+        x: f64,
+        y: f64,
+        size: f64,
+        color: (u8, u8, u8),
+    ) -> PyResult<()> {
+        self.add_text_layout(
+            page,
+            text,
+            x,
+            y,
+            size,
+            color,
+            None,
+            pdfcraft_edit::Align::Left,
+        )
+    }
+
+    /// A bounded native text area; caller fonts retain explicit-line layout only.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (page, text, rect, size=12.0, color=(0,0,0), align="left", font_bytes=None))]
+    pub fn add_text_box(
+        &mut self,
+        page: isize,
+        text: &str,
+        rect: (f64, f64, f64, f64),
+        size: f64,
+        color: (u8, u8, u8),
+        align: &str,
+        font_bytes: Option<&[u8]>,
+    ) -> PyResult<()> {
+        let alignment = match align {
+            "left" => pdfcraft_edit::Align::Left,
+            "center" => pdfcraft_edit::Align::Center,
+            "right" => pdfcraft_edit::Align::Right,
+            "justify" => pdfcraft_edit::Align::Justify,
+            _ => {
+                return Err(PyValueError::new_err(
+                    "alignment must be left, center, right or justify",
+                ))
+            }
+        };
+        match font_bytes {
+            Some(font) => {
+                if alignment == pdfcraft_edit::Align::Justify {
+                    return Err(EngineError::Unsupported("justification with supplied fonts is unavailable; use explicit left, center or right aligned lines".into()).into());
+                }
+                self.add_text_font_layout(
+                    page,
+                    text,
+                    rect.0,
+                    rect.1,
+                    size,
+                    font,
+                    color,
+                    Some((rect.2, rect.3)),
+                    alignment,
+                )
+            }
+            None => self.add_text_layout(
+                page,
+                text,
+                rect.0,
+                rect.1,
+                size,
+                color,
+                Some((rect.2, rect.3)),
+                alignment,
+            ),
+        }
+    }
+
+    /// Place PNG/JPEG bytes at a top-left position without resampling source pixels.
+    #[allow(clippy::too_many_arguments)] // The narrow native boundary receives flattened geometry.
+    #[pyo3(signature = (page,data,x,y,width,height,crop=None,rotation=0,flip_h=false,flip_v=false))]
+    pub fn add_image(
+        &mut self,
+        page: isize,
+        data: &[u8],
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        crop: Option<(f64, f64, f64, f64)>,
+        rotation: i64,
+        flip_h: bool,
+        flip_v: bool,
+    ) -> PyResult<()> {
+        let (left, top, right, bottom) = crop.unwrap_or((0.0, 0.0, 0.0, 0.0));
+        let crop = [left, bottom, right, top];
+        if crop
+            .iter()
+            .any(|value| !value.is_finite() || !(0.0..=0.45).contains(value))
+        {
+            return Err(PyValueError::new_err(
+                "image crop fractions must be finite and between 0 and 0.45",
+            ));
+        }
+        if !matches!(rotation, 0 | 90 | 180 | 270) {
+            return Err(PyValueError::new_err(
+                "image rotation must be 0, 90, 180 or 270 degrees counterclockwise",
+            ));
+        }
+        let page = self.page_index(page)?;
+        self.validate_input(data.len())?;
+        let (page_width, page_height) = self.sizes[page];
+        validate_position(x, y, page_width, page_height)?;
+        if !width.is_finite()
+            || !height.is_finite()
+            || width < 1.0
+            || height < 1.0
+            || x + width > page_width
+            || y + height > page_height
+        {
+            return Err(PyValueError::new_err(
+                "image must fit inside the page with sides at least 1 point",
+            ));
+        }
+        if data.len() > MAX_IMAGE_BYTES {
+            return Err(EngineError::ResourceLimit("image input exceeds 64 MiB".into()).into());
+        }
+        let name = if data.starts_with(b"\x89PNG\r\n\x1a\n") {
+            validate_png(data)?;
+            "image.png"
+        } else if data.starts_with(&[0xff, 0xd8]) {
+            "image.jpg"
+        } else {
+            return Err(EngineError::Unsupported(
+                "PDF image insertion accepts PNG or JPEG bytes".into(),
+            )
+            .into());
+        };
+        let mut edited = self.document()?.clone();
+        let (image, _) =
+            pdfcraft_create::image_xobject(&mut edited, name, data).map_err(creation_error)?;
+        // PdfCraft embeds JPEG bytes without decoding. Check its parsed image metadata before
+        // committing, so a huge JPEG frame never reaches a later render through this API.
+        let image_object = edited.get(image);
+        let dimensions = image_object
+            .as_dict()
+            .and_then(|image| Some((image.int(b"Width")?, image.int(b"Height")?)))
+            .ok_or_else(|| EngineError::Malformed("image has no usable pixel dimensions".into()))?;
+        crate::rendering::validate_size(dimensions.0 as f64, dimensions.1 as f64, 16_000)?;
+        let rect = [x, page_height - y - height, x + width, page_height - y];
+        pdfcraft_edit::add_content(
+            &mut edited,
+            page,
+            &Content::Image(AddedImage {
+                crop,
+                rotation: (rotation / 90) as u8,
+                flip_h,
+                flip_v,
+                ..AddedImage::new(rect, image)
+            }),
+        )
+        .map_err(edit_error)?;
+        preserve_drawing_resources(self.document()?, &edited, page)?;
+        self.document = Some(edited);
+        self.items += 1;
+        self.input_bytes += data.len();
+        Ok(())
+    }
+}
+
+// Only boxed caller-font text needs outline containment. Point-positioned text retains
+// its existing behavior. All parsing, composite transforms and curve geometry remain native.
+const MAX_INK_GLYPHS: usize = 4096;
+const MAX_INK_VISITS: usize = 100_000;
+const MAX_INK_POINTS: usize = 8192;
+const MAX_INK_OPS: usize = 100_000;
+const MAX_INK_SCRATCH: usize = 1024 * 1024;
+
+struct InkPen {
+    path: kurbo::BezPath,
+    remaining: usize,
+    failed: bool,
+}
+
+impl InkPen {
+    fn push(&mut self, element: kurbo::PathEl) {
+        if self.remaining == 0 || !element.is_finite() {
+            self.failed = true;
+            return;
+        }
+        self.remaining -= 1;
+        self.path.push(element);
+    }
+}
+
+impl skrifa::outline::OutlinePen for InkPen {
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.push(kurbo::PathEl::MoveTo((f64::from(x), f64::from(y)).into()));
+    }
+    fn line_to(&mut self, x: f32, y: f32) {
+        self.push(kurbo::PathEl::LineTo((f64::from(x), f64::from(y)).into()));
+    }
+    fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
+        self.push(kurbo::PathEl::QuadTo(
+            (f64::from(cx), f64::from(cy)).into(),
+            (f64::from(x), f64::from(y)).into(),
+        ));
+    }
+    fn curve_to(&mut self, ax: f32, ay: f32, bx: f32, by: f32, x: f32, y: f32) {
+        self.push(kurbo::PathEl::CurveTo(
+            (f64::from(ax), f64::from(ay)).into(),
+            (f64::from(bx), f64::from(by)).into(),
+            (f64::from(x), f64::from(y)).into(),
+        ));
+    }
+    fn close(&mut self) {
+        self.push(kurbo::PathEl::ClosePath);
+    }
+}
+
+struct TextInk<'a> {
+    font: skrifa::FontRef<'a>,
+    scale: f64,
+    cache: std::collections::HashMap<u32, Option<kurbo::Rect>>,
+    visits: usize,
+    ops: usize,
+}
+
+fn ink_limit() -> EngineError {
+    EngineError::ResourceLimit(
+        "boxed font outline work exceeds its bounded glyph, point, operation or memory budget"
+            .into(),
+    )
+}
+
+impl<'a> TextInk<'a> {
+    fn new(bytes: &'a [u8], size: f64) -> Result<Self, EngineError> {
+        use skrifa::{
+            instance::{LocationRef, Size},
+            MetadataProvider,
+        };
+        let font = skrifa::FontRef::new(bytes)
+            .map_err(|e| EngineError::Unsupported(format!("font outlines are unavailable: {e}")))?;
+        if font.outline_glyphs().format() != Some(skrifa::outline::OutlineGlyphFormat::Glyf) {
+            return Err(EngineError::Unsupported("boxed supplied-font text requires static TrueType outlines; bounded CFF outline evaluation is unavailable".into()));
+        }
+        let units = font
+            .metrics(Size::unscaled(), LocationRef::default())
+            .units_per_em;
+        if units == 0 {
+            return Err(EngineError::Unsupported(
+                "font has invalid outline units".into(),
+            ));
+        }
+        Ok(Self {
+            font,
+            scale: size / f64::from(units),
+            cache: Default::default(),
+            visits: 0,
+            ops: 0,
+        })
+    }
+
+    fn bounds(&mut self, id: skrifa::GlyphId) -> Result<Option<kurbo::Rect>, EngineError> {
+        use kurbo::Shape;
+        use skrifa::instance::{LocationRef, Size};
+        use skrifa::outline::{DrawSettings, Hinting};
+        use skrifa::{raw::TableProvider, MetadataProvider};
+        if let Some(bounds) = self.cache.get(&id.to_u32()) {
+            return Ok(*bounds);
+        }
+        if self.cache.len() >= MAX_INK_GLYPHS {
+            return Err(ink_limit());
+        }
+        // Native get() recursively measures composites before applying its point limit.
+        // Bound that traversal first using native parsed component iterators (no parser).
+        let malformed =
+            |e| EngineError::Unsupported(format!("font outline cannot be inspected: {e}"));
+        let loca = self.font.loca(None).map_err(malformed)?;
+        let glyf = self.font.glyf().map_err(malformed)?;
+        let mut pending = vec![(id, 0usize)];
+        let mut points = 0usize;
+        while let Some((glyph, depth)) = pending.pop() {
+            self.visits += 1;
+            if self.visits > MAX_INK_VISITS || depth > 16 {
+                return Err(ink_limit());
+            }
+            match loca.get_glyf(glyph, &glyf).map_err(malformed)? {
+                Some(skrifa::raw::tables::glyf::Glyph::Simple(simple)) => {
+                    points = points.saturating_add(simple.num_points());
+                    if points > MAX_INK_POINTS {
+                        return Err(ink_limit());
+                    }
+                }
+                Some(skrifa::raw::tables::glyf::Glyph::Composite(composite)) => {
+                    for (component, _) in composite.component_glyphs_and_flags() {
+                        if pending.len() >= MAX_INK_POINTS
+                            || self.visits + pending.len() >= MAX_INK_VISITS
+                        {
+                            return Err(ink_limit());
+                        }
+                        pending.push((component.into(), depth + 1));
+                    }
+                }
+                None => {}
+            }
+        }
+        let outlines = self.font.outline_glyphs();
+        let glyph = outlines
+            .get(id)
+            .ok_or_else(|| EngineError::Unsupported("font glyph outline is unavailable".into()))?;
+        let scratch_size = glyph.draw_memory_size(Hinting::None);
+        if scratch_size > MAX_INK_SCRATCH || self.ops >= MAX_INK_OPS {
+            return Err(ink_limit());
+        }
+        let mut scratch = vec![0; scratch_size];
+        let mut pen = InkPen {
+            path: kurbo::BezPath::new(),
+            remaining: (MAX_INK_OPS - self.ops).min(MAX_INK_POINTS * 2),
+            failed: false,
+        };
+        glyph
+            .draw(
+                DrawSettings::unhinted(Size::unscaled(), LocationRef::default())
+                    .with_memory(Some(&mut scratch)),
+                &mut pen,
+            )
+            .map_err(|e| {
+                EngineError::Unsupported(format!("font glyph outline cannot be drawn: {e}"))
+            })?;
+        if pen.failed {
+            return Err(ink_limit());
+        }
+        self.ops += pen.path.elements().len();
+        let bounds = (!pen.path.elements().is_empty()).then(|| pen.path.bounding_box());
+        self.cache.insert(id.to_u32(), bounds);
+        Ok(bounds)
+    }
+
+    fn check(&mut self, id: skrifa::GlyphId, gx: f64, gy: f64, area: kurbo::Rect) -> PyResult<()> {
+        if let Some(bounds) = self.bounds(id)? {
+            let ink = kurbo::Rect::new(
+                gx + bounds.x0 * self.scale,
+                gy - bounds.y1 * self.scale,
+                gx + bounds.x1 * self.scale,
+                gy - bounds.y0 * self.scale,
+            );
+            if !ink.is_finite()
+                || ink.x0 < area.x0
+                || ink.y0 < area.y0
+                || ink.x1 > area.x1
+                || ink.y1 > area.y1
+            {
+                return Err(PyValueError::new_err(
+                    "shaped glyph ink lies outside the text box",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl EditablePdf {
+    #[allow(clippy::too_many_arguments)]
+    fn add_text_font_layout(
+        &mut self,
+        page: isize,
+        text: &str,
+        x: f64,
+        y: f64,
+        size: f64,
+        font_bytes: &[u8],
+        color: (u8, u8, u8),
+        bounds: Option<(f64, f64)>,
+        align: pdfcraft_edit::Align,
+    ) -> PyResult<()> {
         use pdfcraft_cos::{Dict, Object, PdfString};
         let page = self.page_index(page)?;
         if font_bytes.len() > 16 * 1024 * 1024 || text.len() > 262_144 {
@@ -1452,13 +1841,15 @@ impl EditablePdf {
                 "font size must be between 1 and 500 points",
             ));
         }
-        let (width, height) = self.sizes[page];
-        validate_position(x, y, width, height)?;
+        let (page_width, page_height) = self.sizes[page];
+        let (width, height) = text_area(x, y, page_width, page_height, bounds)?;
+        validate_font_reuse_profile(self.document()?, page)?;
         pdfcraft_fonts::embedding::validate_document_input(font_bytes).map_err(|message| {
             EngineError::Unsupported(format!("font cannot be embedded: {message}"))
         })?;
         let (_, family) =
             pdfcraft_fonts::embedding::names(font_bytes).map_err(EngineError::Unsupported)?;
+        let mut ink = bounds.map(|_| TextInk::new(font_bytes, size)).transpose()?;
         let mut edited = self.document()?.clone();
         let full_resource = pdfcraft_edit::text::register_text_font(&mut edited, page, font_bytes)
             .map_err(edit_error)?;
@@ -1525,6 +1916,12 @@ impl EditablePdf {
                     "text row does not fit within the page width; wrap it explicitly",
                 ));
             }
+            let remaining = width - x - shaped.advance * size;
+            let row_x = x + match align {
+                pdfcraft_edit::Align::Center => remaining / 2.0,
+                pdfcraft_edit::Align::Right => remaining,
+                _ => 0.0,
+            };
             let mappings = shaped
                 .glyphs
                 .iter()
@@ -1548,7 +1945,7 @@ impl EditablePdf {
                 vec![Object::name("Span"), Object::Dict(properties)],
             ));
             for (index, glyph) in shaped.glyphs.iter().enumerate() {
-                let gx = x + glyph.position[0] * size;
+                let gx = row_x + glyph.position[0] * size;
                 let gy = row_baseline - glyph.position[1] * size;
                 if !gx.is_finite()
                     || !gy.is_finite()
@@ -1560,6 +1957,9 @@ impl EditablePdf {
                     return Err(PyValueError::new_err(
                         "shaped glyph position lies outside the page",
                     ));
+                }
+                if let Some(ink) = &mut ink {
+                    ink.check(glyph.id, gx, gy, kurbo::Rect::new(x, y, width, height))?;
                 }
                 let mut matrix = view_matrix(&self.geometry[page]);
                 let [ux, uy] = self.geometry[page].view_to_user(gx as f32, gy as f32);
@@ -1606,10 +2006,8 @@ impl EditablePdf {
         Ok(())
     }
 
-    /// x/y are the top-left of a text box, in points. Text wraps to the page's right edge.
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (page, text, x, y, size=12.0, color=(0, 0, 0)))]
-    pub fn add_text(
+    fn add_text_layout(
         &mut self,
         page: isize,
         text: &str,
@@ -1617,6 +2015,8 @@ impl EditablePdf {
         y: f64,
         size: f64,
         color: (u8, u8, u8),
+        bounds: Option<(f64, f64)>,
+        align: pdfcraft_edit::Align,
     ) -> PyResult<()> {
         let page = self.page_index(page)?;
         self.validate_input(text.len())?;
@@ -1631,15 +2031,12 @@ impl EditablePdf {
                 "font size must be between 1 and 500 points",
             ));
         }
-        let (width, height) = self.sizes[page];
-        validate_position(x, y, width, height)?;
-        if width - x < 1.0 {
-            return Err(PyValueError::new_err(
-                "text box must be at least 1 point wide",
-            ));
-        }
+        let (page_width, page_height) = self.sizes[page];
+        let (width, height) = text_area(x, y, page_width, page_height, bounds)?;
+        let wrap_work = text_wrap_work(text)?;
         let item = AddedText {
-            rect: [x, 0.0, width, height - y],
+            rect: [x, page_height - height, width, page_height - y],
+            align,
             text: text.into(),
             size,
             color: rgb(color),
@@ -1653,13 +2050,20 @@ impl EditablePdf {
             .into());
         }
         // Let the upstream text layout determine wrapping and height; reject clipping.
+        let lines = pdfcraft_edit::added::lines(&item);
+        if wrap_work.saturating_mul(lines.len().max(1)) > MAX_TEXT_WRAP_WORK {
+            return Err(EngineError::ResourceLimit(
+                "PDF native text wrapping exceeds its work budget".into(),
+            )
+            .into());
+        }
         let occupied = pdfcraft_edit::added::text_rect(&item);
-        if occupied[1] < 0.0 || !occupied.iter().all(|value| value.is_finite()) {
+        if occupied[1] < page_height - height || !occupied.iter().all(|value| value.is_finite()) {
             return Err(PyValueError::new_err(
                 "text does not fit within the page height",
             ));
         }
-        for line in pdfcraft_edit::added::lines(&item) {
+        for line in lines {
             let line_item = AddedText {
                 text: line,
                 ..item.clone()
@@ -1679,73 +2083,6 @@ impl EditablePdf {
         Ok(())
     }
 
-    /// Place PNG/JPEG bytes at a top-left position without resampling source pixels.
-    #[allow(clippy::too_many_arguments)] // The narrow native boundary receives flattened geometry.
-    pub fn add_image(
-        &mut self,
-        page: isize,
-        data: &[u8],
-        x: f64,
-        y: f64,
-        width: f64,
-        height: f64,
-    ) -> PyResult<()> {
-        let page = self.page_index(page)?;
-        self.validate_input(data.len())?;
-        let (page_width, page_height) = self.sizes[page];
-        validate_position(x, y, page_width, page_height)?;
-        if !width.is_finite()
-            || !height.is_finite()
-            || width < 1.0
-            || height < 1.0
-            || x + width > page_width
-            || y + height > page_height
-        {
-            return Err(PyValueError::new_err(
-                "image must fit inside the page with sides at least 1 point",
-            ));
-        }
-        if data.len() > MAX_IMAGE_BYTES {
-            return Err(EngineError::ResourceLimit("image input exceeds 64 MiB".into()).into());
-        }
-        let name = if data.starts_with(b"\x89PNG\r\n\x1a\n") {
-            validate_png(data)?;
-            "image.png"
-        } else if data.starts_with(&[0xff, 0xd8]) {
-            "image.jpg"
-        } else {
-            return Err(EngineError::Unsupported(
-                "PDF image insertion accepts PNG or JPEG bytes".into(),
-            )
-            .into());
-        };
-        let mut edited = self.document()?.clone();
-        let (image, _) =
-            pdfcraft_create::image_xobject(&mut edited, name, data).map_err(creation_error)?;
-        // PdfCraft embeds JPEG bytes without decoding. Check its parsed image metadata before
-        // committing, so a huge JPEG frame never reaches a later render through this API.
-        let image_object = edited.get(image);
-        let dimensions = image_object
-            .as_dict()
-            .and_then(|image| Some((image.int(b"Width")?, image.int(b"Height")?)))
-            .ok_or_else(|| EngineError::Malformed("image has no usable pixel dimensions".into()))?;
-        crate::rendering::validate_size(dimensions.0 as f64, dimensions.1 as f64, 16_000)?;
-        let rect = [x, page_height - y - height, x + width, page_height - y];
-        pdfcraft_edit::add_content(
-            &mut edited,
-            page,
-            &Content::Image(AddedImage::new(rect, image)),
-        )
-        .map_err(edit_error)?;
-        preserve_drawing_resources(self.document()?, &edited, page)?;
-        self.document = Some(edited);
-        self.items += 1;
-        self.input_bytes += data.len();
-        Ok(())
-    }
-}
-
-impl EditablePdf {
     fn validate_owned_edit(&self, document: &Document) -> PyResult<()> {
         if self.owns_fields {
             checked_owned_fields(document)?;
@@ -2336,6 +2673,86 @@ fn organize_error(error: pdfcraft_organize::OrganizeError) -> EngineError {
     EngineError::Conversion(format!("PDF page organization failed: {error}"))
 }
 
+// PdfCraft searches only the first 256 PCFull-prefixed bindings for an existing
+// font program, before its bounded global-object fallback. Keep one slot available
+// for register_text_font so every subsequent row can reuse its program regardless
+// of document size. This is a conservative native capability limit, not a lookup
+// or font deduplication implementation in the adapter.
+fn validate_font_reuse_profile(document: &Document, page: usize) -> PyResult<()> {
+    let pages = pdfcraft_model::pages(document);
+    let page = pages
+        .get(page)
+        .ok_or_else(|| EngineError::Malformed("font page is missing".into()))?;
+    let Some(resources) = page.dict.get(b"Resources") else {
+        return Ok(());
+    };
+    let resources = document.resolve(resources);
+    let resources = resources.as_dict().ok_or_else(|| {
+        EngineError::Unsupported("supplied-font drawing requires valid page resources".into())
+    })?;
+    let Some(fonts) = resources.get(b"Font") else {
+        return Ok(());
+    };
+    let fonts = document.resolve(fonts);
+    let fonts = fonts.as_dict().ok_or_else(|| {
+        EngineError::Unsupported("supplied-font drawing requires valid font resources".into())
+    })?;
+    if fonts
+        .iter()
+        .filter(|(name, _)| name.starts_with(b"PCFull"))
+        .take(256)
+        .count()
+        >= 256
+    {
+        return Err(EngineError::Unsupported("supplied-font drawing cannot guarantee bounded font-program reuse with 256 or more PCFull resources".into()).into());
+    }
+    Ok(())
+}
+
+const MAX_TEXT_WRAP_WORK: usize = 16_000_000;
+
+fn text_wrap_work(text: &str) -> PyResult<usize> {
+    let mut work = 0usize;
+    let mut paragraphs = 0usize;
+    for paragraph in text.split('\n') {
+        paragraphs += 1;
+        let length = paragraph.len().max(1);
+        work = work.saturating_add(length.saturating_mul(length));
+        // Each explicit paragraph produces at least one line. Reject excessive
+        // line counts before native wrapping allocates its line vector.
+        if work.saturating_mul(paragraphs) > MAX_TEXT_WRAP_WORK {
+            return Err(EngineError::ResourceLimit(
+                "PDF native text wrapping exceeds its work budget".into(),
+            )
+            .into());
+        }
+    }
+    Ok(work)
+}
+
+fn text_area(
+    x: f64,
+    y: f64,
+    page_width: f64,
+    page_height: f64,
+    bounds: Option<(f64, f64)>,
+) -> PyResult<(f64, f64)> {
+    validate_position(x, y, page_width, page_height)?;
+    let (width, height) = bounds.unwrap_or((page_width - x, page_height - y));
+    if !width.is_finite()
+        || !height.is_finite()
+        || width < 1.0
+        || height <= 0.0
+        || x + width > page_width
+        || y + height > page_height
+    {
+        return Err(PyValueError::new_err(
+            "text box must fit within the page, have positive height and be at least 1 point wide",
+        ));
+    }
+    Ok((x + width, y + height))
+}
+
 // Existing indirect resources retain their shared Arc in a staged Document clone.
 // Native replacements are only accepted when their small scalar dictionaries match;
 // never invoke Object's recursive equality on an untrusted graph or decode a stream.
@@ -2436,6 +2853,645 @@ fn preserve_drawing_resources(before: &Document, after: &Document, page: usize) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn font_reuse_source(prefixes: usize, padding: usize, inherited: bool) -> Document {
+        use pdfcraft_cos::{Dict, Object};
+        let mut source = pdfcraft_create::blank(200.0, 200.0, 1).unwrap();
+        let standard = collision_font_resources(b"unused");
+        let standard = standard
+            .get(b"Font")
+            .unwrap()
+            .as_dict()
+            .unwrap()
+            .get(b"unused")
+            .unwrap()
+            .clone();
+        let standard = source.add(standard);
+        let mut fonts = Dict::new();
+        for index in 0..prefixes {
+            fonts.set(format!("PCFull{index}").into_bytes(), Object::Ref(standard));
+        }
+        let mut resources = Dict::new();
+        resources.set(b"Font".to_vec(), Object::Dict(fonts));
+        let page = pdfcraft_organize::pages(&source).unwrap()[0].obj;
+        let owner = if inherited {
+            source
+                .get(page)
+                .as_dict()
+                .unwrap()
+                .reference(b"Parent")
+                .unwrap()
+        } else {
+            page
+        };
+        source
+            .update_dict(page, |dict| {
+                dict.remove(b"Resources");
+            })
+            .unwrap();
+        source
+            .update_dict(owner, |dict| {
+                dict.set(b"Resources".to_vec(), Object::Dict(resources));
+            })
+            .unwrap();
+        let mut retained = Vec::new();
+        for index in 0..padding {
+            let mut dictionary = Dict::new();
+            dictionary.set(b"AuditId".to_vec(), Object::Int(index as i64));
+            retained.push(Object::Ref(source.add(Object::Dict(dictionary))));
+        }
+        // Reachable inert extension objects survive the native full-save garbage collection.
+        source
+            .update_dict(source.root().unwrap(), |dict| {
+                dict.set(b"AuditPadding".to_vec(), Object::Array(retained));
+            })
+            .unwrap();
+        source
+    }
+
+    fn full_font_program_count(document: &Document) -> usize {
+        document.scan_objects().filter(|(_,object)| matches!(&**object,pdfcraft_cos::Object::Stream(stream) if stream.dict.get(b"PCFullFont").is_some())).count()
+    }
+
+    #[test]
+    fn supplied_font_reuse_native_search_limits_are_reproducible() {
+        let font = include_bytes!("../../tests/fixtures/fonts/Inter-Regular.ttf");
+        for (prefixes, padding, expected) in [(255, 8200, 1), (256, 0, 1), (256, 8200, 3)] {
+            let source = font_reuse_source(prefixes, padding, false);
+            let mut document = EditablePdf::from_bytes(&resource_fixture_bytes(&source), None)
+                .unwrap()
+                .document
+                .unwrap();
+            pdfcraft_edit::text::register_text_font(&mut document, 0, font).unwrap();
+            let page = pdfcraft_model::pages(&document).remove(0);
+            let resources = document.dict(page.dict.get(b"Resources").unwrap()).unwrap();
+            let mut fonts = document.dict(resources.get(b"Font").unwrap()).unwrap();
+            let (_, family) = pdfcraft_fonts::embedding::names(font).unwrap();
+            for line in ["row one", "row two"] {
+                let shaped = pdfcraft_fonts::source_shaping::shape(font, line).unwrap();
+                let mappings = shaped
+                    .glyphs
+                    .iter()
+                    .map(|glyph| (glyph.text.clone(), glyph.id))
+                    .collect::<Vec<_>>();
+                pdfcraft_fonts::embedding::embed_mapping(
+                    &mut document,
+                    &mut fonts,
+                    font,
+                    &family,
+                    &mappings,
+                )
+                .unwrap();
+            }
+            assert_eq!(
+                full_font_program_count(&document),
+                expected,
+                "prefixes={prefixes}, padding={padding}"
+            );
+        }
+    }
+
+    #[test]
+    fn supplied_font_reuse_guard_is_atomic_for_inherited_and_direct_resources() {
+        pyo3::prepare_freethreaded_python();
+        let font = include_bytes!("../../tests/fixtures/fonts/Inter-Regular.ttf");
+        for inherited in [false, true] {
+            for boxed in [false, true] {
+                for prefixes in [255, 256] {
+                    let source = font_reuse_source(prefixes, 8200, inherited);
+                    let mut document =
+                        EditablePdf::from_bytes(&resource_fixture_bytes(&source), None).unwrap();
+                    let before = document.to_bytes().unwrap();
+                    let counters = (document.items, document.input_bytes);
+                    let result = if boxed {
+                        document.add_text_box(
+                            0,
+                            "row one\nrow two",
+                            (10.0, 10.0, 180.0, 60.0),
+                            12.0,
+                            (0, 0, 0),
+                            "center",
+                            Some(font),
+                        )
+                    } else {
+                        document.add_text_with_font(
+                            0,
+                            "row one\nrow two",
+                            10.0,
+                            10.0,
+                            12.0,
+                            font,
+                            (0, 0, 0),
+                        )
+                    };
+                    if prefixes == 256 {
+                        assert!(result.unwrap_err().to_string().contains("unsupported:supplied-font drawing cannot guarantee bounded font-program reuse"));
+                        assert_eq!(document.to_bytes().unwrap(), before);
+                        assert_eq!((document.items, document.input_bytes), counters);
+                        assert_eq!(full_font_program_count(document.document().unwrap()), 0);
+                    } else {
+                        result.unwrap();
+                        assert_eq!(full_font_program_count(document.document().unwrap()), 1);
+                    }
+                }
+            }
+        }
+        let mut ordinary = EditablePdf::new(200.0, 200.0).unwrap();
+        ordinary
+            .add_text_with_font(0, "one\ntwo", 10.0, 10.0, 12.0, font, (0, 0, 0))
+            .unwrap();
+        ordinary
+            .add_text_box(
+                0,
+                "three\nfour",
+                (10.0, 60.0, 180.0, 60.0),
+                12.0,
+                (0, 0, 0),
+                "right",
+                Some(font),
+            )
+            .unwrap();
+        assert_eq!(full_font_program_count(ordinary.document().unwrap()), 1);
+    }
+
+    fn pdf2_raster(document: &EditablePdf) -> (usize, usize, Vec<u8>) {
+        let raster = crate::pdf::render(&document.to_bytes().unwrap(), 0, 72.0, None).unwrap();
+        let mut reader = png::Decoder::new(Cursor::new(raster)).read_info().unwrap();
+        let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut pixels).unwrap();
+        assert_eq!(info.color_type, png::ColorType::Rgba);
+        pixels.truncate(info.buffer_size());
+        (info.width as usize, info.height as usize, pixels)
+    }
+
+    #[test]
+    fn pdf2_builtin_boxes_wrap_align_and_reject_overflow_atomically() {
+        let mut document = EditablePdf::new(220.0, 220.0).unwrap();
+        for (row, align) in ["left", "center", "right"].iter().enumerate() {
+            document
+                .add_text_box(
+                    0,
+                    "Align",
+                    (20.0, 20.0 + row as f64 * 40.0, 160.0, 30.0),
+                    12.0,
+                    (0, 0, 0),
+                    align,
+                    None,
+                )
+                .unwrap();
+        }
+        document
+            .add_text_box(
+                0,
+                "one two three four five six",
+                (20.0, 150.0, 70.0, 48.0),
+                10.0,
+                (0, 0, 0),
+                "justify",
+                None,
+            )
+            .unwrap();
+        let (width, _, pixels) = pdf2_raster(&document);
+        let mut minima = Vec::new();
+        for row in 0..3 {
+            let mut xs = Vec::new();
+            for y in 20 + row * 40..50 + row * 40 {
+                for x in 0..width {
+                    let pixel = &pixels[(y * width + x) * 4..][..4];
+                    if pixel[0] < 128 {
+                        xs.push(x);
+                    }
+                }
+            }
+            assert!(!xs.is_empty());
+            minima.push(*xs.iter().min().unwrap());
+            assert!(*xs.iter().max().unwrap() <= 180);
+        }
+        assert!(minima[0] >= 20 && minima[0] < 25);
+        assert!(minima[0] < minima[1] && minima[1] < minima[2]);
+        let extracted = crate::pdf::extract(&document.to_bytes().unwrap(), None).unwrap();
+        let text = extracted.pages[0]
+            .blocks
+            .iter()
+            .map(|b| b.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(text.matches("Align").count(), 3);
+        assert!(text.contains("one two") && text.contains("five six"));
+        let before = document.to_bytes().unwrap();
+        for (text, rect) in [
+            ("one\ntwo", (20.0, 20.0, 100.0, 23.99)),
+            ("unbreakableword", (20.0, 20.0, 10.0, 100.0)),
+            ("x", (200.0, 20.0, 30.0, 20.0)),
+            ("x", (20.0, 20.0, f64::NAN, 20.0)),
+            ("x", (20.0, 20.0, 20.0, 0.0)),
+        ] {
+            assert!(document
+                .add_text_box(0, text, rect, 10.0, (0, 0, 0), "left", None)
+                .is_err());
+            assert_eq!(document.to_bytes().unwrap(), before);
+        }
+        document
+            .add_text_box(
+                0,
+                "one\ntwo",
+                (110.0, 150.0, 100.0, 24.0),
+                10.0,
+                (0, 0, 0),
+                "left",
+                None,
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn boxed_font_ink_overflow_is_atomic_and_point_text_is_unchanged() {
+        pyo3::prepare_freethreaded_python();
+        let font = include_bytes!("../../tests/fixtures/fonts/Inter-Regular.ttf");
+        let text = "\u{301}".repeat(6) + "A";
+        let mut document = EditablePdf::new(300.0, 300.0).unwrap();
+        let before = document.to_bytes().unwrap();
+        let error = document
+            .add_text_box(
+                0,
+                &text,
+                (100.0, 100.0, 100.0, 100.0),
+                30.0,
+                (0, 0, 0),
+                "left",
+                Some(font),
+            )
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("glyph ink lies outside"),
+            "{error}"
+        );
+        assert_eq!(document.to_bytes().unwrap(), before);
+        assert_eq!((document.items, document.input_bytes), (0, 0));
+        document
+            .add_text_with_font(0, &text, 100.0, 100.0, 30.0, font, (0, 0, 0))
+            .unwrap();
+        let (width, _, pixels) = pdf2_raster(&document);
+        assert!((0..100).any(|y| (0..width).any(|x| pixels[(y * width + x) * 4] < 200)));
+        let mut boxed = EditablePdf::new(300.0, 300.0).unwrap();
+        boxed
+            .add_text_box(
+                0,
+                "A Café office",
+                (100.0, 100.0, 150.0, 100.0),
+                20.0,
+                (0, 0, 0),
+                "center",
+                Some(font),
+            )
+            .unwrap();
+        let (width, height, pixels) = pdf2_raster(&boxed);
+        let ink = (0..height)
+            .flat_map(|y| (0..width).map(move |x| (x, y)))
+            .filter(|&(x, y)| pixels[(y * width + x) * 4] < 200)
+            .collect::<Vec<_>>();
+        assert!(!ink.is_empty());
+        assert!(ink
+            .iter()
+            .all(|&(x, y)| (100..250).contains(&x) && (100..200).contains(&y)));
+    }
+
+    #[test]
+    fn boxed_font_outline_cache_and_work_limits_are_bounded() {
+        use skrifa::MetadataProvider;
+        pyo3::prepare_freethreaded_python();
+        let font = include_bytes!("../../tests/fixtures/fonts/Inter-Regular.ttf");
+        let mut ink = TextInk::new(font, 30.0).unwrap();
+        let id = ink.font.charmap().map('A').unwrap();
+        let bounds = ink.bounds(id).unwrap().unwrap();
+        let work = (ink.visits, ink.ops);
+        assert!(bounds.width() > 0.0 && bounds.height() > 0.0);
+        assert_eq!(ink.bounds(id).unwrap(), Some(bounds));
+        assert_eq!((ink.visits, ink.ops), work);
+        let space = ink.font.charmap().map(' ').unwrap();
+        assert_eq!(ink.bounds(space).unwrap(), None);
+        let mut exhausted = TextInk::new(font, 30.0).unwrap();
+        exhausted.visits = MAX_INK_VISITS;
+        assert!(matches!(
+            exhausted.bounds(id),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        let mut exhausted = TextInk::new(font, 30.0).unwrap();
+        exhausted.ops = MAX_INK_OPS;
+        assert!(matches!(
+            exhausted.bounds(id),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        let mut pen = InkPen {
+            path: kurbo::BezPath::new(),
+            remaining: 1,
+            failed: false,
+        };
+        pen.push(kurbo::PathEl::MoveTo((0.0, 0.0).into()));
+        pen.push(kurbo::PathEl::LineTo((1.0, 1.0).into()));
+        assert!(pen.failed);
+        assert_eq!(pen.path.elements().len(), 1);
+    }
+
+    #[test]
+    fn pdf2_boxed_font_keeps_unicode_explicit_lines_and_native_alignment() {
+        pyo3::prepare_freethreaded_python();
+        let font = include_bytes!("../../tests/fixtures/fonts/Inter-Regular.ttf");
+        let mut document = EditablePdf::new(220.0, 220.0).unwrap();
+        for (row, align) in ["left", "center", "right"].iter().enumerate() {
+            document
+                .add_text_box(
+                    0,
+                    "Café office\nfi",
+                    (20.0, 10.0 + row as f64 * 65.0, 180.0, 60.0),
+                    12.0,
+                    (0, 0, 180),
+                    align,
+                    Some(font),
+                )
+                .unwrap();
+        }
+        let extracted = crate::pdf::extract(&document.to_bytes().unwrap(), None).unwrap();
+        let text = extracted.pages[0]
+            .blocks
+            .iter()
+            .map(|b| b.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(text.matches("Café office").count(), 3);
+        let (width, _, pixels) = pdf2_raster(&document);
+        let mut lefts = Vec::new();
+        for row in 0..3 {
+            let xs = (10 + row * 65..40 + row * 65)
+                .flat_map(|y| (0..width).map(move |x| (x, y)))
+                .filter_map(|(x, y)| {
+                    let p = &pixels[(y * width + x) * 4..][..4];
+                    (i16::from(p[2]) > i16::from(p[0]) + 20).then_some(x)
+                })
+                .collect::<Vec<_>>();
+            lefts.push(*xs.iter().min().unwrap());
+        }
+        assert!(lefts[0] < lefts[1] && lefts[1] < lefts[2]);
+        let before = document.to_bytes().unwrap();
+        assert!(document
+            .add_text_box(
+                0,
+                "text",
+                (20.0, 20.0, 100.0, 40.0),
+                12.0,
+                (0, 0, 0),
+                "justify",
+                Some(font)
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported:"));
+        assert!(document
+            .add_text_box(
+                0,
+                "this explicit row is too wide",
+                (20.0, 20.0, 20.0, 100.0),
+                12.0,
+                (0, 0, 0),
+                "left",
+                Some(font)
+            )
+            .is_err());
+        assert!(document
+            .add_text_box(
+                0,
+                "row\nrow",
+                (20.0, 20.0, 100.0, 10.0),
+                12.0,
+                (0, 0, 0),
+                "left",
+                Some(font)
+            )
+            .is_err());
+        assert_eq!(document.to_bytes().unwrap(), before);
+    }
+
+    #[test]
+    fn pdf2_wrapping_work_budget_applies_before_native_legacy_and_boxed_layout() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditablePdf::new(220.0, 220.0).unwrap();
+        let before = document.to_bytes().unwrap();
+        let text = "x".repeat(4001);
+        assert!(document
+            .add_text(0, &text, 10.0, 10.0, 12.0, (0, 0, 0))
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit:"));
+        assert!(document
+            .add_text_box(
+                0,
+                &text,
+                (10.0, 10.0, 200.0, 200.0),
+                12.0,
+                (0, 0, 0),
+                "left",
+                None
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit:"));
+        // Short individual words also bound repeated full layout within native draw().
+        let repeated = "a ".repeat(1000);
+        assert!(document
+            .add_text_box(
+                0,
+                &repeated,
+                (10.0, 10.0, 200.0, 200.0),
+                12.0,
+                (0, 0, 0),
+                "left",
+                None
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit:"));
+        assert!(document
+            .add_text(
+                0,
+                &format!("x{}", "\n".repeat(4001)),
+                10.0,
+                10.0,
+                12.0,
+                (0, 0, 0)
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit:"));
+        assert_eq!(document.to_bytes().unwrap(), before);
+        assert_eq!((document.items, document.input_bytes), (0, 0));
+        let source = resource_fixture(collision_font_resources(b"PCFHelvetica"), b"", true);
+        let mut imported = EditablePdf::from_bytes(&resource_fixture_bytes(&source), None).unwrap();
+        let before = imported.to_bytes().unwrap();
+        assert!(imported
+            .add_text_box(
+                0,
+                "new",
+                (10.0, 10.0, 100.0, 40.0),
+                12.0,
+                (0, 0, 0),
+                "center",
+                None
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported:drawing cannot verify preservation"));
+        assert_eq!(imported.to_bytes().unwrap(), before);
+    }
+
+    fn pdf2_quadrants() -> Vec<u8> {
+        let colors = [
+            [255, 0, 0, 255],
+            [0, 255, 0, 255],
+            [0, 0, 255, 255],
+            [255, 255, 0, 255],
+        ];
+        let mut rgba = Vec::new();
+        for y in 0..20 {
+            for x in 0..20 {
+                rgba.extend_from_slice(&colors[(y / 10) * 2 + x / 10]);
+            }
+        }
+        crate::rendering::encode_png(20, 20, &rgba, 72.0).unwrap()
+    }
+
+    #[test]
+    fn pdf2_image_transform_pixels_follow_crop_flip_and_counterclockwise_rotation() {
+        let image = pdf2_quadrants();
+        let colors = [
+            [255, 0, 0, 255],
+            [0, 255, 0, 255],
+            [0, 0, 255, 255],
+            [255, 255, 0, 255],
+        ];
+        let cases = [
+            (0, false, false, None, [0, 1, 2, 3]),
+            (90, false, false, None, [1, 3, 0, 2]),
+            (180, false, false, None, [3, 2, 1, 0]),
+            (270, false, false, None, [2, 0, 3, 1]),
+            (0, true, false, None, [1, 0, 3, 2]),
+            (0, false, true, None, [2, 3, 0, 1]),
+            (0, false, false, Some((0.45, 0.45, 0.0, 0.0)), [3, 3, 3, 3]),
+            (0, false, false, Some((0.0, 0.0, 0.45, 0.45)), [0, 0, 0, 0]),
+            (90, false, true, Some((0.45, 0.0, 0.0, 0.0)), [3, 1, 3, 1]),
+        ];
+        let mut original_media = None;
+        for (rotation, flip_h, flip_v, crop, expected) in cases {
+            let mut document = EditablePdf::new(140.0, 140.0).unwrap();
+            document
+                .add_image(
+                    0, &image, 30.0, 30.0, 80.0, 80.0, crop, rotation, flip_h, flip_v,
+                )
+                .unwrap();
+            let (width, _, pixels) = pdf2_raster(&document);
+            for ((x, y), index) in [(50, 50), (90, 50), (50, 90), (90, 90)]
+                .into_iter()
+                .zip(expected)
+            {
+                assert_eq!(
+                    &pixels[(y * width + x) * 4..][..4],
+                    &colors[index],
+                    "rotation {rotation}, flips {flip_h}/{flip_v}, crop {crop:?}"
+                );
+            }
+            assert_eq!(&pixels[(20 * width + 20) * 4..][..4], &[255, 255, 255, 255]);
+            let native =
+                pdfcraft_edit::images::reading_images(document.document().unwrap(), 0).unwrap();
+            assert_eq!(native.len(), 1);
+            let object = document.document().unwrap().get(native[0].object.unwrap());
+            let data = match &*object {
+                pdfcraft_cos::Object::Stream(stream) => stream.raw.to_vec(),
+                _ => panic!("image resource"),
+            };
+            match &original_media {
+                None => original_media = Some(data),
+                Some(original) => assert_eq!(&data, original),
+            }
+        }
+    }
+
+    #[test]
+    fn pdf2_image_transform_validation_is_atomic() {
+        let image = pdf2_quadrants();
+        let mut document = EditablePdf::new(140.0, 140.0).unwrap();
+        let before = document.to_bytes().unwrap();
+        for crop in [
+            (0.46, 0.0, 0.0, 0.0),
+            (0.0, -0.1, 0.0, 0.0),
+            (f64::NAN, 0.0, 0.0, 0.0),
+            (0.0, 0.0, 0.0, f64::INFINITY),
+        ] {
+            assert!(document
+                .add_image(
+                    0,
+                    &image,
+                    30.0,
+                    30.0,
+                    80.0,
+                    80.0,
+                    Some(crop),
+                    0,
+                    false,
+                    false
+                )
+                .is_err());
+        }
+        for rotation in [-90, 1, 45, 360] {
+            assert!(document
+                .add_image(0, &image, 30.0, 30.0, 80.0, 80.0, None, rotation, false, false)
+                .is_err());
+        }
+        assert_eq!(document.to_bytes().unwrap(), before);
+        assert_eq!((document.items, document.input_bytes), (0, 0));
+    }
+
+    #[test]
+    fn pdf2_boxes_and_transformed_images_follow_rotated_cropped_user_unit_view() {
+        use pdfcraft_cos::Object;
+        let mut source = pdfcraft_create::blank(300.0, 400.0, 1).unwrap();
+        let page = pdfcraft_organize::pages(&source).unwrap()[0].obj;
+        source
+            .update_dict(page, |dict| {
+                dict.set(
+                    b"CropBox".to_vec(),
+                    Object::Array([20.0, 30.0, 220.0, 330.0].map(Object::Real).to_vec()),
+                );
+                dict.set(b"UserUnit".to_vec(), Object::Real(1.25));
+            })
+            .unwrap();
+        let bytes = resource_fixture_bytes(&source);
+        let image = pdf2_quadrants();
+        for rotation in [0, 90, 180, 270] {
+            let mut document = EditablePdf::from_bytes(&bytes, None).unwrap();
+            document.rotate_page(0, rotation).unwrap();
+            document
+                .add_text_box(
+                    0,
+                    "Text box",
+                    (20.0, 20.0, 120.0, 30.0),
+                    12.0,
+                    (0, 0, 0),
+                    "right",
+                    None,
+                )
+                .unwrap();
+            document
+                .add_image(0, &image, 20.0, 80.0, 80.0, 80.0, None, 90, false, false)
+                .unwrap();
+            let (width, _, pixels) = pdf2_raster(&document);
+            assert_eq!(&pixels[(100 * width + 40) * 4..][..4], &[0, 255, 0, 255]);
+            assert_eq!(&pixels[(140 * width + 80) * 4..][..4], &[0, 0, 255, 255]);
+            let extracted = crate::pdf::extract(&document.to_bytes().unwrap(), None).unwrap();
+            assert!(extracted.pages[0]
+                .blocks
+                .iter()
+                .any(|block| block.text.contains("Text box")));
+        }
+    }
 
     fn resource_fixture(
         resources: pdfcraft_cos::Dict,
@@ -2550,7 +3606,7 @@ mod tests {
                 .unwrap();
             let image = crate::rendering::encode_png(1, 1, &[255, 0, 0, 255], 72.0).unwrap();
             editable
-                .add_image(0, &image, 10.0, 130.0, 20.0, 20.0)
+                .add_image(0, &image, 10.0, 130.0, 20.0, 20.0, None, 0, false, false)
                 .unwrap();
             assert_eq!(
                 original_resource_pixels(editable.document().unwrap()),
@@ -2676,7 +3732,7 @@ mod tests {
         .unwrap();
         assert_ne!(original_resource_pixels(&native), original_pixels);
         assert!(editable
-            .add_image(0, &blue, 10.0, 140.0, 20.0, 20.0)
+            .add_image(0, &blue, 10.0, 140.0, 20.0, 20.0, None, 0, false, false)
             .unwrap_err()
             .to_string()
             .contains("unsupported:drawing cannot verify preservation"));
@@ -3909,7 +4965,9 @@ mod tests {
             .add_text(0, "Hello PDF", 20.0, 30.0, 12.0, (0, 0, 0))
             .unwrap();
         let png = crate::rendering::encode_png(1, 1, &[255, 0, 0, 255], 72.0).unwrap();
-        document.add_image(0, &png, 20.0, 60.0, 10.0, 10.0).unwrap();
+        document
+            .add_image(0, &png, 20.0, 60.0, 10.0, 10.0, None, 0, false, false)
+            .unwrap();
         assert_eq!(document.add_page(400.0, 300.0).unwrap(), 1);
         assert_eq!(document.page_size(-1).unwrap(), (400.0, 300.0));
         let bytes = document.to_bytes().unwrap();
@@ -3937,7 +4995,7 @@ mod tests {
             .add_text(1, "bad page", 0.0, 0.0, 12.0, (0, 0, 0))
             .is_err());
         assert!(original
-            .add_image(0, b"not png", 0.0, 0.0, 10.0, 10.0)
+            .add_image(0, b"not png", 0.0, 0.0, 10.0, 10.0, None, 0, false, false)
             .is_err());
         assert!(original.add_page(f64::INFINITY, 100.0).is_err());
         assert_eq!(original.to_bytes().unwrap(), before);
@@ -4080,7 +5138,9 @@ mod tests {
             .add_text(0, "Source A", 10.0, 10.0, 10.0, (0, 0, 0))
             .unwrap();
         let image = crate::rendering::encode_png(1, 1, &[255, 0, 0, 255], 72.0).unwrap();
-        source.add_image(0, &image, 10.0, 40.0, 20.0, 20.0).unwrap();
+        source
+            .add_image(0, &image, 10.0, 40.0, 20.0, 20.0, None, 0, false, false)
+            .unwrap();
         source.add_page(120.0, 100.0).unwrap();
         source
             .add_text(1, "Source B", 10.0, 10.0, 10.0, (0, 0, 0))
@@ -4141,7 +5201,7 @@ mod tests {
         ).unwrap();
         let mut document = EditablePdf::new(100.0, 100.0).unwrap();
         document
-            .add_image(0, &jpeg, 10.0, 10.0, 20.0, 10.0)
+            .add_image(0, &jpeg, 10.0, 10.0, 20.0, 10.0, None, 0, false, false)
             .unwrap();
         let bytes = document.to_bytes().unwrap();
         let extracted = crate::pdf::extract(&bytes, None).unwrap();
@@ -4155,7 +5215,7 @@ mod tests {
             .unwrap();
         huge[frame + 7..frame + 9].copy_from_slice(&20_000_u16.to_be_bytes());
         assert!(document
-            .add_image(0, &huge, 10.0, 10.0, 20.0, 10.0)
+            .add_image(0, &huge, 10.0, 10.0, 20.0, 10.0, None, 0, false, false)
             .is_err());
         assert_eq!(document.to_bytes().unwrap(), bytes);
     }

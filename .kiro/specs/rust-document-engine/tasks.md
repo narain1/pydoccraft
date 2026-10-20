@@ -171,3 +171,10 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reject verified oversized unmerged unsplittable-row output through native placed-cell bounds before serialization.
 - [x] Validate recovery, later style/content/page changes, existing save destinations, intentional clipping, merges and full installed-wheel corpus; record artifact evidence.
 - [ ] Keep complete merged-row overflow and native allocation budgets tracked upstream; TBL6 remains open.
+
+## PDF text areas and image transforms
+
+- [x] Extend existing text/image methods with native bounded areas, alignment, visual crop and quarter-turn/flip properties.
+- [x] Bound native wrapping work and preserve logical overflow, resource, glyph and media errors atomically.
+- [x] Verify geometry, visible transforms, searchable Unicode, media retention and full installed-wheel artifact; record evidence.
+- [ ] Retain automatic supplied-font wrapping and strict text clipping as upstream gaps; PDF2 remains open.

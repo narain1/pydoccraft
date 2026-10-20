@@ -48,7 +48,8 @@ Bundled and linked third-party material
 - WordCraft English hyphenation data derives from Grady Ward's Moby Hyphenator II public-domain list; generated patterns are CC0-1.0.
 - WordCraft Polish and Italian hyphenation patterns are used under MIT; Portuguese patterns are used under BSD-3-Clause. Copyright details remain in the corresponding upstream source files.
 - Krilla 0.8.2 is MIT OR Apache-2.0. Compact ICC Profiles embedded by the PDF backend are by Clinton Ingram and released under CC0-1.0.
-- Kurbo 0.13.1, by the Linebender contributors, is Apache-2.0 OR MIT. The existing native geometry dependency is also used directly for WordCraft region-render transforms.
+- Kurbo 0.13.1, by the Linebender contributors, is Apache-2.0 OR MIT. The existing native geometry dependency is also used directly for WordCraft region-render transforms and native glyph curve bounds.
+- Skrifa 0.44.0, by the Fontations Authors, is MIT OR Apache-2.0. The existing font dependency is also used directly for bounded native TrueType outline inspection. All font parsing and outline geometry use public upstream library APIs.
 
 The locked crate-by-crate license inventory is distributed as LICENSE-THIRD-PARTY and maintained in source as THIRD_PARTY_LICENSES.md.
 

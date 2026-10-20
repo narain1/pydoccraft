@@ -1,5 +1,30 @@
 # Validation evidence
 
+## PDF supplied-font ink review correction
+
+- Independent review reproduced stacked combining marks rendering 26 points above a requested text box. Boxed static TrueType text now checks actual native shaped outlines against the box before commit, retaining legacy point placement. Built-in fonts still use logical metrics; boxed CFF is explicitly unavailable until native evaluation can be bounded.
+- Resource validation uses public parsed component iterators before recursive outline lookup: 4,096 distinct glyphs, 100,000 composite visits, depth 16, 8,192 points per glyph, 100,000 aggregate path operations, at most 16,384 operations per glyph and 1 MiB scratch per glyph. Native unhinted outlines and Kurbo curve extrema supply geometry; no glyph parser or replacement shaping engine is added.
+- All 44 PDF native tests, formatting and locked all-targets warnings-denied Clippy passed. A public regression covers two/six stacked marks, cached-output rollback, four rotations with CropBox/UserUnit, ordinary Unicode and unchanged point placement; its installed-wheel run passed in the exact-head integration validation below.
+- The only lockfile change adds a direct edge to already-locked skrifa 0.44.0 (MIT OR Apache-2.0). Regenerated and reviewed license inventories are byte-identical at 264 permissive normal/build packages, with no prohibited crates. NOTICE records direct outline use; all upstream revisions remain unchanged.
+
+### PDF text-box integration review
+
+- Exact runtime head `52fd5f801000f28fcdc79364df909010090a095a` passed CI 39467474191: formatting, 165 Rust tests, warnings-denied Clippy, 184 installed-wheel Python tests (no skips), and the regenerated 264-package license audit. Both review corrections and current main's parser-session/selective-extraction changes are included.
+- CPython 3.11.17 / Linux x86_64 artifact: wheel 17,286,676 bytes; native extension 40,094,512 bytes; wheel SHA-256 `2bb96a9e6457a5ea196454cd7ed4ac4877709a88c23a296c852f4febfaa8e836`. The only dependency change is the already-locked Skrifa direct edge; all upstream revisions remain unchanged.
+
+## PDF supplied-font reuse correction after text-box validation
+
+- A deterministic native regression shows the bounded font lookup corner: an 81,446-byte imported source with 256 PCFull-prefixed font bindings and 8,200 earlier reachable objects plus a 411,640-byte font produces three full font programs for two lines while prior accounting charges only once. Boundary controls with 255 bindings or a smaller object graph reuse one program.
+- Supplied-font point/box drawing now rejects 256 or more effective inherited PCFull bindings before embedding. Direct/inherited cases retain serialized bytes and counters on failure; the 255-binding boundary and ordinary repeated font calls pass.
+- Focused validation: all 42 PDF native tests, formatting and locked all-targets warnings-denied Clippy passed. No dependencies changed. The preceding 159-Rust/173-Python artifact below predates this correction; exact updated-head artifact validation is required before PR #35 merges and will be recorded by independent review.
+
+## 2026-10-20 PDF text boxes and image transforms (unreleased)
+
+- Offline Linux x86_64, Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1: formatting, 159 Rust tests, warnings-denied Clippy, locked release build and 173 installed-wheel Python tests passed with zero skips and verified artifact identity. A test initially used a nonexistent Page.images property; it was corrected to the existing get_images API and the complete wheel suite rerun successfully.
+- Existing draw_text accepts point or box geometry. Native built-in wrapping/alignment, supplied-font explicit Unicode lines, logical metric fits, exact-height boundary/overflow rollback and conservative wrapping-work limits pass. No new public text-box object, custom wrapping engine or glyph-outline clipping is introduced. Automatic supplied-font wrapping/justification and strict text clipping remain unavailable; PDF2 stays open.
+- Existing add_image accepts native visual crop, quarter-turns and flips. Asymmetric fixtures verify all rotations/flips, both crop-side orders, composed transforms, outside-box pixels and retained embedded media. Rotated CropBox/UserUnit tests verify current-view placement for text and images. Both drawing paths retain staged resource-preservation checks.
+- Wheel: `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`, 17,220,113 bytes; native extension: 39,892,088 bytes. SHA-256: `86014f3579ad5c8dec1bcd6bb6cf119e6c554e0d5f55436aa424389708581f45`. Lockfile SHA-256: `f5a35e9549115b905196b81ceebfad1475f01571a5c6416e6e15e10da1bdc984`. Dependencies, all four upstream revisions and the reviewed 264-package permissive license graph are unchanged.
+
 ## 2026-10-20 DOCX pagination acceptance and overflow guard (unreleased)
 
 - Offline Linux x86_64, Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1: formatting, 153 Rust tests, warnings-denied Clippy, locked release build and 168 installed-wheel Python tests passed with zero skips and verified artifact identity.
@@ -320,6 +345,14 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 - JSON decode plus Python hydration added 11.18–28.71 ms. Media-heavy inputs can add separate base64/ownership costs.
 - The prioritized feature improvement remains W02/P1: a bounded private native parse/render session, followed by bounded selected-page/text-only extraction under W09/P4.
 
+## Selective text extraction feature branch
+
+- Added `doc_ex.extract_text(source, filetype=None, password=None, pages=None)` with form-feed page separation, ordered/duplicate selections, negative indexes, stable `IndexError`, 10,000 selected-page limit, and 64 MiB output limit.
+- PDF uses a single PdfCraft text renderer and skips COS table/image traversal, media transfer, bounded JSON serialization, and Python public-model hydration. DOCX/PPTX retain eager compatibility fallback behavior.
+- Independent Rust 1.95 formatting/tests/Clippy and release-wheel validation passed: 128 Rust tests and 139 installed-wheel Python tests.
+- Anonymous Linux ARM64 medians versus eager `open()` were: all-page text 1.95×, 2.25×, and 4.95× faster; first-page text 19.91×, 42.32×, and 41.93× faster across the 391-, 65-, and 14-page PDFs.
+- This PR is independent of PDF render-session reuse. Selective structured extraction, Office fast paths, streaming/chunked output, and peak-memory evidence remain open.
+
 ## PDF parser-session reuse feature branch
 
 - Added a private native PDF session that retains the PdfCraft `PageRenderer` used during eager extraction and routes subsequent `Document.render_page` / `Page.get_pixmap` calls through the same parsed document.
@@ -334,3 +367,11 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 - Merging current main required retaining native clipping in the session path. A shared renderer helper now uses immutable inspected displayed dimensions and the existing pixel rounding, geometry, precision and output guards for both one-shot and retained rendering. Tests compare exact full/clipped PNG bytes at fractional DPI with CropBox/UserUnit and all rotations; parser-build count remains one.
 - A concurrent author merge added explicit-close expectations while dropping its close implementation. The reviewed correction releases the parser through Mutex<Option<PageRenderer>> and immutable PyO3 borrows, including poisoned-lock cleanup. Python captures a local handle, marks the document closed and detaches its handle before native close; retained handles report stable closed errors. Thread/lifetime tests pass, but this does not claim concurrent raster execution because current extension calls retain the GIL.
 - Historical private-corpus timings above remain author-reported; this integration review validates correctness and reuse counters, not those private performance measurements. No dependency or public API was added by the review corrections.
+
+
+### Selective extraction review corrections
+
+- Review identified unbounded Python/PyO3 page collection, missing Office and all-page selection/output checks, oversized-index error inconsistency, and a PDF string allocation preceding the output check. Both boundaries now consume at most 10,001 inputs; ordinary and arbitrary-size invalid indexes use IndexError; all formats cap selected pages and UTF-8 output. PDF preflights glyph byte lengths and possible separators before the upstream string builder.
+- Focused regressions cover generator lookahead, direct native conversion, large signed indexes, duplicate non-ASCII Office output, all-page fallback caps, empty-page separators, UTF-8 chunk boundaries, native page-count limits and glyph-budget checks. Upstream text-device construction can still allocate before output preflight; P4 remains open for peak-memory/streaming guarantees. Reviewed runtime head `57efdc8e6872bfad09275b07d2646ccf0a90d356` passed CI 39466407602: 155 Rust tests, 178 installed-wheel Python tests (no skips), formatting, warnings-denied Clippy and the unchanged 264-package locked license audit. The later main merge changed no files.
+
+- CI artifact: CPython 3.11.17 / Linux x86_64, wheel 17,224,825 bytes, native extension 39,902,544 bytes, wheel SHA-256 `60935ab53de271b8727d5dc5bfbd5328eb9f2d6ac94a848e4fbfe58d9e752544`. Upstream revisions and runtime dependency graph remain unchanged. Historical private-corpus timing claims remain author-reported.
