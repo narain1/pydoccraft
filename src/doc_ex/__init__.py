@@ -4,6 +4,7 @@ import base64
 import json
 import operator
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from typing import BinaryIO
 
@@ -133,7 +134,7 @@ def extract_text(
     *,
     filetype: str | None = None,
     password: str | None = None,
-    pages=None,
+    pages: Iterable[int] | None = None,
 ) -> str:
     """Extract selected text; PDF skips public models, while Office uses eager extraction."""
     indices = _selected_pages(pages)
