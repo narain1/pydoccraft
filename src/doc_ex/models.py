@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from html import escape
 from typing import Any
 
 BBox = tuple[float, float, float, float]
@@ -33,13 +34,37 @@ class Image:
 
 
 @dataclass(slots=True)
+class Cell:
+    """Owned cell content in source order, including nested table blocks."""
+
+    blocks: list[Block] = field(default_factory=list)
+    col_span: int = 1
+    row_span: int = 1
+    covered: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"blocks": [block.to_dict() for block in self.blocks], "col_span": self.col_span, "row_span": self.row_span, "covered": self.covered, "metadata": self.metadata}
+
+
+@dataclass(slots=True)
 class Table:
     rows: list[list[str]]
     bbox: BBox | None = None
     page: int | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    cells: list[list[Cell]] = field(default_factory=list)
 
     def to_markdown(self) -> str:
+        # Pipe tables cannot represent nested tables, merged cells or rich content.
+        # HTML preserves that hierarchy without emitting the flat rows a second time.
+        if any(
+            cell.col_span != 1 or cell.row_span != 1 or cell.covered
+            or cell.metadata.get("grid_column", column) != column
+            or any(block.table or block.links or block.images for block in cell.blocks)
+            for row in self.cells for column, cell in enumerate(row)
+        ):
+            return self._to_html()
         if not self.rows:
             return ""
         width = max(len(row) for row in self.rows)
@@ -52,7 +77,67 @@ class Table:
         return "\n".join(lines)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"rows": self.rows, "bbox": self.bbox, "page": self.page, "metadata": self.metadata}
+        value = {"rows": self.rows, "bbox": self.bbox, "page": self.page, "metadata": self.metadata}
+        if self.cells:
+            value["cells"] = [[cell.to_dict() for cell in row] for row in self.cells]
+        return value
+
+    def _to_html(self) -> str:
+        rows = self.cells or [[Cell([Block("paragraph", text)]) for text in row] for row in self.rows]
+        output = ["<table>"]
+        occupied: dict[int, int] = {}
+        for row in rows:
+            output.append("<tr>")
+            column = 0
+            for cell in row:
+                grid_column = cell.metadata.get("grid_column", column)
+                while column < grid_column:
+                    if column not in occupied:
+                        output.append("<td></td>")
+                    column += 1
+                column = grid_column + cell.col_span
+                # Keep unexpected content in a covered source cell visible rather
+                # than dropping it. Ordinary empty merge continuations are omitted.
+                if cell.covered and not any(block.text or block.table or block.images for block in cell.blocks):
+                    continue
+                if cell.row_span > 1:
+                    occupied.update((index, cell.row_span) for index in range(grid_column, column))
+                output.append(f'<td colspan="{cell.col_span}" rowspan="{cell.row_span}">')
+                for block in cell.blocks:
+                    if block.table:
+                        output.append(block.table._to_html())
+                    elif block.text:
+                        output.append(f"<p>{_html_text(block.text, block.links)}</p>")
+                    for image in block.images:
+                        output.append(f'<img src="{escape(image.name, quote=True)}" alt="{escape(image.alt, quote=True)}">')
+                output.append("</td>")
+            output.append("</tr>")
+            occupied = {column: remaining - 1 for column, remaining in occupied.items() if remaining > 1}
+        output.append("</table>")
+        return "".join(output)
+
+
+def _html_text(text: str, links: list[Link]) -> str:
+    output: list[str] = []
+    position = 0
+    valid = []
+    for link in links:
+        start, end = link.metadata.get("start"), link.metadata.get("end")
+        if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(text) and text[start:end] == link.text:
+            valid.append((start, end, link))
+    selected = []
+    last_start = len(text)
+    for start, end, link in sorted(valid, key=lambda value: value[0], reverse=True):
+        if end > last_start:
+            continue
+        selected.append((start, end, link))
+        last_start = start
+    for start, end, link in reversed(selected):
+        output.append(escape(text[position:start]))
+        output.append(f'<a href="{escape(link.uri, quote=True)}">{escape(text[start:end])}</a>')
+        position = end
+    output.append(escape(text[position:]))
+    return "".join(output).replace("\n", "<br>")
 
 
 @dataclass(slots=True)

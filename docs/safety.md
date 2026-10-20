@@ -32,7 +32,9 @@ These limits apply to the local OOXML preflight. WordCraft and DeckCraft also ap
 - DPI must be finite and between 1 and 1200 inclusive.
 - Python rejects out-of-range page indexes.
 - PdfCraft rendering uses upstream oversize rejection.
-- WordCraft and DeckCraft outputs are checked against their upstream maximum-side constants.
+- WordCraft and DeckCraft dimensions are checked against their upstream maximum-side constants before raster allocation.
+- Each raster is limited to 64 million pixels (256 MB for one RGBA buffer). Encoding and renderer intermediates can require additional memory; this is not a total process-memory budget.
+- RGBA buffers must have exactly the expected length before PNG encoding.
 - Rendering returns an encoded PNG held in memory.
 
 The numeric WordCraft and DeckCraft maximum-side values are upstream constants and are not part of the `pydoccraft` API contract.
@@ -47,7 +49,7 @@ Version 0.2.1 does not add a package-level limit for:
 - normalized JSON payload size;
 - Python object count;
 - total rendering time;
-- extraction recursion beyond limits supplied by upstream engines.
+- general extraction recursion beyond limits supplied by upstream engines (DOCX body table normalization additionally caps table nesting at 16 levels).
 
 Production callers should enforce input size and execution time outside the process. A Lambda integration should check remaining invocation time before calling extraction and should reject files whose size exceeds the workload's tested envelope.
 

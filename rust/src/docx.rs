@@ -3,11 +3,13 @@ use std::collections::{HashMap, HashSet};
 use base64::Engine;
 use serde_json::{json, Map, Value};
 use wordcraft_doc::para::{InlineObject, Paragraph, OBJ};
+use wordcraft_doc::props::VMerge;
 use wordcraft_doc::{Block, Blocks, Document, Path, StoryRef, Table};
 use wordcraft_layout::{DocLayout, LayoutCache, LayoutOptions};
 
 use crate::model::{
-    BlockPayload, DocumentPayload, ImagePayload, LinkPayload, PagePayload, TablePayload,
+    BlockPayload, CellPayload, DocumentPayload, ImagePayload, LinkPayload, PagePayload,
+    TablePayload,
 };
 use crate::EngineError;
 
@@ -18,6 +20,7 @@ pub fn read(data: &[u8], password: Option<&str>) -> Result<Document, EngineError
 
 pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, EngineError> {
     let document = read(data, password)?;
+    validate_table_depth(&document.body)?;
     let layout = wordcraft_layout::layout(
         &document,
         &mut LayoutCache::new(),
@@ -35,11 +38,7 @@ pub fn render(
     dpi: f64,
     password: Option<&str>,
 ) -> Result<Vec<u8>, EngineError> {
-    if !dpi.is_finite() || !(1.0..=1200.0).contains(&dpi) {
-        return Err(EngineError::ResourceLimit(
-            "DPI must be finite and between 1 and 1200".into(),
-        ));
-    }
+    crate::rendering::validate_dpi(dpi)?;
     let document = read(data, password)?;
     let layout = wordcraft_layout::layout(
         &document,
@@ -50,23 +49,20 @@ pub fn render(
         .pages
         .get(page)
         .ok_or_else(|| EngineError::Unsupported(format!("page {page} does not exist")))?;
+    let scale = (dpi / 72.0) as f32;
+    // Reject oversized requests before the upstream rasterizer allocates or clamps them.
+    crate::rendering::validate_size(
+        f64::from(page.w * scale),
+        f64::from(page.h * scale),
+        wordcraft_render::MAX_SIDE,
+    )?;
     let rendered = wordcraft_render::render_page(
         &document,
         page,
-        (dpi / 72.0) as f32,
+        scale,
         &wordcraft_render::RenderOptions::default(),
     );
-    if rendered.width >= wordcraft_render::MAX_SIDE || rendered.height >= wordcraft_render::MAX_SIDE
-    {
-        return Err(EngineError::ResourceLimit(
-            "DOCX render exceeds the image dimension limit".into(),
-        ));
-    }
-    let png = rendered.to_png();
-    if png.is_empty() {
-        return Err(EngineError::Malformed("DOCX PNG encoding failed".into()));
-    }
-    Ok(png)
+    crate::rendering::encode_png(rendered.width, rendered.height, &rendered.pixels, dpi)
 }
 
 pub fn to_pdf(data: &[u8], password: Option<&str>) -> Result<Vec<u8>, EngineError> {
@@ -80,6 +76,29 @@ struct Adapter<'a> {
     layout: &'a DocLayout,
     pages: Vec<PagePayload>,
     comment_pages: HashMap<u32, usize>,
+}
+
+// Bound recursive payload depth before layout and normalization. Each nested table adds
+// several JSON container levels; this also keeps the standard JSON decoder usable.
+fn validate_table_depth(blocks: &Blocks) -> Result<(), EngineError> {
+    let mut pending = vec![(blocks, 0_usize)];
+    while let Some((blocks, depth)) = pending.pop() {
+        for block in blocks {
+            if let Block::Table(table) = block.as_ref() {
+                if depth >= 16 {
+                    return Err(EngineError::ResourceLimit(
+                        "DOCX table nesting exceeds 16 levels".into(),
+                    ));
+                }
+                for row in &table.rows {
+                    for cell in &row.cells {
+                        pending.push((&cell.blocks, depth + 1));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 impl<'a> Adapter<'a> {
@@ -200,21 +219,7 @@ impl<'a> Adapter<'a> {
                 );
             }
         }
-        let rows = table
-            .rows
-            .iter()
-            .map(|row| {
-                row.cells
-                    .iter()
-                    .map(|cell| self.cell_text(&cell.blocks))
-                    .collect()
-            })
-            .collect();
-        let table = TablePayload {
-            rows,
-            page: Some(page_number),
-            ..TablePayload::default()
-        };
+        let table = self.table_payload(table, path, page_number);
         let page = &mut self.pages[page_number];
         page.tables.push(table.clone());
         page.blocks.push(BlockPayload {
@@ -224,18 +229,136 @@ impl<'a> Adapter<'a> {
         });
     }
 
+    fn table_payload(&self, table: &Table, path: &Path, page_number: usize) -> TablePayload {
+        let mut cells: Vec<Vec<CellPayload>> = Vec::with_capacity(table.rows.len());
+        let mut active_merges: HashMap<(usize, usize), (usize, usize)> = HashMap::new();
+        for (row_index, row) in table.rows.iter().enumerate() {
+            let mut next_merges = HashMap::new();
+            let mut column = row.props.grid_before as usize;
+            let mut output_row = Vec::with_capacity(row.cells.len());
+            for (cell_index, cell) in row.cells.iter().enumerate() {
+                let prefix = [path.0.as_slice(), &[row_index as u32, cell_index as u32]].concat();
+                let mut blocks = Vec::new();
+                for (index, block) in cell.blocks.iter().enumerate() {
+                    let block_path = Path([prefix.as_slice(), &[index as u32]].concat());
+                    match block.as_ref() {
+                        Block::Para(paragraph) => {
+                            let pages = self.paragraph_pages(&block_path);
+                            for (segment_index, mut segment) in self
+                                .paragraph_segments(paragraph, &pages)
+                                .into_iter()
+                                .enumerate()
+                            {
+                                segment.set_source(&block_path.0, segment_index);
+                                let mut payload = BlockPayload::paragraph(segment.text);
+                                payload.style = paragraph.props.style.clone();
+                                if let Some(level) = self
+                                    .document
+                                    .styles
+                                    .resolve_para(&paragraph.props)
+                                    .outline_level
+                                {
+                                    let level = level.saturating_add(1).clamp(1, 6);
+                                    payload.kind = "heading".into();
+                                    payload.level = Some(level);
+                                    payload
+                                        .metadata
+                                        .insert("outline_level".into(), Value::from(level));
+                                }
+                                payload.links = segment.links;
+                                payload.images = segment.images;
+                                let page = pages
+                                    .get(segment_index)
+                                    .copied()
+                                    .or_else(|| pages.last().copied())
+                                    .unwrap_or(page_number);
+                                for link in &mut payload.links {
+                                    link.page = Some(page);
+                                }
+                                for image in &mut payload.images {
+                                    image.page = Some(page);
+                                }
+                                blocks.push(payload);
+                            }
+                        }
+                        Block::Table(nested) => blocks.push(BlockPayload {
+                            kind: "table".into(),
+                            table: Some(
+                                self.table_payload(
+                                    nested,
+                                    &block_path,
+                                    self.table_page(nested, &block_path)
+                                        .min(self.pages.len() - 1),
+                                ),
+                            ),
+                            ..BlockPayload::default()
+                        }),
+                    }
+                }
+                let key = (column, cell.span());
+                let mut covered = false;
+                if cell.props.vmerge == VMerge::Restart {
+                    next_merges.insert(key, (row_index, cell_index));
+                } else if cell.props.vmerge == VMerge::Continue {
+                    if let Some(&(anchor_row, anchor_cell)) = active_merges.get(&key) {
+                        cells[anchor_row][anchor_cell].row_span += 1;
+                        next_merges.insert(key, (anchor_row, anchor_cell));
+                        covered = true;
+                    }
+                }
+                output_row.push(CellPayload {
+                    blocks,
+                    col_span: cell.span(),
+                    row_span: 1,
+                    covered,
+                    metadata: Map::from_iter([
+                        ("grid_column".into(), json!(column)),
+                        (
+                            "vertical_merge".into(),
+                            json!(match cell.props.vmerge {
+                                VMerge::None => "none",
+                                VMerge::Restart => "restart",
+                                VMerge::Continue => "continue",
+                            }),
+                        ),
+                    ]),
+                });
+                column += cell.span();
+            }
+            cells.push(output_row);
+            active_merges = next_merges;
+        }
+        TablePayload {
+            rows: table
+                .rows
+                .iter()
+                .map(|row| {
+                    row.cells
+                        .iter()
+                        .map(|cell| self.cell_text(&cell.blocks))
+                        .collect()
+                })
+                .collect(),
+            cells,
+            page: Some(page_number),
+            metadata: Map::from_iter([("column_widths".into(), json!(table.grid))]),
+            ..TablePayload::default()
+        }
+    }
+
     fn collect_cell_assets(&mut self, blocks: &Blocks, prefix: &[u32]) {
         for (index, block) in blocks.iter().enumerate() {
             let mut path = prefix.to_vec();
             path.push(index as u32);
             match block.as_ref() {
                 Block::Para(paragraph) => {
-                    let page_indexes = self.paragraph_pages(&Path(path));
+                    let page_indexes = self.paragraph_pages(&Path(path.clone()));
                     for (segment_index, mut segment) in self
                         .paragraph_segments(paragraph, &page_indexes)
                         .into_iter()
                         .enumerate()
                     {
+                        segment.set_source(&path, segment_index);
                         let page_number = page_indexes
                             .get(segment_index)
                             .copied()
@@ -379,7 +502,11 @@ impl<'a> Adapter<'a> {
                                 .push((*id, pages.get(segment_index).copied().unwrap_or(0)));
                         }
                         _ => {
+                            let first_image = segments[segment_index].images.len();
                             self.add_object(object, &mut segments[segment_index].images);
+                            for image in &mut segments[segment_index].images[first_image..] {
+                                image.metadata.insert("source_offset".into(), json!(offset));
+                            }
                             let text = object.plain_text();
                             segments[segment_index].push_text(text, props.link.as_deref());
                         }
@@ -485,6 +612,18 @@ struct Segment {
 }
 
 impl Segment {
+    fn set_source(&mut self, path: &[u32], segment: usize) {
+        for metadata in self
+            .links
+            .iter_mut()
+            .map(|link| &mut link.metadata)
+            .chain(self.images.iter_mut().map(|image| &mut image.metadata))
+        {
+            metadata.insert("source_path".into(), json!(path));
+            metadata.insert("segment".into(), json!(segment));
+        }
+    }
+
     fn push_text(&mut self, text: &str, link: Option<&str>) {
         for character in text.chars() {
             self.push_char(character, link);

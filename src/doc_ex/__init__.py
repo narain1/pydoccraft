@@ -15,10 +15,10 @@ from .errors import (
     UnsafeArchiveError,
     UnsupportedFormatError,
 )
-from .models import Block, Image, Link, Table
+from .models import Block, Cell, Image, Link, Table
 
 __all__ = [
-    "open", "convert", "Document", "Page", "Block", "Table", "Link", "Image",
+    "open", "convert", "Document", "Page", "Block", "Cell", "Table", "Link", "Image",
     "DocExError", "DocumentClosedError", "MalformedDocumentError", "UnsafeArchiveError",
     "UnsupportedFormatError", "ToolExecutionError", "ToolNotFoundError",
 ]
@@ -106,7 +106,11 @@ def _image(value: dict) -> Image:
 
 
 def _table(value: dict) -> Table:
-    return Table(value.get("rows", []), _bbox(value.get("bbox")), value.get("page"), value.get("metadata", {}))
+    cells = [
+        [Cell([_block(block) for block in cell.get("blocks", [])], cell.get("col_span", 1), cell.get("row_span", 1), cell.get("covered", False), cell.get("metadata", {})) for cell in row]
+        for row in value.get("cells", [])
+    ]
+    return Table(value.get("rows", []), _bbox(value.get("bbox")), value.get("page"), value.get("metadata", {}), cells)
 
 
 def _block(value: dict) -> Block:

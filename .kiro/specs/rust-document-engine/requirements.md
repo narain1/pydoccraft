@@ -53,7 +53,7 @@
 
 ### Acceptance criteria
 
-1. THE SYSTEM SHALL avoid GUI, networking, OCR-model, JavaScript, editing, printing, and font-discovery dependencies.
+1. THE SYSTEM SHALL avoid GUI, networking, OCR-model, JavaScript, desktop editor-state, printing, and font-discovery dependencies. Programmatic editing through the selected upstream library crates is permitted; application/editor-state crates remain prohibited.
 2. WHEN parsing OOXML, THE SYSTEM SHALL reject path traversal, excessive member counts, oversized members, oversized aggregate expansion, and suspicious compression ratios.
 3. WHEN parsing malformed XML, ZIP, PDF object graphs, relationships, or media, THE SYSTEM SHALL fail without writing outside owned memory.
 4. THE release wheel SHALL be measured and its size reported.
@@ -65,3 +65,48 @@
 2. Tests SHALL cover path and bytes input, structured text, tables, links, images, notes/comments, Markdown, close semantics, malformed input, ZIP safety, and both conversion directions.
 3. The native crate SHALL pass `cargo test` and `cargo clippy -- -D warnings`.
 4. The Python package SHALL build as a wheel and pass its test suite from an isolated installation.
+5. Installed-wheel validation SHALL verify imported package files against the tested artifact and record test counts, platform, artifact hashes/sizes and pinned upstream revisions. Release matrix jobs SHALL run the corpus before publication.
+
+## 7. Page rendering (existing API)
+
+1. THE SYSTEM SHALL expose `Document.render_page(index, dpi=144)` and `Page.get_pixmap(dpi=144)` returning encoded PNG bytes for PDF, DOCX, and PPTX.
+2. Page selection SHALL use zero-based indexes with normal negative indexing; PPTX pages correspond to slides and DOCX pages to WordCraft layout.
+3. DPI SHALL be finite and between 1 and 1200. Oversized output SHALL fail explicitly even when DPI is within this range.
+4. Rendering SHALL use the selected upstream engine in-process with scale `dpi / 72` and require an open source document.
+5. PNG physical-resolution metadata SHALL reflect requested DPI within integer pixels-per-meter rounding. Each raster SHALL be bounded to 64 million pixels and the engine's maximum side; encoding SHALL reject incomplete RGBA buffers.
+
+The API is implemented. The current implementation adds consistent PNG metadata and multi-DPI/limit tests; broader rotated/landscape fidelity and upstream render-failure reporting remain in R2/R4. Completion evidence is recorded in `validation.md`.
+
+## 8. Planned authoring and extraction improvements
+
+The [feature roadmap](../../../TODO.md) records prioritized TODOs and completion criteria, not additional capabilities of 0.2.1. C1–C5 cover creation of new DOCX/PDF documents and templates; E1–E6 cover extraction fidelity and provenance; P1–P4 cover performance and parity. No authoring API signature is committed until public upstream writer support at the pinned revisions has been checked. Legacy binary `.doc` creation is outside this scope.
+
+The initial E1 extraction slice SHALL retain `Table.rows` unchanged while exposing DOCX cell blocks recursively with column/row spans and merge-continuation state. Text SHALL appear once in plain text and Markdown. HTML tables inside Markdown SHALL preserve hierarchy that pipe tables cannot express. These owned extraction values SHALL remain separate from future editable native objects.
+
+## 9. Pythonic authoring and feature parity (planned)
+
+**User story:** As a Python developer, I want a broad document authoring API with Pillow-like usability, using Open XML as a feature reference and ArtCraft libraries as the sole document backend.
+
+These criteria govern future implementation, not current release capabilities:
+
+1. THE SYSTEM SHALL use readable typed document objects, snake_case methods, keyword options, clear defaults and explicit units. Common operations SHALL NOT require XML elements, relationship IDs, numeric flags, or upstream engine types.
+2. THE SYSTEM SHALL preserve the existing extraction, conversion, page indexing, owned values and bytes-returning rendering contracts. New editable objects SHALL have explicit mutation, copying, saving and lifetime semantics.
+3. DOCX operations SHALL use WordCraft, PDF operations PdfCraft, and PPTX operations DeckCraft library APIs. Open XML SDK, Pillow, PyMuPDF and other reference projects SHALL NOT become fallback document backends. Missing support SHALL be recorded as an upstream requirement.
+4. THE authoring backlog SHALL cover text/runs/lists, styles/themes/fonts, tables and nested cells, backgrounds/watermarks/shading, sections/headers/footers, images/drawings, references/fields/notes, templates/content controls, comments/revisions, properties and safe preservation. Detailed criteria are in the API/DOC/TXT/STY/TBL/BG/LAY/MED/REF/FORM/REV/PKG roadmap groups.
+5. Table authoring SHALL include rows/columns, rich and nested cell content, merges, sizing, borders, shading, alignment and pagination controls where supported upstream. Export/extraction SHALL NOT duplicate table text.
+6. Background APIs SHALL distinguish document/page/slide backgrounds, placed underlays/watermarks, object shading and preview-only compositing. DOCX scope SHALL respect reflow and section/header behavior; requested effects SHALL NOT silently disappear on save/render/export.
+7. Editing SHALL operate on the original upstream document model and preserve untouched supported content. WHEN requested edits or safe preservation are unavailable, THE SYSTEM SHALL return a precise error before publishing a lossy output.
+8. Capability claims SHALL distinguish read, create, edit, preserve, render and export for each feature/format in one development ledger and published matrix. A runtime capability framework is not required. Unknown or partial support SHALL NOT be advertised as full parity. Basic serialization SHALL NOT imply field evaluation or layout fidelity.
+9. Authoring SHALL retain bounded, in-process, offline execution. Python MAY write explicitly requested output paths/streams; native document operations SHALL work on owned data without writing caller-controlled paths.
+10. EACH advertised authoring feature SHALL have installed-wheel create/edit/save/reopen evidence plus applicable extraction, rendering and export checks. Runtime dependencies, licenses, attribution, footprint and upstream revision rules remain unchanged.
+
+See the [API proposal and reference crosswalk](../../../docs/authoring-api-design.md). PDF/SLIDE groups extend authoring to fixed pages and slides; QA defines the operation-specific completion gates. No complete Open XML SDK member parity or Word-identical layout is asserted.
+
+## 10. Compact API, canonical ownership and upstream work (planned)
+
+1. Every coverage ID SHALL have one canonical implementation/workflow owner in [roadmap-workstreams.json](../../../docs/roadmap-workstreams.json). Related work SHALL reference that owner rather than create a duplicate implementation/API.
+2. Reports, watermark placement, basic template substitution, repetition, batch generation, style examples and data formatting SHOULD be ordinary Python recipes over existing primitives. A new public convenience requires evidence that composition is inadequate; no report/template/batch/session framework is required by this roadmap.
+3. Existing PNG rendering methods SHALL remain the rendering surface. An additional image wrapper or render alias is not planned; optional Pillow use remains caller code.
+4. Format algorithms, reusable writer/layout behavior and shared semantic validation SHALL be proposed to the responsible upstream library when public support is missing. Python API naming, projection, Markdown and adapter boundary checks remain local.
+5. Upstream work SHALL distinguish verified source gaps, existing public support, and unassessed candidates, with pinned evidence. Public methods being present SHALL NOT imply full correctness. Linking application engines or copying their algorithms remains prohibited.
+6. The roadmap SHALL connect prerequisites at the required baseline without forcing PDF, PPTX, extraction or rendering to wait for complete DOCX parity. No contribution issue SHALL be opened in an upstream repository solely because it is marked as a local candidate.
