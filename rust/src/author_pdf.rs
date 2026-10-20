@@ -835,17 +835,32 @@ impl EditablePdf {
                     icon: pdfcraft_annot::NoteIcon::Note,
                 }
             }
-            "highlight" => pdfcraft_annot::Shape::TextMarkup {
-                kind: pdfcraft_annot::Markup::Highlight,
+            "highlight" | "underline" | "strikeout" | "squiggly" => pdfcraft_annot::Shape::TextMarkup {
+                kind: match kind {
+                    "underline" => pdfcraft_annot::Markup::Underline,
+                    "strikeout" => pdfcraft_annot::Markup::StrikeOut,
+                    "squiggly" => pdfcraft_annot::Markup::Squiggly,
+                    _ => pdfcraft_annot::Markup::Highlight,
+                },
                 quads: vec![self.geometry[page].view_rect_to_quad(rect)],
             },
             _ => {
                 return Err(EngineError::Unsupported(format!(
-                    "annotation kind {kind}; supported kinds are note and highlight"
+                    "annotation kind {kind}; supported kinds are note, highlight, underline, strikeout and squiggly"
                 ))
                 .into())
             }
         };
+        let appearance_peak = match &shape {
+            pdfcraft_annot::Shape::TextMarkup { kind, quads } => {
+                quads.iter().try_fold(4096usize, |total, quad| {
+                    markup_quad_peak(quad, *kind == pdfcraft_annot::Markup::Squiggly)
+                        .map(|size| total.saturating_add(size))
+                })?
+            }
+            _ => 0,
+        };
+        self.validate_input(text.len() + author.len() + appearance_peak)?;
         let mut style = pdfcraft_annot::Style::default_for(&shape);
         style.color = rgb(color);
         let annotation = pdfcraft_annot::NewAnnotation {
@@ -870,9 +885,16 @@ impl EditablePdf {
         let mut edited = self.document()?.clone();
         let index = pdfcraft_annot::add_annotation(&mut edited, &annotation, &meta)
             .map_err(annotation_error)?;
+        let appearance_bytes = if appearance_peak != 0 {
+            markup_appearance_bytes(&edited, page, index)?
+        } else {
+            0
+        };
+        let cost = text.len() + author.len() + appearance_bytes;
+        self.validate_input(cost)?;
         self.document = Some(edited);
         self.items += 1;
-        self.input_bytes += text.len() + author.len();
+        self.input_bytes += cost;
         Ok(index)
     }
 
@@ -945,6 +967,10 @@ impl EditablePdf {
         author: Option<&str>,
     ) -> PyResult<()> {
         let page = self.page_index(page)?;
+        // props() builds an appearance internally: bound direct native QuadPoints first.
+        let appearance_peak =
+            with_annotation_dict(self.document()?, page, index, markup_dict_peak)?;
+        self.validate_input(appearance_peak)?;
         let props = pdfcraft_annot::props(self.document()?, page, index)
             .ok_or_else(|| PyIndexError::new_err("annotation index out of range"))?;
         let user_rect = rect
@@ -965,7 +991,7 @@ impl EditablePdf {
             validate_annotation_text(author, 4096, "annotation author")?;
         }
         let cost = text.map_or(0, str::len) + author.map_or(0, str::len) + uri.map_or(0, str::len);
-        self.validate_input(cost)?;
+        self.validate_input(cost.saturating_add(appearance_peak))?;
         let mut edited = self.document()?.clone();
         if props.subtype == "Link" {
             if text.is_some() || author.is_some() {
@@ -991,7 +1017,10 @@ impl EditablePdf {
                 color.map(|_| &style),
             )
             .map_err(annotation_error)?;
-        } else if props.subtype == "Text" || props.subtype == "Highlight" {
+        } else if matches!(
+            props.subtype.as_str(),
+            "Text" | "Highlight" | "Underline" | "StrikeOut" | "Squiggly"
+        ) {
             if action.is_some() {
                 return Err(EngineError::Unsupported(
                     "comment annotations do not have link targets".into(),
@@ -1010,7 +1039,7 @@ impl EditablePdf {
                     || ((rect[3] - rect[1]) - (original[3] - original[1])).abs() > 0.001
                 {
                     return Err(EngineError::Unsupported(
-                        "sticky notes and highlights can be moved, but resizing is not available"
+                        "sticky notes and text markup can be moved, but resizing is not available"
                             .into(),
                     )
                     .into());
@@ -1053,6 +1082,14 @@ impl EditablePdf {
             ))
             .into());
         }
+        // set_style regenerates the appearance. Metadata edits and moves retain it.
+        let appearance_bytes = if appearance_peak != 0 && color.is_some() {
+            markup_appearance_bytes(&edited, page, index)?
+        } else {
+            0
+        };
+        let cost = cost.saturating_add(appearance_bytes);
+        self.validate_input(cost)?;
         self.document = Some(edited);
         self.input_bytes += cost;
         self.items += 1;
@@ -1061,13 +1098,18 @@ impl EditablePdf {
 
     pub fn delete_annotation(&mut self, page: isize, index: usize) -> PyResult<()> {
         let page = self.page_index(page)?;
-        let props = pdfcraft_annot::props(self.document()?, page, index)
-            .ok_or_else(|| PyIndexError::new_err("annotation index out of range"))?;
-        if !pdfcraft_annot::is_comment_subtype(&props.subtype) && props.subtype != "Link" {
-            return Err(EngineError::Unsupported(format!(
-                "deleting {} annotations is not available",
-                props.subtype
-            ))
+        let supported = with_annotation_dict(self.document()?, page, index, |dict| {
+            Ok(dict
+                .name(b"Subtype")
+                .and_then(|name| std::str::from_utf8(name).ok())
+                .is_some_and(|subtype| {
+                    pdfcraft_annot::is_comment_subtype(subtype) || subtype == "Link"
+                }))
+        })?;
+        if !supported {
+            return Err(EngineError::Unsupported(
+                "deleting this annotation subtype is not available".into(),
+            )
             .into());
         }
         let mut edited = self.document()?.clone();
@@ -2241,6 +2283,141 @@ impl EditablePdf {
         }
         Ok(())
     }
+}
+
+const MAX_MARKUP_QUADS: usize = 1024;
+
+// Read only one annotation. Preserve borrowed direct objects rather than cloning an
+// untrusted nested dictionary/array, and never decode an imported appearance stream.
+fn with_annotation_dict<T>(
+    document: &Document,
+    page: usize,
+    index: usize,
+    read: impl FnOnce(&pdfcraft_cos::Dict) -> PyResult<T>,
+) -> PyResult<T> {
+    use pdfcraft_cos::Object;
+    let missing = || PyIndexError::new_err("annotation index out of range");
+    let pages = pdfcraft_organize::pages(document).map_err(organize_error)?;
+    let page = document.get(pages.get(page).ok_or_else(missing)?.obj);
+    let annots = page
+        .as_dict()
+        .and_then(|p| p.get(b"Annots"))
+        .ok_or_else(missing)?;
+    let owned = if let Object::Ref(reference) = annots {
+        Some(document.get(*reference))
+    } else {
+        None
+    };
+    let annots = owned
+        .as_deref()
+        .unwrap_or(annots)
+        .as_array()
+        .ok_or_else(missing)?;
+    if annots.len() > MAX_ITEMS {
+        return Err(EngineError::ResourceLimit("PDF annotation count exceeds 10000".into()).into());
+    }
+    let annotation = annots.get(index).ok_or_else(missing)?;
+    let owned = if let Object::Ref(reference) = annotation {
+        Some(document.get(*reference))
+    } else {
+        None
+    };
+    read(
+        owned
+            .as_deref()
+            .unwrap_or(annotation)
+            .as_dict()
+            .ok_or_else(missing)?,
+    )
+}
+
+fn markup_quad_peak(quad: &[f64; 8], squiggly: bool) -> PyResult<usize> {
+    if quad.iter().any(|n| !n.is_finite()) {
+        return Err(
+            EngineError::Unsupported("markup quad contains a nonfinite coordinate".into()).into(),
+        );
+    }
+    let height = (quad[0] - quad[4]).hypot(quad[1] - quad[5]);
+    let length = (quad[6] - quad[4]).hypot(quad[7] - quad[5]);
+    if !height.is_finite() || !length.is_finite() {
+        return Err(
+            EngineError::Unsupported("markup quad exceeds finite native geometry".into()).into(),
+        );
+    }
+    // Resource estimate only; PdfCraft creates the geometry. Its cap coarsens the
+    // entire bottom edge, since each vertex uses i/steps (it never truncates it).
+    let vertices = if squiggly {
+        ((length / (height / 4.0).max(1.5)).ceil() as usize).clamp(1, 10_000) + 1
+    } else {
+        4
+    };
+    // Two maximal finite f64 decimal coordinates plus native operator overhead.
+    Ok(4096 + vertices * 1024)
+}
+
+fn markup_dict_peak(dict: &pdfcraft_cos::Dict) -> PyResult<usize> {
+    let subtype = dict.name(b"Subtype").unwrap_or_default();
+    if !matches!(
+        subtype,
+        b"Highlight" | b"Underline" | b"StrikeOut" | b"Squiggly"
+    ) {
+        return Ok(0);
+    }
+    let quads = dict
+        .get(b"QuadPoints")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| EngineError::Unsupported("markup requires direct QuadPoints".into()))?;
+    if quads.len() > MAX_MARKUP_QUADS * 8 {
+        return Err(EngineError::ResourceLimit("markup exceeds 1024 quadrilaterals".into()).into());
+    }
+    if quads.is_empty() || quads.len() % 8 != 0 {
+        return Err(EngineError::Unsupported("markup has incomplete QuadPoints".into()).into());
+    }
+    let mut total = 4096usize;
+    for values in quads.chunks_exact(8) {
+        let mut quad = [0.0; 8];
+        for (dest, value) in quad.iter_mut().zip(values) {
+            *dest = value.as_f64().ok_or_else(|| {
+                EngineError::Unsupported("markup quad contains a nonnumeric coordinate".into())
+            })?;
+        }
+        total = total.saturating_add(markup_quad_peak(&quad, subtype == b"Squiggly")?);
+        if total > MAX_DOCUMENT_INPUT {
+            return Err(EngineError::ResourceLimit(
+                "markup appearance work exceeds 128 MiB".into(),
+            )
+            .into());
+        }
+    }
+    Ok(total)
+}
+
+fn markup_appearance_bytes(document: &Document, page: usize, index: usize) -> PyResult<usize> {
+    use pdfcraft_cos::Object;
+    with_annotation_dict(document, page, index, |dict| {
+        let missing = || EngineError::Conversion("native markup appearance is missing".into());
+        let ap = dict.get(b"AP").ok_or_else(missing)?;
+        let owned = if let Object::Ref(reference) = ap {
+            Some(document.get(*reference))
+        } else {
+            None
+        };
+        let normal = owned
+            .as_deref()
+            .unwrap_or(ap)
+            .as_dict()
+            .and_then(|d| d.get(b"N"))
+            .ok_or_else(missing)?;
+        let owned = if let Object::Ref(reference) = normal {
+            Some(document.get(*reference))
+        } else {
+            None
+        };
+        match owned.as_deref().unwrap_or(normal) {
+            Object::Stream(stream) => Ok(stream.raw.len()),
+            _ => Err(missing().into()),
+        }
+    })
 }
 
 fn metadata_keys() -> [(&'static str, &'static str); 4] {
@@ -4841,6 +5018,341 @@ mod tests {
         document.delete_annotation(0, remaining).unwrap();
         document.delete_annotation(0, link).unwrap();
         assert_eq!(document.annotations(0).unwrap(), "[]");
+    }
+
+    #[test]
+    fn markup_annotations_roundtrip_move_recolor_and_delete_without_changing_text() {
+        pyo3::prepare_freethreaded_python();
+        for kind in ["underline", "strikeout", "squiggly"] {
+            let mut document = EditablePdf::new(220.0, 220.0).unwrap();
+            document
+                .add_text(0, "Preserved body", 20.0, 160.0, 12.0, (0, 0, 0))
+                .unwrap();
+            let plain = crate::pdf::extract(&document.to_bytes().unwrap(), None)
+                .unwrap()
+                .pages[0]
+                .blocks
+                .iter()
+                .map(|b| b.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            let index = document
+                .add_annotation(
+                    0,
+                    kind,
+                    (20.0, 20.0, 140.0, 40.0),
+                    "Comment café",
+                    "Author",
+                    (255, 0, 0),
+                )
+                .unwrap();
+            document
+                .update_annotation(
+                    0,
+                    index,
+                    Some("Revised ✓"),
+                    Some((30.0, 50.0, 150.0, 70.0)),
+                    Some((0, 0, 255)),
+                    None,
+                    None,
+                    Some("Reviewer"),
+                )
+                .unwrap();
+            let snapshot: Value = serde_json::from_str(&document.annotations(0).unwrap()).unwrap();
+            assert_eq!(snapshot[0]["kind"], kind);
+            assert_eq!(snapshot[0]["text"], "Revised ✓");
+            assert_eq!(snapshot[0]["author"], "Reviewer");
+            assert_eq!(snapshot[0]["color"], json!([0, 0, 255]));
+            assert_eq!(snapshot[0]["rect"], json!([30.0, 50.0, 150.0, 70.0]));
+            let bytes = document.to_bytes().unwrap();
+            let mut reopened = EditablePdf::from_bytes(&bytes, None).unwrap();
+            assert_eq!(
+                serde_json::from_str::<Value>(&reopened.annotations(0).unwrap()).unwrap(),
+                snapshot
+            );
+            let (width, height, pixels) = pdf2_raster(&reopened);
+            let blue = (0..height)
+                .flat_map(|y| (0..width).map(move |x| (x, y)))
+                .filter(|&(x, y)| {
+                    let p = &pixels[(y * width + x) * 4..][..4];
+                    p[2] > p[0].saturating_add(30)
+                })
+                .collect::<Vec<_>>();
+            assert!(!blue.is_empty(), "{kind} appearance missing");
+            assert!(
+                blue.iter()
+                    .all(|&(x, y)| (30..150).contains(&x) && (50..70).contains(&y)),
+                "{kind} move bounds {blue:?}"
+            );
+            assert_eq!(
+                crate::pdf::extract(&bytes, None).unwrap().pages[0]
+                    .blocks
+                    .iter()
+                    .map(|b| b.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                plain
+            );
+            reopened.delete_annotation(0, index).unwrap();
+            assert_eq!(reopened.annotations(0).unwrap(), "[]");
+            let (_, _, clean) = pdf2_raster(&reopened);
+            assert!(!clean
+                .chunks_exact(4)
+                .any(|p| p[2] > p[0].saturating_add(30)));
+        }
+    }
+
+    #[test]
+    fn markup_appearances_follow_quad_orientation_in_all_rotated_cropped_views() {
+        use pdfcraft_cos::Object;
+        let mut source = pdfcraft_create::blank(300.0, 400.0, 1).unwrap();
+        let page = pdfcraft_organize::pages(&source).unwrap()[0].obj;
+        source
+            .update_dict(page, |dict| {
+                dict.set(
+                    b"CropBox".to_vec(),
+                    Object::Array([20.0, 30.0, 220.0, 330.0].map(Object::Real).to_vec()),
+                );
+                dict.set(b"UserUnit".to_vec(), Object::Real(1.25));
+            })
+            .unwrap();
+        let bytes = resource_fixture_bytes(&source);
+        for rotation in [0, 90, 180, 270] {
+            let mut document = EditablePdf::from_bytes(&bytes, None).unwrap();
+            document.rotate_page(0, rotation).unwrap();
+            for (row, kind) in ["underline", "strikeout", "squiggly"]
+                .into_iter()
+                .enumerate()
+            {
+                let y = 20.0 + row as f64 * 50.0;
+                document
+                    .add_annotation(0, kind, (20.0, y, 140.0, y + 20.0), "", "", (255, 0, 0))
+                    .unwrap();
+            }
+            let reopened = EditablePdf::from_bytes(&document.to_bytes().unwrap(), None).unwrap();
+            let metadata: Value = serde_json::from_str(&reopened.annotations(0).unwrap()).unwrap();
+            let (width, _, pixels) = pdf2_raster(&reopened);
+            for row in 0..3 {
+                let y = 20 + row * 50;
+                let expected = [20.0, y as f64, 140.0, (y + 20) as f64];
+                for (actual, want) in metadata[row]["rect"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .zip(expected)
+                {
+                    assert!((actual.as_f64().unwrap() - want).abs() < 0.001);
+                }
+                let ink = (y..y + 20)
+                    .flat_map(|py| (20..140).map(move |x| (x, py)))
+                    .filter(|&(x, py)| {
+                        let p = &pixels[(py * width + x) * 4..][..4];
+                        p[0] > p[1].saturating_add(30)
+                    })
+                    .collect::<Vec<_>>();
+                assert!(
+                    ink.len() > 60,
+                    "rotation {rotation}, kind {} has no substantial appearance",
+                    metadata[row]["kind"]
+                );
+                let top = ink.iter().map(|&(_, py)| py).min().unwrap();
+                let bottom = ink.iter().map(|&(_, py)| py).max().unwrap();
+                match row {
+                    0 => assert!(
+                        top >= y + 17 && bottom < y + 20,
+                        "underline rotation {rotation}: {top}..{bottom}"
+                    ),
+                    1 => assert!(
+                        top >= y + 10 && bottom <= y + 13,
+                        "strikeout rotation {rotation}: {top}..{bottom}"
+                    ),
+                    _ => assert!(
+                        top >= y + 16 && bottom < y + 20 && bottom > top,
+                        "squiggly rotation {rotation}: {top}..{bottom}"
+                    ),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn markup_appearance_budget_preflights_count_bytes_and_accounts_native_output() {
+        use pdfcraft_cos::{Dict, Object};
+        pyo3::prepare_freethreaded_python();
+        let mut dict = Dict::new();
+        for subtype in ["Highlight", "Underline", "StrikeOut", "Squiggly"] {
+            dict.set(b"Subtype".to_vec(), Object::name(subtype));
+            dict.set(
+                b"QuadPoints".to_vec(),
+                Object::Array(vec![Object::Int(0); (MAX_MARKUP_QUADS + 1) * 8]),
+            );
+            assert!(markup_dict_peak(&dict)
+                .unwrap_err()
+                .to_string()
+                .contains("resource_limit:"));
+        }
+        dict.set(
+            b"QuadPoints".to_vec(),
+            Object::Array(vec![Object::Real(f64::NAN); 8]),
+        );
+        assert!(markup_dict_peak(&dict).is_err());
+        let long = [0.0, 1.0, 20000.0, 1.0, 0.0, 0.0, 20000.0, 0.0];
+        assert_eq!(markup_quad_peak(&long, true).unwrap(), 4096 + 10001 * 1024);
+        dict.set(
+            b"QuadPoints".to_vec(),
+            Object::Array((0..14).flat_map(|_| long.map(Object::Real)).collect()),
+        );
+        assert!(markup_dict_peak(&dict)
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit:"));
+        // The count guard must run on the mutation path before native props(), which
+        // would otherwise build an appearance just to report editability.
+        let mut malformed = EditablePdf::new(200.0, 200.0).unwrap();
+        let index = malformed
+            .add_annotation(
+                0,
+                "highlight",
+                (20.0, 20.0, 140.0, 40.0),
+                "",
+                "",
+                (255, 0, 0),
+            )
+            .unwrap();
+        let native = malformed.document.as_mut().unwrap();
+        let page = native.get(pdfcraft_organize::pages(native).unwrap()[0].obj);
+        let annotation = match &page
+            .as_dict()
+            .unwrap()
+            .get(b"Annots")
+            .unwrap()
+            .as_array()
+            .unwrap()[index]
+        {
+            Object::Ref(reference) => *reference,
+            _ => panic!("native annotation must be indirect"),
+        };
+        native
+            .update_dict(annotation, |dict| {
+                dict.set(
+                    b"QuadPoints".to_vec(),
+                    Object::Array(vec![Object::Int(0); (MAX_MARKUP_QUADS + 1) * 8]),
+                )
+            })
+            .unwrap();
+        let before = malformed.to_bytes().unwrap();
+        assert!(malformed
+            .update_annotation(
+                0,
+                index,
+                Some("Do not commit"),
+                None,
+                None,
+                None,
+                None,
+                None
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit:"));
+        assert_eq!(malformed.to_bytes().unwrap(), before);
+        malformed.delete_annotation(0, index).unwrap();
+        assert_eq!(malformed.annotations(0).unwrap(), "[]");
+        for kind in ["highlight", "underline", "strikeout", "squiggly"] {
+            let mut document = EditablePdf::new(200.0, 200.0).unwrap();
+            document.input_bytes = MAX_DOCUMENT_INPUT - 1;
+            let before = document.to_bytes().unwrap();
+            assert!(document
+                .add_annotation(0, kind, (20.0, 20.0, 140.0, 40.0), "", "", (255, 0, 0))
+                .unwrap_err()
+                .to_string()
+                .contains("resource_limit:"));
+            assert_eq!(document.to_bytes().unwrap(), before);
+            assert_eq!(document.items, 0);
+            document.input_bytes = 0;
+            let index = document
+                .add_annotation(0, kind, (20.0, 20.0, 140.0, 40.0), "", "", (255, 0, 0))
+                .unwrap();
+            let charged = markup_appearance_bytes(document.document().unwrap(), 0, index).unwrap();
+            assert!(charged > 0);
+            assert_eq!(document.input_bytes, charged);
+            document
+                .update_annotation(0, index, None, None, Some((0, 0, 255)), None, None, None)
+                .unwrap();
+            assert_eq!(
+                document.input_bytes,
+                charged + markup_appearance_bytes(document.document().unwrap(), 0, index).unwrap()
+            );
+            document.input_bytes = MAX_DOCUMENT_INPUT - 1;
+            let before = document.to_bytes().unwrap();
+            assert!(document
+                .update_annotation(
+                    0,
+                    index,
+                    Some("Do not commit"),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("resource_limit:"));
+            assert_eq!(document.to_bytes().unwrap(), before);
+            // Removing a markup does not need to rebuild an appearance or spend its budget.
+            document.delete_annotation(0, index).unwrap();
+            assert_eq!(document.annotations(0).unwrap(), "[]");
+        }
+    }
+
+    #[test]
+    fn markup_invalid_changes_are_atomic() {
+        pyo3::prepare_freethreaded_python();
+        for kind in ["underline", "strikeout", "squiggly"] {
+            let mut document = EditablePdf::new(200.0, 200.0).unwrap();
+            let index = document
+                .add_annotation(
+                    0,
+                    kind,
+                    (20.0, 20.0, 140.0, 40.0),
+                    "Before",
+                    "",
+                    (255, 0, 0),
+                )
+                .unwrap();
+            let before = document.to_bytes().unwrap();
+            let counts = (document.items, document.input_bytes);
+            assert!(document
+                .update_annotation(
+                    0,
+                    index,
+                    Some("Do not commit"),
+                    Some((20.0, 20.0, 150.0, 40.0)),
+                    None,
+                    None,
+                    None,
+                    None
+                )
+                .is_err());
+            assert!(document
+                .update_annotation(
+                    0,
+                    index,
+                    Some("Do not commit"),
+                    None,
+                    None,
+                    Some("https://example.com"),
+                    None,
+                    None
+                )
+                .is_err());
+            assert!(document
+                .add_annotation(0, kind, (20.0, 20.0, 19.0, 40.0), "", "", (0, 0, 0))
+                .is_err());
+            assert_eq!(document.to_bytes().unwrap(), before);
+            assert_eq!((document.items, document.input_bytes), counts);
+        }
     }
 
     #[test]
