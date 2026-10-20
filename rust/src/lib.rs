@@ -35,8 +35,6 @@ pub enum EngineError {
     Encrypted,
     #[error("conversion_failure:{0}")]
     Conversion(String),
-    #[error("closed:{0}")]
-    Closed(String),
 }
 
 impl From<EngineError> for PyErr {
@@ -52,35 +50,26 @@ impl From<EngineError> for PyErr {
 
 #[pyclass(module = "doc_ex._core", name = "_PdfSession")]
 struct NativePdfSession {
-    inner: Option<pdf::PdfSession>,
+    inner: pdf::PdfSession,
 }
 
 #[pymethods]
 impl NativePdfSession {
-    #[pyo3(signature = (page, dpi=144.0))]
-    fn render(&self, page: usize, dpi: f64) -> PyResult<Vec<u8>> {
-        self.inner
-            .as_ref()
-            .ok_or_else(|| EngineError::Closed("PDF render session is closed".into()))?
-            .render(page, dpi)
-            .map_err(Into::into)
+    #[pyo3(signature = (page, dpi=144.0, clip=None))]
+    fn render(&self, page: usize, dpi: f64, clip: Option<rendering::Clip>) -> PyResult<Vec<u8>> {
+        if let Some(clip) = clip {
+            rendering::validate_clip(clip)?;
+        }
+        self.inner.render(page, dpi, clip).map_err(Into::into)
     }
 
     fn _stats(&self) -> PyResult<(u64, u64, u64)> {
-        let stats = self
-            .inner
-            .as_ref()
-            .ok_or_else(|| EngineError::Closed("PDF render session is closed".into()))?
-            .stats()?;
+        let stats = self.inner.stats()?;
         Ok((
             stats.parser_builds,
             stats.render_requests,
             stats.rasterizations,
         ))
-    }
-
-    fn close(&mut self) {
-        self.inner = None;
     }
 }
 
@@ -90,12 +79,7 @@ fn _open_pdf(data: &[u8], password: Option<&str>) -> PyResult<(NativePdfSession,
     limits::validate_input_size(data.len())?;
     let (session, payload) = pdf::PdfSession::open(data, password)?;
     let encoded = limits::bounded_json(&payload, limits::MAX_PAYLOAD_SIZE)?;
-    Ok((
-        NativePdfSession {
-            inner: Some(session),
-        },
-        encoded,
-    ))
+    Ok((NativePdfSession { inner: session }, encoded))
 }
 
 #[pyfunction]

@@ -395,8 +395,10 @@ class Document:
             raise IndexError("page index out of range")
         from . import _core, _native
         region = _render_clip(clip)
-        if self._render_session is not None and region is None:
-            return bytes(_native(lambda: self._render_session.render(page, dpi)))
+        session = self._render_session
+        if session is not None:
+            return bytes(_native(lambda: session.render(page, dpi, region)))
+        self._ensure_open()
         return bytes(_native(lambda: _core.render(self._source, self._filetype, page, dpi, self._password, region)))
 
     def convert(self, output_format: str) -> bytes:
@@ -415,9 +417,7 @@ class Document:
         return PdfDocument(_native(lambda: _core.EditablePdf.from_bytes(self._source, self._password)))
 
     def close(self) -> None:
-        if self._render_session is not None:
-            self._render_session.close()
-            self._render_session = None
+        self._render_session = None
         self._closed = True
 
     def _ensure_open(self) -> None:

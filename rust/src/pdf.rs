@@ -16,7 +16,7 @@ use crate::EngineError;
 
 pub struct PdfSession {
     renderer: Mutex<PageRenderer>,
-    page_count: usize,
+    page_sizes: Vec<[f32; 2]>,
 }
 
 impl PdfSession {
@@ -108,18 +108,33 @@ impl PdfSession {
         Ok((
             Self {
                 renderer: Mutex::new(renderer),
-                page_count,
+                page_sizes: info
+                    .pages
+                    .iter()
+                    .map(|page| [page.width, page.height])
+                    .collect(),
             },
             payload,
         ))
     }
 
-    pub fn render(&self, page: usize, dpi: f64) -> Result<Vec<u8>, EngineError> {
+    pub fn render(
+        &self,
+        page: usize,
+        dpi: f64,
+        clip: Option<crate::rendering::Clip>,
+    ) -> Result<Vec<u8>, EngineError> {
         let mut renderer = self
             .renderer
             .lock()
             .map_err(|_| EngineError::Malformed("PDF render session is unavailable".into()))?;
-        render_with(&mut renderer, self.page_count, page, dpi, None)
+        render_with(
+            &mut renderer,
+            self.page_sizes.get(page).copied(),
+            page,
+            dpi,
+            clip,
+        )
     }
 
     pub fn stats(&self) -> Result<pdfcraft_render::RenderStats, EngineError> {
@@ -163,22 +178,43 @@ fn render_impl(
     crate::rendering::validate_dpi(dpi)?;
     let bytes = Arc::new(data.to_vec());
     let info = inspect(bytes.clone(), password).map_err(open_error)?;
-    if page >= info.pages.len() {
-        return Err(EngineError::Unsupported(format!(
-            "page {page} does not exist"
-        )));
-    }
+    let mut renderer = PageRenderer::new(
+        bytes,
+        RenderConfig {
+            password: password.map(Arc::from),
+            reject_oversize: true,
+            ..Default::default()
+        },
+    );
+    render_with(
+        &mut renderer,
+        info.pages.get(page).map(|page| [page.width, page.height]),
+        page,
+        dpi,
+        clip,
+    )
+}
+
+fn render_with(
+    renderer: &mut PageRenderer,
+    size: Option<[f32; 2]>,
+    page: usize,
+    dpi: f64,
+    clip: Option<crate::rendering::Clip>,
+) -> Result<Vec<u8>, EngineError> {
+    crate::rendering::validate_dpi(dpi)?;
+    let size =
+        size.ok_or_else(|| EngineError::Unsupported(format!("page {page} does not exist")))?;
     let scale = (dpi / 72.0) as f32;
     let region = clip
         .map(|clip| {
-            let geometry = &info.pages[page];
             let region = crate::rendering::RasterRegion::new(
                 clip,
-                [f64::from(geometry.width), f64::from(geometry.height)],
+                [f64::from(size[0]), f64::from(size[1])],
                 f64::from(scale),
                 [
-                    f64::from(pdfcraft_render::device_pixels(geometry.width, scale)),
-                    f64::from(pdfcraft_render::device_pixels(geometry.height, scale)),
+                    f64::from(pdfcraft_render::device_pixels(size[0], scale)),
+                    f64::from(pdfcraft_render::device_pixels(size[1], scale)),
                 ],
                 4096,
             )?;
@@ -193,31 +229,6 @@ fn render_impl(
             Ok(region)
         })
         .transpose()?;
-    let mut renderer = PageRenderer::new(
-        bytes,
-        RenderConfig {
-            password: password.map(Arc::from),
-            reject_oversize: true,
-            ..Default::default()
-        },
-    );
-    render_with(&mut renderer, info.pages.len(), page, dpi, region)
-}
-
-fn render_with(
-    renderer: &mut PageRenderer,
-    page_count: usize,
-    page: usize,
-    dpi: f64,
-    region: Option<crate::rendering::RasterRegion>,
-) -> Result<Vec<u8>, EngineError> {
-    crate::rendering::validate_dpi(dpi)?;
-    if page >= page_count {
-        return Err(EngineError::Unsupported(format!(
-            "page {page} does not exist"
-        )));
-    }
-    let scale = (dpi / 72.0) as f32;
     let rendered = renderer.render(RenderRequest {
         page,
         kind: RequestKind::Pixels,
