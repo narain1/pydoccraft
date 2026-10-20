@@ -212,3 +212,8 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add four native authored slide layouts through existing add/shape operations, preserving inherited references and effective geometry.
 - [x] Complete the locked installed-wheel corpus for both slices and record artifact evidence.
 - [ ] Keep top/mirrored gutters, continued-table reflow, general slide copy/import and additional layout/theme fidelity open with upstream evidence.
+
+## Combined table fixtures
+
+- [x] Generate all six TBL12 fixtures and check reopened source/export semantics, spans, logical order and actual visible colors on every page.
+- [x] Verify the fixture pack against the frozen installed section/layout wheel and publish its scope/limitations index.
