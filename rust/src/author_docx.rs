@@ -64,6 +64,7 @@ const MAX_FORMAT_PATCH_BYTES: usize = 16 * 1024;
 const MAX_SECTIONS: usize = 128;
 const MAX_NOTES: usize = 10_000;
 const MAX_BOOKMARKS: usize = 1000;
+const MAX_BOOKMARK_WORK: usize = 2_000_000;
 const MAX_TABLE_PATCH_BYTES: usize = 128 * 1024;
 const MAX_TABLE_METADATA_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TAB_STOPS: usize = 64;
@@ -5193,7 +5194,11 @@ fn validate_bookmark_links(document: &Document) -> PyResult<BTreeMap<String, Boo
 /// One linked Glyphs batch can call native link_rect at most once. Recursive
 /// wrappers never duplicate calls. This conservatively bounds the native 10000
 /// rectangles/page cap without copying its private coalescing/geometry algorithm.
-fn validate_bookmark_draws(draws: &[wordcraft_layout::display::Draw]) -> PyResult<usize> {
+fn validate_bookmark_draws(
+    draws: &[wordcraft_layout::display::Draw],
+    target_work: &BTreeMap<String, usize>,
+    work: &mut usize,
+) -> PyResult<usize> {
     use wordcraft_layout::display::Draw;
     if draws.len() > MAX_LAYOUT_ITEMS {
         return Err(limit("navigation display traversal exceeds 2000000 items"));
@@ -5206,6 +5211,7 @@ fn validate_bookmark_draws(draws: &[wordcraft_layout::display::Draw]) -> PyResul
     let mut linked = 0usize;
     while let Some((draw, depth, unsupported)) = pending.pop() {
         visited += 1;
+        charge_bookmark_work(work, 1)?;
         if visited.saturating_add(pending.len()) > MAX_LAYOUT_ITEMS || depth > 32 {
             return Err(limit(
                 "navigation display traversal exceeds its item/depth budget",
@@ -5213,12 +5219,21 @@ fn validate_bookmark_draws(draws: &[wordcraft_layout::display::Draw]) -> PyResul
         }
         match draw {
             Draw::Glyphs {
-                link: Some(_),
+                link: Some(link),
                 glyphs,
                 ..
             } if !glyphs.is_empty() => {
                 if unsupported {
                     return Err(EngineError::Unsupported("internal navigation cannot preserve links in clipped, turned, rotated or figure display contexts at this native revision".into()).into());
+                }
+                if let Some(name) = link.strip_prefix('#') {
+                    let cost = target_work.get(name).ok_or_else(|| {
+                        PyValueError::new_err("linked bookmark has no checked native lookup budget")
+                    })?;
+                    // Native export resolves a caret again for every final annotation.
+                    // Counting each source batch is conservative because coalescing
+                    // can reduce the exported annotation count, never increase it.
+                    charge_bookmark_work(work, *cost)?;
                 }
                 linked += 1;
                 if linked > 10_000 {
@@ -5251,12 +5266,53 @@ fn validate_bookmark_draws(draws: &[wordcraft_layout::display::Draw]) -> PyResul
     Ok(linked)
 }
 
+fn charge_bookmark_work(work: &mut usize, amount: usize) -> PyResult<()> {
+    let next = work
+        .checked_add(amount)
+        .filter(|next| *next <= MAX_BOOKMARK_WORK)
+        .ok_or_else(|| limit("bookmark lookup and geometry scans exceed 2000000 work units"))?;
+    *work = next;
+    Ok(())
+}
+
+// Native body caret() materializes the public index, visits its pieces, then
+// scans each candidate's lines and a selected line's clusters. Export also
+// searches that index for the destination's paragraph edge. Charge public
+// lengths conservatively before calling the native helper, without duplicating
+// its line selection, bidi positions or destination calculation.
+fn bookmark_lookup_work(
+    layout: &wordcraft_layout::DocLayout,
+    path: &Path,
+    work: &mut usize,
+) -> PyResult<usize> {
+    let initial = *work;
+    charge_bookmark_work(work, 1)?;
+    if let Some(pieces) = layout.index.get(&(StoryRef::Body, path.clone())) {
+        charge_bookmark_work(work, pieces.len().saturating_mul(3))?;
+        for (page, item) in pieces {
+            if let Some(wordcraft_layout::Placed::Lines { para, .. }) = layout
+                .pages
+                .get(*page)
+                .and_then(|page| page.items.get(*item))
+            {
+                charge_bookmark_work(work, para.lines.len())?;
+                charge_bookmark_work(work, para.clusters.len())?;
+            }
+        }
+    }
+    Ok(*work - initial)
+}
+
 fn validate_bookmark_layout(
     document: &Document,
     layout: &wordcraft_layout::DocLayout,
     spans: &BTreeMap<String, BookmarkSpan>,
 ) -> PyResult<()> {
-    for span in spans.values() {
+    let mut work = 0usize;
+    let mut target_work = BTreeMap::new();
+    for (name, span) in spans {
+        let cost = bookmark_lookup_work(layout, &span.path, &mut work)?;
+        target_work.insert(name.clone(), cost);
         let caret = layout.caret(&Pos::new(StoryRef::Body, span.path.clone(), span.start)).ok_or_else(|| EngineError::Unsupported("bookmark has no native layout caret; paragraph fallback would change its destination".into()))?;
         let page = layout
             .pages
@@ -5275,6 +5331,7 @@ fn validate_bookmark_layout(
             )
             .into());
         }
+        charge_bookmark_work(&mut work, page.items.len())?;
         for item in &page.items {
             match item {
                 wordcraft_layout::Placed::Cell {
@@ -5333,9 +5390,11 @@ fn validate_bookmark_layout(
                 }
             }
         }
-        validate_bookmark_draws(&wordcraft_layout::display::page_display(
-            document, page, &options,
-        ))?;
+        validate_bookmark_draws(
+            &wordcraft_layout::display::page_display(document, page, &options),
+            &target_work,
+            &mut work,
+        )?;
     }
     Ok(())
 }
@@ -14298,9 +14357,11 @@ mod tests {
             .pages
             .iter()
             .map(|page| {
-                validate_bookmark_draws(&wordcraft_layout::display::page_display(
-                    &native, page, &options,
-                ))
+                validate_bookmark_draws(
+                    &wordcraft_layout::display::page_display(&native, page, &options),
+                    &BTreeMap::from([("Late".into(), 0), ("Cell".into(), 0)]),
+                    &mut 0,
+                )
                 .unwrap()
             })
             .sum();
@@ -14470,7 +14531,12 @@ mod tests {
             )
             .count();
         assert_eq!(count, 10001);
-        assert!(validate_bookmark_draws(&draws).is_err());
+        assert!(validate_bookmark_draws(
+            &draws,
+            &BTreeMap::from([("A".into(), 0), ("B".into(), 0)]),
+            &mut 0
+        )
+        .is_err());
         let pdf = crate::docx::to_pdf(&wordcraft_docx::write(&raw).unwrap(), None).unwrap();
         let extracted = pdfcraft_render::inspect(Arc::new(pdf), None).unwrap();
         assert_eq!(
@@ -14484,7 +14550,15 @@ mod tests {
             .take(10000)
             .cloned()
             .collect::<Vec<_>>();
-        assert_eq!(validate_bookmark_draws(&linked).unwrap(), 10000);
+        assert_eq!(
+            validate_bookmark_draws(
+                &linked,
+                &BTreeMap::from([("A".into(), 0), ("B".into(), 0)]),
+                &mut 0
+            )
+            .unwrap(),
+            10000
+        );
         let glyph = linked[0].clone();
         for wrapped in [
             Draw::Clip {
@@ -14510,13 +14584,61 @@ mod tests {
             },
         ] {
             assert!(
-                validate_bookmark_draws(&[wrapped]).is_err(),
+                validate_bookmark_draws(&[wrapped], &BTreeMap::new(), &mut 0).is_err(),
                 "unaudited wrapper contexts cannot bypass navigation validation"
             );
         }
 
         assert!(validate_unsplittable_page_bounds(&raw).is_err());
     }
+    #[test]
+    fn bookmarks_lookup_work_bounds_native_carets_and_repeated_export_targets() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditableDocx::new();
+        document.set_page_size(300.0, 300.0).unwrap();
+        document.set_margins(30.0, 30.0, 30.0, 30.0).unwrap();
+        let text = format!("{}Target", "Before\n".repeat(700));
+        let target = document.add_paragraph(&text).unwrap();
+        document
+            .set_bookmark(
+                "Late",
+                target,
+                text.len() - 6,
+                text.len(),
+                document.revision().unwrap(),
+            )
+            .unwrap();
+        let label = document.add_paragraph(&"Jump\n".repeat(30)).unwrap();
+        let native = document.document().unwrap();
+        let layout = wordcraft_layout::layout(native, &mut Default::default(), &Default::default());
+        let path = &validate_bookmark_links(native).unwrap()["Late"].path;
+        let cost = bookmark_lookup_work(&layout, path, &mut 0).unwrap();
+        assert!(
+            cost > 50_000,
+            "split paragraph carets repeatedly scan the full native line list"
+        );
+        let mut exact = MAX_BOOKMARK_WORK - cost;
+        assert_eq!(
+            bookmark_lookup_work(&layout, path, &mut exact).unwrap(),
+            cost
+        );
+        assert_eq!(exact, MAX_BOOKMARK_WORK);
+        let mut over = MAX_BOOKMARK_WORK - cost + 1;
+        assert!(bookmark_lookup_work(&layout, path, &mut over).is_err());
+        let before = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        let error = document
+            .set_range_link(label, 0, 150, revision, Some("#Late"))
+            .unwrap_err();
+        assert!(error.to_string().contains("lookup and geometry scans"));
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.to_bytes().unwrap(), before);
+        document
+            .set_range_link(label, 0, 4, revision, Some("#Late"))
+            .unwrap();
+        assert!(document.to_bytes().is_ok());
+    }
+
     #[test]
     fn bookmarks_pair_budget_malformed_state_and_limited_deletion_permission() {
         let mut document = EditableDocx::new();
