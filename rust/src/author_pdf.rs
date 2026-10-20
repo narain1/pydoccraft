@@ -366,15 +366,19 @@ impl EditablePdf {
         Ok(())
     }
 
-    #[pyo3(signature = (data, password, indices, destination))]
+    #[pyo3(signature = (data, password, indices, destination, outline_title=None))]
     pub fn import_pages(
         &mut self,
         data: &[u8],
         password: Option<&str>,
         indices: Option<Vec<isize>>,
         destination: isize,
+        outline_title: Option<&str>,
     ) -> PyResult<usize> {
         self.document()?;
+        if let Some(title) = outline_title {
+            validate_bookmark_title(title)?;
+        }
         let destination = if destination < 0 {
             destination + self.sizes.len() as isize
         } else {
@@ -384,6 +388,22 @@ impl EditablePdf {
             return Err(PyIndexError::new_err("page insertion index out of range"));
         }
         let source = Self::from_bytes(data, password)?;
+        let outlines = if outline_title.is_some() {
+            let source_entries = checked_import_outline(source.document()?, 31, true)?;
+            let destination_entries = checked_import_outline(self.document()?, 32, false)?;
+            let expected = destination_entries.len()
+                + source_entries.len()
+                + usize::from(!source_entries.is_empty());
+            if expected > MAX_ITEMS {
+                return Err(EngineError::ResourceLimit(
+                    "imported outline would exceed 10000 bookmarks".into(),
+                )
+                .into());
+            }
+            Some((source_entries, destination_entries, expected))
+        } else {
+            None
+        };
         let selected = match indices {
             Some(indices) => source.selection(&indices)?,
             None => (0..source.sizes.len()).collect(),
@@ -398,6 +418,7 @@ impl EditablePdf {
         let input_cost = data
             .len()
             .checked_mul(selected.len())
+            .and_then(|cost| cost.checked_add(outline_title.map_or(0, str::len)))
             .ok_or_else(|| EngineError::ResourceLimit("PDF import size overflow".into()))?;
         self.validate_input(input_cost)?;
         let item_cost = source
@@ -410,18 +431,96 @@ impl EditablePdf {
             );
         }
         let mut edited = self.document()?.clone();
-        let imported = pdfcraft_organize::import_pages(
-            &mut edited,
-            source.document()?,
-            &selected,
-            destination as usize,
-        )
-        .map_err(organize_error)?;
+        let imported = if let Some(title) = outline_title {
+            pdfcraft_organize::insert_file_pages(
+                &mut edited,
+                source.document()?,
+                title,
+                &selected,
+                destination as usize,
+                pdfcraft_organize::FieldConflicts::Rename,
+            )
+            .map_err(organize_error)?
+            .pages
+        } else {
+            pdfcraft_organize::import_pages(
+                &mut edited,
+                source.document()?,
+                &selected,
+                destination as usize,
+            )
+            .map_err(organize_error)?
+        };
         if imported.len() != selected.len() {
             return Err(EngineError::Conversion(
                 "PDF import returned an unexpected page count".into(),
             )
             .into());
+        }
+        if let Some((source_entries, destination_entries, expected)) = outlines {
+            let actual = checked_import_outline(&edited, 32, false)?;
+            if actual.len() != expected {
+                return Err(EngineError::Unsupported(
+                    "outline import could not preserve every source bookmark; document unchanged"
+                        .into(),
+                )
+                .into());
+            }
+            let existing = destination_entries
+                .iter()
+                .map(|entry| entry.obj)
+                .collect::<std::collections::HashSet<_>>();
+            let added = actual
+                .iter()
+                .filter(|entry| !existing.contains(&entry.obj))
+                .collect::<Vec<_>>();
+            let preserved = if source_entries.is_empty() {
+                added.is_empty()
+            } else {
+                added.len() == source_entries.len() + 1
+                    && added[0].path.len() == 1
+                    && added[0].title == outline_title.unwrap_or_default().trim()
+                    && added[0].page == Some(destination as usize)
+                    && added[1..]
+                        .iter()
+                        .zip(&source_entries)
+                        .all(|(copy, original)| {
+                            let page = original
+                                .page
+                                .and_then(|page| {
+                                    selected.iter().position(|selected| *selected == page)
+                                })
+                                .map(|offset| destination as usize + offset);
+                            copy.title == original.title
+                                && copy.path.first() == added[0].path.first()
+                                && copy.path.get(1..) == Some(original.path.as_slice())
+                                && copy.page == page
+                                && copy.open == original.open
+                                && copy.view == page.and(original.view.clone())
+                        })
+            };
+            if !preserved {
+                return Err(EngineError::Unsupported(
+                    "native import could not preserve the selected outline destinations; document unchanged".into(),
+                ).into());
+            }
+            // The listing itself caps depth. Inspection explicitly reports omitted nodes.
+            let output =
+                pdfcraft_cos::write_full(&edited, &SaveOptions::default()).map_err(|error| {
+                    EngineError::Conversion(format!("PDF outline serialization failed: {error}"))
+                })?;
+            if output.len() > MAX_OUTPUT_BYTES {
+                return Err(EngineError::ResourceLimit("PDF output exceeds 256 MiB".into()).into());
+            }
+            let info = pdfcraft_render::inspect(Arc::new(output), None).map_err(|error| {
+                EngineError::Malformed(format!("invalid imported PDF outline: {error}"))
+            })?;
+            if info.outline_more {
+                return Err(EngineError::ResourceLimit(
+                    "imported outline exceeds inspection limits".into(),
+                )
+                .into());
+            }
         }
         self.validate_owned_edit(&edited)?;
         self.document = Some(edited);
@@ -1811,6 +1910,91 @@ fn metadata_keys() -> [(&'static str, &'static str); 4] {
     ]
 }
 
+fn checked_import_outline(
+    document: &Document,
+    maximum_depth: usize,
+    copying: bool,
+) -> PyResult<Vec<pdfcraft_organize::Bookmark>> {
+    let listed = pdfcraft_organize::bookmark_page(document, 0, MAX_ITEMS + 1);
+    if listed.next.is_some() || listed.bookmarks.len() > MAX_ITEMS {
+        return Err(EngineError::ResourceLimit("bookmark count exceeds 10000".into()).into());
+    }
+    let mut bytes = 0usize;
+    for entry in &listed.bookmarks {
+        if entry.path.len() > maximum_depth {
+            return Err(EngineError::ResourceLimit(
+                "outline import would exceed 32 bookmark levels including the container".into(),
+            )
+            .into());
+        }
+        validate_annotation_text(&entry.title, 4096, "bookmark title")?;
+        // Account conservatively for escaped JSON titles and normalized path metadata before
+        // allowing an outline the public 16 MiB snapshot could not represent.
+        bytes += serde_json::to_string(&entry.title)
+            .map_err(|error| EngineError::Malformed(format!("invalid bookmark title: {error}")))?
+            .len()
+            + 128
+            + entry.path.len() * 8;
+        if bytes > 16 * 1024 * 1024 {
+            return Err(EngineError::ResourceLimit("outline titles exceed 16 MiB".into()).into());
+        }
+        if copying {
+            // The native copier preserves titles, colour, flags, expansion and internal
+            // destinations. Refuse other semantics that it would otherwise omit.
+            let object = document.get(entry.obj);
+            let item = object
+                .as_dict()
+                .ok_or_else(|| EngineError::Malformed("bookmark is not a dictionary".into()))?;
+            for (key, _) in item.iter() {
+                if !matches!(
+                    key.as_slice(),
+                    b"Type"
+                        | b"Title"
+                        | b"C"
+                        | b"F"
+                        | b"Count"
+                        | b"Parent"
+                        | b"First"
+                        | b"Last"
+                        | b"Next"
+                        | b"Prev"
+                        | b"Dest"
+                        | b"A"
+                ) {
+                    return Err(EngineError::Unsupported(
+                        "outline contains properties the native importer cannot preserve".into(),
+                    )
+                    .into());
+                }
+            }
+            if let Some(action) = item.get(b"A") {
+                let action = document.resolve(action);
+                let action = action
+                    .as_dict()
+                    .ok_or_else(|| EngineError::Unsupported("unsupported outline action".into()))?;
+                if action.name(b"S") != Some(b"GoTo")
+                    || action
+                        .iter()
+                        .any(|(key, _)| !matches!(key.as_slice(), b"Type" | b"S" | b"D"))
+                    || item.contains(b"Dest")
+                {
+                    return Err(EngineError::Unsupported(
+                        "outline import supports only single internal GoTo actions".into(),
+                    )
+                    .into());
+                }
+            }
+            if (item.contains(b"Dest") || item.contains(b"A")) && entry.page.is_none() {
+                return Err(EngineError::Unsupported(
+                    "source bookmark destination cannot be resolved to a source page".into(),
+                )
+                .into());
+            }
+        }
+    }
+    Ok(listed.bookmarks)
+}
+
 fn validate_field_name(name: &str) -> PyResult<()> {
     if name.len() > 256 {
         return Err(EngineError::ResourceLimit("field name exceeds 256 bytes".into()).into());
@@ -2152,6 +2336,203 @@ mod tests {
     use super::*;
 
     #[test]
+    fn outline_import_maps_nested_omitted_and_duplicate_targets_with_links() {
+        let mut source = EditablePdf::new(200.0, 240.0).unwrap();
+        source.add_page(200.0, 240.0).unwrap();
+        source.add_page(200.0, 240.0).unwrap();
+        source.add_bookmark("A", 0, vec![], None).unwrap();
+        source.add_bookmark("B nested", 1, vec![0], None).unwrap();
+        source.add_bookmark("Omitted", 2, vec![], None).unwrap();
+        source
+            .add_link(
+                0,
+                (10.0, 10.0, 100.0, 25.0),
+                Some("https://example.com"),
+                None,
+            )
+            .unwrap();
+        source
+            .add_link(0, (10.0, 40.0, 100.0, 55.0), None, Some(1))
+            .unwrap();
+        source
+            .add_link(0, (10.0, 70.0, 100.0, 85.0), None, Some(2))
+            .unwrap();
+        let bytes = source.to_bytes().unwrap();
+        let mut destination = EditablePdf::new(200.0, 240.0).unwrap();
+        destination
+            .add_bookmark("Existing", 0, vec![], None)
+            .unwrap();
+        destination
+            .add_field(0, "kept", "text", (10.0, 10.0, 150.0, 30.0), vec![])
+            .unwrap();
+        assert_eq!(
+            destination
+                .import_pages(&bytes, None, Some(vec![1, 0, 1]), 0, Some("Imported"))
+                .unwrap(),
+            3
+        );
+        let entries = destination.bookmark_entries().unwrap();
+        assert_eq!(
+            entries
+                .iter()
+                .map(|e| (e.title.as_str(), e.page))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Imported", Some(0)),
+                ("A", Some(1)),
+                ("B nested", Some(0)),
+                ("Omitted", None),
+                ("Existing", Some(3)),
+            ]
+        );
+        assert_eq!(entries[2].path, vec![0, 0, 0]);
+        let links: Vec<Value> = serde_json::from_str(&destination.annotations(1).unwrap()).unwrap();
+        assert!(links.iter().any(|v| v["uri"] == "https://example.com"));
+        assert!(links.iter().any(|v| v["target_page"] == 0));
+        assert_eq!(links.len(), 3);
+        assert_eq!(
+            links
+                .iter()
+                .filter(|v| v["uri"].is_null() && v["target_page"].is_null())
+                .count(),
+            1,
+            "native import retains the omitted-page annotation without its destination"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&destination.field_info("kept").unwrap()).unwrap()
+                ["widgets"][0]["page"],
+            3
+        );
+        destination.move_page(0, 3).unwrap();
+        destination.rotate_page(0, 90).unwrap();
+        let entries = destination.bookmark_entries().unwrap();
+        assert_eq!(entries[1].page, Some(0));
+        assert_eq!(entries[2].page, Some(3));
+        destination.delete_page(3).unwrap();
+        let entries = destination.bookmark_entries().unwrap();
+        assert_eq!(
+            entries[2].page, None,
+            "deleted first copy is not retargeted to a duplicate"
+        );
+        let output = destination.to_bytes().unwrap();
+        let inspection = pdfcraft_render::inspect(Arc::new(output.clone()), None).unwrap();
+        assert!(!inspection.outline_more);
+        assert!(inspection.links.iter().any(|link| matches!(&link.target, pdfcraft_render::LinkTarget::Uri(uri) if uri == "https://example.com")));
+        assert!(inspection.links.iter().all(|link| !matches!(link.target, pdfcraft_render::LinkTarget::Page(page, _) if page >= inspection.pages.len())));
+        assert!(crate::pdf::render(&output, 0, 72.0, None).is_ok());
+    }
+
+    #[test]
+    fn outline_import_is_opt_in_and_empty_sources_add_no_container() {
+        let blank = EditablePdf::new(100.0, 100.0).unwrap().to_bytes().unwrap();
+        let mut destination = EditablePdf::new(100.0, 100.0).unwrap();
+        destination
+            .import_pages(&blank, None, None, 1, Some("No outline"))
+            .unwrap();
+        assert_eq!(destination.bookmarks().unwrap(), "[]");
+        let mut source = EditablePdf::new(100.0, 100.0).unwrap();
+        source
+            .add_bookmark("Not imported", 0, vec![], None)
+            .unwrap();
+        destination
+            .import_pages(&source.to_bytes().unwrap(), None, None, 2, None)
+            .unwrap();
+        assert_eq!(destination.bookmarks().unwrap(), "[]");
+        for title in ["", "  ", "bad\0title", &"x".repeat(4097)] {
+            let before = destination.to_bytes().unwrap();
+            assert!(destination
+                .import_pages(&blank, None, None, 1, Some(title))
+                .is_err());
+            assert_eq!(destination.to_bytes().unwrap(), before);
+        }
+        let longest = "x".repeat(4096);
+        destination
+            .import_pages(&source.to_bytes().unwrap(), None, None, 0, Some(&longest))
+            .unwrap();
+        assert_eq!(destination.bookmark_entries().unwrap()[0].title, longest);
+    }
+
+    #[test]
+    fn outline_import_budget_and_unpreserved_actions_fail_without_mutation() {
+        use pdfcraft_cos::{Dict, Object, PdfString};
+        let mut destination = EditablePdf::new(100.0, 100.0).unwrap();
+        let before = destination.to_bytes().unwrap();
+        let mut deep = EditablePdf::new(100.0, 100.0).unwrap();
+        let mut parent = vec![];
+        for _ in 0..32 {
+            parent = deep.add_bookmark("Deep", 0, parent, None).unwrap();
+        }
+        assert!(destination
+            .import_pages(&deep.to_bytes().unwrap(), None, None, 0, Some("Parent"))
+            .is_err());
+        assert_eq!(destination.to_bytes().unwrap(), before);
+        let mut many = pdfcraft_create::blank(100.0, 100.0, 1).unwrap();
+        let entries = (0..9999)
+            .map(|index| pdfcraft_organize::OutlineEntry {
+                level: 1,
+                title: format!("Entry {index}"),
+                page: 0,
+                element: None,
+            })
+            .collect::<Vec<_>>();
+        pdfcraft_organize::add_bookmark_tree(&mut many, "Many", &entries).unwrap();
+        let bytes = pdfcraft_cos::write_full(&many, &SaveOptions::default()).unwrap();
+        assert!(destination
+            .import_pages(&bytes, None, None, 0, Some("Parent"))
+            .is_err());
+        assert_eq!(destination.to_bytes().unwrap(), before);
+        let mut external = pdfcraft_create::blank(100.0, 100.0, 1).unwrap();
+        pdfcraft_organize::add_bookmark(&mut external, &[], 0, "External", 0).unwrap();
+        let bookmark = pdfcraft_organize::bookmarks(&external)[0].obj;
+        external
+            .update_dict(bookmark, |item| {
+                item.remove(b"Dest");
+                let mut action = Dict::new();
+                action.set(b"S".to_vec(), Object::name("URI"));
+                action.set(
+                    b"URI".to_vec(),
+                    Object::String(PdfString::text("https://example.com")),
+                );
+                item.set(b"A".to_vec(), Object::Dict(action));
+            })
+            .unwrap();
+        let bytes = pdfcraft_cos::write_full(&external, &SaveOptions::default()).unwrap();
+        assert!(destination
+            .import_pages(&bytes, None, None, 0, Some("Parent"))
+            .is_err());
+        assert_eq!(destination.to_bytes().unwrap(), before);
+        // Public outline inspection follows eight destination wrappers; native import
+        // follows four. A resolvable target must fail atomically rather than silently vanish.
+        let mut indirect = pdfcraft_create::blank(100.0, 100.0, 1).unwrap();
+        pdfcraft_organize::add_bookmark(&mut indirect, &[], 0, "Indirect", 0).unwrap();
+        let bookmark = pdfcraft_organize::bookmarks(&indirect)[0].obj;
+        let mut target = indirect
+            .get(bookmark)
+            .as_dict()
+            .unwrap()
+            .get(b"Dest")
+            .unwrap()
+            .clone();
+        for _ in 0..6 {
+            let mut wrapper = Dict::new();
+            wrapper.set(b"D".to_vec(), target);
+            target = Object::Dict(wrapper);
+        }
+        indirect
+            .update_dict(bookmark, |item| item.set(b"Dest".to_vec(), target))
+            .unwrap();
+        assert_eq!(pdfcraft_organize::bookmarks(&indirect)[0].page, Some(0));
+        let bytes = pdfcraft_cos::write_full(&indirect, &SaveOptions::default()).unwrap();
+        assert!(destination
+            .import_pages(&bytes, None, None, 0, Some("Parent"))
+            .is_err());
+        assert_eq!(destination.to_bytes().unwrap(), before);
+        assert_eq!(destination.page_count().unwrap(), 1);
+        assert_eq!(destination.input_bytes, 0);
+        assert_eq!(destination.items, 0);
+    }
+
+    #[test]
     fn owned_fields_create_fill_and_flatten_with_complete_appearances() {
         let mut document = EditablePdf::new(300.0, 300.0).unwrap();
         document
@@ -2337,7 +2718,7 @@ mod tests {
         let bytes = pdfcraft_cos::write_full(&source, &SaveOptions::default()).unwrap();
         for rotation in [0, 90, 180, 270] {
             let mut document = EditablePdf::new(300.0, 400.0).unwrap();
-            document.import_pages(&bytes, None, None, 1).unwrap();
+            document.import_pages(&bytes, None, None, 1, None).unwrap();
             document.rotate_page(1, rotation).unwrap();
             document
                 .add_field(1, "rotated", "text", (20.0, 30.0, 180.0, 30.0), vec![])
@@ -3292,7 +3673,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             destination
-                .import_pages(&source_bytes, None, Some(vec![1, 0, 1]), 0)
+                .import_pages(&source_bytes, None, Some(vec![1, 0, 1]), 0, None)
                 .unwrap(),
             3
         );
@@ -3322,10 +3703,10 @@ mod tests {
         assert_eq!(source.to_bytes().unwrap(), source_bytes);
         let before = destination.to_bytes().unwrap();
         assert!(destination
-            .import_pages(&source_bytes, None, Some(vec![99]), 0)
+            .import_pages(&source_bytes, None, Some(vec![99]), 0, None)
             .is_err());
         assert!(destination
-            .import_pages(&source_bytes, None, None, 99)
+            .import_pages(&source_bytes, None, None, 99, None)
             .is_err());
         assert!(destination.subset(vec![]).is_err());
         assert!(destination.subset(vec![99]).is_err());

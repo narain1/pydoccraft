@@ -68,7 +68,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Expose checked table widths/uniform borders/row layout plus paragraph spacing and explicit page breaks; verify save/reopen and PDF pagination.
 - [x] Verify solid DOCX page-color pixels in native PNG and exported PDF rendering (BG1).
 - [x] Validate the combined 41-Rust/68-installed-Python-test artifact; record remaining scope limits separately.
-- [ ] Complete multiple sections, linked headers, advanced row/column CRUD and full lists/styles; initial lists and structured omission diagnostics are covered below.
+- [ ] Complete linked headers, richer semantic grid copying and full lists/styles; initial lists and structured omission diagnostics are covered below.
 
 ## Text/vector content and diagnostics (unreleased)
 
@@ -89,7 +89,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete E6 with owned in-memory Markdown/media/manifest files, separate stories, shared nested-table HTML rendering and explicit resource limits.
 - [x] Improve typed Python factory/collections/formatting discovery and keep canonical font_size/underline spelling across adapters.
 - [x] Verify 75 Rust tests, 97 installed-wheel Python tests, formatting, Clippy and the locked artifact with unchanged dependencies/attribution.
-- [ ] Complete table-style/theme/next-linked-style editing, multiple sections, full PPTX table semantics and remaining source-preservation/advanced criteria.
+- [ ] Complete table-style/theme/next-linked-style editing, full PPTX table semantics and remaining source-preservation/advanced criteria.
 
 ## Sections, slide tables and template recipes (unreleased)
 
@@ -121,3 +121,15 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Resolve the single added pinned forms crate and regenerate/review the 264-package permissive license inventory and wheel copy.
 - [x] Complete combined locked native and installed-wheel validation and record exact artifact evidence.
 - [ ] Complete remaining LAY7 and PDF6 criteria, including semantic deletion/copy, radio groups and safe bounded imported-field APIs; these broad criteria remain open.
+
+## Table formatting and outline-aware imports
+
+- [x] Add bounded count-based table construction and ordered row/column slices over existing cell handles.
+- [x] Complete native direct table/cell formatting, content fitting and metadata with geometry/budget checks.
+- [x] Complete optional native outline-preserving PDF imports with source/post-copy guards.
+- [x] Validate reopened/rendered outputs and installed-wheel behavior; record exact artifact evidence.
+- [ ] Complete conditional table styles, upstream table fidelity gaps and outline-preserving subsets; broad TBL/PDF5 criteria stay open until their remaining acceptance cases pass.
+
+- [x] Audit merged-through-PR24 coverage and mark C1/E1/API2/API4/API6/API8/API9/TXT7 complete with existing corpus evidence; retain broader incomplete criteria.
+
+- [x] Complete R2 multi-DPI visible-output and P3 reopened assembly link/raster acceptance; complete TBL1/TBL2 count construction and ordered slice/grid access.

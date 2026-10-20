@@ -237,3 +237,36 @@ This creation profile supports one widget per field in PDFs created by this owne
 `document.fields.flatten()` turns all supported field appearances into page content and returns the number flattened. It verifies that no terminal fields/widgets remain before committing. The native writer may retain an empty AcroForm dictionary, so editable reopening can still reject a flattened file; ordinary extraction and rendering remain supported. Subsetting a PDF with active fields is unavailable; flatten or delete them first. Radio groups, multiline text, autosizing, custom fonts, scripts, signatures and arbitrary imported-field inspection remain open work.
 
 Active PDF form appearances cannot be preserved by the current PDF-to-DOCX exporter, so conversion rejects them explicitly. Flatten supported owned fields first to export their visible text. Field deletion invalidates annotation handles on that page because native annotation indices can shift. Flattening an empty field collection leaves handles unchanged. Rotated/UserUnit flattening tests permit at most four pixels differing by one 8-bit channel level; the measured fixture differed in one pixel, consistent with native coordinate rounding. Unrotated form fixtures are PNG-byte-identical.
+
+### Table views and direct formatting
+
+`add_table(rows=3, columns=4)` creates a rectangular blank grid through the same native constructor as string rows; this works for documents, DOCX cells and slides (slides still require `box`). Empty/ragged grids are rejected. Counts are bounded before allocation, then checked against native format limits. Set a DOCX header prefix with `table.row(index).repeat_header = True`.
+
+`table[row, :]` and `table[:, column]` return ordered lists of cell handles; two slices return a list of row lists. Normal negative indexes, reverse slices and empty slices apply. These are snapshots of handles, so changing a returned list does not alter the grid. Covered merged coordinates still address the same anchor. Structural edits make previously returned handles stale; cell text/layout edits retain them.
+
+DOCX `table.format(...)` and `cell.format(...)` apply atomic typed patches; `.formatting` returns an owned snapshot of direct values. Omitted properties remain unchanged. Nullable values clear direct overrides. Existing convenience setters remain available.
+
+```python
+with doc_ex.new("docx") as document:
+    table = document.add_table([["Region", "Revenue"], ["West", "$100"]])
+    table.format(alignment="center", width=360, layout="fixed",
+                 title="Quarterly totals", description="Revenue by region")
+    table[0, 0].format(background="yellow", margins=6,
+                       borders={"bottom": {"style": "double", "color": "blue", "width": 1}})
+    widths = table.fit()
+    document.save("table.docx")
+```
+
+Table keys are `alignment` (`left`, `center`, `right`), `indent`, `width`, `width_percent`, `layout` (`fixed`, `autofit`), `rtl`, `title`, `description` and `borders`. Width is in points; percentage is in 0.02-percent increments through 100. Setting one non-null width preference clears the other; supplying both non-null fails. Title/description are alternative-text metadata, not visible numbered captions, and are limited to 10,000 characters each with an aggregate budget. They do not establish accessible table structure in exported PDF.
+
+Cell keys are `background`, `margins`, `alignment`, `vertical_alignment`, `text_direction` (`horizontal`, `down`, `up`), `no_wrap` and `borders`. Paragraph alignment remains distinct from vertical alignment. Margin tuples retain top/right/bottom/left ordering. Snapshots distinguish inherited nullable properties from direct settings; boolean native layout switches remain explicit. Mixed paragraph alignment raises the same explicit error as the cell alignment getter.
+
+Border mappings address `top`, `right`, `bottom`, `left`, and table-only `inside_horizontal`/`inside_vertical`. A line mapping contains native `style`, `color` and `width` values; `color=None` retains the native automatic color. Supported styles are `none`, `single`, `double`, `dotted`, `dashed`, `thick`, `triple`, `dot_dash` and `wave`; widths use eighth-point steps from 0.125–12 points. A side set to `None` inherits, while `style="none"` suppresses that side. `format(borders=None)` clears direct borders; the pre-existing `table.borders = None` convenience explicitly hides them. Adjacent conflicting borders follow pinned native rendering, which does not implement full Word shared-edge conflict resolution.
+
+`table.fit()` measures content through WordCraft and applies its proposed column widths. It clears absolute/percentage preferences and selects native autofit layout. At most 4,000 directly measured cell paragraphs are allowed. Minimum widths that exceed the container, explicit margins that consume a cell, or squeezed nested content fail atomically. The same native geometry checks apply when alignment activates an indent, section page size/margins/columns change, or grid edits resize nested percentage tables. Rejected edits retain existing handles and content. It does not add a second text-measurement algorithm. Direct table-wide fill, patterned shading and cell spacing remain unavailable; use cell backgrounds for solid fills. The new formatting/fit methods are DOCX-only; existing shared PPTX table properties remain supported.
+
+### PDF imports with outlines
+
+`target.pages.insert(index, source, pages=None, outline_title=None)` retains its existing page/link import behavior by default. Supply `outline_title="Appendix"` to copy native source outlines beneath that container. A source without outlines adds no container. Duplicate selected source pages map destinations to the first imported instance. Omitted targets become destinationless outline entries or link annotations; links are not silently reassigned to an unrelated page.
+
+Outline imports reject incomplete/deep/oversized source trees, unsupported external/chained actions and unrepresentable bookmark properties. The extra container level counts toward the depth limit; titles are bounded to 4,096 UTF-8 bytes and must be nonblank without NUL. Sources with forms/encryption remain unsupported; already-owned destination fields are preserved. Page import invalidates page/annotation/bookmark handles as before. Subset copies still do not preserve outlines and remain separate work.
