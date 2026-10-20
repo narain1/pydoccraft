@@ -3395,6 +3395,60 @@ fn native_cell_width(
             .into()
         })
 }
+fn validate_native_table_layout(
+    document: &Document,
+    widths: &BTreeMap<LayoutCellKey, f32>,
+    story: StoryRef,
+    path: Path,
+) -> PyResult<()> {
+    let mut pending = vec![path];
+    while let Some(path) = pending.pop() {
+        let table = document
+            .table(story, &path)
+            .ok_or_else(|| PyIndexError::new_err("table no longer exists"))?;
+        let available =
+            native_container_width(document, widths, story, &path)? - active_table_indent(table);
+        for (row_index, row) in table.rows.iter().enumerate() {
+            let mut total = 0.0;
+            for (cell_index, cell) in row.cells.iter().enumerate() {
+                let width = native_cell_width(widths, story, &path, row_index, cell_index)?;
+                total += width;
+                if width + 0.001 < cell.span() as f32 * 6.0 {
+                    return Err(PyValueError::new_err(
+                        "native table layout must leave at least 6 points per column",
+                    ));
+                }
+                let margins =
+                    wordcraft_layout::cell_margins(document, table, row_index, cell_index);
+                let inner = width - margins[1] - margins[3];
+                if cell.props.margins.is_some() && inner <= 0.0 {
+                    return Err(PyValueError::new_err(
+                        "table layout must leave positive width inside explicit cell margins",
+                    ));
+                }
+                for (index, block) in cell.blocks.iter().enumerate() {
+                    match block.as_ref() {
+                        Block::Para(paragraph) => validate_picture_width(paragraph, inner)?,
+                        Block::Table(_) => pending.push(Path(
+                            [
+                                path.0.as_slice(),
+                                &[row_index as u32, cell_index as u32, index as u32],
+                            ]
+                            .concat(),
+                        )),
+                    }
+                }
+            }
+            if total > available + 0.01 || available <= 0.0 {
+                return Err(PyValueError::new_err(
+                    "native table layout exceeds its section or cell width",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn native_container_width(
     document: &Document,
     widths: &BTreeMap<LayoutCellKey, f32>,
