@@ -17,7 +17,9 @@ This document describes the current source tree, including unreleased improvemen
 | PNG rendering | Yes | Yes | Yes |
 | Password input | Yes | Yes | Encrypted PPTX unsupported |
 | OCR | No | Not applicable | Not applicable |
-| Create a new document from scratch | No | No | No |
+| Create a new document from scratch | Authored profile | Authored profile | Authored profile |
+
+See [native authoring](authoring.md) for the supported creation/editing profiles; these entries do not imply arbitrary imported-document preservation.
 
 ## PDF
 
@@ -67,7 +69,16 @@ DOCX support is backed by pinned WordCraft 0.8.0 crates.
 - Semantic tables, including content from nested table cells.
 - Anchored comments and replies with author, initials, date, resolved state, and parent identifiers.
 - Explicit manual page breaks and inherited `page_break_before` behavior.
-- Core document metadata where available.
+- Core document metadata where available, plus bounded supported scalar custom properties.
+- Table title/description in `Table.metadata`, separate from visible cell text.
+
+### DOCX properties and field values
+
+`document.metadata["custom"]` maps original property names to strings, booleans, signed 64-bit integers or finite floats for the supported native `lpwstr`, `bool`, `i8` and `r8` kinds. Parsing follows the same strict scalar profile as authored properties; other numeric aliases and structured/raw variants are not coerced. Unsupported kinds, invalid scalar values and ambiguous ASCII-case-insensitive names are omitted with bounded extraction diagnostics. All entries in an ambiguous name group are omitted.
+
+The parsed inventory is capped at 1,024 properties, 64 KiB per value and 256 KiB aggregate raw metadata, including names/kinds. This is a native-model inventory, not a promise of complete source XML preservation: the upstream reader can drop malformed custom parts, omit entries and cap source property traversal before projection. Table alternative text is likewise capped by the upstream reader at 10,000 Unicode characters. Extracted `title`/`description` preserve native absent versus empty values; neither becomes a visible cell caption or a PDF accessibility tag.
+
+Source field text uses stored cached values. Newly authored decimal page/count fields have an empty dirty cache, while PNG/PDF output is evaluated by native layout. General field refresh and convergence remain unsupported.
 
 ### DOCX pagination
 

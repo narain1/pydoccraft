@@ -253,3 +253,17 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reuse the existing private facade dispatch, release source/password ownership, and close sessions on failed hydration.
 - [x] Verify native parse/layout counts, PNG parity, resource boundaries, owned snapshots and close races in the complete installed-wheel corpus.
 - [x] Record separate-process synthetic latency/native RSS evidence while retaining broad P1/peak-layout guarantees as open work.
+
+
+## Page fields and imported DOCX metadata
+
+- [x] Append native decimal page/count fields through Paragraph and add explicit section page-number restart/continuation.
+- [x] Enforce field-marker/range ownership, all-story count bounds, cached-source semantics and native render/export acceptance.
+- [x] Project bounded strict custom properties and table title/description through existing metadata with factual omission diagnostics.
+- [x] Verify the complete locked/native and installed-wheel corpus and record artifact evidence.
+- [ ] Retain native nondecimal page-format/clamp and property-reader completeness limitations as upstream work.
+
+## Bounded PDF page selections
+
+- [x] Reuse bounded integer selection for PDF copy/import and reject callback-driven page organization before native dispatch.
+- [x] Verify limits, ownership, callback behavior and selected output in the complete installed-wheel corpus; record artifact evidence.

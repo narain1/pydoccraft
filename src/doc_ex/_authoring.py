@@ -862,6 +862,15 @@ class Paragraph:
         start, end, revision = self._owner._call("add_run_patch", self._id, text, _format_patch(formatting), _change=True)
         return TextRange(self, start, end, revision)
 
+    def add_field(self, kind: str) -> TextRange:
+        """Append a decimal page, page_count or section_page_count field.
+
+        The returned range contains one object marker. Native rendering evaluates
+        the number; source extraction retains the empty stored field result.
+        """
+        start, end, revision = self._owner._call("add_paragraph_field", self._id, kind, _change=True)
+        return TextRange(self, start, end, revision)
+
     def add_break(self, kind: str = "line") -> TextRange:
         """Append a native line, page or column break and return its text range."""
         start, end, revision = self._owner._call("add_paragraph_break", self._id, kind, _change=True)
@@ -1046,6 +1055,21 @@ class Section:
     @start.setter
     def start(self, value: str):
         self._set(start=value)
+
+    @property
+    def page_number_start(self) -> int | None:
+        """First displayed page number, or None to continue the prior section."""
+        return self._props()["page_number_start"]
+
+    @page_number_start.setter
+    def page_number_start(self, value: int | None) -> None:
+        if value is not None:
+            if isinstance(value, bool):
+                raise TypeError("page_number_start must be an integer, not a boolean")
+            value = operator.index(value)
+            if not 1 <= value <= 32767:
+                raise ValueError("page_number_start must be between 1 and 32767")
+        self._set(page_number_start=value)
 
     @property
     def page_size(self) -> tuple[float, float]:
@@ -1643,7 +1667,14 @@ class PdfDocument(EditableDocument):
     def copy(self, *, pages=None):
         if pages is None:
             return super().copy()
-        indices = [_index(index, self.page_count) for index in pages]
+        from . import _selected_pages
+        self._ensure_open()
+        generation, count = self._page_generation, self.page_count
+        indices = _selected_pages(pages)
+        self._ensure_open()
+        if (generation, count) != (self._page_generation, self.page_count):
+            raise ValueError("page selection is stale after page organization")
+        indices = [_index(index, count) for index in indices]
         return type(self)(self._call("subset", indices))
 
 
@@ -1903,9 +1934,14 @@ class PdfPages(_Collection["PdfPage"]):
 
     def insert(self, index: int, source, *, pages=None, password: str | None = None, outline_title: str | None = None):
         """Import selected pages using the upstream resource-remapping operation."""
-        from . import _read
+        from . import _read, _selected_pages
+        self._owner._ensure_open()
+        generation, page_count = self._owner._page_generation, self._owner.page_count
         index = operator.index(index)
-        if not 0 <= index <= len(self):
+        self._owner._ensure_open()
+        if (generation, page_count) != (self._owner._page_generation, self._owner.page_count):
+            raise ValueError("page selection is stale after page organization")
+        if not 0 <= index <= page_count:
             raise IndexError("insertion index must be between zero and page count")
         if isinstance(source, EditableDocument):
             if source.filetype != "pdf":
@@ -1919,7 +1955,10 @@ class PdfPages(_Collection["PdfPage"]):
             password = source._password if password is None else password
         else:
             data, _ = _read(source)
-        indices = None if pages is None else [operator.index(value) for value in pages]
+        indices = _selected_pages(pages)
+        self._owner._ensure_open()
+        if (generation, page_count) != (self._owner._page_generation, self._owner.page_count):
+            raise ValueError("page selection is stale after page organization")
         count = self._owner._call("import_pages", data, password, indices, index, outline_title, _change=True)
         self._owner._page_generation += 1
         return [PdfPage(self._owner, position) for position in range(index, index + count)]
