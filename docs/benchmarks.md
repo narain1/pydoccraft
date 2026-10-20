@@ -132,7 +132,19 @@ The evidence identifies four costs:
 3. **The renderer itself is not uniformly slow.** The private direct-native probe was 1.61× faster than PyMuPDF's public open/render path on PDF-2 and 1.28× faster on PDF-3, while PyMuPDF was 3.24× faster on PDF-1. The 59.83× public-path gap therefore cannot be attributed to rasterization alone.
 4. **JSON and Python hydration are secondary but visible.** They add roughly 12–29 ms here and become proportionally significant for the 13.24 MiB/14-page document. Image-heavy inputs may add base64 expansion and decoding beyond what this stage profile isolates.
 
-The highest-value feature improvement is a bounded private native document session: inspect/open once, preserve reusable parse/render state, extract pages or text profiles on demand, and drop native state deterministically on `close()`. Existing hydrated values must remain owned, and all resource limits and stable errors must remain intact. A smaller interim improvement is a bounded direct-render or selected-page extraction entry point that avoids mandatory whole-document normalization.
+The highest-value feature improvement is a bounded private native document session: inspect/open once, preserve reusable parse/render state, extract pages or text profiles on demand, and drop native state deterministically on `close()`. Existing hydrated values must remain owned, and all resource limits and stable errors must remain intact. The first PDF-only slice retains the `PageRenderer` used for eager extraction and reuses its parsed document for later page renders; it does not remove eager extraction or address DOCX layout reuse.
+
+### PDF session-reuse feature measurement
+
+On a Linux ARM64 release wheel built from the feature branch, repeated page-1 rendering after one eager `open()` was compared with the legacy one-shot `_core.render` path. Anonymous medians over five iterations were:
+
+| ID | Pages | Retained session | One-shot reopen | Speedup | Parser builds after repeated renders |
+|---|---:|---:|---:|---:|---:|
+| PDF-1 | 391 | 6.52 ms | 59.69 ms | 9.16× | 1 |
+| PDF-2 | 65 | 23.62 ms | 26.00 ms | 1.10× | 1 |
+| PDF-3 | 14 | 71.89 ms | 78.52 ms | 1.09× | 1 |
+
+This is parser-session reuse, not raster-result caching. It improves repeated renders but does not change the eager `open()` cost documented above. A smaller interim improvement is a bounded direct-render or selected-page extraction entry point that avoids mandatory whole-document normalization.
 
 ## API and performance rough edges
 

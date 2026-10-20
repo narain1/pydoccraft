@@ -319,3 +319,18 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 - Direct native rendering was 1.61× and 1.28× faster than PyMuPDF's public open+render path on the 65- and 14-page PDFs, but PyMuPDF was 3.24× faster on the 391-page PDF. The major public-path regression is therefore eager extraction plus duplicate open state, not uniformly slow rasterization.
 - JSON decode plus Python hydration added 11.18–28.71 ms. Media-heavy inputs can add separate base64/ownership costs.
 - The prioritized feature improvement remains W02/P1: a bounded private native parse/render session, followed by bounded selected-page/text-only extraction under W09/P4.
+
+## PDF parser-session reuse feature branch
+
+- Added a private native PDF session that retains the PdfCraft `PageRenderer` used during eager extraction and routes subsequent `Document.render_page` / `Page.get_pixmap` calls through the same parsed document.
+- Public `doc_ex.open`, eager owned values, PNG bytes, negative indexes, errors, conversion/edit source bytes, and idempotent close remain compatible. `close()` releases the private session while previously extracted values remain usable.
+- Rust 1.95 validation passed: 128 tests and Clippy with warnings denied. The installed Linux ARM64 CPython 3.13 wheel passed 139 Python tests, including parser-build-count, repeated render, close, DPI, and output regressions.
+- Anonymous repeated page-1 render medians versus the legacy one-shot native reopen were: 6.52 vs 59.69 ms (9.16×) for 391 pages, 23.62 vs 26.00 ms (1.10×) for 65 pages, and 71.89 vs 78.52 ms (1.09×) for 14 pages. Parser-build count remained one after repeated renders.
+- Scope remains partial: eager full-document extraction still dominates first-render latency; DOCX layout reuse, selected-page/text-only extraction, all-page/peak-RSS evidence, and upstream inspect/COS consolidation remain open.
+
+### PDF session integration review
+
+- Exact review head `29cc3df5e43ef698ae7648fe73dd428620335f5b` passed CI 39465695584: 153 Rust tests, 172 installed-wheel Python tests, formatting, warnings-denied Clippy and the unchanged 264-package locked license audit. Existing full-raster limits, oversized-page small clips, blank pages and cross-format rendering passed alongside the new session tests.
+- Merging current main required retaining native clipping in the session path. A shared renderer helper now uses immutable inspected displayed dimensions and the existing pixel rounding, geometry, precision and output guards for both one-shot and retained rendering. Tests compare exact full/clipped PNG bytes at fractional DPI with CropBox/UserUnit and all rotations; parser-build count remains one.
+- A concurrent author merge added explicit-close expectations while dropping its close implementation. The reviewed correction releases the parser through Mutex<Option<PageRenderer>> and immutable PyO3 borrows, including poisoned-lock cleanup. Python captures a local handle, marks the document closed and detaches its handle before native close; retained handles report stable closed errors. Thread/lifetime tests pass, but this does not claim concurrent raster execution because current extension calls retain the GIL.
+- Historical private-corpus timings above remain author-reported; this integration review validates correctness and reuse counters, not those private performance measurements. No dependency or public API was added by the review corrections.

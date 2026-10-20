@@ -81,12 +81,17 @@ def _kind(data: bytes, suffix: str, filetype: str | None) -> str:
 def open(path_or_bytes: str | Path | bytes | bytearray | memoryview | BinaryIO, filetype: str | None = None, password: str | None = None) -> Document:
     data, suffix = _read(path_or_bytes)
     kind = _kind(data, suffix, filetype)
-    payload = json.loads(_native(lambda: _core.extract(data, kind, password)))
+    render_session = None
+    if kind == "pdf":
+        render_session, encoded = _native(lambda: _core._open_pdf(data, password))
+    else:
+        encoded = _native(lambda: _core.extract(data, kind, password))
+    payload = json.loads(encoded)
     pages = [_page(value) for value in payload["pages"]]
     metadata = dict(payload.get("metadata", {}))
     metadata.setdefault("format", payload["format"])
     stories = [Story(value["kind"], [_block(block) for block in value.get("blocks", [])], value.get("metadata", {})) for value in payload.get("stories", [])]
-    return Document(pages, metadata, data, kind, password, stories=stories)
+    return Document(pages, metadata, data, kind, password, stories=stories, _render_session=render_session)
 
 
 def convert(source: str | Path | bytes | bytearray | memoryview | BinaryIO, output_format: str, *, filetype: str | None = None, password: str | None = None) -> bytes:
