@@ -565,3 +565,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete integrated release/installed-wheel validation: 312 Rust / 446 Python tests, strict typing and unchanged license audit.
 - [ ] Complete independent review and exact-head/current-main CI before manual merge.
 - [ ] Keep R4/U09 open for upstream fallible per-call renderer failures and broader resource guarantees.
+
+
+## PDF field creation callback ownership
+
+- [x] Reproduce existing coordinate callback retargeting on the reviewed installed 439-test release using supported text-field creation.
+- [x] Retain initial validation and add final original-page resolution after options/coordinate normalization.
+- [x] Validate coordinate/iterator reordering, deletion, close, early-invalid precedence, callback exceptions, copies and exact callback-state source/PNG preservation.
+- [ ] Complete integrated installed-wheel validation and independent exact-head review; radio support remains separate.

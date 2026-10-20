@@ -1922,7 +1922,7 @@ class PdfFields:
         """Create one text, checkbox or choice widget on this page."""
         if self._page is None:
             raise ValueError("add fields through page.fields")
-        page = self._page_number()
+        self._page_number()
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in top-left points")
         if isinstance(options, (str, bytes)):
@@ -1936,7 +1936,10 @@ class PdfFields:
             if len(value) > 4096 or len(value.encode("utf-8")) > 4096:
                 raise ValueError("choice options must not exceed 4096 bytes")
             values.append(value)
-        identifier = self._owner._call("add_field", page, name, kind, tuple(map(pt, box)), values, _change=True)
+        coordinates = tuple(map(pt, box))
+        # Iteration and coordinate conversion may reorganize or close the owner.
+        page = self._page_number()
+        identifier = self._owner._call("add_field", page, name, kind, coordinates, values, _change=True)
         self._owner._field_generation += 1
         return PdfField(self._owner, identifier)
 

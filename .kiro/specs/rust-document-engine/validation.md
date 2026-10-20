@@ -1044,3 +1044,10 @@ The new boundary tests reject rounded oversized full-page rasters before native 
 PR87 independent source review and all 444 tests against its copied frozen package pass in 149.329 seconds, with strict typing, evidence checks and matching wheel hash. The canonical mark/style semantics and narrowly migrated four story-clear evidence cells were reviewed; final main integration/CI remains queued.
 
 PR76 final head `5f5503c05788db0f26588582737fac30e5b19420` passed [current-main CI 39509341862](https://github.com/narain1/pydoccraft/actions/runs/39509341862), including 285 Rust / 409 installed-wheel Python tests and all required checks. Independent review cleared its source-backed shading/border gap documentation, and it was manually merged as `65d9535e87d502af92d1c252bc06c7e8ab76b7d9`. Auto-merge remains disabled; broader TBL7/BG7 remains open.
+
+
+## PDF field creation ownership — focused isolated correction
+
+A supported text-field call reproduced retargeting against /opt/slidecellappendlifetimetest (the reviewed 439-test release): a float-subclass coordinate moved original page zero to one, but page.fields.add reused its earlier zero ordinal and created the field on the unrelated page. The original page handle correctly reported itself stale afterward, establishing the missing final check.
+
+The isolated facade correction preserves initial validation, normalizes options/coordinates, then validates the original page again before native creation. Three new public test groups pass against a copied 439-release extension (0.020 seconds); 22 related field, geometry, tooltip, read-only and PDF drawing ownership tests pass (3.435 seconds). Coordinate and options-iterator callbacks cover move/delete/close and exceptions; already-invalid handles do not evaluate inputs. Both pages' post-callback bytes, text and small cached PNGs remain unchanged by rejected outer creation, and independent copies leave valid original targets usable. Only Python code/tests/docs change; there is no Cargo build, dependency or pin change for this correction. Full integrated release packaging/installed-wheel validation and independent review remain required.

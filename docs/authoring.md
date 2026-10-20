@@ -633,3 +633,8 @@ This is an annotation editing flag, not encryption or access control. Page/docum
 Read-only fields still allow tooltip and box changes, copies, deletion and flattening. Their flag survives supported page organization and serialization; normal stale-handle rules still apply. This property is distinct from a widget's Locked flag and is not encryption or access control. Imported AcroForms, multiwidget/radio fields and additional field flags remain unsupported.
 
 The native property setter regenerates appearances even when only this flag changes. Existing conservative appearance reservations and actual generated-byte accounting apply; raw appearance references may change, while tested values, metadata and visible output remain unchanged. Repeated assignments can allocate and invalidate cached snapshots. Non-boolean values raise `TypeError` without invoking truth-value callbacks.
+
+
+### Field creation and caller callbacks
+
+`page.fields.add(...)` validates the page before evaluating option iterators or coordinate conversions and again after normalization. If caller code closes the document or reorganizes its pages, the outer creation fails instead of adding a field at a reused page index. Caller exceptions propagate; callback side effects are not rolled back. Normal creation, including through a negative-index page handle, and independent document copies retain their existing behavior.
