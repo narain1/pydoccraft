@@ -143,6 +143,7 @@ The resolved graph was reviewed for license declarations and compatibility. GPL-
 | `pdfcraft-export` | `0.9.0` | MIT OR Apache-2.0 |
 | `pdfcraft-filters` | `0.9.0` | MIT OR Apache-2.0 |
 | `pdfcraft-fonts` | `0.9.0` | MIT OR Apache-2.0 |
+| `pdfcraft-forms` | `0.9.0` | MIT OR Apache-2.0 |
 | `pdfcraft-model` | `0.9.0` | MIT OR Apache-2.0 |
 | `pdfcraft-organize` | `0.9.0` | MIT OR Apache-2.0 |
 | `pdfcraft-render` | `0.9.0` | MIT OR Apache-2.0 |

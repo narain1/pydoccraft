@@ -198,3 +198,42 @@ This recipe accepts an already authored editable template. It does not enable ar
 `page.boxes` returns owned `(x, y, width, height)` tuples for `media`, `crop`, `bleed`, `trim` and `art`, in current top-left view coordinates with rotation and UserUnit applied. `page.set_box(kind, box)` delegates geometry to PdfCraft. Non-media boxes must fit inside the media box; `set_box(kind, None)` resets a non-media box. Changing media recomputes effective intersections and can clip existing boxes, but rejects an empty intersection. Geometry changes invalidate other page/annotation/bookmark handles and cached rendering. The originating page remains usable. Background readback becomes unknown and raises `UnsupportedFormatError` until a new managed background is set.
 
 Known native content-truncation warnings raise the existing resource-limit exception (`UnsafeArchiveError`) during PDF extraction/rendering. Editable import rejects incomplete outline inspection instead of preserving a truncated outline. These checks do not claim that every possible upstream omission is diagnosed.
+
+### Footnotes and endnotes
+
+```python
+with doc_ex.new("docx") as document:
+    paragraph = document.add_paragraph("See the source for details.")
+    note = document.notes.add(paragraph.find("source")[0], "Supporting detail.")
+    note.paragraphs[0].add_run(" Additional context.", italic=True)
+    document.sections[0].configure_notes(numbering="lower_roman", start=1)
+    document.save("notes.docx")
+```
+
+`document.notes` is an ordered collection of native note stories. `notes.add(range, text, kind="footnote" | "endnote")` attaches a reference at the end of a same-document body range without removing its text. Body table paragraphs are supported; headers, footers and other notes cannot contain note anchors. Each note exposes `kind`, `paragraphs` and `add_paragraph`, reusing ordinary paragraph formatting and range editing. Whole-document copies own independent notes. The supplied range is refreshed; other existing ranges become stale after insertion.
+
+Editable paragraph text exposes the native object replacement character U+FFFC at note anchors; it occupies one Python character in range offsets. Generic paragraph, range, cell and table edits that would destroy or duplicate a semantic reference are rejected atomically. Replace text around the reference instead. Dedicated note deletion and arbitrary copying of anchored fragments remain unavailable; no note part is silently orphaned.
+
+`section.note_options(kind="footnote")` returns resolved native options. `configure_notes` accepts `placement`, `numbering`, `start` and `restart`; omitted values stay unchanged and `None` restores inheritance. Footnote placement is `page_bottom` or `beneath_text`; endnotes use `section_end` or `document_end`. Numbering accepts `decimal`, `upper_roman`, `lower_roman`, `upper_letter`, `lower_letter` and `chicago`. Start is 1–32767; restart is `continuous`, `each_section`, or footnote-only `each_page`. WordCraft owns numbering, pagination and native DOCX/PDF rendering. Extracted note stories remain separate from body text.
+
+### PDF form creation
+
+```python
+with doc_ex.new("pdf") as document:
+    page = document.pages[0]
+    field = page.fields.add("customer", (40, 40, 200, 30))
+    field.value = "Alice"
+    page.fields.add("approved", (40, 90, 24, 24), kind="checkbox").value = True
+    page.fields.add("country", (40, 140, 200, 30), kind="choice",
+                    options=["Canada", "France"]).value = "France"
+    document.fields["customer"].value = "Bob"
+    document.save("form.pdf")
+```
+
+`document.fields` indexes fields by immutable name and iterates checked field handles; `page.fields` filters that collection and creates a widget on the page. Fields expose `name`, `kind`, `value`, `options`, `page` and `box`. Text values are strings, checkbox values are booleans, and choice values are one declared option or `None` to clear selection. `del document.fields[name]` removes the field and its widget. Structural field edits and page organization invalidate existing field handles; retrieve them again by name. Value changes retain handles. Whole-document copies are independent.
+
+This creation profile supports one widget per field in PDFs created by this owner or its copies. Imported PDFs cannot acquire fields; imported AcroForms remain explicitly unsupported for editing. Text/choice appearances use fixed 12-point Helvetica with WinAnsi characters and conservative fit validation. Newlines, missing glyphs, overflow, duplicate names/options and unsupported kinds fail atomically. Names cannot contain periods, controls or surrounding whitespace. Limits are 1,000 fields/widgets, 256 UTF-8 bytes per name, 256 distinct nonempty options, 4 KiB per option/value and 4 MiB aggregate field text.
+
+`document.fields.flatten()` turns all supported field appearances into page content and returns the number flattened. It verifies that no terminal fields/widgets remain before committing. The native writer may retain an empty AcroForm dictionary, so editable reopening can still reject a flattened file; ordinary extraction and rendering remain supported. Subsetting a PDF with active fields is unavailable; flatten or delete them first. Radio groups, multiline text, autosizing, custom fonts, scripts, signatures and arbitrary imported-field inspection remain open work.
+
+Active PDF form appearances cannot be preserved by the current PDF-to-DOCX exporter, so conversion rejects them explicitly. Flatten supported owned fields first to export their visible text. Field deletion invalidates annotation handles on that page because native annotation indices can shift. Flattening an empty field collection leaves handles unchanged. Rotated/UserUnit flattening tests permit at most four pixels differing by one 8-bit channel level; the measured fixture differed in one pixel, consistent with native coordinate rounding. Unrotated form fixtures are PNG-byte-identical.

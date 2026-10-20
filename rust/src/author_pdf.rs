@@ -15,6 +15,8 @@ const MAX_TEXT_BYTES: usize = 1_000_000;
 const MAX_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_DOCUMENT_INPUT: usize = 128 * 1024 * 1024;
 const MAX_OUTPUT_BYTES: usize = 256 * 1024 * 1024;
+const MAX_FIELDS: usize = 1_000;
+const MAX_FIELD_TEXT: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Copy)]
 enum BackgroundState {
@@ -31,6 +33,8 @@ pub struct EditablePdf {
     backgrounds: Vec<BackgroundState>,
     items: usize,
     input_bytes: usize,
+    // Only models created in this process can acquire fields. Import never trusts AcroForms.
+    owns_fields: bool,
 }
 
 #[pymethods]
@@ -47,6 +51,7 @@ impl EditablePdf {
             backgrounds: vec![BackgroundState::Known(None)],
             items: 0,
             input_bytes: 0,
+            owns_fields: true,
         })
     }
 
@@ -84,13 +89,9 @@ impl EditablePdf {
                 EngineError::Unsupported("editing encrypted PDFs is not available".into()).into(),
             );
         }
-        if info
-            .fields
-            .iter()
-            .any(|field| field.kind == pdfcraft_render::FieldKind::Signature)
-        {
+        if !info.fields.is_empty() {
             return Err(EngineError::Unsupported(
-                "editing PDFs with signature fields is not available".into(),
+                "editing imported PDFs with form or signature fields is not available".into(),
             )
             .into());
         }
@@ -139,6 +140,7 @@ impl EditablePdf {
             sizes,
             items,
             input_bytes: data.len(),
+            owns_fields: false,
         })
     }
 
@@ -150,6 +152,7 @@ impl EditablePdf {
             backgrounds: self.backgrounds.clone(),
             items: self.items,
             input_bytes: self.input_bytes,
+            owns_fields: self.owns_fields,
         })
     }
 
@@ -161,6 +164,7 @@ impl EditablePdf {
     }
 
     pub fn to_bytes(&self) -> PyResult<Vec<u8>> {
+        self.owned_fields()?;
         let output = pdfcraft_cos::write_full(self.document()?, &SaveOptions::default()).map_err(
             |error| EngineError::Conversion(format!("PDF serialization failed: {error}")),
         )?;
@@ -275,6 +279,7 @@ impl EditablePdf {
         for geometry in &info.pages {
             validate_page_size(f64::from(geometry.width), f64::from(geometry.height))?;
         }
+        self.validate_owned_edit(&edited)?;
         self.sizes = info
             .pages
             .iter()
@@ -298,6 +303,7 @@ impl EditablePdf {
         pdfcraft_organize::insert_blank_page(&mut edited, index, width, height).map_err(
             |error| EngineError::Conversion(format!("PDF page insertion failed: {error}")),
         )?;
+        self.validate_owned_edit(&edited)?;
         self.document = Some(edited);
         self.sizes.push((width, height));
         self.geometry.push(page_geometry(width, height));
@@ -312,6 +318,7 @@ impl EditablePdf {
         }
         let mut edited = self.document()?.clone();
         pdfcraft_organize::delete_pages(&mut edited, &[page]).map_err(organize_error)?;
+        self.validate_owned_edit(&edited)?;
         self.document = Some(edited);
         self.sizes.remove(page);
         self.geometry.remove(page);
@@ -328,6 +335,7 @@ impl EditablePdf {
         }
         let mut edited = self.document()?.clone();
         pdfcraft_organize::rotate_pages(&mut edited, &[page], degrees).map_err(organize_error)?;
+        self.validate_owned_edit(&edited)?;
         self.document = Some(edited);
         if degrees.rem_euclid(180) != 0 {
             let (width, height) = self.sizes[page];
@@ -347,6 +355,7 @@ impl EditablePdf {
         let destination = self.page_index(destination)?;
         let mut edited = self.document()?.clone();
         pdfcraft_organize::move_pages(&mut edited, &[page], destination).map_err(organize_error)?;
+        self.validate_owned_edit(&edited)?;
         self.document = Some(edited);
         let size = self.sizes.remove(page);
         self.sizes.insert(destination, size);
@@ -414,6 +423,7 @@ impl EditablePdf {
             )
             .into());
         }
+        self.validate_owned_edit(&edited)?;
         self.document = Some(edited);
         self.sizes.splice(
             destination as usize..destination as usize,
@@ -433,6 +443,9 @@ impl EditablePdf {
     }
 
     pub fn subset(&self, indices: Vec<isize>) -> PyResult<Self> {
+        if !self.owned_fields()?.is_empty() {
+            return Err(EngineError::Unsupported("PDF subsets with active fields are not available; flatten or delete the fields first".into()).into());
+        }
         let selected = self.selection(&indices)?;
         if selected.is_empty() {
             return Err(PyValueError::new_err(
@@ -472,7 +485,196 @@ impl EditablePdf {
                 .collect(),
             items,
             input_bytes,
+            owns_fields: self.owns_fields,
         })
+    }
+
+    #[pyo3(signature = (page=None))]
+    pub fn fields(&self, page: Option<isize>) -> PyResult<String> {
+        let page = page.map(|p| self.page_index(p)).transpose()?;
+        let values = self
+            .owned_fields()?
+            .iter()
+            .filter(|field| page.is_none_or(|p| field.widgets[0].page == Some(p)))
+            .map(|field| self.field_payload(field))
+            .collect::<PyResult<Vec<_>>>()?;
+        crate::limits::bounded_json(&values, 32 * 1024 * 1024).map_err(Into::into)
+    }
+
+    pub fn field_info(&self, name: &str) -> PyResult<String> {
+        let field = self.field_named(name)?;
+        crate::limits::bounded_json(&self.field_payload(&field)?, 2 * 1024 * 1024)
+            .map_err(Into::into)
+    }
+
+    #[pyo3(signature = (page, name, kind, rect, options=Vec::new()))]
+    pub fn add_field(
+        &mut self,
+        page: isize,
+        name: &str,
+        kind: &str,
+        rect: (f64, f64, f64, f64),
+        options: Vec<String>,
+    ) -> PyResult<String> {
+        self.document()?;
+        if !self.owns_fields {
+            return Err(EngineError::Unsupported(
+                "form creation requires a newly created PDF model".into(),
+            )
+            .into());
+        }
+        let page = self.page_index(page)?;
+        validate_field_name(name)?;
+        let existing = self.owned_fields()?;
+        if existing.len() >= MAX_FIELDS {
+            return Err(EngineError::ResourceLimit("PDF exceeds 1000 fields".into()).into());
+        }
+        if existing.iter().any(|f| f.name == name) {
+            return Err(PyValueError::new_err("field name already exists"));
+        }
+        if options.len() > 256 {
+            return Err(
+                EngineError::ResourceLimit("choice field exceeds 256 options".into()).into(),
+            );
+        }
+        let mut distinct = std::collections::HashSet::new();
+        for option in &options {
+            validate_field_text(option)?;
+            if option.is_empty() || !distinct.insert(option) {
+                return Err(PyValueError::new_err(
+                    "choice options must be nonempty and distinct",
+                ));
+            }
+        }
+        let new = match kind {
+            "text" if options.is_empty() => pdfcraft_forms::NewField::Text { multiline: false },
+            "checkbox" if options.is_empty() => pdfcraft_forms::NewField::CheckBox,
+            "choice" if !options.is_empty() => pdfcraft_forms::NewField::Combo { options: options.clone(), editable: false },
+            _ => return Err(PyValueError::new_err("field kind must be text, checkbox, or choice; only choice fields take nonempty options")),
+        };
+        let cost = name.len() + options.iter().map(String::len).sum::<usize>();
+        self.validate_input(cost)?;
+        let (x, y, width, height) = rect;
+        let view = self.annotation_rect(page, (x, y, x + width, y + height))?;
+        let user_rect = self.geometry[page].view_rect_to_user(view).map(f64::from);
+        let unit = self.page_user_unit(page);
+        let font_size = 12.0 / unit;
+        // Fixed-size appearances must have room for their border/padding and all value text.
+        // Use a deliberately wider inset than the upstream default one-unit border + padding.
+        if width < 12.0 * unit || height < 24.0 * unit.max(1.0) {
+            return Err(PyValueError::new_err(
+                "form field box is too small for its fixed appearance",
+            ));
+        }
+        validate_field_fit("", width / unit, height / unit, font_size)?;
+        for option in &options {
+            validate_field_fit(option, width / unit, height / unit, font_size)?;
+        }
+        let mut edited = self.document()?.clone();
+        let created = pdfcraft_forms::add_field(&mut edited, page, user_rect, &new, Some(name))
+            .map_err(form_error)?;
+        if created != name {
+            return Err(EngineError::Conversion(
+                "form writer changed the requested field name".into(),
+            )
+            .into());
+        }
+        pdfcraft_forms::set_props(
+            &mut edited,
+            name,
+            &pdfcraft_forms::FieldProps {
+                font_size: Some(font_size),
+                rect: Some((0, user_rect)),
+                rotation: Some((0, i64::from(self.geometry[page].rotation))),
+                ..Default::default()
+            },
+        )
+        .map_err(form_error)?;
+        checked_owned_fields(&edited)?;
+        self.document = Some(edited);
+        self.input_bytes += cost;
+        self.items += 1;
+        Ok(name.into())
+    }
+
+    pub fn set_field_value(&mut self, name: &str, value_json: &str) -> PyResult<()> {
+        use pdfcraft_forms::{FieldKind, FieldValue};
+        let field = self.field_named(name)?;
+        if value_json.len() > 32 * 1024 {
+            return Err(
+                EngineError::ResourceLimit("field value JSON exceeds 32 KiB".into()).into(),
+            );
+        }
+        let value: Value = serde_json::from_str(value_json)
+            .map_err(|_| PyValueError::new_err("invalid field value JSON"))?;
+        self.validate_input(value_json.len())?;
+        let native = match (field.kind, value) {
+            (FieldKind::Text, Value::String(text)) => {
+                validate_field_text(&text)?;
+                validate_value_fit(&field, &text)?;
+                FieldValue::Text(text)
+            }
+            (FieldKind::CheckBox, Value::Bool(value)) => FieldValue::Check(value),
+            (FieldKind::Combo, Value::Null) => FieldValue::Choice(vec![]),
+            (FieldKind::Combo, Value::String(text)) => {
+                validate_field_text(&text)?;
+                if !field.options.iter().any(|(export, _)| export == &text) {
+                    return Err(PyValueError::new_err("value is not a choice option"));
+                }
+                validate_value_fit(&field, &text)?;
+                FieldValue::Choice(vec![text])
+            }
+            _ => return Err(PyValueError::new_err("field value must be a string for text, bool for checkbox, or option string/null for choice")),
+        };
+        let mut edited = self.document()?.clone();
+        pdfcraft_forms::set_value(&mut edited, name, &native).map_err(form_error)?;
+        checked_owned_fields(&edited)?;
+        self.document = Some(edited);
+        self.input_bytes += value_json.len();
+        Ok(())
+    }
+
+    pub fn delete_field(&mut self, name: &str) -> PyResult<()> {
+        self.field_named(name)?;
+        let mut edited = self.document()?.clone();
+        pdfcraft_forms::delete_field(&mut edited, name).map_err(form_error)?;
+        if checked_owned_fields(&edited)?
+            .iter()
+            .any(|f| f.name == name)
+        {
+            return Err(
+                EngineError::Conversion("deleted form field remains reachable".into()).into(),
+            );
+        }
+        self.document = Some(edited);
+        Ok(())
+    }
+
+    pub fn flatten_fields(&mut self) -> PyResult<usize> {
+        let fields = self.owned_fields()?;
+        if fields.is_empty() {
+            return Ok(0);
+        }
+        for field in &fields {
+            for value in &field.value {
+                validate_value_fit(field, value)?;
+            }
+        }
+        let pages = (0..self.sizes.len()).collect::<Vec<_>>();
+        let mut edited = self.document()?.clone();
+        let flattened =
+            pdfcraft_edit::flatten(&mut edited, &pages, false, true).map_err(edit_error)?;
+        if flattened != fields.len()
+            || !checked_owned_fields(&edited)?.is_empty()
+            || has_widgets(&edited)?
+        {
+            return Err(EngineError::Unsupported(
+                "not every field appearance could be flattened; document unchanged".into(),
+            )
+            .into());
+        }
+        self.document = Some(edited);
+        Ok(flattened)
     }
 
     #[pyo3(signature = (page, rect, uri=None, target_page=None))]
@@ -1440,6 +1642,69 @@ impl EditablePdf {
 }
 
 impl EditablePdf {
+    fn validate_owned_edit(&self, document: &Document) -> PyResult<()> {
+        if self.owns_fields {
+            checked_owned_fields(document)?;
+        }
+        Ok(())
+    }
+
+    fn owned_fields(&self) -> PyResult<Vec<pdfcraft_forms::Field>> {
+        let document = self.document()?;
+        if !self.owns_fields {
+            return Ok(vec![]);
+        }
+        checked_owned_fields(document)
+    }
+
+    fn field_named(&self, name: &str) -> PyResult<pdfcraft_forms::Field> {
+        validate_field_name(name)?;
+        self.owned_fields()?
+            .into_iter()
+            .find(|field| field.name == name)
+            .ok_or_else(|| PyValueError::new_err("form field does not exist"))
+    }
+
+    fn page_user_unit(&self, page: usize) -> f64 {
+        let g = &self.geometry[page];
+        let displayed = if g.rotation.is_multiple_of(180) {
+            g.width
+        } else {
+            g.height
+        };
+        f64::from(displayed / (g.crop[2] - g.crop[0]))
+    }
+
+    fn field_payload(&self, field: &pdfcraft_forms::Field) -> PyResult<Value> {
+        use pdfcraft_forms::FieldKind;
+        let widget = &field.widgets[0];
+        let page = widget
+            .page
+            .ok_or_else(|| EngineError::Unsupported("form widget has no page".into()))?;
+        let geometry = self
+            .geometry
+            .get(page)
+            .ok_or_else(|| EngineError::Malformed("form widget page is out of range".into()))?;
+        let rect = view_rect(geometry, widget.rect.map(|v| v as f32));
+        let (kind, value) = match field.kind {
+            FieldKind::Text => (
+                "text",
+                json!(field.value.first().map_or("", String::as_str)),
+            ),
+            FieldKind::CheckBox => ("checkbox", json!(!field.value.is_empty())),
+            FieldKind::Combo => ("choice", json!(field.value.first())),
+            _ => {
+                return Err(EngineError::Unsupported("unsupported owned field kind".into()).into())
+            }
+        };
+        Ok(json!({
+            "name": field.name, "kind":kind, "value":value,
+            "options": field.options.iter().map(|(export, _)| export).collect::<Vec<_>>(),
+            "widgets":[{"page":page,"box":[rect[0],rect[1],rect[2]-rect[0],rect[3]-rect[1]]}],
+            "font_size":12,
+        }))
+    }
+
     fn bookmark_entries(&self) -> PyResult<Vec<pdfcraft_organize::Bookmark>> {
         let entries = pdfcraft_organize::bookmark_page(self.document()?, 0, MAX_ITEMS + 1);
         if entries.bookmarks.len() > MAX_ITEMS || entries.next.is_some() {
@@ -1544,6 +1809,183 @@ fn metadata_keys() -> [(&'static str, &'static str); 4] {
         ("subject", "Subject"),
         ("keywords", "Keywords"),
     ]
+}
+
+fn validate_field_name(name: &str) -> PyResult<()> {
+    if name.len() > 256 {
+        return Err(EngineError::ResourceLimit("field name exceeds 256 bytes".into()).into());
+    }
+    if name.is_empty()
+        || name.trim() != name
+        || name.contains('.')
+        || name.chars().any(char::is_control)
+    {
+        return Err(PyValueError::new_err(
+            "field name must be nonempty without periods, outer whitespace, or controls",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_field_text(text: &str) -> PyResult<()> {
+    if text.len() > 4096 {
+        return Err(
+            EngineError::ResourceLimit("field value or option exceeds 4096 bytes".into()).into(),
+        );
+    }
+    if text.chars().any(char::is_control) {
+        return Err(PyValueError::new_err(
+            "field values and options must be single-line text without control characters",
+        ));
+    }
+    if let Some(character) = pdfcraft_fonts::first_non_win_ansi(text) {
+        return Err(EngineError::Unsupported(format!(
+            "form Helvetica font cannot draw U+{:04X}",
+            u32::from(character)
+        ))
+        .into());
+    }
+    Ok(())
+}
+
+fn validate_field_fit(text: &str, width: f64, height: f64, size: f64) -> PyResult<()> {
+    // Native appearances use a one-unit border and two-unit padding. Four units of inset
+    // conservatively retain full glyphs instead of accepting text hidden by the widget clip.
+    if !size.is_finite()
+        || size <= 0.0
+        || size > 300.0
+        || height < size * 1.2 + 8.0
+        || pdfcraft_fonts::helvetica_width(text, size) > width - 8.0
+    {
+        return Err(PyValueError::new_err(
+            "field text does not fit its fixed 12-point appearance",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_value_fit(field: &pdfcraft_forms::Field, text: &str) -> PyResult<()> {
+    if field.kind == pdfcraft_forms::FieldKind::CheckBox {
+        return Ok(());
+    }
+    let widget = &field.widgets[0];
+    let (width, height) = (
+        widget.rect[2] - widget.rect[0],
+        widget.rect[3] - widget.rect[1],
+    );
+    let (width, height) = if widget.rotation % 180 == 0 {
+        (width, height)
+    } else {
+        (height, width)
+    };
+    validate_field_fit(
+        text,
+        width,
+        height,
+        pdfcraft_forms::appearance::parse_da(&field.da).size,
+    )
+}
+
+fn checked_owned_fields(document: &Document) -> PyResult<Vec<pdfcraft_forms::Field>> {
+    use pdfcraft_forms::FieldKind;
+    // This reader only sees our bounded, shallow, script-free trees. Imported forms never
+    // enter this path; upstream has no fallible caller-bounded reader for arbitrary trees yet.
+    let read = pdfcraft_forms::fields_with_adopted(document);
+    if read.items.len() > MAX_FIELDS {
+        return Err(EngineError::ResourceLimit("PDF exceeds 1000 fields".into()).into());
+    }
+    if read.adopted_page_fields != 0 {
+        return Err(
+            EngineError::Unsupported("owned form contains unregistered widgets".into()).into(),
+        );
+    }
+    let mut names = std::collections::HashSet::new();
+    let mut bytes = 0usize;
+    for field in &read.items {
+        validate_field_name(&field.name)?;
+        if !names.insert(&field.name)
+            || field.widgets.len() != 1
+            || field.widgets[0].page.is_none()
+            || field.widgets[0].hidden
+            || field.value.len() > 1
+            || field.options.len() > 256
+            || field.actions != pdfcraft_forms::af::Actions::default()
+            || field.button.is_some()
+        {
+            return Err(EngineError::Unsupported(
+                "owned form no longer matches the supported single-widget profile".into(),
+            )
+            .into());
+        }
+        match field.kind {
+            FieldKind::Text if field.flags == 0 && field.options.is_empty() => {}
+            FieldKind::CheckBox if field.flags == 0 && field.options.is_empty() => {}
+            FieldKind::Combo
+                if field.flags == pdfcraft_forms::flags::COMBO && !field.options.is_empty() => {}
+            _ => {
+                return Err(EngineError::Unsupported(
+                    "owned form contains an unsupported field kind or setting".into(),
+                )
+                .into())
+            }
+        }
+        bytes = bytes.saturating_add(field.name.len());
+        let mut options = std::collections::HashSet::new();
+        for (export, display) in &field.options {
+            validate_field_text(display)?;
+            if export != display || export.is_empty() || !options.insert(export) {
+                return Err(EngineError::Unsupported(
+                    "owned choice field has unsupported options".into(),
+                )
+                .into());
+            }
+            validate_value_fit(field, display)?;
+            bytes = bytes.saturating_add(export.len());
+        }
+        for value in &field.value {
+            validate_field_text(value)?;
+            validate_value_fit(field, value)?;
+            bytes = bytes.saturating_add(value.len());
+        }
+        if bytes > MAX_FIELD_TEXT {
+            return Err(
+                EngineError::ResourceLimit("aggregate form text exceeds 4 MiB".into()).into(),
+            );
+        }
+    }
+    if pdfcraft_forms::need_appearances(document)
+        || !pdfcraft_forms::undrawn_fields(document).is_empty()
+    {
+        return Err(EngineError::Unsupported(
+            "form appearance is incomplete; partial output was discarded".into(),
+        )
+        .into());
+    }
+    Ok(read.items)
+}
+
+fn has_widgets(document: &Document) -> PyResult<bool> {
+    for page in pdfcraft_organize::pages(document).map_err(organize_error)? {
+        let object = document.get(page.obj);
+        if let Some(annotations) = object.as_dict().and_then(|d| d.get(b"Annots")) {
+            let annotations = document.resolve(annotations);
+            if let Some(annotations) = annotations.as_array() {
+                if annotations.iter().any(|annotation| {
+                    document
+                        .resolve(annotation)
+                        .as_dict()
+                        .is_some_and(|d| d.name(b"Subtype") == Some(b"Widget"))
+                }) {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn form_error(error: pdfcraft_forms::FormError) -> EngineError {
+    EngineError::Conversion(format!("PDF form operation failed: {error}"))
 }
 
 fn validate_bookmark_title(title: &str) -> PyResult<()> {
@@ -1708,6 +2150,253 @@ fn organize_error(error: pdfcraft_organize::OrganizeError) -> EngineError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn owned_fields_create_fill_and_flatten_with_complete_appearances() {
+        let mut document = EditablePdf::new(300.0, 300.0).unwrap();
+        document
+            .add_field(0, "customer", "text", (10.0, 10.0, 200.0, 30.0), vec![])
+            .unwrap();
+        document
+            .add_field(0, "approved", "checkbox", (10.0, 60.0, 30.0, 30.0), vec![])
+            .unwrap();
+        document
+            .add_field(
+                0,
+                "country",
+                "choice",
+                (10.0, 110.0, 200.0, 30.0),
+                vec!["Canada".into(), "France".into()],
+            )
+            .unwrap();
+        let initial: Value =
+            serde_json::from_str(&document.field_info("country").unwrap()).unwrap();
+        assert_eq!(initial["value"], Value::Null);
+        let initial_box: Vec<f64> =
+            serde_json::from_value(initial["widgets"][0]["box"].clone()).unwrap();
+        for (actual, expected) in initial_box.iter().zip([10.0, 110.0, 200.0, 30.0]) {
+            assert!((actual - expected).abs() < 0.001);
+        }
+        document
+            .set_field_value("customer", r#""Alice café""#)
+            .unwrap();
+        document.set_field_value("approved", "true").unwrap();
+        document.set_field_value("country", r#""France""#).unwrap();
+        let checked: Value =
+            serde_json::from_str(&document.field_info("approved").unwrap()).unwrap();
+        assert_eq!(checked["value"], true);
+        let before = document.to_bytes().unwrap();
+        let inspected = pdfcraft_render::inspect(Arc::new(before.clone()), None).unwrap();
+        assert_eq!(inspected.fields.len(), 3);
+        assert!(!inspected.has_javascript);
+        assert!(EditablePdf::from_bytes(&before, None).is_err());
+        let before_png = crate::pdf::render(&before, 0, 144.0, None).unwrap();
+        assert_eq!(document.flatten_fields().unwrap(), 3);
+        assert_eq!(document.fields(None).unwrap(), "[]");
+        let after = document.to_bytes().unwrap();
+        let after_png = crate::pdf::render(&after, 0, 144.0, None).unwrap();
+        assert_eq!(before_png, after_png);
+        assert!(pdfcraft_render::inspect(Arc::new(after.clone()), None)
+            .unwrap()
+            .fields
+            .is_empty());
+        let extracted = crate::pdf::extract(&after, None).unwrap();
+        let text = extracted.pages[0]
+            .blocks
+            .iter()
+            .map(|b| b.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(text.contains("Alice café") && text.contains("France"));
+        assert_eq!(document.flatten_fields().unwrap(), 0);
+    }
+
+    #[test]
+    fn field_validation_and_failed_changes_are_atomic() {
+        let mut document = EditablePdf::new(300.0, 300.0).unwrap();
+        document
+            .add_field(0, "name", "text", (10.0, 10.0, 100.0, 30.0), vec![])
+            .unwrap();
+        document
+            .add_field(
+                0,
+                "choice",
+                "choice",
+                (10.0, 50.0, 100.0, 30.0),
+                vec!["A".into(), "B".into()],
+            )
+            .unwrap();
+        document
+            .add_field(0, "check", "checkbox", (10.0, 90.0, 30.0, 30.0), vec![])
+            .unwrap();
+        let before = document.to_bytes().unwrap();
+        for (name, value) in [
+            ("name", "true"),
+            ("name", r#""Ω""#),
+            ("name", r#""line\nnext""#),
+            ("name", r#""This text is much too long for its appearance""#),
+            ("choice", r#""Unknown""#),
+            ("check", r#""yes""#),
+            ("missing", r#""value""#),
+        ] {
+            assert!(
+                document.set_field_value(name, value).is_err(),
+                "{name}: {value}"
+            );
+            assert_eq!(document.to_bytes().unwrap(), before);
+        }
+        for (name, kind, options) in [
+            ("name", "text", vec![]),
+            ("bad.name", "text", vec![]),
+            (" padded ", "text", vec![]),
+            ("radio", "radio", vec![]),
+            ("empty", "choice", vec![]),
+            ("duplicate", "choice", vec!["A".into(), "A".into()]),
+            ("unicode", "choice", vec!["Ω".into()]),
+        ] {
+            assert!(document
+                .add_field(0, name, kind, (150.0, 10.0, 100.0, 30.0), options)
+                .is_err());
+            assert_eq!(document.to_bytes().unwrap(), before);
+        }
+        assert!(document
+            .add_field(0, "tiny", "text", (0.0, 0.0, 20.0, 5.0), vec![])
+            .is_err());
+        assert!(document.subset(vec![0]).is_err());
+        document.set_field_value("choice", r#""A""#).unwrap();
+        document.set_field_value("choice", "null").unwrap();
+        document.set_field_value("check", "true").unwrap();
+        document.set_field_value("check", "false").unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&document.field_info("choice").unwrap()).unwrap()
+                ["value"],
+            Value::Null
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&document.field_info("check").unwrap()).unwrap()["value"],
+            false
+        );
+        let blank = EditablePdf::new(100.0, 100.0).unwrap().to_bytes().unwrap();
+        let mut imported = EditablePdf::from_bytes(&blank, None).unwrap();
+        assert!(imported
+            .add_field(0, "external", "text", (0.0, 0.0, 80.0, 30.0), vec![])
+            .is_err());
+    }
+
+    #[test]
+    fn owned_fields_follow_copy_page_moves_and_deletion() {
+        let mut document = EditablePdf::new(200.0, 200.0).unwrap();
+        document.add_page(200.0, 200.0).unwrap();
+        document
+            .add_field(0, "first", "text", (10.0, 10.0, 150.0, 30.0), vec![])
+            .unwrap();
+        document.set_field_value("first", r#""Original""#).unwrap();
+        document
+            .add_field(1, "second", "text", (10.0, 10.0, 150.0, 30.0), vec![])
+            .unwrap();
+        let mut copied = document.copy().unwrap();
+        copied.set_field_value("first", r#""Changed""#).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&document.field_info("first").unwrap()).unwrap()["value"],
+            "Original"
+        );
+        document.move_page(0, 1).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&document.field_info("first").unwrap()).unwrap()
+                ["widgets"][0]["page"],
+            1
+        );
+        assert_eq!(
+            serde_json::from_str::<Vec<Value>>(&document.fields(Some(0)).unwrap()).unwrap()[0]
+                ["name"],
+            "second"
+        );
+        document.rotate_page(1, 90).unwrap();
+        assert!(crate::pdf::render(&document.to_bytes().unwrap(), 1, 72.0, None).is_ok());
+        document.delete_page(0).unwrap();
+        assert!(document.field_info("second").is_err());
+        assert_eq!(document.owned_fields().unwrap().len(), 1);
+        document.delete_field("first").unwrap();
+        assert!(document.fields(None).unwrap() == "[]");
+        document
+            .add_field(0, "first", "checkbox", (10.0, 10.0, 30.0, 30.0), vec![])
+            .unwrap();
+        assert_eq!(document.flatten_fields().unwrap(), 1);
+    }
+
+    #[test]
+    fn fields_created_on_rotated_imported_pages_use_view_boxes_and_fixed_point_text() {
+        use pdfcraft_cos::Object;
+        let mut source = pdfcraft_create::blank(240.0, 320.0, 1).unwrap();
+        let page = pdfcraft_organize::pages(&source).unwrap()[0].obj;
+        source
+            .update_dict(page, |d| {
+                d.set(b"UserUnit".to_vec(), Object::Real(1.25));
+            })
+            .unwrap();
+        let bytes = pdfcraft_cos::write_full(&source, &SaveOptions::default()).unwrap();
+        for rotation in [0, 90, 180, 270] {
+            let mut document = EditablePdf::new(300.0, 400.0).unwrap();
+            document.import_pages(&bytes, None, None, 1).unwrap();
+            document.rotate_page(1, rotation).unwrap();
+            document
+                .add_field(1, "rotated", "text", (20.0, 30.0, 180.0, 30.0), vec![])
+                .unwrap();
+            document.set_field_value("rotated", r#""Upright""#).unwrap();
+            let info: Value =
+                serde_json::from_str(&document.field_info("rotated").unwrap()).unwrap();
+            let actual: Vec<f64> =
+                serde_json::from_value(info["widgets"][0]["box"].clone()).unwrap();
+            for (a, b) in actual.iter().zip([20.0, 30.0, 180.0, 30.0]) {
+                assert!((a - b).abs() < 0.001, "rotation {rotation}: {actual:?}");
+            }
+            let field = document.field_named("rotated").unwrap();
+            assert!((pdfcraft_forms::appearance::parse_da(&field.da).size - 9.6).abs() < 0.001);
+            let before = crate::pdf::render(&document.to_bytes().unwrap(), 1, 144.0, None).unwrap();
+            assert_eq!(document.flatten_fields().unwrap(), 1);
+            let output = document.to_bytes().unwrap();
+            let after = crate::pdf::render(&output, 1, 144.0, None).unwrap();
+            let extracted = crate::pdf::extract(&output, None).unwrap();
+            let text = extracted.pages[1]
+                .blocks
+                .iter()
+                .find(|block| block.text.contains("Upright"))
+                .unwrap();
+            let bbox = text.bbox.unwrap();
+            assert!(bbox[0] >= 20.0 && bbox[1] >= 30.0 && bbox[2] <= 200.0 && bbox[3] <= 60.0);
+            let decode = |bytes: Vec<u8>| {
+                let mut reader = png::Decoder::new(Cursor::new(bytes)).read_info().unwrap();
+                let mut output = vec![0; reader.output_buffer_size().unwrap()];
+                reader.next_frame(&mut output).unwrap();
+                output
+            };
+            let (before, after) = (decode(before), decode(after));
+            let changed = before
+                .chunks_exact(4)
+                .zip(after.chunks_exact(4))
+                .filter(|(a, b)| a != b)
+                .count();
+            let largest = before
+                .iter()
+                .zip(&after)
+                .map(|(a, b)| a.abs_diff(*b))
+                .max()
+                .unwrap();
+            assert!(
+                before
+                    .chunks_exact(4)
+                    .filter(|rgba| rgba[0] < 30 && rgba[1] < 30 && rgba[2] < 30)
+                    .count()
+                    > 20
+            );
+            // Observed one-pixel 1/255 variation at 180 degrees/UserUnit 1.25; likely the
+            // native appearance/flatten placement rounding. Geometry and text stay exact.
+            assert!(
+                changed <= 4 && largest <= 1,
+                "rotation {rotation}: {changed} changed pixels, maximum difference {largest}"
+            );
+        }
+    }
 
     #[test]
     fn page_boxes_follow_view_geometry_and_reset_for_every_rotation() {

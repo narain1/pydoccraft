@@ -1,5 +1,14 @@
 # Validation evidence
 
+## 2026-10-20 native notes and owned PDF fields (unreleased)
+
+- Offline Linux x86_64, Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1: formatting, 108 Rust tests, warnings-denied Clippy, locked release build and 119 installed-wheel Python tests passed, with zero skips and matching artifact identity.
+- Notes cover Unicode ranges, stale/closed ownership, nested body-table anchors, editable independent story copies, section placement/restart/numbering, aggregate/anchor/count bounds, atomic destructive-edit rejection, separate extracted stories and DOCX/PNG/PDF output with note text once and page-bottom placement. Generic commit guards are exercised by the full existing authoring corpus.
+- Forms cover typed values, invalid-edit rollback, missing glyphs/overflow, choice clearing, field/page/annotation handle invalidation, copying, page organization, all four rotations and UserUnit, strict appearance completion, removal and flattening. Unrotated combined form output is PNG-byte-identical after flatten. The rotated/UserUnit fixture measured one RGB pixel differing by 1/255; its explicit tolerance is at most four changed pixels and one channel step, with strict geometry/text checks. This is consistent with coordinate rounding, not a claim of universally identical raster output.
+- Review found and fixed field deletion retargeting positional annotation handles. Empty flatten preserves handles; options are bounded before native allocation. A conversion probe demonstrated active form text loss in PDF-to-DOCX, now rejected explicitly; flatten-first conversion is reopened and verified.
+- Wheel: `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`, 17,106,162 bytes; native extension: 39,642,184 bytes. SHA-256: `cb38f3a9471dbc0de577ef08fa98a10d4d20ba43f6bdf6453ab0c0f307c71740`. Lockfile SHA-256: `48265d3bcdda6a4ede5f8262680c7e7c324f5722eb889407c0608e0b89819f51`.
+- Only `pdfcraft-forms` was added at the existing immutable PdfCraft revision. Regenerated/reviewed inventory and wheel copy contain 264 normal/build packages, all permissive and no prohibited application crates; NOTICE updated. Other upstream revisions/assets unchanged. LAY7/PDF6 and other broad criteria remain open; semantic deletion/copy, imported forms, radio groups and broader appearances are not complete. This is not a release declaration.
+
 ## 2026-10-20 PR23 independent review correction (unreleased)
 
 - Reviewed runtime head `d8ccb4345ccadce5a6c80835446be9f78b862b77` against merged main `bb9f21b40ef500433f04ba2a0061fc71ea682b51`. [CI run 39454556564](https://github.com/narain1/pydoccraft/actions/runs/39454556564) passed formatting, all 98 Rust tests, warnings-denied Clippy, the locked 263-package license audit, release build and 113 installed-wheel Python tests with zero skips.

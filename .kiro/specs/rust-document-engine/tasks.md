@@ -111,3 +111,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reject known PDF content truncation and incomplete editable outline inspection.
 - [x] Validate the locked release wheel, reopened outputs and native tests; record evidence.
 - [ ] Complete ordered table column views, general rich-row copying and remaining table criteria.
+
+## Notes and owned PDF fields
+
+- [x] Add native footnote/endnote creation with shared editable story paragraphs and section note options.
+- [x] Guard destructive generic semantic edits and account for note stories/anchor bytes in budgets.
+- [x] Integrate bounded owned PDF text/checkbox/choice fields, strict values and checked native appearances.
+- [x] Reuse native field deletion/flatten and validate page-organization postconditions.
+- [x] Resolve the single added pinned forms crate and regenerate/review the 264-package permissive license inventory and wheel copy.
+- [x] Complete combined locked native and installed-wheel validation and record exact artifact evidence.
+- [ ] Complete remaining LAY7 and PDF6 criteria, including semantic deletion/copy, radio groups and safe bounded imported-field APIs; these broad criteria remain open.

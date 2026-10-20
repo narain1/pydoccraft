@@ -9,12 +9,12 @@ use std::{
 use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
 use serde_json::{json, Map, Value};
-use wordcraft_doc::para::{Float, InlineObject};
+use wordcraft_doc::para::{Float, InlineObject, NoteKind};
 use wordcraft_doc::props::{
     Border, BorderStyle, Borders, HeightRule, Highlight, LineSpacing, NumRef, Underline, VAlign,
     VMerge, VertAlign,
 };
-use wordcraft_doc::section::{SectionProps, SectionStart};
+use wordcraft_doc::section::{NotePos, NoteRestart, NumFormat, SectionProps, SectionStart};
 use wordcraft_doc::styles::{Style, StyleSheet};
 use wordcraft_doc::{
     Align, Block, CharProps, Document, ListKind, ParaProps, Paragraph, PartKind, Path, Pos, Rgb,
@@ -36,6 +36,7 @@ const MAX_LINK_BYTES: usize = 16 * 1024 * 1024;
 const MAX_STYLES: usize = 1024;
 const MAX_FORMAT_PATCH_BYTES: usize = 16 * 1024;
 const MAX_SECTIONS: usize = 128;
+const MAX_NOTES: usize = 10_000;
 
 #[pyclass]
 pub struct EditableDocx {
@@ -158,6 +159,7 @@ impl EditableDocx {
 
     pub fn set_paragraph_text(&mut self, id: usize, text: &str) -> PyResult<()> {
         let existing = self.paragraph(id)?;
+        reject_semantic_range(existing, 0, existing.text.len())?;
         validate_text(text)?;
         let text_bytes = self.updated_text_bytes(existing.text.len(), text.len())?;
         // Replacing all text intentionally resets run formatting; retain paragraph properties.
@@ -1573,6 +1575,7 @@ impl EditableDocx {
         self.check_revision(revision)?;
         let paragraph = self.paragraph(id)?;
         let (from, to) = range_offsets(&paragraph.text, start, end)?;
+        reject_semantic_range(paragraph, from, to)?;
         validate_text(text)?;
         let text_bytes = self.updated_text_bytes(to - from, text.len())?;
         // Replacement takes the first selected character's properties. Surrounding runs
@@ -1588,6 +1591,194 @@ impl EditableDocx {
         self.commit(candidate)?;
         self.text_bytes = text_bytes;
         Ok((start, start + text.chars().count(), self.revision))
+    }
+
+    /// Attach a note after a revision-bound range without replacing its label.
+    /// Public offsets count Unicode scalars, including each native OBJ as one scalar.
+    #[pyo3(signature = (paragraph, start, end, revision, text, kind="footnote"))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_note(
+        &mut self,
+        paragraph: usize,
+        start: usize,
+        end: usize,
+        revision: u64,
+        text: &str,
+        kind: &str,
+    ) -> PyResult<u32> {
+        self.check_revision(revision)?;
+        let (part_kind, note_kind, style, reference_style) = note_kind_values(kind)?;
+        let source = self.paragraph(paragraph)?;
+        let (_, offset) = range_offsets(&source.text, start, end)?;
+        let at = self.position(paragraph, offset)?;
+        if at.story != StoryRef::Body {
+            return Err(PyValueError::new_err(
+                "notes require a body paragraph or body table anchor",
+            ));
+        }
+        validate_text(text)?;
+        self.reserve_block()?;
+        if self.note_ids(None)?.len() >= MAX_NOTES {
+            return Err(limit("document exceeds 10000 notes"));
+        }
+        let added_bytes = text
+            .len()
+            .checked_add(wordcraft_doc::para::OBJ.len_utf8())
+            .ok_or_else(|| limit("note text size overflow"))?;
+        let text_bytes = self.updated_text_bytes(0, added_bytes)?;
+        let mut staged = self.copy()?;
+        let mut candidate = staged.document()?.clone();
+        // The native writer supplies the note's own mark in its first paragraph.
+        // Keeping it out of the editable story permits ordinary paragraph replacement;
+        // serialized rendering/conversion reopens the native mark as usual.
+        let body = Paragraph::with_text(text, CharProps::default()).styled(style);
+        let note = candidate
+            .try_add_part(part_kind, vec![wordcraft_doc::para_block(body)])
+            .map_err(model_error)?;
+        candidate
+            .insert_object(
+                &at,
+                InlineObject::NoteRef {
+                    kind: note_kind,
+                    id: note,
+                    custom: String::new(),
+                },
+                &CharProps {
+                    style: Some(reference_style.into()),
+                    ..Default::default()
+                },
+            )
+            .map_err(model_error)?;
+        staged.commit(candidate)?;
+        let child = staged.register_location(StoryRef::Part(note), Path::top(0), false)?;
+        staged.stories.insert(note, vec![child]);
+        staged.text_bytes = text_bytes;
+        *self = staged;
+        Ok(note)
+    }
+
+    #[pyo3(signature = (kind=None))]
+    pub fn note_ids(&self, kind: Option<&str>) -> PyResult<Vec<u32>> {
+        let filter = kind.map(note_kind_values).transpose()?.map(|value| value.0);
+        Ok(self
+            .document()?
+            .parts
+            .iter()
+            .filter_map(|(id, part)| {
+                (matches!(part.kind, PartKind::Footnote | PartKind::Endnote)
+                    && filter.is_none_or(|kind| part.kind == kind))
+                .then_some(*id)
+            })
+            .collect())
+    }
+
+    pub fn note_info(&self, note: u32) -> PyResult<String> {
+        let part = self
+            .document()?
+            .parts
+            .get(&note)
+            .filter(|part| matches!(part.kind, PartKind::Footnote | PartKind::Endnote))
+            .ok_or_else(|| PyIndexError::new_err("unknown note identifier"))?;
+        Ok(json!({"kind": if part.kind == PartKind::Footnote { "footnote" } else { "endnote" }, "story": note}).to_string())
+    }
+
+    pub fn section_note_options(&self, section: usize, kind: &str) -> PyResult<String> {
+        let (_, note, _, _) = note_kind_values(kind)?;
+        let options = self
+            .document()?
+            .note_options(self.section(section)?, note == NoteKind::Endnote);
+        Ok(json!({
+            "placement": note_placement_name(options.pos),
+            "numbering": note_numbering_name(options.num_fmt)?,
+            "start": options.num_start,
+            "restart": note_restart_name(options.num_restart),
+        })
+        .to_string())
+    }
+
+    pub fn set_section_note_options(
+        &mut self,
+        section: usize,
+        kind: &str,
+        patch: &str,
+    ) -> PyResult<()> {
+        let (_, note, _, _) = note_kind_values(kind)?;
+        let endnote = note == NoteKind::Endnote;
+        let mut properties = self.section(section)?.clone();
+        if patch.len() > MAX_FORMAT_PATCH_BYTES {
+            return Err(limit("note options patch exceeds 16 KiB"));
+        }
+        let value: Value = serde_json::from_str(patch)
+            .map_err(|_| PyValueError::new_err("note options require a JSON object"))?;
+        let values = value
+            .as_object()
+            .ok_or_else(|| PyValueError::new_err("note options require a JSON object"))?;
+        let options = if endnote {
+            &mut properties.endnote_pr
+        } else {
+            &mut properties.footnote_pr
+        };
+        for (key, value) in values {
+            match key.as_str() {
+                "placement" => {
+                    options.pos = if value.is_null() {
+                        None
+                    } else {
+                        let placement = match value.as_str() {
+                        Some("page_bottom") if !endnote => NotePos::PageBottom,
+                        Some("beneath_text") if !endnote => NotePos::BeneathText,
+                        Some("section_end") if endnote => NotePos::SectEnd,
+                        Some("document_end") if endnote => NotePos::DocEnd,
+                        _ => return Err(PyValueError::new_err("placement must match the note kind: page_bottom/beneath_text or section_end/document_end")),
+                    };
+                        Some(placement)
+                    }
+                }
+                "numbering" => {
+                    options.num_fmt = if value.is_null() {
+                        None
+                    } else {
+                        Some(parse_note_numbering(value.as_str().unwrap_or(""))?)
+                    }
+                }
+                "start" => {
+                    options.num_start = if value.is_null() {
+                        None
+                    } else {
+                        Some(
+                            value
+                                .as_u64()
+                                .filter(|n| {
+                                    (1..=u64::from(wordcraft_doc::section::MAX_NOTE_START))
+                                        .contains(n)
+                                })
+                                .ok_or_else(|| {
+                                    PyValueError::new_err(
+                                        "note start must be an integer from 1 to 32767",
+                                    )
+                                })? as u32,
+                        )
+                    }
+                }
+                "restart" => {
+                    options.num_restart = if value.is_null() {
+                        None
+                    } else {
+                        Some(match value.as_str() {
+                        Some("continuous") => NoteRestart::Continuous,
+                        Some("each_section") => NoteRestart::EachSect,
+                        Some("each_page") if !endnote => NoteRestart::EachPage,
+                        _ => return Err(PyValueError::new_err("restart must be continuous, each_section, or each_page for footnotes")),
+                    })
+                    }
+                }
+                _ => return Err(PyValueError::new_err(format!("unknown note option: {key}"))),
+            }
+        }
+        let mut candidate = self.document()?.clone();
+        let end = candidate.sections()[section].0;
+        *candidate.section_mut(end) = properties;
+        self.commit(candidate)
     }
 
     pub fn section_ids(&self) -> PyResult<Vec<usize>> {
@@ -2017,9 +2208,10 @@ impl EditableDocx {
 
     pub fn story_paragraph_ids(&self, story: u32) -> PyResult<Vec<usize>> {
         self.document()?;
-        self.stories.get(&story).cloned().ok_or_else(|| {
-            PyIndexError::new_err("story index does not identify an owned header or footer")
-        })
+        self.stories
+            .get(&story)
+            .cloned()
+            .ok_or_else(|| PyIndexError::new_err("story index does not identify an owned story"))
     }
 
     pub fn story_add_paragraph(&mut self, story: u32, text: &str) -> PyResult<usize> {
@@ -2036,7 +2228,15 @@ impl EditableDocx {
             .parts
             .get_mut(&story)
             .ok_or_else(|| PyIndexError::new_err("story is missing from the native model"))?;
-        let paragraph = Paragraph::with_text(text, CharProps::default());
+        let paragraph = match part.kind {
+            PartKind::Footnote => {
+                Paragraph::with_text(text, CharProps::default()).styled("FootnoteText")
+            }
+            PartKind::Endnote => {
+                Paragraph::with_text(text, CharProps::default()).styled("EndnoteText")
+            }
+            _ => Paragraph::with_text(text, CharProps::default()),
+        };
         let index = if ids.is_empty() {
             part.blocks[0] = wordcraft_doc::para_block(paragraph);
             0
@@ -2438,6 +2638,21 @@ impl EditableDocx {
         document.table_mut(story, &path).map_err(model_error)
     }
     fn commit(&mut self, document: Document) -> PyResult<()> {
+        // Native generic range/table edits do not repair semantic references. Existing
+        // marker identities and multiplicities must survive every ordinary mutation.
+        // New notes may add an identity; removing or duplicating one is unsupported.
+        let existing = semantic_anchors(self.document()?);
+        if !existing.is_empty() {
+            let next = semantic_anchors(&document);
+            if existing
+                .iter()
+                .any(|(key, count)| next.get(key) != Some(count))
+            {
+                return Err(EngineError::Unsupported(
+                    "edit would remove or duplicate a note, bookmark or comment anchor; semantic deletion is not available".into(),
+                ).into());
+            }
+        }
         if hyperlink_bytes(&document) > MAX_LINK_BYTES {
             return Err(limit("document hyperlink targets exceed 16 MiB"));
         }
@@ -2504,6 +2719,135 @@ impl EditableDocx {
         }
         Ok(total)
     }
+}
+
+fn note_kind_values(kind: &str) -> PyResult<(PartKind, NoteKind, &'static str, &'static str)> {
+    match kind {
+        "footnote" => Ok((
+            PartKind::Footnote,
+            NoteKind::Footnote,
+            "FootnoteText",
+            "FootnoteReference",
+        )),
+        "endnote" => Ok((
+            PartKind::Endnote,
+            NoteKind::Endnote,
+            "EndnoteText",
+            "EndnoteReference",
+        )),
+        _ => Err(PyValueError::new_err(
+            "note kind must be footnote or endnote",
+        )),
+    }
+}
+
+fn note_placement_name(value: NotePos) -> &'static str {
+    match value {
+        NotePos::PageBottom => "page_bottom",
+        NotePos::BeneathText => "beneath_text",
+        NotePos::SectEnd => "section_end",
+        NotePos::DocEnd => "document_end",
+    }
+}
+
+fn note_restart_name(value: NoteRestart) -> &'static str {
+    match value {
+        NoteRestart::Continuous => "continuous",
+        NoteRestart::EachSect => "each_section",
+        NoteRestart::EachPage => "each_page",
+    }
+}
+
+const NOTE_NUMBERING: &[(&str, NumFormat)] = &[
+    ("decimal", NumFormat::Decimal),
+    ("upper_roman", NumFormat::UpperRoman),
+    ("lower_roman", NumFormat::LowerRoman),
+    ("upper_letter", NumFormat::UpperLetter),
+    ("lower_letter", NumFormat::LowerLetter),
+    ("chicago", NumFormat::Chicago),
+];
+
+fn parse_note_numbering(value: &str) -> PyResult<NumFormat> {
+    NOTE_NUMBERING.iter().find(|(name, _)| *name == value).map(|(_, format)| *format)
+        .ok_or_else(|| PyValueError::new_err("numbering must be decimal, upper_roman, lower_roman, upper_letter, lower_letter or chicago"))
+}
+
+fn note_numbering_name(value: NumFormat) -> PyResult<&'static str> {
+    NOTE_NUMBERING
+        .iter()
+        .find(|(_, format)| *format == value)
+        .map(|(name, _)| *name)
+        .ok_or_else(|| {
+            EngineError::Unsupported(
+                "native note numbering is outside the supported authoring subset".into(),
+            )
+            .into()
+        })
+}
+
+fn reject_semantic_range(paragraph: &Paragraph, start: usize, end: usize) -> PyResult<()> {
+    if paragraph
+        .object_offsets()
+        .into_iter()
+        .zip(&paragraph.objects)
+        .any(|(offset, object)| {
+            start <= offset
+                && offset < end
+                && matches!(
+                    object,
+                    InlineObject::NoteRef { .. }
+                        | InlineObject::BookmarkStart { .. }
+                        | InlineObject::BookmarkEnd { .. }
+                        | InlineObject::CommentStart { .. }
+                        | InlineObject::CommentEnd { .. }
+                )
+        })
+    {
+        return Err(EngineError::Unsupported(
+            "text replacement cannot remove note, bookmark or comment anchors".into(),
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn semantic_anchors(document: &Document) -> BTreeMap<(u8, String), usize> {
+    let mut anchors = BTreeMap::new();
+    let mut pending: Vec<&Block> = document
+        .body
+        .iter()
+        .chain(document.parts.values().flat_map(|part| part.blocks.iter()))
+        .map(AsRef::as_ref)
+        .collect();
+    while let Some(block) = pending.pop() {
+        match block {
+            Block::Para(paragraph) => {
+                for object in &paragraph.objects {
+                    let key = match object {
+                        InlineObject::NoteRef { kind, id, .. } => (
+                            if *kind == NoteKind::Footnote { 0 } else { 1 },
+                            id.to_string(),
+                        ),
+                        InlineObject::BookmarkStart { name } => (2, name.clone()),
+                        InlineObject::BookmarkEnd { name } => (3, name.clone()),
+                        InlineObject::CommentStart { id } => (4, id.to_string()),
+                        InlineObject::CommentEnd { id } => (5, id.to_string()),
+                        _ => continue,
+                    };
+                    *anchors.entry(key).or_insert(0) += 1;
+                }
+            }
+            Block::Table(table) => pending.extend(
+                table
+                    .rows
+                    .iter()
+                    .flat_map(|row| row.cells.iter())
+                    .flat_map(|cell| cell.blocks.iter())
+                    .map(AsRef::as_ref),
+            ),
+        }
+    }
+    anchors
 }
 
 fn style_kind(kind: &str) -> PyResult<StyleKind> {
@@ -5633,5 +5977,382 @@ mod tests {
         let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
         assert!(reopened.plain_text(StoryRef::Body).contains('A'));
         assert!(reopened.plain_text(StoryRef::Body).contains('B'));
+    }
+
+    #[test]
+    fn notes_attach_after_unicode_ranges_and_keep_editable_owned_stories() {
+        let mut document = EditableDocx::new();
+        let paragraph = document.add_paragraph("α😀 cited tail").unwrap();
+        let revision = document.revision().unwrap();
+        let first = document
+            .add_note(paragraph, 3, 8, revision, "First note", "footnote")
+            .unwrap();
+        assert_eq!(
+            document.paragraph_text(paragraph).unwrap(),
+            "α😀 cited\u{fffc} tail"
+        );
+        assert!(document
+            .add_note(paragraph, 0, 1, revision, "stale", "footnote")
+            .is_err());
+        let last = document.paragraph_text(paragraph).unwrap().chars().count();
+        let second = document
+            .add_note(
+                paragraph,
+                last,
+                last,
+                document.revision().unwrap(),
+                "Second note",
+                "endnote",
+            )
+            .unwrap();
+        assert_eq!(document.note_ids(None).unwrap(), vec![first, second]);
+        assert_eq!(document.note_ids(Some("footnote")).unwrap(), vec![first]);
+        assert_eq!(document.note_ids(Some("endnote")).unwrap(), vec![second]);
+        let note_info: Value = serde_json::from_str(&document.note_info(first).unwrap()).unwrap();
+        assert_eq!(note_info["kind"], "footnote");
+        assert_eq!(note_info["story"], first);
+        let note_para = document.story_paragraph_ids(first).unwrap()[0];
+        assert_eq!(document.paragraph_text(note_para).unwrap(), "First note");
+        document
+            .set_paragraph_text(note_para, "Edited λ note")
+            .unwrap();
+        let extra = document.story_add_paragraph(first, "More detail").unwrap();
+        assert_eq!(document.paragraph_style(extra).unwrap(), "Footnote Text");
+        let mut copy = document.copy().unwrap();
+        copy.set_paragraph_text(note_para, "Copy only").unwrap();
+        assert_eq!(document.paragraph_text(note_para).unwrap(), "Edited λ note");
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        let footnotes = reopened
+            .parts
+            .iter()
+            .filter(|(_, part)| part.kind == PartKind::Footnote)
+            .collect::<Vec<_>>();
+        assert_eq!(footnotes.len(), 1);
+        assert!(reopened
+            .plain_text(StoryRef::Part(*footnotes[0].0))
+            .contains("Edited λ note"));
+        assert!(reopened
+            .plain_text(StoryRef::Part(*footnotes[0].0))
+            .contains("More detail"));
+        assert!(!reopened
+            .plain_text(StoryRef::Body)
+            .contains("Edited λ note"));
+        document.close();
+        assert!(document.note_ids(None).is_err());
+        assert!(document.note_info(first).is_err());
+        assert_eq!(copy.paragraph_text(note_para).unwrap(), "Copy only");
+    }
+
+    #[test]
+    fn notes_reject_destructive_edits_but_follow_surrounding_text_and_table_moves() {
+        let mut document = EditableDocx::new();
+        let table = document
+            .add_table(vec![
+                vec!["safe".into(), "row".into()],
+                vec!["anchor".into(), "keep".into()],
+            ])
+            .unwrap();
+        let paragraph = document.cell_paragraph_ids(table, 1, 0).unwrap()[0];
+        let note = document
+            .add_note(
+                paragraph,
+                0,
+                6,
+                document.revision().unwrap(),
+                "Note text",
+                "footnote",
+            )
+            .unwrap();
+        let snapshot = document.document().unwrap().clone();
+        let revision = document.revision().unwrap();
+        let generation = document.table_generation(table).unwrap();
+        assert!(document
+            .set_paragraph_text(paragraph, "replacement")
+            .is_err());
+        assert!(document
+            .replace_range(paragraph, 6, 7, revision, "")
+            .is_err());
+        assert!(document.set_cell_text(table, 1, 0, "replacement").is_err());
+        assert!(document.delete_row(table, 1).is_err());
+        assert!(document.delete_column(table, 0).is_err());
+        assert_eq!(document.document().unwrap(), &snapshot);
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.table_generation(table).unwrap(), generation);
+        document
+            .replace_range(paragraph, 0, 6, revision, "longer anchor")
+            .unwrap();
+        assert_eq!(
+            document.paragraph_text(paragraph).unwrap(),
+            "longer anchor\u{fffc}"
+        );
+        document.delete_row(table, 0).unwrap();
+        assert!(document.paragraph_text(paragraph).is_err());
+        let moved = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
+        assert_eq!(
+            document.paragraph_text(moved).unwrap(),
+            "longer anchor\u{fffc}"
+        );
+        assert_eq!(document.note_ids(None).unwrap(), vec![note]);
+        document.merge_cells(table, 0, 0, 0, 1).unwrap();
+        let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+        assert!(reopened
+            .plain_text(StoryRef::Body)
+            .contains("longer anchor"));
+        assert_eq!(
+            reopened
+                .parts
+                .values()
+                .filter(|part| part.kind == PartKind::Footnote)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn notes_nested_body_tables_reopen_render_and_export_without_body_duplication() {
+        let mut document = EditableDocx::new();
+        let paragraph = document.add_paragraph("Body anchor").unwrap();
+        document
+            .add_note(
+                paragraph,
+                0,
+                11,
+                document.revision().unwrap(),
+                "Footnote detail",
+                "footnote",
+            )
+            .unwrap();
+        let outer = document.add_table(vec![vec!["Outer".into()]]).unwrap();
+        let inner = document
+            .cell_add_table(outer, 0, 0, vec![vec!["Nested anchor".into()]])
+            .unwrap();
+        let nested = document.cell_paragraph_ids(inner, 0, 0).unwrap()[0];
+        document
+            .add_note(
+                nested,
+                0,
+                13,
+                document.revision().unwrap(),
+                "Nested note detail",
+                "footnote",
+            )
+            .unwrap();
+        document
+            .add_note(
+                paragraph,
+                0,
+                4,
+                document.revision().unwrap(),
+                "Endnote detail",
+                "endnote",
+            )
+            .unwrap();
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        assert_eq!(
+            reopened
+                .parts
+                .values()
+                .filter(|part| matches!(part.kind, PartKind::Footnote | PartKind::Endnote))
+                .count(),
+            3
+        );
+        assert!(!reopened.plain_text(StoryRef::Body).contains("detail"));
+        let png = crate::docx::render(&bytes, 0, 72.0, None).unwrap();
+        assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        let extracted = crate::pdf::extract(&pdf, None).unwrap();
+        let text = extracted
+            .pages
+            .iter()
+            .flat_map(|page| &page.blocks)
+            .map(|block| block.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        for label in ["Footnote detail", "Nested note detail", "Endnote detail"] {
+            assert!(text.contains(label), "{label}: {text}");
+            assert_eq!(text.matches(label).count(), 1, "{text}");
+        }
+        let footnote = extracted.pages[0]
+            .blocks
+            .iter()
+            .find(|block| block.text.contains("Footnote detail"))
+            .unwrap();
+        assert!(
+            footnote.bbox.unwrap()[1] > 600.0,
+            "footnote must be at page bottom: {:?}",
+            footnote.bbox
+        );
+        let payload = crate::docx::extract(&bytes, None).unwrap();
+        assert_eq!(
+            payload
+                .stories
+                .iter()
+                .filter(|story| matches!(story.kind.as_str(), "footnote" | "endnote"))
+                .count(),
+            3
+        );
+        assert!(!payload
+            .pages
+            .iter()
+            .flat_map(|page| &page.blocks)
+            .any(|block| block.text.contains("note detail")));
+    }
+
+    #[test]
+    fn note_options_inherit_roundtrip_and_reject_ineffective_values_atomically() {
+        let mut document = EditableDocx::new();
+        let defaults: Value =
+            serde_json::from_str(&document.section_note_options(0, "endnote").unwrap()).unwrap();
+        assert_eq!(
+            defaults,
+            json!({"placement":"document_end","numbering":"lower_roman","start":1,"restart":"continuous"})
+        );
+        document.set_section_note_options(0, "footnote", r#"{"placement":"beneath_text","numbering":"upper_roman","start":4,"restart":"each_page"}"#).unwrap();
+        document.set_section_note_options(0, "endnote", r#"{"placement":"section_end","numbering":"upper_letter","start":3,"restart":"each_section"}"#).unwrap();
+        let section = document.add_section("next_page").unwrap();
+        document
+            .set_section_note_options(
+                section,
+                "footnote",
+                r#"{"placement":null,"numbering":null,"start":null,"restart":null}"#,
+            )
+            .unwrap();
+        let reset: Value =
+            serde_json::from_str(&document.section_note_options(section, "footnote").unwrap())
+                .unwrap();
+        assert_eq!(
+            reset,
+            json!({"placement":"page_bottom","numbering":"decimal","start":1,"restart":"continuous"})
+        );
+        let revision = document.revision().unwrap();
+        let snapshot = document.document().unwrap().clone();
+        for patch in [
+            r#"{"start":0}"#,
+            r#"{"start":32768}"#,
+            r#"{"start":true}"#,
+            r#"{"start":1.5}"#,
+            r#"{"numbering":"unknown"}"#,
+            r#"{"placement":"document_end"}"#,
+            r#"{"unexpected":true}"#,
+            "[]",
+        ] {
+            assert!(
+                document
+                    .set_section_note_options(0, "footnote", patch)
+                    .is_err(),
+                "{patch}"
+            );
+        }
+        assert!(document
+            .set_section_note_options(0, "endnote", r#"{"restart":"each_page"}"#)
+            .is_err());
+        assert!(document
+            .set_section_note_options(0, "endnote", r#"{"placement":"page_bottom"}"#)
+            .is_err());
+        assert!(document.section_note_options(99, "footnote").is_err());
+        assert!(document.section_note_options(0, "unknown").is_err());
+        assert_eq!(document.document().unwrap(), &snapshot);
+        assert_eq!(document.revision().unwrap(), revision);
+        let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+        let sections = reopened.sections();
+        let first = reopened.note_options(sections[0].1, false);
+        assert_eq!(first.pos, NotePos::BeneathText);
+        assert_eq!(first.num_fmt, NumFormat::UpperRoman);
+        assert_eq!(first.num_start, 4);
+        assert_eq!(first.num_restart, NoteRestart::EachPage);
+        assert_eq!(
+            reopened.note_options(sections[0].1, true).pos,
+            NotePos::SectEnd
+        );
+        assert_eq!(reopened.note_options(sections[1].1, false).num_start, 1);
+    }
+
+    #[test]
+    fn notes_validate_stories_bounds_and_failed_mutations_without_consuming_ids() {
+        let mut document = EditableDocx::new();
+        let paragraph = document.add_paragraph("Source").unwrap();
+        let header = document.ensure_story("header", "default", 0).unwrap();
+        let header_para = document.story_add_paragraph(header, "Header").unwrap();
+        let revision = document.revision().unwrap();
+        let snapshot = document.document().unwrap().clone();
+        assert!(document
+            .add_note(header_para, 0, 6, revision, "bad", "footnote")
+            .is_err());
+        assert!(document
+            .add_note(paragraph, 0, 7, revision, "bad", "footnote")
+            .is_err());
+        assert!(document
+            .add_note(paragraph, 0, 1, revision, "bad", "unknown")
+            .is_err());
+        assert!(document
+            .add_note(paragraph, 0, 1, revision, "bad\rtext", "footnote")
+            .is_err());
+        assert!(document
+            .add_note(
+                paragraph,
+                0,
+                1,
+                revision,
+                &"x".repeat(MAX_TEXT_BYTES + 1),
+                "footnote"
+            )
+            .is_err());
+        assert_eq!(document.document().unwrap(), &snapshot);
+        assert_eq!(document.revision().unwrap(), revision);
+        let first = document
+            .add_note(paragraph, 0, 1, revision, "First", "footnote")
+            .unwrap();
+        let own = document.story_paragraph_ids(first).unwrap()[0];
+        assert!(document
+            .add_note(own, 0, 1, document.revision().unwrap(), "nested", "endnote")
+            .is_err());
+        document.text_bytes = MAX_DOCUMENT_TEXT_BYTES;
+        let revision = document.revision().unwrap();
+        assert!(document
+            .add_note(paragraph, 0, 1, revision, "over budget", "footnote")
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.note_ids(None).unwrap(), vec![first]);
+    }
+
+    #[test]
+    fn note_count_and_anchor_bytes_are_bounded_even_for_empty_notes() {
+        let mut document = EditableDocx::new();
+        let paragraph = document.add_paragraph("").unwrap();
+        document.text_bytes = MAX_DOCUMENT_TEXT_BYTES - wordcraft_doc::para::OBJ.len_utf8();
+        document
+            .add_note(
+                paragraph,
+                0,
+                0,
+                document.revision().unwrap(),
+                "",
+                "footnote",
+            )
+            .unwrap();
+        assert_eq!(document.text_bytes, MAX_DOCUMENT_TEXT_BYTES);
+        let revision = document.revision().unwrap();
+        assert!(document
+            .add_note(paragraph, 0, 0, revision, "", "endnote")
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        let mut document = EditableDocx::new();
+        let paragraph = document.add_paragraph("Source").unwrap();
+        for _ in 0..MAX_NOTES {
+            document
+                .document
+                .as_mut()
+                .unwrap()
+                .try_add_part(PartKind::Footnote, Vec::new())
+                .unwrap();
+        }
+        let revision = document.revision().unwrap();
+        assert!(document
+            .add_note(paragraph, 0, 0, revision, "", "footnote")
+            .is_err());
+        assert_eq!(document.note_ids(None).unwrap().len(), MAX_NOTES);
+        assert_eq!(document.revision().unwrap(), revision);
     }
 }

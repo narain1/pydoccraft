@@ -8,6 +8,11 @@ pub fn pdf_to_docx(data: &[u8], password: Option<&str>) -> Result<Vec<u8>, Engin
     if info.pages.is_empty() {
         return Err(EngineError::Malformed("PDF contains no pages".into()));
     }
+    if !info.fields.is_empty() {
+        return Err(EngineError::Unsupported(
+            "PDF-to-DOCX conversion cannot preserve active form appearances; flatten owned fields first".into(),
+        ));
+    }
     let cos = pdfcraft_cos::Document::open_with_password(bytes, password)
         .map_err(|error| EngineError::Malformed(format!("invalid PDF object graph: {error}")))?;
 

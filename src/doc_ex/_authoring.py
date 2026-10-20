@@ -53,6 +53,13 @@ class StyleFormatting(_CharacterProperties, ParagraphFormatting):
     pass
 
 
+class NoteOptions(TypedDict, total=False):
+    placement: str | None
+    numbering: str | None
+    start: int | None
+    restart: str | None
+
+
 def _format_patch(values, *, rgb_highlight: bool = False) -> str:
     # Preserve omission versus explicit None; native adapters own allowed keys.
     if len(values) > 32:
@@ -217,6 +224,7 @@ class EditableDocument:
         self._page_generation = 0
         self._annotation_generations = {}
         self._bookmark_generation = 0
+        self._field_generation = 0
 
     def _ensure_open(self):
         if self._closed:
@@ -361,6 +369,10 @@ class _Collection(Sequence[_Item], Generic[_Item]):
 
 class WordDocument(EditableDocument):
     _format = "docx"
+
+    @property
+    def notes(self) -> Notes:
+        return Notes(self)
 
     @property
     def styles(self) -> Styles:
@@ -763,6 +775,19 @@ class Section:
             raise TypeError("column count must be an integer and separator a bool")
         self._set(columns=[operator.index(count), pt(gap), separator])
 
+    def note_options(self, *, kind: str = "footnote") -> dict:
+        """Return resolved native numbering and placement for this section."""
+        return json.loads(self._owner._call("section_note_options", self._id, kind))
+
+    def configure_notes(self, *, kind: str = "footnote", **options: Unpack[NoteOptions]) -> None:
+        """Update placement/numbering/start/restart; None inherits native defaults."""
+        if options.keys() - {"placement", "numbering", "start", "restart"}:
+            raise ValueError("note options must be placement, numbering, start or restart")
+        if any(value is not None and not isinstance(value, (str, int)) for value in options.values()):
+            raise TypeError("note options must be strings, integer start or None")
+        self._owner._call("set_section_note_options", self._id, kind,
+                          _format_patch(options), _change=True)
+
     def header(self, variant: str = "default") -> EditableStory:
         """Access this section's default, first-page or even-page header."""
         if variant not in {"default", "first", "even"}:
@@ -792,6 +817,9 @@ class EditableStory:
     def _identifier(self):
         return self._owner._call("story_id", self._kind, self._variant, self._section)
 
+    def _ensure_identifier(self, native):
+        return native.ensure_story(self._kind, self._variant, self._section)
+
     @property
     def paragraphs(self) -> _Collection[Paragraph]:
         def identifiers():
@@ -802,12 +830,47 @@ class EditableStory:
     def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
         style = _style_reference(style, self._owner)
         def append(native):
-            story = native.ensure_story(self._kind, self._variant, self._section)
+            story = self._ensure_identifier(native)
             identifier = native.story_add_paragraph(story, text)
             if style is not None:
                 native.set_paragraph_style(identifier, style)
             return identifier
         return Paragraph(self._owner, self._owner._atomic(append))
+
+
+class Notes(_Collection["Note"]):
+    """Native footnote/endnote stories in creation order."""
+    def __init__(self, owner: WordDocument):
+        super().__init__(owner, lambda: owner._call("note_ids"), Note)
+
+    def add(self, reference: TextRange, text: str = "", *, kind: str = "footnote") -> Note:
+        """Attach a note at a same-document body range's end, retaining its text."""
+        if not isinstance(reference, TextRange) or not isinstance(reference._paragraph, Paragraph):
+            raise TypeError("reference must be a DOCX paragraph TextRange")
+        paragraph = reference._paragraph
+        if paragraph._owner is not self._owner:
+            raise ValueError("reference must belong to this document")
+        identifier = self._owner._call("add_note", paragraph._id, reference._start,
+                                      reference._end, reference._revision, text, kind, _change=True)
+        _, reference._revision = self._owner._call("text_range", paragraph._id,
+                                                  reference._start, reference._end)
+        return Note(self._owner, identifier)
+
+
+class Note(EditableStory):
+    """An editable native note story sharing the paragraph and range APIs."""
+    def __init__(self, owner: WordDocument, identifier: int):
+        self._owner, self._id = owner, identifier
+
+    def _identifier(self):
+        return json.loads(self._owner._call("note_info", self._id))["story"]
+
+    def _ensure_identifier(self, native):
+        return json.loads(native.note_info(self._id))["story"]
+
+    @property
+    def kind(self) -> str:
+        return json.loads(self._owner._call("note_info", self._id))["kind"]
 
 
 class Picture:
@@ -1105,6 +1168,10 @@ class PdfDocument(EditableDocument):
     _format = "pdf"
 
     @property
+    def fields(self) -> PdfFields:
+        return PdfFields(self)
+
+    @property
     def metadata(self):
         """A snapshot of supported document-info fields."""
         return json.loads(self._call("metadata"))
@@ -1137,6 +1204,129 @@ class PdfDocument(EditableDocument):
             return super().copy()
         indices = [_index(index, self.page_count) for index in pages]
         return type(self)(self._call("subset", indices))
+
+
+class PdfFields:
+    """Name-indexed fields; iteration returns checked field handles."""
+    def __init__(self, owner: PdfDocument, page: PdfPage | None = None):
+        self._owner, self._page = owner, page
+
+    def _page_number(self):
+        self._owner._ensure_open()
+        return None if self._page is None else self._page.number
+
+    def _items(self):
+        return json.loads(self._owner._call("fields", self._page_number()))
+
+    def __len__(self):
+        return len(self._items())
+
+    def __iter__(self) -> Iterator[PdfField]:
+        generation = (self._owner._field_generation, self._owner._page_generation)
+        for item in self._items():
+            self._page_number()
+            if generation != (self._owner._field_generation, self._owner._page_generation):
+                raise ValueError("field iteration is stale after structural edits")
+            yield PdfField(self._owner, item["name"])
+
+    def __getitem__(self, name: str) -> PdfField:
+        if not isinstance(name, str):
+            raise TypeError("fields are indexed by their immutable names")
+        self._page_number()
+        if not any(item["name"] == name for item in self._items()):
+            raise KeyError(name)
+        return PdfField(self._owner, name)
+
+    def __delitem__(self, name: str) -> None:
+        field = self[name]
+        page = field.page.number
+        self._owner._call("delete_field", field.name, _change=True)
+        self._owner._field_generation += 1
+        self._owner._annotation_generations[page] = self._owner._annotation_generations.get(page, 0) + 1
+
+    def add(self, name: str, box, *, kind: str = "text", options=()) -> PdfField:
+        """Create one text, checkbox or choice widget on this page."""
+        if self._page is None:
+            raise ValueError("add fields through page.fields")
+        page = self._page_number()
+        if not isinstance(box, (tuple, list)) or len(box) != 4:
+            raise TypeError("box must be (x, y, width, height) in top-left points")
+        if isinstance(options, (str, bytes)):
+            raise TypeError("options must be a sequence of choice strings")
+        values = []
+        for value in options:
+            if len(values) >= 256:
+                raise ValueError("choice fields must not exceed 256 options")
+            if not isinstance(value, str):
+                raise TypeError("choice options must be strings")
+            if len(value) > 4096 or len(value.encode("utf-8")) > 4096:
+                raise ValueError("choice options must not exceed 4096 bytes")
+            values.append(value)
+        identifier = self._owner._call("add_field", page, name, kind, tuple(map(pt, box)), values, _change=True)
+        self._owner._field_generation += 1
+        return PdfField(self._owner, identifier)
+
+    def flatten(self) -> int:
+        """Replace all owned form widgets with their visible page content."""
+        if self._page is not None:
+            raise ValueError("flatten all fields through document.fields")
+        count = self._owner._call("flatten_fields", _change=True)
+        if count:
+            self._owner._field_generation += 1
+            self._owner._annotation_generations.clear()
+            self._owner._page_generation += 1
+        return count
+
+
+class PdfField:
+    """One owned field with an immutable name and checked typed value."""
+    def __init__(self, owner: PdfDocument, name: str):
+        self._owner, self._name = owner, name
+        self._generation = (owner._field_generation, owner._page_generation)
+
+    def _check(self):
+        self._owner._ensure_open()
+        if self._generation != (self._owner._field_generation, self._owner._page_generation):
+            raise ValueError("field handle is stale after structural edits; retrieve it again")
+
+    def _info(self):
+        self._check()
+        return json.loads(self._owner._call("field_info", self._name))
+
+    @property
+    def name(self) -> str:
+        self._check()
+        return self._name
+
+    @property
+    def kind(self) -> str:
+        return self._info()["kind"]
+
+    @property
+    def options(self) -> tuple[str, ...]:
+        return tuple(self._info()["options"])
+
+    @property
+    def page(self) -> PdfPage:
+        return PdfPage(self._owner, self._info()["widgets"][0]["page"])
+
+    @property
+    def box(self) -> tuple[float, float, float, float]:
+        return tuple(self._info()["widgets"][0]["box"])
+
+    @property
+    def value(self) -> str | bool | None:
+        return self._info()["value"]
+
+    @value.setter
+    def value(self, value: str | bool | None):
+        self._check()
+        if value is not None and not isinstance(value, (str, bool)):
+            raise TypeError("field values must be text, a checkbox bool or None for a choice")
+        if isinstance(value, str) and (len(value) > 4096 or len(value.encode("utf-8")) > 4096):
+            raise ValueError("field values must not exceed 4096 bytes")
+        self._owner._call("set_field_value", self._name,
+                          json.dumps(value, ensure_ascii=False, allow_nan=False), _change=True)
 
 
 class Bookmarks(_Collection["Bookmark"]):
@@ -1337,6 +1527,11 @@ class PdfPage:
         self._owner._call("rotate_page", self._id, degrees, _change=True)
         self._owner._page_generation += 1
         self._generation = self._owner._page_generation
+
+    @property
+    def fields(self) -> PdfFields:
+        self._check()
+        return PdfFields(self._owner, self)
 
     @property
     def annotations(self) -> Annotations:
