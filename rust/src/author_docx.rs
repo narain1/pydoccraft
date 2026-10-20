@@ -3339,30 +3339,30 @@ impl EditableDocx {
         {
             return Ok(false);
         }
-        let (removed_text, removed_cells) = content_usage(&part.blocks);
-        let text_bytes = self.updated_text_bytes(removed_text, 0)?;
-        let cell_count = self
-            .cell_count
-            .checked_sub(removed_cells)
-            .ok_or_else(|| limit("document cell accounting underflow"))?;
-        let mut candidate = document.clone();
-        candidate
-            .set_story(StoryRef::Part(id), Vec::new())
-            .map_err(model_error)?;
-        // Semantic/media/field validation completes before publishing any locator changes.
-        self.commit(candidate)?;
-        self.locations
-            .retain(|_, (story, _)| *story != StoryRef::Part(id));
-        self.images.retain(|id| self.locations.contains_key(id));
-        self.table_generations
-            .retain(|id, _| self.locations.contains_key(id));
-        self.cell_placeholders
-            .retain(|(story, _)| *story != StoryRef::Part(id));
-        self.stories.insert(id, Vec::new());
-        self.story_placeholders.insert(id, 0);
-        self.text_bytes = text_bytes;
-        self.cell_count = cell_count;
-        Ok(true)
+        self.clear_owned_story_content(id, Paragraph::new())
+    }
+
+    /// Clear an owned note's content, preserving its external reference and native kind.
+    pub fn clear_note(&mut self, note: u32) -> PyResult<bool> {
+        self.story_paragraph_ids(note)?;
+        let part = self
+            .document()?
+            .parts
+            .get(&note)
+            .ok_or_else(|| PyIndexError::new_err("owned note part is missing"))?;
+        let style = match part.kind {
+            PartKind::Footnote => "FootnoteText",
+            PartKind::Endnote => "EndnoteText",
+            _ => return Err(PyValueError::new_err("story is not an owned note")),
+        };
+        let replacement = Paragraph::new().styled(style);
+        if self.story_placeholders.get(&note) == Some(&0)
+            && part.blocks.len() == 1
+            && *part.blocks[0] == Block::Para(replacement.clone())
+        {
+            return Ok(false);
+        }
+        self.clear_owned_story_content(note, replacement)
     }
 
     pub fn story_paragraph_ids(&self, story: u32) -> PyResult<Vec<usize>> {
@@ -3462,6 +3462,42 @@ impl Default for EditableDocx {
 }
 
 impl EditableDocx {
+    /// Publish bookkeeping only after ordinary semantic/media guards accept the replacement.
+    fn clear_owned_story_content(&mut self, id: u32, replacement: Paragraph) -> PyResult<bool> {
+        let part = self
+            .document()?
+            .parts
+            .get(&id)
+            .ok_or_else(|| PyIndexError::new_err("owned story part is missing"))?;
+        let (removed_text, removed_cells) = content_usage(&part.blocks);
+        let text_bytes = self.updated_text_bytes(removed_text, 0)?;
+        let cell_count = self
+            .cell_count
+            .checked_sub(removed_cells)
+            .ok_or_else(|| limit("document cell accounting underflow"))?;
+        let mut candidate = self.document()?.clone();
+        candidate
+            .set_story(
+                StoryRef::Part(id),
+                vec![wordcraft_doc::para_block(replacement)],
+            )
+            .map_err(model_error)?;
+        // Semantic/media/field validation completes before publishing any locator changes.
+        self.commit(candidate)?;
+        self.locations
+            .retain(|_, (story, _)| *story != StoryRef::Part(id));
+        self.images.retain(|id| self.locations.contains_key(id));
+        self.table_generations
+            .retain(|id, _| self.locations.contains_key(id));
+        self.cell_placeholders
+            .retain(|(story, _)| *story != StoryRef::Part(id));
+        self.stories.insert(id, Vec::new());
+        self.story_placeholders.insert(id, 0);
+        self.text_bytes = text_bytes;
+        self.cell_count = cell_count;
+        Ok(true)
+    }
+
     fn rich_story_width(&self, story: u32) -> PyResult<f32> {
         self.story_paragraph_ids(story)?;
         let document = self.document()?;
@@ -16931,5 +16967,241 @@ mod letter_spacing_tests {
             assert_eq!(d.document().unwrap(), &before);
             assert_eq!(d.revision().unwrap(), revision);
         }
+    }
+}
+
+#[cfg(test)]
+mod note_clear_tests {
+    use super::*;
+
+    fn owned(kind: &str, text: &str) -> (EditableDocx, usize, u32, usize) {
+        let mut document = EditableDocx::new();
+        let body = document.add_paragraph("Anchor").unwrap();
+        let note = document
+            .add_note(body, 0, 6, document.revision().unwrap(), text, kind)
+            .unwrap();
+        let paragraph = document.story_paragraph_ids(note).unwrap()[0];
+        (document, body, note, paragraph)
+    }
+
+    #[test]
+    fn note_clear_native_styled_mark_roundtrip_and_conversion_noop() {
+        pyo3::prepare_freethreaded_python();
+        for kind in ["footnote", "endnote"] {
+            let (mut document, body, note, old) = owned(kind, "EraseMe");
+            let anchors = semantic_anchors(document.document().unwrap());
+            let part_body = document.document().unwrap().parts[&note].body;
+            let old_next = document.next_story_block;
+            assert!(document.clear_note(note).unwrap());
+            assert_eq!(semantic_anchors(document.document().unwrap()), anchors);
+            assert_eq!(document.document().unwrap().parts[&note].body, part_body);
+            assert!(document.paragraph_text(old).is_err());
+            assert!(document.story_paragraph_ids(note).unwrap().is_empty());
+            assert_eq!(document.next_story_block, old_next);
+            assert_eq!(document.paragraph_text(body).unwrap(), "Anchor\u{fffc}");
+            assert_eq!(document.text_bytes, 9);
+            let style = if kind == "footnote" {
+                "FootnoteText"
+            } else {
+                "EndnoteText"
+            };
+            let bytes = document.to_bytes().unwrap();
+            let reopened = wordcraft_docx::read(&bytes).unwrap();
+            let part = reopened
+                .parts
+                .values()
+                .find(|p| matches!(p.kind, PartKind::Footnote | PartKind::Endnote))
+                .unwrap();
+            let Block::Para(paragraph) = part.blocks[0].as_ref() else {
+                panic!("note paragraph")
+            };
+            assert_eq!(paragraph.props.style.as_deref(), Some(style));
+            assert_eq!(
+                paragraph.objects.len(),
+                1,
+                "writer emits one own number mark"
+            );
+            assert!(matches!(paragraph.objects[0], InlineObject::NoteRef { .. }));
+            assert_eq!(paragraph.text, "\u{fffc}");
+            let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+            let text = crate::pdf::extract(&pdf, None)
+                .unwrap()
+                .pages
+                .into_iter()
+                .flat_map(|p| p.blocks)
+                .map(|b| b.text)
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert!(text.contains("Anchor"));
+            assert!(!text.contains("EraseMe"));
+            assert!(crate::docx::render(&bytes, 0, 72.0, None).unwrap().len() > 100);
+            let revision = document.revision().unwrap();
+            assert!(!document.clear_note(note).unwrap());
+            assert_eq!(document.revision().unwrap(), revision);
+            assert_eq!(document.to_bytes().unwrap(), bytes);
+            let other = if kind == "footnote" {
+                "endnote"
+            } else {
+                "footnote"
+            };
+            assert_eq!(document.convert_notes(other).unwrap(), 1);
+            let revision = document.revision().unwrap();
+            assert!(
+                !document.clear_note(note).unwrap(),
+                "conversion keeps canonical synthetic paragraph"
+            );
+            assert_eq!(document.revision().unwrap(), revision);
+            let fresh = document.story_add_paragraph(note, "Fresh").unwrap();
+            assert!(fresh > old);
+            assert_eq!(document.document().unwrap().parts[&note].blocks.len(), 1);
+            assert_eq!(
+                document.paragraph_style(fresh).unwrap(),
+                if other == "footnote" {
+                    "Footnote Text"
+                } else {
+                    "Endnote Text"
+                }
+            );
+            document.close();
+            assert!(document.clear_note(note).is_err());
+        }
+    }
+
+    #[test]
+    fn note_clear_accounting_copies_empty_and_semantic_rollback() {
+        pyo3::prepare_freethreaded_python();
+        let (mut document, body, note, paragraph) = owned("footnote", "");
+        let revision = document.revision().unwrap();
+        assert!(
+            document.clear_note(note).unwrap(),
+            "authored empty paragraph is removed"
+        );
+        assert_eq!(document.revision().unwrap(), revision + 1);
+        assert!(document.paragraph_text(paragraph).is_err());
+        let paragraph = document.story_add_paragraph(note, "abc").unwrap();
+        document.add_paragraph_field(paragraph, "page").unwrap();
+        assert_eq!(document.text_bytes, 15); // 6 body + 3 reference + 3 text + 3 field
+        let mut copied = document.copy().unwrap();
+        copied.text_bytes = MAX_DOCUMENT_TEXT_BYTES;
+        assert!(copied.clear_note(note).unwrap());
+        assert_eq!(copied.text_bytes, MAX_DOCUMENT_TEXT_BYTES - 6);
+        let fresh = copied.story_add_paragraph(note, "123456").unwrap();
+        assert_eq!(copied.text_bytes, MAX_DOCUMENT_TEXT_BYTES);
+        let revision = copied.revision().unwrap();
+        assert!(copied.add_run_patch(fresh, "x", "{}").is_err());
+        assert_eq!(copied.revision().unwrap(), revision);
+        assert_eq!(document.paragraph_text(paragraph).unwrap(), "abc\u{fffc}");
+        assert_eq!(document.paragraph_text(body).unwrap(), "Anchor\u{fffc}");
+        for object in [
+            InlineObject::NoteRef {
+                kind: NoteKind::Footnote,
+                id: note,
+                custom: String::new(),
+            },
+            InlineObject::NoteRef {
+                kind: NoteKind::Footnote,
+                id: 999,
+                custom: String::new(),
+            },
+            InlineObject::BookmarkStart {
+                name: "guarded".into(),
+            },
+            InlineObject::CommentStart { id: 99 },
+        ] {
+            let mut bad = document.copy().unwrap();
+            bad.document
+                .as_mut()
+                .unwrap()
+                .insert_object(
+                    &Pos::new(StoryRef::Part(note), Path::top(0), 0),
+                    object,
+                    &CharProps::default(),
+                )
+                .unwrap();
+            bad.text_bytes += 3;
+            let before = wordcraft_docx::write(bad.document().unwrap()).unwrap();
+            let revision = bad.revision().unwrap();
+            let locations = bad.locations.clone();
+            let stories = bad.stories.clone();
+            let counts = (bad.text_bytes, bad.cell_count, bad.media_bytes);
+            assert!(bad.clear_note(note).is_err());
+            assert_eq!(
+                wordcraft_docx::write(bad.document().unwrap()).unwrap(),
+                before
+            );
+            assert_eq!(bad.revision().unwrap(), revision);
+            assert_eq!(bad.locations, locations);
+            assert_eq!(bad.stories, stories);
+            assert_eq!((bad.text_bytes, bad.cell_count, bad.media_bytes), counts);
+        }
+        assert!(document.clear_note(u32::MAX).is_err());
+        let header = document.ensure_story("header", "default", 0).unwrap();
+        let before = document.to_bytes().unwrap();
+        assert!(document.clear_note(header).is_err());
+        assert_eq!(document.to_bytes().unwrap(), before);
+        let mut missing = document.copy().unwrap();
+        missing.document.as_mut().unwrap().parts.remove(&note);
+        assert!(missing.clear_note(note).is_err());
+    }
+
+    #[test]
+    fn note_clear_native_media_and_cells_reclaim_without_reference_loss() {
+        pyo3::prepare_freethreaded_python();
+        let (mut document, _, note, _) = owned("endnote", "Gone");
+        let mut png = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut png, 1, 1);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&[255, 0, 0])
+                .unwrap();
+        }
+        let picture = document
+            .add_image(&png, Some(10.0), Some(10.0), "shared")
+            .unwrap();
+        let (story, path) = document.location(picture).unwrap();
+        let image = document
+            .document()
+            .unwrap()
+            .para(story, &path)
+            .unwrap()
+            .clone();
+        let mut candidate = document.document().unwrap().clone();
+        candidate
+            .insert_block(StoryRef::Part(note), &Path::top(1), Block::Para(image))
+            .unwrap();
+        let (table, bytes, cells) = document
+            .make_table(vec![vec!["nested".into()]], 100.0)
+            .unwrap();
+        candidate
+            .insert_block(StoryRef::Part(note), &Path::top(2), Block::Table(table))
+            .unwrap();
+        document.commit(candidate).unwrap();
+        document.text_bytes += bytes;
+        document.cell_count += cells;
+        let table = document
+            .register_location(StoryRef::Part(note), Path::top(2), false)
+            .unwrap();
+        let note_picture = document
+            .register_location(StoryRef::Part(note), Path::top(1), true)
+            .unwrap();
+        document.table_generations.insert(table, 0);
+        let copy = document.copy().unwrap();
+        assert!(document.clear_note(note).unwrap());
+        assert_eq!(document.text_bytes, 9);
+        assert_eq!(document.cell_count, 0);
+        assert!(!document.locations.contains_key(&note_picture));
+        assert!(!document.table_generations.contains_key(&table));
+        assert_eq!(document.image_data(picture).unwrap(), png);
+        assert_eq!(document.media_bytes, png.len());
+        document.remove_image(picture).unwrap();
+        assert_eq!(document.media_bytes, 0);
+        assert!(document.document().unwrap().media.is_empty());
+        assert_eq!(copy.media_bytes, png.len());
+        assert_eq!(copy.cell_count, 1);
+        assert_eq!(copy.note_ids(None).unwrap(), vec![note]);
     }
 }

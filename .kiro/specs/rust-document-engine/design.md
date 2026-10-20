@@ -492,3 +492,12 @@ Native resolve::run fills omitted properties from paragraph/list/placeholder def
 ## 75. Validate the cell paragraph before append normalization
 
 _SlideCellParagraph.add_run performs an existing native cell_paragraph_alignment lookup before _format_patch. This checks the canonical target and both generations and returns only an optional static enum without copying paragraph text or introducing a new native endpoint. Existing final add_run_patch validation remains after callbacks and resolves the current stable slide identity. The change is separate from character-spacing support and applies to existing supported formatting keys.
+
+
+## 76. Owned note content clearing
+
+Note.clear uses a private clear_note(id)->bool native call through the existing EditableStory method. It validates owned part kind, builds a canonical styled blank paragraph, and uses public Document.set_story without changing Part.kind/body or external references. The native writer supplies the note's own number mark as it does for existing add_note. The editable owned model never synthesizes an additional own-reference marker.
+
+A small private clear_owned_story_content helper shares only the previous header/footer commit/accounting/publication sequence. It subtracts content_usage charges (excluding only uncharged image markers), runs unchanged ordinary commit validation, then discards that story's child locations/images/table generations/cell placeholders. The story stays owned with an empty explicit paragraph list and a synthetic placeholder at0. Monotonic child IDs are not reset. Header/footer reference/alias/no-op policies remain in their caller; note no-op requires the exact canonical styled paragraph for its current kind.
+
+The bool result controls Python cache invalidation; false does not create a revision. A real clear preserves Note/unrelated handles but follows global range invalidation. Generic protected anchors still reject deletion, including unexpected imported-style own references; there is no semantic exception. Native conversion changes the canonical note style so clear→convert→clear remains a no-op. Blank notes still render their own mark and occupy native layout space.

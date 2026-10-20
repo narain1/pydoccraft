@@ -33,6 +33,7 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(paragraph.add_run(" spaced", letter_spacing=0.3), TextRange)
         assert_type(paragraph[:].format(letter_spacing=None), None)
         assert_type(word.styles.format_defaults(letter_spacing=0), None)
+        assert_type(word.notes.add(paragraph[:], 'Detail').clear(), None)
         assert_type(word.sections[0].header().clear(), None)
         assert_type(word.sections[0].footer('even').clear(), None)
         assert_type(word.add_page_break(), Paragraph)

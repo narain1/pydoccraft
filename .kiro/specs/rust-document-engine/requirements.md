@@ -584,3 +584,11 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 
 1. Existing PPTX cell paragraph add_run SHALL validate its current owner, slide/table/cell and paragraph generations before evaluating caller formatting callbacks. It SHALL retain final native target validation after normalization.
 2. Live slide reordering during normalization SHALL retain the original stable target; callback deletion/reset/close or exceptions SHALL not append text or formatting beyond the callback's own changes. No new public API or broader callback-order guarantee SHALL be introduced.
+
+
+## 76. Owned note content clearing
+
+1. Existing Note.clear SHALL remove owned note content while retaining its part identity, body reference, kind, ordering and section note options. No new public lifecycle handle or deletion method SHALL be added. Native set_story and note-number serialization SHALL own format behavior; cleared notes SHALL retain a canonical FootnoteText/EndnoteText paragraph rather than change to Normal.
+2. A real clear SHALL stage model/resource changes before publishing child invalidation, preserving unrelated owned handles and monotonic identifiers. Existing ordinary semantic-anchor, field/navigation, media and resource guards SHALL remain without a deletion exemption. Whole-document copies SHALL remain independent.
+3. Only an already-cleared canonical synthetic placeholder SHALL be a no-op, preserving bytes, revisions, ranges and render caches, including after native note-kind conversion. An explicitly authored empty paragraph SHALL be removed once. Add-after-clear SHALL reuse the placeholder with a new owned paragraph identity. Closed-owner checks SHALL precede work.
+4. Tests SHALL verify both note kinds, native own marks/styles and source/PDF ink, long-note repagination, exact charged text/field/cell/media reclamation, copy/no-op/stale handles, conversion, protected-anchor rollback and existing header/footer contracts. Imported note editing, semantic reference deletion, rich note insertion and broad DOC5/LAY7 completion SHALL remain excluded.

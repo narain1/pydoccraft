@@ -1317,11 +1317,15 @@ class EditableStory:
         return Pictures(self._owner, identifiers)
 
     def clear(self) -> None:
-        """Remove this owned header/footer's content, retaining its section settings."""
+        """Clear owned story content; a note retains its reference, kind and numbering.
+
+        Existing child handles are invalidated. Repeated clears of the synthetic
+        empty story preserve ranges and render caches.
+        """
         self._owner._ensure_open()
-        if isinstance(self, Note):
-            raise UnsupportedFormatError("clearing notes requires semantic note deletion support")
-        if self._owner._call("clear_story", self._kind, self._variant, self._section):
+        changed = (self._owner._call("clear_note", self._id) if isinstance(self, Note)
+                   else self._owner._call("clear_story", self._kind, self._variant, self._section))
+        if changed:
             self._owner._invalidate()
 
     def add_table(self, rows: _Rows, *, columns: SupportsIndex | None = None) -> EditableTable:

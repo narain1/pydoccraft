@@ -4,7 +4,7 @@ from xml.etree import ElementTree as ET
 from zipfile import ZipFile
 
 import doc_ex
-from doc_ex.errors import DocumentClosedError, UnsupportedFormatError
+from doc_ex.errors import DocumentClosedError
 from test_picture_media import count_color, media_parts, red_picture
 
 W = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
@@ -177,13 +177,14 @@ class StoryClearTests(unittest.TestCase):
             before = document.to_bytes()
             selected = body[:]
             document.render_page(0, dpi=72)
-            cached = document._cached
-            with self.assertRaises(UnsupportedFormatError):
-                note.clear()
-            self.assertEqual(document.to_bytes(), before)
-            self.assertEqual(selected.text, body.text)
-            self.assertIs(document._cached, cached)
-            self.assertEqual(note.paragraphs[0].text, 'Note retained')
+            note.clear()
+            self.assertNotEqual(document.to_bytes(), before)
+            with self.assertRaises(ValueError):
+                _ = selected.text
+            self.assertIsNone(document._cached)
+            self.assertEqual(len(note.paragraphs), 0)
+            self.assertEqual(note.kind, 'footnote')
+            self.assertEqual(len(document.notes), 1)
             document.close()
             for story in (header, footer, note):
                 with self.assertRaises(DocumentClosedError):
