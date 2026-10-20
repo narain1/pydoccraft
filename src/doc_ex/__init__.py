@@ -15,11 +15,11 @@ from .errors import (
     UnsafeArchiveError,
     UnsupportedFormatError,
 )
-from .models import Block, Cell, Image, Link, Table
+from .models import Block, Cell, Image, Link, Story, Table
 from ._authoring import EditableDocument, new, pt, mm, cm, inches
 
 __all__ = [
-    "open", "convert", "new", "pt", "mm", "cm", "inches", "EditableDocument", "Document", "Page", "Block", "Cell", "Table", "Link", "Image",
+    "open", "convert", "new", "pt", "mm", "cm", "inches", "EditableDocument", "Document", "Page", "Block", "Cell", "Table", "Link", "Image", "Story",
     "DocExError", "DocumentClosedError", "MalformedDocumentError", "UnsafeArchiveError",
     "UnsupportedFormatError", "ToolExecutionError", "ToolNotFoundError",
 ]
@@ -62,7 +62,8 @@ def open(path_or_bytes: str | Path | bytes | bytearray | memoryview, filetype: s
     pages = [_page(value) for value in payload["pages"]]
     metadata = dict(payload.get("metadata", {}))
     metadata.setdefault("format", payload["format"])
-    return Document(pages, metadata, data, kind, password)
+    stories = [Story(value["kind"], [_block(block) for block in value.get("blocks", [])], value.get("metadata", {})) for value in payload.get("stories", [])]
+    return Document(pages, metadata, data, kind, password, stories=stories)
 
 
 def convert(source: str | Path | bytes | bytearray | memoryview, output_format: str, *, filetype: str | None = None, password: str | None = None) -> bytes:

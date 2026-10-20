@@ -1,5 +1,21 @@
 # Validation evidence
 
+## 2026-10-20 PR19 independent review corrections (unreleased)
+
+- Reviewed runtime commit `c00e2dee4e1659668ebfb0a2939370020de083d3` against merged main `2340edd867f40cf43b33a5017c190ca01b1d769d`. [CI run 39447521531](https://github.com/narain1/pydoccraft/actions/runs/39447521531) passed formatting, all 45 Rust tests, warnings-denied Clippy, the locked license audit (263 normal/build packages), release wheel build and all 71 installed-wheel Python tests with no skips.
+- Review found and corrected dropped reference-only paragraph anchors, lost leading/consecutive blank pages from explicit page breaks, and repeated paragraph-prefix scans while normalizing references, links and formatting. Regressions cover note-only/text-box-only anchors, native DOCX and PDF blank-page positions, and long Unicode prefixes with many objects, links and formatting runs. The normalization changes use public native ordered objects/run ranges and retain exact character offsets.
+- CI platform: Linux x86_64, Python 3.11.17, Rust 1.95.0; wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`. Wheel size: 16,420,760 bytes; uncompressed native extension: 38,038,256 bytes. Wheel SHA-256: `56ffc0203f45b3d4985d8481b02d1c5e776331084ddb8de0f887e6dc709ba8a4`. Installed package identity was checked against that artifact.
+- Lockfile SHA-256 remains `1b2bcaa846d1ffe42cc844fce299750cf9c288e1aab00a3e8aafc40b7a14b3c9`; all four pinned upstream revisions and the runtime dependency graph are unchanged. These corrections do not complete other open roadmap criteria or establish cross-platform visual fidelity.
+
+## 2026-10-20 DOCX layout controls and auxiliary stories (unreleased)
+
+- Same offline Rust 1.95.0/Linux x86_64/Python 3.11.2 environment and unchanged locked upstream revisions as the authoring baseline.
+- Formatting, 41 full Rust tests and warnings-denied Clippy passed. Clean installed-wheel validation passed 68 Python tests with no skips, including the separately reviewed PPTX CR/CRLF regression.
+- New coverage verifies DOCX rich auxiliary header/footer/note/comment stories, source reference connections, owned values after close, nested-story grid/depth limits, and page-color pixels in both native PNG and PDF-rendered output. Table column widths/borders/row properties round-trip; explicit breaks yield three correctly ordered PDF pages.
+- Wheel: 16,419,239 bytes; uncompressed native extension: 38,033,224 bytes. Wheel SHA-256: `40664a866303fab98964c30c095a654d065924132507031853fbf75356406e34`. Lockfile SHA-256 remains `1b2bcaa846d1ffe42cc844fce299750cf9c288e1aab00a3e8aafc40b7a14b3c9`.
+- Story order is native part-ID order, not an invented original archive ordering. Auxiliary objects have no guessed page assignment. Legacy comments remain in page output for compatibility and are flagged when also exposed as stories. General Office source editing, multiple-section mutation, advanced fills and other unchecked roadmap criteria remain open.
+
+
 ## 2026-10-20 native authoring baseline (unreleased)
 
 - Built offline in the Rust 1.95.0 Debian container on Linux x86_64; Python 3.11.2, Maturin 1.8.1. All builds used `--locked`; upstream revisions remain unchanged from AGENTS.md.

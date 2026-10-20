@@ -79,6 +79,7 @@ with doc_ex.open("slides.pptx") as document:
 | API | Result |
 |---|---|
 | `document.metadata` | Format and document metadata as `dict` |
+| `document.stories` (unreleased) | Owned DOCX auxiliary stories, separate from computed pages |
 | `document.page_count` | Number of normalized pages |
 | `len(document)` | Same as `page_count` |
 | `document[index]` | `Page`; negative indexes are supported |
@@ -206,3 +207,11 @@ All native failures are mapped to stable Python exceptions:
 | `DocumentClosedError` | Operation attempted after closing a document |
 
 `ToolNotFoundError` and `ToolExecutionError` remain exported for compatibility with versions before 0.2.0; the in-process engine does not raise them. Ordinary API validation may raise `FileNotFoundError`, `IndexError`, or `ValueError` as described above.
+
+## Auxiliary DOCX stories (unreleased)
+
+`document.stories` is an ordered list of owned `Story(kind, blocks, metadata)` values. Kinds include `header`, `footer`, `footnote`, `endnote`, `comment`, `text_box` and note separators. Blocks reuse existing paragraph/table/link/image values, including nested cell hierarchy. `story.get_text("text" | "markdown" | "dict" | "json")` and `story.to_dict()` expose content without assigning it to an invented page.
+
+Source block order is preserved within each part. Parts use the upstream model's part-ID order, recorded in metadata; original cross-part archive order is unavailable. Each header/footer part occurs once even if rendered on multiple pages. Links/images/table values have `page=None` in stories, and asset source paths include `story_part_id` for identity. Body note references carry `story_refs` offsets and part IDs when exposed by WordCraft.
+
+Body `Document.to_markdown()` retains its existing projection. Comment stories additionally carry `legacy_page_projection=True` because comments remain in the compatibility page output. Callers combining both projections should choose their desired comment scope explicitly. Stories and their model values remain readable after source closure.

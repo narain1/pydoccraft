@@ -4,12 +4,12 @@ use base64::Engine;
 use serde_json::{json, Map, Value};
 use wordcraft_doc::para::{InlineObject, Paragraph, OBJ};
 use wordcraft_doc::props::VMerge;
-use wordcraft_doc::{Block, Blocks, Document, Path, StoryRef, Table};
+use wordcraft_doc::{Block, Blocks, Document, PartKind, Path, StoryRef, Table};
 use wordcraft_layout::{DocLayout, LayoutCache, LayoutOptions};
 
 use crate::model::{
     BlockPayload, CellPayload, DocumentPayload, ImagePayload, LinkPayload, PagePayload,
-    TablePayload,
+    StoryPayload, TablePayload,
 };
 use crate::EngineError;
 
@@ -20,7 +20,7 @@ pub fn read(data: &[u8], password: Option<&str>) -> Result<Document, EngineError
 
 pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, EngineError> {
     let document = read(data, password)?;
-    validate_table_depth(&document.body)?;
+    validate_stories(&document)?;
     let layout = wordcraft_layout::layout(
         &document,
         &mut LayoutCache::new(),
@@ -78,6 +78,94 @@ struct Adapter<'a> {
     comment_pages: HashMap<u32, usize>,
 }
 
+fn validate_stories(document: &Document) -> Result<(), EngineError> {
+    if document.parts.len() > 10_000 {
+        return Err(EngineError::ResourceLimit(
+            "DOCX exceeds 10000 auxiliary stories".into(),
+        ));
+    }
+    let separators = separator_stories(document);
+    let roots = std::iter::once(&document.body)
+        .chain(document.parts.values().map(|part| &part.blocks))
+        .chain(separators.iter().map(|(_, _, blocks)| *blocks));
+    let mut count = 0usize;
+    let mut text_bytes = 0usize;
+    let mut image_bytes = 0usize;
+    for root in roots {
+        validate_table_depth(root)?;
+        let mut pending = vec![root];
+        while let Some(blocks) = pending.pop() {
+            for block in blocks {
+                count = count.saturating_add(1);
+                match block.as_ref() {
+                    Block::Table(table) => {
+                        for row in &table.rows {
+                            for cell in &row.cells {
+                                pending.push(&cell.blocks);
+                            }
+                        }
+                    }
+                    Block::Para(paragraph) => {
+                        text_bytes = text_bytes.saturating_add(paragraph.text.len());
+                        let mut objects: Vec<_> = paragraph
+                            .objects
+                            .iter()
+                            .map(|object| (object, 0usize))
+                            .collect();
+                        while let Some((object, depth)) = objects.pop() {
+                            count = count.saturating_add(1);
+                            match object {
+                                InlineObject::Image { media, .. } => {
+                                    image_bytes = image_bytes.saturating_add(
+                                        document.media.get(media).map_or(0, |data| data.len()),
+                                    );
+                                }
+                                InlineObject::Group { children, .. } => {
+                                    if depth >= 64 {
+                                        return Err(EngineError::ResourceLimit(
+                                            "DOCX grouped objects exceed 64 levels".into(),
+                                        ));
+                                    }
+                                    objects.extend(
+                                        children.iter().map(|child| (&child.obj, depth + 1)),
+                                    );
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                if count > 100_000
+                    || text_bytes > 32 * 1024 * 1024
+                    || image_bytes > 64 * 1024 * 1024
+                {
+                    return Err(EngineError::ResourceLimit("DOCX extraction exceeds 100000 blocks/objects, 32 MiB text or 64 MiB referenced images".into()));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn separator_stories(document: &Document) -> Vec<(&'static str, &'static str, &Blocks)> {
+    let mut stories = Vec::new();
+    for (kind, separators) in [
+        ("footnote_separator", &document.footnote_separators),
+        ("endnote_separator", &document.endnote_separators),
+    ] {
+        for (role, blocks) in [
+            ("separator", &separators.separator),
+            ("continuation_separator", &separators.continuation_separator),
+            ("continuation_notice", &separators.continuation_notice),
+        ] {
+            if let Some(blocks) = blocks {
+                stories.push((kind, role, blocks));
+            }
+        }
+    }
+    stories
+}
+
 // Bound recursive payload depth before layout and normalization. Each nested table adds
 // several JSON container levels; this also keeps the standard JSON decoder usable.
 fn validate_table_depth(blocks: &Blocks) -> Result<(), EngineError> {
@@ -112,6 +200,165 @@ fn validate_table_depth(blocks: &Blocks) -> Result<(), EngineError> {
 }
 
 impl<'a> Adapter<'a> {
+    fn stories(&self) -> Vec<StoryPayload> {
+        let comments: HashMap<_, _> = self
+            .document
+            .comments
+            .iter()
+            .map(|(id, comment)| (comment.part, (id, comment)))
+            .collect();
+        let mut stories: Vec<_> = self
+            .document
+            .parts
+            .iter()
+            .map(|(id, part)| {
+                let kind = match part.kind {
+                    PartKind::Header => "header",
+                    PartKind::Footer => "footer",
+                    PartKind::Footnote => "footnote",
+                    PartKind::Endnote => "endnote",
+                    PartKind::Comment => "comment",
+                    PartKind::TextBox => "text_box",
+                };
+                let source = Map::from_iter([("story_part_id".into(), json!(id))]);
+                let mut metadata = Map::from_iter([
+                    ("part_id".into(), json!(id)),
+                    (
+                        "ordering".into(),
+                        json!("upstream-part-id; source order within story"),
+                    ),
+                ]);
+                if part.kind == PartKind::TextBox {
+                    if let Some(next) = part.body.next {
+                        metadata.insert("next_part_id".into(), json!(next));
+                    }
+                }
+                if let Some((comment_id, comment)) = comments.get(id) {
+                    metadata.extend(Map::from_iter([
+                        ("comment_id".into(), json!(comment_id)),
+                        ("author".into(), json!(comment.author)),
+                        ("initials".into(), json!(comment.initials)),
+                        ("date".into(), json!(comment.date)),
+                        ("resolved".into(), json!(comment.resolved)),
+                        ("legacy_page_projection".into(), json!(true)),
+                    ]));
+                    if let Some(parent) = comment.parent {
+                        metadata.insert("parent_id".into(), json!(parent));
+                    }
+                }
+                StoryPayload {
+                    kind: kind.into(),
+                    blocks: self.owned_blocks(&part.blocks, &[], None, Some(&source)),
+                    metadata,
+                }
+            })
+            .collect();
+        for (kind, role, blocks) in separator_stories(self.document) {
+            let source = Map::from_iter([
+                ("story_kind".into(), json!(kind)),
+                ("story_role".into(), json!(role)),
+            ]);
+            stories.push(StoryPayload {
+                kind: kind.into(), blocks: self.owned_blocks(blocks, &[], None, Some(&source)),
+                metadata: Map::from_iter([("role".into(), json!(role)), ("ordering".into(), json!("after parts; footnote then endnote; separator, continuation_separator, continuation_notice"))]),
+            });
+        }
+        stories
+    }
+
+    // The same semantic normalizer serves body table cells and independent stories.
+    // A missing page means no layout association is asserted, even for headers that repeat.
+    fn owned_blocks(
+        &self,
+        blocks: &Blocks,
+        prefix: &[u32],
+        page_number: Option<usize>,
+        story: Option<&Map<String, Value>>,
+    ) -> Vec<BlockPayload> {
+        let mut output = Vec::new();
+        for (index, block) in blocks.iter().enumerate() {
+            let path = Path([prefix, &[index as u32]].concat());
+            match block.as_ref() {
+                Block::Para(paragraph) => {
+                    let pages = if page_number.is_some() {
+                        self.paragraph_pages(&path)
+                    } else {
+                        Vec::new()
+                    };
+                    for (segment_index, mut segment) in self
+                        .paragraph_segments(paragraph, &pages)
+                        .into_iter()
+                        .enumerate()
+                    {
+                        segment.set_source(&path.0, segment_index);
+                        let mut payload = BlockPayload::paragraph(segment.text);
+                        payload.style = paragraph.props.style.clone();
+                        if let Some(level) = self
+                            .document
+                            .styles
+                            .resolve_para(&paragraph.props)
+                            .outline_level
+                        {
+                            let level = level.saturating_add(1).clamp(1, 6);
+                            payload.kind = "heading".into();
+                            payload.level = Some(level);
+                            payload
+                                .metadata
+                                .insert("outline_level".into(), json!(level));
+                        }
+                        payload.links = segment.links;
+                        payload.images = segment.images;
+                        payload.metadata.insert("source_path".into(), json!(path.0));
+                        if !segment.story_refs.is_empty() {
+                            payload
+                                .metadata
+                                .insert("story_refs".into(), json!(segment.story_refs));
+                        }
+                        let page = page_number.and_then(|fallback| {
+                            pages
+                                .get(segment_index)
+                                .copied()
+                                .or_else(|| pages.last().copied())
+                                .or(Some(fallback))
+                        });
+                        for link in &mut payload.links {
+                            link.page = page;
+                        }
+                        for image in &mut payload.images {
+                            image.page = page;
+                        }
+                        if let Some(source) = story {
+                            payload.metadata.extend(source.clone());
+                            for metadata in payload
+                                .links
+                                .iter_mut()
+                                .map(|link| &mut link.metadata)
+                                .chain(payload.images.iter_mut().map(|image| &mut image.metadata))
+                            {
+                                metadata.extend(source.clone());
+                            }
+                        }
+                        output.push(payload);
+                    }
+                }
+                Block::Table(table) => output.push(BlockPayload {
+                    kind: "table".into(),
+                    table: Some(
+                        self.table_payload(
+                            table,
+                            &path,
+                            page_number
+                                .map(|_| self.table_page(table, &path).min(self.pages.len() - 1)),
+                            story,
+                        ),
+                    ),
+                    ..BlockPayload::default()
+                }),
+            }
+        }
+        output
+    }
+
     fn new(document: &'a Document, layout: &'a DocLayout) -> Self {
         let page_count = layout.pages.len().max(1);
         let pages = (0..page_count)
@@ -153,10 +400,12 @@ impl<'a> Adapter<'a> {
             "pagination".into(),
             Value::String("wordcraft-layout; blocks assigned to their first computed page".into()),
         );
+        let stories = self.stories();
         DocumentPayload {
             format: "docx".into(),
             metadata,
             pages: self.pages,
+            stories,
         }
     }
 
@@ -185,6 +434,11 @@ impl<'a> Adapter<'a> {
                 self.comment_pages.entry(*id).or_insert(page_number);
             }
             let mut block = BlockPayload::paragraph(segment.text);
+            if !segment.story_refs.is_empty() {
+                block
+                    .metadata
+                    .insert("story_refs".into(), json!(segment.story_refs));
+            }
             block.links = segment.links;
             block.images = segment.images;
             block.style = paragraph.props.style.clone();
@@ -213,7 +467,10 @@ impl<'a> Adapter<'a> {
             let page = &mut self.pages[page_number];
             page.links.extend(block.links.clone());
             page.images.extend(block.images.clone());
-            if !block.text.is_empty() || !block.images.is_empty() {
+            if !block.text.is_empty()
+                || !block.images.is_empty()
+                || block.metadata.contains_key("story_refs")
+            {
                 page.blocks.push(block);
             }
         }
@@ -229,7 +486,7 @@ impl<'a> Adapter<'a> {
                 );
             }
         }
-        let table = self.table_payload(table, path, page_number);
+        let table = self.table_payload(table, path, Some(page_number), None);
         let page = &mut self.pages[page_number];
         page.tables.push(table.clone());
         page.blocks.push(BlockPayload {
@@ -239,7 +496,13 @@ impl<'a> Adapter<'a> {
         });
     }
 
-    fn table_payload(&self, table: &Table, path: &Path, page_number: usize) -> TablePayload {
+    fn table_payload(
+        &self,
+        table: &Table,
+        path: &Path,
+        page_number: Option<usize>,
+        story: Option<&Map<String, Value>>,
+    ) -> TablePayload {
         let mut cells: Vec<Vec<CellPayload>> = Vec::with_capacity(table.rows.len());
         let mut active_merges: HashMap<(usize, usize), (usize, usize)> = HashMap::new();
         for (row_index, row) in table.rows.iter().enumerate() {
@@ -248,63 +511,7 @@ impl<'a> Adapter<'a> {
             let mut output_row = Vec::with_capacity(row.cells.len());
             for (cell_index, cell) in row.cells.iter().enumerate() {
                 let prefix = [path.0.as_slice(), &[row_index as u32, cell_index as u32]].concat();
-                let mut blocks = Vec::new();
-                for (index, block) in cell.blocks.iter().enumerate() {
-                    let block_path = Path([prefix.as_slice(), &[index as u32]].concat());
-                    match block.as_ref() {
-                        Block::Para(paragraph) => {
-                            let pages = self.paragraph_pages(&block_path);
-                            for (segment_index, mut segment) in self
-                                .paragraph_segments(paragraph, &pages)
-                                .into_iter()
-                                .enumerate()
-                            {
-                                segment.set_source(&block_path.0, segment_index);
-                                let mut payload = BlockPayload::paragraph(segment.text);
-                                payload.style = paragraph.props.style.clone();
-                                if let Some(level) = self
-                                    .document
-                                    .styles
-                                    .resolve_para(&paragraph.props)
-                                    .outline_level
-                                {
-                                    let level = level.saturating_add(1).clamp(1, 6);
-                                    payload.kind = "heading".into();
-                                    payload.level = Some(level);
-                                    payload
-                                        .metadata
-                                        .insert("outline_level".into(), Value::from(level));
-                                }
-                                payload.links = segment.links;
-                                payload.images = segment.images;
-                                let page = pages
-                                    .get(segment_index)
-                                    .copied()
-                                    .or_else(|| pages.last().copied())
-                                    .unwrap_or(page_number);
-                                for link in &mut payload.links {
-                                    link.page = Some(page);
-                                }
-                                for image in &mut payload.images {
-                                    image.page = Some(page);
-                                }
-                                blocks.push(payload);
-                            }
-                        }
-                        Block::Table(nested) => blocks.push(BlockPayload {
-                            kind: "table".into(),
-                            table: Some(
-                                self.table_payload(
-                                    nested,
-                                    &block_path,
-                                    self.table_page(nested, &block_path)
-                                        .min(self.pages.len() - 1),
-                                ),
-                            ),
-                            ..BlockPayload::default()
-                        }),
-                    }
-                }
+                let blocks = self.owned_blocks(&cell.blocks, &prefix, page_number, story);
                 let key = (column, cell.span());
                 let mut covered = false;
                 if cell.props.vmerge == VMerge::Restart {
@@ -350,7 +557,7 @@ impl<'a> Adapter<'a> {
                 })
                 .collect(),
             cells,
-            page: Some(page_number),
+            page: page_number,
             metadata: Map::from_iter([("column_widths".into(), json!(table.grid))]),
             ..TablePayload::default()
         }
@@ -496,15 +703,20 @@ impl<'a> Adapter<'a> {
     fn paragraph_segments(&self, paragraph: &Paragraph, pages: &[usize]) -> Vec<Segment> {
         let mut segments = vec![Segment::default()];
         let mut segment_index = 0;
+        let mut objects = paragraph.objects.iter();
+        let mut runs = paragraph.run_ranges().peekable();
         for (offset, character) in paragraph.text.char_indices() {
             if character == '\u{000c}' {
                 segments.push(Segment::default());
                 segment_index += 1;
                 continue;
             }
-            let props = paragraph.props_of_char(offset);
+            while runs.peek().is_some_and(|(range, _)| offset >= range.end) {
+                runs.next();
+            }
+            let props = runs.peek().map_or(&paragraph.mark, |(_, props)| *props);
             if character == OBJ {
-                if let Some(object) = paragraph.object_at(offset) {
+                if let Some(object) = objects.next() {
                     match object {
                         InlineObject::CommentStart { id } | InlineObject::CommentEnd { id } => {
                             segments[segment_index]
@@ -512,6 +724,13 @@ impl<'a> Adapter<'a> {
                                 .push((*id, pages.get(segment_index).copied().unwrap_or(0)));
                         }
                         _ => {
+                            let text_offset = segments[segment_index].char_count;
+                            if let InlineObject::NoteRef { id, kind, custom } = object {
+                                segments[segment_index].story_refs.push(json!({"part_id": id, "kind": match kind { wordcraft_doc::para::NoteKind::Footnote => "footnote", wordcraft_doc::para::NoteKind::Endnote => "endnote" }, "offset": text_offset, "custom_mark": custom}));
+                            }
+                            for id in object.text_boxes() {
+                                segments[segment_index].story_refs.push(json!({"part_id": id, "kind": "text_box", "offset": text_offset}));
+                            }
                             let first_image = segments[segment_index].images.len();
                             self.add_object(object, &mut segments[segment_index].images);
                             for image in &mut segments[segment_index].images[first_image..] {
@@ -614,11 +833,14 @@ impl<'a> Adapter<'a> {
 #[derive(Default)]
 struct Segment {
     text: String,
+    char_count: usize,
     links: Vec<LinkPayload>,
     images: Vec<ImagePayload>,
     comments: Vec<(u32, usize)>,
+    story_refs: Vec<Value>,
     linked_uri: Option<String>,
     linked_start: usize,
+    linked_byte_start: usize,
 }
 
 impl Segment {
@@ -644,25 +866,22 @@ impl Segment {
         if self.linked_uri.as_deref() != link {
             self.finish_link();
             self.linked_uri = link.map(str::to_owned);
-            self.linked_start = self.text.chars().count();
+            self.linked_start = self.char_count;
+            self.linked_byte_start = self.text.len();
         }
         self.text.push(character);
+        self.char_count += 1;
     }
 
     fn finish_link(&mut self) {
         let Some(uri) = self.linked_uri.take() else {
             return;
         };
-        let end = self.text.chars().count();
+        let end = self.char_count;
         if end <= self.linked_start {
             return;
         }
-        let text = self
-            .text
-            .chars()
-            .skip(self.linked_start)
-            .take(end - self.linked_start)
-            .collect();
+        let text = self.text[self.linked_byte_start..].to_owned();
         self.links.push(LinkPayload {
             uri,
             text,
@@ -698,9 +917,10 @@ fn media_type(name: &str) -> &'static str {
 
 fn visible_text(paragraph: &Paragraph) -> String {
     let mut output = String::new();
-    for (offset, character) in paragraph.text.char_indices() {
+    let mut objects = paragraph.objects.iter();
+    for character in paragraph.text.chars() {
         if character == OBJ {
-            if let Some(object) = paragraph.object_at(offset) {
+            if let Some(object) = objects.next() {
                 output.push_str(object.plain_text());
             }
         } else {
@@ -724,5 +944,125 @@ fn docx_error(error: wordcraft_docx::DocxError) -> EngineError {
         | wordcraft_docx::DocxError::MissingPart(message)
         | wordcraft_docx::DocxError::Xml(message)
         | wordcraft_docx::DocxError::Encryption(message) => EngineError::Malformed(message),
+    }
+}
+
+#[cfg(test)]
+mod offset_tests {
+    use super::*;
+
+    #[test]
+    fn many_short_unicode_runs_skip_empty_runs_and_keep_link_boundaries() {
+        use wordcraft_doc::para::Run;
+        use wordcraft_doc::props::CharProps;
+
+        let prefix = "λ🙂ab".repeat(1024);
+        let mut paragraph = Paragraph::with_text(&prefix, CharProps::default());
+        paragraph.props.style = Some("TypedParagraph".into());
+        for index in 0..2000 {
+            let props = CharProps {
+                link: Some(format!("https://example.com/{}", index % 2)),
+                bold: Some(index % 2 == 0),
+                ..CharProps::default()
+            };
+            paragraph.runs.push(Run {
+                len: 0,
+                props: CharProps {
+                    link: Some("https://invalid.example/empty".into()),
+                    ..CharProps::default()
+                },
+            });
+            paragraph.text.push_str("é🙂");
+            paragraph.runs.push(Run {
+                len: "é🙂".len(),
+                props,
+            });
+        }
+        // An uncovered final character uses paragraph mark formatting, matching props_of_char.
+        paragraph.text.push('後');
+        paragraph.mark.link = Some("https://example.com/mark".into());
+        let document = Document::new();
+        let layout = DocLayout::default();
+        let mut adapter = Adapter::new(&document, &layout);
+        adapter.add_paragraph(&paragraph, &Path(vec![0]));
+        let block = &adapter.pages[0].blocks[0];
+        assert_eq!(block.style.as_deref(), Some("TypedParagraph"));
+        assert_eq!(block.text, paragraph.text);
+        assert_eq!(block.links.len(), 2001);
+        for (index, link) in block.links[..2000].iter().enumerate() {
+            assert_eq!(link.uri, format!("https://example.com/{}", index % 2));
+            assert_eq!(link.text, "é🙂");
+            assert_eq!(link.metadata["start"], 4096 + index * 2);
+            assert_eq!(link.metadata["end"], 4096 + index * 2 + 2);
+        }
+        assert_eq!(block.links[2000].uri, "https://example.com/mark");
+        assert_eq!(block.links[2000].text, "後");
+        assert_eq!(block.links[2000].metadata["start"], 8096);
+        assert_eq!(block.links[2000].metadata["end"], 8097);
+    }
+
+    #[test]
+    fn long_unicode_prefix_many_anchors_and_object_text_keep_exact_offsets() {
+        let prefix = "λ🙂ab".repeat(32768);
+        let prefix_chars = 4 * 32768;
+        let mut text = prefix.clone();
+        text.extend(std::iter::repeat_n(OBJ, 1003));
+        let mut paragraph = Paragraph::with_text(&prefix, Default::default());
+        // with_text intentionally strips structural markers; construct this public
+        // model fixture directly to avoid quadratic insert_object setup work.
+        paragraph.text = text;
+        paragraph.runs[0].len = paragraph.text.len();
+        paragraph.objects = (0..1000)
+            .map(|id| InlineObject::NoteRef {
+                id,
+                kind: wordcraft_doc::para::NoteKind::Footnote,
+                custom: String::new(),
+            })
+            .collect();
+        paragraph.objects.push(InlineObject::Equation {
+            linear: "é🙂".into(),
+            display: false,
+            math: Default::default(),
+        });
+        paragraph.objects.push(InlineObject::NoteRef {
+            id: 1000,
+            kind: wordcraft_doc::para::NoteKind::Endnote,
+            custom: String::new(),
+        });
+        // The last marker deliberately has no object: it must not panic or invent a reference.
+        let document = Document::new();
+        let layout = DocLayout::default();
+        let adapter = Adapter::new(&document, &layout);
+        let segments = adapter.paragraph_segments(&paragraph, &[0]);
+        assert_eq!(segments.len(), 1);
+        let segment = &segments[0];
+        assert_eq!(segment.char_count, prefix_chars + 2);
+        assert_eq!(segment.story_refs.len(), 1001);
+        assert_eq!(segment.story_refs[0]["offset"], prefix_chars);
+        assert_eq!(segment.story_refs[999]["offset"], prefix_chars);
+        assert_eq!(segment.story_refs[1000]["offset"], prefix_chars + 2);
+        assert_eq!(segment.text, format!("{prefix}é🙂"));
+        assert_eq!(visible_text(&paragraph), segment.text);
+    }
+
+    #[test]
+    fn unicode_link_labels_use_byte_boundaries_and_character_offsets() {
+        let mut segment = Segment::default();
+        segment.push_text(&"λ🙂ab".repeat(32768), None);
+        let mut offset = 4 * 32768;
+        for index in 0..1000 {
+            segment.push_text("é🙂", Some("https://example.com"));
+            segment.push_char(' ', None);
+            let link = &segment.links[index];
+            assert_eq!(link.text, "é🙂");
+            assert_eq!(link.metadata["start"], offset);
+            assert_eq!(link.metadata["end"], offset + 2);
+            offset += 3;
+        }
+        segment.push_text("終", Some("https://example.org"));
+        segment.finish_links();
+        assert_eq!(segment.links.last().unwrap().text, "終");
+        assert_eq!(segment.links.last().unwrap().metadata["start"], offset);
+        assert_eq!(segment.char_count, offset + 1);
     }
 }

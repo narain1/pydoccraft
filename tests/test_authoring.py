@@ -266,6 +266,38 @@ class AuthoringTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "stale"):
                 _ = highlight.text
 
+    def test_docx_table_and_paragraph_layout_controls(self):
+        with doc_ex.new("docx") as document:
+            heading = document.add_paragraph("First page")
+            heading.spacing = (6, 12, 1.5)
+            self.assertEqual(heading.spacing, (6, 12, 1.5))
+            table = document.add_table([["Header", "Value"], ["Row", "Data"]])
+            table.column_widths = [180, 220]
+            table.borders = ("navy", 0.5)
+            table.row(0).repeat_header = True
+            table.row(1).height = (30, "at_least")
+            table.row(1).allow_split = False
+            self.assertEqual(table.column_widths, [180, 220])
+            self.assertEqual(table.borders, ("#000080", 0.5))
+            self.assertEqual(table.row(1).height, (30, "at_least"))
+            self.assertFalse(table.row(1).allow_split)
+            self.assertTrue(table.row(0).repeat_header)
+            with self.assertRaises(ValueError):
+                table.column_widths = [1000, 1000]
+            self.assertEqual(table.column_widths, [180, 220])
+            document.add_page_break()
+            document.add_paragraph("Second page")
+            third = document.add_paragraph("Third page")
+            third.page_break_before = True
+            self.assertTrue(third.page_break_before)
+            with doc_ex.open(document.convert("pdf")) as pdf:
+                self.assertEqual(pdf.page_count, 3)
+                self.assertIn("First page", pdf[0].get_text())
+                self.assertIn("Second page", pdf[1].get_text())
+                self.assertIn("Third page", pdf[2].get_text())
+            table.borders = None
+            self.assertIsNone(table.borders)
+
     def test_safe_path_stream_save_and_close(self):
         with tempfile.TemporaryDirectory() as directory, doc_ex.new("docx") as document:
             document.add_paragraph("Persisted")
