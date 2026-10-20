@@ -40,6 +40,8 @@ const MAX_NOTES: usize = 10_000;
 const MAX_TABLE_PATCH_BYTES: usize = 128 * 1024;
 const MAX_TABLE_METADATA_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TAB_STOPS: usize = 64;
+const MAX_LAYOUT_PAGES: usize = 10_000;
+const MAX_LAYOUT_ITEMS: usize = 2_000_000;
 
 #[pyclass]
 pub struct EditableDocx {
@@ -104,6 +106,7 @@ impl EditableDocx {
     }
 
     pub fn to_bytes(&self) -> PyResult<Vec<u8>> {
+        validate_unsplittable_page_bounds(self.document()?)?;
         let output = wordcraft_docx::write(self.document()?).map_err(|error| {
             EngineError::Conversion(format!("DOCX serialization failed: {error}"))
         })?;
@@ -3403,6 +3406,107 @@ fn validate_table_metadata_budget(document: &Document) -> PyResult<()> {
 }
 
 type LayoutCellKey = (StoryRef, Path, usize, usize);
+
+/// The native paginator places an oversized unsplittable row whole, even beyond
+/// the physical page. Reject that known loss before serializing authored data.
+/// Vertical merge anchors carry multi-row geometry and are deliberately outside
+/// this narrow check; exact-height clipping *inside* a page remains intentional.
+fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
+    let mut pending = native_table_roots(document);
+    let mut guarded = BTreeSet::new();
+    let mut cells = 0usize;
+    while let Some((story, path)) = pending.pop() {
+        let table = document.table(story, &path).ok_or_else(|| {
+            PyValueError::new_err("table no longer exists during pagination validation")
+        })?;
+        let mut header_prefix = true;
+        for (row_index, row) in table.rows.iter().enumerate() {
+            header_prefix &= row.props.header;
+            cells = cells.saturating_add(row.cells.len());
+            if cells > MAX_CELLS {
+                return Err(limit("pagination validation exceeds 100000 table cells"));
+            }
+            if (row.props.cant_split
+                || header_prefix
+                || (row.props.height_rule == HeightRule::Exact
+                    && row.props.height.is_some_and(|height| height > 0.0)))
+                && row
+                    .cells
+                    .iter()
+                    .all(|cell| cell.props.vmerge == VMerge::None)
+            {
+                guarded.insert((story, path.clone(), row_index));
+            }
+            for (cell_index, cell) in row.cells.iter().enumerate() {
+                for (block_index, block) in cell.blocks.iter().enumerate() {
+                    if matches!(block.as_ref(), Block::Table(_)) {
+                        pending.push((
+                            story,
+                            Path(
+                                [
+                                    path.0.as_slice(),
+                                    &[row_index as u32, cell_index as u32, block_index as u32],
+                                ]
+                                .concat(),
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    if guarded.is_empty() {
+        return Ok(());
+    }
+    let layout = wordcraft_layout::layout(
+        document,
+        &mut wordcraft_layout::LayoutCache::new(),
+        &wordcraft_layout::LayoutOptions::default(),
+    );
+    if layout.pages.len() > MAX_LAYOUT_PAGES {
+        return Err(limit("pagination validation exceeds 10000 pages"));
+    }
+    let mut items = 0usize;
+    for page in &layout.pages {
+        items = items
+            .saturating_add(page.items.len())
+            .saturating_add(page.header.len())
+            .saturating_add(page.footer.len());
+        if items > MAX_LAYOUT_ITEMS {
+            return Err(limit("pagination validation exceeds 2000000 placed items"));
+        }
+        if !page.h.is_finite() || page.h <= 0.0 {
+            return Err(EngineError::Unsupported(
+                "native pagination produced invalid page geometry".into(),
+            )
+            .into());
+        }
+        for item in page.items.iter().chain(&page.header).chain(&page.footer) {
+            if let wordcraft_layout::Placed::Cell {
+                story,
+                table,
+                row,
+                rect,
+                ..
+            } = item
+            {
+                if guarded.contains(&(*story, table.clone(), *row))
+                    && (!rect.y.is_finite()
+                        || !rect.h.is_finite()
+                        || rect.h < 0.0
+                        || rect.y < -0.01
+                        || rect.bottom() > page.h + 0.01)
+                {
+                    return Err(EngineError::Unsupported(
+                        "an unsplittable table row exceeds the physical page; allow row splitting, reduce its content or formatting, or enlarge the page".into(),
+                    ).into());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn native_table_roots(document: &Document) -> Vec<(StoryRef, Path)> {
     let mut roots = Vec::new();
     for (index, block) in document.body.iter().enumerate() {
@@ -5241,6 +5345,154 @@ fn range_offsets(text: &str, start: usize, end: usize) -> PyResult<(usize, usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pagination_row(lines: usize) -> (EditableDocx, usize, usize) {
+        let mut document = EditableDocx::new();
+        document.set_page_size(300.0, 300.0).unwrap();
+        document.set_margins(30.0, 30.0, 30.0, 30.0).unwrap();
+        document
+            .format_defaults(
+                r#"{"font_size":12,"space_before":0,"space_after":0,"line_spacing":1}"#,
+            )
+            .unwrap();
+        let text = (0..lines)
+            .map(|line| format!("CellLine{line:02}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let table = document.add_table(vec![vec![text]]).unwrap();
+        let paragraph = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
+        document
+            .format_paragraph(
+                paragraph,
+                r#"{"keep_together":false,"widow_control":false}"#,
+            )
+            .unwrap();
+        document.set_row_allow_split(table, 0, false).unwrap();
+        (document, table, paragraph)
+    }
+
+    #[test]
+    fn oversized_unsplittable_row_fails_serialization_and_recovers() {
+        let (mut document, table, _) = pagination_row(24);
+        let revision = document.revision().unwrap();
+        assert!(document.to_bytes().is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        document.set_row_allow_split(table, 0, true).unwrap();
+        let output = document.to_bytes().unwrap();
+        assert_eq!(crate::docx::extract(&output, None).unwrap().pages.len(), 2);
+    }
+
+    #[test]
+    fn upstream_oversized_unsplittable_row_has_off_page_geometry() {
+        let (document, _, _) = pagination_row(24);
+        let raw = wordcraft_docx::write(document.document().unwrap()).unwrap();
+        let reopened = wordcraft_docx::read(&raw).unwrap();
+        let layout = wordcraft_layout::layout(
+            &reopened,
+            &mut wordcraft_layout::LayoutCache::new(),
+            &wordcraft_layout::LayoutOptions::default(),
+        );
+        assert!(layout.pages.iter().any(|page| {
+            page.items.iter().any(|item| {
+            matches!(item, wordcraft_layout::Placed::Cell { rect, .. } if rect.bottom() > page.h)
+        })
+        }));
+        let pdf = crate::docx::to_pdf(&raw, None).unwrap();
+        let payload = crate::pdf::extract(&pdf, None).unwrap();
+        let last = payload.pages[0]
+            .blocks
+            .iter()
+            .find(|block| block.text.contains("CellLine23"))
+            .unwrap();
+        assert!(last.bbox.unwrap()[1] > 300.0);
+    }
+
+    #[test]
+    fn pagination_guard_catches_later_font_margin_and_text_growth() {
+        let (source, table, paragraph) = pagination_row(12);
+        source.to_bytes().unwrap();
+        let mut font = source.copy().unwrap();
+        font.format_defaults(r#"{"font_size":28}"#).unwrap();
+        assert!(font.to_bytes().is_err());
+        let mut margin = source.copy().unwrap();
+        margin.set_margins(150.0, 30.0, 30.0, 30.0).unwrap();
+        assert!(margin.to_bytes().is_err());
+        let mut text = source.copy().unwrap();
+        text.set_paragraph_text(
+            paragraph,
+            &(0..24)
+                .map(|line| format!("Expanded{line}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+        assert!(text.to_bytes().is_err());
+        text.set_row_allow_split(table, 0, true).unwrap();
+        text.to_bytes().unwrap();
+        source.to_bytes().unwrap();
+    }
+
+    #[test]
+    fn pagination_guard_preserves_exact_height_clipping_and_vertical_merges() {
+        let (mut clipped, table, _) = pagination_row(24);
+        clipped
+            .set_row_height(table, 0, Some(30.0), "exact")
+            .unwrap();
+        clipped.to_bytes().unwrap();
+        let mut merged = EditableDocx::new();
+        merged.set_page_size(300.0, 300.0).unwrap();
+        merged.set_margins(30.0, 30.0, 30.0, 30.0).unwrap();
+        let table = merged
+            .add_table(
+                (0..20)
+                    .map(|row| vec![format!("Left{row}"), format!("Right{row}")])
+                    .collect(),
+            )
+            .unwrap();
+        merged.merge_cells(table, 0, 0, 19, 0).unwrap();
+        merged.set_cell_text(table, 0, 0, "MergedAnchor").unwrap();
+        for row in 0..20 {
+            merged.set_row_allow_split(table, row, false).unwrap();
+        }
+        let raw = merged.to_bytes().unwrap();
+        assert!(crate::docx::extract(&raw, None).unwrap().pages.len() > 1);
+    }
+
+    #[test]
+    fn pagination_guard_uses_absolute_header_and_footer_table_geometry() {
+        let (mut document, table, _) = pagination_row(1);
+        document
+            .set_row_height(table, 0, Some(18.0), "exact")
+            .unwrap();
+        let native_table = document.table(table).unwrap().clone();
+        for kind in ["header", "footer"] {
+            let story = document.ensure_story(kind, "default", 0).unwrap();
+            // Story table insertion is not yet public authoring API; exercise
+            // existing public native parts rather than inventing a facade here.
+            document
+                .document
+                .as_mut()
+                .unwrap()
+                .parts
+                .get_mut(&story)
+                .unwrap()
+                .blocks = vec![Arc::new(Block::Table(native_table.clone()))];
+        }
+        let raw = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&raw).unwrap();
+        let layout = wordcraft_layout::layout(
+            &reopened,
+            &mut wordcraft_layout::LayoutCache::new(),
+            &wordcraft_layout::LayoutOptions::default(),
+        );
+        for page in &layout.pages {
+            for story in [&page.header, &page.footer] {
+                assert!(story.iter().any(|item| matches!(item, wordcraft_layout::Placed::Cell { rect, .. } if rect.y >= 0.0 && rect.bottom() <= page.h)));
+            }
+        }
+        crate::docx::to_pdf(&raw, None).unwrap();
+        crate::docx::render(&raw, 0, 72.0, None).unwrap();
+    }
 
     #[test]
     fn style_relations_are_reciprocal_bounded_and_roundtrip() {
