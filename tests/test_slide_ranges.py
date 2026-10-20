@@ -106,3 +106,23 @@ class SlideRangeTests(unittest.TestCase):
             self.assertIsNone(selected.link)
             with doc_ex.open(document.to_bytes()) as reopened:
                 self.assertFalse(reopened[0].get_links())
+
+    def test_invalid_xml_link_characters_fail_before_mutation(self):
+        with doc_ex.new("pptx") as document:
+            slide = document.slides.add()
+            shape = slide.add_text("Label", box=(20, 20, 300, 100))
+            shape.link = "https://shape.example"
+            selected = shape.find("Label")[0]
+            selected.link = "https://text.example"
+            for invalid in ("\ufffe", "\uffff"):
+                with self.subTest(character=repr(invalid)):
+                    with self.assertRaises(ValueError):
+                        shape.link = "https://invalid.example/" + invalid
+                    self.assertEqual(shape.link, "https://shape.example")
+                    self.assertEqual(selected.text, "Label")
+                    with self.assertRaises(ValueError):
+                        selected.link = "https://invalid.example/" + invalid
+                    self.assertEqual(selected.link, "https://text.example")
+            with doc_ex.open(document.to_bytes()) as reopened:
+                self.assertEqual({link.uri for link in reopened[0].get_links()},
+                                 {"https://shape.example", "https://text.example"})

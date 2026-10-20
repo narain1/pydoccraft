@@ -1531,6 +1531,7 @@ fn range_has_text(
 }
 
 fn validate_uri(value: &str) -> PyResult<()> {
+    text_value(value)?;
     let valid = ["https://", "http://", "mailto:"].iter().any(|prefix| {
         value
             .get(..prefix.len())
@@ -2849,6 +2850,8 @@ mod tests {
             "mailto:",
             "https://x/a b",
             "https://x/\n",
+            "https://x/\u{fffe}",
+            "https://x/\u{ffff}",
         ] {
             assert!(author
                 .set_range_link(0, id, 0, 2, revision, Some(url), None, "")
