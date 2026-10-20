@@ -400,6 +400,6 @@ Assignment validates staged geometry; every commit rechecks cheap scope, and sav
 
 ## 63. Resolve presentation ordinals after normalization
 
-PPTX handles retain stable slide and shape IDs, unlike the conservative PDF page-generation model. The facade first validates a slide through its existing number lookup or a shape through the cheap native shape_placeholder lookup. It then normalizes numeric/color/format inputs and resolves the current slide index again for native mutation. Existing native per-slide shape lookup rejects deleted shapes; no identifier-to-ordinal cache or replacement handle is added.
+PPTX handles retain stable slide and shape IDs, unlike the conservative PDF page-generation model. For Slide.background and Shape.rotation/fill/box/color/font_size/add_run, the facade first validates a slide through its existing number lookup or a shape through the cheap native shape_placeholder lookup. It then normalizes numeric/color/format inputs and resolves the current slide index again for native mutation. Existing native per-slide shape lookup rejects deleted shapes; no identifier-to-ordinal cache or replacement handle is added.
 
 The same callback discipline applies to generic range formatting: an initial existing revision query provides fast stale/closed rejection without retrieving text, while the native mutation still enforces the captured range revision after callbacks. Changes made by the caller are preserved; this is not automatic rollback of callback effects.
