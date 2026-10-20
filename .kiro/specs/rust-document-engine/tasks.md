@@ -311,3 +311,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Derive ownership/reverse joins and connect the operation matrix without copying tested behavior statuses.
 - [x] Verify source hashes/member lines, malformed-reference regressions and complete installed-wheel corpus; record evidence.
 - [ ] Retain full member disposition, richer native operation audits and broader API1/QA1 parity work.
+
+
+## Header/footer rich content
+
+- [x] Reuse story/table/cell/picture handles for native header/footer rich content and direct collections.
+- [x] Preserve synthetic anchors, authored empty paragraphs, deleted-picture anchors and independent section/document copies.
+- [x] Share native placed-frame validation and disable editor-only story dimming for document PNG output.
+- [x] Verify the complete locked/native and clean installed-wheel corpus and record artifact evidence.
+- [ ] Retain header/footer linkage, clearing/general movement, rich notes and unmeasured inactive-variant geometry as broader open work.

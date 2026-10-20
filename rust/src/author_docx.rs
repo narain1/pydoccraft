@@ -80,6 +80,7 @@ pub struct EditableDocx {
     media_bytes: usize,
     locations: BTreeMap<usize, (StoryRef, Path)>,
     stories: BTreeMap<u32, Vec<usize>>,
+    story_placeholders: BTreeMap<u32, usize>,
     next_story_block: usize,
     cell_placeholders: BTreeSet<(StoryRef, Path)>,
     table_generations: BTreeMap<usize, u64>,
@@ -99,6 +100,7 @@ impl EditableDocx {
             media_bytes: 0,
             locations: BTreeMap::new(),
             stories: BTreeMap::new(),
+            story_placeholders: BTreeMap::new(),
             next_story_block: MAX_BLOCKS,
             cell_placeholders: BTreeSet::new(),
             table_generations: BTreeMap::new(),
@@ -116,6 +118,7 @@ impl EditableDocx {
             media_bytes: self.media_bytes,
             locations: self.locations.clone(),
             stories: self.stories.clone(),
+            story_placeholders: self.story_placeholders.clone(),
             next_story_block: self.next_story_block,
             cell_placeholders: self.cell_placeholders.clone(),
             table_generations: self.table_generations.clone(),
@@ -2595,6 +2598,9 @@ impl EditableDocx {
                             ids.push(staged.register_location(StoryRef::Part(id), path, false)?);
                         }
                         staged.stories.insert(id, ids);
+                        if let Some(index) = self.story_placeholders.get(&old) {
+                            staged.story_placeholders.insert(id, *index);
+                        }
                         for (old_id, (story, path)) in &self.locations {
                             if *story == StoryRef::Part(old) {
                                 staged.register_location(
@@ -2615,6 +2621,7 @@ impl EditableDocx {
                         // An omitted reference links to the previous section in OOXML. An owned
                         // empty part is required to keep future edits to that section independent.
                         staged.stories.insert(id, Vec::new());
+                        staged.story_placeholders.insert(id, 0);
                     }
                     id
                 };
@@ -2728,6 +2735,7 @@ impl EditableDocx {
 
     pub fn remove_image(&mut self, id: usize) -> PyResult<()> {
         self.image(id)?;
+        let (story, path) = self.location(id)?;
         let mut candidate = self.document()?.clone();
         let paragraph = self.paragraph_mut(&mut candidate, id)?;
         // Authored pictures occupy one native inline-object paragraph. Removing
@@ -2743,6 +2751,22 @@ impl EditableDocx {
             .map_err(model_error)?;
         self.commit(candidate)?;
         self.images.retain(|image| *image != id);
+        if let StoryRef::Part(story) = story {
+            if path.0.len() == 1 {
+                if let Some(ids) = self.stories.get_mut(&story) {
+                    // The retained empty anchor is now an ordinary direct paragraph.
+                    // Keep its stable locator and its position among story paragraphs.
+                    if !ids.contains(&id) {
+                        let index = ids.partition_point(|other| {
+                            self.locations
+                                .get(other)
+                                .is_some_and(|(_, other_path)| other_path < &path)
+                        });
+                        ids.insert(index, id);
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
@@ -3014,6 +3038,9 @@ impl EditableDocx {
         }
         self.commit(candidate)?;
         self.stories.entry(id).or_default();
+        if existing.is_none() {
+            self.story_placeholders.insert(id, 0);
+        }
         Ok(id)
     }
 
@@ -3023,6 +3050,35 @@ impl EditableDocx {
             .get(&story)
             .cloned()
             .ok_or_else(|| PyIndexError::new_err("story index does not identify an owned story"))
+    }
+
+    pub fn story_table_ids(&mut self, story: u32) -> PyResult<Vec<usize>> {
+        self.rich_story_child_ids(story, false)
+    }
+
+    pub fn story_image_ids(&mut self, story: u32) -> PyResult<Vec<usize>> {
+        self.rich_story_child_ids(story, true)
+    }
+
+    pub fn story_add_table(&mut self, story: u32, rows: Vec<Vec<String>>) -> PyResult<usize> {
+        let width = self.rich_story_width(story)?;
+        let (table, text, cells) = self.make_table(rows, width)?;
+        self.add_story_block(story, Block::Table(table), text, cells, None)
+    }
+
+    #[pyo3(signature = (story, data, width=None, height=None, alt=""))]
+    pub fn story_add_image(
+        &mut self,
+        story: u32,
+        data: &[u8],
+        width: Option<f64>,
+        height: Option<f64>,
+        alt: &str,
+    ) -> PyResult<usize> {
+        let available = self.rich_story_width(story)?;
+        let paragraph = self.make_image(data, width, height, alt)?;
+        validate_picture_width(&paragraph, available)?;
+        self.add_story_block(story, Block::Para(paragraph), 0, 0, Some(data.to_vec()))
     }
 
     pub fn story_add_paragraph(&mut self, story: u32, text: &str) -> PyResult<usize> {
@@ -3048,9 +3104,13 @@ impl EditableDocx {
             }
             _ => Paragraph::with_text(text, CharProps::default()),
         };
-        let index = if ids.is_empty() {
-            part.blocks[0] = wordcraft_doc::para_block(paragraph);
-            0
+        let index = if let Some(index) = self.story_placeholders.get(&story).copied() {
+            let target = part
+                .blocks
+                .get_mut(index)
+                .ok_or_else(|| PyValueError::new_err("story placeholder no longer exists"))?;
+            *target = wordcraft_doc::para_block(paragraph);
+            index
         } else {
             let index = part.blocks.len();
             candidate
@@ -3067,6 +3127,7 @@ impl EditableDocx {
         self.locations
             .insert(id, (StoryRef::Part(story), Path::top(index)));
         self.stories.insert(story, ids);
+        self.story_placeholders.remove(&story);
         self.next_story_block = next;
         self.text_bytes = text_bytes;
         Ok(id)
@@ -3080,6 +3141,126 @@ impl Default for EditableDocx {
 }
 
 impl EditableDocx {
+    fn rich_story_width(&self, story: u32) -> PyResult<f32> {
+        self.story_paragraph_ids(story)?;
+        let document = self.document()?;
+        let part = document
+            .parts
+            .get(&story)
+            .ok_or_else(|| PyIndexError::new_err("story is missing from the native model"))?;
+        if !matches!(part.kind, PartKind::Header | PartKind::Footer) {
+            return Err(EngineError::Unsupported(
+                "rich note content requires native note-container geometry support".into(),
+            )
+            .into());
+        }
+        document
+            .sections()
+            .iter()
+            .filter_map(|(_, section)| {
+                let h = section.headers;
+                let f = section.footers;
+                [h.default, h.first, h.even, f.default, f.first, f.even]
+                    .contains(&Some(story))
+                    .then(|| section.text_width())
+            })
+            .reduce(f32::min)
+            .ok_or_else(|| PyIndexError::new_err("story has no owning section"))
+    }
+
+    fn rich_story_child_ids(&mut self, story: u32, images: bool) -> PyResult<Vec<usize>> {
+        self.rich_story_width(story)?;
+        let targets = self.document()?.parts[&story]
+            .blocks
+            .iter()
+            .enumerate()
+            .filter_map(|(index, block)| {
+                let image = block.as_para().is_some_and(|paragraph| {
+                    paragraph
+                        .objects
+                        .iter()
+                        .any(|object| matches!(object, InlineObject::Image { .. }))
+                });
+                (if images {
+                    image
+                } else {
+                    block.as_table().is_some()
+                })
+                .then_some(Path::top(index))
+            })
+            .collect::<Vec<_>>();
+        targets
+            .into_iter()
+            .map(|path| self.register_location(StoryRef::Part(story), path, images))
+            .collect()
+    }
+
+    fn add_story_block(
+        &mut self,
+        story: u32,
+        mut block: Block,
+        added_text: usize,
+        added_cells: usize,
+        media: Option<Vec<u8>>,
+    ) -> PyResult<usize> {
+        self.rich_story_width(story)?;
+        self.reserve_block()?;
+        let text_bytes = self.updated_text_bytes(0, added_text)?;
+        let identifier = self.next_story_block;
+        let next = identifier
+            .checked_add(1)
+            .ok_or_else(|| limit("document child identifier limit reached"))?;
+        let is_table = block.as_table().is_some();
+        let is_image = media.is_some();
+        let mut candidate = self.document()?.clone();
+        if let Some(bytes) = media {
+            let Block::Para(paragraph) = &mut block else {
+                return Err(PyValueError::new_err("picture media requires a paragraph"));
+            };
+            attach_image_media(&mut candidate, paragraph, bytes)?;
+        }
+        let length = candidate.parts[&story].blocks.len();
+        let placeholder = self.story_placeholders.get(&story).copied();
+        let index = placeholder.unwrap_or(length);
+        let path = Path::top(index);
+        if placeholder.is_some() {
+            let target = candidate
+                .parts
+                .get_mut(&story)
+                .and_then(|part| part.blocks.get_mut(index))
+                .ok_or_else(|| PyValueError::new_err("story placeholder no longer exists"))?;
+            *target = Arc::new(block);
+        } else {
+            candidate
+                .insert_block(StoryRef::Part(story), &path, block)
+                .map_err(model_error)?;
+        }
+        if is_table {
+            candidate
+                .insert_block(
+                    StoryRef::Part(story),
+                    &Path::top(index + 1),
+                    Block::Para(Paragraph::new()),
+                )
+                .map_err(model_error)?;
+        }
+        self.commit(candidate)?;
+        self.locations
+            .insert(identifier, (StoryRef::Part(story), path));
+        if is_image {
+            self.images.push(identifier);
+        }
+        if is_table {
+            self.story_placeholders.insert(story, index + 1);
+        } else {
+            self.story_placeholders.remove(&story);
+        }
+        self.next_story_block = next;
+        self.text_bytes = text_bytes;
+        self.cell_count += added_cells;
+        Ok(identifier)
+    }
+
     fn section(&self, section: usize) -> PyResult<&SectionProps> {
         self.document()?
             .sections()
@@ -4149,6 +4330,94 @@ fn validate_table_metadata_budget(document: &Document) -> PyResult<()> {
 
 type LayoutCellKey = (StoryRef, Path, usize, usize);
 
+fn rich_story_ids(document: &Document) -> BTreeSet<u32> {
+    document
+        .parts
+        .iter()
+        .filter_map(|(id, part)| {
+            (matches!(part.kind, PartKind::Header | PartKind::Footer)
+                && part.blocks.iter().any(|block| {
+                    block.as_table().is_some()
+                        || block.as_para().is_some_and(|paragraph| {
+                            paragraph
+                                .objects
+                                .iter()
+                                .any(|object| matches!(object, InlineObject::Image { .. }))
+                        })
+                }))
+            .then_some(*id)
+        })
+        .collect()
+}
+
+/// Header/footer boxes do not paginate. Check public placed frames, retaining
+/// native exact-height cell clipping when its clipping frame fits the page.
+fn validate_rich_story_page_bounds(
+    page: &wordcraft_layout::Page,
+    rich: &BTreeSet<u32>,
+) -> PyResult<()> {
+    if rich.is_empty() {
+        return Ok(());
+    }
+    let clipped = page
+        .header
+        .iter()
+        .chain(&page.footer)
+        .filter_map(|item| match item {
+            wordcraft_layout::Placed::Cell {
+                story,
+                table,
+                row,
+                cell,
+                clip: true,
+                ..
+            } => Some((
+                *story,
+                Path([table.0.as_slice(), &[*row as u32, *cell as u32]].concat()),
+            )),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    for item in page.header.iter().chain(&page.footer) {
+        let (story, path, rect) = match item {
+            wordcraft_layout::Placed::Cell {
+                story, table, rect, ..
+            } => (story, table, rect),
+            wordcraft_layout::Placed::Image {
+                story, path, rect, ..
+            }
+            | wordcraft_layout::Placed::Object {
+                story, path, rect, ..
+            } => (story, path, rect),
+            _ => continue,
+        };
+        if !matches!(story, StoryRef::Part(id) if rich.contains(id)) {
+            continue;
+        }
+        if (3..path.0.len())
+            .step_by(3)
+            .any(|length| clipped.contains(&(*story, Path(path.0[..length].to_vec()))))
+        {
+            continue;
+        }
+        if ![page.w, page.h, rect.x, rect.y, rect.w, rect.h]
+            .iter()
+            .all(|v| v.is_finite())
+            || page.w <= 0.0
+            || page.h <= 0.0
+            || rect.w < 0.0
+            || rect.h < 0.0
+            || rect.x < -0.01
+            || rect.y < -0.01
+            || rect.x + rect.w > page.w + 0.01
+            || rect.y + rect.h > page.h + 0.01
+        {
+            return Err(EngineError::Unsupported("header/footer table or image exceeds the physical page; resize the content before serialization".into()).into());
+        }
+    }
+    Ok(())
+}
+
 /// The native paginator places an oversized unsplittable row whole, even beyond
 /// the physical page. Reject that known loss before serializing authored data.
 /// Vertical merge anchors carry multi-row geometry and are deliberately outside
@@ -4197,7 +4466,8 @@ fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
             }
         }
     }
-    if guarded.is_empty() {
+    let rich = rich_story_ids(document);
+    if guarded.is_empty() && rich.is_empty() {
         return Ok(());
     }
     let layout = wordcraft_layout::layout(
@@ -4223,6 +4493,7 @@ fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
             )
             .into());
         }
+        validate_rich_story_page_bounds(page, &rich)?;
         for item in page.items.iter().chain(&page.header).chain(&page.footer) {
             if let wordcraft_layout::Placed::Cell {
                 story,
@@ -6170,6 +6441,140 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rich_stories_keep_append_order_locators_and_section_copy_independent() {
+        let mut document = EditableDocx::new();
+        let header = document.ensure_story("header", "default", 0).unwrap();
+        let table = document
+            .story_add_table(header, vec![vec!["Header cell".into()]])
+            .unwrap();
+        let png = media_png(3, 2, [255, 0, 0, 255]);
+        let image = document
+            .story_add_image(header, &png, Some(24.0), Some(16.0), "Header picture")
+            .unwrap();
+        let paragraph = document
+            .story_add_paragraph(header, "After picture")
+            .unwrap();
+        document.story_add_paragraph(header, "").unwrap();
+        document.story_add_paragraph(header, "After empty").unwrap();
+        assert_eq!(document.story_table_ids(header).unwrap(), vec![table]);
+        assert_eq!(document.story_image_ids(header).unwrap(), vec![image]);
+        assert_eq!(document.story_paragraph_ids(header).unwrap().len(), 3);
+        assert_eq!(document.paragraph_text(paragraph).unwrap(), "After picture");
+        assert_eq!(
+            document.table_rows(table).unwrap(),
+            vec![vec!["Header cell"]]
+        );
+        let pending = document.ensure_story("footer", "default", 0).unwrap();
+        document
+            .story_add_table(pending, vec![vec!["Footer table".into()]])
+            .unwrap();
+        document.add_paragraph("First body").unwrap();
+        document.add_section("next_page").unwrap();
+        document.add_paragraph("Second body").unwrap();
+        let copied_header = document.story_id("header", "default", 1).unwrap().unwrap();
+        let copied_table = document.story_table_ids(copied_header).unwrap()[0];
+        document
+            .set_cell_text(copied_table, 0, 0, "Second cell")
+            .unwrap();
+        assert_eq!(
+            document.table_rows(table).unwrap(),
+            vec![vec!["Header cell"]]
+        );
+        let copied_footer = document.story_id("footer", "default", 1).unwrap().unwrap();
+        document
+            .story_add_paragraph(copied_footer, "After copied table")
+            .unwrap();
+        assert_eq!(document.story_table_ids(copied_footer).unwrap().len(), 1);
+        assert!(document.story_paragraph_ids(pending).unwrap().is_empty());
+        let mut copy = document.copy().unwrap();
+        copy.remove_image(image).unwrap();
+        assert_eq!(document.image_data(image).unwrap(), png);
+        assert_eq!(copy.story_image_ids(header).unwrap().len(), 0);
+        assert_eq!(copy.story_paragraph_ids(header).unwrap()[0], image);
+        assert_eq!(copy.paragraph_text(image).unwrap(), "");
+        let bytes = document.to_bytes().unwrap();
+        let read = wordcraft_docx::read(&bytes).unwrap();
+        let part = &read.parts[&read.last_section.headers.default.unwrap()];
+        assert!(part.blocks[0].as_table().is_some());
+        assert!(part.blocks[1]
+            .as_para()
+            .unwrap()
+            .objects
+            .iter()
+            .any(|object| matches!(object, InlineObject::Image { .. })));
+        assert_eq!(part.blocks[2].as_para().unwrap().text, "After picture");
+        assert_eq!(part.blocks[3].as_para().unwrap().text, "");
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        assert!(border_pixels(crate::pdf::render(&pdf, 0, 72.0, None).unwrap(), 0) > 200);
+        assert!(border_pixels(crate::docx::render(&bytes, 1, 72.0, None).unwrap(), 0) > 200);
+    }
+
+    #[test]
+    fn rich_stories_guard_physical_overflow_and_inactive_nested_geometry() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditableDocx::new();
+        document.set_page_size(240.0, 320.0).unwrap();
+        document.add_paragraph("Body").unwrap();
+        let header = document.ensure_story("header", "default", 0).unwrap();
+        let table = document
+            .story_add_table(header, vec![vec!["short".into()]])
+            .unwrap();
+        document
+            .set_cell_text(table, 0, 0, &"Overflow ".repeat(500))
+            .unwrap();
+        assert!(document
+            .to_bytes()
+            .unwrap_err()
+            .to_string()
+            .contains("physical page"));
+        document.set_cell_text(table, 0, 0, "short").unwrap();
+        document.to_bytes().unwrap();
+        let png = media_png(2, 2, [255, 0, 0, 255]);
+        let footer = document.ensure_story("footer", "default", 0).unwrap();
+        let image = document
+            .story_add_image(footer, &png, Some(40.0), Some(400.0), "Tall")
+            .unwrap();
+        assert!(document
+            .to_bytes()
+            .unwrap_err()
+            .to_string()
+            .contains("physical page"));
+        document.set_image_size(image, 40.0, 20.0).unwrap();
+        document
+            .set_row_height(table, 0, Some(20.0), "exact")
+            .unwrap();
+        document
+            .cell_add_image(
+                table,
+                0,
+                0,
+                &png,
+                Some(10.0),
+                Some(400.0),
+                "Intentionally clipped",
+            )
+            .unwrap();
+        document.to_bytes().unwrap();
+        let even = document.ensure_story("header", "even", 0).unwrap();
+        let hidden = document
+            .story_add_table(even, vec![vec!["Not shown yet".into()]])
+            .unwrap();
+        let before = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        assert!(document
+            .cell_add_image(hidden, 0, 0, &png, Some(10.0), Some(10.0), "hidden")
+            .unwrap_err()
+            .to_string()
+            .contains("geometry"));
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.to_bytes().unwrap(), before);
+        assert!(document
+            .story_add_image(header, &png, Some(999.0), Some(10.0), "wide")
+            .is_err());
+        assert_eq!(document.to_bytes().unwrap(), before);
+    }
+
+    #[test]
     fn core_metadata_roundtrips_without_changing_timestamps_or_content() {
         let mut document = EditableDocx::new();
         document
@@ -7122,8 +7527,7 @@ mod tests {
         pixels[..frame.buffer_size()]
             .chunks_exact(4)
             .filter(|pixel| {
-                // Native preview dims header/footer ink; count clear hue dominance
-                // rather than requiring fully saturated pixels.
+                // Count hue dominance, including antialiased edge pixels.
                 pixel[channel] > 200
                     && pixel[channel].saturating_sub(pixel[(channel + 1) % 3]) > 40
                     && pixel[channel].saturating_sub(pixel[(channel + 2) % 3]) > 40

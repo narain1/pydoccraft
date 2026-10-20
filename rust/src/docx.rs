@@ -190,6 +190,9 @@ fn render_with(
         .get(page)
         .ok_or_else(|| EngineError::Unsupported(format!("page {page} does not exist")))?;
     let scale = (dpi / 72.0) as f32;
+    // Document output must not use the editor's inactive header/footer dimming.
+    let mut options = wordcraft_render::RenderOptions::default();
+    options.display.dim_header = false;
     let rendered = if let Some(clip) = clip {
         let region = crate::rendering::RasterRegion::new(
             clip,
@@ -214,7 +217,7 @@ fn render_with(
                 -f64::from(region.x),
                 -f64::from(region.y),
             ]),
-            &wordcraft_render::RenderOptions::default(),
+            &options,
         );
         region.validate_result(rendered.width, rendered.height)?;
         rendered
@@ -225,12 +228,7 @@ fn render_with(
             f64::from(page.h * scale),
             wordcraft_render::MAX_SIDE,
         )?;
-        wordcraft_render::render_page(
-            document,
-            page,
-            scale,
-            &wordcraft_render::RenderOptions::default(),
-        )
+        wordcraft_render::render_page(document, page, scale, &options)
     };
     crate::rendering::encode_png(rendered.width, rendered.height, &rendered.pixels, dpi)
 }

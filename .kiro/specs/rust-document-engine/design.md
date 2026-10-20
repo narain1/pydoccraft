@@ -307,3 +307,12 @@ The development JSON records references, fingerprinted fixture sources, seven in
 ## Pinned reference-family discovery
 
 A separate comparison inventory describes 44 families with 194 representative members from 17 cited immutable source files. It stores source provenance and family-to-criterion/profile mappings, not tested operation statuses or duplicated ownership. A stdlib checker derives the readable guide and all-criterion reverse join, optionally verifies an explicitly supplied local source cache, and performs no network access. The support matrix links matching reference families after validating the inventory. Comparison-product names remain references; ArtCraft format crates alone own runtime behavior.
+
+
+## 51. Header/footer rich-content reuse
+
+EditableStory delegates table/picture creation and direct-child discovery to private native methods, reusing existing input normalization and atomic owner staging. Native adapters validate Header/Footer ownership and use the minimum full text width of referencing sections. Notes remain explicitly unsupported. A separate story_placeholders map tracks only synthetic empty anchors; table insertion leaves a trailing anchor, while image/text insertion consumes it. Section/document copies preserve or remap this state. Removing a direct picture promotes its retained locator into the ordered paragraph collection without reusing identifiers.
+
+The existing serialization layout guard activates for rich header/footer parts as well as guarded table rows. Public placed Cell/Image/Object frames provide physical-page checks; explicit clipping-cell path prefixes permit intentionally clipped descendants while the clipping frame itself remains checked. The existing page and placed-item caps apply after native layout. No header layout or text measurement algorithm is reproduced. Inactive variants can lack measurements for nested operations and later section geometry edits; such failures leave the owner unchanged.
+
+The shared DOCX renderer sets RenderOptions.display.dim_header=false: the upstream default is an editor preview effect, while this package exports document images. Full/region and retained/one-shot paths therefore keep saturated story colors consistent with native PDF without changing body rendering or other display settings.
