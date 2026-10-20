@@ -76,6 +76,27 @@ class PdfTextBoxTests(unittest.TestCase):
                 page.draw_text("word " * 10000, box=(10, 150, 270, 100))
             self.assertEqual(document.to_bytes(), before)
 
+    def test_supplied_font_actual_ink_overflow_preserves_bytes_and_cached_render(self):
+        for rotation in (0, 90, 180, 270):
+            with self.subTest(rotation=rotation), doc_ex.open(geometry_pdf(rotation)) as original, original.edit() as document:
+                page = document.pages[0]
+                page.draw_text("Café Ω office", box=(30, 30, 180, 60), font=FONT, font_size=16)
+                before = document.to_bytes()
+                png = document.render_page(0, dpi=72)
+                for marks in (2, 6):
+                    with self.subTest(marks=marks), self.assertRaisesRegex(ValueError, "glyph ink lies outside"):
+                        page.draw_text("\u0301" * marks + "A", box=(100, 100, 100, 100), font=FONT, font_size=30)
+                    self.assertEqual(document.to_bytes(), before)
+                    self.assertEqual(document.render_page(0, dpi=72), png)
+                with doc_ex.open(before) as reopened:
+                    self.assertIn("Café Ω office", reopened[0].get_text())
+                    self.assertEqual(reopened.render_page(0, dpi=72), png)
+        with doc_ex.new("pdf", size=(300, 300)) as document:
+            document.pages[0].draw_text("\u0301" * 6 + "A", at=(100, 100), font=FONT, font_size=30)
+            width, pixels = rgba_pixels(png_chunks(document.render_page(0, dpi=72)))
+            self.assertTrue(any(pixels[(y * width + x) * 4] < 200
+                                for y in range(100) for x in range(width)))
+
     def test_box_and_image_in_current_rotated_cropped_view(self):
         for rotation in (0, 90, 180, 270):
             with self.subTest(rotation=rotation), doc_ex.open(geometry_pdf(rotation)) as original, original.edit() as document:
