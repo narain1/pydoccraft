@@ -543,4 +543,5 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 
 - [x] Reproduce the preexisting callback-before-closed-check behavior with the supported font key.
 - [x] Add a narrow initial target lookup while retaining final native validation; verify invalid targets, live reorder, deletion/reset/close and caller exceptions.
-- [ ] Complete integrated installed-wheel regression validation and independent review before merge.
+- [x] Complete integrated installed-wheel regression validation: 439 Python tests and strict typing, with the byte-identical native extension retaining the preceding 307-test validation.
+- [ ] Complete independent review and exact-head/current-main CI before manual merge.
