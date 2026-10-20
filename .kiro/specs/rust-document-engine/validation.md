@@ -1,5 +1,12 @@
 # Validation evidence
 
+## 2026-10-20 DOCX paragraph borders (unreleased)
+
+- Offline Linux x86_64, Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1: formatting, 168 Rust tests, warnings-denied Clippy, locked release build and 176 installed-wheel Python tests passed with zero skips and verified artifact identity. The initial Python run rejected a test's unsupported named color; using its explicit RGB value fixed the fixture, and the complete installed suite passed.
+- Existing paragraph/style/default formatting shares four-edge borders, native whole-group inheritance, direct per-edge patches and clear/reset semantics. Native DOCX readback, independent copies, visible body/cell/header/footer PNG/PDF borders and atomic invalid edits pass. Table-style borders retain their six-edge table meaning. TXT3 is complete within the documented supported border profile.
+- Native regressions show unsupported border substitutions and width clamps, absent between borders, empty vertical waves and overlapping vertical double lines. These inputs now fail explicitly across shared DOCX paragraph/table/cell/style formatting. Horizontal double/wave and supported single/dotted/dashed/thick widths remain native; remaining shared-edge/style fidelity stays upstream work.
+- Wheel: `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`, 17,225,412 bytes; native extension: 39,902,104 bytes. SHA-256: `42a7fc8f333f10171e212b5a9490938ec5d353fed0787973b6b716f9b79e7003`. Lockfile SHA-256: `f5a35e9549115b905196b81ceebfad1475f01571a5c6416e6e15e10da1bdc984`. Dependencies, all four upstream revisions and the reviewed 264-package permissive license graph are unchanged. This artifact includes the supplied-font reuse correction below, but predates the separate PDF ink-bounds review correction; it does not clear that pending review.
+
 ## PDF supplied-font reuse correction after text-box validation
 
 - A deterministic native regression shows the bounded font lookup corner: an 81,446-byte imported source with 256 PCFull-prefixed font bindings and 8,200 earlier reachable objects plus a 411,640-byte font produces three full font programs for two lines while prior accounting charges only once. Boundary controls with 255 bindings or a smaller object graph reuse one program.

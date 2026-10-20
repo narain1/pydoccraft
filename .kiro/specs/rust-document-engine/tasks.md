@@ -178,3 +178,10 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Bound native wrapping work and preserve logical overflow, resource, glyph and media errors atomically.
 - [x] Verify geometry, visible transforms, searchable Unicode, media retention and full installed-wheel artifact; record evidence.
 - [ ] Retain automatic supplied-font wrapping and strict text clipping as upstream gaps; PDF2 remains open.
+
+## DOCX paragraph borders
+
+- [x] Reuse existing paragraph/style/default formatting for supported four-edge borders and native resolved snapshots.
+- [x] Reject shared DOCX border substitutions/clamps and invalid vertical double/wave edges, preserving table-style meaning.
+- [x] Verify native roundtrip, visible body/cell/story colors, inheritance/reset, atomic errors and installed-wheel corpus; record artifact evidence.
+- [ ] Track between/bar and remaining shared-edge/style fidelity gaps upstream.

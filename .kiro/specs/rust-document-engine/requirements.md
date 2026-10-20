@@ -220,3 +220,9 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 2. Native logical metric overflow, invalid geometry, unsupported glyphs and excessive wrapping work SHALL fail atomically. Automatic caller-font wrapping and strict glyph-outline clipping SHALL remain explicitly unavailable.
 3. Existing add_image SHALL accept bounded visual crop fractions, quarter-turns and flips through native transform properties, preserving source media and existing page resources. Rotation, CropBox and UserUnit SHALL preserve displayed-point semantics.
 4. Tests SHALL verify native wrapping/alignment, explicit-font text, rollback, work limits, asymmetric crop/flip/rotation pixels, outside-box pixels and extraction after serialization. PDF2 SHALL remain open for documented upstream gaps.
+
+## 25. DOCX paragraph border formatting
+
+1. Existing paragraph, paragraph-style and document-default formatting SHALL accept supported four-edge borders with shared color/style/width vocabulary. Direct and effective snapshots SHALL expose native whole-group inheritance and distinguish omission, per-side clearing and group reset.
+2. Table-style border meaning SHALL remain unchanged. Shared DOCX border validation SHALL reject proven rendering substitutions/clamps and invalid vertical double/wave edges before mutation; PPTX rules SHALL remain independent.
+3. Native DOCX readback and visible PNG/PDF tests SHALL cover body, cells, stories, style/default inheritance and atomic invalid changes. Between/bar and other unsupported native borders SHALL remain explicit upstream gaps.
