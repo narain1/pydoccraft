@@ -2374,7 +2374,10 @@ mod tests {
         assert_eq!(document.revision().unwrap(), revision);
         let break_paragraph = document.add_page_break().unwrap();
         assert!(!document.page_break_before(break_paragraph).unwrap());
-        assert_eq!(document.paragraph_text(break_paragraph).unwrap(), "\u{000c}");
+        assert_eq!(
+            document.paragraph_text(break_paragraph).unwrap(),
+            "\u{000c}"
+        );
         document.add_paragraph("Second page").unwrap();
         let third = document.add_paragraph("Third page").unwrap();
         document.set_page_break_before(third, true).unwrap();
