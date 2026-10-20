@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 use base64::Engine;
 use pdfcraft_render::{
@@ -303,9 +306,11 @@ fn add_links(
             "PDF link label geometry exceeds the work budget".into(),
         ));
     }
-    // Candidate offsets refer to one surviving paragraph, never a text search match.
-    type Candidate = (usize, usize, usize, String);
-    let mut candidates: Vec<Option<Candidate>> = Vec::new();
+    if count == 0 {
+        return Ok(());
+    }
+    let source = text.and_then(|text| LinkText::new(text, &page.blocks));
+    let mut candidates: Vec<Option<LinkCandidate>> = Vec::new();
     let mut ambiguous = Vec::new();
     let mut glyph_owner = vec![None; text.map_or(0, |text| text.glyphs.len())];
     for link in links.iter().filter(|link| link.page == number) {
@@ -344,7 +349,7 @@ fn add_links(
                         glyph_owner[glyph] = Some(index);
                     }
                 }
-                link_label(text, &selected, &page.blocks)
+                link_label(text, &selected, source.as_ref()?, &page.blocks)
             });
             page.links.push(LinkPayload {
                 uri: uri.clone(),
@@ -368,28 +373,133 @@ fn add_links(
             candidates.push(candidate);
         }
     }
-    // Every supported annotation participates in overlap detection, even an unresolved multiline one.
-    // Shared glyphs never get an arbitrary destination selected from overlapping annotations.
-    for (index, candidate) in candidates.into_iter().enumerate() {
-        if let Some((block, start, end, label)) = candidate.filter(|_| !ambiguous[index]) {
-            let link = &mut page.links[index];
-            link.text = label;
-            link.metadata.insert("start".into(), json!(start));
-            link.metadata.insert("end".into(), json!(end));
-            link.metadata.insert("block".into(), json!(block));
-            link.metadata
-                .insert("label_status".into(), json!("resolved"));
-            page.blocks[block].links.push(link.clone());
+    // Unresolved annotations still participate: never select an arbitrary shared-glyph target.
+    for (candidate, ambiguous) in candidates.iter_mut().zip(ambiguous) {
+        if ambiguous {
+            *candidate = None;
         }
     }
-    Ok(())
+    attach_link_candidates(page, candidates)
+}
+
+struct GlyphOffset {
+    line: usize,
+    byte_start: usize,
+    byte_end: usize,
+    char_start: usize,
+    char_end: usize,
+}
+
+struct LinkLine {
+    start: usize,
+    end: usize,
+    block: Option<usize>,
+}
+
+/// An offset map into the backend's text, not a second reading-order or layout pass.
+struct LinkText {
+    value: String,
+    glyphs: Vec<GlyphOffset>,
+    lines: Vec<LinkLine>,
+}
+
+impl LinkText {
+    fn new(text: &pdfcraft_render::PageText, blocks: &[BlockPayload]) -> Option<Self> {
+        if text.line_of.len() != text.glyphs.len() || text.space_before.len() != text.glyphs.len() {
+            return None;
+        }
+        let mut identities = HashMap::new();
+        for (index, block) in blocks.iter().enumerate() {
+            if block.kind != "paragraph"
+                || block.level.is_some()
+                || block.style.is_some()
+                || !block.links.is_empty()
+                || !block.images.is_empty()
+                || block.table.is_some()
+                || !block.metadata.is_empty()
+            {
+                continue;
+            }
+            let Some(bbox) = block.bbox else { continue };
+            identities
+                .entry((block.text.as_str(), bbox.map(float_key)))
+                .and_modify(|entry| *entry = None)
+                .or_insert(Some(index));
+        }
+        let value = text.plain_text();
+        let mut glyphs = Vec::with_capacity(text.glyphs.len());
+        let mut lines: Vec<LinkLine> = Vec::new();
+        let (mut bytes, mut chars) = (0, 0);
+        for (index, glyph) in text.glyphs.iter().enumerate() {
+            let new_line = index == 0 || text.line_of[index] != text.line_of[index - 1];
+            // These separator positions refer to text_of's exact spaces and newlines.
+            if index > 0 && (new_line || text.space_before[index]) {
+                bytes += 1;
+                chars += 1;
+            }
+            if new_line {
+                lines.push(LinkLine {
+                    start: index,
+                    end: index,
+                    block: None,
+                });
+            }
+            let line = lines.len() - 1;
+            let byte_start = bytes;
+            let char_start = chars;
+            bytes += glyph.text.len();
+            chars += glyph.text.chars().count();
+            glyphs.push(GlyphOffset {
+                line,
+                byte_start,
+                byte_end: bytes,
+                char_start,
+                char_end: chars,
+            });
+            lines[line].end = index + 1;
+        }
+        if bytes != value.len() {
+            return None;
+        }
+        for line in &mut lines {
+            let boxes = text.line_rects(line.start..line.end);
+            let [bbox] = boxes.as_slice() else { continue };
+            let label = value.get(glyphs[line.start].byte_start..glyphs[line.end - 1].byte_end)?;
+            line.block = identities
+                .get(&(label, bbox.map(f64::from).map(float_key)))
+                .copied()
+                .flatten();
+        }
+        Some(Self {
+            value,
+            glyphs,
+            lines,
+        })
+    }
+}
+
+fn float_key(value: f64) -> u64 {
+    if value == 0.0 {
+        0
+    } else {
+        value.to_bits()
+    }
+}
+
+struct LinkCandidate {
+    first_block: usize,
+    last_block: usize,
+    offset: usize,
+    length: usize,
+    label: String,
 }
 
 fn link_label(
     text: &pdfcraft_render::PageText,
     selected: &[usize],
+    source: &LinkText,
     blocks: &[BlockPayload],
-) -> Option<(usize, usize, usize, String)> {
+) -> Option<LinkCandidate> {
     let first = selected
         .iter()
         .position(|index| !text.glyphs[*index].text.trim().is_empty())?;
@@ -402,40 +512,111 @@ fn link_label(
     if selected.len() != end - start {
         return None;
     }
-    let (line_start, line_end) = text.line_at(start)?;
-    if end > line_end + 1 {
+    let first = &source.glyphs[start];
+    let last = &source.glyphs[end - 1];
+    let lines = &source.lines[first.line..=last.line];
+    let first_block = lines.first()?.block?;
+    for (offset, line) in lines.iter().enumerate() {
+        if line.block != Some(first_block + offset) {
+            return None;
+        }
+    }
+    let last_block = first_block + lines.len() - 1;
+    let full_start = &source.glyphs[lines.first()?.start];
+    let full_end = &source.glyphs[lines.last()?.end - 1];
+    // Exact equality excludes removed table text, omitted native lines and normalization gaps.
+    let joined = blocks[first_block..=last_block]
+        .iter()
+        .map(|block| block.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if joined != source.value.get(full_start.byte_start..full_end.byte_end)? {
         return None;
     }
-    let line = text.text_of(line_start..line_end + 1);
-    let boxes = text.line_rects(line_start..line_end + 1);
-    let [bbox] = boxes.as_slice() else {
-        return None;
-    };
-    let bbox = bbox.map(f64::from);
-    let mut matches = blocks.iter().enumerate().filter(|(_, block)| {
-        block.kind == "paragraph" && block.text == line && block.bbox == Some(bbox)
-    });
-    let (block, _) = matches.next()?;
-    if matches.next().is_some() {
-        return None;
+    Some(LinkCandidate {
+        first_block,
+        last_block,
+        offset: first.char_start - full_start.char_start,
+        length: last.char_end - first.char_start,
+        label: source
+            .value
+            .get(first.byte_start..last.byte_end)?
+            .to_owned(),
+    })
+}
+
+fn attach_link_candidates(
+    page: &mut PagePayload,
+    candidates: Vec<Option<LinkCandidate>>,
+) -> Result<(), EngineError> {
+    let mut intervals = candidates
+        .iter()
+        .flatten()
+        .filter(|candidate| candidate.first_block != candidate.last_block)
+        .map(|candidate| (candidate.first_block, candidate.last_block))
+        .collect::<Vec<_>>();
+    intervals.sort_unstable();
+    let mut groups: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in intervals {
+        if let Some(previous) = groups.last_mut().filter(|previous| start <= previous.1) {
+            previous.1 = previous.1.max(end);
+        } else {
+            groups.push((start, end));
+        }
     }
-    let label = text.text_of(start..end);
-    let offset = text
-        .text_of(line_start..start + 1)
-        .chars()
-        .count()
-        .checked_sub(text.glyphs[start].text.chars().count())?;
-    let limit = offset + label.chars().count();
-    if line
-        .chars()
-        .skip(offset)
-        .take(limit - offset)
-        .collect::<String>()
-        != label
-    {
-        return None;
+    let mut remap = vec![(0, 0); page.blocks.len()];
+    let mut old = std::mem::take(&mut page.blocks).into_iter().enumerate();
+    let mut groups = groups.into_iter().peekable();
+    while let Some((index, mut block)) = old.next() {
+        let new_index = page.blocks.len();
+        remap[index] = (new_index, 0);
+        if groups.peek().is_some_and(|group| group.0 == index) {
+            let (_, end) = groups.next().unwrap_or((index, index));
+            let mut characters = block.text.chars().count();
+            for (other_index, other) in old.by_ref().take(end - index) {
+                remap[other_index] = (new_index, characters + 1);
+                characters += 1 + other.text.chars().count();
+                block.text.push('\n');
+                block.text.push_str(&other.text);
+                if let (Some(a), Some(b)) = (&mut block.bbox, other.bbox) {
+                    *a = [
+                        a[0].min(b[0]),
+                        a[1].min(b[1]),
+                        a[2].max(b[2]),
+                        a[3].max(b[3]),
+                    ];
+                }
+            }
+        }
+        page.blocks.push(block);
     }
-    Some((block, offset, limit, label))
+    for (index, candidate) in candidates.into_iter().enumerate() {
+        let Some(candidate) = candidate else { continue };
+        let (block, prefix) = remap[candidate.first_block];
+        let start = prefix + candidate.offset;
+        let end = start + candidate.length;
+        if page.blocks[block]
+            .text
+            .chars()
+            .skip(start)
+            .take(candidate.length)
+            .collect::<String>()
+            != candidate.label
+        {
+            return Err(EngineError::Malformed(
+                "PDF link offset normalization mismatch".into(),
+            ));
+        }
+        let link = &mut page.links[index];
+        link.text = candidate.label;
+        link.metadata.insert("start".into(), json!(start));
+        link.metadata.insert("end".into(), json!(end));
+        link.metadata.insert("block".into(), json!(block));
+        link.metadata
+            .insert("label_status".into(), json!("resolved"));
+        page.blocks[block].links.push(link.clone());
+    }
+    Ok(())
 }
 
 fn add_images(
@@ -501,5 +682,167 @@ mod warning_tests {
             check_content_warnings(&[RenderWarning::ContentTruncated]),
             Err(EngineError::ResourceLimit(message)) if message.contains("partial output was discarded")
         ));
+    }
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::*;
+    use pdfcraft_render::{PageText, TextGlyph};
+
+    fn native_text(lines: &[&[&str]]) -> PageText {
+        let mut text = PageText::default();
+        for (line, values) in lines.iter().enumerate() {
+            for (column, value) in values.iter().enumerate() {
+                let x = column as f32 * 10.0;
+                let y = line as f32 * 20.0;
+                text.glyphs.push(TextGlyph {
+                    text: (*value).into(),
+                    rect: [x, y, x + 10.0, y + 10.0],
+                    quad: [[x, y + 10.0], [x + 10.0, y + 10.0], [x + 10.0, y], [x, y]],
+                    direction: [1.0, 0.0],
+                });
+                text.line_of.push(line as u32);
+                text.space_before.push(false);
+            }
+        }
+        text
+    }
+
+    fn page_info() -> pdfcraft_render::PageInfo {
+        let document = pdfcraft_create::blank(200.0, 200.0, 1).unwrap();
+        let bytes =
+            pdfcraft_cos::write_full(&document, &pdfcraft_cos::SaveOptions::default()).unwrap();
+        pdfcraft_render::inspect(Arc::new(bytes), None)
+            .unwrap()
+            .pages
+            .remove(0)
+    }
+
+    fn annotation(index: usize, view: [f32; 4]) -> pdfcraft_render::Link {
+        pdfcraft_render::Link {
+            page: 0,
+            index,
+            rect: [view[0], 200.0 - view[3], view[2], 200.0 - view[1]],
+            target: LinkTarget::Uri(format!("https://example.com/{index}")),
+        }
+    }
+
+    fn plain(page: &PagePayload) -> String {
+        page.blocks
+            .iter()
+            .map(|block| block.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn multiline_offsets_preserve_ligatures_unicode_spaces_and_neighboring_links() {
+        let mut text = native_text(&[&["é", "ffi", "A"], &["B", "中"], &["Z"]]);
+        text.space_before[2] = true;
+        let mut page = PagePayload::default();
+        add_text(&text, &mut page);
+        let before = plain(&page);
+        let source = LinkText::new(&text, &page.blocks).unwrap();
+        let candidates = [vec![1, 2, 3, 4], vec![0], vec![5]]
+            .map(|selected| link_label(&text, &selected, &source, &page.blocks));
+        assert!(candidates.iter().all(Option::is_some));
+        page.links = vec![LinkPayload::default(); 3];
+        attach_link_candidates(&mut page, candidates.into()).unwrap();
+        assert_eq!(plain(&page), before);
+        assert_eq!(page.blocks.len(), 2);
+        assert_eq!(page.blocks[0].text, "éffi A\nB中");
+        assert_eq!(page.links[0].text, "ffi A\nB中");
+        assert_eq!(page.links[0].metadata["start"], 1);
+        assert_eq!(page.links[0].metadata["end"], 9);
+        assert_eq!(page.links[1].text, "é");
+        assert_eq!(page.links[1].metadata["start"], 0);
+        assert_eq!(page.links[1].metadata["end"], 1);
+        assert_eq!(page.links[2].metadata["block"], 1);
+        assert_eq!(page.blocks[0].bbox, Some([0.0, 0.0, 30.0, 30.0]));
+    }
+
+    #[test]
+    fn disjoint_labels_sharing_a_line_merge_once_and_keep_exact_offsets() {
+        let text = native_text(&[&["A", "B"], &["C", "D"], &["E", "F"]]);
+        let mut page = PagePayload::default();
+        add_text(&text, &mut page);
+        let before = plain(&page);
+        let source = LinkText::new(&text, &page.blocks).unwrap();
+        let candidates = [vec![0, 1, 2], vec![3, 4, 5]]
+            .map(|selected| link_label(&text, &selected, &source, &page.blocks));
+        page.links = vec![LinkPayload::default(); 2];
+        attach_link_candidates(&mut page, candidates.into()).unwrap();
+        assert_eq!(plain(&page), before);
+        assert_eq!(page.blocks.len(), 1);
+        assert_eq!(page.links[0].text, "AB\nC");
+        assert_eq!(page.links[0].metadata["start"], 0);
+        assert_eq!(page.links[0].metadata["end"], 4);
+        assert_eq!(page.links[1].text, "D\nEF");
+        assert_eq!(page.links[1].metadata["start"], 4);
+        assert_eq!(page.links[1].metadata["end"], 8);
+    }
+
+    #[test]
+    fn overlapping_and_empty_annotations_do_not_merge_native_lines() {
+        let text = native_text(&[&["A", "B"], &["C", "D"]]);
+        let mut page = PagePayload::default();
+        add_text(&text, &mut page);
+        let before = serde_json::to_string(&page.blocks).unwrap();
+        add_links(
+            &[
+                annotation(0, [0.0, 0.0, 20.0, 30.0]),
+                annotation(1, [0.0, 0.0, 10.0, 10.0]),
+                annotation(2, [100.0, 100.0, 110.0, 110.0]),
+            ],
+            &page_info(),
+            0,
+            Some(&text),
+            &mut page,
+        )
+        .unwrap();
+        assert_eq!(serde_json::to_string(&page.blocks).unwrap(), before);
+        assert_eq!(page.links.len(), 3);
+        assert!(page
+            .links
+            .iter()
+            .all(|link| link.text.is_empty() && !link.metadata.contains_key("start")));
+    }
+
+    #[test]
+    fn noncontiguous_table_and_duplicate_line_candidates_stay_unresolved() {
+        let text = native_text(&[&["A", "B"], &["C", "D"]]);
+        let mut page = PagePayload::default();
+        add_text(&text, &mut page);
+        let source = LinkText::new(&text, &page.blocks).unwrap();
+        assert!(link_label(&text, &[0, 2], &source, &page.blocks).is_none());
+        let original = page.blocks.clone();
+        page.blocks[1] = BlockPayload {
+            kind: "table".into(),
+            table: Some(TablePayload::default()),
+            ..Default::default()
+        };
+        let source = LinkText::new(&text, &page.blocks).unwrap();
+        assert!(link_label(&text, &[0, 1, 2, 3], &source, &page.blocks).is_none());
+        page.blocks = original;
+        page.blocks.push(page.blocks[0].clone());
+        let source = LinkText::new(&text, &page.blocks).unwrap();
+        assert!(link_label(&text, &[0, 1], &source, &page.blocks).is_none());
+    }
+
+    #[test]
+    fn annotation_work_limit_fails_before_label_allocation() {
+        let mut text = native_text(&[&["A"]]);
+        text.glyphs.resize(5001, text.glyphs[0].clone());
+        text.line_of.resize(5001, 0);
+        text.space_before.resize(5001, false);
+        let links = vec![annotation(0, [0.0, 0.0, 10.0, 10.0]); 1000];
+        let mut page = PagePayload::default();
+        assert!(matches!(
+            add_links(&links, &page_info(), 0, Some(&text), &mut page),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        assert!(page.links.is_empty());
+        assert!(page.blocks.is_empty());
     }
 }

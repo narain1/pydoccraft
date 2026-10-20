@@ -1,6 +1,6 @@
 # Python authoring API direction
 
-Status: proposed design, not an available API. The [feature roadmap](../TODO.md) tracks implementation. Existing `doc_ex.open`, extraction, conversion, and PNG-returning rendering methods keep their contracts.
+Status: historical design direction. The implemented subset is documented in [the authoring guide](authoring.md); sketches below may include future operations. The [feature roadmap](../TODO.md) tracks implementation. Existing `doc_ex.open`, extraction, conversion, and PNG-returning rendering methods keep their contracts.
 
 The overlap review consolidates the feature checklist into [14 canonical workstreams](roadmap-workstreams.md). Feature breadth is not API breadth: a feature may be delivered through existing primitives, ordinary properties and a short Python recipe. Shared naming does not require a universal document hierarchy, dispatcher or generic options dictionary.
 
@@ -164,7 +164,7 @@ These are reference concepts mapped to proposed Python concepts, not verified Wo
 
 ## Completion and coverage
 
-For each feature, record the reference concept, public Python operation, format, pinned upstream crate/symbol, and separate read/create/edit/preserve/render/export results. Use `unassessed`, `blocked upstream`, `partial` with a precise limitation, `verified` with evidence, or `not applicable`. An unchecked feature in the roadmap has unassessed implementation feasibility unless explicitly stated otherwise.
+For each feature, record the reference concept, public Python operation, format, pinned upstream crate/symbol, and separate read/create/edit/preserve/render/export results. Use `unassessed`, `blocked upstream`, `partial` with a precise limitation, `verified` with evidence, or `not applicable`. An unchecked feature remains incomplete; it may contain implemented subsets or verified upstream blockers documented in the current authoring guide and validation evidence.
 
 “Feature parity” targets document operations rather than every SDK class, overload, packaging primitive, or XML escape hatch. A broad inventory must still list unimplemented feature families; they cannot disappear from the matrix. Microsoft Word layout equivalence, complete Office field calculation, macro execution, signatures, and arbitrary embedded programs are not implied by a schema match.
 
