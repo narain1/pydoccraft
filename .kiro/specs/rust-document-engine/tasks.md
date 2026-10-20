@@ -574,3 +574,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Validate coordinate/iterator reordering, deletion, close, early-invalid precedence, callback exceptions, copies and exact callback-state source/PNG preservation.
 - [x] Complete integrated installed-wheel validation: 449 Python tests, strict typing and native extension identity with the 312-test artifact.
 - [ ] Complete independent review and exact-head/current-main CI; radio support remains separate.
+
+
+## Owned auxiliary paragraph deletion
+
+- [x] Audit public native remove_block/sentinel behavior and distinguish adapter locator maintenance from semantic-reference remapping.
+- [x] Reuse integer collection deletion for owned direct header/footer/note paragraphs, with staged identity/accounting changes, bounds and ordinary semantic guards.
+- [x] Add three native groups and five public workflows for actual output, surviving nested ownership, sentinel/note behavior and atomic callback/scope/resource failures; run 41 related tests and strict copied-package typing.
+- [ ] Complete integrated locked release/clean installed-wheel artifact, independent review and current-main CI.
+- [ ] Retain body identity migration, cell/PPTX deletion and broader DOC5/TXT1 insertion/movement/adoption work.

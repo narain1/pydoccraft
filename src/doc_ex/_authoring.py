@@ -555,6 +555,21 @@ class _Collection(Sequence[_Item], Generic[_Item]):
         return self._factory(self._owner, ids[_index(index, len(ids))])
 
 
+class _Paragraphs(_Collection["Paragraph"]):
+    """Ordered paragraph handles; deletion is limited to owned DOCX auxiliary stories."""
+    def __delitem__(self, index: int) -> None:
+        self._owner._ensure_open()
+        if not isinstance(self._owner, WordDocument):
+            raise UnsupportedFormatError("PPTX paragraph deletion is not supported")
+        if isinstance(index, slice):
+            raise TypeError("paragraph deletion requires an integer index")
+        identifiers = self._ids()
+        selected = operator.index(index)
+        self._owner._ensure_open()
+        identifier = identifiers[_index(selected, len(identifiers))]
+        self._owner._call("remove_paragraph", identifier, _change=True)
+
+
 class WordDocument(EditableDocument):
     _format = "docx"
 
@@ -629,8 +644,8 @@ class WordDocument(EditableDocument):
         return Styles(self)
 
     @property
-    def paragraphs(self) -> _Collection[Paragraph]:
-        return _Collection(self, lambda: self._call("paragraph_ids"), Paragraph)
+    def paragraphs(self) -> _Paragraphs:
+        return _Paragraphs(self, lambda: self._call("paragraph_ids"), Paragraph)
 
     @property
     def tables(self) -> _Collection[EditableTable]:
@@ -1285,11 +1300,11 @@ class EditableStory:
         return native.ensure_story(self._kind, self._variant, self._section)
 
     @property
-    def paragraphs(self) -> _Collection[Paragraph]:
+    def paragraphs(self) -> _Paragraphs:
         def identifiers():
             identifier = self._identifier()
             return [] if identifier is None else self._owner._call("story_paragraph_ids", identifier)
-        return _Collection(self._owner, identifiers, Paragraph)
+        return _Paragraphs(self._owner, identifiers, Paragraph)
 
     def _check_rich_content(self):
         self._owner._ensure_open()
@@ -1709,14 +1724,14 @@ class EditableCell:
         return _Collection(owner, lambda: owner._call(f"cell_{kind}_ids", *self._content_args()), factory)
 
     @property
-    def paragraphs(self) -> _Collection[Paragraph]:
+    def paragraphs(self) -> _Paragraphs:
         if self._table._slide is not None:
             owner = self._table._owner
             def targets():
                 row, column, grid, body, count = owner._call("cell_paragraph_info", *self._args)
                 return [(row, column, index, grid, body) for index in range(count)]
-            return _Collection(owner, targets, lambda owner, target: _SlideCellParagraph(self, target))
-        return self._children("paragraph", Paragraph)
+            return _Paragraphs(owner, targets, lambda owner, target: _SlideCellParagraph(self, target))
+        return _Paragraphs(self._table._owner, lambda: self._table._owner._call("cell_paragraph_ids", *self._content_args()), Paragraph)
 
     @property
     def tables(self) -> _Collection[EditableTable]:
