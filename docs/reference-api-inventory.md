@@ -635,7 +635,7 @@ Cleanup, encryption, incremental save and embedded files.
 
 **Audited local surface:** Conservative PDF edit/save rejects unsupported preservation profiles.
 
-**Disposition:** `upstream_or_unassessed`. **Remaining:** Attachment API fixed1GiB decode limit and no suitable bounded writer; arbitrary encryption/active-content/PDF-A/UA profiles unassessed. No raw PDF object escape hatch.
+**Disposition:** `upstream_or_unassessed`. **Remaining:** Page FileAttachment creation is public; document EmbeddedFiles mutation remains private. Bounded complete inventory, unambiguous identity and strict caller-limited extraction remain upstream work. Arbitrary encryption/active-content/PDF-A/UA profiles are unassessed. No raw PDF object escape hatch.
 
 **Upstream candidates:** [U10](upstream-roadmap.md)
 
