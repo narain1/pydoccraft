@@ -244,3 +244,9 @@ Upstream acceptance:
 4. Verify at-limit/+1 arrays, metadata/DA tokens, repeated references, inline annotations, reply parents and page-tree cycles; demonstrate bounded visits/copies with native instrumentation. Preserve normal notes, markup and geometric annotations and explicit error/atomic mutation behavior. Existing fixture tests validate deterministic PDF offsets, native reference identity and bounded probe arguments, not complete safety or upstream completion.
 
 The local target mutation guard adds no summary call and does not fix initial inspection. A generic clone estimator, independent PDF reader, silent `take(N)` adapter or restricted imported inventory is not part of this documentation/reproducer change. PDF6 and the upstream inventory work remain open.
+
+### PDF page labels during assembly
+
+U10/PDF8/P2: native display labels already appear in `page.metadata["label"]`; physical indexes remain unchanged. The pinned [label implementation](https://github.com/storytold/pdfcraft/blob/645016addcfb9078c557f0189559ab47cdcee057/crates/organize/src/labels.rs) owns numbering and range adjustment. Full copies preserve labels, movement retains ranges at document positions, deletion adjusts them, and subsets/imports omit the source label tree. These are current assembly semantics, not evidence that position-based labels are defective. The [synthetic reproducer](../tools/reproduce_pdf_page_label_assembly.py) demonstrates each case without adding a second label API.
+
+A future explicit preservation policy/report should distinguish document-position labels from labels attached to selected content, and report invalid/oversized label-tree fallback rather than presenting physical numbering as complete preservation. Keep that work with existing assembly/output diagnostics; do not add a redundant `Page.label` alias or a local label-tree formatter. This is a local upstream candidate, not a filed upstream request or a completed PDF8 criterion.
