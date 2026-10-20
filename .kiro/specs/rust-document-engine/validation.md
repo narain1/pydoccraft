@@ -895,3 +895,12 @@ Runtime commit `58c1eaa53f5b37bb167958d8d6a059c2c9603a7c` passed **299 Rust test
 Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,508,811 bytes**; native extension **40,614,440 bytes**; SHA-256 `e084a6f29a4346eaeeaf67ca151475d1a4d35c4e2d8cdaf9ca40d47a5fd980c5`. Lock SHA-256 remains `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. PdfCraft/WordCraft/DeckCraft/craft-libs revisions remain pinned above; no dependency/attribution/prohibited-runtime changes.
 
 This local artifact retains the original decimal-outline test and does not supersede PR71's separate corrected-test/current-main CI validation. Final independent branch review and current-main CI remain required. Reset restores native inheritance; it does not imply arbitrary imported theme/master editing, complete referenced-media accounting or transparent output. SLIDE4 remains partial.
+
+
+## Recent roadmap overlap and stale-wording audit
+
+Documentation-only review on 2026-10-20 distinguishes delivered bounded operations from broad partial criteria. TODO now identifies existing hidden-slide metadata/fixed links/plain notes, native page/count fields, note conversion and field/comment properties without proposing duplicate managers. Slide insertion at a position composes existing append/move; slide duplication and imported graph remapping remain open. The workstream guide removes its obsolete138-open count and labels original agent assignments as historical rather than current capability claims.
+
+BG5 now joins the existing word.story-clear profile already used by DOC5/LAY3; its remainder no longer incorrectly lists owned clear as absent. This does not broaden that profile's historical artifact scope. All17 profile definitions,119 operation cells, artifact references, fixture fingerprints and source-audit baseline remain unchanged, including the pending decimal-outline evidence. All139 criterion IDs and their46 checked flags,14 owners and dependency JSON are unchanged. Newly implemented notes/read-only/reset behavior is not automatically promoted into historical operation certifications.
+
+The isolated documentation snapshot passes14 support-ledger tests, exact generated-matrix consistency, the139-ID/14-workstream ownership validator and the cached44-family reference-source check. No Cargo, behavioral corpus, new wheel or upstream source changes are involved. Broad E3/PDF6/SLIDE/API/QA criteria retain their prior partial/open status.

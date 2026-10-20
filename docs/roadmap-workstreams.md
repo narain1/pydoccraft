@@ -1,6 +1,6 @@
 # Canonical roadmap workstreams
 
-Three agents reviewed overlap, API size and prerequisites. The resulting roadmap retains all 139 coverage IDs with **one owner each**, organized into **14 workstreams**. There are 138 open coverage items and one existing rendering capability, R1. Workstreams are GitHub planning units, not new public API concepts.
+Three agents reviewed overlap, API size and prerequisites. The resulting roadmap retains all 139 coverage IDs with **one owner each**, organized into **14 workstreams**. R1 records the original rendering baseline; current completion checkboxes live only in TODO.md, not in this ownership document. Workstreams are GitHub planning units, not new public API concepts.
 
 The [JSON mapping](roadmap-workstreams.json) is the authoritative ownership map. [TODO.md](../TODO.md) holds each feature's acceptance details; [the API proposal](authoring-api-design.md) describes the small Python surface. [The upstream register](upstream-roadmap.md) distinguishes confirmed source findings, existing public support and unassessed contribution candidates.
 
@@ -37,12 +37,15 @@ Dependencies refer to the **needed baseline**, not completion of every advanced 
 | API9 and existing render methods | Use PNG bytes, `Path.write_bytes` and optional Pillow; no `RenderedPage` or third render entry point |
 | C4 / PDF4 | Ordinary DOCX authoring plus existing PDF conversion; no report schema/builder |
 | BG2–BG4 / MED2–MED4 | Image/text placement plus layer/opacity/anchor properties; watermark/background recipes |
-| BG5 / LAY3 | Section/header scope owns first/even/odd behavior |
+| BG5 / LAY3 / DOC5 | Section/header scope owns first/even/odd behavior; existing story clear reuses that scope and retains section settings |
 | BG6 / TXT2–TXT3 / TBL7 | Semantic formatting properties own shading; BG6 is consistency acceptance |
 | TXT7–TXT8 / FORM1 | Literal replacement owns range behavior; placeholders are a caller recipe |
 | DOC5–DOC6 / FORM2 / FORM6 | One safe content-copy primitive; repeat and batch with ordinary Python loops |
 | STY4 / TBL11 | Style examples and row comprehensions; no preset/dataframe subsystem |
 | TBL10 / MED8 / REF6 | Objects own accessibility metadata; W08 owns automatic caption/reference calculations |
+| E3 / SLIDE1 / SLIDE5 | Existing slide metadata, stable fixed-target links and separate notes own those behaviors; hidden-state/filtering policy does not require a second navigation API |
+| PDF6 / PKG5 | Field read-only state and annotation editing locks stay on their existing handles with distinct native effects; neither establishes encryption |
+| SLIDE4 / BG2–BG4 | Existing slide color/image properties own explicit override/reset; native inheritance is not a new resolved-background manager |
 | P1 / LAY9 | Private caching and revision invalidation; no public session/transaction framework |
 | TBL12 / BG8 / QA2–QA7 | Combined fixtures and release evidence; each feature owns its regression checks |
 
@@ -54,13 +57,13 @@ Use one editable lifecycle (`new`, `edit`, `copy`, `save`, `to_bytes`), semantic
 
 Do not add a method because an SDK element or roadmap checkbox exists. A documented recipe is a valid feature delivery when existing primitives provide the behavior clearly. Do not over-generalize DOCX flow, PDF coordinates and PPTX slide geometry into a universal engine.
 
-## Agent work and implementation sequence
+## Initial agent assignment (historical)
 
-The first implementation batch assigns every workstream to a portfolio while limiting concurrent edits to independent areas:
+The original planning batch assigned workstream portfolios as follows. This table records initial responsibilities, not current feature support; use the authoring guide and operation evidence for delivered scope:
 
-| Owner | Workstreams | Current deliverables |
+| Owner | Workstreams | Initial deliverables |
 |---|---|---|
-| API foundation agent | W01, W03, W04, W07, W08 | Coverage validator, lifecycle design and [dependency sequence](implementation-sequence.md); authoring APIs remain planned |
+| API foundation agent | W01, W03, W04, W07, W08 | Coverage validator, lifecycle design and [dependency sequence](implementation-sequence.md); initial authoring API planning |
 | Rendering agent | W02, W06, W10, W11 | DPI metadata and raster bounds; [format authoring readiness](format-authoring-readiness.md) audits dependent work |
 | Extraction agent | W09, W05, W12, W13 | Recursive DOCX cell extraction; [content readiness](content-readiness.md) audits table authoring, advanced Office objects and recipes |
 | Integrator | W14 | Installed-wheel evidence harness, cross-review, spec synchronization and locked validation |
