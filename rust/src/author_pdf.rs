@@ -1022,7 +1022,7 @@ impl EditablePdf {
             values.push((annotation.index, json!({
                 "index": annotation.index, "kind": kind, "text": annotation.contents.unwrap_or_default(),
                 "author": annotation.author.unwrap_or_default(), "color": annotation.color.map(|color| color.map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8)),
-                "rect": view_rect(geometry, annotation.rect), "uri": null, "target_page": null,
+                "rect": view_rect(geometry, annotation.rect), "uri": null, "target_page": null, "locked": annotation.locked,
             })));
         }
         for link in pdfcraft_annot::links::list(self.document()?)
@@ -1221,6 +1221,48 @@ impl EditablePdf {
         self.validate_input(cost)?;
         self.document = Some(edited);
         self.input_bytes += cost;
+        self.items += 1;
+        Ok(())
+    }
+
+    pub fn set_annotation_locked(
+        &mut self,
+        page: isize,
+        index: usize,
+        locked: bool,
+    ) -> PyResult<()> {
+        use pdfcraft_cos::Object;
+        let page = self.page_index(page)?;
+        let (reference, peak) = checked_lock_target(self.document()?, page, index)?;
+        self.validate_input(peak)?;
+        let original = self.document()?.get(reference);
+        let mut expected = original
+            .as_dict()
+            .ok_or_else(|| {
+                EngineError::Conversion("validated annotation dictionary is missing".into())
+            })?
+            .clone();
+        let flags = expected.get(b"F").and_then(Object::as_int).ok_or_else(|| {
+            EngineError::Conversion("validated annotation flags are missing".into())
+        })?;
+        let wanted = if locked { flags | 128 } else { flags & !128 };
+        if flags == wanted {
+            return Ok(());
+        }
+        expected.set(b"F".to_vec(), Object::Int(wanted));
+        let mut edited = self.document()?.clone();
+        pdfcraft_annot::set_locked(&mut edited, page, index, locked).map_err(annotation_error)?;
+        // The bounded canonical dictionary contains no deep direct graphs. The
+        // native operation must preserve every entry except the Locked bit,
+        // including the AP reference; it never regenerates that appearance.
+        if edited.get(reference).as_dict() != Some(&expected) {
+            return Err(EngineError::Conversion(
+                "native annotation lock changed unrelated content".into(),
+            )
+            .into());
+        }
+        self.document = Some(edited);
+        self.input_bytes += 16;
         self.items += 1;
         Ok(())
     }
@@ -2487,7 +2529,7 @@ fn geometric_dict_peak(document: &Document, dict: &pdfcraft_cos::Dict) -> PyResu
             b"Type" if value.as_name() == Some(b"Annot") => {}
             b"Subtype" => {}
             b"P" if matches!(value, Object::Ref(_)) => {}
-            b"F" if value.as_int() == Some(4) => {}
+            b"F" if matches!(value.as_int(), Some(4 | 132)) => {}
             b"CA" if value.as_f64() == Some(1.0) => {}
             b"Contents" | b"T" | b"NM" | b"M" | b"CreationDate" | b"Subj" => {
                 let bytes = value.as_string().ok_or_else(unsupported)?.bytes.len();
@@ -2631,6 +2673,186 @@ fn with_annotation_dict<T>(
             .as_dict()
             .ok_or_else(missing)?,
     )
+}
+
+// This is a bounded profile for one flag-only mutation, not an imported
+// annotation parser. Native annot_ref clones all Annots entries, and update_dict
+// clones the target: reject deep inline siblings and unbounded target values.
+fn checked_lock_target(
+    document: &Document,
+    page: usize,
+    index: usize,
+) -> PyResult<(pdfcraft_cos::ObjRef, usize)> {
+    use pdfcraft_cos::Object;
+    let unsupported = || {
+        EngineError::Unsupported("annotation locking requires a canonical note, text markup, rectangle or ellipse with reference-only page annotations".into())
+    };
+    let missing = || PyIndexError::new_err("annotation index out of range");
+    let pages = pdfcraft_organize::pages(document).map_err(organize_error)?;
+    let page = document.get(pages.get(page).ok_or_else(missing)?.obj);
+    let array = page
+        .as_dict()
+        .and_then(|d| d.get(b"Annots"))
+        .ok_or_else(missing)?;
+    let resolved = if let Object::Ref(r) = array {
+        Some(document.get(*r))
+    } else {
+        None
+    };
+    let array = resolved
+        .as_deref()
+        .unwrap_or(array)
+        .as_array()
+        .ok_or_else(missing)?;
+    if array.len() > MAX_ITEMS {
+        return Err(EngineError::ResourceLimit("PDF annotation count exceeds 10000".into()).into());
+    }
+    if array.iter().any(|entry| !matches!(entry, Object::Ref(_))) {
+        return Err(unsupported().into());
+    }
+    let reference = array
+        .get(index)
+        .and_then(Object::as_ref)
+        .ok_or_else(missing)?;
+    let object = document.get(reference);
+    let dict = object.as_dict().ok_or_else(missing)?;
+    let subtype = dict.name(b"Subtype").ok_or_else(unsupported)?;
+    let note = subtype == b"Text";
+    let markup = matches!(
+        subtype,
+        b"Highlight" | b"Underline" | b"StrikeOut" | b"Squiggly"
+    );
+    let geometric = matches!(subtype, b"Square" | b"Circle");
+    if !note && !markup && !geometric {
+        return Err(unsupported().into());
+    }
+    if dict.len() > 20 {
+        return Err(EngineError::ResourceLimit(
+            "annotation lock dictionary exceeds 20 entries".into(),
+        )
+        .into());
+    }
+    let mut peak = 4096usize.saturating_add(array.len().saturating_mul(128));
+    for (key, value) in dict.iter() {
+        match key.as_slice() {
+            b"Type" if value.as_name() == Some(b"Annot") => {}
+            b"Subtype" => {}
+            b"P" | b"Popup"
+                if matches!(value, Object::Ref(_)) && (key.as_slice() == b"P" || note) => {}
+            b"F" if matches!(value, Object::Int(28 | 156)) && note => {}
+            b"F" if matches!(value, Object::Int(4 | 132)) && !note => {}
+            b"CA" if value.as_f64() == Some(1.0) => {}
+            b"Contents" | b"T" | b"NM" | b"M" | b"CreationDate" | b"Subj" => {
+                let length = value.as_string().ok_or_else(unsupported)?.bytes.len();
+                let limit = if key.as_slice() == b"Contents" {
+                    131_074
+                } else {
+                    8194
+                };
+                if length > limit {
+                    return Err(EngineError::ResourceLimit(
+                        "annotation lock metadata exceeds its bound".into(),
+                    )
+                    .into());
+                }
+                peak = peak.saturating_add(length.saturating_mul(2));
+            }
+            b"Rect" | b"C" => {
+                let values = value.as_array().ok_or_else(unsupported)?;
+                let size = if key.as_slice() == b"Rect" { 4 } else { 3 };
+                if values.len() > size {
+                    return Err(EngineError::ResourceLimit(
+                        "annotation lock geometry array exceeds its bound".into(),
+                    )
+                    .into());
+                }
+                if values.len() != size
+                    || values.iter().any(|v| {
+                        !v.as_f64().is_some_and(|n| {
+                            n.is_finite()
+                                && if size == 4 {
+                                    n.abs() <= 1_000_000.0
+                                } else {
+                                    (0.0..=1.0).contains(&n)
+                                }
+                        })
+                    })
+                {
+                    return Err(unsupported().into());
+                }
+                if size == 4
+                    && (values[0].as_f64() >= values[2].as_f64()
+                        || values[1].as_f64() >= values[3].as_f64())
+                {
+                    return Err(unsupported().into());
+                }
+            }
+            b"Name" if note => {
+                let name = value.as_name().ok_or_else(unsupported)?;
+                if name.len() > 64 {
+                    return Err(EngineError::ResourceLimit(
+                        "annotation note name exceeds 64 bytes".into(),
+                    )
+                    .into());
+                }
+            }
+            b"Open" if note && matches!(value, Object::Bool(_)) => {}
+            b"QuadPoints" if markup => {
+                // The shared validator bounds the direct array before scanning.
+                markup_dict_peak(dict)?;
+                peak = peak.saturating_add(
+                    value
+                        .as_array()
+                        .ok_or_else(unsupported)?
+                        .len()
+                        .saturating_mul(64),
+                );
+            }
+            b"BS" if geometric => {
+                let border = value.as_dict().ok_or_else(unsupported)?;
+                if border.len() != 2
+                    || border.get(b"W").and_then(Object::as_f64) != Some(2.0)
+                    || border.name(b"S") != Some(b"S")
+                {
+                    return Err(unsupported().into());
+                }
+            }
+            b"AP" => {
+                let resolved = if let Object::Ref(r) = value {
+                    Some(document.get(*r))
+                } else {
+                    None
+                };
+                let appearance = resolved
+                    .as_deref()
+                    .unwrap_or(value)
+                    .as_dict()
+                    .ok_or_else(unsupported)?;
+                if appearance.len() != 1 {
+                    return Err(unsupported().into());
+                }
+                let normal = appearance
+                    .get(b"N")
+                    .and_then(Object::as_ref)
+                    .ok_or_else(unsupported)?;
+                if !matches!(document.get(normal).as_ref(), Object::Stream(_)) {
+                    return Err(unsupported().into());
+                }
+            }
+            _ => return Err(unsupported().into()),
+        }
+    }
+    if ![b"Type".as_slice(), b"F", b"Rect", b"C", b"AP"]
+        .iter()
+        .all(|k| dict.contains(k))
+        || (markup && !dict.contains(b"QuadPoints"))
+    {
+        return Err(unsupported().into());
+    }
+    if geometric {
+        geometric_dict_peak(document, dict)?;
+    }
+    Ok((reference, peak))
 }
 
 fn markup_quad_peak(quad: &[f64; 8], squiggly: bool) -> PyResult<usize> {
@@ -5787,6 +6009,348 @@ mod tests {
                 "rotation {rotation}"
             );
         }
+    }
+
+    #[test]
+    fn annotation_lock_preserves_dictionary_appearance_and_native_edit_rules() {
+        pyo3::prepare_freethreaded_python();
+        use pdfcraft_cos::Object;
+        let raw_appearance = |document: &Document, index| {
+            with_annotation_dict(document, 0, index, |dict| {
+                let normal = dict
+                    .get(b"AP")
+                    .unwrap()
+                    .as_dict()
+                    .unwrap()
+                    .reference(b"N")
+                    .unwrap();
+                let object = document.get(normal);
+                let Object::Stream(stream) = object.as_ref() else {
+                    panic!("owned appearance stream")
+                };
+                Ok(stream.raw.clone())
+            })
+            .unwrap()
+        };
+        for kind in [
+            "note",
+            "highlight",
+            "underline",
+            "strikeout",
+            "squiggly",
+            "rectangle",
+            "ellipse",
+        ] {
+            let mut document = EditablePdf::new(240.0, 240.0).unwrap();
+            let index = document
+                .add_annotation(
+                    0,
+                    kind,
+                    if kind == "note" {
+                        (20.0, 30.0, 40.0, 50.0)
+                    } else {
+                        (20.0, 30.0, 120.0, 50.0)
+                    },
+                    "Original",
+                    "Author",
+                    (255, 0, 0),
+                )
+                .unwrap();
+            let (reference, _) =
+                checked_lock_target(document.document().unwrap(), 0, index).unwrap();
+            let original = document
+                .document()
+                .unwrap()
+                .get(reference)
+                .as_dict()
+                .unwrap()
+                .clone();
+            let appearance =
+                annotation_appearance_bytes(document.document().unwrap(), 0, index).unwrap();
+            let original_ap = raw_appearance(document.document().unwrap(), index);
+            let bytes = document.to_bytes().unwrap();
+            let png = crate::pdf::render(&bytes, 0, 144.0, None).unwrap();
+            document.set_annotation_locked(0, index, true).unwrap();
+            let mut expected = original.clone();
+            expected.set(
+                b"F".to_vec(),
+                Object::Int(if kind == "note" { 156 } else { 132 }),
+            );
+            assert_eq!(
+                document.document().unwrap().get(reference).as_dict(),
+                Some(&expected),
+                "{kind}"
+            );
+            assert_eq!(
+                annotation_appearance_bytes(document.document().unwrap(), 0, index).unwrap(),
+                appearance
+            );
+            assert_eq!(
+                raw_appearance(document.document().unwrap(), index),
+                original_ap
+            );
+            let locked = document.to_bytes().unwrap();
+            assert_eq!(
+                crate::pdf::render(&locked, 0, 144.0, None).unwrap(),
+                png,
+                "{kind}"
+            );
+            let mut reopened = EditablePdf::from_bytes(&locked, None).unwrap();
+            assert!(pdfcraft_annot::summaries(reopened.document().unwrap())[0].locked);
+            reopened.set_annotation_locked(0, index, false).unwrap();
+            assert!(!pdfcraft_annot::summaries(reopened.document().unwrap())[0].locked);
+            for (rect, color, author) in [
+                (
+                    Some(if kind == "note" {
+                        (30.0, 40.0, 50.0, 60.0)
+                    } else {
+                        (30.0, 40.0, 130.0, 60.0)
+                    }),
+                    None,
+                    None,
+                ),
+                (None, Some((0, 0, 255)), None),
+                (None, None, Some("Changed")),
+            ] {
+                assert!(document
+                    .update_annotation(
+                        0,
+                        index,
+                        Some("Must roll back"),
+                        rect,
+                        color,
+                        None,
+                        None,
+                        author
+                    )
+                    .unwrap_err()
+                    .to_string()
+                    .contains("locked"));
+                assert_eq!(document.to_bytes().unwrap(), locked);
+            }
+            assert!(document
+                .delete_annotation(0, index)
+                .unwrap_err()
+                .to_string()
+                .contains("locked"));
+            assert_eq!(document.to_bytes().unwrap(), locked);
+            document
+                .update_annotation(
+                    0,
+                    index,
+                    Some("Editable while locked"),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+            assert!(pdfcraft_annot::summaries(document.document().unwrap())[0].locked);
+            assert_eq!(
+                crate::pdf::render(&document.to_bytes().unwrap(), 0, 144.0, None).unwrap(),
+                png
+            );
+            document.set_annotation_locked(0, index, false).unwrap();
+            document
+                .update_annotation(
+                    0,
+                    index,
+                    None,
+                    None,
+                    Some((0, 0, 255)),
+                    None,
+                    None,
+                    Some("Changed"),
+                )
+                .unwrap();
+            document.delete_annotation(0, index).unwrap();
+            assert!(pdfcraft_annot::summaries(document.document().unwrap()).is_empty());
+            let page = document
+                .document()
+                .unwrap()
+                .get(pdfcraft_organize::pages(document.document().unwrap()).unwrap()[0].obj);
+            assert!(page.as_dict().unwrap().get(b"Annots").is_none()); // note popup removed too
+        }
+    }
+
+    #[test]
+    fn annotation_lock_rejects_foreign_profiles_and_budget_failures_atomically() {
+        pyo3::prepare_freethreaded_python();
+        use pdfcraft_cos::{Dict, Object, PdfString};
+        let mut document = EditablePdf::new(240.0, 240.0).unwrap();
+        let index = document
+            .add_annotation(
+                0,
+                "highlight",
+                (20.0, 30.0, 120.0, 50.0),
+                "Original",
+                "Author",
+                (255, 0, 0),
+            )
+            .unwrap();
+        let (reference, _) = checked_lock_target(document.document().unwrap(), 0, index).unwrap();
+        for (key, value) in [
+            (b"F".to_vec(), Object::Real(4.0)),
+            (b"F".to_vec(), Object::Int(0)),
+            (b"IRT".to_vec(), Object::Ref(reference)),
+            (
+                b"Foreign".to_vec(),
+                Object::Array(vec![Object::Array(vec![Object::Int(1)])]),
+            ),
+            (b"AP".to_vec(), Object::Dict(Dict::new())),
+            (b"C".to_vec(), Object::Array(vec![Object::Real(1.0); 4])),
+            (b"Rect".to_vec(), Object::Array(vec![Object::Real(1.0); 4])),
+            (
+                b"Contents".to_vec(),
+                Object::String(PdfString::literal(vec![b'x'; 131_075])),
+            ),
+            (
+                b"QuadPoints".to_vec(),
+                Object::Array(vec![Object::Real(0.0); 8193]),
+            ),
+        ] {
+            let mut bad = document.copy().unwrap();
+            bad.document
+                .as_mut()
+                .unwrap()
+                .update_dict(reference, |d| d.set(key, value))
+                .unwrap();
+            let before = bad.to_bytes().unwrap();
+            let (items, input) = (bad.items, bad.input_bytes);
+            assert!(bad.set_annotation_locked(0, index, true).is_err());
+            assert_eq!(bad.to_bytes().unwrap(), before);
+            assert_eq!((bad.items, bad.input_bytes), (items, input));
+        }
+        for (items, input) in [
+            (MAX_ITEMS, document.input_bytes),
+            (document.items, MAX_DOCUMENT_INPUT - 1),
+        ] {
+            let mut bad = document.copy().unwrap();
+            bad.items = items;
+            bad.input_bytes = input;
+            let before = bad.to_bytes().unwrap();
+            assert!(bad
+                .set_annotation_locked(0, index, true)
+                .unwrap_err()
+                .to_string()
+                .contains("resource_limit"));
+            assert_eq!(bad.to_bytes().unwrap(), before);
+            assert_eq!((bad.items, bad.input_bytes), (items, input));
+        }
+        let mut link = EditablePdf::new(240.0, 240.0).unwrap();
+        let index = link
+            .add_link(
+                0,
+                (20.0, 20.0, 80.0, 40.0),
+                Some("https://example.com"),
+                None,
+            )
+            .unwrap();
+        let before = link.to_bytes().unwrap();
+        assert!(link
+            .set_annotation_locked(0, index, true)
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported"));
+        assert_eq!(link.to_bytes().unwrap(), before);
+    }
+
+    #[test]
+    fn annotation_lock_bounds_references_metadata_and_quad_arrays_before_copy() {
+        pyo3::prepare_freethreaded_python();
+        use pdfcraft_cos::{Dict, Object, PdfString};
+        let mut document = EditablePdf::new(240.0, 240.0).unwrap();
+        let index = document
+            .add_annotation(
+                0,
+                "highlight",
+                (20.0, 30.0, 120.0, 50.0),
+                "Original",
+                "",
+                (255, 0, 0),
+            )
+            .unwrap();
+        let (reference, _) = checked_lock_target(document.document().unwrap(), 0, index).unwrap();
+        let page = pdfcraft_organize::pages(document.document().unwrap()).unwrap()[0].obj;
+        let native = document.document.as_mut().unwrap();
+        native
+            .update_dict(reference, |d| {
+                d.set(
+                    b"Contents".to_vec(),
+                    Object::String(PdfString::literal(vec![b'x'; 131_074])),
+                );
+                d.set(
+                    b"T".to_vec(),
+                    Object::String(PdfString::literal(vec![b'a'; 8194])),
+                );
+                let quad = [20.0, 210.0, 120.0, 210.0, 20.0, 190.0, 120.0, 190.0];
+                d.set(
+                    b"QuadPoints".to_vec(),
+                    Object::Array((0..1024).flat_map(|_| quad.map(Object::Real)).collect()),
+                );
+            })
+            .unwrap();
+        native
+            .update_dict(page, |d| {
+                d.set(
+                    b"Annots".to_vec(),
+                    Object::Array(vec![Object::Ref(reference); MAX_ITEMS]),
+                )
+            })
+            .unwrap();
+        assert!(checked_lock_target(document.document().unwrap(), 0, index).is_ok());
+        document.set_annotation_locked(0, index, true).unwrap();
+        let mut too_many = document.copy().unwrap();
+        too_many
+            .document
+            .as_mut()
+            .unwrap()
+            .update_dict(page, |d| {
+                d.set(
+                    b"Annots".to_vec(),
+                    Object::Array(vec![Object::Ref(reference); MAX_ITEMS + 1]),
+                )
+            })
+            .unwrap();
+        assert!(checked_lock_target(too_many.document().unwrap(), 0, index)
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit"));
+        let mut inline = document.copy().unwrap();
+        inline
+            .document
+            .as_mut()
+            .unwrap()
+            .update_dict(page, |d| {
+                d.set(
+                    b"Annots".to_vec(),
+                    Object::Array(vec![Object::Ref(reference), Object::Dict(Dict::new())]),
+                )
+            })
+            .unwrap();
+        let before = inline.to_bytes().unwrap();
+        assert!(inline
+            .set_annotation_locked(0, index, false)
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported"));
+        assert_eq!(inline.to_bytes().unwrap(), before);
+        let mut oversized = document.copy().unwrap();
+        oversized
+            .document
+            .as_mut()
+            .unwrap()
+            .update_dict(reference, |d| {
+                for i in 0..21 {
+                    d.set(format!("Extra{i}").into_bytes(), Object::Int(0));
+                }
+            })
+            .unwrap();
+        assert!(checked_lock_target(oversized.document().unwrap(), 0, index)
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit"));
     }
 
     #[test]

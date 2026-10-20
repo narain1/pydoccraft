@@ -2459,6 +2459,21 @@ class Annotation:
             author=author, _change=True)
 
     @property
+    def locked(self) -> bool:
+        """Whether native comment editing is locked; this is not access control."""
+        value = self._value()
+        if value["kind"] not in ("note", "highlight", "underline", "strikeout", "squiggly", "rectangle", "ellipse"):
+            raise UnsupportedFormatError("locking this annotation kind is not available")
+        return value["locked"]
+
+    @locked.setter
+    def locked(self, value: bool):
+        self._check()
+        if type(value) is not bool:
+            raise TypeError("annotation locked must be a bool")
+        self._page._owner._call("set_annotation_locked", self._page.number, self._id, value, _change=True)
+
+    @property
     def kind(self):
         return self._value()["kind"]
 

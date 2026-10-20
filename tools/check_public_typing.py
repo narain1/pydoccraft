@@ -10,7 +10,7 @@ from typing import Any, assert_type
 
 import doc_ex
 from doc_ex._authoring import (
-    Annotation, Bookmark, EditableCell, EditableTable, Paragraph, PdfDocument,
+    Annotation, Bookmark, EditableCell, EditableTable, Paragraph, PdfDocument, PdfField,
     PdfPage, Picture, Presentation, Shape, SlidePicture, SlideTable, TextRange,
     WordDocument,
 )
@@ -57,7 +57,16 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         bookmark = pdf.bookmarks.add('Title', 0)
         assert_type(bookmark, Bookmark)
         assert_type(pdf.bookmarks.move(0, 0), Bookmark)
-        assert_type(page.annotations.add('note', box=(10, 10, 20, 20)), Annotation)
+        annotation = page.annotations.add('note', box=(10, 10, 20, 20))
+        assert_type(annotation, Annotation)
+        assert_type(annotation.locked, bool)
+        annotation.locked = True
+        assert_type(annotation.locked, bool)
+        field = page.fields.add('customer', (10, 60, 160, 30))
+        assert_type(field, PdfField)
+        assert_type(field.tooltip, str)
+        field.tooltip = 'Customer identifier'
+        assert_type(field.tooltip, str)
         assert_type(page.annotations.add_link(box=[10, 10, 20, 20], uri='https://example.com'), Annotation)
         assert_type(page.search_for('Example'), list[tuple[float, float, float, float]])
         assert_type(page.get_text(), str)

@@ -385,7 +385,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Keep one atomic save implementation and verify both-mode representation, content, pixels, fields, ownership, callbacks and limit behavior.
 - [x] Complete the local locked native/release/clean-wheel corpus and record the new artifact.
 - [x] Integrate the reviewed bookmark shaping correction and verify the complete local corpus with exact safe-profile PNG assertions.
-- [ ] Pass independent review and corrected prerequisite/current-main CI before merge.
+- [x] Pass independent review and corrected prerequisite/current-main CI before merge.
 - [ ] Retain optimization, version/conformance profiles, incremental writing and broader PDF8 preservation as open work.
 
 
@@ -395,7 +395,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Preserve section references/settings and invalidate only removed child handles; reclaim exact text/cell/media usage through existing commit guards.
 - [x] Verify focused rich-content, copy, no-op, rollback, semantic-anchor and boundary regressions in isolation.
 - [x] Complete integrated locked native/release/installed-wheel validation after the reviewed bookmark corrections.
-- [ ] Pass independent review and exact current-main CI before merge.
+- [x] Pass independent review and exact current-main CI before merge.
 - [ ] Retain general block movement/adoption, note removal, header linkage and broader DOC5/LAY3 parity as open work.
 
 
@@ -405,7 +405,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Bound query, normalization, hit and geometry work with explicit errors and preserve owner/cache semantics.
 - [x] Verify focused native/public geometry, ActualText, ligature, column, Unicode, callback and exact-limit regressions in isolation.
 - [x] Complete integrated locked native/release/clean-wheel validation after prerequisite bookmark fixes (276 Rust / 379 Python).
-- [ ] Complete independent review and exact-head/current-main CI before manual merge.
+- [x] Complete independent review and exact-head/current-main CI before manual merge.
 - [ ] Retain Office search geometry, normalized source offsets and broad E2 grounding parity as open work.
 
 ## PDF3 native drawing-style boundary audit
@@ -467,3 +467,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add five scoped profiles with reviewed fingerprints and the exact complete a94a5ba artifact; preserve the seven-operation distinction and unsupported redaction evidence.
 - [x] Connect existing roadmap/reference families and remove stale claims that owned clear, bookmarks or native search are absent; do not close broader criteria or duplicate ownership.
 - [x] Validate generated guides, offline evidence checks and focused tests against the existing installed wheel; record the documentation-only result without claiming a new release artifact.
+
+
+## Bounded PDF comment editing locks
+
+- [x] Audit native flag semantics, reference/dictionary clone behavior and link incompatibility; reuse the existing Annotation handle.
+- [x] Stage canonical flag-only mutations with bounded borrowed preflight and unchanged-appearance/target postconditions.
+- [x] Complete focused native/public fidelity, boundary, rollback and lifetime checks.
+- [x] Complete integrated locked native/release/installed-wheel validation (288 Rust / 413 Python).
+- [ ] Complete independent review and exact-head/current-main CI before manual merge.
+- [ ] Keep PDF6/U10 broader imported inventory, reply-thread and annotation capabilities open.

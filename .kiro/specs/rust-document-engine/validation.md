@@ -820,6 +820,41 @@ Isolated documentation validation on the 1e28d49 source baseline passed 14 suppo
 Root integration additionally validates the current 16-profile ledger and unchanged 139-ID/44-family joins; no runtime or behavioral evidence changes.
 
 
+### Annotation editing locks — isolated focused evidence (2026-10-20)
+
+Base `fe23c89`; no dependency or upstream revision change. The isolated implementation adds `Annotation.locked` for seven existing comment kinds through public native `set_locked`, a reference-only page-array/canonical target preflight and a staged flag-only dictionary postcondition. Native `set_info` also checks Locked, so author changes are inhibited; comment text remains editable. Links are excluded because their separate native setter does not enforce the flag. This is not access control or a general imported-inventory safety claim.
+
+Rust 1.95 locked/offline focused `annotation_lock` tests: **3 passed**, 285 filtered, 1.38 s. All-target locked/offline Clippy with warnings denied and formatting passed; a debug extension was built. Public tests ran against that isolated extension and matching copied facade: **15 passed** in 29.257 s (`test_annotation_lock`, unchanged `test_pdf_geometric_annotations`, unchanged `test_pdf_markup`), including **4 new groups**. They cover all seven kinds across four rotations with CropBox/UserUnit, actual annotation ink, exact PNG preservation, saved native roundtrips, independent copies, text/blocked compound edits, stale/closed handles, strict bool without callbacks, canonical imported acceptance and malformed/unsupported rollback with warm caches. Native tests additionally compare the complete target dictionary and raw appearance bytes, verify note popup removal after unlock, exercise 10,000/+1 reference counts, 1,024/+1 quadrilateral bounds, encoded metadata maxima, noncanonical flags/arrays and mutation/input-budget failures.
+
+Native `Object::as_int` accepts finite integral Reals. The new mutation deliberately requires direct `Object::Int` canonical flags, with a regression rejecting `/F 4.0`; existing inventory remains permissive. Native lock refusal retains the existing `conversion_failure` → `DocExError` mapping.
+
+Consumer typing assertions cover the bool getter/setter and existing str PdfField.tooltip identity/getter/setter. Strict mypy passed against a separate environment containing the copied matching package/debug extension; it is not release-wheel installation evidence. The parent will repeat the check against the final installed wheel. Documentation append context was rebased onto08ae30d; native/facade sources remain the validated fe23c89 baseline plus this patch.
+
+Full integrated locked tests, release wheel, installed-wheel corpus and independent review remain pending. Existing global annotation summaries and initial inspection can allocate before adapter caps; this slice bounds only the new target mutation and does not close PDF6/U10.
+
+
+## Annotation editing locks — complete local artifact
+
+- Runtime `a21fc5c80abe556ac03b471f1906a7ec6b6a3f16` passes all 288 locked Rust tests and 413 clean installed-wheel Python tests, zero skips/failures/errors, with exact installed-byte matching. Formatting, all-targets warnings-denied Clippy, strict installed-package typing, roadmap/support/cached-reference checks and the unchanged 264-package license audit pass.
+- Linux x86_64 / CPython 3.11.2 wheel: 17,495,963 bytes; extension: 40,586,536; SHA-256 `2c54fbb1b41472fd5a07e7ba8e9019c91bdfa125eebc45c4bb770203cb759d5f`; lock SHA-256 `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. Evidence: `dist/pdf-annotation-lock/validation.json` and `/opt/pdfannotationlocktest`. No upstream revision, dependency or conversion-matrix change.
+- This supersedes focused-only lock evidence for local acceptance. All seven comment kinds retain tested appearances and pixels across transformed pages; native lock refusals preserve staged state. Inventory/initial-inspection limits, foreign profiles, links and reply-thread semantics remain outside this mutation profile. Independent review and exact-head/current-main CI remain required before manual merge; PDF6/U10 stay open.
+
+
+## Independent manual merge evidence through PR 69
+
+GitHub merge state was verified on 2026-10-20. Each change passed independent review, required fixes and fresh exact-head/current-main CI before manual merge; repository auto-merge remains disabled. These gates complete the corresponding delivery tasks, not broader roadmap criteria. Historical artifact sections above retain their original validation scope.
+
+| PR | Merge commit | Final CI Rust / installed Python |
+|---|---|---|
+| [64](https://github.com/narain1/pydoccraft/pull/64) | `fd6b1b1f6fafd04dea520ca7ea9ce3d4888b818d` | 262 / 360 |
+| [65](https://github.com/narain1/pydoccraft/pull/65) | `de2b0b44c3479108157da1d5e04f70edbe480997` | 265 / 365 |
+| [67](https://github.com/narain1/pydoccraft/pull/67) | `9accfa2a667c6521cf6501c3603ec0a0cb6c092d` | 268 / 369 |
+| [68](https://github.com/narain1/pydoccraft/pull/68) | `b733c6ab41c44728920e97e6ba3b31e782b36aaa` | 276 / 379 |
+| [69](https://github.com/narain1/pydoccraft/pull/69) | `e59de48ce0c13c5ade87a626d25f7e2e74dc122a` | 276 / 379 |
+
+Formatting, warnings-denied Clippy, strict installed-package typing and the unchanged 264-package runtime/build license audit passed in each final CI run. PR69 changes source-audit documentation/data only.
+
+
 ## Decimal-outline raster comparison — corrected CI artifact
 
 - Corrected final-main head `d5912b9aad74520b13a9753e6b6ee4b27c2caa3d` passes [CI 39504970072](https://github.com/narain1/pydoccraft/actions/runs/39504970072): all 280 locked Rust tests and 393 installed-wheel Python tests, zero failures/errors/skips, formatting, warnings-denied Clippy, strict typing and the unchanged 264-package audit. Independent corrected-test verification against the copied local release also passes all 393 tests (79.069s). PR71 was manually merged as `e402268f5bc33f756f34587594761c41308a2a1e`; auto-merge remains disabled.

@@ -423,6 +423,15 @@ field_payload adds the existing native Field.tooltip string, and one narrow set_
 The facade uses base str length/conversion/encoding operations and retains initial/final structural checks. No generic form-property patch language, new field container, imported-form reader or metadata renderer is introduced. Native metadata updates can allocate replacement appearances even when pixels remain identical; this is not a constant-allocation operation or secure removal promise.
 
 
+## 66. Native lock flag with a bounded target profile
+
+The existing annotation JSON adds Summary.locked, and one private setter delegates to public pdfcraft_annot::set_locked. The facade uses an actual-bool check. The setter first borrows the page Annots array, rejects inline entries before native annot_ref can clone them, and validates the selected dictionary against a <=20-entry canonical schema. It permits bounded scalar metadata, finite direct geometry, existing bounded markup quads, canonical geometric borders and a reference normal appearance. It does not decode appearance streams or traverse imported reply graphs.
+
+Notes use native flags28/156; the other six supported comment kinds use4/132. The existing rectangle/ellipse guard admits4/132 so locked text editing and later unlocking remain usable. Copies are reserved conservatively using the page reference count and bounded target data; a flag change charges a small scalar mutation and no appearance regeneration. The staged target must equal the bounded original with only F changed. No field/widget framework, ownership tracker, format parser or general mutation language is added.
+
+Native move/set_rect/set_style/set_info/delete check Locked; set_contents and set_locked do not. Links use a different setter that does not enforce the flag, so the property rejects links. Native Invalid retains its existing DocExError mapping. Readback uses the existing permissive Summary flags interpretation (including integral real numbers) and retains its inventory limitations; it does not certify imported dictionary validity.
+
+
 ## Incremental navigation, lifecycle and output evidence
 
 Five additional profiles reuse the existing seven-operation ledger schema and generated support/reference guides. Existing roadmap ownership remains the sole source of owners and checkboxes. The new profiles cite the already validated a94a5ba runtime artifact; their reviewed test-file digests match that runtime exactly. This documentation join does not build or certify a new wheel. Bookmark source inventory, broad imported preservation, advanced output profiles and auxiliary numbering remain explicitly outside the corresponding tested scopes.

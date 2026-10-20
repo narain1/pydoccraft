@@ -508,6 +508,15 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 4. Tests SHALL verify native metadata roundtrip, clear/removal, all three owned kinds, values/options/flags/widgets, exact visible-output preservation, four rotated CropBox/UserUnit profiles, copies/resize/value/flatten and lifetime/budget failures. Imported AcroForms, radios and general widget lifecycle SHALL remain outside this profile.
 
 
+## 66. Bounded PDF comment editing locks
+
+1. Existing Annotation SHALL expose a strict writable locked boolean for the seven supported comment kinds. Links and foreign kinds SHALL fail explicitly. Initial owner/generation checks SHALL precede validation; arbitrary truth-value conversion SHALL not run.
+2. Mutation SHALL use public native set_locked on a staged document and compare the bounded target dictionary against the expected flag-only change. AP references, geometry, metadata and other flags SHALL remain unchanged. Existing geometric validation SHALL admit the canonical Locked bit without relaxing style/shape bounds.
+3. Before native annotation-array/dictionary cloning, the setter SHALL enforce the existing 10,000-entry reference-only page array limit and a bounded canonical target profile. Unsupported nested/reply/flag/style/appearance combinations SHALL reject; metadata/quadrilateral limits and document mutation budgets SHALL remain authoritative. Global native imported summaries and initial inspection remain upstream limitations.
+4. Locked geometry/color/author/deletion requests SHALL fail atomically through native semantics; comment text SHALL remain editable, and unlocking SHALL restore supported edits. This flag SHALL not be described as encryption, document-level protection or arbitrary reply-thread security.
+5. Tests SHALL cover all seven kinds, actual pixels, four rotated CropBox/UserUnit profiles, saved native source, copy/lifetime behavior, unchanged AP and complete target state except F, compound rollback, malformed/unsupported imported profiles and exact resource boundaries.
+
+
 ## 67. Incremental navigation, lifecycle and output evidence
 
 1. Existing operation evidence SHALL add bounded profiles for DOCX endpoint/whole-paragraph bookmark navigation, owned header/footer clear, PDF object-stream serialization, native PDF search and DOCX decimal outlines. Joins SHALL reuse current coverage IDs, owners and reference families without changing criterion completion. The explicit unsupported redaction profile SHALL remain present.
