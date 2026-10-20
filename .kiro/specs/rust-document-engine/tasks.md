@@ -368,3 +368,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Review concrete assertions and native symbols for two bounded profiles; connect exact historical artifacts and existing reference families/criteria.
 - [x] Regenerate both development guides, verify cached reference sources and all existing ownership joins, and run the installed-wheel corpus.
 - [ ] Retain broader typography, imported annotations/appearance, upstream inventory and full parity audits as open work.
+
+
+## Owned DOCX bookmarks and internal links
+
+- [x] Reuse named mapping operations, TextRange and range.link with bounded native paired markers and all-story reference validation.
+- [x] Preserve generic semantic/media safeguards and exact own-pair deletion/relocation, fresh grid lookup, copies and stale-range behavior.
+- [x] Share native layout checks and prove conservative link-batch counting; retain native missing/auxiliary target, clipped hit-area, vertical-link and export-cap regressions.
+- [x] Complete locked full native/release/installed-wheel validation and record exact artifact evidence.
+- [ ] Retain interior targets pending upstream marker-transparent shaping, general cross-references, imported/multi-paragraph targets, tooltips, heading outlines and arbitrary transformed navigation as open work.

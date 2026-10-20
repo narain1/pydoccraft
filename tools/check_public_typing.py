@@ -22,6 +22,10 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(word.copy(), WordDocument)
         paragraph = word.add_paragraph('Example')
         assert_type(paragraph, Paragraph)
+        word.bookmarks['example'] = paragraph[:]
+        assert_type(word.bookmarks['example'], TextRange)
+        assert_type(next(iter(word.bookmarks)), str)
+        del word.bookmarks['example']
         assert_type(paragraph.add_run(' extra', bold=True, language='en-GB'), TextRange)
         assert_type(paragraph.format(direction='rtl'), None)
         assert_type(paragraph[:].format(language=None), None)
@@ -49,7 +53,7 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         bookmark = pdf.bookmarks.add('Title', 0)
         assert_type(bookmark, Bookmark)
         assert_type(pdf.bookmarks.move(0, 0), Bookmark)
-        assert_type(page.annotations.add('text', box=(10, 10, 20, 20)), Annotation)
+        assert_type(page.annotations.add('note', box=(10, 10, 20, 20)), Annotation)
         assert_type(page.annotations.add_link(box=[10, 10, 20, 20], uri='https://example.com'), Annotation)
         assert_type(page.get_text(), str)
         assert_type(page.get_text('dict'), dict[str, Any])

@@ -192,14 +192,14 @@ Unchecked items below remain incomplete even when an initial slice is implemente
 
 ### REF — Links, bookmarks, fields and navigation (P1; calculated indexes P2)
 
-- [ ] **REF1: External/internal hyperlinks.** Create/edit/remove exact labeled links, including bookmark targets, tooltips and links crossing runs. Never fetch the target; validate URI/relationship policy without rewriting label text.
-- [ ] **REF2: Bookmarks and cross-references.** Manage named ranges and references with unique IDs. Define behavior on deletion/copying and detect dangling references before save.
+- [ ] **REF1: External/internal hyperlinks.** Owned DOCX internal links now reuse range.link and named body targets with actual native PDF destination checks; broader tooltips/transformed contexts remain open. Create/edit/remove exact labeled links, including bookmark targets, tooltips and links crossing runs. Never fetch the target; validate URI/relationship policy without rewriting label text.
+- [ ] **REF2: Bookmarks and cross-references.** Owned whole-paragraph ranges and paragraph-endpoint points support assignment, fresh lookup, movement and checked deletion through word.bookmarks; interior targets need upstream marker-transparent shaping; general cross-references and imported/multi-paragraph targets remain open. Manage named ranges and references with unique IDs. Define behavior on deletion/copying and detect dangling references before save.
 - [ ] **REF3: Typed fields.** Decimal page/count fields now reuse Paragraph.add_field and ordinary ranges; saved caches remain explicitly empty while native layout evaluates display. Other kinds and general refresh remain open. Add page/count, date, document-property, reference and merge fields through typed methods. Preserve field instructions and cached results; specify which fields can actually be evaluated by upstream.
 - [ ] **REF4: Field refresh.** Offer explicit recalculation for supported fields with deterministic date/time inputs and stale-result reporting. Never run external applications or pretend that setting an “update on open” flag computes results.
 - [ ] **REF5: Table of contents (P2).** Create/update from heading semantics with links, levels, leaders and page numbers when upstream layout supports it. Verify content and page numbers after repagination; otherwise expose an explicit upstream blocker.
 - [ ] **REF6: Captions and lists of figures/tables (P2).** Support sequence fields and cross-references with predictable restart rules. Verify references after inserting and removing items.
 - [ ] **REF7: Index and bibliography (P2).** Inventory index entries, citations and bibliography data/preservation; support generation only through verified upstream APIs. Publish supported citation/field subsets rather than promising a full Word field engine.
-- [ ] **REF8: Navigation export.** Preserve heading outline/bookmark/link destinations into supported PDF exports. Verify target page/position and distinguish unsupported navigation from plain text extraction.
+- [ ] **REF8: Navigation export.** Bounded owned body/nested-cell bookmark links retain tested native PDF carets after repagination, with explicit missing/vertical/clipped/over-budget failures. Heading outlines and broader navigation remain open. Preserve heading outline/bookmark/link destinations into supported PDF exports. Verify target page/position and distinguish unsupported navigation from plain text extraction.
 
 ### FORM — Content controls and templates (P1; advanced controls P2)
 
