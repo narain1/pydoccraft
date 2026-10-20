@@ -188,12 +188,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 
 ## Ownership and shading consistency
 
-- [ ] Prevent pending positional iterator handles from rebinding after PDF page/annotation/outline changes; verify stable-ID and closed-owner behavior.
-- [ ] Document copy/reparent/slice/iteration ownership and validate the complete installed-wheel corpus for API5.
-- [ ] Verify BG6 native inherited shading/reset, highlight precedence and independent page backgrounds in DOCX/PDF output.
+- [x] Prevent pending positional iterator handles from rebinding after PDF page/annotation/outline changes; verify stable-ID and closed-owner behavior.
+- [x] Document copy/reparent/slice/iteration ownership and validate the complete installed-wheel corpus for API5.
+- [x] Verify BG6 native inherited shading/reset, highlight precedence and independent page backgrounds in DOCX/PDF output.
 
 ## Inline picture lifecycle
 
-- [ ] Add owned picture bytes/replacement and collection deletion through existing source/ownership conventions.
-- [ ] Use native media insertion and supported-story reference accounting to retain live shared media and reclaim unused budgets.
-- [ ] Verify replacement/removal, pixels, serialized media, stale handles, copies, source kinds and atomic failures in the locked installed-wheel corpus.
+- [x] Add owned picture bytes/replacement and collection deletion through existing source/ownership conventions.
+- [x] Use native media insertion and supported-story reference accounting to retain live shared media and reclaim unused budgets.
+- [x] Verify replacement/removal, pixels, serialized media, stale handles, copies, source kinds and atomic failures in the locked installed-wheel corpus.
