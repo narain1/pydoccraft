@@ -368,3 +368,10 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Review concrete assertions and native symbols for two bounded profiles; connect exact historical artifacts and existing reference families/criteria.
 - [x] Regenerate both development guides, verify cached reference sources and all existing ownership joins, and run the installed-wheel corpus.
 - [ ] Retain broader typography, imported annotations/appearance, upstream inventory and full parity audits as open work.
+
+
+## PDF3 native drawing-style boundary audit
+
+- [x] Recheck pinned public/private placement and style-writing boundaries against existing drawing APIs; retain existing U10/PDF3 ownership.
+- [ ] Request typed native path painting/fill rules, collision-safe opacity resources and public native placement; do not extend local PDF operator construction.
+- [ ] Verify stroke work/bounds, contour pixels, rotated CropBox/UserUnit geometry, resource preservation and default compatibility before exposing additional drawing keywords. PDF3 remains open.
