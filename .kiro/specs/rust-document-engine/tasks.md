@@ -591,5 +591,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reproduce undercharged repeated text/choice fills and initial/configured creation generations with small native owned fixtures; distinguish checkbox state reuse and already-accounted property redraws.
 - [x] Add shared appearance work reservation, both creation-generation charges, value-generation charges and successful-fill item accounting without runtime object scans.
 - [x] Add native count/byte/copy/boundary/rotation controls and public repeated-write/source/PNG/copy/flatten coverage; run related field regressions.
-- [ ] Complete integrated release/clean installed-wheel validation and independent source review before radio expansion.
+- [x] Complete integrated locked release/clean installed-wheel validation: 318 Rust / 455 Python tests, strict typing and unchanged license audit.
+- [ ] Complete independent package review and exact-head/current-main CI before manual merge; radio expansion remains separate.
 - [ ] Keep broader PDF6/U10 imported-form and multiwidget acceptance open.
