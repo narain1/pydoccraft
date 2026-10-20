@@ -704,13 +704,17 @@ impl<'a> Adapter<'a> {
         let mut segments = vec![Segment::default()];
         let mut segment_index = 0;
         let mut objects = paragraph.objects.iter();
+        let mut runs = paragraph.run_ranges().peekable();
         for (offset, character) in paragraph.text.char_indices() {
             if character == '\u{000c}' {
                 segments.push(Segment::default());
                 segment_index += 1;
                 continue;
             }
-            let props = paragraph.props_of_char(offset);
+            while runs.peek().is_some_and(|(range, _)| offset >= range.end) {
+                runs.next();
+            }
+            let props = runs.peek().map_or(&paragraph.mark, |(_, props)| *props);
             if character == OBJ {
                 if let Some(object) = objects.next() {
                     match object {
@@ -946,6 +950,56 @@ fn docx_error(error: wordcraft_docx::DocxError) -> EngineError {
 #[cfg(test)]
 mod offset_tests {
     use super::*;
+
+    #[test]
+    fn many_short_unicode_runs_skip_empty_runs_and_keep_link_boundaries() {
+        use wordcraft_doc::para::Run;
+        use wordcraft_doc::props::CharProps;
+
+        let prefix = "λ🙂ab".repeat(1024);
+        let mut paragraph = Paragraph::with_text(&prefix, CharProps::default());
+        paragraph.props.style = Some("TypedParagraph".into());
+        for index in 0..2000 {
+            let props = CharProps {
+                link: Some(format!("https://example.com/{}", index % 2)),
+                bold: Some(index % 2 == 0),
+                ..CharProps::default()
+            };
+            paragraph.runs.push(Run {
+                len: 0,
+                props: CharProps {
+                    link: Some("https://invalid.example/empty".into()),
+                    ..CharProps::default()
+                },
+            });
+            paragraph.text.push_str("é🙂");
+            paragraph.runs.push(Run {
+                len: "é🙂".len(),
+                props,
+            });
+        }
+        // An uncovered final character uses paragraph mark formatting, matching props_of_char.
+        paragraph.text.push('後');
+        paragraph.mark.link = Some("https://example.com/mark".into());
+        let document = Document::new();
+        let layout = DocLayout::default();
+        let mut adapter = Adapter::new(&document, &layout);
+        adapter.add_paragraph(&paragraph, &Path(vec![0]));
+        let block = &adapter.pages[0].blocks[0];
+        assert_eq!(block.style.as_deref(), Some("TypedParagraph"));
+        assert_eq!(block.text, paragraph.text);
+        assert_eq!(block.links.len(), 2001);
+        for (index, link) in block.links[..2000].iter().enumerate() {
+            assert_eq!(link.uri, format!("https://example.com/{}", index % 2));
+            assert_eq!(link.text, "é🙂");
+            assert_eq!(link.metadata["start"], 4096 + index * 2);
+            assert_eq!(link.metadata["end"], 4096 + index * 2 + 2);
+        }
+        assert_eq!(block.links[2000].uri, "https://example.com/mark");
+        assert_eq!(block.links[2000].text, "後");
+        assert_eq!(block.links[2000].metadata["start"], 8096);
+        assert_eq!(block.links[2000].metadata["end"], 8097);
+    }
 
     #[test]
     fn long_unicode_prefix_many_anchors_and_object_text_keep_exact_offsets() {
