@@ -6,7 +6,23 @@ The overlap review consolidates the feature checklist into [14 canonical workstr
 
 ## Reference projects and backend ownership
 
-“OpenXML” is interpreted as Microsoft's [dotnet/Open-XML-SDK](https://github.com/dotnet/Open-XML-SDK). Its repository describes a low-level package/markup SDK. We reviewed its [WordprocessingDocument implementation](https://github.com/dotnet/Open-XML-SDK/blob/main/src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs), [WordprocessingML schema inventory](https://github.com/dotnet/Open-XML-SDK/blob/main/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json), and the official references linked below. These provide feature discovery, not code to port or a dependency to install. This is a feature-family audit, not a completed member-by-member SDK conformance audit; API1 tracks that inventory.
+“OpenXML” is interpreted as Microsoft's [dotnet/Open-XML-SDK](https://github.com/dotnet/Open-XML-SDK). Its repository describes a low-level package/markup SDK. We reviewed its [WordprocessingDocument implementation](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs), [WordprocessingML schema inventory](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json), and the official references linked below. These provide feature discovery, not code to port or a dependency to install. This is a feature-family audit, not a completed member-by-member SDK conformance audit; API1 tracks that inventory.
+
+Reference snapshot rechecked on 2026-10-20: Open XML SDK **v3.5.1**, immutable commit `3139fdfd27414548a41555f7848d5728f6e71a42`. The inspected WordprocessingML 2006 schema inventory contains 726 type entries and 101 enum entries; this count excludes separate DrawingML and Office-extension schema files. Package methods include `Create`, `Open` and `CreateFromTemplate`; representative schema members are listed below. These are feature references only, with no SDK code or runtime dependency added. The older Microsoft API links retain their explicit documentation view; that view is not the repository snapshot version. API1 remains open for the complete operation-by-operation evidence ledger.
+
+| Referenced SDK members | Existing canonical ownership |
+|---|---|
+| `Paragraph`, `Run`, `Text`, `Break`, `TabChar`, `ParagraphProperties`, `RunProperties` | TXT1–TXT8; W04 |
+| `Table`, `TableRow`, `TableCell`, `GridSpan`, `VerticalMerge`, `TableBorders`, `TableCellBorders`, `TableCellMargin`, `TableLook`, `TableCellSpacing` | TBL1–TBL12; W05 |
+| `Style`, `BasedOn`, `NextParagraphStyle`, `LinkedStyle`, `DocDefaults` | STY1–STY6; W04 |
+| `SectionProperties`, `PageSize`, `PageMargin`, `Columns`, `Column`, `PageBorders`, `DocumentBackground`, `HeaderReference`, `FooterReference` | LAY/BG features; W06 |
+| `Drawing`, `Picture`, `TextBoxContent` | MED picture/drawing features; W06 |
+| `Hyperlink`, `BookmarkStart`, `BookmarkEnd`, `SimpleField`, `FieldChar`, `FieldCode`, `FootnoteReference`, `EndnoteReference` | REF and LAY7; W06/W07/W08 |
+| `Comment`, `CommentRangeStart`, `CommentRangeEnd`, `InsertedRun`, `DeletedRun`, `MoveFromRun`, `MoveToRun`, `RunPropertiesChange`, `ParagraphPropertiesChange` | REV1–REV6; W07 |
+| `SdtBlock`, `SdtRun`, `SdtCell`, `SdtRow`, `SdtProperties`, `SdtContentBlock`, `DataBinding`, `Lock` | FORM3–FORM5; W08 |
+| `Settings`, `DocumentProtection`, `Compatibility`, `HyphenationZone`, `DefaultTabStop`, `MirrorMargins` | LAY10 and PKG settings/protection; W03/W06 |
+
+The table points to the existing workstream ownership ledger; it creates no new feature tickets or public classes. Class presence establishes schema representation, not layout, rendering, preservation or safe editing behavior in either SDK or ArtCraft.
 
 The public API takes inspiration from [Pillow's Image API](https://pillow.readthedocs.io/en/stable/reference/Image.html): easy construction/opening, understandable objects, explicit operations, copying, and saving. Pillow itself is not required for document processing. Optional Pillow interoperation can consume our PNG bytes.
 
@@ -150,7 +166,7 @@ These are reference concepts mapped to proposed Python concepts, not verified Wo
 
 | Reference family | Python-facing direction | Roadmap IDs | Reference |
 |---|---|---|---|
-| Package open/create/clone and document parts | `new`, `edit`, `copy`, `save`, owned document lifecycle | API, DOC, PKG | [SDK source](https://github.com/dotnet/Open-XML-SDK/blob/main/src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs) |
+| Package open/create/clone and document parts | `new`, `edit`, `copy`, `save`, owned document lifecycle | API, DOC, PKG | [SDK source](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs) |
 | Body, paragraphs, runs, stories | Ordered blocks, paragraphs and runs; explicit auxiliary stories | TXT, LAY, REV | [Document structure](https://learn.microsoft.com/en-us/office/open-xml/word/structure-of-a-wordprocessingml-document) |
 | Run properties and style definitions | Readable formatting properties and reusable named styles | TXT, STY | [Run properties](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.runproperties?view=openxml-3.0.1), [styles](https://learn.microsoft.com/en-us/office/open-xml/word/how-to-create-and-add-a-paragraph-style-to-a-word-processing-document) |
 | Numbering definitions and instances | Bullets, numbering levels and explicit restart/continue | TXT | [Numbering](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.numbering?view=openxml-3.0.1) |
