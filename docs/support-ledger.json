@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "audited_commit": "a21fc5c80abe556ac03b471f1906a7ec6b6a3f16",
+  "audited_commit": "58c1eaa53f5b37bb167958d8d6a059c2c9603a7c",
   "references": {
     "pdfcraft": {
       "revision": "645016addcfb9078c557f0189559ab47cdcee057",
@@ -84,6 +84,27 @@
       "source_commit": "a21fc5c80abe556ac03b471f1906a7ec6b6a3f16",
       "date": "2026-10-20"
     },
+    "field-read-only-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#owned-pdf-field-read-only-state--complete-local-artifact",
+      "wheel_sha256": "52d36a6006b504e2de511846845e77705abe5228db89ac6472c6fbe8f65466c4",
+      "kind": "artifact",
+      "source_commit": "6af0b8d313fd585dcdedf138aad27f3205b76873",
+      "date": "2026-10-20"
+    },
+    "note-conversion-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#owned-note-conversion--complete-local-artifact",
+      "wheel_sha256": "01ca47af4beb9a6e0f01b75a4fca5e7158cfe610260f339cb14ebc97787554bc",
+      "kind": "artifact",
+      "source_commit": "c2e64845c52dcc72204b13a58c725f3f3810e349",
+      "date": "2026-10-20"
+    },
+    "slide-background-reset-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#slide-background-reset--complete-local-artifact",
+      "wheel_sha256": "e084a6f29a4346eaeeaf67ca151475d1a4d35c4e2d8cdaf9ca40d47a5fd980c5",
+      "kind": "artifact",
+      "source_commit": "58c1eaa53f5b37bb167958d8d6a059c2c9603a7c",
+      "date": "2026-10-20"
+    },
     "outline-raster-ci-2026-10-20": {
       "validation": ".kiro/specs/rust-document-engine/validation.md#decimal-outline-raster-comparison--corrected-ci-artifact",
       "wheel_sha256": "016327f2fbb8f0a55634dfb3ed9e700e6be92e4a548358a1e23e03801a6b3816",
@@ -110,7 +131,10 @@
     "tests/test_pdf_search.py": "58fef2f3633a8578ceff0f2c5494f19c5cc8980bc6a3a6d1c154cf8134b4df29",
     "tests/test_decimal_outline.py": "e3d3c62c93b4290ad8d9176cf13d160219ceeecd97828301f25ff40d7f53f533",
     "tests/test_field_tooltips.py": "569ecc1cfbc33a6a22f32fe456639a7c2560ff11c0af1cecfcc9b22bf56f28f4",
-    "tests/test_annotation_lock.py": "b10af9191b773aac61be358a7fe3123e581628a8a636f2756b082c3373efd3d9"
+    "tests/test_annotation_lock.py": "b10af9191b773aac61be358a7fe3123e581628a8a636f2756b082c3373efd3d9",
+    "tests/test_field_read_only.py": "f3055f423c0f98cd9eb02bfc21927a7b251bed81da2764c4d765bb2d36108cb7",
+    "tests/test_note_conversion.py": "4d9fbcb9330d703c8643e42fdcbce9d72126d0a16ecf3df91533f771a281dbd0",
+    "tests/test_slide_background_reset.py": "a76f9249da5695435353315417936c88c3a4ebf209ec41a7bf20e24af1c1f7f1"
   },
   "profiles": [
     {
@@ -506,12 +530,13 @@
     {
       "id": "pdf.owned-fields",
       "format": "pdf",
-      "scope": "Owned single-widget text/checkbox/choice fields with fixed appearances and bounded Unicode tooltip metadata; no radio/script/multiline profile.",
+      "scope": "Owned single-widget text/checkbox/choice fields with fixed appearances and bounded Unicode tooltip metadata and native read-only state; no radio/script/multiline profile.",
       "public_members": [
         "new(\"pdf\").pages[0].fields.add(...)",
         "field.value",
         "field.box",
         "field.tooltip",
+        "field.read_only",
         "pdf.fields.flatten()"
       ],
       "native_sources": {
@@ -562,24 +587,36 @@
           "symbols": [
             "Field"
           ]
+        },
+        "read_only": {
+          "reference": "pdfcraft",
+          "path": "crates/forms/src/lib.rs",
+          "symbols": [
+            "flags::READ_ONLY",
+            "Field::read_only",
+            "set_value_with"
+          ]
         }
       },
       "operations": {
         "read": {
           "status": "partial",
-          "scope": "Owned field handles expose bounded values/options, current-view geometry and Unicode tooltip metadata; absent/cleared tooltips read as empty strings. This is not imported AcroForm extraction.",
+          "scope": "Owned field handles expose bounded values/options, current-view geometry and Unicode tooltip metadata; absent/cleared tooltips read as empty strings. This is not imported AcroForm extraction. Owned handles also expose strict boolean read-only state, preserved across copied/page-organized owned models; saved editable AcroForm reopening remains rejected.",
           "tests": [
             "tests/test_pdf_fields.py::PdfFieldTests.test_owned_forms_render_copy_and_flatten",
             "tests/test_field_geometry.py::FieldGeometryTests.test_rotated_cropped_userunit_pages_use_display_coordinates",
-            "tests/test_field_tooltips.py::FieldTooltipTests.test_metadata_preserves_all_kinds_rotated_geometry_pixels_and_followup_edits"
+            "tests/test_field_tooltips.py::FieldTooltipTests.test_metadata_preserves_all_kinds_rotated_geometry_pixels_and_followup_edits",
+            "tests/test_field_read_only.py::FieldReadOnlyTests.test_all_kinds_preserve_four_view_pixels_metadata_copy_and_allowed_edits",
+            "tests/test_field_read_only.py::FieldReadOnlyTests.test_strict_bool_and_closed_stale_removed_identity"
           ],
-          "artifact": "field-tooltips-2026-10-20",
+          "artifact": "field-read-only-2026-10-20",
           "native": [
             "author",
             "inspect",
             "flatten",
             "tooltip",
-            "tooltip_read"
+            "tooltip_read",
+            "read_only"
           ]
         },
         "create": {
@@ -597,22 +634,27 @@
         },
         "edit_authored": {
           "status": "verified",
-          "scope": "Fill, resize/move, delete and flatten the supported owned profile atomically; preserve widget orientation when pages rotate. Set/clear bounded Unicode tooltips with strict type/Unicode/4096-byte checks and subclass/lifetime guards; this does not add multiline painted values.",
+          "scope": "Fill, resize/move, delete and flatten the supported owned profile atomically; preserve widget orientation when pages rotate. Set/clear bounded Unicode tooltips with strict type/Unicode/4096-byte checks and subclass/lifetime guards; this does not add multiline painted values. Set/unset READ_ONLY only. Native filling refuses valid identical, different and clear values while set; unsetting restores filling. Tooltip/box edits, field/page deletion and flattening remain allowed. Invalid bool and stale/closed identity failures are atomic; no security or AP-reference-preserving claim.",
           "tests": [
             "tests/test_pdf_fields.py::PdfFieldTests.test_owned_forms_render_copy_and_flatten",
             "tests/test_field_geometry.py::FieldGeometryTests.test_rotated_cropped_userunit_pages_use_display_coordinates",
             "tests/test_field_tooltips.py::FieldTooltipTests.test_metadata_preserves_all_kinds_rotated_geometry_pixels_and_followup_edits",
             "tests/test_field_tooltips.py::FieldTooltipTests.test_utf8_limits_bad_values_and_warm_cache_are_atomic",
             "tests/test_field_tooltips.py::FieldTooltipTests.test_subclasses_cannot_run_callbacks_or_hide_size",
-            "tests/test_field_tooltips.py::FieldTooltipTests.test_closed_stale_deleted_and_copied_handles_keep_identity"
+            "tests/test_field_tooltips.py::FieldTooltipTests.test_closed_stale_deleted_and_copied_handles_keep_identity",
+            "tests/test_field_read_only.py::FieldReadOnlyTests.test_all_kinds_preserve_four_view_pixels_metadata_copy_and_allowed_edits",
+            "tests/test_field_read_only.py::FieldReadOnlyTests.test_programmatic_same_different_and_clear_values_fail_atomically",
+            "tests/test_field_read_only.py::FieldReadOnlyTests.test_strict_bool_and_closed_stale_removed_identity",
+            "tests/test_field_read_only.py::FieldReadOnlyTests.test_read_only_deletion_and_page_deletion_remain_available"
           ],
-          "artifact": "field-tooltips-2026-10-20",
+          "artifact": "field-read-only-2026-10-20",
           "native": [
             "author",
             "inspect",
             "flatten",
             "tooltip",
-            "tooltip_read"
+            "tooltip_read",
+            "read_only"
           ]
         },
         "edit_imported": {
@@ -621,33 +663,38 @@
         },
         "preserve": {
           "status": "partial",
-          "scope": "Owned copies/page organization retain tested values/widgets and tooltip metadata; later widget geometry/value edits retain tooltips. Saved outputs preserve tested pixels, but this is not arbitrary field-dictionary or imported-form metadata preservation.",
+          "scope": "Owned copies/page organization retain tested values/widgets and tooltip metadata; later widget geometry/value edits retain tooltips. Saved outputs preserve tested pixels, but this is not arbitrary field-dictionary or imported-form metadata preservation. Read-only updates preserve tested values/options/tooltip/box and exact fixture pixels; independent copies can clear the flag and fill without changing the source. Same-format source readback of Ff has separate native artifact evidence, not imported Python inventory.",
           "tests": [
             "tests/test_pdf_fields.py::PdfFieldTests.test_owned_forms_render_copy_and_flatten",
             "tests/test_pdf_fields.py::PdfFieldTests.test_fields_follow_page_organization",
-            "tests/test_field_tooltips.py::FieldTooltipTests.test_metadata_preserves_all_kinds_rotated_geometry_pixels_and_followup_edits"
+            "tests/test_field_tooltips.py::FieldTooltipTests.test_metadata_preserves_all_kinds_rotated_geometry_pixels_and_followup_edits",
+            "tests/test_field_read_only.py::FieldReadOnlyTests.test_all_kinds_preserve_four_view_pixels_metadata_copy_and_allowed_edits",
+            "tests/test_field_read_only.py::FieldReadOnlyTests.test_programmatic_same_different_and_clear_values_fail_atomically"
           ],
-          "artifact": "field-tooltips-2026-10-20",
+          "artifact": "field-read-only-2026-10-20",
           "native": [
             "author",
             "inspect",
             "flatten",
             "tooltip",
-            "tooltip_read"
+            "tooltip_read",
+            "read_only"
           ]
         },
         "render": {
           "status": "verified",
-          "scope": "Visible text/checkbox/choice appearances and tested flattening render as expected, including rotated/cropped/UserUnit geometry. Tooltip-only updates/clear preserve exact fixture PNG bytes; flatten output matches the same control without tooltip metadata.",
+          "scope": "Visible text/checkbox/choice appearances and tested flattening render as expected, including rotated/cropped/UserUnit geometry. Tooltip-only updates/clear preserve exact fixture PNG bytes; flatten output matches the same control without tooltip metadata. Read-only updates preserve exact PNGs for all three field kinds/four rotated CropBox/UserUnit views; flattened output matches the same flag-cleared control. Native set_props may regenerate appearance references.",
           "tests": [
             "tests/test_pdf_fields.py::PdfFieldTests.test_owned_forms_render_copy_and_flatten",
             "tests/test_field_geometry.py::FieldGeometryTests.test_rotated_cropped_userunit_pages_use_display_coordinates",
-            "tests/test_field_tooltips.py::FieldTooltipTests.test_metadata_preserves_all_kinds_rotated_geometry_pixels_and_followup_edits"
+            "tests/test_field_tooltips.py::FieldTooltipTests.test_metadata_preserves_all_kinds_rotated_geometry_pixels_and_followup_edits",
+            "tests/test_field_read_only.py::FieldReadOnlyTests.test_all_kinds_preserve_four_view_pixels_metadata_copy_and_allowed_edits"
           ],
-          "artifact": "field-tooltips-2026-10-20",
+          "artifact": "field-read-only-2026-10-20",
           "native": [
             "raster",
-            "tooltip"
+            "tooltip",
+            "read_only"
           ]
         },
         "export": {
@@ -662,10 +709,11 @@
           "set_field_box",
           "flatten_fields",
           "field_payload",
-          "set_field_tooltip"
+          "set_field_tooltip",
+          "set_field_read_only"
         ]
       },
-      "fixture_provenance": "Synthetic PDFs authored in test_pdf_fields.py and test_field_geometry.py; the latter uses local PDF geometry fixtures with rotation/CropBox/UserUnit. Assertions inspect actual PNG pixels, metadata, owned copy independence and flattening results. Tooltip fixtures additionally author all three kinds on four rotated CropBox/UserUnit pages, assert owned metadata/copy/readback/clear/resize/value behavior and exact PNG/flatten-control equality. Saved AcroForms still reject editable reopening; native TU roundtrip has separate artifact-level Rust evidence, not an imported-field Python certification."
+      "fixture_provenance": "Synthetic PDFs authored in test_pdf_fields.py and test_field_geometry.py; the latter uses local PDF geometry fixtures with rotation/CropBox/UserUnit. Assertions inspect actual PNG pixels, metadata, owned copy independence and flattening results. Tooltip fixtures additionally author all three kinds on four rotated CropBox/UserUnit pages, assert owned metadata/copy/readback/clear/resize/value behavior and exact PNG/flatten-control equality. Saved AcroForms still reject editable reopening; native TU roundtrip has separate artifact-level Rust evidence, not an imported-field Python certification. Read-only fixtures cover the same three kinds/four rotated page views, exact render and flatten-control equality, native programmatic same/different/clear refusal with warm-cache rollback, copied/unset recovery, permitted box/tooltip/delete behavior and strict-bool/stale identity."
     },
     {
       "id": "slides.layouts",
@@ -2132,6 +2180,299 @@
       }
     },
     {
+      "id": "word.note-kind-conversion",
+      "format": "docx",
+      "scope": "Convert all owned footnotes/endnotes to one kind, preserving note identities; this is a semantic edit, not a format-conversion API. No note deletion, rich-note adoption or general imported editing.",
+      "public_members": [
+        "new(\"docx\").notes.convert(kind=\"footnote\" | \"endnote\")",
+        "note.kind",
+        "note.paragraphs"
+      ],
+      "adapter_sources": {
+        "rust/src/author_docx.rs": [
+          "convert_notes",
+          "validate_note_conversion_work",
+          "validate_note_conversion_anchors",
+          "commit_with_note_conversion"
+        ],
+        "src/doc_ex/_authoring.py": [
+          "Notes"
+        ]
+      },
+      "native_sources": {
+        "edit": {
+          "reference": "wordcraft",
+          "path": "crates/doc/src/edit.rs",
+          "symbols": [
+            "Document::convert_notes"
+          ]
+        },
+        "model": {
+          "reference": "wordcraft",
+          "path": "crates/doc/src/lib.rs",
+          "symbols": [
+            "Document::para_paths",
+            "PartKind"
+          ]
+        },
+        "write": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/write/mod.rs",
+          "symbols": [
+            "write"
+          ]
+        },
+        "layout": {
+          "reference": "wordcraft",
+          "path": "crates/layout/src/lib.rs",
+          "symbols": [
+            "layout",
+            "note_info"
+          ]
+        },
+        "render": {
+          "reference": "wordcraft",
+          "path": "crates/render/src/lib.rs",
+          "symbols": [
+            "render_page"
+          ]
+        },
+        "pdf": {
+          "reference": "wordcraft",
+          "path": "crates/pdf/src/lib.rs",
+          "symbols": [
+            "export_layout"
+          ]
+        },
+        "read": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/lib.rs",
+          "symbols": [
+            "read_with_password"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic authored body/nested-table note references, custom and standard styles, link targets, existing mixed note kinds, configured destination counters,45-paragraph continuation and unsafe continuous-section field scopes. Tests assert source references/styles, separate reopened note text, native PNG/PDF colored placement, exact counts, handle/copy/no-op behavior and shared-style guard recovery. Native artifact tests separately verify work-bound/+1 and exact semantic-anchor rejection.",
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "Owned note.kind and paragraph handles observe destination kind and content; reopened DOCX retains separate note stories with tested text exactly once. This is not complete arbitrary imported-note/comment inventory.",
+          "artifact": "note-conversion-2026-10-20",
+          "tests": [
+            "tests/test_note_conversion.py::NoteConversionTests.test_conversion_moves_numbered_visible_notes_and_preserves_cache_on_noop",
+            "tests/test_note_conversion.py::NoteConversionTests.test_nested_references_styles_media_links_and_copy_keep_their_handles"
+          ],
+          "native": [
+            "model",
+            "read"
+          ]
+        },
+        "create": {
+          "status": "not_applicable",
+          "scope": "This profile evaluates mutation of existing owned notes. Creation/same-format serialization must not be confused with Notes.convert or a new writer certification."
+        },
+        "edit_authored": {
+          "status": "verified",
+          "scope": "Convert the complete owned collection to footnote/endnote, retaining stable IDs/paragraph handles and destination section options. Actual conversion invalidates ranges/cache; no-op preserves both. Shared standard-style runs with unrelated content and unsafe destination field scopes fail atomically, with tested custom-style/section recovery and bounded callback-free kind validation.",
+          "artifact": "note-conversion-2026-10-20",
+          "tests": [
+            "tests/test_note_conversion.py::NoteConversionTests.test_conversion_moves_numbered_visible_notes_and_preserves_cache_on_noop",
+            "tests/test_note_conversion.py::NoteConversionTests.test_nested_references_styles_media_links_and_copy_keep_their_handles",
+            "tests/test_note_conversion.py::NoteConversionTests.test_long_notes_keep_every_paragraph_and_visible_continuation",
+            "tests/test_note_conversion.py::NoteConversionTests.test_unsafe_field_destination_rolls_back_all_notes_and_can_recover",
+            "tests/test_note_conversion.py::NoteConversionTests.test_shared_standard_style_runs_are_guarded_with_custom_style_recovery",
+            "tests/test_note_conversion.py::NoteConversionTests.test_kind_validation_is_bounded_callback_free_and_closed_first"
+          ],
+          "native": [
+            "edit",
+            "model"
+          ]
+        },
+        "edit_imported": {
+          "status": "unsupported",
+          "scope": "Current editable DOCX lifecycle does not adopt arbitrary source Office documents or imported note graphs."
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Retain tested body/nested references, note text/custom styles, the tested external URL link, independent copies and saved source reference/style kinds. Native standard note styles intentionally change; arbitrary imported parts, semantic deletion and fragment remapping are outside this profile.",
+          "artifact": "note-conversion-2026-10-20",
+          "tests": [
+            "tests/test_note_conversion.py::NoteConversionTests.test_conversion_moves_numbered_visible_notes_and_preserves_cache_on_noop",
+            "tests/test_note_conversion.py::NoteConversionTests.test_nested_references_styles_media_links_and_copy_keep_their_handles",
+            "tests/test_note_conversion.py::NoteConversionTests.test_unsafe_field_destination_rolls_back_all_notes_and_can_recover",
+            "tests/test_note_conversion.py::NoteConversionTests.test_shared_standard_style_runs_are_guarded_with_custom_style_recovery"
+          ],
+          "native": [
+            "edit",
+            "write"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "Native DOCX PNG moves tested colored note text between footnote/endnote destinations, retains complete long-note continuation and restores the original fixture on reverse conversion. Destination options are native; no general pagination equivalence or rich-note geometry certification.",
+          "artifact": "note-conversion-2026-10-20",
+          "tests": [
+            "tests/test_note_conversion.py::NoteConversionTests.test_conversion_moves_numbered_visible_notes_and_preserves_cache_on_noop",
+            "tests/test_note_conversion.py::NoteConversionTests.test_long_notes_keep_every_paragraph_and_visible_continuation",
+            "tests/test_note_conversion.py::NoteConversionTests.test_shared_standard_style_runs_are_guarded_with_custom_style_recovery"
+          ],
+          "native": [
+            "layout",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "partial",
+          "scope": "The separate existing document.convert(\"pdf\") path produces the tested destination counters, note text exactly once, retained URL link and colored note placement/continuation. Notes.convert itself changes note kind; it does not export a format.",
+          "artifact": "note-conversion-2026-10-20",
+          "tests": [
+            "tests/test_note_conversion.py::NoteConversionTests.test_conversion_moves_numbered_visible_notes_and_preserves_cache_on_noop",
+            "tests/test_note_conversion.py::NoteConversionTests.test_nested_references_styles_media_links_and_copy_keep_their_handles",
+            "tests/test_note_conversion.py::NoteConversionTests.test_long_notes_keep_every_paragraph_and_visible_continuation"
+          ],
+          "native": [
+            "layout",
+            "pdf"
+          ]
+        }
+      }
+    },
+    {
+      "id": "slides.background-reset",
+      "format": "pptx",
+      "scope": "Remove an explicit owned solid/PNG slide background override through Slide.background=None; the getter reports direct state, not resolved inherited color. No master/theme editor or generic imported-media preservation.",
+      "public_members": [
+        "slide.background = None",
+        "slide.background",
+        "slide.background_image"
+      ],
+      "adapter_sources": {
+        "rust/src/author_pptx.rs": [
+          "clear_background",
+          "slide_background",
+          "prune_media"
+        ],
+        "src/doc_ex/_authoring.py": [
+          "Slide"
+        ]
+      },
+      "native_sources": {
+        "model": {
+          "reference": "deckcraft",
+          "path": "crates/model/src/lib.rs",
+          "symbols": [
+            "Slide",
+            "Background"
+          ]
+        },
+        "resolve": {
+          "reference": "deckcraft",
+          "path": "crates/model/src/resolve.rs",
+          "symbols": [
+            "background"
+          ]
+        },
+        "write": {
+          "reference": "deckcraft",
+          "path": "crates/pptx/src/lib.rs",
+          "symbols": [
+            "export",
+            "import"
+          ]
+        },
+        "render": {
+          "reference": "deckcraft",
+          "path": "crates/render/src/lib.rs",
+          "symbols": [
+            "render_slide"
+          ]
+        },
+        "pdf": {
+          "reference": "deckcraft",
+          "path": "crates/pdf/src/lib.rs",
+          "symbols": [
+            "export"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic public solid/PNG slide backgrounds with text/link shapes, shared picture/second-slide assets, independent copies and normalization callbacks. Assertions inspect absent p:bg, direct getter None, actual PNG/PDF output, retained text/links and final media reclamation. Native artifact tests separately inject master/layout color/gradient/picture controls, compare exact before/after PNG and exported-PDF PNG, and reject explicit-picture removal with direct inherited-picture assets before authored-only pruning.",
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "After reset the explicit background and explicit background_image getters return None; explicit picture override still makes the color getter unsupported. Native inherited-image/gradient getter controls belong to artifact-level tests, not arbitrary imported Python inventory.",
+          "artifact": "slide-background-reset-2026-10-20",
+          "tests": [
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_reset_restores_native_background_source_pixels_pdf_and_copy"
+          ],
+          "native": [
+            "model",
+            "resolve"
+          ]
+        },
+        "create": {
+          "status": "not_applicable",
+          "scope": "This row evaluates removing an existing override, not presentation creation or a new background writer."
+        },
+        "edit_authored": {
+          "status": "verified",
+          "scope": "Set None on the existing property, preserving normal revision/cache behavior and stable targets across color-normalization reorder callbacks. Invalid inputs/closed/deleted handles fail explicitly. Shared authored image assets remain live and final-reference removal reclaims them; no cache-preserving repeated-reset guarantee.",
+          "artifact": "slide-background-reset-2026-10-20",
+          "tests": [
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_reset_restores_native_background_source_pixels_pdf_and_copy",
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_shared_media_retained_then_reclaimed_after_last_reference",
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_stable_identity_callbacks_invalid_input_closed_deleted_and_copies"
+          ],
+          "native": [
+            "model",
+            "resolve"
+          ]
+        },
+        "edit_imported": {
+          "status": "unsupported",
+          "scope": "Arbitrary imported PPTX master/layout/theme/media graphs are not adopted for editing. Raw inherited-picture combinations requiring unavailable media accounting are explicitly outside reset reclamation."
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Retain tested shape text/link/identity, unaffected slide background pixels, shared picture data/alt, independent copies and saved p:bg absence. General imported master-shape/theme references and inherited-media reclamation are excluded.",
+          "artifact": "slide-background-reset-2026-10-20",
+          "tests": [
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_reset_restores_native_background_source_pixels_pdf_and_copy",
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_shared_media_retained_then_reclaimed_after_last_reference",
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_stable_identity_callbacks_invalid_input_closed_deleted_and_copies"
+          ],
+          "native": [
+            "model",
+            "write"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "Reset restores exact original native PNG for the public solid/PNG override fixture, preserving unaffected slide pixels. Artifact-level native controls exercise inherited colors/gradient/image; no general theme fidelity or transparent output claim.",
+          "artifact": "slide-background-reset-2026-10-20",
+          "tests": [
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_reset_restores_native_background_source_pixels_pdf_and_copy",
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_shared_media_retained_then_reclaimed_after_last_reference"
+          ],
+          "native": [
+            "resolve",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "partial",
+          "scope": "Existing PPTX-to-PDF export after reset retains tested text/URL annotation and white background pixels. Exact before/after inherited native PDF PNG controls are separate artifact-level evidence. This is not hidden-slide policy or arbitrary theme export certification.",
+          "artifact": "slide-background-reset-2026-10-20",
+          "tests": [
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_reset_restores_native_background_source_pixels_pdf_and_copy"
+          ],
+          "native": [
+            "resolve",
+            "pdf"
+          ]
+        }
+      }
+    },
+    {
       "id": "pdf.vertical-redaction",
       "format": "pdf",
       "scope": "Secure removal of vertical-writing text beneath a redaction mark; no public package redaction API currently.",
@@ -2252,9 +2593,10 @@
     },
     "E3": {
       "profiles": [
-        "word.decimal-outline"
+        "word.decimal-outline",
+        "word.note-kind-conversion"
       ],
-      "remaining": "Unassessed: Auxiliary Office constructs, review/comment anchors and arbitrary source semantic coverage beyond the tested native body-list definitions/labels."
+      "remaining": "Unassessed: broader auxiliary Office extraction, review/comment anchors and arbitrary source semantic coverage beyond linked body-list and owned note-kind profiles."
     },
     "E4": {
       "profiles": [],
@@ -2539,8 +2881,10 @@
       "remaining": "Unassessed: broader page-field evidence inventory, nondecimal formats and full numbering parity; native multi-column/continuous-resume defects remain explicit limitations."
     },
     "LAY7": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "word.note-kind-conversion"
+      ],
+      "remaining": "Unassessed: semantic note deletion, arbitrary fragment reference remapping, rich-note geometry and broader placement/restart fidelity beyond owned kind conversion."
     },
     "LAY8": {
       "profiles": [],
@@ -2765,8 +3109,10 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "SLIDE4": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "slides.background-reset"
+      ],
+      "remaining": "Unassessed: master/theme editing, general layered marks and imported asset preservation beyond explicit owned background reset."
     },
     "SLIDE5": {
       "profiles": [],

@@ -554,3 +554,10 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 2. Reset SHALL preserve stable slide/shape identity, unrelated content/links and independently copied documents. Existing initial lifetime and final callback-safe stable-ID checks SHALL remain. Successful mutations SHALL retain normal revision/cache semantics.
 3. Removing an owned picture override SHALL preserve shared authored media and reclaim only the supported authored-media graph. Direct inherited-picture combinations outside that profile SHALL fail before mutation when local reclamation cannot preserve them; no generic imported media walker SHALL be added.
 4. Tests SHALL cover native inheritance and save/reopen/PNG/PDF output, explicit-versus-inherited getter semantics, shared media and final reclamation, copy/lifetime/callback behavior and atomic invalid/resource failures. Broader SLIDE4/theme/imported preservation SHALL remain open.
+
+
+## 73. Field-state, note-kind and slide-reset operation evidence
+
+1. Existing pdf.owned-fields evidence SHALL add read-only state using its exact 423-test artifact while retaining historical creation and unsupported imported/export scopes. New word.note-kind-conversion and slides.background-reset profiles SHALL describe only their existing mutations and measured output behavior. Notes.convert SHALL be classified as note-kind editing, with separate existing DOCX-to-PDF evidence in the export cell.
+2. Source/test fingerprints SHALL be reviewed against each exact 419/423/426-test runtime. Existing unrelated historical artifacts, pending corrected outline evidence, criterion completion flags and ownership SHALL remain intact. Reference joins SHALL reuse existing families; the representative Widget.field_flags member SHALL not imply arbitrary flags or multiwidget parity.
+3. Generated support/reference guides and offline drift checks SHALL pass without claiming a new runtime build or wider imported source preservation. Broader API1/API7/QA1/QA8 and feature acceptance SHALL remain open.

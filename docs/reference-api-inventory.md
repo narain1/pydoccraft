@@ -4,7 +4,7 @@
 
 This comparison groups related reference members under existing Python handles and formatting properties. It is not an exhaustive member inventory, implementation test, or format-conformance claim. Open XML schema/model APIs do not establish pagination or rendering. Reference products are not runtime dependencies.
 
-Audited local surface: `a21fc5c80abe556ac03b471f1906a7ec6b6a3f16`. The inventory contains 44 families and 197 representative members from 17 pinned source files. Later implementation changes require review.
+Audited local surface: `58c1eaa53f5b37bb167958d8d6a059c2c9603a7c`. The inventory contains 44 families and 198 representative members from 17 pinned source files. Later implementation changes require review.
 
 - [dotnet/Open-XML-SDK v3.5.1](https://github.com/dotnet/Open-XML-SDK/tree/3139fdfd27414548a41555f7848d5728f6e71a42) — `3139fdfd27414548a41555f7848d5728f6e71a42`
 - [pymupdf/PyMuPDF 2.0](https://github.com/pymupdf/PyMuPDF/tree/b8904b27efa0c4e2258f0e46ab4498a6173ffa22) — `b8904b27efa0c4e2258f0e46ab4498a6173ffa22`
@@ -201,11 +201,13 @@ Footnotes and endnotes.
 
 **Criteria / owners:** LAY7 (W07), E3 (W09), REF8 (W07)
 
-**Audited local surface:** Notes collection plus shared Paragraph handles; section note_options/configure_notes.
+**Audited local surface:** Notes collection plus shared Paragraph handles; section note_options/configure_notes; notes.convert changes owned kind through the native semantic operation.
 
-**Disposition:** `implemented_subset`. **Remaining:** Full continuation/section placement and unsupported custom styles remain bounded by existing native acceptance. Endnote collector field scopes already guarded.
+**Disposition:** `implemented_subset`. **Remaining:** Semantic note deletion, fragment graph remapping, rich-note geometry and broader placement/restart fidelity remain open. Shared standard-style runs fail if native conversion would restyle unrelated content; custom-style identity is preserved. This edit is separate from existing DOCX-to-PDF export.
 
 **Upstream candidates:** [U02](upstream-roadmap.md), [U07](upstream-roadmap.md)
+
+**Evidence profiles:** [word.note-kind-conversion](support-matrix.md#wordnote-kind-conversion)
 
 ## REF-OX-NAVIGATION
 
@@ -401,13 +403,13 @@ Slides, layouts, masters, notes and navigation.
 
 **Criteria / owners:** SLIDE1 (W11), SLIDE2 (W11), SLIDE3 (W11), SLIDE4 (W11), SLIDE5 (W11), SLIDE6 (W11)
 
-**Audited local surface:** Slides/layouts/typed shapes/text/tables/images/notes/internal links with stable IDs.
+**Audited local surface:** Slides/layouts/typed shapes/text/tables/images/notes/internal links with stable IDs; existing Slide.background=None removes an explicit owned override.
 
-**Disposition:** `implemented_subset`. **Remaining:** Whole-slide import/copy needs public graph re-ID/remapping; comments lose shape anchors/deep replies; PDF artwork rasterized; imported preservation unassessed.
+**Disposition:** `implemented_subset`. **Remaining:** Whole-slide import/copy needs public graph re-ID/remapping; comments lose shape anchors/deep replies; PDF artwork rasterized; imported preservation unassessed. Reset getter reports direct state rather than effective inherited color; imported inherited-media graphs remain outside mutable authoring.
 
 **Upstream candidates:** [U11](upstream-roadmap.md)
 
-**Evidence profiles:** [slides.layouts](support-matrix.md#slideslayouts)
+**Evidence profiles:** [slides.layouts](support-matrix.md#slideslayouts), [slides.background-reset](support-matrix.md#slidesbackground-reset)
 
 ## REF-OX-VALIDATION
 
@@ -605,13 +607,13 @@ Annotation operations and appearances.
 
 Interactive widgets and field values.
 
-**Reference members:** [field_name](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L92), [field_value](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L104), [field_type](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L114), [rect](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L134), [choice_values](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L88), [update](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L58), [field_label](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L100)
+**Reference members:** [field_name](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L92), [field_value](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L104), [field_type](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L114), [rect](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L134), [choice_values](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L88), [update](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L58), [field_label](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L100), [field_flags](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L110)
 
 **Criteria / owners:** PDF6 (W10), FORM3 (W08), PKG5 (W03)
 
-**Audited local surface:** PdfFields/PdfField owned text/checkbox/choice profile with geometry/value updates and bounded Unicode tooltip metadata.
+**Audited local surface:** PdfFields/PdfField owned text/checkbox/choice profile with geometry/value updates and bounded Unicode tooltip metadata and strict read_only state.
 
-**Disposition:** `implemented_subset`. **Remaining:** Imported enumeration silently truncates/loses widgets/unknown kinds; require public fallible bounded inventory before safe general source-form editing. Script/signature behavior is excluded. The local tooltip is an empty string when absent; this is not a promise to match the reference field-label fallback or imported metadata behavior.
+**Disposition:** `implemented_subset`. **Remaining:** Imported enumeration silently truncates/loses widgets/unknown kinds; require public fallible bounded inventory before safe general source-form editing. Script/signature behavior is excluded. The local tooltip is an empty string when absent; this is not a promise to match the reference field-label fallback or imported metadata behavior. Local read_only exposes only READ_ONLY and native filling refusal, including identical/clear assignments; it is not arbitrary flags, widget synchronization or security parity.
 
 **Upstream candidates:** [U10](upstream-roadmap.md)
 

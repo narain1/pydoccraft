@@ -429,7 +429,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Gate top-level body/section scope and reuse shared native layout for bounded logical label geometry, malformed geometry and later output refusal/recovery.
 - [x] Verify isolated native/public hierarchy, nine-level maximum-start LTR/RTL ink, source/PDF output, copy/wrapping/callback and compatibility regressions.
 - [x] Complete integrated locked native/release/installed-wheel validation (280 Rust / 393 Python).
-- [ ] Complete independent manual review/current-main CI.
+- [x] Complete independent manual review/current-main CI: corrected 280 Rust / 393 Python head passed; PR71 manually merged as e402268f5bc33f756f34587594761c41308a2a1e.
 - [ ] Keep broader custom list definitions, cell/auxiliary outline placement and TXT5 completion open.
 
 
@@ -516,3 +516,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete integrated release/clean installed-wheel validation: 299 Rust / 426 Python tests, strict typing and unchanged license audit.
 - [ ] Complete independent review and fresh current-main CI before manual merge.
 - [ ] Retain broader SLIDE4/master/theme/imported-media preservation work.
+
+
+## Field-state, note-kind and slide-reset evidence followup
+
+- [x] Audit exact 419/423/426 runtime assertions and module fingerprints; separate note-kind mutation, same-format persistence and format export.
+- [x] Extend owned-fields and add two scoped mutation profiles, reusing current criteria/reference families without changing feature completion or unrelated historical profiles.
+- [x] Validate 19-profile/133-cell generated guides, cached immutable sources and offline evidence drift checks; preserve independently corrected outline evidence.
+- [ ] Complete independent evidence review; broader feature/API/QA acceptance remains open.
