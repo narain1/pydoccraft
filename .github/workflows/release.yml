@@ -4,6 +4,16 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing version tag to release
+        required: true
+        type: string
+      publish:
+        description: Publish wheels to PyPI
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -16,21 +26,22 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Match tag to package version
-        if: github.event_name == 'push'
+      - name: Match release tag to package version
         shell: python
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
         run: |
           import os
           import pathlib
           import tomllib
 
           version = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"]
-          tag = os.environ["GITHUB_REF_NAME"]
+          tag = os.environ["RELEASE_TAG"]
           if tag != f"v{version}":
               raise SystemExit(f"tag {tag!r} does not match package version {version!r}")
 
   wheels:
-    name: Wheel (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    name: Wheel (${{ matrix.os }}, Python ${{ matrix.python.version }})
     needs: verify-version
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
@@ -38,7 +49,13 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.11", "3.12", "3.13"]
+        python:
+          - version: "3.11"
+            tag: "311"
+          - version: "3.12"
+            tag: "312"
+          - version: "3.13"
+            tag: "313"
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -46,15 +63,24 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: ${{ matrix.python.version }}
 
-      - name: Build wheel
+      - name: Build Linux wheel
+        if: runner.os == 'Linux'
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
+        with:
+          command: build
+          maturin-version: 1.8.1
+          args: --release --locked --out dist --interpreter /opt/python/cp${{ matrix.python.tag }}-cp${{ matrix.python.tag }}/bin/python
+          manylinux: auto
+
+      - name: Build macOS or Windows wheel
+        if: runner.os != 'Linux'
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           command: build
           maturin-version: 1.8.1
           args: --release --locked --out dist --interpreter python
-          manylinux: auto
 
       - name: Smoke-test wheel
         run: |
@@ -64,13 +90,12 @@ jobs:
       - name: Upload wheel
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: wheel-${{ matrix.os }}-py${{ matrix.python-version }}
+          name: wheel-${{ matrix.os }}-py${{ matrix.python.version }}
           path: dist/*.whl
           if-no-files-found: error
 
   github-release:
     name: Create GitHub release
-    if: github.event_name == 'push'
     needs: wheels
     runs-on: ubuntu-latest
     permissions:
@@ -86,11 +111,12 @@ jobs:
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/*.whl --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
+        run: gh release create "$RELEASE_TAG" dist/*.whl --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
 
   pypi:
     name: Publish to PyPI
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || inputs.publish
     needs: wheels
     runs-on: ubuntu-latest
     environment:
