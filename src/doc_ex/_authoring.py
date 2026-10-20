@@ -8,7 +8,7 @@ import reprlib
 import os
 import stat
 import tempfile
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from numbers import Real
 from pathlib import Path
 from typing import Any, BinaryIO, Generic, Literal, Self, SupportsIndex, TYPE_CHECKING, TypeVar, TypedDict, Unpack, overload
@@ -463,16 +463,21 @@ class EditableDocument:
 
     def save(self, destination: str | Path | BinaryIO) -> None:
         """Save the native format; path replacement is atomic, stream writes are not."""
+        self._save(destination, self.to_bytes)
+
+    def _save(self, destination: str | Path | BinaryIO, serialize: Callable[[], bytes]) -> None:
+        # One filesystem/stream implementation; format-specific options only select the
+        # serialization callback. It runs after destination normalization, as before.
         self._ensure_open()
         if hasattr(destination, "write"):
-            data = self.to_bytes()
+            data = serialize()
             if destination.write(data) != len(data):
                 raise OSError("destination did not accept the complete document")
             return
         path = Path(destination).expanduser()
         if path.suffix and path.suffix.lower() != "." + self._format:
             raise ValueError(f"save writes {self._format}; use convert() to change formats")
-        data = self.to_bytes()
+        data = serialize()
         previous_mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else None
         temporary = None
         try:
@@ -1772,6 +1777,20 @@ class EditableCell:
 
 class PdfDocument(EditableDocument):
     _format = "pdf"
+
+    def to_bytes(self, *, object_streams: bool = True) -> bytes:
+        """Serialize PDF; false selects classic xref tables without object-stream packing."""
+        self._ensure_open()
+        if type(object_streams) is not bool:
+            raise TypeError("object_streams must be a bool")
+        return bytes(self._call("to_bytes", object_streams))
+
+    def save(self, destination: str | Path | BinaryIO, *, object_streams: bool = True) -> None:
+        """Save PDF with the selected object representation; path replacement is atomic."""
+        self._ensure_open()
+        if type(object_streams) is not bool:
+            raise TypeError("object_streams must be a bool")
+        self._save(destination, lambda: self.to_bytes(object_streams=object_streams))
 
     @property
     def fields(self) -> PdfFields:

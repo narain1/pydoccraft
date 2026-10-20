@@ -45,6 +45,8 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
 
     with doc_ex.new('pdf') as pdf:
         assert_type(pdf, PdfDocument)
+        assert_type(pdf.to_bytes(object_streams=False), bytes)
+        assert_type(pdf.save('output.pdf', object_streams=True), None)
         assert_type(pdf.copy(pages=[0]), PdfDocument)
         page = pdf.pages.add(size=(200, 300))
         assert_type(page, PdfPage)

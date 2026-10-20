@@ -377,3 +377,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Share native layout checks and prove conservative link-batch counting; retain native missing/auxiliary target, clipped hit-area, vertical-link and export-cap regressions.
 - [x] Complete locked full native/release/installed-wheel validation and record exact artifact evidence.
 - [ ] Retain interior targets pending upstream marker-transparent shaping, general cross-references, imported/multi-paragraph targets, tooltips, heading outlines and arbitrary transformed navigation as open work.
+
+
+## PDF object-stream output choice
+
+- [x] Reuse native SaveOptions.object_streams through existing PDF serialization methods with strict bool/default compatibility.
+- [x] Keep one atomic save implementation and verify both-mode representation, content, pixels, fields, ownership, callbacks and limit behavior.
+- [x] Complete the local locked native/release/clean-wheel corpus and record the new artifact.
+- [x] Integrate the reviewed bookmark shaping correction and verify the complete local corpus with exact safe-profile PNG assertions.
+- [ ] Pass independent review and corrected prerequisite/current-main CI before merge.
+- [ ] Retain optimization, version/conformance profiles, incremental writing and broader PDF8 preservation as open work.
