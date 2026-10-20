@@ -1,5 +1,12 @@
 # Validation evidence
 
+## PDF supplied-font ink review correction
+
+- Independent review reproduced stacked combining marks rendering 26 points above a requested text box. Boxed static TrueType text now checks actual native shaped outlines against the box before commit, retaining legacy point placement. Built-in fonts still use logical metrics; boxed CFF is explicitly unavailable until native evaluation can be bounded.
+- Resource validation uses public parsed component iterators before recursive outline lookup: 4,096 distinct glyphs, 100,000 composite visits, depth 16, 8,192 points per glyph, 100,000 aggregate path operations, at most 16,384 operations per glyph and 1 MiB scratch per glyph. Native unhinted outlines and Kurbo curve extrema supply geometry; no glyph parser or replacement shaping engine is added.
+- All 44 PDF native tests, formatting and locked all-targets warnings-denied Clippy passed. A public regression covers two/six stacked marks, cached-output rollback, four rotations with CropBox/UserUnit, ordinary Unicode and unchanged point placement; its installed-wheel run is pending combined validation.
+- The only lockfile change adds a direct edge to already-locked skrifa 0.44.0 (MIT OR Apache-2.0). Regenerated and reviewed license inventories are byte-identical at 264 permissive normal/build packages, with no prohibited crates. NOTICE records direct outline use; all upstream revisions remain unchanged.
+
 ## 2026-10-20 DOCX paragraph borders (unreleased)
 
 - Offline Linux x86_64, Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1: formatting, 168 Rust tests, warnings-denied Clippy, locked release build and 176 installed-wheel Python tests passed with zero skips and verified artifact identity. The initial Python run rejected a test's unsupported named color; using its explicit RGB value fixed the fixture, and the complete installed suite passed.
