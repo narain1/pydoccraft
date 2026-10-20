@@ -361,3 +361,10 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Verify fixture offsets, native repeated-reference identity and probe argument bounds against an installed wheel without changing runtime behavior.
 - [ ] Add upstream fallible caller-bounded annotation inventories and strict initial inspection results, including preallocation/occurrence budgets and explicit incompleteness errors.
 - [ ] Verify native at-limit/+1 and fallback propagation before claiming bounded imported inventory; preserve the separate parser/decompression scope and broader PDF6 work.
+
+
+## Direction and geometric-comment operation evidence
+
+- [x] Review concrete assertions and native symbols for two bounded profiles; connect exact historical artifacts and existing reference families/criteria.
+- [x] Regenerate both development guides, verify cached reference sources and all existing ownership joins, and run the installed-wheel corpus.
+- [ ] Retain broader typography, imported annotations/appearance, upstream inventory and full parity audits as open work.
