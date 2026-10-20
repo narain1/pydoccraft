@@ -292,3 +292,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Validate canonical anchors, body/table generations, native empty-body insertion, budgets, callbacks and explicit unsupported Word members.
 - [x] Verify complete locked/native and installed-wheel source/render/export coverage and record artifact evidence.
 - [ ] Retain paragraph spacing/indent fidelity, rich nested content and broader SLIDE3/grouped-content work.
+
+
+## Everyday API typing and handle representations
+
+- [x] Retain concrete owner/handle types for common creation/copy/context and literal text-output chains without changing runtime signatures or exports.
+- [x] Bound existing child reprs and make them native-free for stale, closed and private no-ID paragraphs.
+- [x] Verify the strict installed-wheel consumer and complete installed corpus; record artifact evidence.
+- [ ] Retain broader property annotations, full-package typing and remaining API3 discoverability work.

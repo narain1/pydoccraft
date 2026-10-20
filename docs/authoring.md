@@ -33,6 +33,19 @@ A new PDF starts with one Letter page unless `size` is supplied. `pdf.pages.add(
 
 EPUB rendering, conversion, CSS, raw XHTML/OPF, scripts, fixed layout, editing an existing book, and physical pagination are unavailable. The extraction API maps each spine chapter to one compatibility page.
 
+## Typing and inspection
+
+The package ships `py.typed`. Literal `new("docx")`, `new("pdf")`, `new("pptx")` and `new("epub")` calls retain the matching document type through context managers and copies. Common creation methods return typed handles; collections and table slices retain their element types. `get_text("dict")` returns a dictionary, while text/Markdown/JSON modes return strings. A dynamic mode string retains the union. These hints describe successful results; existing format, ownership and value checks still apply.
+
+Paragraph, table and style reprs show identity and owner closure without reading document content, including stale handles. A repr is not a validity check: retrieve the desired property to apply normal lifetime checks. Other authoring annotations remain incomplete. The development consumer check is deliberately narrower than a full-package strict-typing guarantee:
+
+```bash
+python -m pip install -r tools/typing-requirements.txt
+python -m mypy --strict --follow-imports=silent --python-executable "$(command -v python)" tools/check_public_typing.py
+```
+
+Run this after installing the wheel built from the checkout. The checker is development tooling and is not a runtime dependency.
+
 ## Units, colors and collections
 
 Lengths are finite numbers in points (72 points per inch); `pt`, `mm`, `cm` and `inches` make conversions explicit. Page sizes accept `(width, height)` or `"A4"`, `"Letter"`, `"Legal"`. Positioned `box` values are `(x, y, width, height)` measured from the top-left of the visible page or slide. Alpha, percentages and theme colors are not accepted by solid-color setters. Colors accept `#RRGGBB`, an RGB integer tuple or the documented small name set: black, white, red, green, blue, gray/grey, yellow and navy. Getters return normalized `#RRGGBB` strings, or `None` for absent values where supported.
