@@ -745,14 +745,15 @@
         "E3",
         "REF8"
       ],
-      "local_surface": "Notes collection plus shared Paragraph handles; section note_options/configure_notes; notes.convert changes owned kind through the native semantic operation",
+      "local_surface": "Notes collection plus shared Paragraph handles; section note_options/configure_notes; notes.convert changes owned kind through the native semantic operation; Note.clear removes owned content while retaining reference/kind/options and a native styled number mark",
       "remaining": "Semantic note deletion, fragment graph remapping, rich-note geometry and broader placement/restart fidelity remain open. Shared standard-style runs fail if native conversion would restyle unrelated content; custom-style identity is preserved. This edit is separate from existing DOCX-to-PDF export.",
       "upstream_candidates": [
         "U02",
         "U07"
       ],
       "profiles": [
-        "word.note-kind-conversion"
+        "word.note-kind-conversion",
+        "word.story-clear"
       ],
       "disposition": "implemented_subset"
     },

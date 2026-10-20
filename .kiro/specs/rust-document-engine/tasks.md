@@ -552,5 +552,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Audit public native set_story, note own-mark writing and canonical style behavior; distinguish clearing from reference deletion.
 - [x] Reuse existing Note.clear, ordinary commit checks and staged story-local resource/identity cleanup without changing header/footer policies.
 - [x] Add three native groups and five public workflows covering blank/long/converted notes, actual mark/content ink, exact accounting, ownership/no-op/cache and protected-anchor rollback; run related story/note/field regressions.
-- [ ] Complete integrated locked release/clean installed-wheel validation and independent review/current-main CI.
+- [x] Complete integrated locked release/clean installed-wheel validation: 310 Rust / 444 Python tests, strict typing and unchanged license audit; refresh only affected story-clear evidence.
+- [ ] Complete independent review and exact-head/current-main CI before manual merge.
 - [ ] Retain broader DOC5/LAY7 imported note, semantic deletion and fragment-remapping work.
