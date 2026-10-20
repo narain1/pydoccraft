@@ -9,6 +9,7 @@ import json
 import statistics
 import struct
 import time
+from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable
@@ -51,6 +52,15 @@ def text_summary(value: str, expected_pages: int) -> tuple[int, int]:
     if pages != expected_pages:
         raise RuntimeError("text result does not match the source page count")
     return pages, len(value)
+
+
+def text_overlap(ours: str, theirs: str, expected_pages: int) -> float:
+    # Equal empty content is valid, but never bypass the source page-count check.
+    text_summary(ours, expected_pages)
+    text_summary(theirs, expected_pages)
+    ours_tokens, theirs_tokens = Counter(ours.split()), Counter(theirs.split())
+    total = max(sum(ours_tokens.values()), sum(theirs_tokens.values()))
+    return sum((ours_tokens & theirs_tokens).values()) / total if total else 1.0
 
 
 def png_summary(value: bytes, expected: tuple[int, int] | None = None) -> tuple[int, int]:
@@ -114,6 +124,10 @@ def run(directory: Path, warmups: int, repeats: int, dpi: int, output: Path | No
             dimensions = png_summary(probe[0].get_pixmap(dpi=dpi, alpha=True).tobytes("png"))
         validate_text = lambda value: text_summary(value, pages)
         validate_png = lambda value: png_summary(value, dimensions)
+
+        overlap = text_overlap(pydoc_text(data), pymupdf_text(data), pages)
+        if overlap < 0.95:
+            raise RuntimeError("libraries returned less than 95% token overlap")
 
         add(results, identifier, pages, len(data), "all-page plain text", "pydoccraft", measure(lambda: pydoc_text(data), validate_text, warmups, repeats))
         add(results, identifier, pages, len(data), "all-page plain text", "PyMuPDF", measure(lambda: pymupdf_text(data), validate_text, warmups, repeats))

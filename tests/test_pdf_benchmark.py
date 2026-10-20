@@ -38,6 +38,19 @@ class PdfBenchmarkTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             benchmark.text_summary("one page", 2)
 
+    def test_token_overlap_preserves_blank_pages_and_multiset_counts(self):
+        for ours, theirs, pages, expected in (
+            ("", "  ", 1, 1.0), ("\f\f", " \f \f", 3, 1.0),
+            ("", "present", 1, 0.0), ("present", "", 1, 0.0),
+            ("a a b", "a b b", 1, 2 / 3),
+            ("Ω\f😀", "😀\fΩ", 2, 1.0),
+        ):
+            with self.subTest(ours=ours, theirs=theirs):
+                self.assertEqual(benchmark.text_overlap(ours, theirs, pages), expected)
+        for ours, theirs in (("", ""), ("\f", ""), ("", "\f")):
+            with self.subTest(ours=ours, theirs=theirs), self.assertRaises(RuntimeError):
+                benchmark.text_overlap(ours, theirs, 2)
+
     def test_render_dimensions_must_be_nonzero_and_match_the_comparison(self):
         header = b"\x89PNG\r\n\x1a\n" + b"\0" * 8
         png = header + struct.pack(">II", 200, 100)
