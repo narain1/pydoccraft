@@ -3794,7 +3794,7 @@ fn attach_image_media(
     Ok(())
 }
 
-/// Reference accounting for this owner's authored Image/NoteRef profile. Native
+/// Reference accounting for this owner's authored image/note/page-field profile. Native
 /// paths traverse nested tables; we do not reconstruct an OOXML resource graph.
 fn retain_authored_image_media(document: &mut Document) -> PyResult<usize> {
     if document.settings.page_picture.is_some() {
@@ -3825,7 +3825,10 @@ fn retain_authored_image_media(document: &mut Document) -> PyResult<usize> {
                         used.insert(media.clone());
                     }
                     InlineObject::NoteRef { .. } => {}
-                    _ => return Err(EngineError::Unsupported("media cleanup requires the authored image/note profile; other inline objects need upstream reference traversal".into()).into()),
+                    // Fields own instruction/result text, not media references. Legacy
+                    // form XML is outside our authored page-field profile.
+                    InlineObject::Field { form, .. } if form.is_empty() => {}
+                    _ => return Err(EngineError::Unsupported("media cleanup requires the authored image/note/page-field profile; other inline objects need upstream reference traversal".into()).into()),
                 }
             }
         }
@@ -6345,6 +6348,41 @@ mod tests {
             72.0,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn page_fields_and_images_share_accounting_but_raw_forms_remain_rejected() {
+        let png = media_png(2, 2, [0, 0, 255, 255]);
+        for image_first in [true, false] {
+            let mut document = EditableDocx::new();
+            if image_first {
+                document.add_image(&png, Some(32.0), None, "Image").unwrap();
+            }
+            let paragraph = document.add_paragraph("Page ").unwrap();
+            document.add_paragraph_field(paragraph, "page").unwrap();
+            if !image_first {
+                document.add_image(&png, Some(32.0), None, "Image").unwrap();
+            }
+            assert_eq!(document.media_bytes, png.len());
+            let original = document.to_bytes().unwrap();
+            let revision = document.revision().unwrap();
+            let mut candidate = document.document().unwrap().clone();
+            let InlineObject::Field { form, .. } = &mut document
+                .paragraph_mut(&mut candidate, paragraph)
+                .unwrap()
+                .objects[0]
+            else {
+                panic!("missing native field");
+            };
+            *form = "<w:ffData/>".into();
+            assert!(document.commit(candidate).is_err());
+            assert_eq!(document.revision().unwrap(), revision);
+            assert_eq!(document.media_bytes, png.len());
+            assert_eq!(document.to_bytes().unwrap(), original);
+            let read = wordcraft_docx::read(&original).unwrap();
+            assert_eq!(read.media.len(), 1);
+            assert_eq!(page_field_count(&read).unwrap(), 1);
+        }
     }
 
     #[test]
