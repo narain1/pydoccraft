@@ -380,3 +380,10 @@ Existing staged commit checks run before publishing location, picture, table-gen
 A narrow private session method requests native text interpretation, checks content warnings and bounded glyph/index vectors, then delegates literal matching to PageText.find_opts_limited and geometry to line_rects. Native KMP runs in amortized O(source+query) time, but builds its source character buffer before honoring the result cap. The adapter therefore preflights UTF-8 source bytes, conservative lowercase scalar expansion and possible separators before calling it. Result ranges/line transitions are counted before geometry allocation; native rectangles remain unchanged.
 
 The Python facade only validates query/ownership and wraps owned tuples. Editable pages reuse their checked current read snapshot. Ordinary read documents reuse the retained native parser; manually constructed documents without a session use and close a temporary native session. No raster/text-result cache or equality to normalized table order is implied. ActualText and ligature boxes can cover more than the matched substring; native reading order can cross columns.
+
+
+## 61. Recheck the PDF page after normalization
+
+The facade retains each method's initial PdfPage._check, normalizes coordinate/color/font/image-stream inputs into local values, then calls the same check immediately before dispatch. Native arguments at that point have no remaining supported user callback conversions. rotate uses operator.index before this final check, avoiding conversion while PyO3 holds a mutable owner borrow. set_box/rotate refresh the handle generation only after successful native mutation, as before.
+
+This uses the existing generation invariant without a transaction or callback framework. Page moves/deletions performed by callbacks remain effective, while the stale requested drawing/geometry change fails. Copy-only callbacks leave the original page live and permit the operation. Read rendering continues through its captured snapshot; this change does not introduce a new rendering cache or mutable-handle rule.

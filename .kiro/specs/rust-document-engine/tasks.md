@@ -407,3 +407,10 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete integrated locked native/release/clean-wheel validation after prerequisite bookmark fixes (276 Rust / 379 Python).
 - [ ] Complete independent review and exact-head/current-main CI before manual merge.
 - [ ] Retain Office search geometry, normalized source offsets and broad E2 grounding parity as open work.
+
+
+## PDF mutation ownership after caller normalization
+
+- [x] Reproduce page retargeting through numeric/color/stream/iterable callbacks and reuse existing page-generation checks in six mutation methods.
+- [x] Verify focused move/delete/close/error/copy routes, native boolean rejection and integer rotation compatibility against a copied installed extension.
+- [ ] Complete clean installed-wheel validation, strict typing and independent review/current-main CI before manual merge.

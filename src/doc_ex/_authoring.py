@@ -2195,6 +2195,7 @@ class PdfPage:
             if not isinstance(box, (tuple, list)) or len(box) != 4:
                 raise TypeError("box must be (x, y, width, height) in current view points")
             box = tuple(map(pt, box))
+        self._check()
         self._owner._call("set_page_box", self._id, kind, box, _change=True)
         self._owner._page_generation += 1
         self._generation = self._owner._page_generation
@@ -2208,9 +2209,13 @@ class PdfPage:
     @background.setter
     def background(self, value):
         self._check()
-        self._owner._call("set_background", self._id, _color(value), _change=True)
+        rgb = _color(value)
+        self._check()
+        self._owner._call("set_background", self._id, rgb, _change=True)
 
     def rotate(self, degrees: int):
+        self._check()
+        degrees = operator.index(degrees)
         self._check()
         self._owner._call("rotate_page", self._id, degrees, _change=True)
         self._owner._page_generation += 1
@@ -2247,19 +2252,25 @@ class PdfPage:
             if font is not None:
                 from . import _read
                 data, _ = _read(font, limit=16 * 1024 * 1024)
-            self._owner._call("add_text_box", self._id, text, rect, pt(font_size),
-                              _color(color), align, data, _change=True)
+            size, rgb = pt(font_size), _color(color)
+            self._check()
+            self._owner._call("add_text_box", self._id, text, rect, size,
+                              rgb, align, data, _change=True)
             return
         if align != "left":
             raise ValueError("alignment requires a text box")
         if not isinstance(at, (tuple, list)) or len(at) != 2:
             raise TypeError("at must be an (x, y) pair in top-left points")
-        if font is None:
-            self._owner._call("add_text", self._id, text, pt(at[0]), pt(at[1]), pt(font_size), _color(color), _change=True)
-        else:
+        data = None
+        if font is not None:
             from . import _read
             data, _ = _read(font, limit=16 * 1024 * 1024)
-            self._owner._call("add_text_with_font", self._id, text, pt(at[0]), pt(at[1]), pt(font_size), data, _color(color), _change=True)
+        x, y, size, rgb = pt(at[0]), pt(at[1]), pt(font_size), _color(color)
+        self._check()
+        if font is None:
+            self._owner._call("add_text", self._id, text, x, y, size, rgb, _change=True)
+        else:
+            self._owner._call("add_text_with_font", self._id, text, x, y, size, data, rgb, _change=True)
 
     def draw_path(self, commands, *, stroke="black", fill=None, width: float = 1, close: bool = False):
         """Draw move/line/curve commands in top-left points through the native writer."""
@@ -2277,7 +2288,11 @@ class PdfPage:
         payload = json.dumps(normalized, separators=(",", ":"), allow_nan=False)
         if len(payload) > 262144:
             raise ValueError("path commands exceed 256 KiB")
-        self._owner._call("draw_path", self._id, payload, None if stroke is None else _color(stroke), None if fill is None else _color(fill), pt(width), close, _change=True)
+        stroke_rgb = None if stroke is None else _color(stroke)
+        fill_rgb = None if fill is None else _color(fill)
+        stroke_width = pt(width)
+        self._check()
+        self._owner._call("draw_path", self._id, payload, stroke_rgb, fill_rgb, stroke_width, close, _change=True)
 
     def add_image(self, source, *, box, crop=None, rotation: int = 0,
                   flip_h: bool = False, flip_v: bool = False):
@@ -2304,7 +2319,9 @@ class PdfPage:
         if not isinstance(flip_h, bool) or not isinstance(flip_v, bool):
             raise TypeError("flip_h and flip_v must be booleans")
         data, _ = _read(source)
-        self._owner._call("add_image", self._id, data, *map(pt, box), crop,
+        rect = tuple(map(pt, box))
+        self._check()
+        self._owner._call("add_image", self._id, data, *rect, crop,
                           rotation, flip_h, flip_v, _change=True)
 
     def get_pixmap(self, dpi: float = 144, *, clip: tuple[float, float, float, float] | None = None) -> bytes:
