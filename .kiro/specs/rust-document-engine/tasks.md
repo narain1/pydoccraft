@@ -375,5 +375,5 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reuse named mapping operations, TextRange and range.link with bounded native paired markers and all-story reference validation.
 - [x] Preserve generic semantic/media safeguards and exact own-pair deletion/relocation, fresh grid lookup, copies and stale-range behavior.
 - [x] Share native layout checks and prove conservative link-batch counting; retain native missing/auxiliary target, clipped hit-area, vertical-link and export-cap regressions.
-- [ ] Complete locked full native/release/installed-wheel validation and record exact artifact evidence.
+- [x] Complete locked full native/release/installed-wheel validation and record exact artifact evidence.
 - [ ] Retain general cross-references, imported/multi-paragraph targets, tooltips, heading outlines and arbitrary transformed navigation as open work.
