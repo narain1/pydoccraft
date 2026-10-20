@@ -95,6 +95,9 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         cell_paragraph = slide.add_table([['Cell']], box=(10, 210, 200, 80))[0, 0].paragraphs[0]
         assert_type(cell_paragraph, Paragraph)
         assert_type(cell_paragraph.add_run(' rich', bold=True), TextRange)
+        assert_type(cell_paragraph.add_run(' spaced', letter_spacing=0.3), TextRange)
+        assert_type(cell_paragraph[:].format(letter_spacing=None), None)
+        assert_type(slide.add_text('Spaced', box=(10, 300, 200, 40))[:].format(letter_spacing=0), None)
         assert_type(slide.get_text('markdown'), str)
         assert_type(slide.get_text('dict'), dict[str, Any])
 

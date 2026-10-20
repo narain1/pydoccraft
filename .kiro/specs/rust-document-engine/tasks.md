@@ -528,3 +528,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete integrated locked native/release/clean installed-wheel validation: 302 Rust / 432 Python tests, strict typing and unchanged license audit.
 - [ ] Complete independent review and exact-head/current-main CI before manual merge.
 - [ ] Keep broader TXT6 font/shaping controls and diagnostics under their existing owner.
+
+
+## Shared PPTX character spacing
+
+- [x] Audit public native storage/inheritance/tracking/autofit/PDF paths and reuse the existing format key with the shared bounded precision profile.
+- [x] Add five native groups and five public workflows for storage, output, invisible text positions, shape/cell ownership, links and atomic failures; explicitly retire the obsolete negative-PPTX group.
+- [x] Complete 33 related Python regressions and strict copied-package typing.
+- [ ] Complete integrated locked release/installed-wheel validation.
+- [ ] Complete independent review/current-main CI; broader SLIDE3/TXT6 acceptance remains open.

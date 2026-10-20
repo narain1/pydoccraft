@@ -196,22 +196,5 @@ class LetterSpacingTests(unittest.TestCase):
                     self.assertTrue(any(link.metadata.get("target_page") == 1 for link in links))
                 self.assertIn("Destination", document.bookmarks["target"].text)
 
-    def test_shared_character_formatting_rejects_unsupported_pptx(self):
-        with doc_ex.new("pptx") as presentation:
-            slide = presentation.slides.add()
-            shape = slide.add_text("Text", box=(20, 20, 200, 40))
-            cell = slide.add_table([["Cell"]], box=(20, 80, 200, 80))[0, 0].paragraphs[0]
-            for paragraph in (shape, cell):
-                selected = paragraph[:]
-                before = presentation.to_bytes()
-                for spacing in (None, 0, -0.05, 1):
-                    with self.assertRaisesRegex(ValueError, "unsupported PPTX formatting property: letter_spacing"):
-                        selected.format(bold=True, letter_spacing=spacing)
-                    with self.assertRaisesRegex(ValueError, "unsupported PPTX formatting property: letter_spacing"):
-                        paragraph.add_run("Extra", letter_spacing=spacing)
-                    self.assertEqual(presentation.to_bytes(), before)
-                    self.assertEqual(selected.text, paragraph.text)
-
-
 if __name__ == "__main__":
     unittest.main()
