@@ -1,5 +1,14 @@
 # Validation evidence
 
+## 2026-10-20 integrated picture lifecycle, ownership and shading acceptance (unreleased)
+
+- Runtime integration commit `1750702` includes merged parser reuse/selective extraction (PR32/34), paragraph borders, the supplied-font reuse/ink corrections and the picture/ownership batch. Offline Linux x86_64, Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1: formatting, 177 Rust tests, warnings-denied Clippy, locked release build and 196 installed-wheel Python tests passed with zero skips and verified artifact identity.
+- Picture.data replacement accepts bounded bytes/path/stream sources, preserves placement/alt text, changes actual cached preview pixels and keeps copies independent. Native public add_media and story/path traversal deduplicate live bytes and reclaim orphans after picture/cell/grid deletion. Tests cover all-story references, collision-safe reinsertion, 1,001 add/remove cycles, the 1,000-placement limit and exact 64 MiB aggregate capacity with atomic overflow/recovery. Deletion retains the editable anchor paragraph and invalidates the removed picture. MED1 is complete for the documented PNG authoring profile.
+- Collection iteration now captures handles before yielding, preventing pending PDF positions from silently acquiring a new generation after page/annotation/outline edits. Stable DOCX/slide identity, slice membership, independent copying, retained parent lifetime and closed-owner behavior pass; unsupported detached child copies/reparenting are documented. API5 is complete within the existing format-specific ownership contract.
+- BG6 acceptance verifies actual DOCX/PDF fills and native XML: run shading reset, highlight disable versus inheritance, paragraph/cell style restoration and document-default clearing remain independent from page backgrounds. No duplicate shading API was added.
+- The supplied-font public regression now passes against the installed wheel, including two/six stacked marks, cached-render rollback, four rotated CropBox/UserUnit views, ordinary Unicode and unchanged point behavior. This supersedes the pending installed-wheel statement in the earlier ink-correction note; it is combined integration evidence, not PR35's isolated CI artifact.
+- Wheel: `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`, 17,299,619 bytes; native extension: 40,127,688 bytes. SHA-256: `8e1245a864d8233025b7097070daf08c665946665572518e2ec959404cbc6d44`. Lockfile SHA-256: `fcfb4a174387cf25cceddadeba9e6be930ec790c840dca0bb5f169431a6c089c`. The direct already-locked Skrifa edge and attribution are recorded below; the regenerated 264-package permissive graph, all four upstream revisions and assets remain unchanged. Broader unchecked criteria and upstream fidelity gaps remain open.
+
 ## PDF supplied-font ink review correction
 
 - Independent review reproduced stacked combining marks rendering 26 points above a requested text box. Boxed static TrueType text now checks actual native shaped outlines against the box before commit, retaining legacy point placement. Built-in fonts still use logical metrics; boxed CFF is explicitly unavailable until native evaluation can be bounded.
@@ -387,3 +396,8 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 
 - Exact runtime head `bca6a47e7b39d596d37f97b5c9e48ad7ab4e0928` passed CI 39467518674: formatting, 172 Rust tests, warnings-denied Clippy, 187 installed-wheel Python tests (no skips), and 264-package license audit. Independent review also ran all 176 Python tests against the original frozen feature wheel. The later main merge added only PDF review evidence.
 - CPython 3.11.17 / Linux x86_64 artifact: wheel 17,290,310 bytes; native extension 40,109,520 bytes; wheel SHA-256 `020b291f27eac331d8a5260f836d8dfe310af45ddec012050d17223e810a13fd`. No dependencies changed in the border feature; integrated dependency and upstream revisions match reviewed main.
+
+### Picture lifecycle and ownership independent review
+
+- Independently ran all 196 Python tests against the frozen installed package for `ef0b577ac5cf11ba45936bb2541ec1c72a6d4535`; all passed. CI 39467831926 on that exact head also passed formatting, 177 Rust tests, warnings-denied Clippy, 196 installed-wheel Python tests (no skips) and the 264-package locked license audit. Integration of the reviewed PR35/36 histories changed no runtime, tests, dependency or attribution files.
+- CI artifact: CPython 3.11.17 / Linux x86_64, wheel 17,299,520 bytes, native extension 40,130,544 bytes, wheel SHA-256 `6191b9e0be1ba7a56b6fe7ab4df64cbbc87cb7b6dc65842aabe5041133d699e3`. Reviewed native reference traversal, bounded media accounting, retained paragraph anchors and generation-captured iteration; no additional findings.

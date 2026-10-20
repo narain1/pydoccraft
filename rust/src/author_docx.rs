@@ -894,7 +894,7 @@ impl EditableDocx {
         height: Option<f64>,
         alt: &str,
     ) -> PyResult<usize> {
-        let (paragraph, media) = self.make_image(data, width, height, alt)?;
+        let paragraph = self.make_image(data, width, height, alt)?;
         let table = self.table(id)?;
         let (anchor_row, cell) = cell_anchor(table, row, column)?;
         let margins = wordcraft_layout::cell_margins(self.document()?, table, anchor_row, cell);
@@ -913,7 +913,7 @@ impl EditableDocx {
             Block::Para(paragraph),
             0,
             0,
-            Some((media, data.to_vec())),
+            Some(data.to_vec()),
         )
     }
 
@@ -2437,13 +2437,13 @@ impl EditableDocx {
         alt: &str,
     ) -> PyResult<usize> {
         self.reserve_block()?;
-        let (paragraph, media) = self.make_image(data, width, height, alt)?;
+        let mut paragraph = self.make_image(data, width, height, alt)?;
         validate_picture_width(&paragraph, column_width(&self.document()?.last_section))?;
         let mut candidate = self.document()?.clone();
         if candidate.body.len() >= MAX_BLOCKS {
             return Err(limit("document exceeds 100000 blocks"));
         }
-        candidate.media.insert(media, Arc::new(data.to_vec()));
+        attach_image_media(&mut candidate, &mut paragraph, data.to_vec())?;
         let id = self.placeholder.unwrap_or(candidate.body.len());
         if self.placeholder.is_some() {
             candidate.body[id] = wordcraft_doc::para_block(paragraph);
@@ -2456,8 +2456,56 @@ impl EditableDocx {
         self.placeholder = None;
         self.images.push(id);
         self.locations.insert(id, (StoryRef::Body, Path::top(id)));
-        self.media_bytes += data.len();
         Ok(id)
+    }
+
+    pub fn image_data(&self, id: usize) -> PyResult<Vec<u8>> {
+        let InlineObject::Image { media, .. } = self.image(id)? else {
+            return Err(PyIndexError::new_err(
+                "image index does not identify a picture",
+            ));
+        };
+        self.document()?
+            .media
+            .get(media)
+            .map(|bytes| bytes.as_ref().clone())
+            .ok_or_else(|| PyValueError::new_err("picture references missing native media"))
+    }
+
+    pub fn set_image_data(&mut self, id: usize, data: &[u8]) -> PyResult<()> {
+        self.image(id)?;
+        validate_png(data)?;
+        let mut candidate = self.document()?.clone();
+        let key = candidate.add_media(data.to_vec(), "png");
+        let paragraph = self.paragraph_mut(&mut candidate, id)?;
+        let Some(InlineObject::Image { media, .. }) = paragraph.objects.first_mut() else {
+            return Err(PyIndexError::new_err(
+                "image index does not identify a picture",
+            ));
+        };
+        *media = key;
+        paragraph.touch();
+        self.commit(candidate)
+    }
+
+    pub fn remove_image(&mut self, id: usize) -> PyResult<()> {
+        self.image(id)?;
+        let mut candidate = self.document()?.clone();
+        let paragraph = self.paragraph_mut(&mut candidate, id)?;
+        // Authored pictures occupy one native inline-object paragraph. Removing
+        // the object keeps its anchor and every unrelated stable block locator.
+        if paragraph.text != "\u{fffc}" || paragraph.objects.len() != 1 {
+            return Err(EngineError::Unsupported(
+                "image removal requires an authored inline-picture paragraph".into(),
+            )
+            .into());
+        }
+        paragraph
+            .delete(0, '\u{fffc}'.len_utf8())
+            .map_err(model_error)?;
+        self.commit(candidate)?;
+        self.images.retain(|image| *image != id);
+        Ok(())
     }
 
     pub fn image_ids(&mut self) -> PyResult<Vec<usize>> {
@@ -2891,10 +2939,10 @@ impl EditableDocx {
         id: usize,
         row: usize,
         column: usize,
-        block: Block,
+        mut block: Block,
         added_text: usize,
         added_cells: usize,
-        media: Option<(String, Vec<u8>)>,
+        media: Option<Vec<u8>>,
     ) -> PyResult<usize> {
         self.reserve_block()?;
         let text_bytes = self.updated_text_bytes(0, added_text)?;
@@ -2911,10 +2959,12 @@ impl EditableDocx {
             .ok_or_else(|| limit("document child identifier limit reached"))?;
         let is_table = block.as_table().is_some();
         let is_image = media.is_some();
-        let media_bytes = media.as_ref().map_or(0, |(_, data)| data.len());
         let mut candidate = self.document()?.clone();
-        if let Some((key, bytes)) = media {
-            candidate.media.insert(key, Arc::new(bytes));
+        if let Some(bytes) = media {
+            let Block::Para(paragraph) = &mut block else {
+                return Err(PyValueError::new_err("picture media requires a paragraph"));
+            };
+            attach_image_media(&mut candidate, paragraph, bytes)?;
         }
         if consume {
             candidate.container_mut(story, &path).map_err(model_error)?[index] = Arc::new(block);
@@ -2944,7 +2994,6 @@ impl EditableDocx {
         self.next_story_block = next;
         self.text_bytes = text_bytes;
         self.cell_count += added_cells;
-        self.media_bytes += media_bytes;
         Ok(identifier)
     }
 
@@ -2954,14 +3003,8 @@ impl EditableDocx {
         width: Option<f64>,
         height: Option<f64>,
         alt: &str,
-    ) -> PyResult<(Paragraph, String)> {
-        if self.document()?.media.len() >= 1000
-            || self.media_bytes.saturating_add(data.len()) > MAX_MEDIA_BYTES
-        {
-            return Err(limit(
-                "document images exceed 1000 images or 64 MiB of encoded media",
-            ));
-        }
+    ) -> PyResult<Paragraph> {
+        self.document()?;
         validate_alt(alt)?;
         let (pixel_width, pixel_height) = validate_png(data)?;
         let (width, height) = match (width, height) {
@@ -2977,13 +3020,12 @@ impl EditableDocx {
             (None, None) => (f64::from(pixel_width), f64::from(pixel_height)),
         };
         validate_image_size(width, height)?;
-        let media = format!("pydoccraft-image-{}.png", self.document()?.media.len());
         let mut paragraph = Paragraph::new();
         paragraph
             .insert_object(
                 0,
                 InlineObject::Image {
-                    media: media.clone(),
+                    media: String::new(),
                     w: width as f32,
                     h: height as f32,
                     alt: alt.into(),
@@ -2994,7 +3036,7 @@ impl EditableDocx {
                 &CharProps::default(),
             )
             .map_err(model_error)?;
-        Ok((paragraph, media))
+        Ok(paragraph)
     }
 
     fn make_table(&self, rows: Vec<Vec<String>>, width: f32) -> PyResult<(Table, usize, usize)> {
@@ -3076,7 +3118,12 @@ impl EditableDocx {
         let (story, path) = self.location(id)?;
         document.table_mut(story, &path).map_err(model_error)
     }
-    fn commit(&mut self, document: Document) -> PyResult<()> {
+    fn commit(&mut self, mut document: Document) -> PyResult<()> {
+        let media_bytes = if document.media.is_empty() {
+            0
+        } else {
+            retain_authored_image_media(&mut document)?
+        };
         validate_table_metadata_budget(&document)?;
         validate_document_tabs(&document)?;
         // Native generic range/table edits do not repair semantic references. Existing
@@ -3102,6 +3149,7 @@ impl EditableDocx {
             .checked_add(1)
             .ok_or_else(|| limit("document revision limit reached"))?;
         self.document = Some(document);
+        self.media_bytes = media_bytes;
         self.revision = revision;
         Ok(())
     }
@@ -3160,6 +3208,69 @@ impl EditableDocx {
         }
         Ok(total)
     }
+}
+
+fn attach_image_media(
+    document: &mut Document,
+    paragraph: &mut Paragraph,
+    data: Vec<u8>,
+) -> PyResult<()> {
+    let Some(InlineObject::Image { media, .. }) = paragraph.objects.first_mut() else {
+        return Err(PyValueError::new_err(
+            "picture media requires an inline image",
+        ));
+    };
+    *media = document.add_media(data, "png");
+    Ok(())
+}
+
+/// Reference accounting for this owner's authored Image/NoteRef profile. Native
+/// paths traverse nested tables; we do not reconstruct an OOXML resource graph.
+fn retain_authored_image_media(document: &mut Document) -> PyResult<usize> {
+    if document.settings.page_picture.is_some() {
+        return Err(EngineError::Unsupported(
+            "media cleanup for page pictures is outside the authored image profile".into(),
+        )
+        .into());
+    }
+    let mut used = BTreeSet::new();
+    let mut references = 0usize;
+    for story in
+        std::iter::once(StoryRef::Body).chain(document.parts.keys().map(|id| StoryRef::Part(*id)))
+    {
+        for path in document.para_paths(story) {
+            let paragraph = document
+                .para(story, &path)
+                .ok_or_else(|| PyValueError::new_err("native paragraph path no longer exists"))?;
+            for object in &paragraph.objects {
+                match object {
+                    InlineObject::Image { media, ole: None, .. } => {
+                        references += 1;
+                        if references > 1000 {
+                            return Err(limit("document exceeds 1000 image placements"));
+                        }
+                        if !document.media.contains_key(media) {
+                            return Err(PyValueError::new_err("picture references missing native media"));
+                        }
+                        used.insert(media.clone());
+                    }
+                    InlineObject::NoteRef { .. } => {}
+                    _ => return Err(EngineError::Unsupported("media cleanup requires the authored image/note profile; other inline objects need upstream reference traversal".into()).into()),
+                }
+            }
+        }
+    }
+    if used.len() > 1000 {
+        return Err(limit("document exceeds 1000 distinct image resources"));
+    }
+    let bytes = used.iter().try_fold(0usize, |total, key| {
+        total
+            .checked_add(document.media[key].len())
+            .filter(|total| *total <= MAX_MEDIA_BYTES)
+            .ok_or_else(|| limit("document images exceed 64 MiB of referenced encoded media"))
+    })?;
+    document.media.retain(|key, _| used.contains(key));
+    Ok(bytes)
 }
 
 fn table_patch(patch: &str) -> PyResult<Map<String, Value>> {
@@ -5398,6 +5509,215 @@ fn range_offsets(text: &str, start: usize, end: usize) -> PyResult<(usize, usize
 mod tests {
     use super::*;
 
+    fn media_png(width: u32, height: u32, color: [u8; 4]) -> Vec<u8> {
+        crate::rendering::encode_png(
+            width,
+            height,
+            &color.repeat((width * height) as usize),
+            72.0,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn picture_payload_replacement_preserves_geometry_alt_copy_and_visible_output() {
+        let red = media_png(16, 8, [255, 0, 0, 255]);
+        let blue = media_png(8, 16, [0, 0, 255, 255]);
+        let mut document = EditableDocx::new();
+        let before = document.add_paragraph("Before picture").unwrap();
+        let picture = document
+            .add_image(&red, Some(80.0), None, "Kept alt")
+            .unwrap();
+        let after = document.add_paragraph("After picture").unwrap();
+        let copy = document.copy().unwrap();
+        document.set_image_data(picture, &blue).unwrap();
+        assert_eq!(document.image_data(picture).unwrap(), blue);
+        assert_eq!(document.image_size(picture).unwrap(), (80.0, 40.0));
+        assert_eq!(document.image_alt(picture).unwrap(), "Kept alt");
+        assert_eq!(copy.image_data(picture).unwrap(), red);
+        assert_eq!(document.paragraph_text(before).unwrap(), "Before picture");
+        assert_eq!(document.paragraph_text(after).unwrap(), "After picture");
+        let raw = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&raw).unwrap();
+        assert_eq!(reopened.media.len(), 1);
+        assert_eq!(reopened.media.values().next().unwrap().as_ref(), &blue);
+        let pdf = crate::docx::to_pdf(&raw, None).unwrap();
+        assert!(border_pixels(crate::docx::render(&raw, 0, 72.0, None).unwrap(), 2) > 100);
+        assert!(border_pixels(crate::pdf::render(&pdf, 0, 72.0, None).unwrap(), 2) > 100);
+        let revision = document.revision().unwrap();
+        for invalid in [b"not PNG".as_slice(), &blue[..blue.len() - 8]] {
+            assert!(document.set_image_data(picture, invalid).is_err());
+            assert_eq!(document.revision().unwrap(), revision);
+            assert_eq!(document.to_bytes().unwrap(), raw);
+        }
+    }
+
+    #[test]
+    fn picture_resources_deduplicate_reclaim_and_never_overwrite_live_keys() {
+        let red = media_png(1, 1, [255, 0, 0, 255]);
+        let blue = media_png(1, 1, [0, 0, 255, 255]);
+        let green = media_png(1, 1, [0, 255, 0, 255]);
+        let mut document = EditableDocx::new();
+        let first = document.add_image(&red, None, None, "First").unwrap();
+        let table = document
+            .add_table(vec![vec!["Keep".into()], vec!["Delete".into()]])
+            .unwrap();
+        let second = document
+            .cell_add_image(table, 0, 0, &red, None, None, "Second")
+            .unwrap();
+        assert_eq!(document.document().unwrap().media.len(), 1);
+        assert_eq!(document.media_bytes, red.len());
+        document.set_image_data(first, &blue).unwrap();
+        assert_eq!(document.document().unwrap().media.len(), 2);
+        assert_eq!(document.image_data(second).unwrap(), red);
+        document.set_image_data(second, &blue).unwrap();
+        assert_eq!(document.document().unwrap().media.len(), 1);
+        assert_eq!(document.media_bytes, blue.len());
+        document.remove_image(first).unwrap();
+        assert!(document.image_data(first).is_err());
+        assert_eq!(document.paragraph_text(first).unwrap(), "");
+        assert_eq!(document.image_data(second).unwrap(), blue);
+        document.set_cell_text(table, 0, 0, "Replacement").unwrap();
+        assert!(document.image_data(second).is_err());
+        assert_eq!(document.media_bytes, 0);
+        assert!(document.document().unwrap().media.is_empty());
+        let live = document.add_image(&blue, None, None, "Live").unwrap();
+        let dropped = document
+            .cell_add_image(table, 1, 0, &red, None, None, "Drop")
+            .unwrap();
+        document.delete_row(table, 1).unwrap();
+        assert!(document.image_data(dropped).is_err());
+        let fresh = document.add_image(&green, None, None, "Fresh").unwrap();
+        assert_eq!(document.image_data(live).unwrap(), blue);
+        assert_eq!(document.image_data(fresh).unwrap(), green);
+        assert_eq!(document.media_bytes, blue.len() + green.len());
+    }
+
+    #[test]
+    fn image_reference_accounting_includes_header_footer_and_note_stories() {
+        let png = media_png(1, 1, [255, 0, 0, 255]);
+        let mut document = EditableDocx::new();
+        let body = document.add_image(&png, None, None, "Shared").unwrap();
+        let anchor = document.add_paragraph("Note anchor").unwrap();
+        let note = document
+            .add_note(
+                anchor,
+                0,
+                4,
+                document.revision().unwrap(),
+                "Footnote",
+                "footnote",
+            )
+            .unwrap();
+        let note_info: Value = serde_json::from_str(&document.note_info(note).unwrap()).unwrap();
+        let note_story = note_info["story"].as_u64().unwrap() as u32;
+        let mut copies = Vec::new();
+        let (story, path) = document.location(body).unwrap();
+        let image_para = document
+            .document()
+            .unwrap()
+            .para(story, &path)
+            .unwrap()
+            .clone();
+        for story in [
+            document.ensure_story("header", "default", 0).unwrap(),
+            document.ensure_story("footer", "default", 0).unwrap(),
+            note_story,
+        ] {
+            let mut candidate = document.document().unwrap().clone();
+            let part = candidate.parts.get_mut(&story).unwrap();
+            let index = part.blocks.len();
+            part.blocks.push(Arc::new(Block::Para(image_para.clone())));
+            document.commit(candidate).unwrap();
+            copies.push(
+                document
+                    .register_location(StoryRef::Part(story), Path::top(index), true)
+                    .unwrap(),
+            );
+        }
+        document.remove_image(body).unwrap();
+        assert_eq!(document.document().unwrap().media.len(), 1);
+        for (index, picture) in copies.iter().enumerate() {
+            assert_eq!(document.image_data(*picture).unwrap(), png);
+            document.remove_image(*picture).unwrap();
+            assert_eq!(
+                document.document().unwrap().media.len(),
+                usize::from(index + 1 < copies.len())
+            );
+        }
+        document.to_bytes().unwrap();
+    }
+
+    #[test]
+    fn aggregate_media_budget_is_transactional_and_removed_payloads_release_capacity() {
+        let red = media_png(1, 1, [255, 0, 0, 255]);
+        let blue = media_png(1, 1, [0, 0, 255, 255]);
+        let mut document = EditableDocx::new();
+        let first = document.add_image(&red, None, None, "First").unwrap();
+        let second = document.add_image(&blue, None, None, "Second").unwrap();
+        let keys: Vec<_> = [first, second]
+            .into_iter()
+            .map(|id| match document.image(id).unwrap() {
+                InlineObject::Image { media, .. } => media.clone(),
+                _ => unreachable!(),
+            })
+            .collect();
+        // Synthetic native media isolates encoded-byte accounting from PNG
+        // decoding. Never serialize/render these deliberately non-PNG values.
+        let mut candidate = document.document().unwrap().clone();
+        for key in &keys {
+            candidate
+                .media
+                .insert(key.clone(), Arc::new(vec![0; MAX_MEDIA_BYTES / 2]));
+        }
+        document.commit(candidate).unwrap();
+        assert_eq!(document.media_bytes, MAX_MEDIA_BYTES);
+        let revision = document.revision().unwrap();
+        let original = document.document().unwrap().media[&keys[0]].clone();
+        let mut oversized = document.document().unwrap().clone();
+        oversized
+            .media
+            .insert(keys[0].clone(), Arc::new(vec![1; MAX_MEDIA_BYTES / 2 + 1]));
+        assert!(document.commit(oversized).is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.media_bytes, MAX_MEDIA_BYTES);
+        assert!(Arc::ptr_eq(
+            &document.document().unwrap().media[&keys[0]],
+            &original
+        ));
+        document.remove_image(first).unwrap();
+        assert_eq!(document.media_bytes, MAX_MEDIA_BYTES / 2);
+        assert!(!document.document().unwrap().media.contains_key(&keys[0]));
+        document.set_image_data(second, &blue).unwrap();
+        assert_eq!(document.media_bytes, blue.len());
+        document
+            .add_image(&red, None, None, "Capacity reused")
+            .unwrap();
+        assert_eq!(document.media_bytes, red.len() + blue.len());
+        document.to_bytes().unwrap();
+    }
+
+    #[test]
+    fn removed_picture_resources_release_limits_and_duplicate_placements_are_bounded() {
+        let png = media_png(1, 1, [255, 0, 0, 255]);
+        let mut document = EditableDocx::new();
+        for _ in 0..1001 {
+            let image = document.add_image(&png, None, None, "Transient").unwrap();
+            document.remove_image(image).unwrap();
+            assert_eq!(document.media_bytes, 0);
+        }
+        let mut document = EditableDocx::new();
+        for _ in 0..1000 {
+            document.add_image(&png, None, None, "Shared").unwrap();
+        }
+        assert_eq!(document.document().unwrap().media.len(), 1);
+        assert_eq!(document.media_bytes, png.len());
+        let revision = document.revision().unwrap();
+        assert!(document.add_image(&png, None, None, "Over limit").is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.image_ids().unwrap().len(), 1000);
+    }
+
     fn border_pixels(png: Vec<u8>, channel: usize) -> usize {
         let mut reader = png::Decoder::new(Cursor::new(png)).read_info().unwrap();
         let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
@@ -6826,7 +7146,7 @@ mod tests {
         assert_eq!(document.cell_text(table, 0, 0).unwrap(), "Replaced");
         let later = document.add_image(&png, None, None, "Later").unwrap();
         assert_eq!(document.image_alt(later).unwrap(), "Later");
-        assert_eq!(document.document().unwrap().media.len(), 2);
+        assert_eq!(document.document().unwrap().media.len(), 1);
     }
 
     #[test]

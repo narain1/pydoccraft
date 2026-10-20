@@ -227,3 +227,16 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 1. Existing paragraph, paragraph-style and document-default formatting SHALL accept supported four-edge borders with shared color/style/width vocabulary. Direct and effective snapshots SHALL expose native whole-group inheritance and distinguish omission, per-side clearing and group reset.
 2. Table-style border meaning SHALL remain unchanged. Shared DOCX border validation SHALL reject proven rendering substitutions/clamps and invalid vertical double/wave edges before mutation; PPTX rules SHALL remain independent.
 3. Native DOCX readback and visible PNG/PDF tests SHALL cover body, cells, stories, style/default inheritance and atomic invalid changes. Between/bar and other unsupported native borders SHALL remain explicit upstream gaps.
+
+## 26. Ownership and shading consistency acceptance
+
+1. Ordered collection iteration SHALL capture handles before yielding, preserving stable identities and generation checks across structural edits. A pending positional handle SHALL NOT be rebound to the current generation after its original object moved or disappeared.
+2. The API SHALL document live-handle slices, parent ownership, closed/deleted/stale access, independent whole-document copies, unsupported detached child copying/general reparenting and layout invalidation. Existing format-specific operations SHALL remain the only supported exceptions.
+3. Shared run/paragraph/cell background formatting SHALL verify direct clearing restores native inheritance, independently from text highlight and page background. Native DOCX properties and actual PNG/PDF fills SHALL agree without adding a second shading API.
+
+## 27. Inline picture replacement and removal
+
+1. Existing picture handles SHALL expose owned source bytes and accept a replacement through the existing bounded bytes/path/stream reader. Replacement SHALL preserve size and alt text and invalidate derived outputs only after native validation succeeds.
+2. Existing document/cell image collections SHALL support indexed deletion of one inline placement. Native paragraph deletion SHALL preserve the anchor paragraph and unrelated IDs; deleted handles SHALL fail explicitly.
+3. Native media insertion SHALL deduplicate and allocate collision-safe keys. Commit SHALL retain media referenced by supported authored stories, including nested tables and auxiliary parts, and recompute distinct encoded-byte and placement budgets. Unsupported object profiles SHALL fail before cleanup rather than risking unrelated resources.
+4. Tests SHALL verify replacement/removal, shared resources, copy independence, reclaimed budgets, save/read/render consistency and atomic failure; no new image-processing backend SHALL be introduced.
