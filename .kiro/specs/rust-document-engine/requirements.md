@@ -128,3 +128,13 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 2. Story tables, links and images SHALL reuse existing normalized values; auxiliary asset identities SHALL include part ID and source path. Footnote/endnote body references SHALL retain exposed part IDs and Unicode offsets. Legacy comment page output SHALL remain compatible and be identified in the story metadata.
 3. Boundary traversal SHALL bound story counts, nested tables, grids, objects, text and referenced image projection before constructing unbounded normalized output. Unsupported or excessive content SHALL fail with existing stable exceptions.
 4. DOCX table layout SHALL expose checked column widths, uniform solid borders, row height rules, repeated header prefixes and row splitting. Paragraph spacing/page-break-before and explicit page breaks SHALL be delegated to native model/layout and verified in PDF pagination.
+
+## 13. Text, vector content and bounded diagnostics
+
+1. DOCX paragraphs SHALL support native bullet/numbered list membership, levels and explicit restart; revision-bound text ranges SHALL support checked URL links without changing labels or Unicode offsets. All text-size arguments SHALL use `font_size` in the public Python authoring API.
+2. PDF creation SHALL accept bounded caller-supplied permitted fonts through PdfCraft registration/shaping/embedding, preserving searchable Unicode and rejecting missing glyphs or overflow. Basic vector paths SHALL use native content operations with explicit top-left coordinates and checked bounds.
+3. PDF metadata and hierarchical bookmarks SHALL reuse native APIs, support atomic validation and explicit stale-handle behavior. Child collections SHALL remain usable after their own edits that preserve parent identity.
+4. Reading an absent DOCX header/footer SHALL return an empty collection without creating a part, changing section flags or invalidating text ranges. Creation SHALL occur only on insertion.
+5. Native extraction SHALL expose bounded structured diagnostics for detectable omitted or approximated model constructs. Unknown markup discarded upstream cannot be diagnosed by inspecting the resulting model; diagnostics SHALL NOT imply complete preservation or downgrade errors.
+6. Python input reads and native document entry points SHALL enforce a 128 MiB input limit. Normalized JSON serialization SHALL enforce a 64 MiB encoded-payload limit before growing beyond it. These limits SHALL NOT be advertised as a bound on all parser/layout memory.
+7. Report generation SHALL remain a recipe over DOCX authoring and existing PDF conversion. Reopened outputs SHALL preserve order, links and table text exactly once.

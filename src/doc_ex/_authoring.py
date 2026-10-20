@@ -138,6 +138,7 @@ class EditableDocument:
         self._cached = None
         self._page_generation = 0
         self._annotation_generations = {}
+        self._bookmark_generation = 0
 
     def _ensure_open(self):
         if self._closed:
@@ -345,6 +346,15 @@ class Paragraph:
         self._owner._call("set_paragraph_alignment", self._id, value, _change=True)
 
     @property
+    def list_style(self):
+        """The direct list kind/level, or None for an ordinary paragraph."""
+        return self._owner._call("paragraph_list", self._id)
+
+    def set_list(self, kind: str | None = None, *, level: int = 0, restart: bool = False):
+        """Set bullet/numbered list membership; None removes it."""
+        self._owner._call("set_paragraph_list", self._id, kind, operator.index(level), restart, _change=True)
+
+    @property
     def page_break_before(self):
         return self._owner._call("page_break_before", self._id)
 
@@ -363,8 +373,8 @@ class Paragraph:
             raise TypeError("spacing must be (before, after, line_spacing)")
         self._owner._call("set_paragraph_spacing", self._id, *map(pt, value), _change=True)
 
-    def add_run(self, text: str, *, bold: bool = False, italic: bool = False, size: float | None = None, font: str | None = None, color=None):
-        start, end, revision = self._owner._call("add_run", self._id, text, bold, italic, None if size is None else pt(size), font, None if color is None else _hex_color(color), _change=True)
+    def add_run(self, text: str, *, bold: bool = False, italic: bool = False, font_size: float | None = None, font: str | None = None, color=None):
+        start, end, revision = self._owner._call("add_run", self._id, text, bold, italic, None if font_size is None else pt(font_size), font, None if color is None else _hex_color(color), _change=True)
         return TextRange(self, start, end, revision)
 
     def find(self, text: str) -> list[TextRange]:
@@ -420,9 +430,19 @@ class TextRange:
         paragraph = self._paragraph
         self._start, self._end, self._revision = paragraph._owner._call("replace_range", paragraph._id, self._start, self._end, self._revision, value, _change=True)
 
-    def format(self, *, bold: bool | None = None, italic: bool | None = None, size: float | None = None, font: str | None = None, color=None) -> None:
+    @property
+    def link(self):
         paragraph = self._paragraph
-        self._revision = paragraph._owner._call("format_range", paragraph._id, self._start, self._end, self._revision, bold, italic, None if size is None else pt(size), font, None if color is None else _hex_color(color), _change=True)
+        return paragraph._owner._call("range_link", paragraph._id, self._start, self._end, self._revision)
+
+    @link.setter
+    def link(self, url: str | None):
+        paragraph = self._paragraph
+        self._revision = paragraph._owner._call("set_range_link", paragraph._id, self._start, self._end, self._revision, url, _change=True)
+
+    def format(self, *, bold: bool | None = None, italic: bool | None = None, font_size: float | None = None, font: str | None = None, color=None) -> None:
+        paragraph = self._paragraph
+        self._revision = paragraph._owner._call("format_range", paragraph._id, self._start, self._end, self._revision, bold, italic, None if font_size is None else pt(font_size), font, None if color is None else _hex_color(color), _change=True)
 
 
 class Section:
@@ -470,11 +490,14 @@ class EditableStory:
         self._owner, self._kind, self._variant = owner, kind, variant
 
     def _identifier(self):
-        return self._owner._call("ensure_story", self._kind, self._variant, _change=True)
+        return self._owner._call("story_id", self._kind, self._variant)
 
     @property
     def paragraphs(self):
-        return _Collection(self._owner, lambda: self._owner._call("story_paragraph_ids", self._identifier()), Paragraph)
+        def identifiers():
+            identifier = self._identifier()
+            return [] if identifier is None else self._owner._call("story_paragraph_ids", identifier)
+        return _Collection(self._owner, identifiers, Paragraph)
 
     def add_paragraph(self, text: str = "", *, style: str | None = None):
         def append(native):
@@ -699,6 +722,26 @@ class PdfDocument(EditableDocument):
     _format = "pdf"
 
     @property
+    def metadata(self):
+        """A snapshot of supported document-info fields."""
+        return json.loads(self._call("metadata"))
+
+    def update_metadata(self, **values):
+        """Update title/author/subject/keywords; None or empty strings clear fields."""
+        if values.keys() - {"title", "author", "subject", "keywords"}:
+            raise ValueError("metadata keys must be title, author, subject or keywords")
+        for value in values.values():
+            if value is not None and not isinstance(value, str):
+                raise TypeError("metadata values must be strings or None")
+            if value is not None and (len(value) > 65536 or len(value.encode("utf-8")) > 65536):
+                raise ValueError("metadata values must not exceed 65536 bytes")
+        self._call("update_metadata", json.dumps(values, ensure_ascii=False, allow_nan=False), _change=True)
+
+    @property
+    def bookmarks(self):
+        return Bookmarks(self)
+
+    @property
     def page_count(self):
         return self._call("page_count")
 
@@ -711,6 +754,111 @@ class PdfDocument(EditableDocument):
             return super().copy()
         indices = [_index(index, self.page_count) for index in pages]
         return type(self)(self._call("subset", indices))
+
+
+class Bookmarks(_Collection):
+    def __init__(self, owner: PdfDocument, path=(), parent=None):
+        self._path, self._parent = tuple(path), parent
+        def identifiers():
+            self._check()
+            return [tuple(value["path"]) for value in json.loads(owner._call("bookmarks"))
+                    if len(value["path"]) == len(self._path) + 1 and tuple(value["path"][:-1]) == self._path]
+        super().__init__(owner, identifiers, Bookmark)
+
+    def _check(self):
+        self._owner._ensure_open()
+        if self._parent is not None:
+            self._parent._check()
+
+    def add(self, title: str, page: int, *, index: int | None = None):
+        self._check()
+        page = _index(page, self._owner.page_count)
+        if index is not None:
+            index = operator.index(index)
+            if not 0 <= index <= len(self):
+                raise IndexError("bookmark insertion index out of range")
+        path = self._owner._call("add_bookmark", title, page, list(self._path), index, _change=True)
+        self._owner._bookmark_generation += 1
+        if self._parent is not None:
+            self._parent._generation = self._owner._bookmark_generation
+        return Bookmark(self._owner, path)
+
+    def __delitem__(self, index):
+        bookmark = self[index]
+        self._owner._call("delete_bookmark", list(bookmark._path), _change=True)
+        self._owner._bookmark_generation += 1
+        if self._parent is not None:
+            self._parent._generation = self._owner._bookmark_generation
+
+    def move(self, index: int, destination: int, *, to=None):
+        bookmark = self[index]
+        target = self if to is None else to
+        if not isinstance(target, Bookmarks) or target._owner is not self._owner:
+            raise ValueError("bookmark destination must belong to the same document")
+        target._check()
+        destination = operator.index(destination)
+        maximum = len(target) - int(target._path == self._path)
+        if not 0 <= destination <= maximum:
+            raise IndexError("bookmark destination index out of range")
+        path = self._owner._call("move_bookmark", list(bookmark._path), list(target._path), destination, _change=True)
+        self._owner._bookmark_generation += 1
+        if target._path == self._path:
+            for collection in (self, target):
+                if collection._parent is not None:
+                    collection._parent._generation = self._owner._bookmark_generation
+        return Bookmark(self._owner, path)
+
+
+class Bookmark:
+    """A native outline entry; structural outline edits invalidate old handles."""
+    def __init__(self, owner: PdfDocument, path):
+        self._owner, self._path = owner, tuple(path)
+        self._generation = owner._bookmark_generation
+        self._page_generation = owner._page_generation
+
+    def _check(self):
+        self._owner._ensure_open()
+        if self._generation != self._owner._bookmark_generation or self._page_generation != self._owner._page_generation:
+            raise ValueError("bookmark handle is stale after organization; retrieve it again")
+
+    def _value(self):
+        self._check()
+        for value in json.loads(self._owner._call("bookmarks")):
+            if tuple(value["path"]) == self._path:
+                return value
+        raise ValueError("bookmark no longer exists")
+
+    @property
+    def children(self):
+        self._check()
+        return Bookmarks(self._owner, self._path, self)
+
+    @property
+    def title(self):
+        return self._value()["title"]
+
+    @title.setter
+    def title(self, value: str):
+        self._check()
+        self._owner._call("update_bookmark", list(self._path), title=value, _change=True)
+
+    @property
+    def page(self):
+        return self._value()["page"]
+
+    @page.setter
+    def page(self, value: int):
+        self._check()
+        self._owner._call("update_bookmark", list(self._path), page=_index(value, self._owner.page_count), _change=True)
+
+    @property
+    def expanded(self):
+        return self._value()["open"]
+
+    @expanded.setter
+    def expanded(self, value: bool):
+        self._check()
+        self._owner._call("update_bookmark", list(self._path), open=value, _change=True)
 
 
 class PdfPages(_Collection):
@@ -795,11 +943,34 @@ class PdfPage:
         self._check()
         return Annotations(self)
 
-    def draw_text(self, text: str, *, at: tuple[float, float], font_size: float = 12):
+    def draw_text(self, text: str, *, at: tuple[float, float], font_size: float = 12, font=None):
         self._check()
         if not isinstance(at, (tuple, list)) or len(at) != 2:
             raise TypeError("at must be an (x, y) pair in top-left points")
-        self._owner._call("add_text", self._id, text, pt(at[0]), pt(at[1]), pt(font_size), _change=True)
+        if font is None:
+            self._owner._call("add_text", self._id, text, pt(at[0]), pt(at[1]), pt(font_size), _change=True)
+        else:
+            from . import _read
+            data, _ = _read(font, limit=16 * 1024 * 1024)
+            self._owner._call("add_text_with_font", self._id, text, pt(at[0]), pt(at[1]), pt(font_size), data, _change=True)
+
+    def draw_path(self, commands, *, stroke="black", fill=None, width: float = 1, close: bool = False):
+        """Draw move/line/curve commands in top-left points through the native writer."""
+        self._check()
+        normalized = []
+        for command in commands:
+            if len(normalized) >= 10000:
+                raise ValueError("path must not exceed 10000 commands")
+            if not isinstance(command, (tuple, list)) or not command:
+                raise TypeError("path commands must be tuples beginning with move, line or curve")
+            kind, *coordinates = command
+            if kind not in {"move", "line", "curve"} or len(coordinates) != (6 if kind == "curve" else 2):
+                raise ValueError("move/line require two coordinates; curve requires six")
+            normalized.append([kind, *map(pt, coordinates)])
+        payload = json.dumps(normalized, separators=(",", ":"), allow_nan=False)
+        if len(payload) > 262144:
+            raise ValueError("path commands exceed 256 KiB")
+        self._owner._call("draw_path", self._id, payload, None if stroke is None else _color(stroke), None if fill is None else _color(fill), pt(width), close, _change=True)
 
     def add_image(self, source, *, box):
         self._check()

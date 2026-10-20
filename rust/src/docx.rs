@@ -7,6 +7,7 @@ use wordcraft_doc::props::VMerge;
 use wordcraft_doc::{Block, Blocks, Document, PartKind, Path, StoryRef, Table};
 use wordcraft_layout::{DocLayout, LayoutCache, LayoutOptions};
 
+use crate::diagnostics::Diagnostics;
 use crate::model::{
     BlockPayload, CellPayload, DocumentPayload, ImagePayload, LinkPayload, PagePayload,
     StoryPayload, TablePayload,
@@ -76,6 +77,107 @@ struct Adapter<'a> {
     layout: &'a DocLayout,
     pages: Vec<PagePayload>,
     comment_pages: HashMap<u32, usize>,
+}
+
+fn extraction_diagnostics(document: &Document) -> Value {
+    let mut diagnostics = Diagnostics::default();
+    diagnose_blocks(
+        document,
+        &document.body,
+        &[],
+        &json!({"story": "body"}),
+        &mut diagnostics,
+    );
+    for (id, part) in &document.parts {
+        diagnose_blocks(
+            document,
+            &part.blocks,
+            &[],
+            &json!({"story_part_id": id}),
+            &mut diagnostics,
+        );
+    }
+    for (kind, role, blocks) in separator_stories(document) {
+        diagnose_blocks(
+            document,
+            blocks,
+            &[],
+            &json!({"story_kind": kind, "story_role": role}),
+            &mut diagnostics,
+        );
+    }
+    diagnostics.into_json()
+}
+
+fn diagnose_blocks(
+    document: &Document,
+    blocks: &Blocks,
+    prefix: &[u32],
+    story: &Value,
+    diagnostics: &mut Diagnostics,
+) {
+    for (index, block) in blocks.iter().enumerate() {
+        let path = [prefix, &[index as u32]].concat();
+        match block.as_ref() {
+            Block::Table(table) => {
+                for (row, value) in table.rows.iter().enumerate() {
+                    for (column, cell) in value.cells.iter().enumerate() {
+                        diagnose_blocks(
+                            document,
+                            &cell.blocks,
+                            &[path.as_slice(), &[row as u32, column as u32]].concat(),
+                            story,
+                            diagnostics,
+                        );
+                    }
+                }
+            }
+            Block::Para(paragraph) => {
+                for (index, object) in paragraph.objects.iter().enumerate() {
+                    let mut source = story.clone();
+                    source["source_path"] = json!(path);
+                    source["object_path"] = json!([index]);
+                    diagnose_object(document, object, source, diagnostics);
+                }
+            }
+        }
+    }
+}
+
+fn diagnose_object(
+    document: &Document,
+    object: &InlineObject,
+    source: Value,
+    diagnostics: &mut Diagnostics,
+) {
+    let notice = match object {
+        InlineObject::Graphic { graphic, .. } => Some(match graphic.kind {
+            wordcraft_doc::graphic::GraphicKind::Chart => ("chart_data_omitted", "warning", "Semantic extraction omits chart data and chart drawing content."),
+            wordcraft_doc::graphic::GraphicKind::Diagram => ("diagram_structure_omitted", "warning", "Semantic extraction omits diagram structure and drawing content."),
+            wordcraft_doc::graphic::GraphicKind::Ink => ("ink_geometry_omitted", "warning", "Semantic extraction omits ink strokes and their graphic preview."),
+        }),
+        InlineObject::Shape { .. } => Some(("shape_geometry_omitted", "info", "Semantic extraction omits drawing shape geometry; text box stories are exposed separately.")),
+        InlineObject::Opaque { .. } => Some(("opaque_content_text_only", "warning", "An opaque object contributes only its stored text fallback; its structure is not extracted.")),
+        InlineObject::Equation { .. } => Some(("equation_linearized", "info", "An equation contributes its linear text; structured mathematics is not extracted.")),
+        InlineObject::Ruby { .. } => Some(("ruby_annotation_omitted", "warning", "Ruby text contributes the base text; the phonetic annotation is not extracted.")),
+        InlineObject::Field { dirty: true, .. } | InlineObject::FieldStart { dirty: true, .. } => Some(("dirty_field_cached_result", "warning", "A field marked dirty contributes cached result text; extraction does not refresh it.")),
+        InlineObject::Image { ole: Some(_), .. } => Some(("embedded_object_preview_only", "warning", "An embedded object contributes its image preview; embedded document data is not extracted.")),
+        _ => None,
+    };
+    if let Some((code, severity, message)) = notice {
+        diagnostics.record(code, severity, message, source.clone());
+    }
+    match object {
+        InlineObject::Image { media, .. } if !document.media.contains_key(media) => diagnostics.record("missing_image_data", "warning", "An image reference has no media bytes in the parsed model and is omitted from extraction.", source),
+        InlineObject::Group { children, .. } => {
+            for (index, child) in children.iter().enumerate() {
+                let mut child_source = source.clone();
+                if let Some(path) = child_source["object_path"].as_array_mut() { path.push(json!(index)); }
+                diagnose_object(document, &child.obj, child_source, diagnostics);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn validate_stories(document: &Document) -> Result<(), EngineError> {
@@ -401,6 +503,7 @@ impl<'a> Adapter<'a> {
             Value::String("wordcraft-layout; blocks assigned to their first computed page".into()),
         );
         let stories = self.stories();
+        metadata.insert("diagnostics".into(), extraction_diagnostics(self.document));
         DocumentPayload {
             format: "docx".into(),
             metadata,
@@ -467,7 +570,10 @@ impl<'a> Adapter<'a> {
             let page = &mut self.pages[page_number];
             page.links.extend(block.links.clone());
             page.images.extend(block.images.clone());
-            if !block.text.is_empty() || !block.images.is_empty() {
+            if !block.text.is_empty()
+                || !block.images.is_empty()
+                || block.metadata.contains_key("story_refs")
+            {
                 page.blocks.push(block);
             }
         }
@@ -700,15 +806,20 @@ impl<'a> Adapter<'a> {
     fn paragraph_segments(&self, paragraph: &Paragraph, pages: &[usize]) -> Vec<Segment> {
         let mut segments = vec![Segment::default()];
         let mut segment_index = 0;
+        let mut objects = paragraph.objects.iter();
+        let mut runs = paragraph.run_ranges().peekable();
         for (offset, character) in paragraph.text.char_indices() {
             if character == '\u{000c}' {
                 segments.push(Segment::default());
                 segment_index += 1;
                 continue;
             }
-            let props = paragraph.props_of_char(offset);
+            while runs.peek().is_some_and(|(range, _)| offset >= range.end) {
+                runs.next();
+            }
+            let props = runs.peek().map_or(&paragraph.mark, |(_, props)| *props);
             if character == OBJ {
-                if let Some(object) = paragraph.object_at(offset) {
+                if let Some(object) = objects.next() {
                     match object {
                         InlineObject::CommentStart { id } | InlineObject::CommentEnd { id } => {
                             segments[segment_index]
@@ -716,7 +827,7 @@ impl<'a> Adapter<'a> {
                                 .push((*id, pages.get(segment_index).copied().unwrap_or(0)));
                         }
                         _ => {
-                            let text_offset = segments[segment_index].text.chars().count();
+                            let text_offset = segments[segment_index].char_count;
                             if let InlineObject::NoteRef { id, kind, custom } = object {
                                 segments[segment_index].story_refs.push(json!({"part_id": id, "kind": match kind { wordcraft_doc::para::NoteKind::Footnote => "footnote", wordcraft_doc::para::NoteKind::Endnote => "endnote" }, "offset": text_offset, "custom_mark": custom}));
                             }
@@ -825,12 +936,14 @@ impl<'a> Adapter<'a> {
 #[derive(Default)]
 struct Segment {
     text: String,
+    char_count: usize,
     links: Vec<LinkPayload>,
     images: Vec<ImagePayload>,
     comments: Vec<(u32, usize)>,
     story_refs: Vec<Value>,
     linked_uri: Option<String>,
     linked_start: usize,
+    linked_byte_start: usize,
 }
 
 impl Segment {
@@ -856,25 +969,22 @@ impl Segment {
         if self.linked_uri.as_deref() != link {
             self.finish_link();
             self.linked_uri = link.map(str::to_owned);
-            self.linked_start = self.text.chars().count();
+            self.linked_start = self.char_count;
+            self.linked_byte_start = self.text.len();
         }
         self.text.push(character);
+        self.char_count += 1;
     }
 
     fn finish_link(&mut self) {
         let Some(uri) = self.linked_uri.take() else {
             return;
         };
-        let end = self.text.chars().count();
+        let end = self.char_count;
         if end <= self.linked_start {
             return;
         }
-        let text = self
-            .text
-            .chars()
-            .skip(self.linked_start)
-            .take(end - self.linked_start)
-            .collect();
+        let text = self.text[self.linked_byte_start..].to_owned();
         self.links.push(LinkPayload {
             uri,
             text,
@@ -910,9 +1020,10 @@ fn media_type(name: &str) -> &'static str {
 
 fn visible_text(paragraph: &Paragraph) -> String {
     let mut output = String::new();
-    for (offset, character) in paragraph.text.char_indices() {
+    let mut objects = paragraph.objects.iter();
+    for character in paragraph.text.chars() {
         if character == OBJ {
-            if let Some(object) = paragraph.object_at(offset) {
+            if let Some(object) = objects.next() {
                 output.push_str(object.plain_text());
             }
         } else {
@@ -936,5 +1047,250 @@ fn docx_error(error: wordcraft_docx::DocxError) -> EngineError {
         | wordcraft_docx::DocxError::MissingPart(message)
         | wordcraft_docx::DocxError::Xml(message)
         | wordcraft_docx::DocxError::Encryption(message) => EngineError::Malformed(message),
+    }
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+    use std::sync::Arc;
+    use wordcraft_doc::graphic::{Embedded, Graphic, GraphicKind};
+
+    #[test]
+    fn native_chart_file_reports_omission_at_its_body_source() {
+        let mut document = Document::new();
+        let spec = wordcraft_doc::chart::ChartSpec::sample(wordcraft_doc::chart::ChartType::Column);
+        let mut paragraph = Paragraph::new();
+        paragraph
+            .insert_object(
+                0,
+                InlineObject::Graphic {
+                    w: 300.0,
+                    h: 200.0,
+                    alt: "Sales".into(),
+                    float: Default::default(),
+                    graphic: Arc::new(Graphic {
+                        kind: GraphicKind::Chart,
+                        items: wordcraft_docx::chart_items(
+                            &spec,
+                            &document.settings.theme_colors,
+                            300.0,
+                            200.0,
+                        ),
+                        w: 300.0,
+                        h: 200.0,
+                        chart: Some(Arc::new(spec)),
+                        ..Graphic::default()
+                    }),
+                },
+                &Default::default(),
+            )
+            .unwrap();
+        document.body = vec![wordcraft_doc::para_block(paragraph)];
+        let bytes = wordcraft_docx::write(&document).unwrap();
+        let extracted = extract(&bytes, None).unwrap();
+        assert_eq!(
+            extracted.metadata["diagnostics"][0]["code"],
+            "chart_data_omitted"
+        );
+        assert_eq!(extracted.metadata["diagnostics"][0]["count"], 1);
+        assert_eq!(
+            extracted.metadata["diagnostics"][0]["sources"][0]["source_path"],
+            json!([0])
+        );
+    }
+
+    #[test]
+    fn identifies_graphic_fallbacks_and_missing_embedded_media() {
+        let document = Document::new();
+        let mut diagnostics = Diagnostics::default();
+        for (index, kind) in [GraphicKind::Chart, GraphicKind::Diagram, GraphicKind::Ink]
+            .into_iter()
+            .enumerate()
+        {
+            let object = InlineObject::Graphic {
+                w: 10.0,
+                h: 10.0,
+                alt: "Graphic".into(),
+                float: Default::default(),
+                graphic: Arc::new(Graphic {
+                    kind,
+                    ..Graphic::default()
+                }),
+            };
+            diagnose_object(
+                &document,
+                &object,
+                json!({"story_part_id": 9, "source_path": [0], "object_path": [index]}),
+                &mut diagnostics,
+            );
+        }
+        let image = InlineObject::Image {
+            media: "missing.png".into(),
+            w: 10.0,
+            h: 10.0,
+            alt: String::new(),
+            float: Default::default(),
+            crop: [0.0; 4],
+            ole: Some(Arc::new(Embedded::default())),
+        };
+        diagnose_object(
+            &document,
+            &image,
+            json!({"story": "body", "source_path": [1], "object_path": [0]}),
+            &mut diagnostics,
+        );
+        let opaque = InlineObject::Opaque {
+            format: "docx".into(),
+            xml: "<opaque/>".into(),
+            text: "Fallback".into(),
+        };
+        diagnose_object(
+            &document,
+            &opaque,
+            json!({"story": "body", "source_path": [2], "object_path": [0]}),
+            &mut diagnostics,
+        );
+        let values = diagnostics.into_json();
+        let values = values.as_array().unwrap();
+        let codes: Vec<_> = values
+            .iter()
+            .map(|value| value["code"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            codes,
+            [
+                "chart_data_omitted",
+                "diagram_structure_omitted",
+                "ink_geometry_omitted",
+                "embedded_object_preview_only",
+                "missing_image_data",
+                "opaque_content_text_only"
+            ]
+        );
+        assert_eq!(values[0]["sources"][0]["story_part_id"], 9);
+        assert!(values
+            .iter()
+            .all(|value| value["count"] == 1 && value["operation"] == "extract"));
+    }
+}
+
+#[cfg(test)]
+mod offset_tests {
+    use super::*;
+
+    #[test]
+    fn many_short_unicode_runs_skip_empty_runs_and_keep_link_boundaries() {
+        use wordcraft_doc::para::Run;
+        use wordcraft_doc::props::CharProps;
+
+        let prefix = "λ🙂ab".repeat(1024);
+        let mut paragraph = Paragraph::with_text(&prefix, CharProps::default());
+        paragraph.props.style = Some("TypedParagraph".into());
+        for index in 0..2000 {
+            let props = CharProps {
+                link: Some(format!("https://example.com/{}", index % 2)),
+                bold: Some(index % 2 == 0),
+                ..CharProps::default()
+            };
+            paragraph.runs.push(Run {
+                len: 0,
+                props: CharProps {
+                    link: Some("https://invalid.example/empty".into()),
+                    ..CharProps::default()
+                },
+            });
+            paragraph.text.push_str("é🙂");
+            paragraph.runs.push(Run {
+                len: "é🙂".len(),
+                props,
+            });
+        }
+        // An uncovered final character uses paragraph mark formatting, matching props_of_char.
+        paragraph.text.push('後');
+        paragraph.mark.link = Some("https://example.com/mark".into());
+        let document = Document::new();
+        let layout = DocLayout::default();
+        let mut adapter = Adapter::new(&document, &layout);
+        adapter.add_paragraph(&paragraph, &Path(vec![0]));
+        let block = &adapter.pages[0].blocks[0];
+        assert_eq!(block.style.as_deref(), Some("TypedParagraph"));
+        assert_eq!(block.text, paragraph.text);
+        assert_eq!(block.links.len(), 2001);
+        for (index, link) in block.links[..2000].iter().enumerate() {
+            assert_eq!(link.uri, format!("https://example.com/{}", index % 2));
+            assert_eq!(link.text, "é🙂");
+            assert_eq!(link.metadata["start"], 4096 + index * 2);
+            assert_eq!(link.metadata["end"], 4096 + index * 2 + 2);
+        }
+        assert_eq!(block.links[2000].uri, "https://example.com/mark");
+        assert_eq!(block.links[2000].text, "後");
+        assert_eq!(block.links[2000].metadata["start"], 8096);
+        assert_eq!(block.links[2000].metadata["end"], 8097);
+    }
+
+    #[test]
+    fn long_unicode_prefix_many_anchors_and_object_text_keep_exact_offsets() {
+        let prefix = "λ🙂ab".repeat(32768);
+        let prefix_chars = 4 * 32768;
+        let mut text = prefix.clone();
+        text.extend(std::iter::repeat_n(OBJ, 1003));
+        let mut paragraph = Paragraph::with_text(&prefix, Default::default());
+        // with_text intentionally strips structural markers; construct this public
+        // model fixture directly to avoid quadratic insert_object setup work.
+        paragraph.text = text;
+        paragraph.runs[0].len = paragraph.text.len();
+        paragraph.objects = (0..1000)
+            .map(|id| InlineObject::NoteRef {
+                id,
+                kind: wordcraft_doc::para::NoteKind::Footnote,
+                custom: String::new(),
+            })
+            .collect();
+        paragraph.objects.push(InlineObject::Equation {
+            linear: "é🙂".into(),
+            display: false,
+            math: Default::default(),
+        });
+        paragraph.objects.push(InlineObject::NoteRef {
+            id: 1000,
+            kind: wordcraft_doc::para::NoteKind::Endnote,
+            custom: String::new(),
+        });
+        // The last marker deliberately has no object: it must not panic or invent a reference.
+        let document = Document::new();
+        let layout = DocLayout::default();
+        let adapter = Adapter::new(&document, &layout);
+        let segments = adapter.paragraph_segments(&paragraph, &[0]);
+        assert_eq!(segments.len(), 1);
+        let segment = &segments[0];
+        assert_eq!(segment.char_count, prefix_chars + 2);
+        assert_eq!(segment.story_refs.len(), 1001);
+        assert_eq!(segment.story_refs[0]["offset"], prefix_chars);
+        assert_eq!(segment.story_refs[999]["offset"], prefix_chars);
+        assert_eq!(segment.story_refs[1000]["offset"], prefix_chars + 2);
+        assert_eq!(segment.text, format!("{prefix}é🙂"));
+        assert_eq!(visible_text(&paragraph), segment.text);
+    }
+
+    #[test]
+    fn unicode_link_labels_use_byte_boundaries_and_character_offsets() {
+        let mut segment = Segment::default();
+        segment.push_text(&"λ🙂ab".repeat(32768), None);
+        let mut offset = 4 * 32768;
+        for index in 0..1000 {
+            segment.push_text("é🙂", Some("https://example.com"));
+            segment.push_char(' ', None);
+            let link = &segment.links[index];
+            assert_eq!(link.text, "é🙂");
+            assert_eq!(link.metadata["start"], offset);
+            assert_eq!(link.metadata["end"], offset + 2);
+            offset += 3;
+        }
+        segment.push_text("終", Some("https://example.org"));
+        segment.finish_links();
+        assert_eq!(segment.links.last().unwrap().text, "終");
+        assert_eq!(segment.links.last().unwrap().metadata["start"], offset);
+        assert_eq!(segment.char_count, offset + 1);
     }
 }

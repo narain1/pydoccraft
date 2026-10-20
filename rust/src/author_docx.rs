@@ -9,10 +9,12 @@ use std::{
 use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
 use wordcraft_doc::para::{Float, InlineObject};
-use wordcraft_doc::props::{Border, BorderStyle, Borders, HeightRule, LineSpacing, VAlign, VMerge};
+use wordcraft_doc::props::{
+    Border, BorderStyle, Borders, HeightRule, LineSpacing, NumRef, VAlign, VMerge,
+};
 use wordcraft_doc::{
-    Align, Block, CharProps, Document, Paragraph, PartKind, Path, Pos, Rgb, StoryRef, StyleKind,
-    Table, TextColor,
+    Align, Block, CharProps, Document, ListKind, Paragraph, PartKind, Path, Pos, Rgb, StoryRef,
+    StyleKind, Table, TextColor,
 };
 
 use crate::{DocExNativeError, EngineError};
@@ -25,6 +27,8 @@ const MAX_OUTPUT_BYTES: usize = 128 * 1024 * 1024;
 const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_MEDIA_BYTES: usize = 64 * 1024 * 1024;
 const MAX_IMAGE_PIXELS: u64 = 16_000_000;
+const MAX_LISTS: usize = 10_000;
+const MAX_LINK_BYTES: usize = 16 * 1024 * 1024;
 
 #[pyclass]
 pub struct EditableDocx {
@@ -296,10 +300,10 @@ impl EditableDocx {
         self.row(id, row)?;
         let rule = match (rule, height) {
             ("auto", None) => HeightRule::Auto,
-            ("at_least", Some(value)) | ("exact", Some(value)) if value.is_finite() && value > 0.0 && value <= 1584.0 => {
+            ("at_least", Some(value)) | ("exact", Some(value)) if value.is_finite() && (0.05..=1584.0).contains(&value) => {
                 if rule == "exact" { HeightRule::Exact } else { HeightRule::AtLeast }
             }
-            _ => return Err(PyValueError::new_err("row height requires (None, auto) or a finite height in (0, 1584] points with at_least/exact")),
+            _ => return Err(PyValueError::new_err("row height requires (None, auto) or a finite height in [0.05, 1584] points with at_least/exact")),
         };
         let mut candidate = self.document()?.clone();
         let props = &mut self.table_mut(&mut candidate, id)?.rows[row].props;
@@ -705,6 +709,105 @@ impl EditableDocx {
             .map_or_else(|| style.to_string(), |value| value.name.clone()))
     }
 
+    pub fn paragraph_list(&self, id: usize) -> PyResult<Option<(&'static str, u8)>> {
+        let paragraph = self.paragraph(id)?;
+        let document = self.document()?;
+        let Some(numbering) = document.styles.resolve_para(&paragraph.props).numbering else {
+            return Ok(None);
+        };
+        for (kind, name) in [
+            (ListKind::Bullet, "bullet"),
+            (ListKind::Numbered, "numbered"),
+        ] {
+            let wanted = wordcraft_doc::numbering::levels_for(kind);
+            if document
+                .numbering
+                .level(numbering.num, 0)
+                .is_some_and(|level| {
+                    level.format == wanted[0].format && level.text == wanted[0].text
+                })
+            {
+                return Ok(Some((name, numbering.level)));
+            }
+        }
+        Err(PyValueError::new_err(
+            "paragraph uses an unsupported list style",
+        ))
+    }
+
+    #[pyo3(signature = (id, kind=None, level=0, restart=false))]
+    pub fn set_paragraph_list(
+        &mut self,
+        id: usize,
+        kind: Option<&str>,
+        level: u8,
+        restart: bool,
+    ) -> PyResult<()> {
+        self.paragraph(id)?;
+        if level > 8 || (kind.is_none() && (level != 0 || restart)) {
+            return Err(PyValueError::new_err(
+                "list level must be 0..8; clearing a list requires level=0 and restart=false",
+            ));
+        }
+        let kind = match kind {
+            Some("bullet") => Some(ListKind::Bullet),
+            Some("numbered") => Some(ListKind::Numbered),
+            None => None,
+            _ => {
+                return Err(PyValueError::new_err(
+                    "list kind must be bullet, numbered or None",
+                ))
+            }
+        };
+        let mut candidate = self.document()?.clone();
+        let num = if let Some(kind) = kind {
+            let (story, path) = self.location(id)?;
+            let wanted = wordcraft_doc::numbering::levels_for(kind);
+            // Preserve the current sequence or continue the closest earlier matching list
+            // in this story, including a restart. find_kind always returns the first one.
+            let existing = if restart {
+                None
+            } else {
+                candidate
+                    .para_paths(story)
+                    .into_iter()
+                    .take_while(|previous| previous <= &path)
+                    .filter_map(|previous| {
+                        let paragraph = candidate.para(story, &previous)?;
+                        let reference = candidate.styles.resolve_para(&paragraph.props).numbering?;
+                        candidate
+                            .numbering
+                            .level(reference.num, 0)
+                            .filter(|level| {
+                                level.format == wanted[0].format && level.text == wanted[0].text
+                            })
+                            .map(|_| reference.num)
+                    })
+                    .last()
+            };
+            if let Some(existing) = existing {
+                existing
+            } else {
+                if candidate.numbering.nums.len() >= MAX_LISTS
+                    || candidate.numbering.abstracts.len() >= MAX_LISTS
+                {
+                    return Err(limit("document exceeds 10000 native list definitions"));
+                }
+                candidate
+                    .numbering
+                    .try_add_list(kind)
+                    .map_err(model_error)?
+            }
+        } else {
+            0
+        };
+        let paragraph = self.paragraph_mut(&mut candidate, id)?;
+        // NumRef 0 explicitly cancels any numbering inherited from the paragraph style.
+        paragraph.props.numbering = Some(NumRef { num, level });
+        paragraph.touch();
+        self.commit(candidate)
+    }
+
     pub fn set_paragraph_style(&mut self, id: usize, style: &str) -> PyResult<()> {
         self.paragraph(id)?;
         let style = self
@@ -778,7 +881,17 @@ impl EditableDocx {
     pub fn add_page_break(&mut self) -> PyResult<usize> {
         let mut candidate = self.copy()?;
         let id = candidate.add_paragraph("")?;
-        candidate.set_page_break_before(id, true)?;
+        // A paragraph's page_break_before is ignored at the start of a document/page.
+        // Use the upstream explicit break character so leading and consecutive breaks
+        // retain their blank pages; the DOCX writer emits w:br with type="page".
+        let text = wordcraft_doc::para::PAGE_BREAK.to_string();
+        let text_bytes = candidate.updated_text_bytes(0, text.len())?;
+        let mut document = candidate.document()?.clone();
+        document
+            .insert_text(&candidate.position(id, 0)?, &text, &CharProps::default())
+            .map_err(model_error)?;
+        candidate.commit(document)?;
+        candidate.text_bytes = text_bytes;
         *self = candidate;
         Ok(id)
     }
@@ -866,6 +979,98 @@ impl EditableDocx {
     ) -> PyResult<String> {
         self.check_revision(revision)?;
         self.text_range(id, start, end).map(|(text, _)| text)
+    }
+
+    pub fn range_link(
+        &self,
+        id: usize,
+        start: usize,
+        end: usize,
+        revision: u64,
+    ) -> PyResult<Option<String>> {
+        self.check_revision(revision)?;
+        let paragraph = self.paragraph(id)?;
+        let (from, to) = range_offsets(&paragraph.text, start, end)?;
+        if from == to {
+            return Err(PyValueError::new_err(
+                "an empty text range has no hyperlink",
+            ));
+        }
+        let target = paragraph.props_of_char(from).link.clone();
+        if paragraph
+            .run_ranges()
+            .any(|(range, props)| range.start < to && range.end > from && props.link != target)
+        {
+            return Err(PyValueError::new_err(
+                "text range contains mixed hyperlink targets",
+            ));
+        }
+        Ok(target)
+    }
+
+    #[pyo3(signature = (id, start, end, revision, url=None))]
+    pub fn set_range_link(
+        &mut self,
+        id: usize,
+        start: usize,
+        end: usize,
+        revision: u64,
+        url: Option<&str>,
+    ) -> PyResult<u64> {
+        self.check_revision(revision)?;
+        let paragraph = self.paragraph(id)?;
+        let (from, to) = range_offsets(&paragraph.text, start, end)?;
+        if from == to {
+            return Err(PyValueError::new_err("cannot link an empty text range"));
+        }
+        if let Some(url) = url {
+            validate_text(url)?;
+            if url.len() > 8192
+                || url.chars().any(|ch| ch.is_control() || ch.is_whitespace())
+                || !wordcraft_doc::link::is_web_or_mail_link(url)
+                || url
+                    .split_once(':')
+                    .is_none_or(|(_, target)| target.is_empty())
+            {
+                return Err(PyValueError::new_err("hyperlink must be an http, https or mailto URI of at most 8192 bytes without whitespace or controls"));
+            }
+        }
+        // Account for a link target being copied when a formatted run is split, before the
+        // upstream edit allocates those copies. Adjacent equal runs may later coalesce.
+        let document = self.document()?;
+        let mut bytes = hyperlink_bytes(document);
+        for (range, props) in paragraph
+            .run_ranges()
+            .filter(|(range, _)| range.start < to && range.end > from)
+        {
+            let old = props.link.as_ref().map_or(0, String::len);
+            bytes -= old;
+            bytes += url.map_or(0, str::len)
+                + usize::from(range.start < from) * old
+                + usize::from(range.end > to) * old;
+            if bytes > MAX_LINK_BYTES {
+                return Err(limit("document hyperlink targets exceed 16 MiB"));
+            }
+        }
+        let mut candidate = document.clone();
+        candidate
+            .format_range(
+                &self.position(id, from)?,
+                &self.position(id, to)?,
+                &|props| {
+                    if let Some(url) = url {
+                        props.link = Some(url.into());
+                        if props.style.is_none() {
+                            props.style = Some("Hyperlink".into());
+                        }
+                    } else {
+                        *props = props.unlinked();
+                    }
+                },
+            )
+            .map_err(model_error)?;
+        self.commit(candidate)?;
+        Ok(self.revision)
     }
 
     #[pyo3(signature = (id, start, end, revision, bold=None, italic=None, size=None, font=None, color=None))]
@@ -1116,6 +1321,24 @@ impl EditableDocx {
         candidate.settings.page_color = color;
         self.commit(candidate)?;
         Ok(())
+    }
+
+    #[pyo3(signature = (kind, variant="default"))]
+    pub fn story_id(&self, kind: &str, variant: &str) -> PyResult<Option<u32>> {
+        let document = self.document()?;
+        let refs = match kind {
+            "header" => document.last_section.headers,
+            "footer" => document.last_section.footers,
+            _ => return Err(PyValueError::new_err("story kind must be header or footer")),
+        };
+        match variant {
+            "default" => Ok(refs.default),
+            "first" => Ok(refs.first),
+            "even" => Ok(refs.even),
+            _ => Err(PyValueError::new_err(
+                "story variant must be default, first or even",
+            )),
+        }
     }
 
     #[pyo3(signature = (kind, variant="default"))]
@@ -1494,6 +1717,9 @@ impl EditableDocx {
         document.table_mut(story, &path).map_err(model_error)
     }
     fn commit(&mut self, document: Document) -> PyResult<()> {
+        if hyperlink_bytes(&document) > MAX_LINK_BYTES {
+            return Err(limit("document hyperlink targets exceed 16 MiB"));
+        }
         let revision = self
             .revision
             .checked_add(1)
@@ -1557,6 +1783,20 @@ impl EditableDocx {
         }
         Ok(total)
     }
+}
+
+fn hyperlink_bytes(document: &Document) -> usize {
+    std::iter::once(StoryRef::Body)
+        .chain(document.parts.keys().map(|id| StoryRef::Part(*id)))
+        .flat_map(|story| {
+            document
+                .para_paths(story)
+                .into_iter()
+                .filter_map(move |path| document.para(story, &path))
+        })
+        .flat_map(|paragraph| paragraph.runs.iter())
+        .map(|run| run.props.link.as_ref().map_or(0, String::len))
+        .fold(0, usize::saturating_add)
 }
 
 fn validate_text(text: &str) -> PyResult<()> {
@@ -2363,8 +2603,11 @@ mod tests {
             .is_err());
         assert_eq!(document.revision().unwrap(), revision);
         let break_paragraph = document.add_page_break().unwrap();
-        assert!(document.page_break_before(break_paragraph).unwrap());
-        assert_eq!(document.paragraph_text(break_paragraph).unwrap(), "");
+        assert!(!document.page_break_before(break_paragraph).unwrap());
+        assert_eq!(
+            document.paragraph_text(break_paragraph).unwrap(),
+            "\u{000c}"
+        );
         document.add_paragraph("Second page").unwrap();
         let third = document.add_paragraph("Third page").unwrap();
         document.set_page_break_before(third, true).unwrap();
@@ -2389,6 +2632,382 @@ mod tests {
                 .blocks
                 .iter()
                 .any(|block| block.text.contains(expected)));
+        }
+    }
+
+    #[test]
+    fn native_lists_continue_restart_and_clear_without_rebuilding_text() {
+        let mut document = EditableDocx::new();
+        let mut ids = Vec::new();
+        for (index, label) in ["First", "Second", "Restart", "Continued"]
+            .iter()
+            .enumerate()
+        {
+            let id = document.add_paragraph(label).unwrap();
+            document
+                .set_paragraph_list(id, Some("numbered"), 0, index == 2)
+                .unwrap();
+            ids.push(id);
+        }
+        let first_num = document
+            .paragraph(ids[0])
+            .unwrap()
+            .props
+            .numbering
+            .unwrap()
+            .num;
+        let restarted = document
+            .paragraph(ids[2])
+            .unwrap()
+            .props
+            .numbering
+            .unwrap()
+            .num;
+        assert_ne!(first_num, restarted);
+        assert_eq!(
+            document
+                .paragraph(ids[1])
+                .unwrap()
+                .props
+                .numbering
+                .unwrap()
+                .num,
+            first_num
+        );
+        assert_eq!(
+            document
+                .paragraph(ids[3])
+                .unwrap()
+                .props
+                .numbering
+                .unwrap()
+                .num,
+            restarted
+        );
+        document
+            .set_paragraph_list(ids[0], Some("numbered"), 0, false)
+            .unwrap();
+        assert_eq!(
+            document
+                .paragraph(ids[0])
+                .unwrap()
+                .props
+                .numbering
+                .unwrap()
+                .num,
+            first_num
+        );
+        let sub = document.add_paragraph("Nested bullet").unwrap();
+        document
+            .add_run(sub, " bold", true, false, None, None, None)
+            .unwrap();
+        document
+            .set_paragraph_list(sub, Some("bullet"), 2, false)
+            .unwrap();
+        assert_eq!(document.paragraph_list(sub).unwrap(), Some(("bullet", 2)));
+        let revision = document.revision().unwrap();
+        assert!(document
+            .set_paragraph_list(sub, Some("bullet"), 9, false)
+            .is_err());
+        assert!(document
+            .set_paragraph_list(sub, Some("unsupported"), 0, false)
+            .is_err());
+        assert!(document.set_paragraph_list(sub, None, 0, true).is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        let mut counters = wordcraft_doc::numbering::Counters::default();
+        let labels = ids
+            .iter()
+            .map(|id| {
+                let reference = reopened
+                    .para(StoryRef::Body, &Path::top(*id))
+                    .unwrap()
+                    .props
+                    .numbering
+                    .unwrap();
+                counters
+                    .next_label(&reopened.numbering, reference.num, reference.level)
+                    .unwrap()
+                    .0
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(labels, ["1.", "2.", "1.", "2."]);
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        assert_eq!(crate::pdf::extract(&pdf, None).unwrap().pages.len(), 1);
+        document.set_paragraph_list(sub, None, 0, false).unwrap();
+        assert_eq!(document.paragraph_list(sub).unwrap(), None);
+        assert_eq!(document.paragraph_text(sub).unwrap(), "Nested bullet bold");
+        assert_eq!(
+            document
+                .paragraph(sub)
+                .unwrap()
+                .runs
+                .last()
+                .unwrap()
+                .props
+                .bold,
+            Some(true)
+        );
+        let story = document.ensure_story("header", "default").unwrap();
+        let header = document.story_add_paragraph(story, "Header list").unwrap();
+        document
+            .set_paragraph_list(header, Some("numbered"), 0, false)
+            .unwrap();
+        assert_ne!(
+            document
+                .paragraph(header)
+                .unwrap()
+                .props
+                .numbering
+                .unwrap()
+                .num,
+            first_num
+        );
+    }
+
+    #[test]
+    fn list_definition_limit_is_atomic() {
+        let mut document = EditableDocx::new();
+        let id = document.add_paragraph("Limited").unwrap();
+        let mut candidate = document.document().unwrap().clone();
+        // Fill the boundary directly: exercising 10,000 public document clones would test
+        // allocation cost rather than the rejection path.
+        candidate.numbering.nums = (1..=MAX_LISTS as u32)
+            .map(|id| wordcraft_doc::numbering::Num {
+                id,
+                ..Default::default()
+            })
+            .collect();
+        document.commit(candidate).unwrap();
+        let revision = document.revision().unwrap();
+        assert!(document
+            .set_paragraph_list(id, Some("numbered"), 0, true)
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.paragraph_list(id).unwrap(), None);
+    }
+
+    #[test]
+    fn unicode_links_cross_runs_roundtrip_clear_and_reject_stale_or_unsafe_edits() {
+        let mut document = EditableDocx::new();
+        let id = document.add_paragraph("Before λ").unwrap();
+        document
+            .add_run(id, "日本", true, false, None, None, None)
+            .unwrap();
+        document
+            .add_run(id, " after", false, true, None, None, None)
+            .unwrap();
+        let revision = document.revision().unwrap();
+        let url = "https://example.com/path?a=1&b=2";
+        let current = document
+            .set_range_link(id, 7, 10, revision, Some(url))
+            .unwrap();
+        assert_eq!(
+            document.range_link(id, 7, 10, current).unwrap().as_deref(),
+            Some(url)
+        );
+        assert!(document.range_link(id, 6, 10, current).is_err());
+        assert!(document.range_link(id, 7, 10, revision).is_err());
+        assert!(document.set_range_link(id, 7, 10, revision, None).is_err());
+        for bad in [
+            "javascript:alert(1)",
+            "file:///tmp/private",
+            "https://example.com/a\nb",
+            "mailto:",
+            "//example.com",
+            "https://example.com/a b",
+        ] {
+            assert!(document
+                .set_range_link(id, 7, 10, current, Some(bad))
+                .is_err());
+        }
+        assert!(document
+            .set_range_link(id, 7, 7, current, Some(url))
+            .is_err());
+        assert_eq!(document.revision().unwrap(), current);
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        let paragraph = reopened.para(StoryRef::Body, &Path::top(id)).unwrap();
+        assert_eq!(paragraph.props_of_char("Before λ".len()).bold, Some(true));
+        assert_eq!(
+            paragraph.props_of_char("Before λ日本".len()).italic,
+            Some(true)
+        );
+        assert_eq!(
+            paragraph.props_of_char("Before ".len()).link.as_deref(),
+            Some(url)
+        );
+        assert_eq!(paragraph.mark.link, None);
+        let extracted = crate::docx::extract(&bytes, None).unwrap();
+        let labels = extracted
+            .pages
+            .iter()
+            .flat_map(|page| &page.links)
+            .filter(|link| link.uri == url)
+            .map(|link| link.text.as_str())
+            .collect::<Vec<_>>()
+            .join("");
+        assert_eq!(labels, "λ日本");
+        let current = document.set_range_link(id, 7, 10, current, None).unwrap();
+        assert_eq!(document.range_link(id, 7, 10, current).unwrap(), None);
+        assert!(
+            document
+                .paragraph(id)
+                .unwrap()
+                .runs
+                .iter()
+                .all(|run| run.props.link.is_none()
+                    && run.props.style.as_deref() != Some("Hyperlink"))
+        );
+        assert_eq!(document.paragraph_text(id).unwrap(), "Before λ日本 after");
+        assert_eq!(
+            document
+                .paragraph(id)
+                .unwrap()
+                .props_of_char("Before λ".len())
+                .bold,
+            Some(true)
+        );
+        assert_eq!(
+            document
+                .paragraph(id)
+                .unwrap()
+                .props_of_char("Before λ日本".len())
+                .italic,
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn repeated_table_headers_appear_on_every_exported_page() {
+        let mut document = EditableDocx::new();
+        document.set_margins(40.0, 40.0, 40.0, 40.0).unwrap();
+        document.set_page_size(400.0, 400.0).unwrap();
+        let mut rows = vec![vec!["Repeat heading".into()]];
+        rows.extend((0..24).map(|index| vec![format!("UniqueRow{index:02}")]));
+        let table = document.add_table(rows).unwrap();
+        document.set_row_repeat_header(table, 0, true).unwrap();
+        for row in 0..25 {
+            document
+                .set_row_height(table, row, Some(30.0), "exact")
+                .unwrap();
+            document.set_row_allow_split(table, row, false).unwrap();
+        }
+        let revision = document.revision().unwrap();
+        assert!(document
+            .set_row_height(table, 0, Some(0.01), "exact")
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        let pdf = crate::docx::to_pdf(&document.to_bytes().unwrap(), None).unwrap();
+        let extracted = crate::pdf::extract(&pdf, None).unwrap();
+        assert!(extracted.pages.len() >= 3);
+        let pages = extracted
+            .pages
+            .iter()
+            .map(|page| {
+                page.blocks
+                    .iter()
+                    .map(|block| block.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect::<Vec<_>>();
+        for page in &pages {
+            assert!(
+                page.contains("Repeat heading"),
+                "missing repeated header: {page}"
+            );
+        }
+        let all = pages.join("\n");
+        for index in 0..24 {
+            assert_eq!(all.matches(&format!("UniqueRow{index:02}")).count(), 1);
+        }
+    }
+
+    #[test]
+    fn formatting_cannot_bypass_hyperlink_resource_limit() {
+        let mut document = EditableDocx::new();
+        let count = MAX_LINK_BYTES / 8192;
+        let id = document.add_paragraph(&"abc".repeat(count)).unwrap();
+        let mut candidate = document.document().unwrap().clone();
+        let mut url = "https://example.com/".to_string();
+        url.push_str(&"a".repeat(8192 - url.len()));
+        candidate
+            .para_mut(StoryRef::Body, &Path::top(id))
+            .unwrap()
+            .runs = (0..count)
+            .map(|index| wordcraft_doc::para::Run {
+                len: 3,
+                props: CharProps {
+                    bold: Some(index % 2 == 0),
+                    link: Some(url.clone()),
+                    ..Default::default()
+                },
+            })
+            .collect();
+        document.commit(candidate).unwrap();
+        let revision = document.revision().unwrap();
+        assert!(document
+            .format_range(id, 1, 2, revision, Some(false), None, None, None, None)
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.paragraph(id).unwrap().runs.len(), count);
+        assert_eq!(
+            document.paragraph(id).unwrap().runs[0].props.bold,
+            Some(true)
+        );
+        document
+            .set_range_link(id, 0, count * 3, revision, None)
+            .unwrap();
+        assert_eq!(hyperlink_bytes(document.document().unwrap()), 0);
+    }
+
+    #[test]
+    fn explicit_page_breaks_preserve_initial_and_consecutive_blank_pages() {
+        for (before, breaks, expected_pages) in
+            [(false, 1, 2), (false, 2, 3), (true, 1, 2), (true, 2, 3)]
+        {
+            let mut document = EditableDocx::new();
+            if before {
+                document.add_paragraph("Before").unwrap();
+            }
+            let mut break_ids = Vec::new();
+            for _ in 0..breaks {
+                break_ids.push(document.add_page_break().unwrap());
+            }
+            document.add_paragraph("After").unwrap();
+            let bytes = document.to_bytes().unwrap();
+            let reopened = wordcraft_docx::read(&bytes).unwrap();
+            for id in break_ids {
+                assert_eq!(
+                    reopened.para(StoryRef::Body, &Path::top(id)).unwrap().text,
+                    wordcraft_doc::para::PAGE_BREAK.to_string()
+                );
+            }
+            let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+            let extracted = crate::pdf::extract(&pdf, None).unwrap();
+            assert_eq!(
+                extracted.pages.len(),
+                expected_pages,
+                "before={before}, breaks={breaks}"
+            );
+            for (index, page) in extracted.pages.iter().enumerate() {
+                let text = page
+                    .blocks
+                    .iter()
+                    .map(|block| block.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                assert_eq!(text.contains("After"), index == expected_pages - 1);
+                assert_eq!(text.contains("Before"), before && index == 0);
+                if (!before || index > 0) && index < expected_pages - 1 {
+                    assert!(
+                        text.trim().is_empty(),
+                        "expected blank page {index}: {text}"
+                    );
+                }
+            }
         }
     }
 }

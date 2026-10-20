@@ -1,5 +1,15 @@
 # Validation evidence
 
+## 2026-10-20 text/vector content and diagnostics (unreleased)
+
+- Validated offline on Linux x86_64 with Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1; all four upstream revisions remain unchanged.
+- Formatting, 63 Rust tests, warnings-denied Clippy and the locked release build passed. Installed-wheel validation passed 85 Python tests with zero skips and verified imported package members against the artifact.
+- Coverage includes DOCX lists/links, explicit initial/consecutive blank pages, native report DOCX/PDF order and single table text, supplied-font searchable Unicode and visible glyphs, vector pixels/invalid-edit rollback, metadata/bookmark persistence, nonmutating absent-story lookup, stable originating child collections, bounded inputs/JSON and structured extraction diagnostics. Existing PDF/DOCX/PPTX extraction/render/conversion checks remain passing.
+- Wheel: `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`, 16,600,451 bytes. Native extension: 38,425,016 bytes. Wheel SHA-256: `390dbe8015a307f7512d94741070c50592fbe3ae43aed37acb5aaecc21cb8a84`. Lockfile SHA-256: `07d283b629c33e1994e4bd2b9e3e8f16876ee5efda73c46428581e20869fcdf8`.
+- `pdfcraft-content` and `pdfcraft-fonts` become direct dependencies at the same pinned revision; both were already transitive. The regenerated/reviewed normal/build inventory remains 263 packages, with no prohibited application crates or non-permissive-only license. NOTICE and the adjacent complete OFL license cover the unmodified Inter regression fixture from pinned PdfCraft; the runtime asset set is unchanged.
+- Diagnostics cover detectable native model constructs, not unknown markup discarded by upstream readers. Full conversion diagnostics, arbitrary Office source editing, complex-script conformance, advanced styles/sections/fields/review, attachment resource controls and unchecked roadmap criteria remain open. This is feature validation, not a release declaration.
+
+
 ## 2026-10-20 DOCX layout controls and auxiliary stories (unreleased)
 
 - Same offline Rust 1.95.0/Linux x86_64/Python 3.11.2 environment and unchanged locked upstream revisions as the authoring baseline.

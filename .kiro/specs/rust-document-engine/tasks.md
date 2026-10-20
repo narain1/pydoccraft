@@ -59,7 +59,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Verify the initial PPTX text/table/image/basic-shape/background/metadata/slide-organization profile using DeckCraft public models and writers.
 - [x] Audit 263 normal/build packages with the checked license-expression validator; add the pinned lower-level `pdfcraft-organize` crate and direct existing `pdfcraft-annot` dependency without upgrading upstream revisions.
 - [x] Run Rust formatting, 37 Rust tests, warnings-denied Clippy and 61 installed-wheel Python tests; record artifact evidence and limits in validation.md.
-- [ ] Complete the broader C2/C3 content/font requirements, arbitrary Office preservation, full styles/lists, fields, review and advanced objects. Initial profile tests do not complete those coverage IDs.
+- [ ] Complete arbitrary Office preservation, full styles/lists, fields, review and advanced objects; the C2/C3 basic creation criteria are covered by the later text/vector batch. Initial profile tests do not complete those coverage IDs.
 
 ## DOCX layout/story integration (unreleased)
 
@@ -68,4 +68,15 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Expose checked table widths/uniform borders/row layout plus paragraph spacing and explicit page breaks; verify save/reopen and PDF pagination.
 - [x] Verify solid DOCX page-color pixels in native PNG and exported PDF rendering (BG1).
 - [x] Validate the combined 41-Rust/68-installed-Python-test artifact; record remaining scope limits separately.
-- [ ] Complete multiple sections, linked headers, advanced row/column CRUD, lists/styles and structured omission diagnostics.
+- [ ] Complete multiple sections, linked headers, advanced row/column CRUD and full lists/styles; initial lists and structured omission diagnostics are covered below.
+
+## Text/vector content and diagnostics (unreleased)
+
+- [x] Complete C2 basic DOCX creation with native lists and revision-bound URL links.
+- [x] Complete C3 basic PDF creation with supplied-font Unicode text and native vector paths; verify visible glyphs, font rejection and geometry.
+- [x] Verify blank DOCX lifecycle (DOC1), native report DOCX/PDF recipe (C4) and repeated-table-header PDF rendering (TBL11).
+- [x] Add native PDF metadata and hierarchical bookmark editing with atomic validation and explicit collection/handle lifetimes.
+- [x] Add bounded model-derived DOCX/PPTX omission diagnostics and 128 MiB input/64 MiB serialized-payload guards.
+- [x] Correct header/footer read side effects and child bookmark collection self-invalidation; standardize public authoring font_size spelling.
+- [x] Verify 63 Rust and 85 installed-wheel Python tests, locked release artifact, formatting, Clippy and unchanged 263-package license graph.
+- [ ] Complete full diagnostics/conversion coverage, complex-script font fidelity, advanced lists/styles, selective extraction and all remaining unchecked roadmap criteria.
