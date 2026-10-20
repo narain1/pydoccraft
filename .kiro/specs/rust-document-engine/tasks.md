@@ -224,3 +224,10 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Validate deduplicated live media accounting, transforms, shared backgrounds, ownership and atomic limits.
 - [x] Add shared contiguous Paragraph/Shape slicing returning existing range types without another native method.
 - [x] Run the complete locked installed-wheel suite and record source/PNG/PDF evidence for these slices.
+
+## Numbering and internal navigation extraction
+
+- [x] Project resolved DOCX list definitions and native logical labels through existing block metadata with story/segment identity and bounded accounting.
+- [x] Project resolved PPTX internal slide targets through existing links and omission diagnostics, retaining text/table/group provenance.
+- [x] Validate both slices in the complete locked installed-wheel corpus and record artifact evidence.
+- [ ] Retain broader E3/TXT5 list authoring, native reader preservation and pre-import slide-count gaps until their acceptance cases are complete.

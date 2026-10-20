@@ -1,9 +1,10 @@
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 
 use base64::Engine;
 use serde_json::{json, Map, Value};
 use wordcraft_doc::para::{InlineObject, Paragraph, OBJ};
-use wordcraft_doc::props::VMerge;
+use wordcraft_doc::props::{NumRef, VMerge};
 use wordcraft_doc::{Block, Blocks, Document, PartKind, Path, StoryRef, Table};
 use wordcraft_layout::{DocLayout, LayoutCache, LayoutOptions};
 
@@ -27,10 +28,10 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
         &mut LayoutCache::new(),
         &LayoutOptions::default(),
     );
-    let mut adapter = Adapter::new(&document, &layout);
+    let mut adapter = Adapter::new(&document, &layout)?;
     adapter.visit_blocks(&document.body, &[]);
     adapter.add_comments();
-    Ok(adapter.finish())
+    adapter.finish()
 }
 
 pub fn render(
@@ -127,6 +128,104 @@ struct Adapter<'a> {
     layout: &'a DocLayout,
     pages: Vec<PagePayload>,
     comment_pages: HashMap<u32, usize>,
+    numbering: HashMap<(StoryRef, Path), NumberingObservation>,
+    numbering_bytes: Cell<usize>,
+    numbering_definitions: RefCell<HashMap<(u32, u8), NumberingDefinition<'a>>>,
+    numbering_lookup_work: Cell<usize>,
+    numbering_lookup_cost: usize,
+}
+
+const MAX_NUMBERING_BYTES: usize = 16 * 1024 * 1024;
+const MAX_NUMBERING_STRING: usize = 64 * 1024;
+const MAX_NUMBERING_LOOKUP_WORK: usize = 10_000_000;
+
+#[derive(Clone, Copy)]
+struct NumberingDefinition<'a> {
+    abstract_id: Option<u32>,
+    level: Option<&'a wordcraft_doc::numbering::Level>,
+}
+
+fn numbering_limit() -> EngineError {
+    EngineError::ResourceLimit(
+        "DOCX numbering exceeds bounded paths, placements, metadata bytes or native lookup work"
+            .into(),
+    )
+}
+
+struct NumberingObservation {
+    reference: Option<NumRef>,
+    label: Option<(usize, String)>,
+    ambiguous_label: bool,
+}
+
+fn numbering_observations(
+    layout: &DocLayout,
+) -> Result<HashMap<(StoryRef, Path), NumberingObservation>, EngineError> {
+    let mut observations: HashMap<(StoryRef, Path), NumberingObservation> = HashMap::new();
+    let mut items = 0usize;
+    let mut bytes = 0usize;
+    for page in &layout.pages {
+        for item in &page.items {
+            items += 1;
+            if items > 1_000_000 {
+                return Err(numbering_limit());
+            }
+            let wordcraft_layout::Placed::Lines {
+                story,
+                path,
+                para,
+                l0,
+                l1,
+                ..
+            } = item
+            else {
+                continue;
+            };
+            let reference = para.rp.numbering.filter(|value| value.num != 0);
+            if reference.is_none() && para.label.is_none() {
+                continue;
+            }
+            let observation =
+                observations
+                    .entry((*story, path.clone()))
+                    .or_insert(NumberingObservation {
+                        reference,
+                        label: None,
+                        ambiguous_label: false,
+                    });
+            if observation.reference != reference {
+                return Err(EngineError::Unsupported(
+                    "DOCX paragraph numbering differs between native placements".into(),
+                ));
+            }
+            let line = para.label_line();
+            if *l0 <= line && line < *l1 {
+                if let (Some(label), Some(line)) = (&para.label, para.lines.get(line)) {
+                    if label.text.len() > MAX_NUMBERING_STRING {
+                        return Err(numbering_limit());
+                    }
+                    bytes = bytes.saturating_add(label.text.len());
+                    if bytes > MAX_NUMBERING_BYTES {
+                        return Err(numbering_limit());
+                    }
+                    if !observation.ambiguous_label {
+                        if let Some((offset, text)) = &observation.label {
+                            if *offset != line.start || text != &label.text {
+                                observation.label = None;
+                                observation.ambiguous_label = true;
+                            }
+                        } else {
+                            observation.label = Some((line.start, label.text.clone()));
+                        }
+                    }
+                }
+            }
+            if observations.len() > 100_000 {
+                return Err(numbering_limit());
+            }
+        }
+    }
+    Ok(observations)
 }
 
 fn extraction_diagnostics(document: &Document) -> Value {
@@ -231,6 +330,33 @@ fn diagnose_object(
 }
 
 fn validate_stories(document: &Document) -> Result<(), EngineError> {
+    if document.numbering.nums.len() > 100_000 || document.numbering.abstracts.len() > 100_000 {
+        return Err(numbering_limit());
+    }
+    let mut numbering_bytes = 0usize;
+    let mut levels = 0usize;
+    for level in document
+        .numbering
+        .abstracts
+        .iter()
+        .flat_map(|value| &value.levels)
+        .chain(
+            document
+                .numbering
+                .nums
+                .iter()
+                .flat_map(|value| value.level_overrides.iter().map(|(_, level)| level)),
+        )
+    {
+        levels += 1;
+        numbering_bytes = numbering_bytes.saturating_add(level.text.len());
+        if levels > 100_000
+            || level.text.len() > MAX_NUMBERING_STRING
+            || numbering_bytes > MAX_NUMBERING_BYTES
+        {
+            return Err(numbering_limit());
+        }
+    }
     if document.parts.len() > 10_000 {
         return Err(EngineError::ResourceLimit(
             "DOCX exceeds 10000 auxiliary stories".into(),
@@ -352,6 +478,118 @@ fn validate_table_depth(blocks: &Blocks) -> Result<(), EngineError> {
 }
 
 impl<'a> Adapter<'a> {
+    fn numbering_definition(&self, reference: NumRef) -> Option<NumberingDefinition<'a>> {
+        let key = (reference.num, reference.level);
+        if let Some(value) = self.numbering_definitions.borrow().get(&key) {
+            return Some(*value);
+        }
+        let work = self
+            .numbering_lookup_work
+            .get()
+            .saturating_add(self.numbering_lookup_cost);
+        self.numbering_lookup_work.set(work);
+        if work > MAX_NUMBERING_LOOKUP_WORK || self.numbering_definitions.borrow().len() >= 100_000
+        {
+            self.numbering_lookup_work
+                .set(MAX_NUMBERING_LOOKUP_WORK + 1);
+            return None;
+        }
+        // Keep resolution native, including first-match IDs and level overrides. Cache misses
+        // and unresolved references too; otherwise repeated invalid references rescan all definitions.
+        let value = NumberingDefinition {
+            abstract_id: self
+                .document
+                .numbering
+                .num(reference.num)
+                .map(|num| num.abstract_id),
+            level: self
+                .document
+                .numbering
+                .level(reference.num, reference.level),
+        };
+        self.numbering_definitions.borrow_mut().insert(key, value);
+        Some(value)
+    }
+
+    fn segment_numbering(
+        &self,
+        paragraph: &Paragraph,
+        path: &Path,
+        story: Option<StoryRef>,
+        segments: &[Segment],
+    ) -> Vec<Option<Value>> {
+        let observation = story.and_then(|story| self.numbering.get(&(story, path.clone())));
+        let reference = observation
+            .map(|value| value.reference)
+            .unwrap_or_else(|| {
+                let table = story.and_then(|story| {
+                    let (table, _, _) = path.cell()?;
+                    let table = self.document.table(story, &table)?;
+                    self.document
+                        .styles
+                        .table_style(table.props.style.as_deref()?)
+                });
+                self.document
+                    .styles
+                    .resolve_para_in(&paragraph.props, table.as_ref().map(|style| &style.para))
+                    .numbering
+            })
+            .filter(|value| value.num != 0);
+        let Some(reference) = reference else {
+            return vec![None; segments.len()];
+        };
+        if self.numbering_bytes.get() > MAX_NUMBERING_BYTES {
+            return vec![None; segments.len()];
+        }
+        let Some(definition) = self.numbering_definition(reference) else {
+            return vec![None; segments.len()];
+        };
+        let level = definition.level;
+        let label = observation
+            .and_then(|value| value.label.as_ref())
+            .map(|(offset, text)| {
+                (
+                    segments
+                        .partition_point(|segment| segment.byte_start <= *offset)
+                        .saturating_sub(1),
+                    text,
+                )
+            });
+        segments
+            .iter()
+            .enumerate()
+            .map(|(index, _)| {
+                // Account for escaping and the duplicated page.tables projection before cloning.
+                let strings = level.map_or(0, |level| level.text.len()).saturating_add(
+                    label
+                        .filter(|(segment, _)| *segment == index)
+                        .map_or(0, |(_, text)| text.len()),
+                );
+                let bytes = self
+                    .numbering_bytes
+                    .get()
+                    .saturating_add(strings.saturating_mul(12).saturating_add(512));
+                self.numbering_bytes.set(bytes);
+                if bytes > MAX_NUMBERING_BYTES {
+                    return None;
+                }
+                let mut value = json!({
+                    "num_id": reference.num,
+                    "abstract_id": definition.abstract_id,
+                    "level": reference.level,
+                    "format": level.map(|level| level.format.ooxml()),
+                    "template": level.map(|level| level.text.as_str()),
+                });
+                if let Some((segment, text)) = label {
+                    if segment == index {
+                        value["label"] = json!(text);
+                    }
+                }
+                Some(value)
+            })
+            .collect()
+    }
+
     fn stories(&self) -> Vec<StoryPayload> {
         let comments: HashMap<_, _> = self
             .document
@@ -400,7 +638,13 @@ impl<'a> Adapter<'a> {
                 }
                 StoryPayload {
                     kind: kind.into(),
-                    blocks: self.owned_blocks(&part.blocks, &[], None, Some(&source)),
+                    blocks: self.owned_blocks(
+                        &part.blocks,
+                        &[],
+                        None,
+                        Some(&source),
+                        Some(StoryRef::Part(*id)),
+                    ),
                     metadata,
                 }
             })
@@ -411,7 +655,7 @@ impl<'a> Adapter<'a> {
                 ("story_role".into(), json!(role)),
             ]);
             stories.push(StoryPayload {
-                kind: kind.into(), blocks: self.owned_blocks(blocks, &[], None, Some(&source)),
+                kind: kind.into(), blocks: self.owned_blocks(blocks, &[], None, Some(&source), None),
                 metadata: Map::from_iter([("role".into(), json!(role)), ("ordering".into(), json!("after parts; footnote then endnote; separator, continuation_separator, continuation_notice"))]),
             });
         }
@@ -426,6 +670,7 @@ impl<'a> Adapter<'a> {
         prefix: &[u32],
         page_number: Option<usize>,
         story: Option<&Map<String, Value>>,
+        native_story: Option<StoryRef>,
     ) -> Vec<BlockPayload> {
         let mut output = Vec::new();
         for (index, block) in blocks.iter().enumerate() {
@@ -445,10 +690,15 @@ impl<'a> Adapter<'a> {
                             pages.first().copied().unwrap_or(fallback),
                         )
                     });
+                    let numbering =
+                        self.segment_numbering(paragraph, &path, native_story, &segments);
                     for (segment_index, mut segment) in segments.into_iter().enumerate() {
                         segment.set_source(&path.0, segment_index);
                         let mut payload = BlockPayload::paragraph(segment.text);
                         payload.style = paragraph.props.style.clone();
+                        if let Some(value) = numbering[segment_index].clone() {
+                            payload.metadata.insert("numbering".into(), value);
+                        }
                         if let Some(level) = self
                             .document
                             .styles
@@ -500,6 +750,7 @@ impl<'a> Adapter<'a> {
                             page_number
                                 .map(|_| self.table_page(table, &path).min(self.pages.len() - 1)),
                             story,
+                            native_story,
                         ),
                     ),
                     ..BlockPayload::default()
@@ -509,7 +760,7 @@ impl<'a> Adapter<'a> {
         output
     }
 
-    fn new(document: &'a Document, layout: &'a DocLayout) -> Self {
+    fn new(document: &'a Document, layout: &'a DocLayout) -> Result<Self, EngineError> {
         let page_count = layout.pages.len().max(1);
         let pages = (0..page_count)
             .map(|number| {
@@ -525,15 +776,37 @@ impl<'a> Adapter<'a> {
                 }
             })
             .collect();
-        Self {
+        Ok(Self {
             document,
             layout,
             pages,
             comment_pages: HashMap::new(),
-        }
+            numbering: numbering_observations(layout)?,
+            numbering_bytes: Cell::new(0),
+            numbering_definitions: RefCell::new(HashMap::new()),
+            numbering_lookup_work: Cell::new(0),
+            // num() once plus level()'s two num() scans, an abstract scan and a level-override
+            // scan. This is conservative for the pinned native API, not a local resolver.
+            numbering_lookup_cost: document
+                .numbering
+                .nums
+                .len()
+                .saturating_mul(3)
+                .saturating_add(document.numbering.abstracts.len())
+                .saturating_add(
+                    document
+                        .numbering
+                        .nums
+                        .iter()
+                        .map(|num| num.level_overrides.len())
+                        .max()
+                        .unwrap_or(0),
+                )
+                .max(1),
+        })
     }
 
-    fn finish(self) -> DocumentPayload {
+    fn finish(self) -> Result<DocumentPayload, EngineError> {
         let mut metadata = Map::new();
         for (key, value) in [
             ("title", &self.document.core.title),
@@ -559,12 +832,17 @@ impl<'a> Adapter<'a> {
         );
         let stories = self.stories();
         metadata.insert("diagnostics".into(), extraction_diagnostics(self.document));
-        DocumentPayload {
+        if self.numbering_bytes.get() > MAX_NUMBERING_BYTES
+            || self.numbering_lookup_work.get() > MAX_NUMBERING_LOOKUP_WORK
+        {
+            return Err(numbering_limit());
+        }
+        Ok(DocumentPayload {
             format: "docx".into(),
             metadata,
             pages: self.pages,
             stories,
-        }
+        })
     }
 
     fn visit_blocks(&mut self, blocks: &Blocks, prefix: &[u32]) {
@@ -582,12 +860,16 @@ impl<'a> Adapter<'a> {
         let page_indexes = self.paragraph_pages(path);
         let segments = self.paragraph_segments(paragraph, &page_indexes);
         let segment_pages = self.paragraph_segment_pages(path, &segments, page_indexes[0]);
+        let numbering = self.segment_numbering(paragraph, path, Some(StoryRef::Body), &segments);
         for (segment_index, segment) in segments.into_iter().enumerate() {
             let page_number = segment_pages[segment_index].min(self.pages.len() - 1);
             for (id, _) in &segment.comments {
                 self.comment_pages.entry(*id).or_insert(page_number);
             }
             let mut block = BlockPayload::paragraph(segment.text);
+            if let Some(value) = numbering[segment_index].clone() {
+                block.metadata.insert("numbering".into(), value);
+            }
             if !segment.story_refs.is_empty() {
                 block
                     .metadata
@@ -624,6 +906,7 @@ impl<'a> Adapter<'a> {
             if !block.text.is_empty()
                 || !block.images.is_empty()
                 || block.metadata.contains_key("story_refs")
+                || block.metadata.contains_key("numbering")
             {
                 page.blocks.push(block);
             }
@@ -640,7 +923,7 @@ impl<'a> Adapter<'a> {
                 );
             }
         }
-        let table = self.table_payload(table, path, Some(page_number), None);
+        let table = self.table_payload(table, path, Some(page_number), None, Some(StoryRef::Body));
         let page = &mut self.pages[page_number];
         page.tables.push(table.clone());
         page.blocks.push(BlockPayload {
@@ -656,6 +939,7 @@ impl<'a> Adapter<'a> {
         path: &Path,
         page_number: Option<usize>,
         story: Option<&Map<String, Value>>,
+        native_story: Option<StoryRef>,
     ) -> TablePayload {
         let mut cells: Vec<Vec<CellPayload>> = Vec::with_capacity(table.rows.len());
         let mut active_merges: HashMap<(usize, usize), (usize, usize)> = HashMap::new();
@@ -665,7 +949,8 @@ impl<'a> Adapter<'a> {
             let mut output_row = Vec::with_capacity(row.cells.len());
             for (cell_index, cell) in row.cells.iter().enumerate() {
                 let prefix = [path.0.as_slice(), &[row_index as u32, cell_index as u32]].concat();
-                let blocks = self.owned_blocks(&cell.blocks, &prefix, page_number, story);
+                let blocks =
+                    self.owned_blocks(&cell.blocks, &prefix, page_number, story, native_story);
                 let key = (column, cell.span());
                 let mut covered = false;
                 if cell.props.vmerge == VMerge::Restart {
@@ -1142,6 +1427,182 @@ fn docx_error(error: wordcraft_docx::DocxError) -> EngineError {
 }
 
 #[cfg(test)]
+mod numbering_tests {
+    use super::*;
+    use std::sync::Arc;
+    use wordcraft_doc::numbering::ListKind;
+
+    fn numbered(text: &str, num: u32, level: u8) -> Arc<Block> {
+        let mut paragraph = Paragraph::new();
+        paragraph.insert_text(0, text, &Default::default()).unwrap();
+        paragraph.props.numbering = Some(NumRef { num, level });
+        wordcraft_doc::para_block(paragraph)
+    }
+
+    #[test]
+    fn labels_come_from_native_layout_and_follow_the_label_line_after_a_break() {
+        let mut document = Document::new();
+        let num = document.numbering.try_add_list(ListKind::Numbered).unwrap();
+        document.body = vec![
+            numbered("\u{c}After break", num, 0),
+            numbered("Second", num, 0),
+            numbered("", num, 0),
+        ];
+        let data = wordcraft_docx::write(&document).unwrap();
+        let payload = extract(&data, None).unwrap();
+        assert_eq!(payload.pages.len(), 2);
+        let blocks: Vec<_> = payload.pages.iter().flat_map(|page| &page.blocks).collect();
+        assert_eq!(
+            blocks
+                .iter()
+                .map(|block| block.text.as_str())
+                .collect::<Vec<_>>(),
+            ["", "After break", "Second", ""]
+        );
+        assert!(!blocks[0].metadata["numbering"]
+            .as_object()
+            .unwrap()
+            .contains_key("label"));
+        for (block, label) in blocks[1..].iter().zip(["1.", "2.", "3."]) {
+            assert_eq!(block.metadata["numbering"]["label"], label);
+            assert_eq!(block.metadata["numbering"]["format"], "decimal");
+            assert_eq!(block.metadata["numbering"]["template"], "%1.");
+            assert_eq!(block.metadata["numbering"]["num_id"], num);
+        }
+    }
+
+    #[test]
+    fn conflicting_repeated_labels_are_not_asserted_and_missing_definitions_are_null() {
+        let mut document = Document::new();
+        let num = document.numbering.try_add_list(ListKind::Numbered).unwrap();
+        document.body = vec![numbered("Repeated", num, 0)];
+        let mut layout = wordcraft_layout::layout(
+            &document,
+            &mut LayoutCache::new(),
+            &LayoutOptions::default(),
+        );
+        let mut repeated = layout.pages[0]
+            .items
+            .iter()
+            .find(|item| matches!(item, wordcraft_layout::Placed::Lines { .. }))
+            .unwrap()
+            .clone();
+        let wordcraft_layout::Placed::Lines { para, .. } = &mut repeated else {
+            unreachable!()
+        };
+        Arc::make_mut(para).label.as_mut().unwrap().text = "99.".into();
+        layout.pages[0].items.push(repeated);
+        let mut adapter = Adapter::new(&document, &layout).unwrap();
+        adapter.visit_blocks(&document.body, &[]);
+        let metadata = &adapter.pages[0].blocks[0].metadata["numbering"];
+        assert_eq!(metadata["format"], "decimal");
+        assert!(!metadata.as_object().unwrap().contains_key("label"));
+
+        document.body = vec![
+            numbered("Missing", 9999, 7),
+            numbered("Missing level", num, 20),
+            numbered("Unnumbered", 0, 0),
+        ];
+        let empty_layout = DocLayout::default();
+        let mut adapter = Adapter::new(&document, &empty_layout).unwrap();
+        adapter.visit_blocks(&document.body, &[]);
+        let missing = &adapter.pages[0].blocks[0].metadata["numbering"];
+        assert_eq!(missing["num_id"], 9999);
+        assert!(missing["abstract_id"].is_null());
+        assert!(missing["format"].is_null());
+        assert!(missing["template"].is_null());
+        let missing_level = &adapter.pages[0].blocks[1].metadata["numbering"];
+        assert!(missing_level["abstract_id"].is_number());
+        assert!(missing_level["format"].is_null());
+        assert!(!adapter.pages[0].blocks[2]
+            .metadata
+            .contains_key("numbering"));
+    }
+
+    #[test]
+    fn repeated_definition_queries_are_cached_and_distinct_query_work_is_bounded() {
+        let mut document = Document::new();
+        document.numbering.try_add_list(ListKind::Numbered).unwrap();
+        let original = document.numbering.nums[0].clone();
+        for id in 2..=2000 {
+            let mut number = original.clone();
+            number.id = id;
+            document.numbering.nums.push(number);
+        }
+        let layout = DocLayout::default();
+        let mut adapter = Adapter::new(&document, &layout).unwrap();
+        let block = numbered("Repeated", 2000, 0);
+        let Block::Para(paragraph) = block.as_ref() else {
+            unreachable!()
+        };
+        for index in 0..2000 {
+            adapter.add_paragraph(paragraph, &Path::top(index));
+        }
+        assert_eq!(
+            adapter.numbering_lookup_work.get(),
+            adapter.numbering_lookup_cost
+        );
+        let missing = NumRef {
+            num: 9999,
+            level: 0,
+        };
+        for _ in 0..2000 {
+            let value = adapter.numbering_definition(missing).unwrap();
+            assert!(value.abstract_id.is_none() && value.level.is_none());
+        }
+        assert_eq!(
+            adapter.numbering_lookup_work.get(),
+            2 * adapter.numbering_lookup_cost
+        );
+        let payload = adapter.finish().unwrap();
+        assert_eq!(payload.pages[0].blocks.len(), 2000);
+        assert!(payload.pages[0]
+            .blocks
+            .iter()
+            .all(|block| block.metadata["numbering"]["num_id"] == 2000
+                && block.metadata["numbering"]["format"] == "decimal"));
+
+        let mut adapter = Adapter::new(&document, &layout).unwrap();
+        for id in 1..=2000 {
+            let block = numbered("Distinct", id, 0);
+            let Block::Para(paragraph) = block.as_ref() else {
+                unreachable!()
+            };
+            adapter.add_paragraph(paragraph, &Path::top((id - 1) as usize));
+        }
+        assert!(matches!(
+            adapter.finish(),
+            Err(EngineError::ResourceLimit(_))
+        ));
+    }
+
+    #[test]
+    fn numbering_templates_and_repeated_output_metadata_are_bounded() {
+        let mut document = Document::new();
+        let num = document.numbering.try_add_list(ListKind::Numbered).unwrap();
+        document.numbering.abstracts[0].levels[0].text = "x".repeat(MAX_NUMBERING_STRING + 1);
+        assert!(matches!(
+            validate_stories(&document),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        document.numbering.abstracts[0].levels[0].text = "x".repeat(1024);
+        let paragraph = numbered("Small paragraph", num, 0);
+        let layout = DocLayout::default();
+        let mut adapter = Adapter::new(&document, &layout).unwrap();
+        let Block::Para(paragraph) = paragraph.as_ref() else {
+            unreachable!()
+        };
+        for index in 0..2000 {
+            adapter.add_paragraph(paragraph, &Path::top(index));
+        }
+        assert!(matches!(
+            adapter.finish(),
+            Err(EngineError::ResourceLimit(_))
+        ));
+    }
+}
+
+#[cfg(test)]
 mod diagnostic_tests {
     use super::*;
     use std::sync::Arc;
@@ -1302,7 +1763,7 @@ mod offset_tests {
         paragraph.mark.link = Some("https://example.com/mark".into());
         let document = Document::new();
         let layout = DocLayout::default();
-        let mut adapter = Adapter::new(&document, &layout);
+        let mut adapter = Adapter::new(&document, &layout).unwrap();
         adapter.add_paragraph(&paragraph, &Path(vec![0]));
         let block = &adapter.pages[0].blocks[0];
         assert_eq!(block.style.as_deref(), Some("TypedParagraph"));
@@ -1351,7 +1812,7 @@ mod offset_tests {
         // The last marker deliberately has no object: it must not panic or invent a reference.
         let document = Document::new();
         let layout = DocLayout::default();
-        let adapter = Adapter::new(&document, &layout);
+        let adapter = Adapter::new(&document, &layout).unwrap();
         let segments = adapter.paragraph_segments(&paragraph, &[0]);
         assert_eq!(segments.len(), 1);
         let segment = &segments[0];

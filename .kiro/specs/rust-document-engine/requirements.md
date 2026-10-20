@@ -284,3 +284,15 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 1. Paragraph and text-bearing shape slicing SHALL return their existing revision-bound ranges through existing native range operations. Normal Python Unicode-character slice normalization SHALL apply; integer indexing and steps other than one SHALL be rejected. Empty forward slices SHALL select an insertion point.
 2. Existing range text/format/link operations SHALL retain their semantics, stale-owner checks and semantic-anchor guards. Removing all text SHALL preserve the paragraph; no DOCX cross-paragraph range, new Run class or duplicate insertion/deletion method SHALL be introduced. Slide ranges SHALL retain their existing LF-separated paragraph behavior, internal links and tooltips; table indexing SHALL remain unchanged.
 3. Tests SHALL cover Unicode/whitespace, clamped/negative bounds, insertion/deletion, surrounding formatting, links, copies, auxiliary/cell scopes, invalid inputs, mutation during index conversion, semantic-anchor rollback, slide ordering/placeholder preservation and unsupported nontext selection.
+
+## 35. Native DOCX numbering extraction
+
+1. Existing paragraph metadata SHALL expose effective native numbering identity, level, parsed format/template and optional logical layout label without prefixing paragraph text or changing link offsets. Cleared numbering SHALL be absent; missing definitions SHALL remain null rather than guessed.
+2. Native style/table resolution and layout placements SHALL own numbering semantics. Labels SHALL attach to the segment containing the native label line; body, auxiliary stories and nested tables SHALL retain separate identities. Conflicting repeated labels SHALL be omitted, and empty numbered paragraphs SHALL remain represented.
+3. Definitions, observed paths, placements, individual strings, output metadata and adapter-native definition lookup work SHALL be bounded. Repeated and missing definition results SHALL be cached without replacing native resolution. Tests SHALL cover continuation/restart, all nine levels, styles, start overrides, breaks/wrapping, stories, symbol fonts, RTL logical labels and native reader normalization. Broader list authoring and exact automatic page slicing remain separately scoped.
+
+## 36. PPTX fixed internal navigation extraction
+
+1. Existing Link values SHALL normalize resolved native slide actions to one-based #page=N URIs and zero-based target_page metadata in current presentation order, including hidden/self targets. Source page, exact Unicode label offsets, table source paths and grouped-shape traversal SHALL remain unchanged.
+2. A bounded native SlideId index SHALL be shared by payload projection and diagnostics. Duplicate native identities SHALL fail explicitly. Contextual actions SHALL remain diagnosed omissions rather than invented fixed destinations; native reader discards SHALL be documented as upstream gaps.
+3. Tests SHALL cover source relationship variants, reorder/hidden/self links, repeated labels, table/group links, URLs, omission diagnostics and model bounds. No raw XML link parser or new public navigation API SHALL be introduced.
