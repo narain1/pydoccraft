@@ -1977,7 +1977,7 @@
         "REV6"
       ],
       "local_surface": "Conservative PDF edit/save rejects unsupported preservation profiles",
-      "remaining": "Attachment API fixed1GiB decode limit and no suitable bounded writer; arbitrary encryption/active-content/PDF-A/UA profiles unassessed. No raw PDF object escape hatch.",
+      "remaining": "Page FileAttachment creation is public; document EmbeddedFiles mutation remains private. Native strict caller-limited full-chain decoding exists; bounded complete attachment inventory, unambiguous identity and integrated bounded extraction remain upstream work. Arbitrary encryption/active-content/PDF-A/UA profiles are unassessed. No raw PDF object escape hatch.",
       "upstream_candidates": [
         "U10"
       ],
