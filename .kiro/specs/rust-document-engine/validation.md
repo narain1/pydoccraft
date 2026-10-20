@@ -922,6 +922,15 @@ Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,508,811 byt
 This local artifact retains the original decimal-outline test and does not supersede PR71's separate corrected-test/current-main CI validation. Final independent branch review and current-main CI remain required. Reset restores native inheritance; it does not imply arbitrary imported theme/master editing, complete referenced-media accounting or transparent output. SLIDE4 remains partial.
 
 
+## Recent roadmap overlap and stale-wording audit
+
+Documentation-only review on 2026-10-20 distinguishes delivered bounded operations from broad partial criteria. TODO now identifies existing hidden-slide metadata/fixed links/plain notes, native page/count fields, note conversion and field/comment properties without proposing duplicate managers. Slide insertion at a position composes existing append/move; slide duplication and imported graph remapping remain open. The workstream guide removes its obsolete138-open count and labels original agent assignments as historical rather than current capability claims.
+
+BG5 now joins the existing word.story-clear profile already used by DOC5/LAY3; its remainder no longer incorrectly lists owned clear as absent. This does not broaden that profile's historical artifact scope. All17 profile definitions,119 operation cells, artifact references, fixture fingerprints and source-audit baseline remain unchanged, including the pending decimal-outline evidence. All139 criterion IDs and their46 checked flags,14 owners and dependency JSON are unchanged. Newly implemented notes/read-only/reset behavior is not automatically promoted into historical operation certifications.
+
+The isolated documentation snapshot passes14 support-ledger tests, exact generated-matrix consistency, the139-ID/14-workstream ownership validator and the cached44-family reference-source check. No Cargo, behavioral corpus, new wheel or upstream source changes are involved. Broad E3/PDF6/SLIDE/API/QA criteria retain their prior partial/open status.
+
+
 ## Decimal-outline raster comparison — corrected CI artifact
 
 - Corrected final-main head `d5912b9aad74520b13a9753e6b6ee4b27c2caa3d` passes [CI 39504970072](https://github.com/narain1/pydoccraft/actions/runs/39504970072): all 280 locked Rust tests and 393 installed-wheel Python tests, zero failures/errors/skips, formatting, warnings-denied Clippy, strict typing and the unchanged 264-package audit. Independent corrected-test verification against the copied local release also passes all 393 tests (79.069s). PR71 was manually merged as `e402268f5bc33f756f34587594761c41308a2a1e`; auto-merge remains disabled.

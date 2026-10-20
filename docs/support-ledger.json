@@ -2492,9 +2492,10 @@
     },
     "BG5": {
       "profiles": [
-        "word.rich-stories"
+        "word.rich-stories",
+        "word.story-clear"
       ],
-      "remaining": "Unassessed: linked-to-previous stories, clearing/general block movement, rich notes and complete variant/repagination fidelity beyond the owned profile."
+      "remaining": "Unassessed: linked-to-previous stories, general block movement, rich notes and complete variant/repagination fidelity beyond the owned rich-story/clear profiles."
     },
     "BG6": {
       "profiles": [],
