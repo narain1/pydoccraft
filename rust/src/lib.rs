@@ -23,6 +23,8 @@ create_exception!(_core, DocExNativeError, PyException);
 pub enum EngineError {
     #[error("invalid_argument:{0}")]
     InvalidArgument(String),
+    #[error("closed:{0}")]
+    Closed(String),
     #[error("unsupported:{0}")]
     Unsupported(String),
     #[error("malformed:{0}")]
@@ -31,6 +33,8 @@ pub enum EngineError {
     UnsafeArchive(String),
     #[error("resource_limit:{0}")]
     ResourceLimit(String),
+    #[error("index:{0}")]
+    PageIndex(String),
     #[error("encrypted:document is password-protected or the supplied password is incorrect")]
     Encrypted,
     #[error("conversion_failure:{0}")]
@@ -48,6 +52,44 @@ impl From<EngineError> for PyErr {
     }
 }
 
+#[pyclass(module = "doc_ex._core", name = "_PdfSession")]
+struct NativePdfSession {
+    inner: pdf::PdfSession,
+}
+
+#[pymethods]
+impl NativePdfSession {
+    #[pyo3(signature = (page, dpi=144.0, clip=None))]
+    fn render(&self, page: usize, dpi: f64, clip: Option<rendering::Clip>) -> PyResult<Vec<u8>> {
+        if let Some(clip) = clip {
+            rendering::validate_clip(clip)?;
+        }
+        self.inner.render(page, dpi, clip).map_err(Into::into)
+    }
+
+    fn close(&self) -> PyResult<()> {
+        self.inner.close().map_err(Into::into)
+    }
+
+    fn _stats(&self) -> PyResult<(u64, u64, u64)> {
+        let stats = self.inner.stats()?;
+        Ok((
+            stats.parser_builds,
+            stats.render_requests,
+            stats.rasterizations,
+        ))
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (data, password=None))]
+fn _open_pdf(data: &[u8], password: Option<&str>) -> PyResult<(NativePdfSession, String)> {
+    limits::validate_input_size(data.len())?;
+    let (session, payload) = pdf::PdfSession::open(data, password)?;
+    let encoded = limits::bounded_json(&payload, limits::MAX_PAYLOAD_SIZE)?;
+    Ok((NativePdfSession { inner: session }, encoded))
+}
+
 #[pyfunction]
 #[pyo3(signature = (data, filetype, password=None))]
 fn extract(data: &[u8], filetype: &str, password: Option<&str>) -> PyResult<String> {
@@ -59,6 +101,40 @@ fn extract(data: &[u8], filetype: &str, password: Option<&str>) -> PyResult<Stri
         _ => unreachable!(),
     }?;
     limits::bounded_json(&payload, limits::MAX_PAYLOAD_SIZE).map_err(Into::into)
+}
+
+#[pyfunction]
+#[pyo3(signature = (data, pages=None, password=None))]
+fn extract_text(
+    data: &[u8],
+    pages: Option<Bound<'_, PyAny>>,
+    password: Option<&str>,
+) -> PyResult<String> {
+    limits::validate_input_size(data.len())?;
+    let selected = pages
+        .map(|pages| -> PyResult<Vec<isize>> {
+            let mut selected = Vec::new();
+            for value in pages.try_iter()? {
+                if selected.len() == pdf::MAX_SELECTED_PAGES {
+                    return Err(EngineError::ResourceLimit(
+                        "selected page count exceeds 10000".into(),
+                    )
+                    .into());
+                }
+                let value = value?;
+                let index = value.extract::<isize>().map_err(|error| {
+                    if error.is_instance_of::<pyo3::exceptions::PyOverflowError>(value.py()) {
+                        pyo3::exceptions::PyIndexError::new_err("page index is out of range")
+                    } else {
+                        error
+                    }
+                })?;
+                selected.push(index);
+            }
+            Ok(selected)
+        })
+        .transpose()?;
+    pdf::extract_text(data, password, selected.as_deref()).map_err(Into::into)
 }
 
 #[pyfunction]
@@ -141,11 +217,14 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<author_docx::EditableDocx>()?;
     module.add_class::<author_pdf::EditablePdf>()?;
     module.add_class::<author_pptx::EditablePptx>()?;
+    module.add_class::<NativePdfSession>()?;
     module.add(
         "DocExNativeError",
         module.py().get_type::<DocExNativeError>(),
     )?;
+    module.add_function(wrap_pyfunction!(_open_pdf, module)?)?;
     module.add_function(wrap_pyfunction!(extract, module)?)?;
+    module.add_function(wrap_pyfunction!(extract_text, module)?)?;
     module.add_function(wrap_pyfunction!(convert, module)?)?;
     module.add_function(wrap_pyfunction!(render, module)?)?;
     module.add_function(wrap_pyfunction!(detect, module)?)?;

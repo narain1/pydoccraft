@@ -1616,6 +1616,198 @@ impl EditablePdf {
     }
 }
 
+// Only boxed caller-font text needs outline containment. Point-positioned text retains
+// its existing behavior. All parsing, composite transforms and curve geometry remain native.
+const MAX_INK_GLYPHS: usize = 4096;
+const MAX_INK_VISITS: usize = 100_000;
+const MAX_INK_POINTS: usize = 8192;
+const MAX_INK_OPS: usize = 100_000;
+const MAX_INK_SCRATCH: usize = 1024 * 1024;
+
+struct InkPen {
+    path: kurbo::BezPath,
+    remaining: usize,
+    failed: bool,
+}
+
+impl InkPen {
+    fn push(&mut self, element: kurbo::PathEl) {
+        if self.remaining == 0 || !element.is_finite() {
+            self.failed = true;
+            return;
+        }
+        self.remaining -= 1;
+        self.path.push(element);
+    }
+}
+
+impl skrifa::outline::OutlinePen for InkPen {
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.push(kurbo::PathEl::MoveTo((f64::from(x), f64::from(y)).into()));
+    }
+    fn line_to(&mut self, x: f32, y: f32) {
+        self.push(kurbo::PathEl::LineTo((f64::from(x), f64::from(y)).into()));
+    }
+    fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
+        self.push(kurbo::PathEl::QuadTo(
+            (f64::from(cx), f64::from(cy)).into(),
+            (f64::from(x), f64::from(y)).into(),
+        ));
+    }
+    fn curve_to(&mut self, ax: f32, ay: f32, bx: f32, by: f32, x: f32, y: f32) {
+        self.push(kurbo::PathEl::CurveTo(
+            (f64::from(ax), f64::from(ay)).into(),
+            (f64::from(bx), f64::from(by)).into(),
+            (f64::from(x), f64::from(y)).into(),
+        ));
+    }
+    fn close(&mut self) {
+        self.push(kurbo::PathEl::ClosePath);
+    }
+}
+
+struct TextInk<'a> {
+    font: skrifa::FontRef<'a>,
+    scale: f64,
+    cache: std::collections::HashMap<u32, Option<kurbo::Rect>>,
+    visits: usize,
+    ops: usize,
+}
+
+fn ink_limit() -> EngineError {
+    EngineError::ResourceLimit(
+        "boxed font outline work exceeds its bounded glyph, point, operation or memory budget"
+            .into(),
+    )
+}
+
+impl<'a> TextInk<'a> {
+    fn new(bytes: &'a [u8], size: f64) -> Result<Self, EngineError> {
+        use skrifa::{
+            instance::{LocationRef, Size},
+            MetadataProvider,
+        };
+        let font = skrifa::FontRef::new(bytes)
+            .map_err(|e| EngineError::Unsupported(format!("font outlines are unavailable: {e}")))?;
+        if font.outline_glyphs().format() != Some(skrifa::outline::OutlineGlyphFormat::Glyf) {
+            return Err(EngineError::Unsupported("boxed supplied-font text requires static TrueType outlines; bounded CFF outline evaluation is unavailable".into()));
+        }
+        let units = font
+            .metrics(Size::unscaled(), LocationRef::default())
+            .units_per_em;
+        if units == 0 {
+            return Err(EngineError::Unsupported(
+                "font has invalid outline units".into(),
+            ));
+        }
+        Ok(Self {
+            font,
+            scale: size / f64::from(units),
+            cache: Default::default(),
+            visits: 0,
+            ops: 0,
+        })
+    }
+
+    fn bounds(&mut self, id: skrifa::GlyphId) -> Result<Option<kurbo::Rect>, EngineError> {
+        use kurbo::Shape;
+        use skrifa::instance::{LocationRef, Size};
+        use skrifa::outline::{DrawSettings, Hinting};
+        use skrifa::{raw::TableProvider, MetadataProvider};
+        if let Some(bounds) = self.cache.get(&id.to_u32()) {
+            return Ok(*bounds);
+        }
+        if self.cache.len() >= MAX_INK_GLYPHS {
+            return Err(ink_limit());
+        }
+        // Native get() recursively measures composites before applying its point limit.
+        // Bound that traversal first using native parsed component iterators (no parser).
+        let malformed =
+            |e| EngineError::Unsupported(format!("font outline cannot be inspected: {e}"));
+        let loca = self.font.loca(None).map_err(malformed)?;
+        let glyf = self.font.glyf().map_err(malformed)?;
+        let mut pending = vec![(id, 0usize)];
+        let mut points = 0usize;
+        while let Some((glyph, depth)) = pending.pop() {
+            self.visits += 1;
+            if self.visits > MAX_INK_VISITS || depth > 16 {
+                return Err(ink_limit());
+            }
+            match loca.get_glyf(glyph, &glyf).map_err(malformed)? {
+                Some(skrifa::raw::tables::glyf::Glyph::Simple(simple)) => {
+                    points = points.saturating_add(simple.num_points());
+                    if points > MAX_INK_POINTS {
+                        return Err(ink_limit());
+                    }
+                }
+                Some(skrifa::raw::tables::glyf::Glyph::Composite(composite)) => {
+                    for (component, _) in composite.component_glyphs_and_flags() {
+                        if pending.len() >= MAX_INK_POINTS
+                            || self.visits + pending.len() >= MAX_INK_VISITS
+                        {
+                            return Err(ink_limit());
+                        }
+                        pending.push((component.into(), depth + 1));
+                    }
+                }
+                None => {}
+            }
+        }
+        let outlines = self.font.outline_glyphs();
+        let glyph = outlines
+            .get(id)
+            .ok_or_else(|| EngineError::Unsupported("font glyph outline is unavailable".into()))?;
+        let scratch_size = glyph.draw_memory_size(Hinting::None);
+        if scratch_size > MAX_INK_SCRATCH || self.ops >= MAX_INK_OPS {
+            return Err(ink_limit());
+        }
+        let mut scratch = vec![0; scratch_size];
+        let mut pen = InkPen {
+            path: kurbo::BezPath::new(),
+            remaining: (MAX_INK_OPS - self.ops).min(MAX_INK_POINTS * 2),
+            failed: false,
+        };
+        glyph
+            .draw(
+                DrawSettings::unhinted(Size::unscaled(), LocationRef::default())
+                    .with_memory(Some(&mut scratch)),
+                &mut pen,
+            )
+            .map_err(|e| {
+                EngineError::Unsupported(format!("font glyph outline cannot be drawn: {e}"))
+            })?;
+        if pen.failed {
+            return Err(ink_limit());
+        }
+        self.ops += pen.path.elements().len();
+        let bounds = (!pen.path.elements().is_empty()).then(|| pen.path.bounding_box());
+        self.cache.insert(id.to_u32(), bounds);
+        Ok(bounds)
+    }
+
+    fn check(&mut self, id: skrifa::GlyphId, gx: f64, gy: f64, area: kurbo::Rect) -> PyResult<()> {
+        if let Some(bounds) = self.bounds(id)? {
+            let ink = kurbo::Rect::new(
+                gx + bounds.x0 * self.scale,
+                gy - bounds.y1 * self.scale,
+                gx + bounds.x1 * self.scale,
+                gy - bounds.y0 * self.scale,
+            );
+            if !ink.is_finite()
+                || ink.x0 < area.x0
+                || ink.y0 < area.y0
+                || ink.x1 > area.x1
+                || ink.y1 > area.y1
+            {
+                return Err(PyValueError::new_err(
+                    "shaped glyph ink lies outside the text box",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 impl EditablePdf {
     #[allow(clippy::too_many_arguments)]
     fn add_text_font_layout(
@@ -1657,6 +1849,7 @@ impl EditablePdf {
         })?;
         let (_, family) =
             pdfcraft_fonts::embedding::names(font_bytes).map_err(EngineError::Unsupported)?;
+        let mut ink = bounds.map(|_| TextInk::new(font_bytes, size)).transpose()?;
         let mut edited = self.document()?.clone();
         let full_resource = pdfcraft_edit::text::register_text_font(&mut edited, page, font_bytes)
             .map_err(edit_error)?;
@@ -1764,6 +1957,9 @@ impl EditablePdf {
                     return Err(PyValueError::new_err(
                         "shaped glyph position lies outside the page",
                     ));
+                }
+                if let Some(ink) = &mut ink {
+                    ink.check(glyph.id, gx, gy, kurbo::Rect::new(x, y, width, height))?;
                 }
                 let mut matrix = view_matrix(&self.geometry[page]);
                 let [ux, uy] = self.geometry[page].view_to_user(gx as f32, gy as f32);
@@ -2906,6 +3102,95 @@ mod tests {
                 None,
             )
             .unwrap();
+    }
+
+    #[test]
+    fn boxed_font_ink_overflow_is_atomic_and_point_text_is_unchanged() {
+        pyo3::prepare_freethreaded_python();
+        let font = include_bytes!("../../tests/fixtures/fonts/Inter-Regular.ttf");
+        let text = "\u{301}".repeat(6) + "A";
+        let mut document = EditablePdf::new(300.0, 300.0).unwrap();
+        let before = document.to_bytes().unwrap();
+        let error = document
+            .add_text_box(
+                0,
+                &text,
+                (100.0, 100.0, 100.0, 100.0),
+                30.0,
+                (0, 0, 0),
+                "left",
+                Some(font),
+            )
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("glyph ink lies outside"),
+            "{error}"
+        );
+        assert_eq!(document.to_bytes().unwrap(), before);
+        assert_eq!((document.items, document.input_bytes), (0, 0));
+        document
+            .add_text_with_font(0, &text, 100.0, 100.0, 30.0, font, (0, 0, 0))
+            .unwrap();
+        let (width, _, pixels) = pdf2_raster(&document);
+        assert!((0..100).any(|y| (0..width).any(|x| pixels[(y * width + x) * 4] < 200)));
+        let mut boxed = EditablePdf::new(300.0, 300.0).unwrap();
+        boxed
+            .add_text_box(
+                0,
+                "A Café office",
+                (100.0, 100.0, 150.0, 100.0),
+                20.0,
+                (0, 0, 0),
+                "center",
+                Some(font),
+            )
+            .unwrap();
+        let (width, height, pixels) = pdf2_raster(&boxed);
+        let ink = (0..height)
+            .flat_map(|y| (0..width).map(move |x| (x, y)))
+            .filter(|&(x, y)| pixels[(y * width + x) * 4] < 200)
+            .collect::<Vec<_>>();
+        assert!(!ink.is_empty());
+        assert!(ink
+            .iter()
+            .all(|&(x, y)| (100..250).contains(&x) && (100..200).contains(&y)));
+    }
+
+    #[test]
+    fn boxed_font_outline_cache_and_work_limits_are_bounded() {
+        use skrifa::MetadataProvider;
+        pyo3::prepare_freethreaded_python();
+        let font = include_bytes!("../../tests/fixtures/fonts/Inter-Regular.ttf");
+        let mut ink = TextInk::new(font, 30.0).unwrap();
+        let id = ink.font.charmap().map('A').unwrap();
+        let bounds = ink.bounds(id).unwrap().unwrap();
+        let work = (ink.visits, ink.ops);
+        assert!(bounds.width() > 0.0 && bounds.height() > 0.0);
+        assert_eq!(ink.bounds(id).unwrap(), Some(bounds));
+        assert_eq!((ink.visits, ink.ops), work);
+        let space = ink.font.charmap().map(' ').unwrap();
+        assert_eq!(ink.bounds(space).unwrap(), None);
+        let mut exhausted = TextInk::new(font, 30.0).unwrap();
+        exhausted.visits = MAX_INK_VISITS;
+        assert!(matches!(
+            exhausted.bounds(id),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        let mut exhausted = TextInk::new(font, 30.0).unwrap();
+        exhausted.ops = MAX_INK_OPS;
+        assert!(matches!(
+            exhausted.bounds(id),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        let mut pen = InkPen {
+            path: kurbo::BezPath::new(),
+            remaining: 1,
+            failed: false,
+        };
+        pen.push(kurbo::PathEl::MoveTo((0.0, 0.0).into()));
+        pen.push(kurbo::PathEl::LineTo((1.0, 1.0).into()));
+        assert!(pen.failed);
+        assert_eq!(pen.path.elements().len(), 1);
     }
 
     #[test]

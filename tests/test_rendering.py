@@ -4,6 +4,7 @@ import math
 import struct
 import unittest
 import zlib
+from concurrent.futures import ThreadPoolExecutor
 
 import doc_ex
 from doc_ex.errors import DocumentClosedError, UnsafeArchiveError
@@ -90,6 +91,29 @@ class RenderingTests(unittest.TestCase):
                         self.assertEqual(len(zlib.decompress(chunks[b"IDAT"])), height * (1 + width * 4))
                         if dpi == 72:
                             self.assertTrue(has_visible_content(chunks), "fixture rendered blank")
+
+    def test_pdf_reuses_native_parser_across_renders(self) -> None:
+        document = doc_ex.open(pdf_fixture())
+        page = document[0]
+        self.assertIsNotNone(document._render_session)
+        session = document._render_session
+        before = session._stats()
+        self.assertEqual(before[0], 1)
+        self.assertEqual(before[2], 0)
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            rendered = list(pool.map(lambda dpi: document.render_page(0, dpi=dpi), (72, 96, 144, 200)))
+        self.assertTrue(all(value.startswith(b"\x89PNG\r\n\x1a\n") for value in rendered))
+        page.get_pixmap(dpi=144)
+        after = session._stats()
+        self.assertEqual(after[0], 1)
+        self.assertEqual(after[2] - before[2], 5)
+        document.close()
+        self.assertIsNone(document._render_session)
+        with self.assertRaises(doc_ex._core.DocExNativeError):
+            session.render(0, 72)
+        self.assertIn("Page one", page.get_text())
+        with self.assertRaises(DocumentClosedError):
+            page.get_pixmap()
 
     def test_invalid_dpi_and_oversized_requests_fail_for_all_formats(self) -> None:
         for fixture in (pdf_fixture, docx_fixture, pptx_fixture):
