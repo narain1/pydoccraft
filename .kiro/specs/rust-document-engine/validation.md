@@ -815,7 +815,7 @@ Full integrated locked tests, release wheel, installed-wheel corpus and independ
 - This supersedes focused-only lock evidence for local acceptance. All seven comment kinds retain tested appearances and pixels across transformed pages; native lock refusals preserve staged state. Inventory/initial-inspection limits, foreign profiles, links and reply-thread semantics remain outside this mutation profile. Independent review and exact-head/current-main CI remain required before manual merge; PDF6/U10 stay open.
 
 
-## Independent manual merge evidence through PR 73
+## Independent manual merge evidence through PR 74
 
 GitHub merge state was verified on 2026-10-20. Each change passed independent review, required fixes and fresh exact-head/current-main CI before manual merge; repository auto-merge remains disabled. These gates complete the corresponding delivery tasks, not broader roadmap criteria. Historical artifact sections above retain their original validation scope.
 
@@ -830,6 +830,7 @@ GitHub merge state was verified on 2026-10-20. Each change passed independent re
 | [71](https://github.com/narain1/pydoccraft/pull/71) | `e402268f5bc33f756f34587594761c41308a2a1e` | 280 / 393 |
 | [72](https://github.com/narain1/pydoccraft/pull/72) | `d0a8ec6de3e72f2472d411a7fe9577f638af8ad2` | 280 / 402 |
 | [73](https://github.com/narain1/pydoccraft/pull/73) | `0a47b4b001c52b1fa21ab40829d502620022c37e` | 282 / 405 |
+| [74](https://github.com/narain1/pydoccraft/pull/74) | `57fcc94216e58d74b967b24cf2ced68f9f45b742` | 285 / 409 |
 
 Formatting, warnings-denied Clippy, strict installed-package typing and the unchanged 264-package runtime/build license audit passed in each final CI run. PR69 changes source-audit documentation/data only.
 
@@ -961,3 +962,16 @@ PR73 final head `c5cbc8bf8a8d156e9bb438df91ff0eb9080ac1e4` passed [current-main 
 The isolated same-key extension adds no dependency or public method. Five native groups pass: all 4,001 accepted values roundtrip through native hundredth-point storage; None/0 inheritance and native autofit scaling; shape/cell rollback and generation/resource failures; 15 Latin/combining/Arabic raster fixtures including -100/+100 boundaries; and independent invisible PDF glyph-origin displacement checks. Source-reopen native pixels are exact for the raster fixtures, and PNG/PDF whole-image channels differ by at most one at 200 DPI. Whole-pixel page dimensions avoid conflating existing source round-versus-PDF ceil dimension quantization with character-spacing fidelity. Extracted PDF glyph displacements for ABC at 0/+2/-1/-100/+100 agree with native placed origins within 0.002 point; no local text-placement repair is used.
 
 All-targets warnings-denied Clippy, formatting and debug compilation pass. Five new public workflows pass in 29.101 seconds against the isolated copied debug package; 33 related DOCX/slide/range/ownership/table/navigation regressions pass in 23.067 seconds. The strict copied-package typing consumer also passes. They cover source properties/reset/append, Unicode visible width changes and output, invalid patches/copies/caches, merged cell links/reordering and revision-bound callback protection. The prior DOCX-only negative PPTX test is intentionally removed; the original 432-test artifact remains historical, and this feature's expected net public suite grows by four to 436 before independent later corrections. Full integrated release/clean installed-wheel validation and independent review remain required. This does not claim arbitrary imported editing, typography completeness or identical PDF text inference for overlapping/spread glyphs.
+
+
+## Shared slide character spacing — complete local artifact
+
+Runtime commit `c5a67d033ddbdb8b1e42971b814bb8cfc433be45` passed **307 Rust tests and 436 clean installed-wheel Python tests**, zero failures/errors/skips. The Python corpus ran in 137.488 seconds on Linux x86_64 / Python 3.11.2 / Rust 1.95. Installed facade/native bytes match the wheel. Formatting, locked/offline all-target warnings-denied Clippy, release build, strict installed-package typing and the unchanged 264-package license audit pass. Native spacing tests include visible source/PDF channels and independent invisible PDF glyph displacement. The full corpus verifies extraction, PNG rendering and reopened conversions across all three formats.
+
+Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,509,816 bytes**; native extension **40,616,840 bytes**; SHA-256 `2fa1a551c6d5f0b36c29160f020f2a839e2a0e4d2135a79ac9c6dbdb9e8a9c39`. Lock SHA-256 remains `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. Upstream revisions, dependencies and attribution remain unchanged.
+
+The original 432-test DOCX artifact retains its historical rejection-test scope. This artifact deliberately replaces that obsolete PPTX rejection method with five capability workflows, a net increase of four Python tests. Shared spacing uses the existing key; native 200-DPI raster and text-layer evidence does not imply arbitrary-DPI pixel identity or stable inferred reading order for overlapping glyphs. Final independent review and exact-head/current-main CI remain required; SLIDE3/TXT6 stay partial.
+
+PR84 independent source review and all 432 tests against its copied frozen release package passed in 126.169 seconds, with strict typing and matching wheel hash. This is independent confirmation of the recorded DOCX artifact; its final main integration/CI is still pending.
+
+PR74 final head `60a568fbc8e04e0e15e048ed3f0ee7dad3a570db` passed [current-main CI 39507569770](https://github.com/narain1/pydoccraft/actions/runs/39507569770): 285 Rust / 409 installed-wheel Python tests and all required checks. It was manually merged as `57fcc94216e58d74b967b24cf2ced68f9f45b742` after independent review. Auto-merge remains disabled; broader PDF6 stays open.

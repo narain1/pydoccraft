@@ -452,7 +452,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Stage complete expected-field comparison and charge regenerated appearances plus tooltip bytes under existing budgets.
 - [x] Verify focused native/public roundtrip, all kinds/transformed pages, pixels/copy/resize/value/flatten and atomic limit/lifetime controls.
 - [x] Complete integrated locked native/release/installed-wheel validation (285 Rust / 409 Python).
-- [ ] Complete independent manual review/current-main CI.
+- [x] Complete independent manual review/current-main CI; PR74 manually merged after 285 Rust / 409 installed-wheel Python tests and all required checks.
 - [ ] Retain owned radio groups, imported forms and reply identity/appearance/lifecycle as separate existing PDF6/U10 gaps.
 
 
@@ -535,5 +535,5 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Audit public native storage/inheritance/tracking/autofit/PDF paths and reuse the existing format key with the shared bounded precision profile.
 - [x] Add five native groups and five public workflows for storage, output, invisible text positions, shape/cell ownership, links and atomic failures; explicitly retire the obsolete negative-PPTX group.
 - [x] Complete 33 related Python regressions and strict copied-package typing.
-- [ ] Complete integrated locked release/installed-wheel validation.
+- [x] Complete integrated locked release/installed-wheel validation: 307 Rust / 436 Python tests, strict typing and unchanged license audit.
 - [ ] Complete independent review/current-main CI; broader SLIDE3/TXT6 acceptance remains open.
