@@ -1,5 +1,12 @@
 # Validation evidence
 
+## 2026-10-20 DOCX properties and PDF markup (unreleased)
+
+- Runtime commits `849de87` and `70b636a` passed the combined offline Linux x86_64 corpus: Rust 1.95.0 formatting, 186 native tests, warnings-denied Clippy, locked Maturin 1.8.1 release build and 203 installed-wheel Python 3.11.2 tests, zero skips, with verified artifact identity.
+- DOCX metadata tests verify typed core/custom XML and native readback, ordinary source core extraction, escaping and whitespace rules, unchanged caller timestamps/revision, independent nested snapshots/copies, atomic invalid batches, retained ranges on failure, bounded JSON encoding, count/serialized-value capacity and reclamation. Existing content and warmed PNG output remain unchanged. No raw XML or property wrapper is exposed. DOC7 stays open for source custom inventory, language and extended/application properties.
+- PDF markup tests cover underline/strikeout/squiggly creation through the existing annotation API, searchable body text, metadata updates, moving/recoloring/deleting, reopened native values, stale handles and warmed-render rollback. Actual colored pixel bands follow all four rotations with CropBox/UserUnit. Appearance preflight rejects excessive/malformed quads and finite-geometry/work violations before native props/regeneration; generated raw AP bytes are charged without imported-stream decoding. Native squiggly limits coarsen the complete line. PDF6 remains open for broader imported-field, radio and reply/appearance support.
+- Wheel: `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`, 17,316,919 bytes; native extension: 40,160,184 bytes. SHA-256: `726684366a87cdd198c8cf14edac95502eaec4618f2e5e02cbc63bbeb4a8c8f2`. Lockfile SHA-256: `fcfb4a174387cf25cceddadeba9e6be930ec790c840dca0bb5f169431a6c089c`. Dependencies, all four upstream revisions, the previously reviewed 264-package permissive graph and attributed assets are unchanged.
+
 ## 2026-10-20 integrated picture lifecycle, ownership and shading acceptance (unreleased)
 
 - Runtime integration commit `1750702` includes merged parser reuse/selective extraction (PR32/34), paragraph borders, the supplied-font reuse/ink corrections and the picture/ownership batch. Offline Linux x86_64, Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1: formatting, 177 Rust tests, warnings-denied Clippy, locked release build and 196 installed-wheel Python tests passed with zero skips and verified artifact identity.
@@ -401,3 +408,9 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 
 - Independently ran all 196 Python tests against the frozen installed package for `ef0b577ac5cf11ba45936bb2541ec1c72a6d4535`; all passed. CI 39467831926 on that exact head also passed formatting, 177 Rust tests, warnings-denied Clippy, 196 installed-wheel Python tests (no skips) and the 264-package locked license audit. Integration of the reviewed PR35/36 histories changed no runtime, tests, dependency or attribution files.
 - CI artifact: CPython 3.11.17 / Linux x86_64, wheel 17,299,520 bytes, native extension 40,130,544 bytes, wheel SHA-256 `6191b9e0be1ba7a56b6fe7ab4df64cbbc87cb7b6dc65842aabe5041133d699e3`. Reviewed native reference traversal, bounded media accounting, retained paragraph anchors and generation-captured iteration; no additional findings.
+
+### Imported markup coordinate review correction
+
+- Independently reproduced a tiny imported Underline whose finite ±1e308 right-edge coordinates overflow native interpolation while the guarded left height and bottom length remain finite. Recolor was accepted and serialized literal `inf` into the appearance. The adapter now applies the existing ±1,000,000 PDF-user-unit page-box coordinate limit before any native markup appearance work.
+- Native extreme/boundary assertions and a public imported-PDF regression cover all four markup kinds, compound recolor/text rollback and deletion without appearance regeneration. The original frozen PR39 package independently passed all 203 Python tests; corrected runtime head `98c035c8e8b5c2a49d640a43a4c96f7cbd812b47` passed CI 39469758507: formatting, 186 Rust tests, warnings-denied Clippy, 204 installed-wheel Python tests (no skips), and the unchanged 264-package license audit.
+- CI artifact: CPython 3.11.17 / Linux x86_64, wheel 17,317,570 bytes, native extension 40,163,296 bytes, wheel SHA-256 `d13f133870d8e0d3ae2390ab566b68460e60ea0568476f1a1d16c8e5ebb67abc`. No dependencies or upstream revisions changed in this feature.

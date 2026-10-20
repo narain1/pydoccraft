@@ -197,3 +197,10 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add owned picture bytes/replacement and collection deletion through existing source/ownership conventions.
 - [x] Use native media insertion and supported-story reference accounting to retain live shared media and reclaim unused budgets.
 - [x] Verify replacement/removal, pixels, serialized media, stale handles, copies, source kinds and atomic failures in the locked installed-wheel corpus.
+
+## DOCX metadata and PDF markup
+
+- [x] Add bounded core/custom property patches using existing metadata names; preserve native types, timestamps, clear semantics and source core extraction.
+- [x] Extend existing annotation kinds with native underline/strikeout/squiggly and preflight appearance work before regeneration.
+- [x] Verify native/property/pixel/ownership/rollback regressions in the complete locked installed-wheel corpus and record artifact evidence.
+- [ ] Retain broader DOC7/PDF6 source-property, form, reply and fidelity gaps as explicit remaining work.

@@ -42,6 +42,9 @@ const MAX_TABLE_METADATA_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TAB_STOPS: usize = 64;
 const MAX_LAYOUT_PAGES: usize = 10_000;
 const MAX_LAYOUT_ITEMS: usize = 2_000_000;
+const MAX_PROPERTY_BYTES: usize = 256 * 1024;
+const MAX_PROPERTY_VALUE_BYTES: usize = 64 * 1024;
+const MAX_CUSTOM_PROPERTIES: usize = 1024;
 
 #[pyclass]
 pub struct EditableDocx {
@@ -103,6 +106,77 @@ impl EditableDocx {
     pub fn revision(&self) -> PyResult<u64> {
         self.document()?;
         Ok(self.revision)
+    }
+
+    pub fn metadata(&self) -> PyResult<String> {
+        Ok(document_metadata(self.document()?)?.to_string())
+    }
+
+    pub fn update_metadata(&mut self, updates: &str) -> PyResult<()> {
+        self.document()?;
+        let values = property_patch(updates)?;
+        if values.is_empty() {
+            return Ok(());
+        }
+        let mut candidate = self.document()?.clone();
+        for (key, value) in values {
+            if key == "custom" {
+                patch_custom_metadata(&mut candidate, value)?;
+                continue;
+            }
+            if key == "revision" {
+                candidate.core.revision = if value.is_null() {
+                    0
+                } else {
+                    value
+                        .as_u64()
+                        .and_then(|value| u32::try_from(value).ok())
+                        .ok_or_else(|| {
+                            PyValueError::new_err(
+                                "revision requires an unsigned 32-bit integer or null",
+                            )
+                        })?
+                };
+                continue;
+            }
+            let target = match key.as_str() {
+                "title" => &mut candidate.core.title,
+                "author" => &mut candidate.core.creator,
+                "subject" => &mut candidate.core.subject,
+                "keywords" => &mut candidate.core.keywords,
+                "description" => &mut candidate.core.description,
+                "category" => &mut candidate.core.category,
+                "last_modified_by" => &mut candidate.core.last_modified_by,
+                "created" => &mut candidate.core.created,
+                "modified" => &mut candidate.core.modified,
+                _ => {
+                    return Err(PyValueError::new_err(format!(
+                        "unknown metadata key: {key}"
+                    )))
+                }
+            };
+            let text = match &value {
+                Value::Null => "",
+                Value::String(text) => text.as_str(),
+                _ => {
+                    return Err(PyValueError::new_err(
+                        "metadata values require strings or null, except revision",
+                    ))
+                }
+            };
+            validate_property_text(text)?;
+            if text.trim() != text {
+                return Err(PyValueError::new_err("DOCX metadata cannot preserve leading or trailing whitespace at this native revision"));
+            }
+            if matches!(key.as_str(), "created" | "modified") && !text.is_empty() {
+                validate_property_timestamp(text)?;
+            }
+            *target = text.to_owned();
+        }
+        if core_metadata(&candidate).to_string().len() > MAX_PROPERTY_BYTES {
+            return Err(limit("metadata exceeds 256 KiB of serialized values"));
+        }
+        self.commit(candidate)
     }
 
     pub fn to_bytes(&self) -> PyResult<Vec<u8>> {
@@ -3210,6 +3284,193 @@ impl EditableDocx {
     }
 }
 
+fn property_patch(updates: &str) -> PyResult<Map<String, Value>> {
+    if updates.len() > MAX_PROPERTY_BYTES {
+        return Err(limit("metadata update exceeds 256 KiB"));
+    }
+    serde_json::from_str(updates)
+        .map_err(|_| PyValueError::new_err("metadata updates require a JSON object"))
+}
+
+fn validate_property_text(text: &str) -> PyResult<()> {
+    if text.len() > MAX_PROPERTY_VALUE_BYTES {
+        return Err(limit("metadata value exceeds 64 KiB"));
+    }
+    validate_text(text)
+}
+
+fn validate_property_timestamp(text: &str) -> PyResult<()> {
+    let bytes = text.as_bytes();
+    let invalid = || {
+        PyValueError::new_err(
+            "metadata timestamps require a valid UTC YYYY-MM-DDTHH:MM:SSZ value (years 0001..9999)",
+        )
+    };
+    if bytes.len() != 20
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes[10] != b'T'
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+        || bytes[19] != b'Z'
+        || bytes
+            .iter()
+            .enumerate()
+            .any(|(index, byte)| ![4, 7, 10, 13, 16, 19].contains(&index) && !byte.is_ascii_digit())
+    {
+        return Err(invalid());
+    }
+    let number = |start: usize, end: usize| {
+        bytes[start..end]
+            .iter()
+            .fold(0u32, |value, byte| value * 10 + u32::from(*byte - b'0'))
+    };
+    let (year, month, day) = (number(0, 4), number(5, 7), number(8, 10));
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days = match month {
+        2 => {
+            if leap {
+                29
+            } else {
+                28
+            }
+        }
+        4 | 6 | 9 | 11 => 30,
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        _ => return Err(invalid()),
+    };
+    if year == 0
+        || day == 0
+        || day > days
+        || number(11, 13) > 23
+        || number(14, 16) > 59
+        || number(17, 19) > 59
+    {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
+fn core_metadata(document: &Document) -> Value {
+    let core = &document.core;
+    let mut values = Map::new();
+    for (key, text) in [
+        ("title", &core.title),
+        ("author", &core.creator),
+        ("subject", &core.subject),
+        ("keywords", &core.keywords),
+        ("description", &core.description),
+        ("category", &core.category),
+        ("last_modified_by", &core.last_modified_by),
+        ("created", &core.created),
+        ("modified", &core.modified),
+    ] {
+        if !text.is_empty() {
+            values.insert(key.into(), json!(text));
+        }
+    }
+    if core.revision > 0 {
+        values.insert("revision".into(), json!(core.revision));
+    }
+    Value::Object(values)
+}
+
+fn custom_metadata(document: &Document) -> PyResult<Value> {
+    let mut values = Map::new();
+    for property in &document.custom_props {
+        let malformed =
+            || PyValueError::new_err("custom metadata is outside the supported scalar profile");
+        let value = match property.kind.as_str() {
+            "lpwstr" => json!(property.value),
+            "bool" => json!(property.value.parse::<bool>().map_err(|_| malformed())?),
+            "i8" => json!(property.value.parse::<i64>().map_err(|_| malformed())?),
+            "r8" => {
+                let value = property.value.parse::<f64>().map_err(|_| malformed())?;
+                if !value.is_finite() {
+                    return Err(malformed());
+                }
+                json!(value)
+            }
+            _ => return Err(malformed()),
+        };
+        values.insert(property.name.clone(), value);
+    }
+    Ok(Value::Object(values))
+}
+
+fn document_metadata(document: &Document) -> PyResult<Value> {
+    let mut values = core_metadata(document);
+    values
+        .as_object_mut()
+        .unwrap()
+        .insert("custom".into(), custom_metadata(document)?);
+    Ok(values)
+}
+
+fn patch_custom_metadata(candidate: &mut Document, value: Value) -> PyResult<()> {
+    if value.is_null() {
+        candidate.custom_props.clear();
+        return Ok(());
+    }
+    let values = value
+        .as_object()
+        .cloned()
+        .ok_or_else(|| PyValueError::new_err("custom metadata requires an object or null"))?;
+    let mut names = BTreeSet::new();
+    for (name, value) in values {
+        validate_property_text(&name)?;
+        if name.is_empty()
+            || name.len() > 255
+            || name.trim() != name
+            || name.chars().any(char::is_control)
+        {
+            return Err(PyValueError::new_err("custom property names require 1..255 UTF-8 bytes, no control characters or surrounding whitespace"));
+        }
+        if !names.insert(name.to_ascii_lowercase()) {
+            return Err(PyValueError::new_err(
+                "custom property updates contain case-insensitive duplicate names",
+            ));
+        }
+        if value.is_null() {
+            candidate.remove_custom_prop(&name);
+            continue;
+        }
+        let (kind, text) = match value {
+                Value::String(text) => {
+                    validate_property_text(&text)?;
+                    ("lpwstr", text)
+                }
+                Value::Bool(value) => ("bool", value.to_string()),
+                Value::Number(value) if value.is_i64() => ("i8", value.to_string()),
+                Value::Number(value) if value.is_f64() && value.as_f64().is_some_and(f64::is_finite) => ("r8", value.to_string()),
+                _ => return Err(PyValueError::new_err("custom properties require strings, bools, signed 64-bit integers, finite floats or null")),
+            };
+        if let Some(property) = candidate
+            .custom_props
+            .iter_mut()
+            .find(|property| property.name.eq_ignore_ascii_case(&name))
+        {
+            property.kind = kind.into();
+            property.value = text;
+        } else {
+            candidate.custom_props.push(wordcraft_doc::CustomProp {
+                name,
+                kind: kind.into(),
+                value: text,
+            });
+        }
+    }
+    if candidate.custom_props.len() > MAX_CUSTOM_PROPERTIES {
+        return Err(limit("document exceeds 1024 custom properties"));
+    }
+    if custom_metadata(candidate)?.to_string().len() > MAX_PROPERTY_BYTES {
+        return Err(limit(
+            "custom properties exceed 256 KiB of serialized values",
+        ));
+    }
+    Ok(())
+}
+
 fn attach_image_media(
     document: &mut Document,
     paragraph: &mut Paragraph,
@@ -5508,6 +5769,214 @@ fn range_offsets(text: &str, start: usize, end: usize) -> PyResult<(usize, usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn core_metadata_roundtrips_without_changing_timestamps_or_content() {
+        let mut document = EditableDocx::new();
+        document
+            .add_paragraph("Metadata body remains visible")
+            .unwrap();
+        assert_eq!(document.metadata().unwrap(), r#"{"custom":{}}"#);
+        let values = json!({"title":"Report <&> Ω", "author":"Example Author", "subject":"Subject",
+            "keywords":"one;two", "description":"First line\nSecond line", "category":"Review",
+            "last_modified_by":"Editor", "created":"2024-02-29T01:02:03Z",
+            "modified":"2026-10-20T23:59:59Z", "revision":4294967295u32});
+        document.update_metadata(&values.to_string()).unwrap();
+        let expected = document.metadata().unwrap();
+        let copied = document.copy().unwrap();
+        let bytes = document.to_bytes().unwrap();
+        assert_eq!(document.to_bytes().unwrap(), bytes);
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        assert_eq!(document_metadata(&reopened).unwrap().to_string(), expected);
+        assert_eq!(reopened.core.creator, "Example Author");
+        assert_eq!(reopened.core.created, "2024-02-29T01:02:03Z");
+        crate::docx::render(&bytes, 0, 72.0, None).unwrap();
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        crate::pdf::render(&pdf, 0, 72.0, None).unwrap();
+        document
+            .update_metadata(r#"{"author":null,"title":"","revision":null,"created":null}"#)
+            .unwrap();
+        let updated: Value = serde_json::from_str(&document.metadata().unwrap()).unwrap();
+        for key in ["title", "author", "revision", "created"] {
+            assert!(updated.get(key).is_none());
+        }
+        assert_eq!(updated["modified"], "2026-10-20T23:59:59Z");
+        assert_eq!(copied.metadata().unwrap(), expected);
+        document.close();
+        assert!(document.metadata().is_err());
+        assert!(document.update_metadata("{}").is_err());
+    }
+
+    #[test]
+    fn custom_metadata_scalar_types_clear_and_case_identity_roundtrip() {
+        let mut document = EditableDocx::new();
+        let custom = json!({"Text":"  escaped <&> Ω\ntext  ", "Empty":"", "Flag":false,
+            "Minimum":i64::MIN, "Maximum":i64::MAX, "Ratio":1.25, "NegativeZero":-0.0});
+        document
+            .update_metadata(&json!({"custom":custom}).to_string())
+            .unwrap();
+        let expected: Value = serde_json::from_str(&document.metadata().unwrap()).unwrap();
+        assert_eq!(expected["custom"], custom);
+        let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+        assert_eq!(document_metadata(&reopened).unwrap(), expected);
+        assert_eq!(
+            reopened
+                .custom_props
+                .iter()
+                .find(|p| p.name == "Flag")
+                .unwrap()
+                .kind,
+            "bool"
+        );
+        assert_eq!(
+            reopened
+                .custom_props
+                .iter()
+                .find(|p| p.name == "Maximum")
+                .unwrap()
+                .kind,
+            "i8"
+        );
+        assert_eq!(
+            reopened
+                .custom_props
+                .iter()
+                .find(|p| p.name == "Ratio")
+                .unwrap()
+                .kind,
+            "r8"
+        );
+        document
+            .update_metadata(r#"{"title":"Retained","custom":{"flag":true,"ratio":null}}"#)
+            .unwrap();
+        let values: Value = serde_json::from_str(&document.metadata().unwrap()).unwrap();
+        assert_eq!(values["custom"]["Flag"], true);
+        assert!(values["custom"].get("flag").is_none());
+        assert!(values["custom"].get("Ratio").is_none());
+        document.update_metadata(r#"{"custom":null}"#).unwrap();
+        assert_eq!(
+            document.metadata().unwrap(),
+            r#"{"custom":{},"title":"Retained"}"#
+        );
+        assert!(wordcraft_docx::read(&document.to_bytes().unwrap())
+            .unwrap()
+            .custom_props
+            .is_empty());
+    }
+
+    #[test]
+    fn metadata_invalid_updates_preserve_owner_and_revision() {
+        let mut document = EditableDocx::new();
+        document
+            .update_metadata(r#"{"title":"Original","custom":{"Keep":1}}"#)
+            .unwrap();
+        let bytes = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        let mut invalid = vec![
+            "[]".into(),
+            r#"{"title":"Changed","language":"en"}"#.into(),
+            r#"{"title":" Changed"}"#.into(),
+            r#"{"title":"Changed "}"#.into(),
+            r#"{"title":"\u0000"}"#.into(),
+            r#"{"title":true}"#.into(),
+            r#"{"revision":true}"#.into(),
+            r#"{"revision":-1}"#.into(),
+            r#"{"revision":4294967296}"#.into(),
+            r#"{"revision":1.0}"#.into(),
+            r#"{"custom":{"Key":1,"KEY":2}}"#.into(),
+            r#"{"custom":{"Keep":null,"Nested":[]}}"#.into(),
+            r#"{"custom":{"Huge":9223372036854775808}}"#.into(),
+            r#"{"custom":{"Huge":1e400}}"#.into(),
+            r#"{"custom":[]}"#.into(),
+            r#"{"custom":{"":1}}"#.into(),
+            r#"{"custom":{" bad":1}}"#.into(),
+            r#"{"custom":{"bad\nname":1}}"#.into(),
+        ];
+        for date in [
+            "2023-02-29T00:00:00Z",
+            "1900-02-29T00:00:00Z",
+            "0000-01-01T00:00:00Z",
+            "2024-13-01T00:00:00Z",
+            "2024-04-31T00:00:00Z",
+            "2024-01-00T00:00:00Z",
+            "2024-01-01T24:00:00Z",
+            "2024-01-01T00:60:00Z",
+            "2024-01-01T00:00:60Z",
+            "2024-01-01",
+            "2024-01-01T00:00:00+01:00",
+            "é024-01-01T00:00:00Z",
+        ] {
+            invalid.push(json!({"title":"Changed", "created":date}).to_string());
+        }
+        invalid.push(json!({"title":"x".repeat(MAX_PROPERTY_VALUE_BYTES+1)}).to_string());
+        invalid.push(json!({"custom":{"x".repeat(256):1}}).to_string());
+        for update in invalid {
+            assert!(
+                document.update_metadata(&update).is_err(),
+                "unexpectedly accepted {update}"
+            );
+            assert_eq!(document.revision().unwrap(), revision);
+            assert_eq!(document.to_bytes().unwrap(), bytes);
+        }
+        document.update_metadata("{}").unwrap();
+        assert_eq!(document.revision().unwrap(), revision);
+    }
+
+    #[test]
+    fn metadata_aggregate_and_custom_count_budgets_reclaim_after_clear() {
+        let mut document = EditableDocx::new();
+        let value = "x".repeat(60_000);
+        for name in ["title", "author", "subject", "description"] {
+            document
+                .update_metadata(&json!({name:&value}).to_string())
+                .unwrap();
+        }
+        let revision = document.revision().unwrap();
+        assert!(document
+            .update_metadata(&json!({"keywords":&value}).to_string())
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        document.update_metadata(r#"{"description":null}"#).unwrap();
+        document
+            .update_metadata(&json!({"keywords":&value}).to_string())
+            .unwrap();
+        for name in ["First", "Second", "Third", "Fourth"] {
+            document
+                .update_metadata(&json!({"custom":{name:&value}}).to_string())
+                .unwrap();
+        }
+        assert!(document
+            .update_metadata(&json!({"custom":{"Fifth":&value}}).to_string())
+            .is_err());
+        document.update_metadata(r#"{"custom":null}"#).unwrap();
+        let properties: Map<String, Value> = (0..MAX_CUSTOM_PROPERTIES)
+            .map(|index| (format!("Property{index}"), json!(index)))
+            .collect();
+        document
+            .update_metadata(&json!({"custom":properties}).to_string())
+            .unwrap();
+        assert!(document
+            .update_metadata(r#"{"custom":{"Extra":1}}"#)
+            .is_err());
+        document
+            .update_metadata(r#"{"custom":{"Property0":null,"Extra":1}}"#)
+            .unwrap();
+        assert_eq!(
+            document.document().unwrap().custom_props.len(),
+            MAX_CUSTOM_PROPERTIES
+        );
+        document.to_bytes().unwrap();
+    }
+
+    #[test]
+    fn upstream_core_metadata_reader_trims_supplied_strings() {
+        let mut document = Document::new();
+        document.core.title = "  Title Ω  ".into();
+        document.core.created = "2024-02-29T01:02:03Z".into();
+        let reopened = wordcraft_docx::read(&wordcraft_docx::write(&document).unwrap()).unwrap();
+        assert_eq!(reopened.core.title, "Title Ω");
+        assert_eq!(reopened.core.created, document.core.created);
+    }
 
     fn media_png(width: u32, height: u32, color: [u8; 4]) -> Vec<u8> {
         crate::rendering::encode_png(

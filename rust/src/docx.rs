@@ -541,10 +541,17 @@ impl<'a> Adapter<'a> {
             ("author", &self.document.core.creator),
             ("keywords", &self.document.core.keywords),
             ("description", &self.document.core.description),
+            ("category", &self.document.core.category),
+            ("last_modified_by", &self.document.core.last_modified_by),
+            ("created", &self.document.core.created),
+            ("modified", &self.document.core.modified),
         ] {
             if !value.is_empty() {
                 metadata.insert(key.into(), Value::String(value.clone()));
             }
+        }
+        if self.document.core.revision > 0 {
+            metadata.insert("revision".into(), json!(self.document.core.revision));
         }
         metadata.insert(
             "pagination".into(),

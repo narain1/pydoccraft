@@ -382,3 +382,28 @@ DOCX borders accept `none`, `single`, `dotted`, `dashed`, `thick`, and horizonta
 Supplied-font PDF drawing rejects pages with 256 or more `PCFull`-prefixed font bindings, including inherited bindings. At this pin, native bounded lookup can miss the full font program on such pages and embed it repeatedly across lines without the expected reuse. The guard runs before embedding and leaves the document unchanged; ordinary repeated font calls remain supported.
 
 Supplied static TrueType fonts additionally require every shaped glyph outline to fit inside a text box. Native unhinted outlines and exact curve bounds include shaping offsets; overflow fails before committing. Boxed CFF fonts are explicitly unsupported because their public native evaluator lacks an aggregate work budget. The existing `at` path is unchanged. Built-in fonts still use native logical metrics and may have small ink overhangs; no path promises clipping. Outline checks cap distinct glyphs, component visits/depth, points, path operations and scratch memory.
+
+### DOCX document properties
+
+`document.metadata` returns an owned dictionary. `update_metadata(**values)` patches core properties and an optional nested `custom` dictionary:
+
+```python
+report.update_metadata(
+    title="Quarterly report", author="Reporting team", revision=2,
+    modified="2026-10-20T12:00:00Z",
+    custom={"Approved": False, "Quarter": 4, "Ratio": 1.25},
+)
+report.update_metadata(custom={"Approved": True, "Ratio": None})
+```
+
+Core keys are `title`, `author`, `subject`, `keywords`, `description`, `category`, `last_modified_by`, `created`, `modified` and `revision`. Strings use XML-safe text without surrounding whitespace because the native reader trims it. Empty strings or `None` clear core strings; revision is an unsigned 32-bit integer, with zero/`None` clearing it. Created/modified accept valid UTC `YYYY-MM-DDTHH:MM:SSZ` timestamps, years 0001–9999. Saving leaves caller timestamps and revision unchanged. The dictionary omits cleared core values and always includes `custom`.
+
+Custom values support strings, booleans, signed 64-bit integers and finite floats, preserving their native types. A custom dictionary patches entries: omitted names stay unchanged, per-entry `None` removes one, and `custom=None` clears all. Names use native ASCII case-insensitive identity while retaining their original spelling; ambiguous batch names fail. Custom string whitespace is preserved. Nested objects, arbitrary XML, vectors and custom date wrappers are unavailable. Names are 1–255 UTF-8 bytes with no control characters or surrounding whitespace; values are limited to 64 KiB, with at most 1,024 properties. Incoming JSON, stored core values and stored custom values each have a 256 KiB serialized budget. Compound updates fail atomically, retaining existing ranges and cached output on rejection.
+
+Ordinary DOCX extraction exposes the supported core properties. Imported custom-property inventory, core language and extended/application property editing remain DOC7 gaps. Metadata editing uses native CoreProps/CustomProp and the normal document writer; it does not add arbitrary source DOCX editing.
+
+### PDF text-markup annotations
+
+`page.annotations.add(kind, box=..., text="", author="", color=...)` also accepts `underline`, `strikeout` and `squiggly`, alongside `note` and `highlight`. Existing annotation properties and `update` move the markup, change text/author/color, and preserve searchable page text. Deletion remains `del page.annotations[index]`. Boxes use current displayed-page points; native quadrilaterals preserve rotation, CropBox and UserUnit geometry. Each new mark uses one quadrilateral. Movement is supported; resizing and multi-quad authoring remain unavailable.
+
+Native appearance generation is preflighted before potentially allocating it, including when updating imported highlights. Direct quadrilateral arrays are limited to 1,024 quads with finite coordinates within ±1,000,000 PDF user units (the editable page-box coordinate limit), plus a conservative work estimate within the remaining document-input budget; generated appearance bytes are charged after successful staging. Squiggly's native 10,000-segment cap coarsens the whole line rather than truncating its extent. Unsupported/malformed/over-budget updates leave bytes and cached renders unchanged. Deletion reads the subtype without rebuilding appearances, so an over-budget appearance does not prevent removal. This profile does not establish complete imported-form, reply-thread or arbitrary annotation appearance support.
