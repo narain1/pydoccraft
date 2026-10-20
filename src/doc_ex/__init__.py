@@ -84,6 +84,7 @@ def _kind(data: bytes, suffix: str, filetype: str | None) -> str:
 
 
 def open(path_or_bytes: str | Path | bytes | bytearray | memoryview | BinaryIO, filetype: str | None = None, password: str | None = None) -> Document:
+    """Open PDF, DOCX or PPTX for extraction and rendering; returned models own their data."""
     data, suffix = _read(path_or_bytes)
     kind = _kind(data, suffix, filetype)
     if kind == "pdf":
@@ -154,6 +155,7 @@ def extract_text(
 
 
 def convert(source: str | Path | bytes | bytearray | memoryview | BinaryIO, output_format: str, *, filetype: str | None = None, password: str | None = None) -> bytes:
+    """Return converted file bytes for a supported format pair; unsupported conversions raise explicitly."""
     data, suffix = _read(source)
     kind = _kind(data, suffix, filetype)
     target = output_format.lower().lstrip(".")
