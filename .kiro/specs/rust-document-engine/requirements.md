@@ -240,3 +240,15 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 2. Existing document/cell image collections SHALL support indexed deletion of one inline placement. Native paragraph deletion SHALL preserve the anchor paragraph and unrelated IDs; deleted handles SHALL fail explicitly.
 3. Native media insertion SHALL deduplicate and allocate collision-safe keys. Commit SHALL retain media referenced by supported authored stories, including nested tables and auxiliary parts, and recompute distinct encoded-byte and placement budgets. Unsupported object profiles SHALL fail before cleanup rather than risking unrelated resources.
 4. Tests SHALL verify replacement/removal, shared resources, copy independence, reclaimed budgets, save/read/render consistency and atomic failure; no new image-processing backend SHALL be introduced.
+
+## 28. DOCX core and typed custom properties
+
+1. Existing metadata/update_metadata naming SHALL expose supported native core values and a nested scalar custom mapping. Patches SHALL preserve omitted entries, distinguish clear/reset, preserve custom value types and native name identity, and reject ambiguous or unsupported values atomically.
+2. Core whitespace and timestamp input SHALL be validated against native readback behavior. Saving SHALL retain explicit timestamps/revision without automatically changing them. Source extraction SHALL expose the supported core fields; broader imported custom/language/extended properties remain separately scoped.
+3. Python SHALL bound scalars and aggregate encoding before constructing the native JSON patch; Rust SHALL bound input, stored property bytes and counts. Tests SHALL verify native XML/readback, public extraction, copy/snapshot ownership, rollback, capacity reuse and unchanged content/rendering.
+
+## 29. PDF text-markup kinds and appearance budgets
+
+1. Existing annotation operations SHALL support native underline, strikeout and squiggly kinds with current-view coordinates, metadata changes, movement, recoloring, deletion and reopened persistence. New authoring SHALL use one quadrilateral and reject unsupported resizing/target changes.
+2. Appearance work SHALL be bounded before native property inspection or regeneration. Direct native QuadPoints SHALL have bounded counts and finite geometry; newly generated appearance bytes SHALL count toward document mutation budgets. Deletion SHALL not rebuild an appearance merely to identify its subtype.
+3. Tests SHALL verify actual pixels across rotations/CropBox/UserUnit, preserved page text, cache invalidation, reopened metadata, stale handles and atomic budget/geometry failures. Broader PDF6 form/import/reply criteria SHALL remain open.
