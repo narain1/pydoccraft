@@ -1796,8 +1796,32 @@ class PdfPage:
         self._check()
         return Annotations(self)
 
-    def draw_text(self, text: str, *, at: tuple[float, float], font_size: float = 12, font=None, color="black"):
+    def draw_text(self, text: str, *, at: tuple[float, float] | None = None,
+                  box: tuple[float, float, float, float] | None = None,
+                  font_size: float = 12, font=None, color="black", align: str = "left"):
+        """Draw searchable text at a point or inside a bounded top-left box.
+
+        Built-in fonts wrap within boxes; supplied fonts require explicit lines.
+        Overflow fails atomically. Alignment applies only to boxes.
+        """
         self._check()
+        if (at is None) == (box is None):
+            raise ValueError("provide exactly one of at or box")
+        if not isinstance(align, str) or align not in {"left", "center", "right", "justify"}:
+            raise ValueError("align must be left, center, right or justify")
+        if box is not None:
+            if not isinstance(box, (tuple, list)) or len(box) != 4:
+                raise TypeError("box must be (x, y, width, height) in top-left points")
+            rect = tuple(map(pt, box))
+            data = None
+            if font is not None:
+                from . import _read
+                data, _ = _read(font, limit=16 * 1024 * 1024)
+            self._owner._call("add_text_box", self._id, text, rect, pt(font_size),
+                              _color(color), align, data, _change=True)
+            return
+        if align != "left":
+            raise ValueError("alignment requires a text box")
         if not isinstance(at, (tuple, list)) or len(at) != 2:
             raise TypeError("at must be an (x, y) pair in top-left points")
         if font is None:
@@ -1825,13 +1849,33 @@ class PdfPage:
             raise ValueError("path commands exceed 256 KiB")
         self._owner._call("draw_path", self._id, payload, None if stroke is None else _color(stroke), None if fill is None else _color(fill), pt(width), close, _change=True)
 
-    def add_image(self, source, *, box):
+    def add_image(self, source, *, box, crop=None, rotation: int = 0,
+                  flip_h: bool = False, flip_v: bool = False):
+        """Place an image with optional visual crop, quarter-turn and flips.
+
+        Crop is (left, top, right, bottom), each a fraction from 0 to 0.45.
+        Rotation is counterclockwise. Original embedded pixels are retained.
+        """
         self._check()
         from . import _read
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
+        if crop is not None:
+            if not isinstance(crop, (tuple, list)) or len(crop) != 4:
+                raise TypeError("crop must be (left, top, right, bottom) fractions")
+            crop = tuple(map(pt, crop))
+            if any(value < 0 or value > 0.45 for value in crop):
+                raise ValueError("crop fractions must be between 0 and 0.45")
+        if isinstance(rotation, bool):
+            raise TypeError("rotation must be an integer quarter-turn")
+        rotation = operator.index(rotation)
+        if rotation not in (0, 90, 180, 270):
+            raise ValueError("rotation must be 0, 90, 180 or 270 degrees")
+        if not isinstance(flip_h, bool) or not isinstance(flip_v, bool):
+            raise TypeError("flip_h and flip_v must be booleans")
         data, _ = _read(source)
-        self._owner._call("add_image", self._id, data, *map(pt, box), _change=True)
+        self._owner._call("add_image", self._id, data, *map(pt, box), crop,
+                          rotation, flip_h, flip_v, _change=True)
 
     def get_pixmap(self, dpi: float = 144, *, clip: tuple[float, float, float, float] | None = None) -> bytes:
         self._check()
