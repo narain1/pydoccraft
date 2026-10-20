@@ -2227,19 +2227,28 @@ class Slide:
     def add_shape(self, kind: str, *, box, fill=None, stroke=None, stroke_width: float = 1):
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
-        identifier = self._owner._call("add_shape", self.number, kind, *map(pt, box), None if fill is None else _color(fill), None if stroke is None else _color(stroke), pt(stroke_width), _change=True)
+        coordinates = tuple(map(pt, box))
+        fill = None if fill is None else _color(fill)
+        stroke = None if stroke is None else _color(stroke)
+        stroke_width = pt(stroke_width)
+        identifier = self._owner._call("add_shape", self.number, kind, *coordinates, fill, stroke, stroke_width, _change=True)
         return Shape(self._owner, self._id, identifier)
 
     def add_text(self, text: str, *, box, font_size: float = 18):
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
-        identifier = self._owner._call("add_text", self.number, text, *map(pt, box), pt(font_size), _change=True)
+        coordinates = tuple(map(pt, box))
+        font_size = pt(font_size)
+        identifier = self._owner._call("add_text", self.number, text, *coordinates, font_size, _change=True)
         return Shape(self._owner, self._id, identifier)
 
     def add_table(self, rows, *, columns: int | None = None, box, font_size: float = 18):
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
-        identifier = self._owner._call("add_table", self.number, _rows(rows, columns), *map(pt, box), pt(font_size), _change=True)
+        rows = _rows(rows, columns)
+        coordinates = tuple(map(pt, box))
+        font_size = pt(font_size)
+        identifier = self._owner._call("add_table", self.number, rows, *coordinates, font_size, _change=True)
         return SlideTable(self._owner, identifier, self._id)
 
     def add_image(self, source, *, box, alt: str = "") -> SlidePicture:
