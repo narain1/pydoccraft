@@ -431,3 +431,8 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 - The selective all-page text path was 2.06×, 2.30×, and 1.22× slower than PyMuPDF after removing its redundant valid-document `inspect()` parse.
 - The single-parse change improved pydoccraft versus its preceding merged implementation by approximately 1.10×, 1.04×, and 1.00×. Rust 1.95 tests/Clippy passed: 194 tests.
 - Remaining structured-open costs are duplicate PdfCraft text interpretation for table detection and unconditional image traversal; exact semantic optimizations require focused upstream PdfCraft APIs rather than local PDF heuristics.
+
+## 2026-10-20 combined table fixture pack
+
+- The new single acceptance test runs six generated fixtures: invoice, merged header, nested table, long repeated-header table, RTL table and picture-containing cell. All pass against the clean installed `/opt/sectionlayouttest` artifact recorded above (194 Rust /212 prior Python baseline); the new fixture test is additional to that baseline. No runtime code or dependency changed in this slice.
+- Both DOCX and PDF reopen with matching page counts, body labels exactly once and visible representative colors on every rendered page. The repeating-header fixture checks one semantic source header and one visible header on each PDF page. RTL source order and reversed visual cell placement, merged semantic spans, nested fill and source-image colors are independently asserted. Independent review subsequently ran the complete suite against the same frozen installed package: all 213 Python tests passed. Runtime and dependency files remain byte-identical to the 194-Rust-test section/layout baseline; exact current-main CI is required before merge. See `docs/table-corpus.md`.

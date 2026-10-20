@@ -266,3 +266,9 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 1. Existing slides.add SHALL accept the verified blank, title, title_and_content and two_content native layouts. Other known layouts SHALL fail explicitly until their fidelity is verified, and unknown names SHALL fail validation. Native constructors SHALL own layout/master relationships and fresh object identities.
 2. Existing shapes SHALL expose a read-only placeholder role and native resolved box/rotation. Text edits SHALL preserve inheritance; geometry edits SHALL materialize only the affected transform while retaining unrelated transform values and placeholder references. No separate placeholder collection or layout engine SHALL be introduced.
 3. Native ID/content budgets SHALL be checked before mutation. Tests SHALL cover actual placeholder text in native PNG/PDF, saved PPTX relationships, unchanged masters, geometry edits, ownership and atomic invalid/limit failures. General slide copy/import and layout/theme editing remain separately scoped.
+
+## 32. Combined table fixture acceptance
+
+1. The installed-wheel corpus SHALL generate invoice, merged-header, nested, long repeated-header, RTL and image-cell fixtures through existing public APIs. No fixture-specific runtime methods or external processors SHALL be added.
+2. Saved DOCX and exported PDF SHALL reopen with matching page counts and exactly-once body content. Semantic table spans/order SHALL remain distinct from rendered RTL placement and intentional repeated PDF headers. Every rendered page SHALL have checked visible representative fills; nested/image source pixels SHALL survive export.
+3. The fixture index SHALL record covered combinations and distinguish this acceptance from broader table fidelity, accessibility and import-preservation criteria.
