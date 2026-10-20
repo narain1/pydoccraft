@@ -199,6 +199,12 @@ class EpubTests(unittest.TestCase):
         )
         with self.assertRaises(doc_ex.MalformedDocumentError):
             doc_ex.open(malformed_package)
+        malformed_unreferenced_xhtml = rewrite_epub(
+            epub_fixture(),
+            {"OEBPS/unused.xhtml": '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>broken</body></html>'},
+        )
+        with self.assertRaises(doc_ex.MalformedDocumentError):
+            doc_ex.open(malformed_unreferenced_xhtml)
 
         with doc_ex.new("epub") as book:
             book.set_metadata(title="Safe", identifier="urn:safe", language="en")

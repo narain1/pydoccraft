@@ -179,6 +179,12 @@ impl EditableEpub {
         self.images.try_reserve(1).map_err(|_| {
             EngineError::ResourceLimit("cannot allocate bounded EPUB image storage".into())
         })?;
+        self.chapters[chapter]
+            .body
+            .try_reserve(fragment.len())
+            .map_err(|_| {
+                EngineError::ResourceLimit("cannot allocate bounded EPUB chapter storage".into())
+            })?;
         self.chapters[chapter].body.push_str(&fragment);
         self.images.push(ImageResource { href, data });
         self.content_bytes = next_content;

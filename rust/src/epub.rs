@@ -443,7 +443,28 @@ fn validate_container(data: &[u8]) -> Result<(), EngineError> {
         bytes
     };
     validate_xml(&package, "package XML")?;
-    validate_package_structure(&package)
+    validate_package_structure(&package)?;
+
+    for index in 0..archive.len() {
+        let mut member = archive
+            .by_index(index)
+            .map_err(|error| EngineError::Malformed(format!("invalid EPUB ZIP member: {error}")))?;
+        let name = member.name().to_ascii_lowercase();
+        if member.is_dir() || !(name.ends_with(".xhtml") || name.ends_with(".html")) {
+            continue;
+        }
+        let size = usize::try_from(member.size())
+            .map_err(|_| EngineError::ResourceLimit("EPUB XHTML is too large".into()))?;
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(size)
+            .map_err(|_| EngineError::ResourceLimit("cannot allocate bounded EPUB XHTML".into()))?;
+        member.read_to_end(&mut bytes).map_err(|error| {
+            EngineError::Malformed(format!("invalid EPUB XHTML member: {error}"))
+        })?;
+        validate_xhtml(&bytes)?;
+    }
+    Ok(())
 }
 
 #[allow(deprecated)]
