@@ -266,4 +266,4 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 ## Bounded PDF page selections
 
 - [x] Reuse bounded integer selection for PDF copy/import and reject callback-driven page organization before native dispatch.
-- [ ] Verify limits, ownership, callback behavior and selected output in the complete installed-wheel corpus; record artifact evidence.
+- [x] Verify limits, ownership, callback behavior and selected output in the complete installed-wheel corpus; record artifact evidence.
