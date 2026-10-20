@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import operator
 from pathlib import Path
 from typing import BinaryIO
 
@@ -20,7 +21,7 @@ from .models import Block, Cell, Image, Link, Story, Table
 from ._authoring import EditableDocument, new, pt, mm, cm, inches
 
 __all__ = [
-    "open", "convert", "new", "pt", "mm", "cm", "inches", "EditableDocument", "Document", "Page", "Block", "Cell", "Table", "Link", "Image", "Story",
+    "open", "convert", "extract_text", "new", "pt", "mm", "cm", "inches", "EditableDocument", "Document", "Page", "Block", "Cell", "Table", "Link", "Image", "Story",
     "DocExError", "DocumentClosedError", "MalformedDocumentError", "UnsafeArchiveError",
     "UnsupportedFormatError", "ToolExecutionError", "ToolNotFoundError",
 ]
@@ -89,6 +90,24 @@ def open(path_or_bytes: str | Path | bytes | bytearray | memoryview | BinaryIO, 
     return Document(pages, metadata, data, kind, password, stories=stories)
 
 
+def extract_text(
+    source: str | Path | bytes | bytearray | memoryview | BinaryIO,
+    *,
+    filetype: str | None = None,
+    password: str | None = None,
+    pages=None,
+) -> str:
+    """Extract selected pages as form-feed-separated text without building public models."""
+    data, suffix = _read(source)
+    kind = _kind(data, suffix, filetype)
+    indices = None if pages is None else [operator.index(page) for page in pages]
+    if kind == "pdf":
+        return _native(lambda: _core.extract_text(data, indices, password))
+    with open(data, filetype=kind, password=password) as document:
+        selected = range(document.page_count) if indices is None else indices
+        return "\f".join(document[index].get_text("text") for index in selected)
+
+
 def convert(source: str | Path | bytes | bytearray | memoryview | BinaryIO, output_format: str, *, filetype: str | None = None, password: str | None = None) -> bytes:
     data, suffix = _read(source)
     kind = _kind(data, suffix, filetype)
@@ -108,6 +127,7 @@ def _native(operation):
             "malformed": MalformedDocumentError,
             "unsafe_archive": UnsafeArchiveError,
             "resource_limit": UnsafeArchiveError,
+            "index": IndexError,
             "encrypted": MalformedDocumentError,
             "conversion_failure": DocExError,
             "closed": DocumentClosedError,

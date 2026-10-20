@@ -49,11 +49,12 @@ Rendering and conversion dependencies are currently unconditional in the release
 
 ```python
 _core.extract(data: bytes, filetype: str, password: str | None) -> str
+_core.extract_text(data: bytes, pages: list[int] | None, password: str | None) -> str
 _core.convert(data: bytes, source_format: str, target_format: str, password: str | None) -> bytes
 _core.render(data: bytes, filetype: str, page: int, dpi: float, password: str | None) -> bytes
 ```
 
-JSON remains the narrow extraction ABI. Images are base64 encoded only across this boundary. `render` returns PNG bytes. Python hydrates typed `Document`, `Page`, `Block`, `Table`, `Cell`, `Link`, and `Image` values.
+JSON remains the narrow structured-extraction ABI. Images are base64 encoded only across this boundary. The additive PDF `extract_text` fast path returns bounded form-feed-separated text directly and deliberately omits structured values; DOCX/PPTX use the existing eager model fallback in Python. `render` returns PNG bytes. Python hydrates typed `Document`, `Page`, `Block`, `Table`, `Cell`, `Link`, and `Image` values.
 
 ## Conversion matrix
 

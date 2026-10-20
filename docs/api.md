@@ -36,6 +36,17 @@ For paths, the suffix is checked against the detected content. For bytes, the na
 
 Passwords are supported for encrypted PDF and DOCX input. Encrypted PPTX is rejected by the upstream DeckCraft importer.
 
+## Fast text extraction
+
+```python
+text = doc_ex.extract_text("report.pdf")
+selected = doc_ex.extract_text("report.pdf", pages=[0, 4, -1])
+```
+
+`extract_text(source, *, filetype=None, password=None, pages=None)` returns selected pages separated by form-feed (`\f`) characters. Page indexes preserve caller order, allow duplicates, and support normal negative indexing; invalid indexes raise `IndexError`.
+
+For PDF, this is a bounded native fast path: it uses PdfCraft text extraction but skips table/image traversal, media transfer, normalized JSON, and public model hydration. Output is capped at 64 MiB and selected-page requests are capped at 10,000 entries. DOCX and PPTX use the existing eager extraction model as a compatibility fallback. Use `open()` when links, tables, images, geometry, metadata, Markdown, or owned structured values are required.
+
 ## Convert a document
 
 ```python

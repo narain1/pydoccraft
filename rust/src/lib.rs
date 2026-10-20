@@ -29,6 +29,8 @@ pub enum EngineError {
     UnsafeArchive(String),
     #[error("resource_limit:{0}")]
     ResourceLimit(String),
+    #[error("index:{0}")]
+    PageIndex(String),
     #[error("encrypted:document is password-protected or the supplied password is incorrect")]
     Encrypted,
     #[error("conversion_failure:{0}")]
@@ -52,6 +54,17 @@ fn extract(data: &[u8], filetype: &str, password: Option<&str>) -> PyResult<Stri
         _ => unreachable!(),
     }?;
     limits::bounded_json(&payload, limits::MAX_PAYLOAD_SIZE).map_err(Into::into)
+}
+
+#[pyfunction]
+#[pyo3(signature = (data, pages=None, password=None))]
+fn extract_text(
+    data: &[u8],
+    pages: Option<Vec<isize>>,
+    password: Option<&str>,
+) -> PyResult<String> {
+    limits::validate_input_size(data.len())?;
+    pdf::extract_text(data, password, pages.as_deref()).map_err(Into::into)
 }
 
 #[pyfunction]
@@ -131,6 +144,7 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
         module.py().get_type::<DocExNativeError>(),
     )?;
     module.add_function(wrap_pyfunction!(extract, module)?)?;
+    module.add_function(wrap_pyfunction!(extract_text, module)?)?;
     module.add_function(wrap_pyfunction!(convert, module)?)?;
     module.add_function(wrap_pyfunction!(render, module)?)?;
     module.add_function(wrap_pyfunction!(detect, module)?)?;

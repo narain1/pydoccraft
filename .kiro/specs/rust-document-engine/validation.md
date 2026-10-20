@@ -285,3 +285,11 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 - Direct native rendering was 1.61× and 1.28× faster than PyMuPDF's public open+render path on the 65- and 14-page PDFs, but PyMuPDF was 3.24× faster on the 391-page PDF. The major public-path regression is therefore eager extraction plus duplicate open state, not uniformly slow rasterization.
 - JSON decode plus Python hydration added 11.18–28.71 ms. Media-heavy inputs can add separate base64/ownership costs.
 - The prioritized feature improvement remains W02/P1: a bounded private native parse/render session, followed by bounded selected-page/text-only extraction under W09/P4.
+
+## Selective text extraction feature branch
+
+- Added `doc_ex.extract_text(source, filetype=None, password=None, pages=None)` with form-feed page separation, ordered/duplicate selections, negative indexes, stable `IndexError`, 10,000 selected-page limit, and 64 MiB output limit.
+- PDF uses a single PdfCraft text renderer and skips COS table/image traversal, media transfer, bounded JSON serialization, and Python public-model hydration. DOCX/PPTX retain eager compatibility fallback behavior.
+- Independent Rust 1.95 formatting/tests/Clippy and release-wheel validation passed: 128 Rust tests and 139 installed-wheel Python tests.
+- Anonymous Linux ARM64 medians versus eager `open()` were: all-page text 1.95×, 2.25×, and 4.95× faster; first-page text 19.91×, 42.32×, and 41.93× faster across the 391-, 65-, and 14-page PDFs.
+- This PR is independent of PDF render-session reuse. Selective structured extraction, Office fast paths, streaming/chunked output, and peak-memory evidence remain open.

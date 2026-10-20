@@ -132,7 +132,9 @@ The evidence identifies four costs:
 3. **The renderer itself is not uniformly slow.** The private direct-native probe was 1.61× faster than PyMuPDF's public open/render path on PDF-2 and 1.28× faster on PDF-3, while PyMuPDF was 3.24× faster on PDF-1. The 59.83× public-path gap therefore cannot be attributed to rasterization alone.
 4. **JSON and Python hydration are secondary but visible.** They add roughly 12–29 ms here and become proportionally significant for the 13.24 MiB/14-page document. Image-heavy inputs may add base64 expansion and decoding beyond what this stage profile isolates.
 
-The highest-value feature improvement is a bounded private native document session: inspect/open once, preserve reusable parse/render state, extract pages or text profiles on demand, and drop native state deterministically on `close()`. Existing hydrated values must remain owned, and all resource limits and stable errors must remain intact. A smaller interim improvement is a bounded direct-render or selected-page extraction entry point that avoids mandatory whole-document normalization.
+The highest-value feature improvement is a bounded private native document session: inspect/open once, preserve reusable parse/render state, extract pages or text profiles on demand, and drop native state deterministically on `close()`. Existing hydrated values must remain owned, and all resource limits and stable errors must remain intact.
+
+An independent selective-text feature branch adds `extract_text(..., pages=...)` without changing eager `open()`. On anonymous Linux ARM64 release-wheel runs, all-page PDF text improved by 1.95×–4.95× over eager open, while selecting only page 1 improved by 19.91×–42.32×. The fast path uses PdfCraft text extraction but skips table/image traversal, media transfer, JSON, and public-model hydration. It retains ordered/duplicate selections, negative indexes, a 10,000-selection limit, and a 64 MiB output limit.
 
 ## API and performance rough edges
 

@@ -177,6 +177,25 @@ class ApiTests(unittest.TestCase):
             "[same](https://one) and [same](https://two)",
         )
 
+    def test_selective_text_extraction_preserves_page_order_and_indexes(self) -> None:
+        data = pdf_fixture()
+        text = doc_ex.extract_text(data, filetype="pdf")
+        self.assertEqual(text.count("\f"), 1)
+        self.assertIn("Page one", text)
+        self.assertIn("Second page image", text)
+
+        selected = doc_ex.extract_text(data, filetype="pdf", pages=[-1, 0, -1])
+        parts = selected.split("\f")
+        self.assertEqual(len(parts), 3)
+        self.assertIn("Second page image", parts[0])
+        self.assertIn("Page one", parts[1])
+        self.assertEqual(parts[0], parts[2])
+        with self.assertRaises(IndexError):
+            doc_ex.extract_text(data, filetype="pdf", pages=[2])
+
+        office = doc_ex.extract_text(docx_fixture(), filetype="docx", pages=[-1])
+        self.assertIn("Second page", office)
+
     def test_conversion_reopen_no_table_duplication_and_empty_pages(self) -> None:
         docx = doc_ex.convert(pdf_fixture(), "docx", filetype="pdf")
         with doc_ex.open(docx) as converted:

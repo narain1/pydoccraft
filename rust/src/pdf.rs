@@ -91,6 +91,87 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
     })
 }
 
+pub fn extract_text(
+    data: &[u8],
+    password: Option<&str>,
+    pages: Option<&[isize]>,
+) -> Result<String, EngineError> {
+    let bytes = Arc::new(data.to_vec());
+    let info = inspect(bytes.clone(), password).map_err(open_error)?;
+    if info.pages.is_empty() {
+        return Err(EngineError::Malformed("PDF contains no pages".into()));
+    }
+    let selected = match pages {
+        Some(indices) => {
+            if indices.len() > 10_000 {
+                return Err(EngineError::ResourceLimit(
+                    "selected page count exceeds 10000".into(),
+                ));
+            }
+            indices
+                .iter()
+                .map(|&index| {
+                    let resolved = if index < 0 {
+                        info.pages.len() as isize + index
+                    } else {
+                        index
+                    };
+                    if resolved < 0 || resolved as usize >= info.pages.len() {
+                        Err(EngineError::PageIndex(format!(
+                            "page index {index} is out of range"
+                        )))
+                    } else {
+                        Ok(resolved as usize)
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        }
+        None => (0..info.pages.len()).collect(),
+    };
+    let mut renderer = PageRenderer::new(
+        bytes,
+        RenderConfig {
+            password: password.map(Arc::from),
+            ..Default::default()
+        },
+    );
+    let mut output = String::new();
+    for (position, page) in selected.into_iter().enumerate() {
+        let rendered = renderer.render(RenderRequest {
+            page,
+            kind: RequestKind::Text,
+            scale: 1.0,
+            ..Default::default()
+        });
+        check_content_warnings(&rendered.warnings)?;
+        if let Some(error) = rendered.error {
+            return Err(EngineError::Malformed(format!(
+                "PDF text extraction failed: {error}"
+            )));
+        }
+        let text = rendered
+            .text
+            .ok_or_else(|| EngineError::Malformed("PDF page has no text result".into()))?
+            .plain_text();
+        let separator = usize::from(position > 0);
+        if output
+            .len()
+            .saturating_add(separator)
+            .saturating_add(text.len())
+            > crate::limits::MAX_PAYLOAD_SIZE
+        {
+            return Err(EngineError::ResourceLimit(
+                "selected text exceeds the 64 MiB output limit".into(),
+            ));
+        }
+        if position > 0 {
+            output.push('\u{c}');
+        }
+        output.push_str(text.trim_end());
+    }
+    Ok(output)
+}
+
 pub fn render(
     data: &[u8],
     page: usize,
