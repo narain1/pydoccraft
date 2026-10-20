@@ -264,6 +264,13 @@ U07/REF2 shaping blocker: [native paragraph shaping](https://github.com/storytol
 
 U10/PDF8: pinned [SaveOptions](https://github.com/storytold/pdfcraft/blob/645016addcfb9078c557f0189559ab47cdcee057/crates/cos/src/writer.rs#L142) and [write_full](https://github.com/storytold/pdfcraft/blob/645016addcfb9078c557f0189559ab47cdcee057/crates/cos/src/writer.rs#L241) already expose object-stream packing versus classic cross-reference output. The local PDF save/to_bytes keyword integrates that existing primitive; a second serializer or optimizer is not an upstream request. Both representations build the full output vector before the adapter cap, and broader aggregate serialization budgets remain distinct work. No general lossless optimizer or conformance guarantee follows from this switch.
 
+
+### Existing PDF text-search primitives
+
+U10/E2: public PageText.find_opts_limited and line_rects at the pinned PdfCraft revision already support bounded local geometry search; a second matching API is not an upstream gap. The native [KMP matcher](https://github.com/storytold/pdfcraft/blob/645016addcfb9078c557f0189559ab47cdcee057/crates/render/src/text/search.rs) is linear, but builds the full normalized source buffer before its result limit. Local glyph/source preflights bound this later work. Caller-supplied budgets before native text interpretation remain separate upstream resource work.
+
+Native [TextDevice](https://github.com/storytold/pdfcraft/blob/645016addcfb9078c557f0189559ab47cdcee057/crates/render/src/text.rs) includes clipped/invisible text and yields glyph em/advance geometry. Simple ActualText replacement, ligatures and column-order cases now have local probes. Search must not be described as visible-ink filtering or offsets into normalized table/Markdown text. A future richer native provenance/visibility contract needs its own evidence; no local clip evaluator, matcher or geometry reconstruction is proposed.
+
 ### PDF page labels during assembly
 
 U10/PDF8/P2: native display labels already appear in `page.metadata["label"]`; physical indexes remain unchanged. The pinned [label implementation](https://github.com/storytold/pdfcraft/blob/645016addcfb9078c557f0189559ab47cdcee057/crates/organize/src/labels.rs) owns numbering and range adjustment. Full copies preserve labels, movement retains ranges at document positions, deletion adjusts them, and subsets/imports omit the source label tree. These are current assembly semantics, not evidence that position-based labels are defective. The [synthetic reproducer](../tools/reproduce_pdf_page_label_assembly.py) demonstrates each case without adding a second label API.

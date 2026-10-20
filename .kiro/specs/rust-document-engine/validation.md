@@ -677,6 +677,13 @@ Independent exact-head CI then exposed a substantive native shaping defect: addi
 - Root integration separately passes formatting, all three new native groups and all-targets warnings-denied Clippy. Roadmap/support/cached-reference checks pass. No dependency, pin, attribution or license graph changes.
 - This is focused development evidence, not a new clean release-wheel/full-corpus certificate. The prerequisite bookmark CI shaping failure remains open; integrated full validation and independent review are still required before merge. DOC5/LAY3 remain partial, and linkage, general block adoption/movement and note removal remain unavailable.
 
+## Bounded PDF text search — focused integration evidence
+
+- Runtime snapshot `f433314` adds search through the retained PDF session and existing read/editable page handles. Native matching, line rectangles and displayed-page coordinate transforms remain authoritative. No dependency, revision, license or conversion-matrix changes. E2 remains partial; normalized text offsets and Office geometry search are not claimed.
+- The isolated final implementation passed eight native groups, warnings-denied all-targets Clippy, formatting and 23 related public Python tests against its matching debug extension/facade (ten new search workflows). Root integration separately passes formatting and roadmap/support/cached-reference checks; full combined native/release/installed-wheel and strict typing validation remain pending.
+- Native evidence covers every Unicode scalar's conservative fold accounting, source/query byte and scalar limits, exactly 10,000/+1 matches and line rectangles, one million/+1 selected-glyph visits, index/range/finite ordered geometry failures and retained-session parser/raster statistics. Four rotated CropBox/UserUnit ligature fixtures retain actual pixels and independently projected rectangles. Public cases add ActualText replacement, mirrored x/y text, native cross-column order, clipped/invisible text, read/editable lifetime, cache invalidation/copy, callback-resistant queries and page-index ownership checks.
+- This is focused development evidence, not a new release artifact or complete-corpus certificate. The prerequisite bookmark CI shaping correction and independent review remain required before merge. Native search bounds follow text interpretation, and no process-memory ceiling, tight-ink guarantee or normalized-table ordering is implied.
+
 
 ## PDF output choice with corrected bookmark shaping — replacement artifact
 
@@ -690,6 +697,13 @@ Independent exact-head CI then exposed a substantive native shaping defect: addi
 - Runtime `0493379` integrates story clearing with the reviewed bookmark resource/shaping fixes. All 268 locked native tests and 369 clean installed-wheel Python tests pass, zero skips/failures/errors, with exact installed-byte matching. Formatting, all-targets warnings-denied Clippy, strict installed-package typing, roadmap/support/cached-reference checks and the unchanged 264-package license audit pass.
 - Linux x86_64 / CPython 3.11.2 wheel: 17,472,507 bytes; extension: 40,514,440; SHA-256 `52aa84308041fea19fb983df35d5c362e298e446de616aee343769d10f498efd`; lock SHA-256 `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. Evidence: `dist/story-clear-safe/validation.json` and `/opt/storyclearsafetest`. No upstream pin, dependency or conversion-matrix changes.
 - This supersedes the focused-only clearing evidence above for local acceptance. Independent exact-head/current-main CI and manual review remain required before merge. General block movement/adoption, linkage and note deletion remain unavailable; DOC5/LAY3 remain partial.
+
+
+## Bounded PDF search — complete corrected local artifact
+
+- Runtime `063b193` includes the reviewed bookmark shaping/resource fixes and rejects oversized string subclasses before copying or encoding them. All 276 locked Rust tests and 379 clean installed-wheel Python tests pass, zero skips/failures/errors, with exact installed-byte matching. Formatting, all-targets warnings-denied Clippy, strict installed-package typing, roadmap/support/cached-reference checks and the unchanged 264-package license audit pass.
+- Linux x86_64 / CPython 3.11.2 wheel: 17,474,546 bytes; extension: 40,533,864; SHA-256 `e13f0f4ed6ba48fa0e83ef13447dfc707f3bbfc663ea300e8789e8a5dd4cbb48`; lock SHA-256 `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. Evidence: `dist/pdf-search-reviewed/validation.json` and `/opt/pdfsearchreviewedtest`. No dependency, upstream revision or conversion-matrix changes.
+- This supersedes the focused-only search evidence for local acceptance. Native matching and line geometry remain authoritative, with documented source-order, ligature/ActualText and invisible/clipped-text semantics. Interpretation precedes search-specific budgets; tight ink, normalized-text offsets and Office geometry are not certified. E2 remains partial. Independent review and exact-head/current-main CI remain required before manual merge.
 
 ## 2026-10-20 PDF display-label assembly evidence
 
