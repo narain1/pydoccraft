@@ -33,6 +33,7 @@ const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_MEDIA_BYTES: usize = 64 * 1024 * 1024;
 const MAX_IMAGE_PIXELS: u64 = 16_000_000;
 const MAX_LISTS: usize = 10_000;
+const MAX_PAGE_FIELDS: usize = 10_000;
 
 /// Private boundary value: Python booleans must not become numbering starts.
 #[derive(Clone, Copy)]
@@ -1817,6 +1818,46 @@ impl EditableDocx {
         Ok(id)
     }
 
+    pub fn add_paragraph_field(&mut self, id: usize, kind: &str) -> PyResult<(usize, usize, u64)> {
+        let paragraph = self.paragraph(id)?;
+        let instruction = match kind {
+            "page" => "PAGE",
+            "page_count" => "NUMPAGES",
+            "section_page_count" => "SECTIONPAGES",
+            _ => {
+                return Err(PyValueError::new_err(
+                    "field kind must be page, page_count or section_page_count",
+                ))
+            }
+        };
+        let (offset, start) = (paragraph.text.len(), paragraph.text.chars().count());
+        let text_bytes = self.updated_text_bytes(0, wordcraft_doc::para::OBJ.len_utf8())?;
+        if page_field_count(self.document()?)? >= MAX_PAGE_FIELDS {
+            return Err(limit("document exceeds 10000 page fields"));
+        }
+        let mut candidate = self.document()?.clone();
+        // Explicit decimal avoids the pinned renderer's inconsistent section-format
+        // inheritance between body/note and header/footer fields. The writer keeps an
+        // empty cached result; native layout evaluates the display without mutating it.
+        self.paragraph_mut(&mut candidate, id)?
+            .insert_object(
+                offset,
+                InlineObject::Field {
+                    instr: format!("{instruction} \\* Arabic"),
+                    result: String::new(),
+                    locked: false,
+                    dirty: true,
+                    code: false,
+                    form: String::new(),
+                },
+                &CharProps::default(),
+            )
+            .map_err(model_error)?;
+        self.commit(candidate)?;
+        self.text_bytes = text_bytes;
+        Ok((start, start + 1, self.revision))
+    }
+
     #[pyo3(signature = (id, kind="line"))]
     pub fn add_paragraph_break(&mut self, id: usize, kind: &str) -> PyResult<(usize, usize, u64)> {
         let paragraph = self.paragraph(id)?;
@@ -2358,6 +2399,7 @@ impl EditableDocx {
         let props = self.section(section)?;
         Ok(json!({
             "start": section_start_name(props.start),
+            "page_number_start": props.page_num_start,
             "page_size": [props.page_w, props.page_h],
             "margins": [props.margin_top, props.margin_right, props.margin_bottom, props.margin_left],
             "gutter": props.gutter,
@@ -2388,6 +2430,14 @@ impl EditableDocx {
                             "the first section must start with next_page",
                         ));
                     }
+                }
+                "page_number_start" => {
+                    props.page_num_start = if value.is_null() {
+                        None
+                    } else {
+                        Some(value.as_u64().filter(|value| (1..=32767).contains(value))
+                            .ok_or_else(|| PyValueError::new_err("page_number_start must be an integer from 1 to 32767, or null"))? as u32)
+                    };
                 }
                 "page_size" => {
                     let [width, height] = section_numbers::<2>(value, key)?;
@@ -2480,6 +2530,9 @@ impl EditableDocx {
                     .collect::<PyResult<Vec<_>>>()?
             };
         }
+        if props.start == SectionStart::Continuous && props.page_num_start.is_some() {
+            return Err(EngineError::Unsupported("page numbering restart is not supported in continuous sections at this native revision".into()).into());
+        }
         validate_section_geometry(&props)?;
         let mut candidate = self.document()?.clone();
         let end = candidate.sections()[section].0;
@@ -2504,6 +2557,7 @@ impl EditableDocx {
         let previous = candidate.last_section.clone();
         let mut next = previous.clone();
         next.start = start;
+        next.page_num_start = None;
         let mut copied = BTreeMap::new();
         for (kind, refs) in [
             (PartKind::Header, &mut next.headers),
@@ -3371,6 +3425,7 @@ impl EditableDocx {
         } else {
             retain_authored_image_media(&mut document)?
         };
+        page_field_count(&document)?;
         validate_table_metadata_budget(&document)?;
         validate_document_tabs(&document)?;
         // Native generic range/table edits do not repair semantic references. Existing
@@ -3553,19 +3608,7 @@ fn custom_metadata(document: &Document) -> PyResult<Value> {
     for property in &document.custom_props {
         let malformed =
             || PyValueError::new_err("custom metadata is outside the supported scalar profile");
-        let value = match property.kind.as_str() {
-            "lpwstr" => json!(property.value),
-            "bool" => json!(property.value.parse::<bool>().map_err(|_| malformed())?),
-            "i8" => json!(property.value.parse::<i64>().map_err(|_| malformed())?),
-            "r8" => {
-                let value = property.value.parse::<f64>().map_err(|_| malformed())?;
-                if !value.is_finite() {
-                    return Err(malformed());
-                }
-                json!(value)
-            }
-            _ => return Err(malformed()),
-        };
+        let value = crate::docx::custom_scalar(property).ok_or_else(malformed)?;
         values.insert(property.name.clone(), value);
     }
     Ok(Value::Object(values))
@@ -3642,6 +3685,90 @@ fn patch_custom_metadata(candidate: &mut Document, value: Value) -> PyResult<()>
         ));
     }
     Ok(())
+}
+
+fn page_field_count(document: &Document) -> PyResult<usize> {
+    let sections = document.sections();
+    // Reuse native section endpoints: section_index_of() rebuilds that inventory
+    // for every call, which would make this whole-document check quadratic.
+    let section_of = |path: &Path| {
+        sections
+            .iter()
+            .position(|(end, _)| path.0[0] as usize <= *end)
+            .unwrap_or(0)
+    };
+    let continuous: BTreeSet<_> = sections
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (_, props))| {
+            (props.start == SectionStart::Continuous).then_some(index)
+        })
+        .collect();
+    let mut continuous_parts = BTreeSet::new();
+    for index in &continuous {
+        let props = sections[*index].1;
+        continuous_parts.extend(
+            [
+                props.headers.default,
+                props.headers.first,
+                props.headers.even,
+                props.footers.default,
+                props.footers.first,
+                props.footers.even,
+            ]
+            .into_iter()
+            .flatten(),
+        );
+    }
+    if !continuous.is_empty() {
+        for path in document.para_paths(StoryRef::Body) {
+            let section = section_of(&path);
+            if let Some(paragraph) = document.para(StoryRef::Body, &path) {
+                for object in &paragraph.objects {
+                    if let InlineObject::NoteRef { id, kind, .. } = object {
+                        let target = if *kind == NoteKind::Endnote
+                            && document.note_options(sections[section].1, true).pos
+                                == NotePos::DocEnd
+                        {
+                            sections.len() - 1
+                        } else {
+                            section
+                        };
+                        if continuous.contains(&target) {
+                            continuous_parts.insert(*id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let mut count = 0usize;
+    for story in
+        std::iter::once(StoryRef::Body).chain(document.parts.keys().copied().map(StoryRef::Part))
+    {
+        for path in document.para_paths(story) {
+            if let Some(paragraph) = document.para(story, &path) {
+                let continuous_scope = match story {
+                    StoryRef::Body => continuous.contains(&section_of(&path)),
+                    StoryRef::Part(id) => continuous_parts.contains(&id),
+                };
+                for object in &paragraph.objects {
+                    if let InlineObject::Field { instr, .. } = object {
+                        count = count.saturating_add(1);
+                        if count > MAX_PAGE_FIELDS {
+                            return Err(limit("document exceeds 10000 page fields"));
+                        }
+                        if continuous_scope
+                            && wordcraft_layout::fields::field_name(instr) == "SECTIONPAGES"
+                        {
+                            return Err(EngineError::Unsupported("section_page_count is not supported in continuous sections at this native revision".into()).into());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(count)
 }
 
 fn attach_image_media(
@@ -6209,6 +6336,186 @@ mod tests {
             72.0,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn page_fields_use_native_objects_and_revision_bound_ranges() {
+        let mut document = EditableDocx::new();
+        let paragraph = document.add_paragraph("Page ").unwrap();
+        document
+            .set_section_props(0, r#"{"page_number_start":7}"#)
+            .unwrap();
+        let (start, end, revision) = document.add_paragraph_field(paragraph, "page").unwrap();
+        assert_eq!((start, end), (5, 6));
+        assert_eq!(
+            document
+                .range_text(paragraph, start, end, revision)
+                .unwrap(),
+            "\u{fffc}"
+        );
+        let raw = document.to_bytes().unwrap();
+        let native = wordcraft_docx::read(&raw).unwrap();
+        let p = native.para(StoryRef::Body, &Path::top(0)).unwrap();
+        let InlineObject::Field {
+            instr,
+            result,
+            dirty,
+            locked,
+            ..
+        } = &p.objects[0]
+        else {
+            panic!("missing field")
+        };
+        assert_eq!(instr, "PAGE \\* Arabic");
+        assert!(result.is_empty() && *dirty && !*locked);
+        assert_eq!(native.last_section.page_num_start, Some(7));
+        let source = crate::docx::extract(&raw, None).unwrap();
+        assert_eq!(source.pages[0].blocks[0].text, "Page ");
+        let pdf = crate::docx::to_pdf(&raw, None).unwrap();
+        assert!(crate::pdf::extract(&pdf, None).unwrap().pages[0]
+            .blocks
+            .iter()
+            .any(|block| block.text.contains("Page 7")));
+        let copy = document.copy().unwrap();
+        document
+            .replace_range(paragraph, start, end, revision, "literal")
+            .unwrap();
+        assert_eq!(document.paragraph_text(paragraph).unwrap(), "Page literal");
+        assert_eq!(page_field_count(document.document().unwrap()).unwrap(), 0);
+        assert_eq!(page_field_count(copy.document().unwrap()).unwrap(), 1);
+        let section = document.add_section("next_page").unwrap();
+        assert!(document.section(section).unwrap().page_num_start.is_none());
+    }
+
+    #[test]
+    fn page_field_bounds_and_scope_edits_are_transactional() {
+        let mut document = EditableDocx::new();
+        let paragraph = document.add_paragraph("").unwrap();
+        document.add_paragraph_field(paragraph, "page").unwrap();
+        let raw = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        for patch in [
+            r#"{"page_number_start":true}"#,
+            r#"{"page_number_start":0}"#,
+            r#"{"page_number_start":32768}"#,
+            r#"{"page_number_start":1.5}"#,
+        ] {
+            assert!(document.set_section_props(0, patch).is_err());
+        }
+        assert!(document.add_paragraph_field(paragraph, "date").is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.to_bytes().unwrap(), raw);
+        // Synthetic native model reaches the bound without 10000 public transactions.
+        let mut candidate = document.document().unwrap().clone();
+        let p = document.paragraph_mut(&mut candidate, paragraph).unwrap();
+        p.text = wordcraft_doc::para::OBJ.to_string().repeat(MAX_PAGE_FIELDS);
+        p.objects = vec![p.objects[0].clone(); MAX_PAGE_FIELDS];
+        p.runs[0].len = p.text.len();
+        p.touch();
+        document.commit(candidate).unwrap();
+        document.text_bytes = MAX_PAGE_FIELDS * wordcraft_doc::para::OBJ.len_utf8();
+        let revision = document.revision().unwrap();
+        assert!(document
+            .add_paragraph_field(paragraph, "page_count")
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        document
+            .replace_range(paragraph, 0, 1, revision, "")
+            .unwrap();
+        document
+            .add_paragraph_field(paragraph, "page_count")
+            .unwrap();
+        assert_eq!(
+            page_field_count(document.document().unwrap()).unwrap(),
+            MAX_PAGE_FIELDS
+        );
+        document.text_bytes = MAX_DOCUMENT_TEXT_BYTES;
+        assert!(document.add_paragraph_field(paragraph, "page").is_err());
+        document.close();
+        assert!(document.add_paragraph_field(paragraph, "page").is_err());
+    }
+
+    #[test]
+    fn upstream_page_fields_expose_format_and_continuous_section_limits() {
+        let mut document = EditableDocx::new();
+        let first = document.add_paragraph("First ").unwrap();
+        document.add_paragraph_field(first, "page").unwrap();
+        let header = document.ensure_story("header", "default", 0).unwrap();
+        let head = document.story_add_paragraph(header, "Header ").unwrap();
+        document.add_paragraph_field(head, "page").unwrap();
+        let mut native = document.document().unwrap().clone();
+        native.last_section.page_num_start = Some(3);
+        native.last_section.page_num_format = NumFormat::LowerRoman;
+        for id in [first, head] {
+            if let InlineObject::Field { instr, .. } =
+                &mut document.paragraph_mut(&mut native, id).unwrap().objects[0]
+            {
+                *instr = "PAGE".into();
+            }
+        }
+        let raw = wordcraft_docx::write(&native).unwrap();
+        let pdf = crate::docx::to_pdf(&raw, None).unwrap();
+        let payload = crate::pdf::extract(&pdf, None).unwrap();
+        let text = payload.pages[0]
+            .blocks
+            .iter()
+            .map(|block| block.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains("First 3") && text.contains("Header iii"),
+            "{text}"
+        );
+        assert_eq!(
+            NumFormat::LowerRoman.format(50_001),
+            NumFormat::LowerRoman.format(50_000)
+        );
+        assert_eq!(
+            NumFormat::UpperLetter.format(781),
+            NumFormat::UpperLetter.format(780)
+        );
+
+        let section = document.add_section("continuous").unwrap();
+        let second = document.add_paragraph("Second ").unwrap();
+        document.add_paragraph_field(second, "page").unwrap();
+        assert!(document
+            .add_paragraph_field(second, "section_page_count")
+            .is_err());
+        assert!(document
+            .set_section_props(section, r#"{"page_number_start":10}"#)
+            .is_err());
+        document.add_page_break().unwrap();
+        let third = document.add_paragraph("Third ").unwrap();
+        document.add_paragraph_field(third, "page").unwrap();
+        let mut native = document.document().unwrap().clone();
+        native.last_section.page_num_start = Some(10);
+        for id in [second, third] {
+            if let InlineObject::Field { instr, .. } =
+                &mut document.paragraph_mut(&mut native, id).unwrap().objects[0]
+            {
+                *instr = "SECTIONPAGES \\* Arabic".into();
+            }
+        }
+        let raw = wordcraft_docx::write(&native).unwrap();
+        let native = wordcraft_docx::read(&raw).unwrap();
+        let layout =
+            wordcraft_layout::layout(&native, &mut Default::default(), &Default::default());
+        assert_eq!(layout.pages.len(), 2);
+        assert_eq!(layout.pages[1].number, 2); // continuous restart 10 was ignored
+        let pdf = crate::docx::to_pdf(&raw, None).unwrap();
+        let payload = crate::pdf::extract(&pdf, None).unwrap();
+        let text = payload
+            .pages
+            .iter()
+            .flat_map(|page| &page.blocks)
+            .map(|block| block.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Section two occupies both physical pages; native reports only its owned last page.
+        assert!(
+            text.contains("Second 1") && text.contains("Third 1"),
+            "{text}"
+        );
     }
 
     #[test]

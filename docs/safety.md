@@ -49,6 +49,8 @@ Public native entry points reject inputs over 128 MiB, and normalized JSON seria
 
 DOCX structured extraction bounds auxiliary parts at 10,000, blocks/objects at 100,000, source text at 32 MiB and referenced images at 64 MiB. Table nesting is limited to 16 levels. Native DOCX extraction/render sessions reject layouts over 10,000 pages or one million placed items after pagination; the checks bound retained state, not peak layout allocation. [Numbering metadata](numbering-extraction.md) has additional path, placement and byte bounds. PPTX parsed slide indexing is limited to 10,000 entries and semantic tables to 100,000 total cells, with at most 1,000 rows/columns per table.
 
+Imported DOCX custom-property projection allows at most 1,024 parsed entries, 64 KiB per value and 256 KiB aggregate raw names/kinds/values. Unsupported or malformed scalar variants and ASCII-case-insensitive duplicate names are omitted with bounded diagnostics. These checks follow native parsing; the native reader can discard malformed parts or cap source traversal before the adapter sees them. Table alternative-text bytes count toward the existing 32 MiB extraction text budget. Authored page/count fields are limited to 10,000 across all stories.
+
 There is no universal process-memory, Python-object-count or execution-time budget. Eager PDF page traversal, native Office pagination and format-specific parsing can allocate before normalized output limits apply. Image accounting and recursion guards differ by format; the JSON ceiling is not a pre-decode media bound. Callers should enforce upload and execution limits appropriate to their workload, including remaining invocation time in serverless applications.
 
 ## Image behavior

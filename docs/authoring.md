@@ -55,6 +55,18 @@ paragraph[-3:].text = ""
 
 `document.background` sets solid page color. `document.sections[index].page_size` and `.margins` control that section. Margins accept a uniform number or `(top, right, bottom, left)`. `sections.add(start="next_page")` appends a stable section; other supported starts are `continuous`, `odd_page` and `even_page`. Intentional parity/blank pages use upstream layout. The section retains its identity when later sections are appended. Paragraph `spacing` uses `(before_points, after_points, line_multiplier)`; `page_break_before` controls paragraph placement. `document.add_page_break()` inserts the upstream explicit break marker (`\f`), preserving initial and consecutive blank pages. `section.header(variant="default")` and `.footer(...)` return paragraph containers; variants are `default`, `first` and `even`. Inserting into first/even variants enables the corresponding native section/settings behavior; reading does not mutate the document. Header/footer text is saved and included in native rendering/PDF export. Reopened DOCX exposes auxiliary content separately in `document.stories`; body Markdown does not automatically repeat it.
 
+`paragraph.add_field("page" | "page_count" | "section_page_count")` appends a native decimal field and returns the same TextRange used for runs and slices. The range selects the native object marker (`range.text` is U+FFFC), not an evaluated number. Format it through `range.format(...)`, or remove it by assigning `range.text = ""`. WordCraft evaluates the field for PNG/PDF output. Saved DOCX contains an empty dirty cached result: source extraction therefore does not fabricate a current page number. For example:
+
+```python
+footer = document.sections[0].footer().add_paragraph("Page ")
+footer.add_field("page")
+footer.add_run(" of ")
+footer.add_field("page_count")
+document.sections[0].page_number_start = 3
+```
+
+`section.page_number_start` is `None` for continuation or an integer from 1 to 32767 for an explicit restart. New sections continue numbering until explicitly restarted. A continuous section cannot restart numbering; setting a restart there, or changing a restarted section to continuous, fails atomically because native layout ignores that combination. The section-page-count field is unavailable in continuous-section scopes because native counting omits a shared first page; ordinary page and total-page fields remain supported there. Up to 10,000 fields across all authored stories are supported. Arbitrary field instructions and nondecimal numbering are unavailable in this profile: native implicit section-format inheritance differs by story, and some numeral formats clamp larger values. Page/count fields do not constitute a general field-calculation or TOC API.
+
 `document.add_image(source, width=None, height=None, alt="")` and `cell.add_image(...)` accept PNG bytes, a path or a binary stream and return a picture with writable `size`, `alt`, `data`, `crop`, `flip_h` and `flip_v`. A single requested dimension preserves aspect ratio on insertion. Reading `picture.data` returns owned PNG bytes; assigning another source replaces the payload while preserving its existing size and alt text. Change `size` explicitly when the replacement should use another aspect ratio. PNG format, dimensions and decoded size are checked before mutation. DOCX authoring currently accepts PNG only, unlike the broader extraction surface. Image frame dimensions must each be 1–1584 points and fit the native container; sub-point frames are rejected because the native inline layout clamps them to one point.
 
 `picture.crop=(left, top, right, bottom)` uses finite fractions in 0..0.45; `None` resets the crop. `flip_h` and `flip_v` require booleans. The uncropped display frame remains `size`, original PNG bytes remain in `data`, and replacing the source preserves these transforms. These properties use native drawing transforms in saved DOCX, PNG and PDF output. Rotation is not exposed for DOCX pictures: a native quarter-turn fixture loses edge strips, so a local image-resampling workaround is not used.
@@ -165,7 +177,7 @@ An image placement returned by `slide.add_image(...)` or the existing shape coll
 
 ## Limits and evidence
 
-Do not infer complete Open XML parity from successful serialization. Advanced numbering/formatting properties, arbitrary source Office edits, field evaluation, review operations, charts and diagram fidelity remain roadmap items. No desktop application crates, external document tools, runtime downloads or fallback backends are used. See [validation evidence](../.kiro/specs/rust-document-engine/validation.md) and the operation-specific [readiness audits](content-readiness.md).
+Do not infer complete Open XML parity from successful serialization. Advanced numbering/formatting properties, arbitrary source Office edits, general field evaluation, review operations, charts and diagram fidelity remain roadmap items. No desktop application crates, external document tools, runtime downloads or fallback backends are used. See [validation evidence](../.kiro/specs/rust-document-engine/validation.md) and the operation-specific [readiness audits](content-readiness.md).
 
 ## A report recipe
 
@@ -299,7 +311,7 @@ with doc_ex.new("docx") as document:
     document.save("table.docx")
 ```
 
-Table keys are `style`, `look`, `alignment` (`left`, `center`, `right`), `indent`, `width`, `width_percent`, `layout` (`fixed`, `autofit`), `rtl`, `title`, `description` and `borders`. Width is in points; percentage is in 0.02-percent increments through 100. Setting one non-null width preference clears the other; supplying both non-null fails. Title/description are alternative-text metadata, not visible numbered captions, and are limited to 10,000 characters each with an aggregate budget. They do not establish accessible table structure in exported PDF.
+Table keys are `style`, `look`, `alignment` (`left`, `center`, `right`), `indent`, `width`, `width_percent`, `layout` (`fixed`, `autofit`), `rtl`, `title`, `description` and `borders`. Width is in points; percentage is in 0.02-percent increments through 100. Setting one non-null width preference clears the other; supplying both non-null fails. Title/description are alternative-text metadata, not visible numbered captions, and are limited to 10,000 characters each with an aggregate budget. Reopened DOCX returns them in `Table.metadata` without inserting them into cell text or Markdown. They do not establish accessible table structure in exported PDF.
 
 Cell keys are `background`, `margins`, `alignment`, `vertical_alignment`, `text_direction` (`horizontal`, `down`, `up`), `no_wrap` and `borders`. Paragraph alignment remains distinct from vertical alignment. Margin tuples retain top/right/bottom/left ordering. Snapshots distinguish inherited nullable properties from direct settings; boolean native layout switches remain explicit. Mixed paragraph alignment raises the same explicit error as the cell alignment getter.
 
