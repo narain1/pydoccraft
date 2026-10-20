@@ -254,3 +254,15 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 3. Tests SHALL verify actual pixels across rotations/CropBox/UserUnit, preserved page text, cache invalidation, reopened metadata, stale handles and atomic budget/geometry failures. Broader PDF6 form/import/reply criteria SHALL remain open.
 
 4. Imported text-markup mutation SHALL reject quadrilateral coordinates outside ±1,000,000 PDF user units before native appearance evaluation, preventing nonfinite derived geometry; removal SHALL remain available without rebuilding the appearance.
+
+## 30. Section binding space and unequal columns
+
+1. Existing section properties SHALL expose a left gutter and explicit column widths through native SectionProps/Columns. Column widths SHALL match the configured count, retain the shared gap/separator, and fit usable page width without clamping or scaling. Clearing widths or assigning the existing columns tuple SHALL restore equal columns.
+2. Native layout SHALL position and paginate text across columns and explicit breaks. Table/image validation SHALL conservatively use the narrowest body column until upstream reflows continued tables across changing widths; header/footer content SHALL retain full usable width. Geometry changes SHALL validate existing nested content atomically.
+3. Tests SHALL cover native DOCX readback, mixed page geometry, actual text coordinates and PNG/PDF pixels, ordering, continuation, cache invalidation, copies, invalid widths and rollback. Mirrored/top gutters and per-column gaps remain explicitly outside this profile.
+
+## 31. Native authored slide layouts
+
+1. Existing slides.add SHALL accept the verified blank, title, title_and_content and two_content native layouts. Other known layouts SHALL fail explicitly until their fidelity is verified, and unknown names SHALL fail validation. Native constructors SHALL own layout/master relationships and fresh object identities.
+2. Existing shapes SHALL expose a read-only placeholder role and native resolved box/rotation. Text edits SHALL preserve inheritance; geometry edits SHALL materialize only the affected transform while retaining unrelated transform values and placeholder references. No separate placeholder collection or layout engine SHALL be introduced.
+3. Native ID/content budgets SHALL be checked before mutation. Tests SHALL cover actual placeholder text in native PNG/PDF, saved PPTX relationships, unchanged masters, geometry edits, ownership and atomic invalid/limit failures. General slide copy/import and layout/theme editing remain separately scoped.

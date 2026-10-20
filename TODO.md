@@ -168,10 +168,10 @@ Unchecked items below remain incomplete even when an initial slice is implemente
 
 ### LAY — Sections, pagination and auxiliary stories (P1)
 
-- [ ] **LAY1: Page setup.** Set paper presets/custom dimensions, orientation, margins and gutter per section; use upstream layout. Test mixed portrait/landscape documents and invalid sizes.
+- [x] **LAY1: Page setup.** Set paper presets/custom dimensions, orientation, margins and gutter per section; use upstream layout. Test mixed portrait/landscape documents and invalid sizes.
 - [x] **LAY2: Section breaks.** Add next-page, continuous, odd-page and even-page breaks as supported. Test intentional blank pages and page-count changes after editing.
 - [ ] **LAY3: Headers and footers.** Create/edit/remove content with first-page and even/odd variants, linkage to previous sections and offset from page edges. Test inheritance and independently linked headers/footers.
-- [ ] **LAY4: Columns.** Add equal/unequal columns, gaps and separator lines. Ensure upstream lays out text in the right order and respects column breaks; do not simulate columns with spaces.
+- [x] **LAY4: Columns.** Add equal/unequal columns, gaps and separator lines. Ensure upstream lays out text in the right order and respects column breaks; do not simulate columns with spaces.
 - [x] **LAY5: Flow controls.** Support keep-with-next, keep-lines-together, widow/orphan controls and page-break-before. Test headings followed by tables and long paragraphs without promising Word-identical pagination.
 - [ ] **LAY6: Numbering and page fields.** Configure page-number start, format and section restart plus line numbering where supported. Verify headers/footers and PDF text contain correct evaluated values or explicit stale-field diagnostics.
 - [ ] **LAY7: Footnotes and endnotes.** Create/edit references and note bodies, numbering/restart and placement. Preserve links between notes and source text when copying/deleting content; expose separate extraction scope.
@@ -244,7 +244,7 @@ Unchecked items below remain incomplete even when an initial slice is implemente
 ### SLIDE — PPTX authoring consistency (P2)
 
 - [ ] **SLIDE1: Presentation/slide creation.** Audit DeckCraft public export first; add new presentations and slide insert/copy/delete/reorder only when supported. Keep slide dimensions, names and hidden state explicit.
-- [ ] **SLIDE2: Layouts, masters and themes.** Preserve/import supported master/layout relationships and expose placeholders by role. Do not flatten editable placeholders or break theme inheritance when copying slides.
+- [ ] **SLIDE2: Layouts, masters and themes.** Authored blank/title/title-and-content/two-content layouts and role-addressed inherited placeholders are implemented; source master/theme import and slide-copy remapping remain open. Preserve/import supported master/layout relationships and expose placeholders by role. Do not flatten editable placeholders or break theme inheritance when copying slides.
 - [ ] **SLIDE3: Text, pictures and tables.** Reuse Python naming and units while retaining slide-specific geometry. Cover rich runs, grouped objects, cell merges, images, alt text and order through DeckCraft.
 - [ ] **SLIDE4: Slide backgrounds and watermarks.** Support per-slide/theme background fills, images and layered marks; test PNG and PDF export as well as saved PPTX.
 - [ ] **SLIDE5: Notes, comments and navigation.** Add/edit notes, comment anchors and internal/URL links where public APIs exist; retain extraction scope and source order.
