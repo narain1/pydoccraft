@@ -552,3 +552,15 @@ Native markers remain U+FFFC characters in authored paragraph text and count in 
 Adding the first bookmark activates stricter checks for all existing links. Internal-link assignment and bookmark creation/movement check native layout before committing. Serialization rechecks after later formatting/layout edits; unsupported output leaves an existing save destination intact, and resetting the unsupported formatting allows saving again. The current native PDF exporter loses vertical-cell links and can place clipped-cell annotations outside their clip. Linked clipped/turned/rotated/figure contexts are therefore rejected; linked figures are outside the audited profile, not asserted intrinsically defective. Targets require actual native carets within the physical page, without paragraph-start fallback.
 
 At most 10,000 nonempty linked native glyph batches per page are allowed when navigation is active, counting repeated stories and external links too. This conservatively avoids the native annotation cap; coalescing can make the limit stricter than the final annotation count. Native layout/display generation happens before observed-result item/depth checks, so these checks are not a preallocation memory guarantee. Broader transformed graphics, tooltips, imported editing, heading-outline export and REF/PAGEREF evaluation remain open.
+
+
+### PDF object-stream output
+
+PDF `to_bytes(*, object_streams=True)` and `save(destination, *, object_streams=True)` accept a strict boolean. The default preserves current native output. With `False`, the native writer writes objects directly and uses a classic cross-reference table, useful for inspection and consumers requiring that representation. Other formats retain their existing serialization signatures.
+
+```python
+pdf.save("classic-xref.pdf", object_streams=False)
+data = pdf.to_bytes(object_streams=False)
+```
+
+This controls object packing only: image/content/font streams can remain compressed. It is not an optimizer, incremental save, PDF-version downgrade or PDF/A/PDF/UA profile, and it does not promise smaller files. The native writer can raise an older header version when object streams are enabled; disabling them does not remove newer source features. Both modes retain existing imported-document restrictions, owned-field checks and the same 256 MiB returned-output cap. The upstream writer allocates its complete byte vector before this cap, so it is not a peak-memory limit. Saving does not change model state or render caches; path replacement stays atomic and stream writes retain their documented short-write errors.

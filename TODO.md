@@ -239,7 +239,7 @@ Unchecked items below remain incomplete even when an initial slice is implemente
 - [x] **PDF5: Links, outlines and metadata.** Create/edit URI/internal links, bookmarks and supported metadata. Verify destinations survive assembly, deletion and rotation.
 - [ ] **PDF6: Annotations and forms (P2).** Native notes, highlight/underline/strikeout/squiggly markup, bounded rectangle/ellipse outlines and owned text/checkbox/choice fields are implemented; imported forms, radio groups and broader appearance/reply support remain open. Inventory comments/highlights and form field read/create/fill/flatten support. Separate PDF form fields from DOCX content controls and reject unsupported field/appearance types.
 - [ ] **PDF7: Real redaction (P2).** Expose only verified upstream removal of content, not a painted rectangle. Test text/image/object recoverability after saving; keep the feature unavailable until its deletion guarantees are demonstrated.
-- [ ] **PDF8: Preservation and output profiles (P2).** Audit tagging, attachments, encryption, incremental save, compression and archival/accessibility profiles independently. Do not claim PDF/A or PDF/UA conformance without appropriate validators and corpus evidence.
+- [ ] **PDF8: Preservation and output profiles (P2).** PDF save/to_bytes can select native object streams or classic cross-reference output; this is not general compression, version downgrade or archival conformance. Audit tagging, attachments, encryption, incremental save, compression and archival/accessibility profiles independently. Do not claim PDF/A or PDF/UA conformance without appropriate validators and corpus evidence.
 
 ### SLIDE — PPTX authoring consistency (P2)
 
