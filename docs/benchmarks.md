@@ -34,6 +34,40 @@ Run at 2026-10-20 16:44 UTC. Times are medians of seven measured iterations afte
 
 The 25-page PDF text rates were approximately 319 pages/s for pydoccraft and 1,039 pages/s for PyMuPDF. Throughput is derived from this small in-memory corpus and should not be extrapolated to arbitrary documents.
 
+## Anonymized local-file results
+
+A second run used five local files from `.test_files`: three PDFs, one DOCX, and one PPTX. The files are not committed or distributed. Results intentionally omit filenames, paths, hashes, and extracted text; anonymous IDs are assigned by format and ascending byte size.
+
+Configuration: one warmup and five measured iterations on the same Apple M5 Pro host, with first-page RGBA rendering at 144 DPI.
+
+| ID | Type | MiB | Pages/slides | Operation | Library | Median | IQR |
+|---|---|---:|---:|---|---|---:|---:|
+| DOCX-1 | DOCX | 0.03 | 2 | Extract text | pydoccraft | 5.18 ms | 5.13–5.30 ms |
+| DOCX-1 | DOCX | 0.03 | 2 | Render page 1 | pydoccraft | 16.49 ms | 16.21–16.52 ms |
+| DOCX-1 | DOCX | 0.03 | 2 | Convert to PDF | pydoccraft | 6.65 ms | 6.60–6.73 ms |
+| PDF-1 | PDF | 1.58 | 391 | Extract text | pydoccraft | 1,278.19 ms | 1,274.49–1,284.31 ms |
+| PDF-1 | PDF | 1.58 | 391 | Extract text | PyMuPDF | 406.03 ms | 405.80–406.68 ms |
+| PDF-1 | PDF | 1.58 | 391 | Render page 1 | pydoccraft | 1,364.63 ms | 1,361.99–1,368.14 ms |
+| PDF-1 | PDF | 1.58 | 391 | Render page 1 | PyMuPDF | 22.81 ms | 22.60–23.00 ms |
+| PDF-1 | PDF | 1.58 | 391 | Convert to DOCX | pydoccraft | 759.18 ms | 744.07–769.48 ms |
+| PDF-2 | PDF | 2.24 | 65 | Extract text | pydoccraft | 204.70 ms | 204.40–206.73 ms |
+| PDF-2 | PDF | 2.24 | 65 | Extract text | PyMuPDF | 44.77 ms | 44.58–44.89 ms |
+| PDF-2 | PDF | 2.24 | 65 | Render page 1 | pydoccraft | 232.06 ms | 230.72–233.87 ms |
+| PDF-2 | PDF | 2.24 | 65 | Render page 1 | PyMuPDF | 42.86 ms | 42.57–42.90 ms |
+| PDF-2 | PDF | 2.24 | 65 | Convert to DOCX | pydoccraft | 107.61 ms | 107.06–107.98 ms |
+| PDF-3 | PDF | 13.24 | 14 | Extract text | pydoccraft | 104.47 ms | 104.16–104.68 ms |
+| PDF-3 | PDF | 13.24 | 14 | Extract text | PyMuPDF | 25.09 ms | 24.96–25.10 ms |
+| PDF-3 | PDF | 13.24 | 14 | Render page 1 | pydoccraft | 174.28 ms | 173.49–174.67 ms |
+| PDF-3 | PDF | 13.24 | 14 | Render page 1 | PyMuPDF | 90.51 ms | 90.16–91.85 ms |
+| PDF-3 | PDF | 13.24 | 14 | Convert to DOCX | pydoccraft | 69.38 ms | 68.31–70.04 ms |
+| PPTX-1 | PPTX | 8.47 | 14 | Extract text | pydoccraft | 41.93 ms | 41.44–42.35 ms |
+| PPTX-1 | PPTX | 8.47 | 14 | Render page 1 | pydoccraft | 72.73 ms | 72.17–72.87 ms |
+| PPTX-1 | PPTX | 8.47 | 14 | Convert to PDF | pydoccraft | 168.11 ms | 167.72–170.92 ms |
+
+Matched PDF extraction favored PyMuPDF by 3.15×, 4.57×, and 4.16×. Matched first-page rendering favored PyMuPDF by 59.83×, 5.41×, and 1.93×. The 391-page case makes the main rough edge especially clear: pydoccraft eagerly extracts the complete document before rendering page 1, so first-page latency scales with total document work.
+
+PyMuPDF PDF rewrite medians, retained in the machine-readable local run but omitted from the compact table above because there is no pydoccraft equivalent, were 204.05 ms, 38.47 ms, and 10.01 ms for PDF-1 through PDF-3.
+
 ## What is comparable
 
 The two paired PDF scenarios produce the same class of caller-visible result:
@@ -81,6 +115,37 @@ pydoccraft extracted 68,999 PDF text characters and PyMuPDF extracted 69,024. In
 
 `benchmarks/requirements-lock.txt` records the complete Python environment, including transitive packages.
 
+## Root-cause stage profile
+
+A separate diagnostic run decomposed the anonymous PDF path. These timings are medians of five iterations and are not additional public-API comparisons; `_core` calls are private implementation probes.
+
+| ID | Pages | Detect | Native full extraction | JSON decode | Python hydration | Public open | Direct native page-1 render | Public open + render | PyMuPDF open + render |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| PDF-1 | 391 | <0.01 ms | 1,281.93 ms | 23.01 ms | 7.56 ms | 1,307.87 ms | 70.63 ms | 1,381.57 ms | 21.78 ms |
+| PDF-2 | 65 | <0.01 ms | 193.95 ms | 7.02 ms | 4.16 ms | 202.44 ms | 26.67 ms | 229.85 ms | 42.89 ms |
+| PDF-3 | 14 | <0.01 ms | 76.41 ms | 17.42 ms | 11.29 ms | 104.78 ms | 70.30 ms | 174.73 ms | 90.26 ms |
+
+The evidence identifies four costs:
+
+1. **Whole-document extraction is the primary bottleneck.** Native extraction accounts for approximately 98%, 96%, and 73% of public open latency in these three cases. `doc_ex.open()` renders text and traverses tables, links, and images for every page even when the caller only wants page count or a first-page image.
+2. **Public render performs two independent pipelines.** `open()` first performs full extraction; `render_page()` then sends the retained bytes through a fresh native inspect and `PageRenderer`. Public first-page time closely tracks `public open + direct native render`.
+3. **The renderer itself is not uniformly slow.** The private direct-native probe was 1.61× faster than PyMuPDF's public open/render path on PDF-2 and 1.28× faster on PDF-3, while PyMuPDF was 3.24× faster on PDF-1. The 59.83× public-path gap therefore cannot be attributed to rasterization alone.
+4. **JSON and Python hydration are secondary but visible.** They add roughly 12–29 ms here and become proportionally significant for the 13.24 MiB/14-page document. Image-heavy inputs may add base64 expansion and decoding beyond what this stage profile isolates.
+
+The highest-value feature improvement is a bounded private native document session: inspect/open once, preserve reusable parse/render state, extract pages or text profiles on demand, and drop native state deterministically on `close()`. Existing hydrated values must remain owned, and all resource limits and stable errors must remain intact. The first PDF-only slice retains the `PageRenderer` used for eager extraction and reuses its parsed document for later page renders; it does not remove eager extraction or address DOCX layout reuse.
+
+### PDF session-reuse feature measurement
+
+On a Linux ARM64 release wheel built from the feature branch, repeated page-1 rendering after one eager `open()` was compared with the legacy one-shot `_core.render` path. Anonymous medians over five iterations were:
+
+| ID | Pages | Retained session | One-shot reopen | Speedup | Parser builds after repeated renders |
+|---|---:|---:|---:|---:|---:|
+| PDF-1 | 391 | 6.52 ms | 59.69 ms | 9.16× | 1 |
+| PDF-2 | 65 | 23.62 ms | 26.00 ms | 1.10× | 1 |
+| PDF-3 | 14 | 71.89 ms | 78.52 ms | 1.09× | 1 |
+
+This is parser-session reuse, not raster-result caching. It improves repeated renders but does not change the eager `open()` cost documented above. A smaller interim improvement is a bounded direct-render or selected-page extraction entry point that avoids mandatory whole-document normalization.
+
 ## API and performance rough edges
 
 ### 1. Rendering repeats document work
@@ -91,7 +156,7 @@ pydoccraft extracted 68,999 PDF text characters and PyMuPDF extracted 69,024. In
 
 ### 2. Plain-text callers pay for eager structured extraction
 
-`doc_ex.open()` always constructs the complete normalized model before returning. A caller wanting only plain text pays for table/link/image traversal, JSON serialization/deserialization, media base64 transfer, and Python model hydration. The matched PDF text operation was 3.25× slower than PyMuPDF.
+`doc_ex.open()` always constructs the complete normalized model before returning. A caller wanting only plain text pays for eager table/link traversal, JSON serialization/deserialization, and Python model hydration on this text-and-link corpus. Image-bearing documents additionally pay media transfer costs, but that overhead was not measured by the synthetic PDF scenario. The matched PDF text operation was 3.25× slower than PyMuPDF.
 
 **Fix direction:** investigate an upstream-backed bounded text-only or selective extraction path rather than weakening the default owned structured model. Keep explicit limits and stable errors. Track extraction shape and selective processing under [W09 extraction structure and portable output](https://github.com/narain1/pydoccraft/issues/11).
 
@@ -128,10 +193,21 @@ PYTHONPATH= /tmp/pydoccraft-benchmark/bin/python benchmarks/benchmark_documents.
   --warmups 2 \
   --repeats 7 \
   --dpi 144 \
-  --repository-revision "$(git rev-parse HEAD)" \
+  --harness-revision "$(git rev-parse HEAD)" \
   --output /tmp/pydoccraft-benchmark-results/results.json
 ```
 
 The command writes raw JSON and generated Markdown outside the repository. The `--output` path must not end in `.md`, which is reserved for the companion report. Run focused harness checks with `/tmp/pydoccraft-benchmark/bin/python -m unittest discover -s benchmarks -v`. Do not commit generated documents, rendered images, converted outputs, profiles, virtual environments, or timing dumps.
 
-Run results vary with hardware, power state, thermal state, operating system, Python version, library version, and document structure. Repeat on representative real documents and every supported release platform before making broad performance claims.
+Run results vary with hardware, power state, thermal state, operating system, Python version, library version, and document structure. Ratios are observed-run estimates: scenarios were measured in a fixed sequence, so future harness work should interleave matched libraries and add repeated process-level runs before treating small differences as stable. Repeat on representative real documents and every supported release platform before making broad performance claims.
+
+
+To measure your own files without including their filenames, paths, hashes or extracted text in reports:
+
+```console
+PYTHONPATH= /tmp/pydoccraft-benchmark/bin/python benchmarks/benchmark_test_files.py /path/to/local/corpus \
+  --warmups 1 --repeats 5 --dpi 144 \
+  --output /tmp/pydoccraft-benchmark-results/local.json
+```
+
+The corpus script validates CLI counts and keeps JSON/Markdown output paths distinct. Its Python failure messages omit reader/filesystem exception details; successful reports contain anonymous IDs, format, file size, page/slide/row counts and timings. File sizes/counts are still document metadata, so review reports before sharing them. Third-party backend diagnostics are not a promised redaction boundary. Serialized byte length is excluded from repeatability guards because metadata can change it without changing content.
