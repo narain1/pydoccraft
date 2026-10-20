@@ -5,6 +5,9 @@ use crate::EngineError;
 const MAX_CHAPTERS: usize = 10_000;
 const MAX_CONTENT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_IMAGES: usize = 10_000;
+const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_MEDIA_BYTES: usize = 64 * 1024 * 1024;
+const MAX_OUTPUT_BYTES: usize = 128 * 1024 * 1024;
 
 #[derive(Clone)]
 struct Chapter {
@@ -28,6 +31,7 @@ pub struct EditableEpub {
     chapters: Vec<Chapter>,
     images: Vec<ImageResource>,
     content_bytes: usize,
+    media_bytes: usize,
     closed: bool,
 }
 
@@ -43,6 +47,7 @@ impl EditableEpub {
             chapters: Vec::new(),
             images: Vec::new(),
             content_bytes: 0,
+            media_bytes: 0,
             closed: false,
         }
     }
@@ -57,6 +62,7 @@ impl EditableEpub {
         self.chapters.clear();
         self.images.clear();
         self.content_bytes = 0;
+        self.media_bytes = 0;
     }
 
     pub fn set_metadata(
@@ -111,11 +117,13 @@ impl EditableEpub {
                 "EPUB heading level must be between 1 and 6".into(),
             ));
         }
+        validate_text(&text, 65_536, "heading text")?;
         let fragment = format!("<h{level}>{}</h{level}>\n", escape_text(&text));
         self.append(chapter, &fragment)
     }
 
     pub fn add_paragraph(&mut self, chapter: usize, text: String) -> Result<(), EngineError> {
+        validate_text(&text, 65_536, "paragraph text")?;
         let fragment = format!("<p>{}</p>\n", escape_text(&text));
         self.append(chapter, &fragment)
     }
@@ -126,6 +134,7 @@ impl EditableEpub {
         text: String,
         href: String,
     ) -> Result<(), EngineError> {
+        validate_text(&text, 65_536, "link text")?;
         validate_link(&href)?;
         let fragment = format!(
             "<p><a href=\"{}\">{}</a></p>\n",
@@ -148,31 +157,32 @@ impl EditableEpub {
                 "EPUB images exceed 10000".into(),
             ));
         }
-        if data.is_empty() || data.len() > 128 * 1024 * 1024 {
+        if data.is_empty() || data.len() > MAX_IMAGE_BYTES {
             return Err(EngineError::ResourceLimit(
-                "EPUB image must contain at most 128 MiB".into(),
+                "EPUB image must contain at most 16 MiB".into(),
             ));
         }
+        let next_media = self
+            .media_bytes
+            .checked_add(data.len())
+            .filter(|size| *size <= MAX_MEDIA_BYTES)
+            .ok_or_else(|| EngineError::ResourceLimit("EPUB images exceed 64 MiB".into()))?;
         validate_text(&alt, 65_536, "image alt text")?;
-        let extension = match media_type.as_str() {
-            "image/png" => "png",
-            "image/jpeg" => "jpg",
-            "image/gif" => "gif",
-            "image/svg+xml" => "svg",
-            _ => {
-                return Err(EngineError::Unsupported(format!(
-                    "EPUB image type {media_type} is not supported"
-                )))
-            }
-        };
+        let extension = validate_image(&data, &media_type)?;
         let href = format!("images/image-{}.{}", self.images.len() + 1, extension);
         let fragment = format!(
             "<p><img src=\"{}\" alt=\"{}\" /></p>\n",
             href,
             escape_attribute(&alt)
         );
-        self.append(chapter, &fragment)?;
+        let next_content = self.checked_append(chapter, &fragment)?;
+        self.images.try_reserve(1).map_err(|_| {
+            EngineError::ResourceLimit("cannot allocate bounded EPUB image storage".into())
+        })?;
+        self.chapters[chapter].body.push_str(&fragment);
         self.images.push(ImageResource { href, data });
+        self.content_bytes = next_content;
+        self.media_bytes = next_media;
         Ok(())
     }
 
@@ -196,6 +206,26 @@ impl EditableEpub {
                 "EPUB requires at least one chapter".into(),
             ));
         }
+        let metadata_bytes = self.authors.iter().try_fold(
+            self.title
+                .len()
+                .checked_add(self.identifier.len())
+                .and_then(|size| size.checked_add(self.language.len()))
+                .ok_or_else(|| EngineError::ResourceLimit("EPUB metadata size overflow".into()))?,
+            |size, author| {
+                size.checked_add(author.len())
+                    .ok_or_else(|| EngineError::ResourceLimit("EPUB metadata size overflow".into()))
+            },
+        )?;
+        self.content_bytes
+            .checked_add(self.media_bytes)
+            .and_then(|size| size.checked_add(metadata_bytes))
+            .and_then(|size| size.checked_add(self.chapters.len().checked_mul(4096)?))
+            .and_then(|size| size.checked_add(self.images.len().checked_mul(1024)?))
+            .and_then(|size| size.checked_add(1024 * 1024))
+            .filter(|size| *size <= MAX_OUTPUT_BYTES)
+            .ok_or_else(|| EngineError::ResourceLimit("EPUB output exceeds 128 MiB".into()))?;
+
         let mut builder = rbook::Epub::builder()
             .identifier(self.identifier.as_str())
             .title(self.title.as_str())
@@ -213,11 +243,16 @@ impl EditableEpub {
                     .xhtml_body(chapter.body.as_str()),
             );
         }
-        builder
-            .build()
-            .write()
-            .to_vec()
-            .map_err(|error| EngineError::Conversion(format!("EPUB writing failed: {error}")))
+        let output =
+            builder.build().write().to_vec().map_err(|error| {
+                EngineError::Conversion(format!("EPUB writing failed: {error}"))
+            })?;
+        if output.len() > MAX_OUTPUT_BYTES {
+            return Err(EngineError::ResourceLimit(
+                "EPUB output exceeds 128 MiB".into(),
+            ));
+        }
+        Ok(output)
     }
 }
 
@@ -230,25 +265,35 @@ impl EditableEpub {
         }
     }
 
-    fn append(&mut self, chapter: usize, fragment: &str) -> Result<(), EngineError> {
+    fn checked_append(&self, chapter: usize, fragment: &str) -> Result<usize, EngineError> {
         self.ensure_open()?;
-        let next = self
-            .content_bytes
+        if chapter >= self.chapters.len() {
+            return Err(EngineError::InvalidArgument(
+                "EPUB chapter does not exist".into(),
+            ));
+        }
+        self.content_bytes
             .checked_add(fragment.len())
             .filter(|size| *size <= MAX_CONTENT_BYTES)
-            .ok_or_else(|| EngineError::ResourceLimit("EPUB content exceeds 64 MiB".into()))?;
-        let target = self
-            .chapters
-            .get_mut(chapter)
-            .ok_or_else(|| EngineError::InvalidArgument("EPUB chapter does not exist".into()))?;
-        target.body.push_str(fragment);
+            .ok_or_else(|| EngineError::ResourceLimit("EPUB content exceeds 64 MiB".into()))
+    }
+
+    fn append(&mut self, chapter: usize, fragment: &str) -> Result<(), EngineError> {
+        let next = self.checked_append(chapter, fragment)?;
+        self.chapters[chapter].body.push_str(fragment);
         self.content_bytes = next;
         Ok(())
     }
 }
 
 fn validate_text(value: &str, limit: usize, name: &str) -> Result<(), EngineError> {
-    if value.len() > limit || value.contains('\0') {
+    let valid_xml = value.chars().all(|character| {
+        matches!(character, '\u{9}' | '\u{A}' | '\u{D}')
+            || ('\u{20}'..='\u{D7FF}').contains(&character)
+            || ('\u{E000}'..='\u{FFFD}').contains(&character)
+            || ('\u{10000}'..='\u{10FFFF}').contains(&character)
+    });
+    if value.len() > limit || !valid_xml {
         Err(EngineError::InvalidArgument(format!(
             "EPUB {name} is invalid or exceeds {limit} bytes"
         )))
@@ -259,9 +304,10 @@ fn validate_text(value: &str, limit: usize, name: &str) -> Result<(), EngineErro
 
 fn validate_link(href: &str) -> Result<(), EngineError> {
     validate_text(href, 16_384, "link")?;
-    if href.starts_with("https://")
-        || href.starts_with("http://")
-        || href.starts_with("mailto:")
+    let lower = href.to_ascii_lowercase();
+    if lower.starts_with("https://")
+        || lower.starts_with("http://")
+        || lower.starts_with("mailto:")
         || (href.starts_with('#') && !href.contains(".."))
     {
         Ok(())
@@ -270,6 +316,32 @@ fn validate_link(href: &str) -> Result<(), EngineError> {
             "EPUB links require http, https, mailto or a safe fragment".into(),
         ))
     }
+}
+
+fn validate_image(data: &[u8], media_type: &str) -> Result<&'static str, EngineError> {
+    let valid = match media_type {
+        "image/png" => data.starts_with(b"\x89PNG\r\n\x1a\n").then_some("png"),
+        "image/jpeg" => {
+            (data.starts_with(&[0xff, 0xd8]) && data.ends_with(&[0xff, 0xd9])).then_some("jpg")
+        }
+        "image/gif" => {
+            (data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a")).then_some("gif")
+        }
+        "image/svg+xml" => return Err(EngineError::Unsupported(
+            "EPUB SVG authoring is not supported because active content cannot be guaranteed inert"
+                .into(),
+        )),
+        _ => {
+            return Err(EngineError::Unsupported(format!(
+                "EPUB image type {media_type} is not supported"
+            )))
+        }
+    };
+    valid.ok_or_else(|| {
+        EngineError::InvalidArgument(format!(
+            "EPUB image bytes do not match declared type {media_type}"
+        ))
+    })
 }
 
 fn escape_text(value: &str) -> String {
@@ -281,4 +353,35 @@ fn escape_text(value: &str) -> String {
 
 fn escape_attribute(value: &str) -> String {
     escape_text(value).replace('"', "&quot;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_aggregate_media_before_mutation() {
+        let mut book = EditableEpub::new();
+        let chapter = book.add_chapter("One".into()).unwrap();
+        book.media_bytes = MAX_MEDIA_BYTES;
+        let before = book.chapters[chapter].body.clone();
+        let error = book
+            .add_image(
+                chapter,
+                b"\x89PNG\r\n\x1a\n".to_vec(),
+                "image/png".into(),
+                String::new(),
+            )
+            .unwrap_err();
+        assert!(matches!(error, EngineError::ResourceLimit(_)));
+        assert_eq!(book.chapters[chapter].body, before);
+        assert!(book.images.is_empty());
+    }
+
+    #[test]
+    fn rejects_xml_controls_and_active_svg() {
+        assert!(validate_text("bad\u{1}", 100, "text").is_err());
+        assert!(validate_image(b"<svg><script/></svg>", "image/svg+xml").is_err());
+        assert!(validate_link("HTTPS://example.com").is_ok());
+    }
 }

@@ -36,6 +36,19 @@ def epub_fixture(*, encrypted: bool = False, version: str = "3.0", chapter_one: 
     return output.getvalue()
 
 
+def rewrite_epub(data: bytes, updates: dict[str, bytes | str]) -> bytes:
+    members: dict[str, bytes] = {}
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        for name in archive.namelist():
+            members[name] = archive.read(name)
+    members.update({name: value.encode() if isinstance(value, str) else value for name, value in updates.items()})
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, value in members.items():
+            archive.writestr(name, value)
+    return output.getvalue()
+
+
 class EpubTests(unittest.TestCase):
     def test_bytes_path_metadata_order_and_owned_values(self) -> None:
         data = epub_fixture()
@@ -152,6 +165,56 @@ class EpubTests(unittest.TestCase):
         book.close()
         with self.assertRaises(doc_ex.DocumentClosedError):
             _ = book.chapter_count
+
+    def test_semantic_fallback_offsets_uri_and_detection_edges(self) -> None:
+        chapter = (
+            '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+            '<h1>Title</h1><ul><li>List café <a href="HTTPS://example.com">Again</a></li></ul>'
+            '<blockquote>Quoted body</blockquote></body></html>'
+        )
+        data = rewrite_epub(
+            epub_fixture(chapter_one=chapter),
+            {"[Content_Types].xml": "wordprocessingml.document.main+xml"},
+        )
+        with doc_ex.open(data) as document:
+            self.assertEqual(document.metadata["format"], "epub")
+            text = document[0].get_text()
+            self.assertIn("List café Again", text)
+            self.assertIn("Quoted body", text)
+            link = document[0].get_links()[0]
+            block = next(block for block in document[0].blocks if link in block.links)
+            self.assertEqual(block.text[link.metadata["start"]:link.metadata["end"]], "Again")
+            self.assertEqual(link.metadata["target_kind"], "external")
+
+    def test_strict_package_and_authoring_safety_are_atomic(self) -> None:
+        malformed_container = rewrite_epub(
+            epub_fixture(),
+            {"META-INF/container.xml": b'<container><rootfiles><rootfile full-path="\xff"/></rootfiles></container>'},
+        )
+        with self.assertRaises(doc_ex.MalformedDocumentError):
+            doc_ex.open(malformed_container)
+        malformed_package = rewrite_epub(
+            epub_fixture(),
+            {"OEBPS/content.opf": '<package><manifest></package>'},
+        )
+        with self.assertRaises(doc_ex.MalformedDocumentError):
+            doc_ex.open(malformed_package)
+
+        with doc_ex.new("epub") as book:
+            book.set_metadata(title="Safe", identifier="urn:safe", language="en")
+            chapter = book.add_chapter("One")
+            chapter.add_paragraph("before")
+            before = book.to_bytes()
+            for operation in (
+                lambda: chapter.add_paragraph("bad\x01text"),
+                lambda: chapter.add_link("bad\x02label", "https://example.com"),
+                lambda: chapter.add_image(b"<svg><script/></svg>", media_type="image/svg+xml"),
+                lambda: chapter.add_image(b"not png", media_type="image/png"),
+            ):
+                with self.assertRaises((ValueError, doc_ex.UnsupportedFormatError)):
+                    operation()
+                self.assertEqual(book.to_bytes(), before)
+            chapter.add_link("Uppercase", "HTTPS://example.com")
 
     def test_render_conversion_encryption_and_malformed_fail_explicitly(self) -> None:
         with doc_ex.open(epub_fixture()) as document:

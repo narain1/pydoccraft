@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::{Cursor, Read};
 
 use quick_xml::events::Event;
@@ -29,11 +30,13 @@ fn inspect(
     validate_member_count(archive.len())?;
     let mut total = 0_u64;
     let mut document_type = None;
+    let mut member_names = HashSet::new();
     for index in 0..archive.len() {
         let mut member = archive
             .by_index(index)
             .map_err(|error| EngineError::Malformed(format!("invalid ZIP member: {error}")))?;
         let name = member.name().replace('\\', "/");
+        member_names.insert(name.clone());
         validate_member(&name, member.size(), member.compressed_size())?;
         total = add_uncompressed_size(total, member.size())?;
         if count_presentation_slides
@@ -68,15 +71,84 @@ fn inspect(
             member.read_to_end(&mut bytes).map_err(|error| {
                 EngineError::Malformed(format!("invalid ZIP member data: {error}"))
             })?;
-            let types = String::from_utf8_lossy(&bytes);
-            if types.contains("wordprocessingml.document.main+xml") {
-                document_type = Some("docx");
-            } else if types.contains("presentationml.presentation.main+xml") {
-                document_type = Some("pptx");
-            }
+            document_type = parse_document_content_type(&bytes)?;
         }
     }
-    Ok(document_type)
+    Ok(document_type
+        .filter(|(_, part_name)| member_names.contains(part_name.trim_start_matches('/')))
+        .map(|(kind, _)| kind))
+}
+
+#[allow(deprecated)]
+fn parse_document_content_type(data: &[u8]) -> Result<Option<(&'static str, String)>, EngineError> {
+    let mut reader = quick_xml::Reader::from_reader(data);
+    let mut buffer = Vec::new();
+    let mut root_seen = false;
+    let mut document_type = None;
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) | Ok(Event::Empty(event)) => {
+                let name = event.local_name();
+                if !root_seen {
+                    if name.as_ref() != b"Types" {
+                        return Ok(None);
+                    }
+                    root_seen = true;
+                }
+                if name.as_ref() == b"Override" {
+                    let mut part_name = None;
+                    let mut content_type = None;
+                    for attribute in event.attributes() {
+                        let attribute = attribute.map_err(|error| {
+                            EngineError::Malformed(format!(
+                                "invalid OOXML content-types attribute: {error}"
+                            ))
+                        })?;
+                        let value = attribute
+                            .decode_and_unescape_value(reader.decoder())
+                            .map_err(|error| {
+                                EngineError::Malformed(format!(
+                                    "invalid OOXML content-types value: {error}"
+                                ))
+                            })?
+                            .into_owned();
+                        match attribute.key.local_name().as_ref() {
+                            b"PartName" => part_name = Some(value),
+                            b"ContentType" => content_type = Some(value),
+                            _ => {}
+                        }
+                    }
+                    document_type = match content_type.as_deref() {
+                        Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml") => {
+                            part_name.map(|path| ("docx", path))
+                        }
+                        Some("application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml") => {
+                            part_name.map(|path| ("pptx", path))
+                        }
+                        _ => document_type,
+                    };
+                }
+            }
+            Ok(Event::DocType(_)) => {
+                return Err(EngineError::Malformed(
+                    "OOXML content types must not contain a DTD".into(),
+                ))
+            }
+            Ok(Event::Text(text)) => {
+                text.decode().map_err(|error| {
+                    EngineError::Malformed(format!("invalid OOXML content-types text: {error}"))
+                })?;
+            }
+            Ok(Event::Eof) => return Ok(document_type),
+            Ok(_) => {}
+            Err(error) => {
+                return Err(EngineError::Malformed(format!(
+                    "invalid OOXML content types: {error}"
+                )))
+            }
+        }
+        buffer.clear();
+    }
 }
 
 // Match the pinned native Package::xml raw-byte ceiling. Existing ZIP checks

@@ -4,20 +4,20 @@ This document describes the current source tree, including unreleased improvemen
 
 ## Capability matrix
 
-| Capability | PDF | DOCX | PPTX |
-|---|---:|---:|---:|
-| Structured extraction | Yes | Yes | Yes |
-| Page/slide boundaries | Source pages | WordCraft layout pages | One page per slide |
-| Text and geometry | Yes | Text; layout page metadata | Text and shape geometry |
-| URI links | Yes | Yes | Yes |
-| Semantic tables | Conservative geometry inference | Yes | Yes |
-| Embedded image bytes | Exportable images | Referenced images | Referenced pictures |
-| Notes | No dedicated model | Comments as comment blocks | Speaker notes |
-| Comments | PDF comments not normalized | Comments and replies | Comments and replies |
-| PNG rendering | Yes | Yes | Yes |
-| Password input | Yes | Yes | Encrypted PPTX unsupported |
-| OCR | No | Not applicable | Not applicable |
-| Create a new document from scratch | Authored profile | Authored profile | Authored profile |
+| Capability | PDF | DOCX | PPTX | EPUB |
+|---|---:|---:|---:|---:|
+| Structured extraction | Yes | Yes | Yes | Reflowable profile |
+| Page/slide boundaries | Source pages | WordCraft layout pages | One page per slide | One page per spine chapter |
+| Text and geometry | Yes | Text; layout page metadata | Text and shape geometry | Semantic text; no physical geometry |
+| URI links | Yes | Yes | Yes | Yes |
+| Semantic tables | Conservative geometry inference | Yes | Yes | Readable cell text only |
+| Embedded image bytes | Exportable images | Referenced images | Referenced pictures | Referenced images |
+| Notes | No dedicated model | Comments as comment blocks | Speaker notes | No |
+| Comments | PDF comments not normalized | Comments and replies | Comments and replies | No |
+| PNG rendering | Yes | Yes | Yes | No |
+| Password input | Yes | Yes | Encrypted PPTX unsupported | DRM/password unsupported |
+| OCR | No | Not applicable | Not applicable | Not applicable |
+| Create a new document from scratch | Authored profile | Authored profile | Authored profile | Append-only profile |
 
 See [native authoring](authoring.md) for the supported creation/editing profiles; these entries do not imply arbitrary imported-document preservation.
 
@@ -166,12 +166,14 @@ Conversion is not pixel-perfect. Font substitution, unsupported PDF constructs, 
 
 ## Document creation
 
-`doc_ex.new("docx" | "pdf" | "pptx")` creates an owned editable native document with insertion, formatting, copy, conversion and atomic path saving. See the supported methods and limitations in [Authoring](authoring.md). Extracted Python values remain independent snapshots; arbitrary source-Office editing is still unavailable, while PDF `Document.edit()` uses a conservative preservation profile. Remaining [creation TODOs](../TODO.md#p1--create-docx-and-pdf-documents) cover broader features; legacy `.doc` output is outside the current scope.
+`doc_ex.new("docx" | "pdf" | "pptx" | "epub")` creates an owned editable native document with insertion, formatting, copy, and atomic path saving. EPUB creation is append-only and reflowable: it supports metadata, ordered chapters, headings, paragraphs, inert links, and signature-checked PNG/JPEG/GIF resources; it does not support rendering, conversion, CSS, raw XHTML, SVG, or editing existing books. See the supported methods and limitations in [Authoring](authoring.md). Extracted Python values remain independent snapshots; arbitrary source-Office editing is still unavailable, while PDF `Document.edit()` uses a conservative preservation profile.
 
-## EPUB (unreleased extraction scope)
+## EPUB (unreleased extraction and creation profile)
 
-The EPUB feature branch detects EPUB 2/3 containers and maps each spine chapter to one compatibility `Page` in reading order. This is a chapter boundary, not physical pagination. Native extraction preserves semantic headings, paragraphs, inline links, referenced image bytes/alt text and publication metadata through LexePub 0.1.2 after the shared archive safety preflight.
+The EPUB feature branch detects EPUB 2/3 containers and maps each spine chapter to one compatibility `Page` in reading order. This is a chapter boundary, not physical pagination. Native extraction preserves semantic headings, paragraphs, readable list/quote/preformatted/cell text, inline links, referenced image bytes/alt text and publication metadata through LexePub 0.1.2 after shared archive safety and strict container/package/XHTML XML preflights.
 
-The same branch adds `doc_ex.new("epub")` through rbook 0.7.12 for bounded semantic metadata, chapters, headings, paragraphs, inert links and in-memory images. Created bytes reopen through the independent extraction path.
+The same branch adds `doc_ex.new("epub")` through rbook 0.7.12 for bounded semantic metadata, chapters, headings, paragraphs, inert links and signature-checked PNG/JPEG/GIF images. Created bytes reopen through the independent extraction path. Authored SVG is rejected because arbitrary SVG cannot be guaranteed inert.
 
-Rendering, fixed-layout pagination, CSS fidelity, scripts, media overlays, editing existing EPUB files and conversion are intentionally unsupported. Encrypted or DRM-protected resources fail explicitly. See `.kiro/specs/epub-support/` for requirements and deferred work.
+LexePub still eagerly materializes its complete CSS/chapter AST before the adapter's final normalized-output check, and rbook writes through an in-memory vector. The public profile applies source ZIP/input limits, strict XML checks, 64 MiB content/media ceilings, 16 MiB per image, and conservative/actual 128 MiB output checks, but does not claim hard intermediate-allocation ceilings without upstream streaming APIs.
+
+Rendering, fixed-layout pagination, CSS fidelity, scripts, SVG authoring, media overlays, editing existing EPUB files and conversion are intentionally unsupported. Encrypted or DRM-protected resources fail explicitly. See `.kiro/specs/epub-support/` for requirements and deferred work.

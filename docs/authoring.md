@@ -1,6 +1,6 @@
 # Native authoring (unreleased)
 
-The branch adds `doc_ex.new("docx" | "pdf" | "pptx")`. Editable documents own the upstream native model; extracted `Document`, `Block`, `Table` and `Cell` values remain snapshots. This page describes the implemented surface, while [the roadmap](../TODO.md) retains broader parity work. These additions are not part of the published 0.2.1 release.
+The branch adds `doc_ex.new("docx" | "pdf" | "pptx" | "epub")`. Editable documents own the upstream native model; extracted `Document`, `Block`, `Table` and `Cell` values remain snapshots. This page describes the implemented surface, while [the roadmap](../TODO.md) retains broader parity work. These additions are not part of the published 0.2.1 release.
 
 ## Create, save, copy and render
 
@@ -26,6 +26,12 @@ with doc_ex.new("docx") as report:
 `copy()` returns independent native state, including media. Child handles keep their owner alive, but access after explicit `close()` raises `DocumentClosedError`. Saving does not close the document. Rendering and conversion serialize a snapshot through the same upstream pipelines as existing read-only documents. Mutation invalidates the cached extraction snapshot.
 
 A new PDF starts with one Letter page unless `size` is supplied. `pdf.pages.add()` defaults to Letter independently of the first page; pass `size` explicitly for another size. A new DOCX has a default section and styles; its required blank paragraph is omitted from the user paragraph collection. An explicitly inserted empty paragraph is retained. A presentation starts with no slides and must have at least one slide before serialization.
+
+### EPUB reflowable books
+
+`doc_ex.new("epub" | "ebook")` creates an append-only EPUB 3 book. Set required title, identifier, and language metadata, add ordered chapters, then append headings, paragraphs, HTTP(S)/mailto/fragment links, and PNG/JPEG/GIF images. Text must be valid XML 1.0. Images are signature checked, limited to 16 MiB each and 64 MiB total; authored content is limited to 64 MiB and estimated/actual output to 128 MiB. SVG is rejected because arbitrary SVG cannot be guaranteed inert. `copy()`, bytes/path/stream save, context management, and close follow the lifecycle above.
+
+EPUB rendering, conversion, CSS, raw XHTML/OPF, scripts, fixed layout, editing an existing book, and physical pagination are unavailable. The extraction API maps each spine chapter to one compatibility page.
 
 ## Units, colors and collections
 
@@ -478,6 +484,6 @@ with doc_ex.new("epub") as book:
     epub_bytes = book.to_bytes()
 ```
 
-EPUB creation is append-only and semantic. `EpubDocument` supports the shared `to_bytes`, path/stream `save`, `copy`, context manager and idempotent `close` lifecycle. Required metadata is title, identifier and language. Links are inert HTTP(S), mailto or safe fragment targets; remote resources are never fetched. Supported image resources are bounded PNG, JPEG, GIF and SVG bytes.
+EPUB creation is append-only and semantic. `EpubDocument` supports the shared `to_bytes`, path/stream `save`, `copy`, context manager and idempotent `close` lifecycle. Required metadata is title, identifier and language. Links are inert ASCII-case-insensitive HTTP(S), mailto or safe fragment targets; remote resources are never fetched. Supported image resources are signature-checked PNG, JPEG and GIF bytes, limited to 16 MiB each and 64 MiB total. SVG authoring is rejected because active content cannot be guaranteed inert.
 
-Callers cannot inject raw XHTML, OPF, CSS, scripts or archive paths. Existing EPUB editing, fixed-layout content, rendering, conversion, DRM and media overlays are unsupported.
+Callers cannot inject raw XHTML, OPF, CSS, SVG, scripts or archive paths. Existing EPUB editing, fixed-layout content, rendering, conversion, DRM and media overlays are unsupported.
