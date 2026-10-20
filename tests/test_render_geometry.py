@@ -86,10 +86,53 @@ class RenderGeometryTests(unittest.TestCase):
         }
         for rotation, points in centers.items():
             with self.subTest(rotation=rotation), doc_ex.open(geometry_pdf(rotation)) as document:
-                width, pixels = rgba_pixels(png_chunks(document.render_page(0, dpi=72)))
-                for (x, y), expected in zip(points, (b"\xff\0\0\xff", b"\0\0\xff\xff")):
-                    offset = (int(y) * width + int(x)) * 4
-                    self.assertEqual(pixels[offset:offset + 4], expected)
+                for dpi in (72, 144, 300):
+                    data = document.render_page(0, dpi=dpi)
+                    self.assertEqual(data, document[0].get_pixmap(dpi=dpi))
+                    width, pixels = rgba_pixels(png_chunks(data))
+                    for (x, y), expected in zip(points, (b"\xff\0\0\xff", b"\0\0\xff\xff")):
+                        offset = (int(y * dpi / 72) * width + int(x * dpi / 72)) * 4
+                        self.assertEqual(pixels[offset:offset + 4], expected)
+
+
+    def test_nonstandard_slide_dimensions_and_visible_content_at_each_dpi(self):
+        with doc_ex.new("pptx", size=(413, 257)) as authored:
+            slide = authored.slides.add()
+            slide.add_shape("rectangle", box=(20, 20, 80, 50), fill="red")
+            slide.add_text("Nonstandard preview", box=(20, 100, 350, 60))
+            with doc_ex.open(authored.to_bytes()) as document:
+                for dpi in (72, 144, 300):
+                    with self.subTest(dpi=dpi):
+                        data = document.render_page(0, dpi=dpi)
+                        self.assertEqual(data, document[0].get_pixmap(dpi=dpi))
+                        chunks = png_chunks(data)
+                        size = struct.unpack(">II", chunks[b"IHDR"][:8])
+                        for actual, points in zip(size, (413, 257)):
+                            self.assertLessEqual(abs(actual - points * dpi / 72), 1)
+                        width, pixels = rgba_pixels(chunks)
+                        offset = (int(40 * dpi / 72) * width + int(50 * dpi / 72)) * 4
+                        self.assertEqual(pixels[offset:offset + 4], b"\xff\0\0\xff")
+
+    def test_landscape_multipage_docx_visible_content_at_each_dpi(self):
+        with doc_ex.new("docx", size=(360, 240)) as authored:
+            authored.sections[0].margins = 24
+            authored.add_paragraph("RED PAGE ONE").find("RED PAGE ONE")[0].format(color="red")
+            authored.add_page_break()
+            authored.add_paragraph("BLUE PAGE TWO").find("BLUE PAGE TWO")[0].format(color="blue")
+            with doc_ex.open(authored.to_bytes()) as document:
+                self.assertEqual(document.page_count, 2)
+                for page in range(2):
+                    for dpi in (72, 144, 300):
+                        with self.subTest(page=page, dpi=dpi):
+                            data = document.render_page(page, dpi=dpi)
+                            self.assertEqual(data, document[page].get_pixmap(dpi=dpi))
+                            chunks = png_chunks(data)
+                            size = struct.unpack(">II", chunks[b"IHDR"][:8])
+                            for actual, points in zip(size, (360, 240)):
+                                self.assertLessEqual(abs(actual - points * dpi / 72), 1)
+                            _, pixels = rgba_pixels(chunks)
+                            color = b"\xff\0\0\xff" if page == 0 else b"\0\0\xff\xff"
+                            self.assertGreater(sum(pixels[index:index + 4] == color for index in range(0, len(pixels), 4)), 10)
 
 
 if __name__ == "__main__":

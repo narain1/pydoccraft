@@ -60,6 +60,88 @@ class NoteOptions(TypedDict, total=False):
     restart: str | None
 
 
+class BorderFormatting(TypedDict, total=False):
+    style: str
+    color: str | tuple[int, int, int] | None
+    width: float
+
+
+class TableFormatting(TypedDict, total=False):
+    alignment: str | None
+    indent: float | None
+    width: float | None
+    width_percent: float | None
+    layout: str
+    rtl: bool
+    title: str | None
+    description: str | None
+    borders: dict[str, BorderFormatting | None] | None
+
+
+class CellFormatting(TypedDict, total=False):
+    background: str | tuple[int, int, int] | None
+    margins: float | tuple[float, float, float, float] | None
+    alignment: str | None
+    vertical_alignment: str | None
+    text_direction: str | None
+    no_wrap: bool
+    borders: dict[str, BorderFormatting | None] | None
+
+
+def _table_format_patch(values, *, cell: bool = False) -> str:
+    allowed = CellFormatting.__annotations__ if cell else TableFormatting.__annotations__
+    if values.keys() - allowed.keys():
+        raise ValueError("unknown cell/table formatting property")
+    patch = {}
+    for key, value in values.items():
+        if key == "borders" and value is not None:
+            if not isinstance(value, dict) or len(value) > 6:
+                raise TypeError("borders must be a mapping of at most six sides")
+            sides = {"top", "right", "bottom", "left"}
+            if not cell:
+                sides |= {"inside_horizontal", "inside_vertical"}
+            if value.keys() - sides:
+                raise ValueError("unsupported border side")
+            borders = {}
+            for side, line in value.items():
+                if line is None:
+                    borders[side] = None
+                    continue
+                if not isinstance(line, dict) or line.keys() - BorderFormatting.__annotations__.keys():
+                    raise TypeError("each border must contain only style, color and width")
+                border = {}
+                for prop, item in line.items():
+                    if prop == "color":
+                        item = None if item is None else _hex_color(item)
+                    elif prop == "width":
+                        item = pt(item)
+                    elif not isinstance(item, str) or len(item) > 32:
+                        raise ValueError("border style must be a short native style name")
+                    border[prop] = item
+                borders[side] = border
+            patch[key] = borders
+            continue
+        if key in {"title", "description"}:
+            if value is not None and (not isinstance(value, str) or len(value) > 10000):
+                raise ValueError("table title/description must be strings of at most 10000 characters or None")
+        elif key == "background" and value is not None:
+            value = _hex_color(value)
+        elif key == "margins" and value is not None:
+            value = _margins(value)
+        elif key in {"indent", "width", "width_percent"} and value is not None:
+            value = pt(value)
+        elif value is not None:
+            if not isinstance(value, (str, bool)):
+                raise TypeError("formatting values must match the property's scalar type")
+            if isinstance(value, str) and len(value) > 128:
+                raise ValueError("formatting enum exceeds its limit")
+        patch[key] = value
+    encoded = json.dumps(patch, ensure_ascii=False, allow_nan=False)
+    if len(encoded.encode("utf-8")) > 128 * 1024:
+        raise ValueError("table formatting patch exceeds 128 KiB")
+    return encoded
+
+
 def _format_patch(values, *, rgb_highlight: bool = False) -> str:
     # Preserve omission versus explicit None; native adapters own allowed keys.
     if len(values) > 32:
@@ -155,7 +237,14 @@ def _index(index, length: int) -> int:
     return index
 
 
-def _rows(rows) -> list[list[str]]:
+def _rows(rows, columns: int | None = None) -> list[list[str]]:
+    if columns is not None:
+        if isinstance(rows, bool) or isinstance(columns, bool):
+            raise TypeError("row and column counts must be integers")
+        count, columns = operator.index(rows), operator.index(columns)
+        if not 1 <= count <= 10000 or not 1 <= columns <= 1000 or count * columns > 100000:
+            raise ValueError("table counts require 1..10000 rows, 1..1000 columns and at most 100000 cells")
+        return [[""] * columns for _ in range(count)]
     if isinstance(rows, (str, bytes)):
         raise TypeError("table rows must be a sequence of rows of strings")
     result = []
@@ -418,8 +507,8 @@ class WordDocument(EditableDocument):
         """Start a new layout page with an explicit native paragraph break."""
         return Paragraph(self, self._call("add_page_break", _change=True))
 
-    def add_table(self, rows) -> EditableTable:
-        return EditableTable(self, self._call("add_table", _rows(rows), _change=True))
+    def add_table(self, rows, *, columns: int | None = None) -> EditableTable:
+        return EditableTable(self, self._call("add_table", _rows(rows, columns), _change=True))
 
     def add_image(self, source, *, width=None, height=None, alt: str = ""):
         from . import _read
@@ -908,13 +997,32 @@ class EditableTable:
         """Return a text snapshot; use table[row, column].text to edit a cell."""
         return self._owner._call("table_rows", *self._args)
 
-    def __getitem__(self, key) -> EditableCell:
+    @overload
+    def __getitem__(self, key: tuple[int, int]) -> EditableCell: ...
+
+    @overload
+    def __getitem__(self, key: tuple[int, slice] | tuple[slice, int]) -> list[EditableCell]: ...
+
+    @overload
+    def __getitem__(self, key: tuple[slice, slice]) -> list[list[EditableCell]]: ...
+
+    def __getitem__(self, key):
+        """Address cells or ordered row/column slices; slices return handle lists."""
         if not isinstance(key, tuple) or len(key) != 2:
-            raise TypeError("address a cell with table[row, column]")
+            raise TypeError("address cells with table[row, column] or row/column slices")
         rows = self.rows
-        row = _index(key[0], len(rows))
-        column = _index(key[1], len(rows[row]))
-        return EditableCell(self, row, column)
+        row_key, column_key = key
+        if isinstance(row_key, slice):
+            row_indices = range(len(rows))[row_key]
+            if isinstance(column_key, slice):
+                columns = range(len(rows[0]))[column_key]
+                return [[EditableCell(self, row, column) for column in columns] for row in row_indices]
+            column = _index(column_key, len(rows[0]))
+            return [EditableCell(self, row, column) for row in row_indices]
+        row = _index(row_key, len(rows))
+        if isinstance(column_key, slice):
+            return [EditableCell(self, row, column) for column in range(len(rows[row]))[column_key]]
+        return EditableCell(self, row, _index(column_key, len(rows[row])))
 
     def __repr__(self):
         rows = self.rows
@@ -924,6 +1032,19 @@ class EditableTable:
         if self._slide is not None:
             raise UnsupportedFormatError("this table layout operation is currently DOCX-only")
         return self._id
+
+    @property
+    def formatting(self) -> dict:
+        """A snapshot of direct native table formatting."""
+        return json.loads(self._owner._call("table_formatting", self._word_id()))
+
+    def format(self, **formatting: Unpack[TableFormatting]) -> None:
+        self._owner._call("table_format_patch", self._word_id(),
+                          _table_format_patch(formatting), _change=True)
+
+    def fit(self) -> list[float]:
+        """Measure native cell content and apply checked column widths."""
+        return self._owner._call("fit_table", self._word_id(), _change=True)
 
     @property
     def column_widths(self):
@@ -1105,9 +1226,9 @@ class EditableCell:
             return identifier
         return Paragraph(self._table._owner, self._table._owner._atomic(append))
 
-    def add_table(self, rows):
+    def add_table(self, rows, *, columns: int | None = None):
         owner = self._table._owner
-        return EditableTable(owner, owner._call("cell_add_table", *self._content_args(), _rows(rows), _change=True))
+        return EditableTable(owner, owner._call("cell_add_table", *self._content_args(), _rows(rows, columns), _change=True))
 
     def add_image(self, source, *, width=None, height=None, alt: str = ""):
         from . import _read
@@ -1125,6 +1246,17 @@ class EditableCell:
         if columns is not None:
             columns = operator.index(columns)
         table._owner._call("split_cell", *self._args, columns, _change=True)
+
+    @property
+    def formatting(self) -> dict:
+        """A snapshot of direct native cell formatting."""
+        self._check()
+        return json.loads(self._table._owner._call("cell_formatting", self._table._word_id(), self._row, self._column))
+
+    def format(self, **formatting: Unpack[CellFormatting]) -> None:
+        self._check()
+        self._table._owner._call("cell_format_patch", self._table._word_id(), self._row, self._column,
+                                _table_format_patch(formatting, cell=True), _change=True)
 
     @property
     def margins(self) -> tuple[float, float, float, float]:
@@ -1450,7 +1582,7 @@ class PdfPages(_Collection["PdfPage"]):
         self._owner._call("move_page", _index(index, len(self)), _index(destination, len(self)), _change=True)
         self._owner._page_generation += 1
 
-    def insert(self, index: int, source, *, pages=None, password: str | None = None):
+    def insert(self, index: int, source, *, pages=None, password: str | None = None, outline_title: str | None = None):
         """Import selected pages using the upstream resource-remapping operation."""
         from . import _read
         index = operator.index(index)
@@ -1469,7 +1601,7 @@ class PdfPages(_Collection["PdfPage"]):
         else:
             data, _ = _read(source)
         indices = None if pages is None else [operator.index(value) for value in pages]
-        count = self._owner._call("import_pages", data, password, indices, index, _change=True)
+        count = self._owner._call("import_pages", data, password, indices, index, outline_title, _change=True)
         self._owner._page_generation += 1
         return [PdfPage(self._owner, position) for position in range(index, index + count)]
 
@@ -1805,10 +1937,10 @@ class Slide:
         identifier = self._owner._call("add_text", self.number, text, *map(pt, box), pt(font_size), _change=True)
         return Shape(self._owner, self._id, identifier)
 
-    def add_table(self, rows, *, box, font_size: float = 18):
+    def add_table(self, rows, *, columns: int | None = None, box, font_size: float = 18):
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
-        identifier = self._owner._call("add_table", self.number, _rows(rows), *map(pt, box), pt(font_size), _change=True)
+        identifier = self._owner._call("add_table", self.number, _rows(rows, columns), *map(pt, box), pt(font_size), _change=True)
         return SlideTable(self._owner, identifier, self._id)
 
     def add_image(self, source, *, box, alt: str = ""):
