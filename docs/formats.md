@@ -1,6 +1,6 @@
 # Formats, rendering, and conversion
 
-This document is the authoritative capability and fidelity matrix for `pydoccraft` 0.2.1.
+This document describes the current source tree, including unreleased improvements since `pydoccraft` 0.2.1. See the [validation record](../.kiro/specs/rust-document-engine/validation.md) for tested artifacts.
 
 ## Capability matrix
 
@@ -17,6 +17,7 @@ This document is the authoritative capability and fidelity matrix for `pydoccraf
 | PNG rendering | Yes | Yes | Yes |
 | Password input | Yes | Yes | Encrypted PPTX unsupported |
 | OCR | No | Not applicable | Not applicable |
+| Create a new document from scratch | No | No | No |
 
 ## PDF
 
@@ -71,7 +72,7 @@ DOCX support is backed by pinned WordCraft 0.8.0 crates.
 
 WordCraft computes layout pages. A paragraph that spans multiple computed pages but contains no explicit page break is emitted once on the first page it occupies because the upstream public model does not expose exact normalized text slices for each laid-out page.
 
-Tables are associated with their first page rather than split into separate normalized table fragments. Nested tables are represented inside the containing cell using newline/tab text, not as recursively nested Python `Table` objects.
+Tables are associated with their first page rather than split into separate normalized table fragments. `Table.rows` retains newline/tab cell text for compatibility; `Table.cells` additionally preserves ordered paragraph/table blocks and horizontal/vertical merge information. Markdown uses HTML for nested, merged, or rich tables. This extraction structure does not provide an editable document model.
 
 Unreferenced files in `word/media/` are not returned.
 
@@ -110,6 +111,10 @@ Both methods return encoded PNG bytes.
 - DPI must be finite and between 1 and 1200.
 - Out-of-range pages are rejected in Python before native dispatch.
 
+DPI controls raster scale and embedded PNG resolution metadata for all three formats. Pixel dimensions follow each engine's rounding; physical resolution uses integer pixels per meter. The multi-DPI corpus checks dimensions, metadata, decoded PNG data and visible content. Rotated/landscape and broader fidelity cases remain in the [rendering validation TODOs](../TODO.md#p0--rendering-at-a-requested-dpi).
+
+Each output is bounded to 64 million RGBA pixels in addition to upstream maximum-side limits. DOCX/PPTX dimensions are checked before rasterization; PDF uses upstream oversize rejection. DeckCraft can internally replace a rendering panic with a blank image: this remains a documented upstream blocker, because an intentionally blank slide is also valid output.
+
 The returned value is not a PyMuPDF `Pixmap`; write it directly or load it with an image library:
 
 ```python
@@ -137,3 +142,7 @@ slide_pdf = doc_ex.convert("slides.pptx", "pdf")
 ```
 
 Conversion is not pixel-perfect. Font substitution, unsupported PDF constructs, Office layout differences, grouped graphics, complex tables, and upstream exporter limitations can change appearance. Always reopen and validate converted output for the intended workflow.
+
+## Document creation
+
+The conversion methods produce new files from existing documents. There is currently no public builder for creating a DOCX or PDF from scratch, nor a mutation/save API for writing changes to extracted Python objects back to a document. [Creation TODOs](../TODO.md#p1--create-docx-and-pdf-documents) cover upstream-backed authoring of modern DOCX and PDF; legacy `.doc` output is outside the current scope.

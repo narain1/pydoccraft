@@ -2,6 +2,8 @@
 
 `pydoccraft` exposes an eager, PyMuPDF-style API. Opening a document reads the source into memory, invokes the native Rust engine, and returns Python objects that own their extracted text and image bytes.
 
+This page describes the existing API. The [proposed authoring API](authoring-api-design.md) and [feature backlog](../TODO.md) cover future Pillow-like creation/editing objects and Open XML feature parity; their examples are not executable against 0.2.1.
+
 ## Open a document
 
 ```python
@@ -88,7 +90,7 @@ with doc_ex.open("slides.pptx") as document:
 
 Slices are not supported. An out-of-range page raises `IndexError`.
 
-After `close()`, document operations raise `DocumentClosedError`. Previously obtained `Page`, `Block`, `Table`, `Link`, and `Image` data remains readable because extraction is eager. `Page.get_pixmap()` still requires its originating document and therefore fails after that document closes.
+After `close()`, document operations raise `DocumentClosedError`. Previously obtained `Page`, `Block`, `Table`, `Cell`, `Link`, and `Image` data remains readable because extraction is eager. `Page.get_pixmap()` still requires its originating document and therefore fails after that document closes.
 
 ## `Page`
 
@@ -124,7 +126,7 @@ tables = page.find_tables()
 png = page.get_pixmap(dpi=144)
 ```
 
-The result is encoded PNG bytes, not a PyMuPDF `Pixmap` object. DPI must be finite and between 1 and 1200. Rendering behavior and limits are described in [Formats and fidelity](formats.md) and [Safety](safety.md).
+The result is encoded PNG bytes, not a PyMuPDF `Pixmap` object. DPI must be finite and between 1 and 1200. PNG physical-resolution metadata records the requested DPI, rounded to integer pixels per meter. Rendering behavior and limits are described in [Formats and fidelity](formats.md) and [Safety](safety.md).
 
 ## Data models
 
@@ -175,10 +177,20 @@ Image(
 ### `Table`
 
 ```python
-Table(rows, bbox=None, page=None, metadata={})
+Table(rows, bbox=None, page=None, metadata={}, cells=[])
 ```
 
-`rows` is `list[list[str]]`. `to_markdown()` treats the first row as the header, pads ragged rows, escapes `|`, and converts cell newlines to `<br>`.
+`rows` is the compatible `list[list[str]]` text view. DOCX tables additionally provide `cells: list[list[Cell]]`, preserving paragraphs and nested tables in source order. PDF/PPTX currently leave `cells` empty. `to_dict()` adds the `cells` key only when this structure is available.
+
+Simple `to_markdown()` output treats the first row as the header, pads ragged rows, escapes `|`, and converts cell newlines to `<br>`. Nested, merged, or rich DOCX tables use escaped HTML tables inside Markdown because pipe tables cannot represent that structure. Plain text uses the flat rows once.
+
+### `Cell`
+
+```python
+Cell(blocks=[], col_span=1, row_span=1, covered=False, metadata={})
+```
+
+`blocks` contains owned `Block` values; a nested table is available through `block.table`. Span counts are positive, and `covered` identifies a vertical merge continuation. `metadata["vertical_merge"]` records the source merge state; `metadata["grid_column"]` gives its zero-based logical column, including omitted leading grid cells. WordCraft may insert a required empty paragraph after a nested table, which remains in `blocks`. These extracted values remain usable after the source document closes; changing them does not edit the source document.
 
 ## Errors
 

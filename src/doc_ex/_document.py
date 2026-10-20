@@ -7,6 +7,25 @@ from .errors import DocumentClosedError
 from .models import Block, Image, Link, Table
 
 
+def _table_blocks(table: Table) -> Iterator[Block]:
+    for row in table.cells:
+        for cell in row:
+            for block in cell.blocks:
+                yield block
+                if block.table:
+                    yield from _table_blocks(block.table)
+
+
+def _source_asset(asset: Link | Image) -> tuple | None:
+    path = asset.metadata.get("source_path")
+    if path is None:
+        return None
+    source = (tuple(path), asset.metadata.get("segment"), asset.page)
+    if isinstance(asset, Link):
+        return source + (asset.uri, asset.text, asset.metadata.get("start"), asset.metadata.get("end"))
+    return source + (asset.name, asset.alt, asset.metadata.get("source_offset"))
+
+
 class Page:
     def __init__(self, number: int, blocks: list[Block] | None = None, *, links: list[Link] | None = None, images: list[Image] | None = None, tables: list[Table] | None = None, metadata: dict[str, Any] | None = None) -> None:
         self.number = number
@@ -68,9 +87,10 @@ class Page:
             last_start = start
         return text, emitted
 
-    def _markdown(self) -> str:
+    def _markdown(self, table_links: set[tuple] | None = None, table_images: set[tuple] | None = None) -> str:
         parts: list[str] = []
         emitted_links: set[tuple[str, str, int, int]] = set()
+        emitted_images: set[tuple[str, str]] = set()
         for block in self.blocks:
             linked_text, emitted = self._linked_text(block.text, block.links)
             emitted_links.update(emitted)
@@ -78,6 +98,10 @@ class Page:
                 parts.append(f"{'#' * max(1, min(block.level or 1, 6))} {linked_text}")
             elif block.table:
                 parts.append(block.table.to_markdown())
+                for nested in _table_blocks(block.table):
+                    _, emitted = self._linked_text(nested.text, nested.links)
+                    emitted_links.update(emitted)
+                    emitted_images.update((image.name, image.alt) for image in nested.images)
             elif block.kind == "comment":
                 parts.append(f"> **Comment:** {block.text}")
             elif block.kind == "notes":
@@ -86,13 +110,16 @@ class Page:
                 parts.append(linked_text)
             for image in block.images:
                 parts.append(f"![{image.alt}]({image.name})")
+                emitted_images.add((image.name, image.alt))
         for image in self._images:
             reference = f"![{image.alt}]({image.name})"
-            if reference not in parts:
+            if (image.name, image.alt) not in emitted_images and _source_asset(image) not in (table_images or set()):
                 parts.append(reference)
+                emitted_images.add((image.name, image.alt))
         remaining = [
             link for link in self._links
             if (link.uri, link.text, link.metadata.get("start"), link.metadata.get("end")) not in emitted_links
+            and _source_asset(link) not in (table_links or set())
         ]
         if remaining:
             parts.append("**Links:**\n" + "\n".join(f"- [{link.text or link.uri}]({link.uri})" for link in remaining))
@@ -138,7 +165,16 @@ class Document:
 
     def to_markdown(self) -> str:
         self._ensure_open()
-        return "\n\n".join(markdown for page in self._pages if (markdown := page.get_text("markdown"))).strip()
+        table_links: set[tuple] = set()
+        table_images: set[tuple] = set()
+        for page in self._pages:
+            for block in page.blocks:
+                if block.table:
+                    for nested in _table_blocks(block.table):
+                        _, emitted = Page._linked_text(nested.text, nested.links)
+                        table_links.update(key for link in nested.links if (link.uri, link.text, link.metadata.get("start"), link.metadata.get("end")) in emitted and (key := _source_asset(link)) is not None)
+                        table_images.update(key for image in nested.images if (key := _source_asset(image)) is not None)
+        return "\n\n".join(markdown for page in self._pages if (markdown := page._markdown(table_links, table_images))).strip()
 
     def render_page(self, page: int, dpi: float = 144) -> bytes:
         self._ensure_open()

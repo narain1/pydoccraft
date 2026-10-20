@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, io::Cursor, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use base64::Engine;
 use pdfcraft_render::{
@@ -86,11 +86,7 @@ pub fn render(
     dpi: f64,
     password: Option<&str>,
 ) -> Result<Vec<u8>, EngineError> {
-    if !dpi.is_finite() || !(1.0..=1200.0).contains(&dpi) {
-        return Err(EngineError::ResourceLimit(
-            "DPI must be finite and between 1 and 1200".into(),
-        ));
-    }
+    crate::rendering::validate_dpi(dpi)?;
     let bytes = Arc::new(data.to_vec());
     let info = inspect(bytes.clone(), password).map_err(open_error)?;
     if page >= info.pages.len() {
@@ -117,7 +113,7 @@ pub fn render(
             "PDF rendering failed: {e}"
         )));
     }
-    encode_png(rendered.width, rendered.height, rendered.rgba.as_ref())
+    crate::rendering::encode_png(rendered.width, rendered.height, rendered.rgba.as_ref(), dpi)
 }
 
 fn add_text(text: &pdfcraft_render::PageText, page: &mut PagePayload) {
@@ -329,31 +325,6 @@ fn add_images(
         });
     }
     Ok(())
-}
-
-fn encode_png(width: u32, height: u32, premultiplied: &[u8]) -> Result<Vec<u8>, EngineError> {
-    let mut rgba = premultiplied.to_vec();
-    for pixel in rgba.chunks_exact_mut(4) {
-        let alpha = u16::from(pixel[3]);
-        if alpha != 0 && alpha != 255 {
-            for c in &mut pixel[..3] {
-                *c = ((u16::from(*c) * 255 + alpha / 2) / alpha).min(255) as u8;
-            }
-        }
-    }
-    let mut output = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(Cursor::new(&mut output), width, height);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder
-            .write_header()
-            .map_err(|e| EngineError::Malformed(format!("PNG encoding failed: {e}")))?;
-        writer
-            .write_image_data(&rgba)
-            .map_err(|e| EngineError::Malformed(format!("PNG encoding failed: {e}")))?;
-    }
-    Ok(output)
 }
 
 fn open_error(error: pdfcraft_render::OpenError) -> EngineError {
