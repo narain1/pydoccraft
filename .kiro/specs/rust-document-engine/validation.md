@@ -742,3 +742,24 @@ Independent exact-head CI then exposed a substantive native shaping defect: addi
 - Runtime `9758561` passes all 386 clean installed-wheel Python tests with zero skips/failures/errors and exact installed-byte matching. Strict installed-package typing and roadmap/support/cached-reference checks pass. Rust is unchanged from the 276-test PDF search runtime; its locked native/fmt/Clippy results and unchanged 264-package license audit remain applicable. The release build used the committed lockfile offline.
 - Linux x86_64 / CPython 3.11.2 wheel: 17,474,607 bytes; extension: 40,533,864; SHA-256 `ad89b38cbd9b199b38ec691b2ae3a6ed7e000ba6f7c596a55d67f42e49711fef`; lock SHA-256 `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. Evidence: `dist/pdf-page-ownership/validation.json` and `/opt/pdfpageownershiptest`. No upstream revision, dependency or conversion-matrix change.
 - This supersedes focused-only ownership evidence for local acceptance. Independent review and exact-head/current-main CI remain required before manual merge; broad PDF criteria are unchanged.
+
+
+## Native decimal outlines — focused integration evidence
+
+- The isolated implementation passes 128 DOCX native tests, all-targets warnings-denied Clippy and 28 related public tests against a matching copied debug extension/facade. Four new native groups and seven public workflows cover exact effective-definition identity, Num.start_overrides continuation, restart/copy, all nine levels at start 32767 in LTR/RTL, empty/wrapped items, scope/section guards, work limits and atomic failures/recovery.
+- Independent root review added rejection of non-finite interior caret values (which floating min/max can otherwise ignore), finite body-edge sums, once-per-operation canonical definitions and actual native override-scan accounting. Malformed-layout regressions and decoded source/PDF label-only ink controls pass; no broad font-ink guarantee is inferred.
+- Native ListKind::Legal remains responsible for all numbering and layout. No dependency, pin, license or conversion-matrix change. Complete integrated locked native/release/installed-wheel validation and independent review remain pending. TXT5 remains partial.
+
+
+## Native decimal outlines — complete local artifact
+
+- Runtime `bea5ea9` includes lazy matching of only referenced Legal numbering IDs, avoiding repeated full-definition matching for unused restart definitions. All 280 locked Rust tests and 393 clean installed-wheel Python tests pass, zero skips/failures/errors, with exact installed-byte matching. Formatting, all-targets warnings-denied Clippy, strict installed-package typing, roadmap/support/cached-reference checks and the unchanged 264-package license audit pass.
+- Linux x86_64 / CPython 3.11.2 wheel: 17,484,671 bytes; extension: 40,562,760; SHA-256 `12279825f40795d8ff4147c9af19ab3825e799384c997d3f10c7cc27569e0b02`; lock SHA-256 `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. Evidence: `dist/docx-decimal-outline/validation.json` and `/opt/docxdecimaloutlinetest`. No upstream revision, dependency or conversion-matrix change.
+- The corpus retains all-nine-level maximum-start LTR/RTL decoded label ink controls, source numbering identities, ordinary list compatibility, scope/geometry/budget refusal and recovery. This supersedes focused-only evidence for local acceptance. Independent review and exact-head/current-main CI remain required before manual merge; broader TXT5 custom definitions and cell/auxiliary placement remain open.
+
+
+## Decimal-outline raster comparison — independent CI correction
+
+Final-main CI runs `39503201911` and diagnostic-only `39504027755` exposed an overstrict aggregate ink-count assertion in the nine-level/max-start fixture. At LTR 144 DPI, source and PDF ink bounds were exactly `(145, 662, 150, 548)`, but thresholded counts were 5481 versus 5482. Full-image diagnostics found 140 changed pixels with maximum RGBA-channel difference 1: exactly one pixel at `(267, 248)` crossed from `(128,128,128,255)` to `(127,127,127,255)`. Independent repeated local probes also found deterministic one-channel differences while their aggregate counts happened to match. This is renderer coverage quantization, not evidence of a layout or shaping change.
+
+The corrected expectation retains exact image dimensions, exact thresholded ink bounds, visible ink, direction placement and all nine source numbering labels. It additionally compares every source/PDF RGBA channel with maximum difference 1, replacing aggregate count equality with spatially stronger evidence. No runtime implementation, native guard or dependency changed. Earlier local 393-test and downstream artifact results retain their original test-file scope; fresh corrected-test installed-wheel and final current-main CI validation remain required before merge.

@@ -421,3 +421,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Verify focused move/delete/close/error/copy routes, native boolean rejection and integer rotation compatibility against a copied installed extension.
 - [x] Complete clean installed-wheel validation (386 tests), strict typing and structural checks.
 - [ ] Complete independent review/current-main CI before manual merge.
+
+
+## Native decimal-outline list option
+
+- [x] Reuse Legal numbering through existing paragraph list methods with full-level identity, starts/restarts and bounded continuation lookup.
+- [x] Gate top-level body/section scope and reuse shared native layout for bounded logical label geometry, malformed geometry and later output refusal/recovery.
+- [x] Verify isolated native/public hierarchy, nine-level maximum-start LTR/RTL ink, source/PDF output, copy/wrapping/callback and compatibility regressions.
+- [x] Complete integrated locked native/release/installed-wheel validation (280 Rust / 393 Python).
+- [ ] Complete independent manual review/current-main CI.
+- [ ] Keep broader custom list definitions, cell/auxiliary outline placement and TXT5 completion open.

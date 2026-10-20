@@ -37,6 +37,8 @@ const MAX_IMAGE_PIXELS: u64 = 16_000_000;
 const MAX_LISTS: usize = 10_000;
 const MAX_PAGE_FIELDS: usize = 10_000;
 const MAX_LINE_NUMBER_WORK: usize = 100_000;
+const MAX_OUTLINE_WORK: usize = 100_000;
+const MAX_LIST_MATCH_WORK: usize = 2_000_000;
 
 /// Private boundary value: Python booleans must not become numbering starts.
 #[derive(Clone, Copy)]
@@ -1617,20 +1619,9 @@ impl EditableDocx {
         let Some(numbering) = document.styles.resolve_para(&paragraph.props).numbering else {
             return Ok(None);
         };
-        for (kind, name) in [
-            (ListKind::Bullet, "bullet"),
-            (ListKind::Numbered, "numbered"),
-        ] {
-            let wanted = wordcraft_doc::numbering::levels_for(kind);
-            if document
-                .numbering
-                .level(numbering.num, 0)
-                .is_some_and(|level| {
-                    level.format == wanted[0].format && level.text == wanted[0].text
-                })
-            {
-                return Ok(Some((name, numbering.level)));
-            }
+        let definitions = list_definitions();
+        if let Some(name) = supported_list_kind(document, numbering.num, &definitions, &mut 0)? {
+            return Ok(Some((name, numbering.level)));
         }
         Err(PyValueError::new_err(
             "paragraph uses an unsupported list style",
@@ -1653,9 +1644,10 @@ impl EditableDocx {
                 "list start must be between 1 and 32767",
             ));
         }
-        if start.is_some() && (kind != Some("numbered") || level != 0) {
+        if start.is_some() && (!matches!(kind, Some("numbered" | "decimal_outline")) || level != 0)
+        {
             return Err(PyValueError::new_err(
-                "list start requires a top-level numbered list",
+                "list start requires a top-level numbered or decimal_outline list",
             ));
         }
         if start.is_some() {
@@ -1679,38 +1671,69 @@ impl EditableDocx {
         let kind = match kind {
             Some("bullet") => Some(ListKind::Bullet),
             Some("numbered") => Some(ListKind::Numbered),
+            Some("decimal_outline") => Some(ListKind::Legal),
             None => None,
             _ => {
                 return Err(PyValueError::new_err(
-                    "list kind must be bullet, numbered or None",
+                    "list kind must be bullet, numbered, decimal_outline or None",
                 ))
             }
         };
+        if kind == Some(ListKind::Legal) {
+            let (story, path) = self.location(id)?;
+            if story != StoryRef::Body || path.0.len() != 1 {
+                return Err(EngineError::Unsupported("decimal_outline is available only on top-level body paragraphs; cells and auxiliary stories are not supported".into()).into());
+            }
+        }
         let mut candidate = self.document()?.clone();
         let num = if let Some(kind) = kind {
             let (story, path) = self.location(id)?;
-            let wanted = wordcraft_doc::numbering::levels_for(kind);
+            let wanted = match kind {
+                ListKind::Bullet => "bullet",
+                ListKind::Numbered => "numbered",
+                ListKind::Legal => "decimal_outline",
+                _ => return Err(PyValueError::new_err("unsupported list kind")),
+            };
             // Preserve the current sequence or continue the closest earlier matching list
             // in this story, including a restart. find_kind always returns the first one.
             let existing = if restart || start.is_some() {
                 None
             } else {
-                candidate
+                let mut found = None;
+                let mut work = 0usize;
+                let mut cache = BTreeMap::new();
+                let definitions = list_definitions();
+                for (visited, previous) in candidate
                     .para_paths(story)
                     .into_iter()
                     .take_while(|previous| previous <= &path)
-                    .filter_map(|previous| {
-                        let paragraph = candidate.para(story, &previous)?;
-                        let reference = candidate.styles.resolve_para(&paragraph.props).numbering?;
-                        candidate
-                            .numbering
-                            .level(reference.num, 0)
-                            .filter(|level| {
-                                level.format == wanted[0].format && level.text == wanted[0].text
-                            })
-                            .map(|_| reference.num)
-                    })
-                    .last()
+                    .enumerate()
+                {
+                    if visited >= MAX_BLOCKS {
+                        return Err(limit("list continuation exceeds 100000 paragraph visits"));
+                    }
+                    let Some(paragraph) = candidate.para(story, &previous) else {
+                        continue;
+                    };
+                    let Some(reference) = candidate.styles.resolve_para(&paragraph.props).numbering
+                    else {
+                        continue;
+                    };
+                    if let std::collections::btree_map::Entry::Vacant(entry) =
+                        cache.entry(reference.num)
+                    {
+                        entry.insert(supported_list_kind(
+                            &candidate,
+                            reference.num,
+                            &definitions,
+                            &mut work,
+                        )?);
+                    }
+                    if cache[&reference.num] == Some(wanted) {
+                        found = Some(reference.num);
+                    }
+                }
+                found
             };
             if let Some(existing) = existing {
                 existing
@@ -1743,6 +1766,9 @@ impl EditableDocx {
         // NumRef 0 explicitly cancels any numbering inherited from the paragraph style.
         paragraph.props.numbering = Some(NumRef { num, level });
         paragraph.touch();
+        if kind == Some(ListKind::Legal) {
+            validate_unsplittable_page_bounds(&candidate)?;
+        }
         self.commit(candidate)
     }
 
@@ -3914,6 +3940,7 @@ impl EditableDocx {
         };
         page_field_count(&document)?;
         validate_line_number_work(&document)?;
+        outline_targets(&document)?;
         validate_table_metadata_budget(&document)?;
         validate_document_tabs(&document)?;
         // Native generic range/table edits do not repair semantic references. Existing
@@ -4709,6 +4736,7 @@ fn validate_rich_story_page_bounds(
 /// this narrow check; exact-height clipping *inside* a page remains intentional.
 fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
     validate_line_number_work(document)?;
+    let outlines = outline_targets(document)?;
     let mut pending = native_table_roots(document);
     let mut guarded = BTreeSet::new();
     let mut cells = 0usize;
@@ -4758,7 +4786,12 @@ fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
         .iter()
         .any(|(_, section)| section.line_numbers.is_some());
     let bookmarks = validate_bookmark_links(document)?;
-    if guarded.is_empty() && rich.is_empty() && !numbered && bookmarks.is_empty() {
+    if guarded.is_empty()
+        && rich.is_empty()
+        && !numbered
+        && bookmarks.is_empty()
+        && outlines.is_empty()
+    {
         return Ok(());
     }
     let layout = wordcraft_layout::layout(
@@ -4813,6 +4846,9 @@ fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
     }
     if !bookmarks.is_empty() {
         validate_bookmark_layout(document, &layout, &bookmarks)?;
+    }
+    if !outlines.is_empty() {
+        validate_outline_layout(&layout, &outlines)?;
     }
     Ok(())
 }
@@ -6804,6 +6840,292 @@ fn line_number_restart_name(value: LineNumberRestart) -> &'static str {
         LineNumberRestart::Section => "each_section",
         LineNumberRestart::Continuous => "continuous",
     }
+}
+
+fn list_definitions() -> [(&'static str, Vec<wordcraft_doc::numbering::Level>); 3] {
+    [
+        (ListKind::Bullet, "bullet"),
+        (ListKind::Numbered, "numbered"),
+        (ListKind::Legal, "decimal_outline"),
+    ]
+    .map(|(kind, name)| (name, wordcraft_doc::numbering::levels_for(kind)))
+}
+
+// Compare all nine effective levels, never rendered labels or start counters.
+// Native start_overrides do not participate in Numbering::level.
+fn supported_list_kind(
+    document: &Document,
+    num: u32,
+    definitions: &[(&'static str, Vec<wordcraft_doc::numbering::Level>); 3],
+    work: &mut usize,
+) -> PyResult<Option<&'static str>> {
+    let numbering = &document.numbering;
+    // Count the initial num lookup, then upper-bound the two num scans, one
+    // abstract scan and override scan performed by each native level lookup.
+    *work = work.saturating_add(numbering.nums.len());
+    if *work > MAX_LIST_MATCH_WORK {
+        return Err(limit(
+            "list definition matching exceeds 2000000 lookup units",
+        ));
+    }
+    let Some(number) = numbering.num(num) else {
+        return Ok(None);
+    };
+    let cost = numbering
+        .nums
+        .len()
+        .saturating_mul(2)
+        .saturating_add(numbering.abstracts.len())
+        .saturating_add(number.level_overrides.len())
+        .saturating_add(1)
+        .saturating_mul(9);
+    *work = work.saturating_add(cost);
+    if *work > MAX_LIST_MATCH_WORK {
+        return Err(limit(
+            "list definition matching exceeds 2000000 lookup units",
+        ));
+    }
+    let levels: Option<Vec<_>> = (0..9).map(|level| numbering.level(num, level)).collect();
+    let Some(levels) = levels else {
+        return Ok(None);
+    };
+    for (name, wanted) in definitions {
+        if levels
+            .iter()
+            .zip(wanted)
+            .all(|(actual, expected)| *actual == expected)
+        {
+            return Ok(Some(*name));
+        }
+    }
+    Ok(None)
+}
+
+// The authored profile has no custom numbering-definition editor. A canonical
+// Legal abstract is a cheap activation test; full effective matching follows.
+fn outline_targets(document: &Document) -> PyResult<BTreeMap<usize, usize>> {
+    let definitions = list_definitions();
+    let wanted = &definitions[2].1;
+    let abstracts: BTreeSet<_> = document
+        .numbering
+        .abstracts
+        .iter()
+        .filter(|value| &value.levels == wanted)
+        .map(|value| value.id)
+        .collect();
+    if abstracts.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    if document.numbering.nums.len() > MAX_LISTS || document.numbering.abstracts.len() > MAX_LISTS {
+        return Err(limit("document exceeds 10000 native list definitions"));
+    }
+    let numbers: BTreeSet<_> = document
+        .numbering
+        .nums
+        .iter()
+        .filter(|number| abstracts.contains(&number.abstract_id))
+        .map(|number| number.id)
+        .collect();
+    let mut matching = 0;
+    let mut matched = BTreeMap::new();
+    if numbers.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let sections = document.sections();
+    let mut begin = 0;
+    let mut visited = 0usize;
+    let mut work = 0usize;
+    let mut targets = BTreeMap::new();
+    for (section_index, (end, section)) in sections.iter().enumerate() {
+        let blocks = document
+            .body
+            .get(begin..=*end)
+            .ok_or_else(|| PyValueError::new_err("invalid section bounds for decimal_outline"))?;
+        for (offset, block) in blocks.iter().enumerate() {
+            visited = visited.saturating_add(1);
+            if visited > MAX_BLOCKS {
+                return Err(limit(
+                    "decimal_outline preflight exceeds 100000 body blocks",
+                ));
+            }
+            let Some(paragraph) = block.as_para() else {
+                continue;
+            };
+            let Some(reference) = document.styles.resolve_para(&paragraph.props).numbering else {
+                continue;
+            };
+            if !numbers.contains(&reference.num) {
+                continue;
+            }
+            if let std::collections::btree_map::Entry::Vacant(entry) = matched.entry(reference.num)
+            {
+                entry.insert(supported_list_kind(
+                    document,
+                    reference.num,
+                    &definitions,
+                    &mut matching,
+                )?);
+            }
+            if matched[&reference.num] != Some("decimal_outline") {
+                continue;
+            }
+            if section.columns.count != 1
+                || section.start == SectionStart::Continuous
+                || sections
+                    .get(section_index + 1)
+                    .is_some_and(|(_, next)| next.start == SectionStart::Continuous)
+            {
+                return Err(EngineError::Unsupported("decimal_outline requires a single-column, non-continuous body section that is not followed by a continuous section".into()).into());
+            }
+            work = work
+                .saturating_add(paragraph.text.len().saturating_mul(4))
+                .saturating_add(paragraph.objects.len())
+                .saturating_add(1);
+            if work > MAX_OUTLINE_WORK {
+                return Err(limit("decimal_outline text exceeds 100000 layout-work units (four per UTF-8 byte, one per paragraph and inline object)"));
+            }
+            targets.insert(begin + offset, section_index);
+        }
+        begin = end + 1;
+    }
+    Ok(targets)
+}
+
+fn validate_outline_layout(
+    layout: &wordcraft_layout::DocLayout,
+    targets: &BTreeMap<usize, usize>,
+) -> PyResult<()> {
+    let mut work = 0usize;
+    let mut items = 0usize;
+    let mut seen = BTreeSet::new();
+    for page in &layout.pages {
+        items = items.saturating_add(page.items.len());
+        if items > MAX_LAYOUT_ITEMS {
+            return Err(limit(
+                "decimal_outline validation exceeds 2000000 placed items",
+            ));
+        }
+        for item in &page.items {
+            let wordcraft_layout::Placed::Lines {
+                story: StoryRef::Body,
+                path,
+                para,
+                l0,
+                l1,
+                x,
+                y,
+                turn,
+            } = item
+            else {
+                continue;
+            };
+            if path.0.len() != 1 {
+                continue;
+            }
+            let id = path.0[0] as usize;
+            let Some(section) = targets.get(&id) else {
+                continue;
+            };
+            let label_line = para.label_line();
+            if label_line < *l0 || label_line >= *l1 {
+                continue;
+            }
+            if *turn != TextDirection::Horizontal
+                || page.section != *section
+                || *l0 >= *l1
+                || *l1 > para.lines.len()
+            {
+                return Err(EngineError::Unsupported(
+                    "decimal_outline requires unambiguous horizontal body placement".into(),
+                )
+                .into());
+            }
+            let label = para.label.as_ref().ok_or_else(|| {
+                EngineError::Unsupported("native decimal_outline label is missing".into())
+            })?;
+            let line = para.lines.get(label_line).ok_or_else(|| {
+                EngineError::Unsupported("native decimal_outline label line is missing".into())
+            })?;
+            work = work
+                .saturating_add(label.glyphs.len())
+                .saturating_add(label.runs.len())
+                .saturating_add(line.xs.len());
+            if work > MAX_LAYOUT_ITEMS {
+                return Err(limit(
+                    "decimal_outline geometry exceeds 2000000 glyph/caret scan units",
+                ));
+            }
+            let left = *x + label.x;
+            let right = left + label.width;
+            let mut text_left = f32::INFINITY;
+            let mut text_right = f32::NEG_INFINITY;
+            for caret in &line.xs {
+                let placed = *x + *caret;
+                if !caret.is_finite() || !placed.is_finite() {
+                    return Err(EngineError::Unsupported(
+                        "native decimal_outline caret geometry is nonfinite".into(),
+                    )
+                    .into());
+                }
+                text_left = text_left.min(placed);
+                text_right = text_right.max(placed);
+            }
+            let top = *y + line.top - para.lines[*l0].top;
+            let bottom = top + line.height;
+            let body = page.body;
+            let body_right = body.right();
+            let body_bottom = body.bottom();
+            let disjoint = text_right - text_left <= 0.01
+                || if para.rp.bidi {
+                    text_right <= left + 0.01
+                } else {
+                    right <= text_left + 0.01
+                };
+            if ![
+                left,
+                right,
+                text_left,
+                text_right,
+                top,
+                bottom,
+                body.x,
+                body.y,
+                body.w,
+                body.h,
+                body_right,
+                body_bottom,
+            ]
+            .iter()
+            .all(|value| value.is_finite())
+                || label.width < 0.0
+                || line.height <= 0.0
+                || body.w <= 0.0
+                || body.h <= 0.0
+                || left < body.x - 0.01
+                || right > body_right + 0.01
+                || text_left < body.x - 0.01
+                || text_right > body_right + 0.01
+                || top < body.y - 0.01
+                || bottom > body_bottom + 0.01
+                || !disjoint
+            {
+                return Err(EngineError::Unsupported("native decimal_outline label or first-line text exceeds the body area or overlaps; adjust level, font, indentation or margins".into()).into());
+            }
+            if !seen.insert(id) {
+                return Err(EngineError::Unsupported(
+                    "native decimal_outline label is placed more than once".into(),
+                )
+                .into());
+            }
+        }
+    }
+    if seen.len() != targets.len() {
+        return Err(EngineError::Unsupported(
+            "native decimal_outline placement is missing or ambiguous".into(),
+        )
+        .into());
+    }
+    Ok(())
 }
 
 /// Bound additional native line-number work before any pagination. This is not a
@@ -15113,5 +15435,259 @@ mod tests {
         assert_eq!(document.revision().unwrap(), revision);
         assert_eq!(document.locations, locations);
         assert_eq!(document.text_bytes, count);
+    }
+    fn decimal_outline_labels(document: &Document) -> Vec<String> {
+        let layout =
+            wordcraft_layout::layout(document, &mut Default::default(), &Default::default());
+        layout
+            .pages
+            .iter()
+            .flat_map(|page| &page.items)
+            .filter_map(|item| {
+                let wordcraft_layout::Placed::Lines { para, l0, l1, .. } = item else {
+                    return None;
+                };
+                let line = para.label_line();
+                (line >= *l0 && line < *l1)
+                    .then(|| para.label.as_ref().map(|label| label.text.clone()))
+                    .flatten()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn decimal_outline_owned_identity_start_restart_copy_and_rtl() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditableDocx::new();
+        let mut ids = Vec::new();
+        for (text, kind, level, start, restart) in [
+            ("Ordinary", "numbered", 0, None, false),
+            ("Root", "decimal_outline", 0, Some(ListStart(7)), false),
+            ("Child", "decimal_outline", 1, None, false),
+            ("Other ordinary", "numbered", 0, None, false),
+            ("Next", "decimal_outline", 0, None, false),
+            ("Restart", "decimal_outline", 0, None, true),
+            ("Restart child", "decimal_outline", 1, None, false),
+            ("", "decimal_outline", 2, None, false),
+        ] {
+            let id = document.add_paragraph(text).unwrap();
+            document
+                .set_paragraph_list(id, Some(kind), level, restart, start)
+                .unwrap();
+            assert_eq!(document.paragraph_list(id).unwrap(), Some((kind, level)));
+            ids.push(id);
+        }
+        let expected = ["1.", "7.", "7.1.", "2.", "8.", "1.", "1.1.", "1.1.1."];
+        assert_eq!(
+            decimal_outline_labels(document.document().unwrap()),
+            expected
+        );
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        assert_eq!(decimal_outline_labels(&reopened), expected);
+        assert_eq!(reopened.numbering, document.document().unwrap().numbering);
+        let mut copied = document.copy().unwrap();
+        copied
+            .set_paragraph_list(
+                ids[1],
+                Some("decimal_outline"),
+                0,
+                false,
+                Some(ListStart(20)),
+            )
+            .unwrap();
+        assert_eq!(decimal_outline_labels(copied.document().unwrap())[1], "20.");
+        assert_eq!(document.to_bytes().unwrap(), bytes);
+        document
+            .format_paragraph(ids[1], r#"{"direction":"rtl"}"#)
+            .unwrap();
+        assert!(document.to_bytes().is_ok());
+        let revision = document.revision().unwrap();
+        document
+            .set_paragraph_list(ids[1], Some("decimal_outline"), 0, false, None)
+            .unwrap();
+        assert_eq!(
+            decimal_outline_labels(document.document().unwrap())[1],
+            "7."
+        );
+        assert!(document.revision().unwrap() > revision);
+        document
+            .set_paragraph_list(ids[1], None, 0, false, None)
+            .unwrap();
+        assert_eq!(document.paragraph_list(ids[1]).unwrap(), None);
+    }
+
+    #[test]
+    fn decimal_outline_scope_geometry_and_later_output_failures_are_explicit() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditableDocx::new();
+        let body = document.add_paragraph("Anchor").unwrap();
+        let cell = document.add_table(vec![vec!["Cell".into()]]).unwrap();
+        let cell_para = document.cell_paragraph_ids(cell, 0, 0).unwrap()[0];
+        let header = document.ensure_story("header", "default", 0).unwrap();
+        let header_para = document.story_add_paragraph(header, "Header").unwrap();
+        let note = document
+            .add_note(body, 0, 0, document.revision().unwrap(), "Note", "footnote")
+            .unwrap();
+        let note_para = document.story_paragraph_ids(note).unwrap()[0];
+        let before = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        for id in [cell_para, header_para, note_para] {
+            assert!(document
+                .set_paragraph_list(id, Some("decimal_outline"), 0, false, None)
+                .unwrap_err()
+                .to_string()
+                .contains("top-level body"));
+            assert_eq!(document.to_bytes().unwrap(), before);
+            assert_eq!(document.revision().unwrap(), revision);
+        }
+        document
+            .set_paragraph_list(body, Some("decimal_outline"), 0, false, None)
+            .unwrap();
+        let before = document.to_bytes().unwrap();
+        assert!(document.add_section("continuous").is_err());
+        assert!(document
+            .set_section_props(0, r#"{"columns":[2,20,false]}"#)
+            .is_err());
+        assert_eq!(document.to_bytes().unwrap(), before);
+        document
+            .format_paragraph(body, r#"{"indent_left":600}"#)
+            .unwrap();
+        assert!(document
+            .to_bytes()
+            .unwrap_err()
+            .to_string()
+            .contains("body area"));
+        document
+            .format_paragraph(body, r#"{"indent_left":null}"#)
+            .unwrap();
+        assert!(document.to_bytes().is_ok());
+        let mut narrow = EditableDocx::new();
+        narrow
+            .set_section_props(0, r#"{"page_size":[144,300],"margins":[18,18,18,18]}"#)
+            .unwrap();
+        let id = narrow.add_paragraph("Narrow").unwrap();
+        let before = narrow.to_bytes().unwrap();
+        let revision = narrow.revision().unwrap();
+        assert!(narrow
+            .set_paragraph_list(id, Some("decimal_outline"), 8, false, None)
+            .is_err());
+        assert_eq!(narrow.to_bytes().unwrap(), before);
+        assert_eq!(narrow.revision().unwrap(), revision);
+    }
+
+    #[test]
+    fn decimal_outline_definition_identity_and_work_budgets_are_bounded() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditableDocx::new();
+        let id = document.add_paragraph("Identity").unwrap();
+        document
+            .set_paragraph_list(id, Some("decimal_outline"), 0, false, Some(ListStart(7)))
+            .unwrap();
+        let native = document.document().unwrap();
+        let num = native
+            .para(StoryRef::Body, &Path::top(id))
+            .unwrap()
+            .props
+            .numbering
+            .unwrap()
+            .num;
+        assert_eq!(
+            supported_list_kind(native, num, &list_definitions(), &mut 0).unwrap(),
+            Some("decimal_outline")
+        );
+        let mut work = MAX_LIST_MATCH_WORK;
+        assert!(supported_list_kind(native, num, &list_definitions(), &mut work).is_err());
+        let mut overridden = native.clone();
+        let mut level = wordcraft_doc::numbering::levels_for(ListKind::Legal)[0].clone();
+        level.start = 7;
+        overridden.numbering.nums[0]
+            .level_overrides
+            .push((0, level));
+        assert_eq!(
+            supported_list_kind(&overridden, num, &list_definitions(), &mut 0).unwrap(),
+            None
+        );
+        let mut unused = native.clone();
+        let original = unused.numbering.nums[0].clone();
+        unused.numbering.nums = (1..=MAX_LISTS as u32)
+            .map(|id| wordcraft_doc::numbering::Num {
+                id,
+                ..original.clone()
+            })
+            .collect();
+        assert_eq!(
+            outline_targets(&unused).unwrap().len(),
+            1,
+            "unused restart IDs must not incur full matching work"
+        );
+        let mut altered = native.clone();
+        altered.numbering.abstracts[0].levels[8].text = "%9)".into();
+        assert_eq!(
+            supported_list_kind(&altered, num, &list_definitions(), &mut 0).unwrap(),
+            None
+        );
+        let mut large = EditableDocx::new();
+        let id = large
+            .add_paragraph(&"x".repeat(MAX_OUTLINE_WORK / 4))
+            .unwrap();
+        let revision = large.revision().unwrap();
+        let before = large.to_bytes().unwrap();
+        assert!(large
+            .set_paragraph_list(id, Some("decimal_outline"), 0, false, None)
+            .unwrap_err()
+            .to_string()
+            .contains("layout-work"));
+        assert_eq!(large.revision().unwrap(), revision);
+        assert_eq!(large.to_bytes().unwrap(), before);
+        let id = document.add_paragraph("Ordinary still separate").unwrap();
+        document
+            .set_paragraph_list(id, Some("numbered"), 0, false, None)
+            .unwrap();
+        assert_eq!(document.paragraph_list(id).unwrap(), Some(("numbered", 0)));
+    }
+    #[test]
+    fn decimal_outline_nonfinite_native_geometry_is_rejected() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditableDocx::new();
+        let id = document.add_paragraph("Geometry").unwrap();
+        document
+            .set_paragraph_list(id, Some("decimal_outline"), 0, false, None)
+            .unwrap();
+        let native = document.document().unwrap();
+        let targets = outline_targets(native).unwrap();
+        let layout = wordcraft_layout::layout(native, &mut Default::default(), &Default::default());
+        validate_outline_layout(&layout, &targets).unwrap();
+        for malformed in 0..3 {
+            let mut changed = layout.clone();
+            let page = &mut changed.pages[0];
+            match malformed {
+                0 => {
+                    let para = page
+                        .items
+                        .iter_mut()
+                        .find_map(|item| {
+                            if let wordcraft_layout::Placed::Lines { path, para, .. } = item {
+                                (path == &Path::top(id)).then_some(para)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap();
+                    let para = Arc::make_mut(para);
+                    let line = para.label_line();
+                    para.lines[line].xs.insert(1, f32::NAN);
+                }
+                1 => {
+                    page.body.x = f32::MAX;
+                    page.body.w = f32::MAX;
+                }
+                _ => {
+                    page.body.y = f32::MAX;
+                    page.body.h = f32::MAX;
+                }
+            }
+            assert!(validate_outline_layout(&changed, &targets).is_err());
+        }
     }
 }

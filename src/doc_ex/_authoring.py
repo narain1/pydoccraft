@@ -839,13 +839,18 @@ class Paragraph:
         self._owner._call("set_paragraph_alignment", self._id, value, _change=True)
 
     @property
-    def list_style(self):
+    def list_style(self) -> tuple[str, int] | None:
         """The direct list kind/level, or None for an ordinary paragraph."""
         return self._owner._call("paragraph_list", self._id)
 
     def set_list(self, kind: str | None = None, *, level: int = 0, restart: bool = False,
-                 start: int | None = None):
-        """Set list membership; start creates a new top-level numbered sequence."""
+                 start: int | None = None) -> None:
+        """Set bullet, numbered, or decimal_outline membership; None clears it.
+
+        ``start`` creates an independent numbered or decimal outline sequence.
+        Decimal outlines require top-level body text in an unambiguous single-
+        column section; native label/body geometry is checked before output.
+        """
         level = operator.index(level)
         if start is not None:
             if isinstance(start, bool):
