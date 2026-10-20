@@ -768,6 +768,13 @@ Independent exact-head CI then exposed a substantive native shaping defect: addi
 - Native set_props redraws the owned appearance even for tooltip metadata. The existing peak helper is shared with box edits, and actual generated AP bytes plus metadata are charged before commit. No dependency/pin/license or conversion-matrix change. Integrated full artifact and independent review remain pending; PDF6 remains partial.
 
 
+## Owned PDF field tooltips — complete local artifact
+
+- Runtime `b3917b84379a356f2b7a00d36b757d5bf66d4550` passes all 285 locked Rust tests and 409 clean installed-wheel Python tests, zero skips/failures/errors, with exact installed-byte matching. Formatting, all-targets warnings-denied Clippy, strict installed-package typing, roadmap/support/cached-reference checks and the unchanged 264-package license audit pass.
+- Linux x86_64 / CPython 3.11.2 wheel: 17,487,665 bytes; extension: 40,569,352; SHA-256 `850d56884901018551cecea6beb1e741023ab4c01f444c286c539acee1c20f37`; lock SHA-256 `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. Evidence: `dist/pdf-field-tooltips/validation.json` and `/opt/pdffieldtooltipstest`. No upstream revision, dependency or conversion-matrix change.
+- This supersedes focused-only tooltip evidence for local acceptance. The complete corpus retains exact metadata-only rendering/appearance controls, owned-field operations, transformed pages and atomic input/aggregate/resource failures. Independent review and exact-head/current-main CI remain required before manual merge; PDF6 remains partial and imported forms, radio/widget lifecycle and replies are not certified.
+
+
 ## Incremental navigation, lifecycle and output evidence — documentation audit
 
 The operation ledger now has 16 profiles and still 139 coverage joins, 14 workstream owners and 44 immutable reference families. Five additions cover bounded DOCX bookmark navigation, owned header/footer clear, PDF object-stream output, native PDF search and DOCX decimal outlines. Existing IDs/owners/checkboxes are unchanged; unsupported vertical-redaction evidence remains last for the checker fixture. Generated reference descriptions remove stale absence claims without declaring broader feature completion. Same-format output is preservation, not conversion; authored bookmark lookup is not a general imported source inventory.
