@@ -29,6 +29,8 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(paragraph.add_run(' extra', bold=True, language='en-GB'), TextRange)
         assert_type(paragraph.format(direction='rtl'), None)
         assert_type(paragraph[:].format(language=None), None)
+        assert_type(word.sections[0].header().clear(), None)
+        assert_type(word.sections[0].footer('even').clear(), None)
         assert_type(word.add_page_break(), Paragraph)
         assert_type(word.add_image(png, width=40), Picture)
         table = word.add_table([['Heading'], ['Value']])

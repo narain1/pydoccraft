@@ -1306,6 +1306,14 @@ class EditableStory:
             return [] if identifier is None else self._owner._call("story_image_ids", identifier)
         return Pictures(self._owner, identifiers)
 
+    def clear(self) -> None:
+        """Remove this owned header/footer's content, retaining its section settings."""
+        self._owner._ensure_open()
+        if isinstance(self, Note):
+            raise UnsupportedFormatError("clearing notes requires semantic note deletion support")
+        if self._owner._call("clear_story", self._kind, self._variant, self._section):
+            self._owner._invalidate()
+
     def add_table(self, rows: _Rows, *, columns: SupportsIndex | None = None) -> EditableTable:
         """Append a header/footer table from string rows or row/column counts."""
         self._check_rich_content()

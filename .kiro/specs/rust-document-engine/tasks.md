@@ -387,3 +387,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Integrate the reviewed bookmark shaping correction and verify the complete local corpus with exact safe-profile PNG assertions.
 - [ ] Pass independent review and corrected prerequisite/current-main CI before merge.
 - [ ] Retain optimization, version/conformance profiles, incremental writing and broader PDF8 preservation as open work.
+
+
+## Owned header/footer clearing
+
+- [x] Reuse native set_story with strict ownership and conditional no-op/cache behavior.
+- [x] Preserve section references/settings and invalidate only removed child handles; reclaim exact text/cell/media usage through existing commit guards.
+- [x] Verify focused rich-content, copy, no-op, rollback, semantic-anchor and boundary regressions in isolation.
+- [x] Complete integrated locked native/release/installed-wheel validation after the reviewed bookmark corrections.
+- [ ] Pass independent review and exact current-main CI before merge.
+- [ ] Retain general block movement/adoption, note removal, header linkage and broader DOC5/LAY3 parity as open work.

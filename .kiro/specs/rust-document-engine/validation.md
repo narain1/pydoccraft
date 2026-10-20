@@ -670,12 +670,26 @@ Independent exact-head CI then exposed a substantive native shaping defect: addi
 - Linux x86_64 / CPython 3.11.2 wheel: 17,458,225 bytes; extension: 40,485,816; SHA-256 `7a74e56e164a4542de0ee8ba9e681802e5c96ab3ee131c5948dd6a1473e4d60b`; lock SHA-256 `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. Local evidence is `dist/pdf-object-stream-reviewed/validation.json` and `/opt/pdfobjectstreamreviewedtest`; earlier provisional object-stream artifacts are superseded for local validation.
 - **Merge remains blocked by the prerequisite bookmark PR's CI rendering failure.** CI on that branch detects changed PNG pixels immediately after inserting a bookmark in the Unicode fixture; this local artifact passes the same assertion but does not resolve the environment-dependent failure. Independent investigation and corrected exact-head/current-main CI are required. The work-budget fixes address a separate resource issue.
 
+## Owned header/footer clearing — focused integration evidence
+
+- Runtime snapshot `280a44d` integrates native set_story clearing through the existing EditableStory handle. It keeps section references/settings, invalidates only removed children, preserves exact no-op cache/range behavior, and reclaims text/cell/media resources through existing staged validation. Native insertion accounting excludes image-marker bytes only; field/note/bookmark markers remain charged.
+- Isolated handoff validation passed 122 DOCX native tests, all-targets Clippy and 56 related public Python tests against the matching debug extension/facade. Three new native groups and four new public workflows include six paragraph/table/image-first header/footer subcases, actual DOCX/PDF pixels, independent copies/variants, shared resources, no-op versus authored-empty behavior, stale children, outgoing links, protected-anchor rollback and exact field/cell limits.
+- Root integration separately passes formatting, all three new native groups and all-targets warnings-denied Clippy. Roadmap/support/cached-reference checks pass. No dependency, pin, attribution or license graph changes.
+- This is focused development evidence, not a new clean release-wheel/full-corpus certificate. The prerequisite bookmark CI shaping failure remains open; integrated full validation and independent review are still required before merge. DOC5/LAY3 remain partial, and linkage, general block adoption/movement and note removal remain unavailable.
+
 
 ## PDF output choice with corrected bookmark shaping — replacement artifact
 
 - Runtime `1280428` includes the reviewed central bookmark endpoint invariant and preserves exact Unicode/Arabic/ligature PNG controls while rejecting unsafe interior targets. This artifact supersedes the earlier object-stream artifacts for local validation; it does not claim interior bookmark support.
 - All 265 locked native tests and 365 clean installed-wheel Python tests pass, with zero skips/failures/errors and exact installed byte matching. Formatting, all-targets warnings-denied Clippy, strict installed-package typing, roadmap/support/cached-reference checks and the unchanged 264-package license audit pass. Prerequisite exact-head CI and independent manual review remain the merge gates.
 - Linux x86_64 / CPython 3.11.2 wheel: 17,458,809 bytes; extension: 40,486,744; SHA-256 `5a1b1a24c261c5c983305ff6264c141ceeade378d27f91aa2522961fc9f1d9ef`; lock SHA-256 `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. Evidence: `dist/pdf-output-safe/validation.json`, `/opt/pdfoutputsafetest`. Upstream pins, dependencies and broad PDF8/REF criteria remain unchanged.
+
+
+## Owned header/footer clearing — complete local artifact
+
+- Runtime `0493379` integrates story clearing with the reviewed bookmark resource/shaping fixes. All 268 locked native tests and 369 clean installed-wheel Python tests pass, zero skips/failures/errors, with exact installed-byte matching. Formatting, all-targets warnings-denied Clippy, strict installed-package typing, roadmap/support/cached-reference checks and the unchanged 264-package license audit pass.
+- Linux x86_64 / CPython 3.11.2 wheel: 17,472,507 bytes; extension: 40,514,440; SHA-256 `52aa84308041fea19fb983df35d5c362e298e446de616aee343769d10f498efd`; lock SHA-256 `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. Evidence: `dist/story-clear-safe/validation.json` and `/opt/storyclearsafetest`. No upstream pin, dependency or conversion-matrix changes.
+- This supersedes the focused-only clearing evidence above for local acceptance. Independent exact-head/current-main CI and manual review remain required before merge. General block movement/adoption, linkage and note deletion remain unavailable; DOC5/LAY3 remain partial.
 
 ## 2026-10-20 PDF display-label assembly evidence
 
