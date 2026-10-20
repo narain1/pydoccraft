@@ -33,7 +33,7 @@ class SupportMatrixTests(unittest.TestCase):
         self.assertEqual(checker.validate(ROOT, self.ledger), [])
         self.assertEqual(self.ledger, self.original)
         self.assertEqual(len(self.ledger['coverage']), 139)
-        self.assertEqual(len(self.ledger['profiles']), 16)
+        self.assertEqual(len(self.ledger['profiles']), 17)
         self.assertEqual(checker.generate(ROOT, self.ledger), (ROOT / 'docs/support-matrix.md').read_text(encoding='utf-8'))
 
     def test_missing_unknown_coverage_and_unknown_profile_are_rejected(self):

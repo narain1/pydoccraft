@@ -420,7 +420,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reproduce page retargeting through numeric/color/stream/iterable callbacks and reuse existing page-generation checks in six mutation methods.
 - [x] Verify focused move/delete/close/error/copy routes, native boolean rejection and integer rotation compatibility against a copied installed extension.
 - [x] Complete clean installed-wheel validation (386 tests), strict typing and structural checks.
-- [ ] Complete independent review/current-main CI before manual merge.
+- [x] Complete independent review/current-main CI before manual merge.
 
 
 ## Native decimal-outline list option
@@ -477,3 +477,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete integrated locked native/release/installed-wheel validation (288 Rust / 413 Python).
 - [ ] Complete independent review and exact-head/current-main CI before manual merge.
 - [ ] Keep PDF6/U10 broader imported inventory, reply-thread and annotation capabilities open.
+
+
+## Field-tooltip and comment-lock evidence followup
+
+- [x] Review actual tooltip/lock assertions and source fingerprints against their exact validated artifacts; retain historical scopes and geometric creation evidence.
+- [x] Reuse owned-fields and one orthogonal comment-lock profile with existing PDF6/reference joins and explicit imported limits.
+- [x] Validate the 17-profile/119-cell generated guides, cached immutable reference citations and existing offline drift checks.
+- [ ] Complete independent evidence review; keep broader PDF6/API1/API7/QA1/QA8 acceptance open.

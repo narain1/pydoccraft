@@ -4,7 +4,7 @@
 
 This comparison groups related reference members under existing Python handles and formatting properties. It is not an exhaustive member inventory, implementation test, or format-conformance claim. Open XML schema/model APIs do not establish pagination or rendering. Reference products are not runtime dependencies.
 
-Audited local surface: `1e28d49b0f9c87403e66b78c23749e6fdb350b81`. The inventory contains 44 families and 195 representative members from 17 pinned source files. Later implementation changes require review.
+Audited local surface: `a21fc5c80abe556ac03b471f1906a7ec6b6a3f16`. The inventory contains 44 families and 197 representative members from 17 pinned source files. Later implementation changes require review.
 
 - [dotnet/Open-XML-SDK v3.5.1](https://github.com/dotnet/Open-XML-SDK/tree/3139fdfd27414548a41555f7848d5728f6e71a42) — `3139fdfd27414548a41555f7848d5728f6e71a42`
 - [pymupdf/PyMuPDF 2.0](https://github.com/pymupdf/PyMuPDF/tree/b8904b27efa0c4e2258f0e46ab4498a6173ffa22) — `b8904b27efa0c4e2258f0e46ab4498a6173ffa22`
@@ -589,29 +589,29 @@ Links, outlines, metadata and page labels.
 
 Annotation operations and appearances.
 
-**Reference members:** [update](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L41), [set_colors](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L30), [set_opacity](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L35), [set_border](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L28)
+**Reference members:** [update](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L41), [set_colors](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L30), [set_opacity](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L35), [set_border](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L28), [set_flags](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L301)
 
 **Criteria / owners:** PDF6 (W10), REV1 (W07), REV6 (W13)
 
-**Audited local surface:** Existing note/markup/link and bounded rectangle/ellipse annotation handles and typed properties.
+**Audited local surface:** Existing note/markup/link and bounded rectangle/ellipse annotation handles and typed properties; strict boolean lock for seven canonical comment kinds.
 
-**Disposition:** `implemented_subset`. **Remaining:** Fixed-profile geometric comments do not establish opacity/fill/reply or arbitrary appearance support. Caller-bounded native inventories remain upstream work; PDF annotations are distinct from tracked DOCX review.
+**Disposition:** `implemented_subset`. **Remaining:** Fixed-profile geometric comments do not establish opacity/fill/reply or arbitrary appearance support. Caller-bounded native inventories remain upstream work; PDF annotations are distinct from tracked DOCX review. Local locked exposes only the native editing-lock bit, excludes links, and is not arbitrary flag editing or access control.
 
 **Upstream candidates:** [U10](upstream-roadmap.md)
 
-**Evidence profiles:** [pdf.geometric-comments](support-matrix.md#pdfgeometric-comments)
+**Evidence profiles:** [pdf.geometric-comments](support-matrix.md#pdfgeometric-comments), [pdf.comment-locks](support-matrix.md#pdfcomment-locks)
 
 ## REF-PM-FORMS
 
 Interactive widgets and field values.
 
-**Reference members:** [field_name](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L92), [field_value](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L104), [field_type](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L114), [rect](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L134), [choice_values](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L88), [update](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L58)
+**Reference members:** [field_name](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L92), [field_value](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L104), [field_type](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L114), [rect](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L134), [choice_values](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L88), [update](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L58), [field_label](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L100)
 
 **Criteria / owners:** PDF6 (W10), FORM3 (W08), PKG5 (W03)
 
-**Audited local surface:** PdfFields/PdfField owned text/checkbox/choice profile with geometry/value updates.
+**Audited local surface:** PdfFields/PdfField owned text/checkbox/choice profile with geometry/value updates and bounded Unicode tooltip metadata.
 
-**Disposition:** `implemented_subset`. **Remaining:** Imported enumeration silently truncates/loses widgets/unknown kinds; require public fallible bounded inventory before safe general source-form editing. Script/signature behavior is excluded.
+**Disposition:** `implemented_subset`. **Remaining:** Imported enumeration silently truncates/loses widgets/unknown kinds; require public fallible bounded inventory before safe general source-form editing. Script/signature behavior is excluded. The local tooltip is an empty string when absent; this is not a promise to match the reference field-label fallback or imported metadata behavior.
 
 **Upstream candidates:** [U10](upstream-roadmap.md)
 

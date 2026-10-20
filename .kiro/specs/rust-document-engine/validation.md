@@ -840,7 +840,7 @@ Full integrated locked tests, release wheel, installed-wheel corpus and independ
 - This supersedes focused-only lock evidence for local acceptance. All seven comment kinds retain tested appearances and pixels across transformed pages; native lock refusals preserve staged state. Inventory/initial-inspection limits, foreign profiles, links and reply-thread semantics remain outside this mutation profile. Independent review and exact-head/current-main CI remain required before manual merge; PDF6/U10 stay open.
 
 
-## Independent manual merge evidence through PR 69
+## Independent manual merge evidence through PR 70
 
 GitHub merge state was verified on 2026-10-20. Each change passed independent review, required fixes and fresh exact-head/current-main CI before manual merge; repository auto-merge remains disabled. These gates complete the corresponding delivery tasks, not broader roadmap criteria. Historical artifact sections above retain their original validation scope.
 
@@ -851,8 +851,20 @@ GitHub merge state was verified on 2026-10-20. Each change passed independent re
 | [67](https://github.com/narain1/pydoccraft/pull/67) | `9accfa2a667c6521cf6501c3603ec0a0cb6c092d` | 268 / 369 |
 | [68](https://github.com/narain1/pydoccraft/pull/68) | `b733c6ab41c44728920e97e6ba3b31e782b36aaa` | 276 / 379 |
 | [69](https://github.com/narain1/pydoccraft/pull/69) | `e59de48ce0c13c5ade87a626d25f7e2e74dc122a` | 276 / 379 |
+| [70](https://github.com/narain1/pydoccraft/pull/70) | `c99ba86f2c341c1229f6a24e5436cf98dae73c14` | 276 / 386 |
 
 Formatting, warnings-denied Clippy, strict installed-package typing and the unchanged 264-package runtime/build license audit passed in each final CI run. PR69 changes source-audit documentation/data only.
+
+
+## Field-tooltip and comment-lock evidence — documentation audit
+
+The current operation ledger contains **17 profiles / 119 operation cells**, with the same139 coverage joins,14 workstream owners and44 immutable reference families. `pdf.owned-fields` gains tooltip read/edit/preservation/render evidence while retaining its historical creation artifact and unsupported imported/conversion scope. The new `pdf.comment-locks` profile covers only flag mutation; it does not replace or widen `pdf.geometric-comments` creation/style evidence. Unsupported vertical redaction remains the final profile. No criterion completion flags or ownership IDs change.
+
+Tooltip cells cite runtime `b3917b84379a356f2b7a00d36b757d5bf66d4550`, the completed409-test artifact above (wheel SHA-256 `850d56884901018551cecea6beb1e741023ab4c01f444c286c539acee1c20f37`). Lock cells cite runtime `a21fc5c80abe556ac03b471f1906a7ec6b6a3f16`, the completed413-test artifact above (wheel SHA-256 `2c54fbb1b41472fd5a07e7ba8e9019c91bdfa125eebc45c4bb770203cb759d5f`). New module fingerprints were reviewed against actual assertions and exact source snapshots: tooltip `569ecc1cfbc33a6a22f32fe456639a7c2560ff11c0af1cecfcc9b22bf56f28f4`; lock `b10af9191b773aac61be358a7fe3123e581628a8a636f2756b082c3373efd3d9`. Existing field/geometry test fingerprints also match the409 artifact. Native field-tooltip source roundtrip evidence is not promoted to imported Python inventory; lock imported scope is the dedicated canonical rectangle fixture plus saved/reopened native seven-kind outputs.
+
+Isolated documentation checks on the6573ea0 context passed **14 support-matrix tests and5 reference-inventory tests**, generated-byte checks, all17 cached immutable source hashes/member-line checks and the139-ID roadmap validator. The two added reference members use already fingerprinted PyMuPDF sources: `field_label` at widget.rst100 and `set_flags` at annot.rst301, with local default/subset differences explicit. Four tooltip behavioral tests passed again against their exact installed409-test wheel in0.168s; four lock tests passed against their exact installed413-test wheel in8.526s. Tests loaded from the isolated snapshot; `doc_ex` resolved to the respective installed environment, not a source package.
+
+This documentation-only followup changes no runtime, native source, dependency, pin or artifact. It does not rerun the complete corpus or certify broader form/annotation/security/imported-inventory behavior. API1/API7/QA1/QA8 and remaining PDF6 scope stay open; independent evidence review remains required.
 
 
 ## Decimal-outline raster comparison — corrected CI artifact
