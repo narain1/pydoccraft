@@ -122,6 +122,16 @@ WordCraft paragraph borders are public and share native rendering across body, c
 
 PdfCraft full-font reuse searches only 256 `PCFull`-prefixed resources, then 8,192 objects. A valid imported fixture with 256 prefix bindings and 8,200 earlier reachable objects hides the newly registered program; two explicit text rows embed three full programs while the adapter previously charged once. Tests retain the native reproducer and boundary controls. Local supplied-font drawing rejects the unprovable prefix profile before embedding; upstream should return/reuse an explicit registered font-program handle or provide bounded lookup with completion reporting.
 
+## PDF underlay and Form composition audit
+
+U10/PDF3: public stamp/add-content helpers force overlay placement, while private native placement already supports prepending and graphics-state isolation. A public behind/overlay option with collision-safe resource allocation would expose that behavior without an adapter-side composition system. Watermark text has different font, trimming, alignment and leading semantics, so it cannot faithfully substitute for the existing text/path/image APIs.
+
+Creating a temporary page and wrapping every drawing in a Form would require extra ownership/provenance tracking and consume native inspection limits: Form image traversal silently stops after 4,096 visits or depth 12. Request fallible caller-bounded traversal and explicit truncation reporting. Arbitrary source page-as-Form also needs bounded aggregate decoding and correct UserUnit handling. These are verified limitations in the inspected paths, not proof that all native Form operations are unusable. PDF3 remains open; no alternate renderer or public layer object is introduced.
+
+## WordCraft media reference cleanup
+
+U02/U04/MED1: native Document::add_media already provides collision-safe, deduplicated insertion, and the DOCX writer privately filters unused media. There is no equivalent public referenced_media/retain_referenced_media operation covering every native drawing type and story. Request that reusable public traversal rather than copying writer relationship logic. The local authored-image profile can account through public para_paths for Body and all parts, including nested tables; it rejects unknown media-bearing objects. This fixes owner-memory/budget retention after deletion, not a claimed serialized orphan-media leak. A length-based media key is unsafe after pruning and must not be used.
+
 ## Supplied-font ink bounds
 
 U10/PDF2: native advance/vertical metrics alone permit stacked combining marks to draw well above a requested text box. Public shaped glyph positions plus the already-used font library's native outlines allow a local box-only TrueType containment guard. A public caller-bounded CFF evaluator is needed for the remaining outline profile: recursion limits alone do not bound operator execution, and its pen callback cannot abort. Native built-in-font public metrics expose advances rather than per-glyph ink bounds, so those boxes retain documented logical-fit semantics. No clipping or automatic supplied-font wrapping is implied.

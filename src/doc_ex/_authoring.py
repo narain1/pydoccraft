@@ -507,10 +507,10 @@ class _Collection(Sequence[_Item], Generic[_Item]):
 
     def __iter__(self) -> Iterator[_Item]:
         self._owner._ensure_open()
-        identifiers = self._ids()
-        for identifier in identifiers:
+        items = [self._factory(self._owner, identifier) for identifier in self._ids()]
+        for item in items:
             self._owner._ensure_open()
-            yield self._factory(self._owner, identifier)
+            yield item
 
     @overload
     def __getitem__(self, index: int) -> _Item: ...
@@ -550,8 +550,8 @@ class WordDocument(EditableDocument):
         return Sections(self)
 
     @property
-    def images(self) -> _Collection[Picture]:
-        return _Collection(self, lambda: self._call("image_ids"), Picture)
+    def images(self) -> Pictures:
+        return Pictures(self, lambda: self._call("image_ids"))
 
     @property
     def background(self) -> str | None:
@@ -1089,9 +1089,30 @@ class Note(EditableStory):
         return json.loads(self._owner._call("note_info", self._id))["kind"]
 
 
+class Pictures(_Collection["Picture"]):
+    """Ordered inline pictures; deletion removes the selected placement."""
+    def __init__(self, owner, ids):
+        super().__init__(owner, ids, Picture)
+
+    def __delitem__(self, index: int) -> None:
+        picture = self[operator.index(index)]
+        self._owner._call("remove_image", picture._id, _change=True)
+
+
 class Picture:
     def __init__(self, owner: WordDocument, identifier: int):
         self._owner, self._id = owner, identifier
+
+    @property
+    def data(self) -> bytes:
+        """Owned PNG bytes; assigning a source preserves size and alternative text."""
+        return bytes(self._owner._call("image_data", self._id))
+
+    @data.setter
+    def data(self, source) -> None:
+        from . import _read
+        data, _ = _read(source)
+        self._owner._call("set_image_data", self._id, data, _change=True)
 
     @property
     def size(self):
@@ -1342,8 +1363,9 @@ class EditableCell:
         return self._children("table", EditableTable)
 
     @property
-    def images(self) -> _Collection[Picture]:
-        return self._children("image", Picture)
+    def images(self) -> Pictures:
+        owner = self._table._owner
+        return Pictures(owner, lambda: owner._call("cell_image_ids", *self._content_args()))
 
     def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
         style = _style_reference(style, self._table._owner)
