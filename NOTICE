@@ -9,7 +9,7 @@ Copyright (c) 2026 ArtCraft Team and the PdfCraft contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option.
 Source: https://github.com/storytold/pdfcraft
 Pinned revision: 645016addcfb9078c557f0189559ab47cdcee057
-The selected PdfCraft library crates include pdfcraft-organize for page insertion and organization, pdfcraft-annot for annotations and links, and pdfcraft-forms for bounded creation and filling of native form fields.
+The selected PdfCraft library crates include pdfcraft-organize for page insertion and organization, pdfcraft-annot for annotations and links, pdfcraft-forms for bounded creation and filling of native form fields, and pdfcraft-model for native inherited page-resource inspection.
 
 WordCraft
 Copyright (c) 2026 ArtCraft Team and the WordCraft contributors.
