@@ -432,4 +432,5 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reproduce wrong-slide background updates and stale-ordinal shape failures, then resolve stable target IDs after normalization.
 - [x] Verify focused stable-ID/control-output, early/late invalidation, copy and appended-range regressions; retain native final checks.
 - [x] Complete early stale-range normalization guard and DOCX/PPTX shape/cell controls.
-- [ ] Complete integrated clean-wheel validation, independent review and exact-head/current-main CI before manual merge.
+- [x] Complete integrated clean-wheel validation (402 tests), strict typing and structural checks.
+- [ ] Complete independent review and exact-head/current-main CI before manual merge.
