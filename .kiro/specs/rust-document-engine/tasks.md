@@ -295,3 +295,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Bound existing child reprs and make them native-free for stale, closed and private no-ID paragraphs.
 - [x] Verify the strict installed-wheel consumer and complete installed corpus; record artifact evidence.
 - [ ] Retain broader property annotations, full-package typing and remaining API3 discoverability work.
+
+
+## Bounded operation evidence ledger
+
+- [x] Seed seven bounded profiles with exact historical/native/fixture references and join all existing roadmap IDs without duplicating ownership or completion state.
+- [x] Generate the readable operation matrix and add offline validation of references, evidence drift, optional cells and calendar dates.
+- [x] Run development checks and the complete installed-wheel corpus, recording that runtime code and artifact are unchanged.
+- [ ] Expand audited profiles and reference-member dispositions before claiming complete API1/API7/QA1/QA8 coverage.
