@@ -27,6 +27,10 @@ Absolute archive paths, `..` traversal components using either slash style, expa
 
 These limits apply to the local OOXML preflight. WordCraft and DeckCraft also apply their own parser limits.
 
+PPTX additionally checks source slide references before import. Every `sldId` element beneath a presentation root counts toward a 10,000-reference ceiling, including section lists, alternate-content branches and unused presentation parts. This conservative bound can admit fewer than 10,000 actual slides when references are duplicated; it prevents native truncation without interpreting relationships or choosing markup branches.
+
+The check scans eligible members regardless of their path or extension, so relocated presentation parts are covered. It holds one member at a time, capped at the native XML ceiling of 96 MiB; UTF-16 BOM decoding can additionally use up to 144 MiB. Borrowed XML events avoid allocating a second token buffer or element tree. Presentation prologs are capped at 64 KiB, individual tokens at 1 MiB and nesting at 256 levels. Binary/non-presentation parts do not fail merely because they are not XML. Other-format and type-detection preflight retains the ZIP-only path. These are bounded intermediate allocations, not a whole-process memory guarantee.
+
 ## Rendering limits
 
 - DPI must be finite and between 1 and 1200 inclusive.
@@ -39,19 +43,13 @@ These limits apply to the local OOXML preflight. WordCraft and DeckCraft also ap
 
 The numeric WordCraft and DeckCraft maximum-side values are upstream constants and are not part of the `pydoccraft` API contract.
 
-## Limits not currently enforced locally
+## Input, extraction and remaining limits
 
-Version 0.2.1 does not add a package-level limit for:
+Public native entry points reject inputs over 128 MiB, and normalized JSON serialization stops at 64 MiB. Python path/stream reads enforce the input bound before loading the complete source. Selected text requests additionally cap selections at 10,000 pages and UTF-8 output at 64 MiB. These output bounds do not prevent earlier upstream parsing/layout allocations.
 
-- total input bytes;
-- PDF page count or Office page/slide count;
-- aggregate extracted image bytes;
-- normalized JSON payload size;
-- Python object count;
-- total rendering time;
-- general extraction recursion beyond limits supplied by upstream engines (DOCX body table normalization additionally caps table nesting at 16 levels).
+DOCX structured extraction bounds auxiliary parts at 10,000, blocks/objects at 100,000, source text at 32 MiB and referenced images at 64 MiB. Table nesting is limited to 16 levels. [Numbering metadata](numbering-extraction.md) has additional path, placement and byte bounds. PPTX parsed slide indexing is limited to 10,000 entries and semantic tables to 100,000 total cells, with at most 1,000 rows/columns per table.
 
-Production callers should enforce input size and execution time outside the process. A Lambda integration should check remaining invocation time before calling extraction and should reject files whose size exceeds the workload's tested envelope.
+There is no universal process-memory, Python-object-count or execution-time budget. Eager PDF page traversal, native Office pagination and format-specific parsing can allocate before normalized output limits apply. Image accounting and recursion guards differ by format; the JSON ceiling is not a pre-decode media bound. Callers should enforce upload and execution limits appropriate to their workload, including remaining invocation time in serverless applications.
 
 ## Image behavior
 

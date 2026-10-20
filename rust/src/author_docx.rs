@@ -6,8 +6,9 @@ use std::{
     sync::Arc,
 };
 
-use pyo3::exceptions::{PyIndexError, PyValueError};
+use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::{PyBool, PyInt};
 use serde_json::{json, Map, Value};
 use wordcraft_doc::para::{Float, InlineObject, NoteKind};
 use wordcraft_doc::props::{
@@ -32,6 +33,27 @@ const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_MEDIA_BYTES: usize = 64 * 1024 * 1024;
 const MAX_IMAGE_PIXELS: u64 = 16_000_000;
 const MAX_LISTS: usize = 10_000;
+
+/// Private boundary value: Python booleans must not become numbering starts.
+#[derive(Clone, Copy)]
+pub struct ListStart(u32);
+
+impl<'py> FromPyObject<'py> for ListStart {
+    fn extract_bound(value: &Bound<'py, PyAny>) -> PyResult<Self> {
+        if value.is_instance_of::<PyBool>() || !value.is_instance_of::<PyInt>() {
+            return Err(PyTypeError::new_err(
+                "list start must be an integer, not a boolean",
+            ));
+        }
+        let start = value.extract::<u32>()?;
+        if !(1..=32767).contains(&start) {
+            return Err(PyValueError::new_err(
+                "list start must be between 1 and 32767",
+            ));
+        }
+        Ok(Self(start))
+    }
+}
 const MAX_LINK_BYTES: usize = 16 * 1024 * 1024;
 const MAX_STYLES: usize = 1024;
 const MAX_FORMAT_PATCH_BYTES: usize = 16 * 1024;
@@ -1605,15 +1627,40 @@ impl EditableDocx {
         ))
     }
 
-    #[pyo3(signature = (id, kind=None, level=0, restart=false))]
+    #[pyo3(signature = (id, kind=None, level=0, restart=false, start=None))]
     pub fn set_paragraph_list(
         &mut self,
         id: usize,
         kind: Option<&str>,
         level: u8,
         restart: bool,
+        start: Option<ListStart>,
     ) -> PyResult<()> {
         self.paragraph(id)?;
+        let start = start.map(|value| value.0);
+        if start.is_some_and(|value| !(1..=32767).contains(&value)) {
+            return Err(PyValueError::new_err(
+                "list start must be between 1 and 32767",
+            ));
+        }
+        if start.is_some() && (kind != Some("numbered") || level != 0) {
+            return Err(PyValueError::new_err(
+                "list start requires a top-level numbered list",
+            ));
+        }
+        if start.is_some() {
+            let (story, _) = self.location(id)?;
+            if let StoryRef::Part(part) = story {
+                if self
+                    .document()?
+                    .parts
+                    .get(&part)
+                    .is_some_and(|part| matches!(part.kind, PartKind::Header | PartKind::Footer))
+                {
+                    return Err(EngineError::Unsupported("explicit list starts in headers/footers are unavailable: native measurement advances their counters".into()).into());
+                }
+            }
+        }
         if level > 8 || (kind.is_none() && (level != 0 || restart)) {
             return Err(PyValueError::new_err(
                 "list level must be 0..8; clearing a list requires level=0 and restart=false",
@@ -1635,7 +1682,7 @@ impl EditableDocx {
             let wanted = wordcraft_doc::numbering::levels_for(kind);
             // Preserve the current sequence or continue the closest earlier matching list
             // in this story, including a restart. find_kind always returns the first one.
-            let existing = if restart {
+            let existing = if restart || start.is_some() {
                 None
             } else {
                 candidate
@@ -1663,10 +1710,21 @@ impl EditableDocx {
                 {
                     return Err(limit("document exceeds 10000 native list definitions"));
                 }
-                candidate
+                let id = candidate
                     .numbering
                     .try_add_list(kind)
-                    .map_err(model_error)?
+                    .map_err(model_error)?;
+                if let Some(start) = start {
+                    candidate
+                        .numbering
+                        .nums
+                        .iter_mut()
+                        .find(|number| number.id == id)
+                        .ok_or_else(|| PyValueError::new_err("new list definition is missing"))?
+                        .start_overrides
+                        .push((0, start));
+                }
+                id
             }
         } else {
             0
@@ -7884,6 +7942,270 @@ mod tests {
     }
 
     #[test]
+    fn list_start_creates_an_independent_native_sequence_with_visible_labels() {
+        let mut document = EditableDocx::new();
+        let mut ids = Vec::new();
+        for text in ["First", "Selected", "Already assigned"] {
+            let id = document.add_paragraph(text).unwrap();
+            document
+                .set_paragraph_list(id, Some("numbered"), 0, false, None)
+                .unwrap();
+            ids.push(id);
+        }
+        let original_num = document
+            .paragraph(ids[2])
+            .unwrap()
+            .props
+            .numbering
+            .unwrap()
+            .num;
+        let original = document.copy().unwrap();
+        document
+            .set_paragraph_list(ids[1], Some("numbered"), 0, false, Some(ListStart(7)))
+            .unwrap();
+        assert_eq!(
+            document
+                .paragraph(ids[2])
+                .unwrap()
+                .props
+                .numbering
+                .unwrap()
+                .num,
+            original_num
+        );
+        assert_eq!(
+            original
+                .paragraph(ids[1])
+                .unwrap()
+                .props
+                .numbering
+                .unwrap()
+                .num,
+            original_num
+        );
+        let selected_num = document
+            .paragraph(ids[1])
+            .unwrap()
+            .props
+            .numbering
+            .unwrap()
+            .num;
+        assert_ne!(selected_num, original_num);
+        assert_ne!(
+            document
+                .document()
+                .unwrap()
+                .numbering
+                .num(selected_num)
+                .unwrap()
+                .abstract_id,
+            document
+                .document()
+                .unwrap()
+                .numbering
+                .num(original_num)
+                .unwrap()
+                .abstract_id
+        );
+        let later = document.add_paragraph("Future assignment").unwrap();
+        document
+            .set_paragraph_list(later, Some("numbered"), 0, false, None)
+            .unwrap();
+        assert_eq!(
+            document
+                .paragraph(later)
+                .unwrap()
+                .props
+                .numbering
+                .unwrap()
+                .num,
+            original_num
+        );
+        document
+            .set_paragraph_list(later, Some("numbered"), 0, true, Some(ListStart(20)))
+            .unwrap();
+        let continuation = document.add_paragraph("Continued start").unwrap();
+        document
+            .set_paragraph_list(continuation, Some("numbered"), 0, false, None)
+            .unwrap();
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        assert_eq!(
+            reopened
+                .numbering
+                .num(selected_num)
+                .unwrap()
+                .start_overrides,
+            [(0, 7)]
+        );
+        let payload = crate::docx::extract(&bytes, None).unwrap();
+        let labels: Vec<_> = payload
+            .pages
+            .iter()
+            .flat_map(|page| &page.blocks)
+            .filter_map(|block| {
+                block
+                    .metadata
+                    .get("numbering")
+                    .map(|value| value["label"].as_str().unwrap())
+            })
+            .collect();
+        assert_eq!(labels, ["1.", "7.", "2.", "20.", "21."]);
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        let payload = crate::pdf::extract(&pdf, None).unwrap();
+        let text = payload
+            .pages
+            .iter()
+            .flat_map(|page| &page.blocks)
+            .map(|block| {
+                block.table.as_ref().map_or_else(
+                    || block.text.clone(),
+                    |table| {
+                        table
+                            .rows
+                            .iter()
+                            .map(|row| row.join(" "))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    },
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        for expected in ["7.", "20.", "21.", "Selected", "Continued start"] {
+            assert!(text.contains(expected), "{text:?}");
+        }
+        assert_ne!(
+            crate::docx::render(&bytes, 0, 72.0, None).unwrap(),
+            crate::docx::render(&original.to_bytes().unwrap(), 0, 72.0, None).unwrap()
+        );
+    }
+
+    #[test]
+    fn header_footer_start_rejection_preserves_native_counter_advance_reproducer() {
+        for (kind, rendered) in [("header", "12."), ("footer", "13.")] {
+            let mut document = EditableDocx::new();
+            document.add_paragraph("Body").unwrap();
+            let story = document.ensure_story(kind, "default", 0).unwrap();
+            let id = document
+                .story_add_paragraph(story, "Auxiliary list")
+                .unwrap();
+            document
+                .set_paragraph_list(id, Some("numbered"), 0, false, None)
+                .unwrap();
+            let bytes = document.to_bytes().unwrap();
+            let revision = document.revision().unwrap();
+            assert!(document
+                .set_paragraph_list(id, Some("numbered"), 0, false, Some(ListStart(11)))
+                .is_err());
+            assert_eq!(document.to_bytes().unwrap(), bytes);
+            assert_eq!(document.revision().unwrap(), revision);
+
+            // The public model/writer preserve11, but native header/footer measurement advances
+            // its counter before the rendered placement. Do not compensate in the adapter.
+            let mut native = wordcraft_docx::read(&bytes).unwrap();
+            let num = native
+                .para(StoryRef::Part(story), &Path::top(0))
+                .unwrap()
+                .props
+                .numbering
+                .unwrap()
+                .num;
+            native
+                .numbering
+                .nums
+                .iter_mut()
+                .find(|number| number.id == num)
+                .unwrap()
+                .start_overrides
+                .push((0, 11));
+            let raw = wordcraft_docx::write(&native).unwrap();
+            assert_eq!(
+                wordcraft_docx::read(&raw)
+                    .unwrap()
+                    .numbering
+                    .num(num)
+                    .unwrap()
+                    .start_overrides,
+                [(0, 11)]
+            );
+            let pdf = crate::docx::to_pdf(&raw, None).unwrap();
+            let text = crate::pdf::extract(&pdf, None).unwrap().pages[0]
+                .blocks
+                .iter()
+                .map(|block| block.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            // PdfCraft infers the gap after a list marker as whitespace on some platforms.
+            // Assert the exact counter and following content independently of that gap.
+            let compact = text.split_whitespace().collect::<String>();
+            assert!(
+                compact.contains(&format!("{rendered}Auxiliarylist")),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn list_start_validation_and_definition_budgets_are_atomic() {
+        let mut document = EditableDocx::new();
+        let id = document.add_paragraph("Stable").unwrap();
+        document
+            .set_paragraph_list(id, Some("numbered"), 0, false, Some(ListStart(32767)))
+            .unwrap();
+        let bytes = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        for (kind, level, start) in [
+            (None, 0, 1),
+            (Some("bullet"), 0, 1),
+            (Some("numbered"), 1, 1),
+            (Some("numbered"), 0, 0),
+            (Some("numbered"), 0, 32768),
+        ] {
+            assert!(document
+                .set_paragraph_list(id, kind, level, false, Some(ListStart(start)))
+                .is_err());
+            assert_eq!(document.to_bytes().unwrap(), bytes);
+            assert_eq!(document.revision().unwrap(), revision);
+        }
+        for abstracts in [false, true] {
+            let mut bounded = document.copy().unwrap();
+            let mut candidate = bounded.document().unwrap().clone();
+            if abstracts {
+                candidate
+                    .numbering
+                    .abstracts
+                    .resize_with(MAX_LISTS, Default::default);
+            } else {
+                candidate
+                    .numbering
+                    .nums
+                    .resize_with(MAX_LISTS, Default::default);
+            }
+            bounded.commit(candidate).unwrap();
+            let revision = bounded.revision().unwrap();
+            assert!(bounded
+                .set_paragraph_list(id, Some("numbered"), 0, false, Some(ListStart(7)))
+                .is_err());
+            assert_eq!(bounded.revision().unwrap(), revision);
+            assert_eq!(
+                bounded
+                    .document()
+                    .unwrap()
+                    .numbering
+                    .num(bounded.paragraph(id).unwrap().props.numbering.unwrap().num)
+                    .unwrap()
+                    .start_overrides,
+                [(0, 32767)]
+            );
+        }
+        document.close();
+        assert!(document
+            .set_paragraph_list(id, Some("numbered"), 0, false, Some(ListStart(7)))
+            .is_err());
+    }
+
+    #[test]
     fn native_lists_continue_restart_and_clear_without_rebuilding_text() {
         let mut document = EditableDocx::new();
         let mut ids = Vec::new();
@@ -7893,7 +8215,7 @@ mod tests {
         {
             let id = document.add_paragraph(label).unwrap();
             document
-                .set_paragraph_list(id, Some("numbered"), 0, index == 2)
+                .set_paragraph_list(id, Some("numbered"), 0, index == 2, None)
                 .unwrap();
             ids.push(id);
         }
@@ -7933,7 +8255,7 @@ mod tests {
             restarted
         );
         document
-            .set_paragraph_list(ids[0], Some("numbered"), 0, false)
+            .set_paragraph_list(ids[0], Some("numbered"), 0, false, None)
             .unwrap();
         assert_eq!(
             document
@@ -7950,17 +8272,19 @@ mod tests {
             .add_run(sub, " bold", true, false, None, None, None)
             .unwrap();
         document
-            .set_paragraph_list(sub, Some("bullet"), 2, false)
+            .set_paragraph_list(sub, Some("bullet"), 2, false, None)
             .unwrap();
         assert_eq!(document.paragraph_list(sub).unwrap(), Some(("bullet", 2)));
         let revision = document.revision().unwrap();
         assert!(document
-            .set_paragraph_list(sub, Some("bullet"), 9, false)
+            .set_paragraph_list(sub, Some("bullet"), 9, false, None)
             .is_err());
         assert!(document
-            .set_paragraph_list(sub, Some("unsupported"), 0, false)
+            .set_paragraph_list(sub, Some("unsupported"), 0, false, None)
             .is_err());
-        assert!(document.set_paragraph_list(sub, None, 0, true).is_err());
+        assert!(document
+            .set_paragraph_list(sub, None, 0, true, None)
+            .is_err());
         assert_eq!(document.revision().unwrap(), revision);
         let bytes = document.to_bytes().unwrap();
         let reopened = wordcraft_docx::read(&bytes).unwrap();
@@ -7983,7 +8307,9 @@ mod tests {
         assert_eq!(labels, ["1.", "2.", "1.", "2."]);
         let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
         assert_eq!(crate::pdf::extract(&pdf, None).unwrap().pages.len(), 1);
-        document.set_paragraph_list(sub, None, 0, false).unwrap();
+        document
+            .set_paragraph_list(sub, None, 0, false, None)
+            .unwrap();
         assert_eq!(document.paragraph_list(sub).unwrap(), None);
         assert_eq!(document.paragraph_text(sub).unwrap(), "Nested bullet bold");
         assert_eq!(
@@ -8000,7 +8326,7 @@ mod tests {
         let story = document.ensure_story("header", "default", 0).unwrap();
         let header = document.story_add_paragraph(story, "Header list").unwrap();
         document
-            .set_paragraph_list(header, Some("numbered"), 0, false)
+            .set_paragraph_list(header, Some("numbered"), 0, false, None)
             .unwrap();
         assert_ne!(
             document
@@ -8030,7 +8356,7 @@ mod tests {
         document.commit(candidate).unwrap();
         let revision = document.revision().unwrap();
         assert!(document
-            .set_paragraph_list(id, Some("numbered"), 0, true)
+            .set_paragraph_list(id, Some("numbered"), 0, true, None)
             .is_err());
         assert_eq!(document.revision().unwrap(), revision);
         assert_eq!(document.paragraph_list(id).unwrap(), None);

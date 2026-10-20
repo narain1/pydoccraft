@@ -296,3 +296,15 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 1. Existing Link values SHALL normalize resolved native slide actions to one-based #page=N URIs and zero-based target_page metadata in current presentation order, including hidden/self targets. Source page, exact Unicode label offsets, table source paths and grouped-shape traversal SHALL remain unchanged.
 2. A bounded native SlideId index SHALL be shared by payload projection and diagnostics. Duplicate native identities SHALL fail explicitly. Contextual actions SHALL remain diagnosed omissions rather than invented fixed destinations; native reader discards SHALL be documented as upstream gaps.
 3. Tests SHALL cover source relationship variants, reorder/hidden/self links, repeated labels, table/group links, URLs, omission diagnostics and model bounds. No raw XML link parser or new public navigation API SHALL be introduced.
+
+## 37. Explicit native list starts
+
+1. Existing Paragraph.set_list SHALL accept an optional non-boolean integer start in 1..32767 for top-level numbered lists. Supplying start SHALL allocate a fresh native abstract/instance sequence and level-zero start override; omitted start SHALL retain existing nearest-sequence continuation. No existing paragraph SHALL be reassigned implicitly.
+2. Unsupported list kinds/levels and invalid integers SHALL fail before mutation. Supplied starts in header/footer stories, including nested cells, SHALL fail explicitly until native measurement preserves the requested visible counter. Existing omission behavior SHALL remain unchanged.
+3. Native list-definition budgets, story identity, copies, closed/deleted handles and atomic failures SHALL remain enforced. Tests SHALL verify saved native overrides, extracted labels, visible PDF text, body/cell/note scope, continuation and rollback without a local counter algorithm.
+
+## 38. PPTX source slide-count preflight
+
+1. PPTX input SHALL reject more than 10,000 source slide references before the native reader silently truncates them. The check SHALL use bounded generic XML events, retain native prefix/encoding recognition, and avoid reproducing private package relationship resolution or alternate-content selection.
+2. A conservative count of every sldId element beneath each presentation root SHALL cover alternate branches and section lists as well as the primary list; unused presentation parts and redundant references count toward this stricter profile. Other-format/detection preflight SHALL retain its existing path. Binary media SHALL NOT be rejected merely for not being XML.
+3. Eligible member inflation, UTF-16 decoding, prolog, token and nesting work SHALL be bounded. Tests SHALL cover 10,000/+1, relocation and unusual part names, UTF-8/UTF-16, leading text, alternate content, large media and all public processing paths. A shared XML parser is a safety dependency only; document semantics remain in DeckCraft.
