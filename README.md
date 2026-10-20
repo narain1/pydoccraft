@@ -77,6 +77,7 @@ Track the work in the [GitHub Roadmap project](https://github.com/users/narain1/
 - [Formats, rendering, and conversion](docs/formats.md)
 - [Safety and resource behavior](docs/safety.md)
 - [Dependencies, licensing, and attribution](docs/dependencies-and-licenses.md)
+- [Performance benchmarks and optimization targets](docs/benchmarks.md)
 - [Development and release validation](docs/development.md)
 - [Feature roadmap and TODOs](TODO.md)
 - [Proposed Python authoring API and Open XML crosswalk](docs/authoring-api-design.md)

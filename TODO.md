@@ -29,7 +29,7 @@ The existing suite checks PNG signatures for all three formats, default/72 DPI, 
 
 ## Comparison with PyMuPDF
 
-Do not market these as features that “no app does.” The comparison supports a focused opportunity: a permissively licensed, self-contained package combining Office semantics, extraction, rendering, and eventually authoring. Comparative quality and uniqueness still need benchmarks.
+Do not market these as features that “no app does.” The comparison supports a focused opportunity: a permissively licensed, self-contained package combining Office semantics, extraction, rendering, and eventually authoring. The first reproducible synthetic [performance baseline](docs/benchmarks.md) found PyMuPDF faster for matched PDF text and rendering operations; conversion and Office results remain capability baselines rather than direct comparisons.
 
 | Feature | PyMuPDF baseline | Roadmap interpretation |
 |---|---|---|

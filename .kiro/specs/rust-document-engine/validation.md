@@ -217,3 +217,13 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 - Final lockfile contains 246 unique package names and no prohibited engine, UI, CLI, MCP, automation, OCR, JavaScript, print, signing, or WinPrint package.
 - Documentation links, workflow YAML, and `git diff --check` passed.
 - PyPI trusted publishing was reported configured for project `pydoccraft`, owner `narain1`, repository `pydoccraft`, workflow `release.yml`, and environment `pypi`.
+
+## 2026-10-20 published-wheel performance baseline
+
+- Benchmarked the published pydoccraft 0.2.1 macOS ARM64 wheel on Apple M5 Pro, macOS 26.6.2, and CPython 3.13.12.
+- Used independently generated 25-page PDF/DOCX, 25-slide PPTX, and 20,000-cell XLSX inputs; generation and correctness checks were outside timed regions.
+- After two warmups and seven measured iterations, median PDF plain-text extraction was 78.42 ms for pydoccraft and 24.10 ms for PyMuPDF 2.0; PyMuPDF was 3.25× faster.
+- Median open plus first-page 144-DPI RGBA PNG rendering was 96.90 ms for pydoccraft and 40.22 ms for PyMuPDF; PyMuPDF was 2.41× faster. pydoccraft eagerly extracts all pages before rendering and the native render path reopens source bytes.
+- pydoccraft median capability baselines were 20.16 ms for DOCX extraction, 5.07 ms for PPTX extraction, 9.84 ms for PDF→DOCX, 22.67 ms for DOCX→PDF, and 154.19 ms for PPTX→PDF.
+- openpyxl 3.1.5 was measured only as a separate XLSX baseline because it has no equivalent PDF/DOCX/PPTX parsing, rendering, or conversion operation.
+- Conversion outputs reopened and contained text; render outputs had valid PNG signatures. See `docs/benchmarks.md` for methodology, environment, hashes, limitations, and rough-edge tracking links.
