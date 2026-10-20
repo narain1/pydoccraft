@@ -649,18 +649,20 @@
         "LAY3",
         "BG5"
       ],
-      "local_surface": "Section.header/footer(default/first/even) reuse Paragraph/TextRange; section copies own independent parts",
-      "remaining": "Header/footer tables and pictures can reuse existing owned content handles with explicit synthetic-placeholder tracking and native geometry guards. Link-to-previous/unlink/clear remain separate acceptance requiring stable story IDs and field-scope checks.",
+      "local_surface": "Section.header/footer(default/first/even) reuse paragraphs, tables, rich cells and pictures; copies own independent parts and deleted pictures retain paragraph anchors.",
+      "remaining": "Link-to-previous/unlink/clear and arbitrary block movement remain open. Inactive variants may lack measured cell geometry; oversized physical frames fail explicitly. Rich notes are separate.",
       "upstream_candidates": [
         "U02",
         "U04"
       ],
-      "profiles": [],
-      "disposition": "local_candidate"
+      "profiles": [
+        "word.rich-stories"
+      ],
+      "disposition": "implemented_subset"
     },
     {
       "id": "REF-OX-PAGE-FIELDS",
-      "title": "Page/count fields and refresh semantics",
+      "title": "Page/count fields, line numbering and refresh semantics",
       "reference_members": [
         {
           "name": "PageNumberType",
@@ -686,6 +688,11 @@
           "name": "UpdateFieldsOnOpen",
           "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
           "line": 2297
+        },
+        {
+          "name": "LineNumberType",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 22696
         }
       ],
       "coverage": [
@@ -693,12 +700,14 @@
         "REF3",
         "REF4"
       ],
-      "local_surface": "Paragraph.add_field(page/page_count/section_page_count), Section.page_number_start",
-      "remaining": "Explicit Arabic supported. Continuous SECTIONPAGES/restarts are rejected; implicit numeral context differs across body/stories; no general field evaluator.",
+      "local_surface": "Paragraph.add_field(page/page_count/section_page_count), Section.page_number_start; Section.line_numbers reuses native decimal counters",
+      "remaining": "Explicit Arabic supported. Continuous SECTIONPAGES/restarts are rejected; implicit numeral context differs across body/stories; no general field evaluator. Numbered sections are single-column; affected continuous each_page resumes are rejected. Line-label bounds/work do not imply complete numbering parity.",
       "upstream_candidates": [
         "U07"
       ],
-      "profiles": [],
+      "profiles": [
+        "word.line-numbers"
+      ],
       "disposition": "implemented_subset"
     },
     {
@@ -1996,5 +2005,5 @@
       "disposition": "reference_comparison"
     }
   ],
-  "audited_commit": "52d1d9d055413a9a076eab85ae3e90d2f13144c2"
+  "audited_commit": "17482eb76c264e5c4303b34cf8d7d1b62287e656"
 }

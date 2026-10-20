@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "audited_commit": "5236ab12c9e136a8abbc675331370e6fbfd3ac99",
+  "audited_commit": "17482eb76c264e5c4303b34cf8d7d1b62287e656",
   "references": {
     "pdfcraft": {
       "revision": "645016addcfb9078c557f0189559ab47cdcee057",
@@ -34,6 +34,20 @@
       "kind": "artifact",
       "source_commit": "f713bb191781ae18226f25d2f98f8e08c7db5cf6",
       "date": "2026-10-20"
+    },
+    "stories-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#2026-10-20-headerfooter-rich-content",
+      "wheel_sha256": "fe069561df57ea88495deadff69e4d05a19c0ae395f80f2937aeae09ab48c356",
+      "kind": "artifact",
+      "source_commit": "dd34deda1df340098a9799ffc76a8e7d2999753c",
+      "date": "2026-10-20"
+    },
+    "lines-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#2026-10-20-bounded-native-line-numbering",
+      "wheel_sha256": "69b9da8f4227e2e2efe02ada4c9f94b3ee7275ff17c22accb2cdbe870c2fe114",
+      "kind": "artifact",
+      "source_commit": "17482eb76c264e5c4303b34cf8d7d1b62287e656",
+      "date": "2026-10-20"
     }
   },
   "test_sources": {
@@ -43,7 +57,9 @@
     "tests/test_pdf_fields.py": "5298a96956cafac4e90911bbd3ec94a2f6149ef2d09a8c26c18bb506a09f4ea5",
     "tests/test_pdf_outline_import.py": "50c265c647416f2b53b3bf4a7228b11ce09b3292810f5f1f30b66a2758ed1d64",
     "tests/test_render_clipping.py": "367107aecedb72184ee304cd673dc0d2498c1041e9f85d459ab0be14d6ff914a",
-    "tests/test_slide_layouts.py": "365028483efdb274afb6b4efc4b3ca8e51a169c879e47f2263b2a435271562f2"
+    "tests/test_slide_layouts.py": "365028483efdb274afb6b4efc4b3ca8e51a169c879e47f2263b2a435271562f2",
+    "tests/test_story_content.py": "c2432ede7ebf0ff0d3b3b5c6cef0729d77e30018f0eb0b576bcd8cd3324e4203",
+    "tests/test_line_numbers.py": "b12daf4001b8134b9ae99d981c33c70615c51e3b4301575f2dfc4ea3dc568fdf"
   },
   "profiles": [
     {
@@ -711,6 +727,281 @@
       "fixture_provenance": "Synthetic DeckCraft default layouts reached through public Python authoring; tests fill every placeholder and inspect the authored PPTX ZIP parts. They reopen PPTX and exported PDF and inspect actual label text/PNG pixels; this is not independent PowerPoint validation."
     },
     {
+      "id": "word.rich-stories",
+      "format": "docx",
+      "scope": "Owned header/footer tables and inline PNG pictures, direct child collections and native repeated placement; linkage and rich notes are excluded.",
+      "public_members": [
+        "Section.header(...).add_table(...)",
+        "Section.footer(...).add_image(...)",
+        "EditableStory.tables/images/paragraphs"
+      ],
+      "adapter_sources": {
+        "rust/src/author_docx.rs": [
+          "story_add_table",
+          "story_add_image",
+          "validate_rich_story_page_bounds"
+        ],
+        "rust/src/docx.rs": [
+          "render_with"
+        ],
+        "src/doc_ex/_authoring.py": [
+          "EditableStory"
+        ]
+      },
+      "native_sources": {
+        "write": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/write/mod.rs",
+          "symbols": [
+            "write"
+          ]
+        },
+        "render": {
+          "reference": "wordcraft",
+          "path": "crates/render/src/lib.rs",
+          "symbols": [
+            "RenderOptions",
+            "render_page"
+          ]
+        },
+        "pdf": {
+          "reference": "wordcraft",
+          "path": "crates/pdf/src/lib.rs",
+          "symbols": [
+            "export",
+            "export_layout"
+          ]
+        },
+        "model": {
+          "reference": "wordcraft",
+          "path": "crates/doc/src/edit.rs",
+          "symbols": [
+            "insert_block"
+          ]
+        },
+        "layout": {
+          "reference": "wordcraft",
+          "path": "crates/layout/src/lib.rs",
+          "symbols": [
+            "Placed",
+            "layout"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic native authored DOCX; XML assertions inspect part order, independent variants/copies and retained anchors. PNG tests compare saturated source colors with PDF and prove intentional exact-height clipping. No external corpus or arbitrary imported source editing is certified.",
+      "operations": {
+        "read": {
+          "status": "unassessed",
+          "scope": "Broader auxiliary-story semantic extraction is not certified by this profile; reopened source/render behavior is scoped under preserve/render."
+        },
+        "create": {
+          "status": "verified",
+          "scope": "Direct tables/pictures and rich cells in owned default/first/even headers/footers, preserving explicit empty paragraphs.",
+          "artifact": "stories-2026-10-20",
+          "tests": [
+            "tests/test_story_content.py::StoryContentTests.test_table_and_picture_first_preserve_order_rich_cells_and_native_output",
+            "tests/test_story_content.py::StoryContentTests.test_variants_and_copied_sections_keep_independent_handles_and_placeholders"
+          ],
+          "native": [
+            "model",
+            "write"
+          ]
+        },
+        "edit_authored": {
+          "status": "partial",
+          "scope": "Existing handles edit/copy rich content and remove pictures while retaining anchors; inactive variants may lack nested geometry. No arbitrary block move/clear/linkage.",
+          "artifact": "stories-2026-10-20",
+          "tests": [
+            "tests/test_story_content.py::StoryContentTests.test_media_replacement_deletion_and_cache_keep_other_references_alive",
+            "tests/test_story_content.py::StoryContentTests.test_inactive_variant_measurement_and_invalid_operations_are_atomic"
+          ],
+          "native": [
+            "model",
+            "layout"
+          ]
+        },
+        "edit_imported": {
+          "status": "unsupported",
+          "scope": "The editable DOCX lifecycle does not expose arbitrary imported Office editing."
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Owned source order, explicit empty paragraphs and independent section/document copies; not preservation of unknown imported parts.",
+          "artifact": "stories-2026-10-20",
+          "tests": [
+            "tests/test_story_content.py::StoryContentTests.test_table_and_picture_first_preserve_order_rich_cells_and_native_output",
+            "tests/test_story_content.py::StoryContentTests.test_variants_and_copied_sections_keep_independent_handles_and_placeholders"
+          ],
+          "native": [
+            "model",
+            "write"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "Actual source colors in full/region and retained/one-shot PNG, repeated variant selection and physical table/picture-frame checks. No full text-ink containment guarantee.",
+          "artifact": "stories-2026-10-20",
+          "tests": [
+            "tests/test_story_content.py::StoryContentTests.test_export_colors_match_pdf_full_region_sessions_and_mixed_page_sizes",
+            "tests/test_story_content.py::StoryContentTests.test_physical_overflow_rejects_output_and_recovers_after_later_edits"
+          ],
+          "native": [
+            "layout",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "partial",
+          "scope": "Native PDF retains tested story text and visible media. Off-page frames fail before output; no general linked-story or rich-note support.",
+          "artifact": "stories-2026-10-20",
+          "tests": [
+            "tests/test_story_content.py::StoryContentTests.test_table_and_picture_first_preserve_order_rich_cells_and_native_output",
+            "tests/test_story_content.py::StoryContentTests.test_physical_overflow_rejects_output_and_recovers_after_later_edits"
+          ],
+          "native": [
+            "write",
+            "pdf"
+          ]
+        }
+      }
+    },
+    {
+      "id": "word.line-numbers",
+      "format": "docx",
+      "scope": "Owned single-column section decimal line numbering through native page/section/continuous counters; known native configurations are rejected.",
+      "public_members": [
+        "Section.line_numbers"
+      ],
+      "adapter_sources": {
+        "rust/src/author_docx.rs": [
+          "validate_line_number_work",
+          "validate_line_number_bounds",
+          "native_cell_widths"
+        ],
+        "src/doc_ex/_authoring.py": [
+          "line_numbers"
+        ]
+      },
+      "native_sources": {
+        "write": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/write/mod.rs",
+          "symbols": [
+            "write"
+          ]
+        },
+        "render": {
+          "reference": "wordcraft",
+          "path": "crates/render/src/lib.rs",
+          "symbols": [
+            "RenderOptions",
+            "render_page"
+          ]
+        },
+        "pdf": {
+          "reference": "wordcraft",
+          "path": "crates/pdf/src/lib.rs",
+          "symbols": [
+            "export",
+            "export_layout"
+          ]
+        },
+        "model": {
+          "reference": "wordcraft",
+          "path": "crates/doc/src/section.rs",
+          "symbols": [
+            "LineNumbering",
+            "LineNumberRestart"
+          ]
+        },
+        "layout": {
+          "reference": "wordcraft",
+          "path": "crates/layout/src/lib.rs",
+          "symbols": [
+            "DECOR_STORY",
+            "layout"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic native authored DOCX with automatic and explicit pages, mixed sections, fields and rich stories. Exact source numbering properties, native label values and visible margin ink are asserted; PDF ordering remains native. Raw model defect repros are retained in Rust tests.",
+      "operations": {
+        "read": {
+          "status": "unsupported",
+          "scope": "Read-only Document does not expose a section line-number configuration inventory. DOCX semantic text omits layout decorations."
+        },
+        "create": {
+          "status": "verified",
+          "scope": "Bounded single-column native settings with representable starts/intervals/distances and page/section/continuous restart.",
+          "artifact": "lines-2026-10-20",
+          "tests": [
+            "tests/test_line_numbers.py::LineNumberTests.test_source_png_pdf_copy_and_clear_use_native_labels",
+            "tests/test_line_numbers.py::LineNumberTests.test_restart_intervals_sections_and_fields_remain_native"
+          ],
+          "native": [
+            "model",
+            "write",
+            "layout"
+          ]
+        },
+        "edit_authored": {
+          "status": "partial",
+          "scope": "Copy/reset and later changes preserve atomic limits. Multi-column labels and affected continuous each_page resumes are rejected before commit.",
+          "artifact": "lines-2026-10-20",
+          "tests": [
+            "tests/test_line_numbers.py::LineNumberTests.test_invalid_configuration_column_edits_and_work_limits_are_atomic",
+            "tests/test_line_numbers.py::LineNumberTests.test_each_page_reenable_after_unnumbered_pages_is_explicitly_unsupported"
+          ],
+          "native": [
+            "model",
+            "layout"
+          ]
+        },
+        "edit_imported": {
+          "status": "unsupported",
+          "scope": "The editable DOCX lifecycle does not expose arbitrary imported Office editing."
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Owned settings survive native write/read and copies; reset disables labels. No arbitrary imported section-property preservation claim.",
+          "artifact": "lines-2026-10-20",
+          "tests": [
+            "tests/test_line_numbers.py::LineNumberTests.test_source_png_pdf_copy_and_clear_use_native_labels"
+          ],
+          "native": [
+            "model",
+            "write"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "Native margin labels on automatic pages with actual logical-bound checks and conservative authored label-work cap. No total-memory/imported-source/glyph-ink guarantee.",
+          "artifact": "lines-2026-10-20",
+          "tests": [
+            "tests/test_line_numbers.py::LineNumberTests.test_automatic_multipage_restart_and_continuation",
+            "tests/test_line_numbers.py::LineNumberTests.test_actual_extent_guard_allows_default_margins_and_rejects_offpage_output",
+            "tests/test_line_numbers.py::LineNumberTests.test_line_labels_and_rich_story_geometry_share_output_validation"
+          ],
+          "native": [
+            "layout",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "partial",
+          "scope": "Native PDF label values and ink are verified in the bounded profile; reading order/classification may differ from numeric order.",
+          "artifact": "lines-2026-10-20",
+          "tests": [
+            "tests/test_line_numbers.py::LineNumberTests.test_restart_intervals_sections_and_fields_remain_native",
+            "tests/test_line_numbers.py::LineNumberTests.test_automatic_multipage_restart_and_continuation"
+          ],
+          "native": [
+            "write",
+            "pdf"
+          ]
+        }
+      }
+    },
+    {
       "id": "pdf.vertical-redaction",
       "format": "pdf",
       "scope": "Secure removal of vertical-writing text beneath a redaction mark; no public package redaction API currently.",
@@ -1060,8 +1351,10 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "BG5": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "word.rich-stories"
+      ],
+      "remaining": "Unassessed: linked-to-previous stories, clearing/general block movement, rich notes and complete variant/repagination fidelity beyond the owned profile."
     },
     "BG6": {
       "profiles": [],
@@ -1084,8 +1377,10 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "LAY3": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "word.rich-stories"
+      ],
+      "remaining": "Unassessed: linked-to-previous stories, clearing/general block movement, rich notes and complete variant/repagination fidelity beyond the owned profile."
     },
     "LAY4": {
       "profiles": [],
@@ -1096,8 +1391,10 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "LAY6": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "word.line-numbers"
+      ],
+      "remaining": "Unassessed: broader page-field evidence inventory, nondecimal formats and full numbering parity; native multi-column/continuous-resume defects remain explicit limitations."
     },
     "LAY7": {
       "profiles": [],

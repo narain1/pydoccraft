@@ -329,3 +329,10 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Preflight label work before both authored full-layout validation paths and share the existing physical-bound validation pass.
 - [x] Verify complete locked/native and clean installed-wheel acceptance; record artifact and upstream evidence.
 - [ ] Retain multi-column labels, affected continuous page restarts and broader LAY6 numbering fidelity as upstream work.
+
+
+## Incremental story and numbering evidence
+
+- [x] Add bounded story/line operation cells with distinct artifacts, exact fixture fingerprints and existing roadmap/reference joins.
+- [x] Keep unsupported imported edits, unassessed semantic extraction and broader native fidelity gaps explicit.
+- [x] Verify cached reference locations, generated guides and installed-wheel development checks; record unchanged runtime evidence.
