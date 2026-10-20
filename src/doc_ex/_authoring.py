@@ -658,9 +658,9 @@ def _slide_link_value(owner, value):
 
 
 class _SlideTextRange(TextRange):
-    def _link_info(self):
+    def _link_info(self, *, allow_mixed: bool = False):
         content = self._paragraph
-        return content._owner._call("range_link", *content._range_args, self._start, self._end, self._revision)
+        return content._owner._call("range_link", *content._range_args, self._start, self._end, self._revision, allow_mixed)
 
     @property
     def link(self) -> str | Slide | None:
@@ -670,7 +670,7 @@ class _SlideTextRange(TextRange):
     def link(self, target: str | Slide | None):
         content = self._paragraph
         url, slide_id = _slide_link_target(content._owner, target)
-        previous = self._link_info()
+        previous = self._link_info(allow_mixed=True)
         tooltip = previous[2] if previous is not None and target is not None else ""
         self._revision = content._owner._call("set_range_link", *content._range_args, self._start, self._end, self._revision, url, slide_id, tooltip, _change=True)
 

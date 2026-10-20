@@ -789,6 +789,8 @@ impl EditablePptx {
         Ok(self.revision)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (slide, id, start, end, revision, allow_mixed=false))]
     pub fn range_link(
         &self,
         slide: usize,
@@ -796,6 +798,7 @@ impl EditablePptx {
         start: usize,
         end: usize,
         revision: u64,
+        allow_mixed: bool,
     ) -> PyResult<LinkValue> {
         self.check_revision(revision)?;
         let body = self.text_body(slide, id)?;
@@ -814,6 +817,9 @@ impl EditablePptx {
                 let next = offset + run.char_len();
                 if offset < to && next > from {
                     if found.is_some_and(|value| value != &run.props.link) {
+                        if allow_mixed {
+                            return Ok(None);
+                        }
                         return Err(PyValueError::new_err(
                             "range contains mixed hyperlink targets or tooltips",
                         ));
@@ -2766,10 +2772,10 @@ mod tests {
             .set_range_link(0, id, 7, 10, revision, Some(url), None, "Website")
             .unwrap();
         assert_eq!(
-            author.range_link(0, id, 7, 10, revision).unwrap(),
+            author.range_link(0, id, 7, 10, revision, false).unwrap(),
             Some((Some(url.into()), None, "Website".into()))
         );
-        assert!(author.range_link(0, id, 6, 10, revision).is_err());
+        assert!(author.range_link(0, id, 6, 10, revision, false).is_err());
         author
             .set_shape_link(0, id, None, Some(target), "Last page")
             .unwrap();
@@ -2880,13 +2886,61 @@ mod tests {
         let current = author
             .set_range_link(0, id, 0, 4, current, None, None, "")
             .unwrap();
-        assert_eq!(author.range_link(0, id, 0, 4, current).unwrap(), None);
+        assert_eq!(
+            author.range_link(0, id, 0, 4, current, false).unwrap(),
+            None
+        );
         let current = author
             .set_range_link(0, id, 5, 9, current, Some("https://example.com"), None, "")
             .unwrap();
         let (_, _, latest) = author.add_run_patch(0, id, " extra", "{}").unwrap();
         assert!(latest > current);
-        assert_eq!(author.range_link(0, id, 9, 15, latest).unwrap(), None);
+        assert_eq!(
+            author.range_link(0, id, 9, 15, latest, false).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn mixed_link_assignment_lookup_retains_range_and_revision_validation() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide().unwrap();
+        let id = author
+            .add_text(0, "AB", 20.0, 20.0, 500.0, 100.0, 18.0)
+            .unwrap();
+        let revision = author.revision().unwrap();
+        let revision = author
+            .set_range_link(0, id, 0, 1, revision, Some("https://a.example"), None, "A")
+            .unwrap();
+        let revision = author
+            .set_range_link(0, id, 1, 2, revision, Some("https://b.example"), None, "B")
+            .unwrap();
+        assert!(author.range_link(0, id, 0, 2, revision, false).is_err());
+        assert_eq!(
+            author.range_link(0, id, 0, 2, revision, true).unwrap(),
+            None
+        );
+        assert!(author.range_link(0, id, 0, 3, revision, true).is_err());
+        let current = author
+            .set_range_link(0, id, 0, 2, revision, Some("https://all.example"), None, "")
+            .unwrap();
+        assert!(author.range_link(0, id, 0, 2, revision, true).is_err());
+        assert_eq!(
+            author.range_link(0, id, 0, 2, current, false).unwrap(),
+            Some((Some("https://all.example".into()), None, "".into()))
+        );
+        let current = author
+            .set_range_link(0, id, 0, 1, current, None, None, "")
+            .unwrap();
+        assert_eq!(author.range_link(0, id, 0, 2, current, true).unwrap(), None);
+        let current = author
+            .set_range_link(0, id, 0, 2, current, None, None, "")
+            .unwrap();
+        assert_eq!(
+            author.range_link(0, id, 0, 2, current, false).unwrap(),
+            None
+        );
     }
 
     #[test]
