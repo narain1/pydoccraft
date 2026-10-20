@@ -1568,7 +1568,7 @@ mod numbering_tests {
             let Block::Para(paragraph) = block.as_ref() else {
                 unreachable!()
             };
-            adapter.add_paragraph(paragraph, &Path::top(id - 1));
+            adapter.add_paragraph(paragraph, &Path::top((id - 1) as usize));
         }
         assert!(matches!(
             adapter.finish(),
