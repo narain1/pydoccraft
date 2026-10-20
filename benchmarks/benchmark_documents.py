@@ -61,6 +61,12 @@ class Result:
     note: str
 
 
+@dataclass(frozen=True)
+class Serialized:
+    data: bytes
+    filetype: str
+
+
 def normalize_ooxml(data: bytes) -> bytes:
     """Normalize ZIP and core timestamps after fixture writers have serialized them."""
     namespaces = {
@@ -220,9 +226,9 @@ def pymupdf_render(data: bytes, dpi: float) -> tuple[int, bytes]:
         return document.page_count, output
 
 
-def pymupdf_rewrite(data: bytes) -> bytes:
+def pymupdf_rewrite(data: bytes) -> Serialized:
     with pymupdf.open(stream=data, filetype="pdf") as document:
-        return document.tobytes(garbage=3, deflate=True)
+        return Serialized(document.tobytes(garbage=3, deflate=True), "pdf")
 
 
 def openpyxl_parse(data: bytes) -> tuple[int, int, int]:
@@ -239,24 +245,32 @@ def openpyxl_parse(data: bytes) -> tuple[int, int, int]:
         workbook.close()
 
 
-def openpyxl_write(rows: int, columns: int) -> int:
-    # Serialization is intentionally performed even though ZIP metadata may vary in size.
-    generate_xlsx(rows, columns, normalize=False)
-    return rows * columns
+def openpyxl_write(rows: int, columns: int) -> Serialized:
+    return Serialized(generate_xlsx(rows, columns, normalize=False), "xlsx")
 
 
-def converted(data: bytes, source: str, target: str) -> bytes:
-    return doc_ex.convert(data, target, filetype=source)
+def converted(data: bytes, source: str, target: str) -> Serialized:
+    return Serialized(doc_ex.convert(data, target, filetype=source), target)
 
 
 def guard(value: object) -> tuple:
-    # ZIP/PDF metadata can make byte lengths vary without changing benchmark semantics.
+    """Validate measured outputs after timing and return stable semantic invariants."""
+    if isinstance(value, Serialized):
+        if value.filetype == "xlsx":
+            return (value.filetype, *openpyxl_parse(value.data))
+        with doc_ex.open(value.data, filetype=value.filetype) as document:
+            characters = sum(len(page.get_text("text")) for page in document)
+            if document.page_count < 1 or characters < 1:
+                raise RuntimeError("serialized output did not reopen with pages and text")
+            return value.filetype, document.page_count, characters
     if isinstance(value, bytes):
-        return (value[:8],)
+        if not value.startswith(b"\x89PNG\r\n\x1a\n") or len(value) < 24:
+            raise RuntimeError("byte output is not a complete PNG header")
+        return value[:8], int.from_bytes(value[16:20], "big"), int.from_bytes(value[20:24], "big")
     if isinstance(value, tuple):
         normalized = []
         for item in value:
-            normalized.append(item[:8] if isinstance(item, bytes) else item)
+            normalized.extend(guard(item) if isinstance(item, (Serialized, bytes)) else (item,))
         return tuple(normalized)
     return (value,)
 
@@ -316,9 +330,9 @@ def verify_corpus(corpus: Corpus, pages: int, xlsx_cells: int, dpi: float) -> di
     if not pydoc_png.startswith(b"\x89PNG\r\n\x1a\n") or not mupdf_png.startswith(b"\x89PNG\r\n\x1a\n"):
         raise RuntimeError("renderer did not return PNG")
 
-    docx_pdf = converted(corpus.docx, "docx", "pdf")
-    pptx_pdf = converted(corpus.pptx, "pptx", "pdf")
-    pdf_docx = converted(corpus.pdf, "pdf", "docx")
+    docx_pdf = converted(corpus.docx, "docx", "pdf").data
+    pptx_pdf = converted(corpus.pptx, "pptx", "pdf").data
+    pdf_docx = converted(corpus.pdf, "pdf", "docx").data
     for data, filetype in ((docx_pdf, "pdf"), (pptx_pdf, "pdf"), (pdf_docx, "docx")):
         with doc_ex.open(data, filetype=filetype) as document:
             if document.page_count < 1:
@@ -342,14 +356,21 @@ def verify_corpus(corpus: Corpus, pages: int, xlsx_cells: int, dpi: float) -> di
     }
 
 
-def environment(corpus: Corpus, repository_revision: str) -> dict[str, object]:
+def environment(corpus: Corpus, harness_revision: str) -> dict[str, object]:
+    native_path = Path(doc_ex._core.__file__).resolve()
     return {
         "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "platform": platform.platform(),
         "machine": platform.machine(),
         "processor": platform.processor(),
         "python": platform.python_version(),
-        "repository_revision": repository_revision,
+        "harness_revision": harness_revision,
+        "benchmarked_artifact": {
+            "distribution": "pydoccraft",
+            "version": importlib.metadata.version("pydoccraft"),
+            "native_extension": str(native_path),
+            "native_extension_sha256": hashlib.sha256(native_path.read_bytes()).hexdigest(),
+        },
         "packages": {
             name: importlib.metadata.version(name)
             for name in ("pydoccraft", "PyMuPDF", "openpyxl", "python-docx", "python-pptx")
@@ -370,12 +391,13 @@ def markdown_report(payload: dict[str, object]) -> str:
         "",
         f"Run: `{env['timestamp_utc']}` on `{env['platform']}` / `{env['machine']}` with Python `{env['python']}`.",
         "",
-        "| Category | Operation | Library | Median (ms) | IQR (ms) | Min–max (ms) |",
-        "|---|---|---:|---:|---:|---:|",
+        "| Category | Operation | Library | Status | Median (ms) | IQR (ms) | Min–max (ms) |",
+        "|---|---|---|---|---:|---:|---:|",
     ]
     for result in payload["results"]:
+        status = "matched PDF comparison" if result["comparable_group"] else (result["note"] or "capability baseline; no matched competitor")
         lines.append(
-            f"| {result['category']} | {result['operation']} | {result['library']} | "
+            f"| {result['category']} | {result['operation']} | {result['library']} | {status} | "
             f"{result['median_ms']:.2f} | {result['p25_ms']:.2f}–{result['p75_ms']:.2f} | "
             f"{result['minimum_ms']:.2f}–{result['maximum_ms']:.2f} |"
         )
@@ -410,7 +432,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--warmups", type=int, default=2)
     parser.add_argument("--repeats", type=int, default=7)
     parser.add_argument("--dpi", type=float, default=144)
-    parser.add_argument("--repository-revision", default="unknown")
+    parser.add_argument("--harness-revision", default="unknown")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if args.output is not None and args.output.suffix.lower() == ".md":
@@ -465,7 +487,7 @@ def main() -> int:
         )
 
     payload = {
-        "environment": environment(corpus, args.repository_revision),
+        "environment": environment(corpus, args.harness_revision),
         "configuration": {
             "pages": args.pages,
             "lines_per_page": args.lines,
