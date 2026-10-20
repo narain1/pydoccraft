@@ -143,7 +143,7 @@ Unchecked items below remain incomplete even when an initial slice is implemente
 ### TBL — Full table authoring (P1; refines C2 and E1)
 
 - [ ] **TBL1: Table construction.** Create from rectangular rows or explicit row/column counts; choose a clear policy for ragged data and empty tables. Provide optional header rows and verify data order after save, extraction and conversion.
-- [ ] **TBL2: Row/column/cell access.** Offer `table[row, column]`, ordered row/column views and insert/delete operations. Preserve widths and spans; define how addressing works when cells are merged or structurally absent.
+- [ ] **TBL2: Row/column/cell access.** DOCX/PPTX grid insertion/deletion and stale-handle protection are implemented; ordered column views remain open. Offer `table[row, column]`, ordered row/column views and insert/delete operations. Preserve widths and spans; define how addressing works when cells are merged or structurally absent.
 - [ ] **TBL3: Rich cell content.** Allow paragraphs, runs, hyperlinks, images and nested tables in a cell. Keep that hierarchy editable and extractable; a plain-text convenience view must not destroy it implicitly.
 - [ ] **TBL4: Cell merges and splits.** Support horizontal/vertical spans, rectangular merges, explicit split semantics and content placement. Reject overlapping or nonrectangular merges; test reversibility where content permits it.
 - [ ] **TBL5: Widths and layout.** Add table alignment/indent, absolute/relative width, fixed/autofit layout and column sizing through WordCraft. Specify behavior when content overflows rather than guessing widths in Python.
@@ -232,7 +232,7 @@ Unchecked items below remain incomplete even when an initial slice is implemente
 
 ### PDF — PDF creation and editing parity (P1 basics; advanced items P2)
 
-- [ ] **PDF1: Page authoring.** Create fixed-size pages, set boxes/rotation and insert/remove/reorder pages through PdfCraft. Reopen and verify geometry, rendered orientation and page count.
+- [x] **PDF1: Page authoring.** Create fixed-size pages, set boxes/rotation and insert/remove/reorder pages through PdfCraft. Reopen and verify geometry, rendered orientation and page count.
 - [ ] **PDF2: Text and images.** Draw/searchable text, text boxes and embedded images with explicit positioning, fonts, colors and clipping. Validate Unicode/shaping and overflow behavior through upstream public APIs.
 - [ ] **PDF3: Vector graphics and backgrounds.** Add basic paths/shapes, strokes/fills and underlays/overlays/watermarks. Preserve text extraction and layering; use PdfCraft drawing primitives rather than writing PDF operators.
 - [x] **PDF4: Flowed reports and tables.** Use the WordCraft report-to-PDF path for semantic flowing content, or a verified PdfCraft layout API for positioned tables. Document which path applies; do not introduce a Python pagination/table layout engine.

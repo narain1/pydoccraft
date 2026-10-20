@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use base64::Engine;
 use pdfcraft_render::{
-    inspect, LinkTarget, PageRenderer, RenderConfig, RenderRequest, RequestKind,
+    inspect, LinkTarget, PageRenderer, RenderConfig, RenderRequest, RenderWarning, RequestKind,
 };
 use serde_json::{json, Map, Value};
 
@@ -34,6 +34,7 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
             scale: 1.0,
             ..Default::default()
         });
+        check_content_warnings(&rendered.warnings)?;
         if let Some(e) = rendered.error {
             return Err(EngineError::Malformed(format!(
                 "PDF text extraction failed: {e}"
@@ -115,12 +116,22 @@ pub fn render(
         scale: (dpi / 72.0) as f32,
         ..Default::default()
     });
+    check_content_warnings(&rendered.warnings)?;
     if let Some(e) = rendered.error {
         return Err(EngineError::ResourceLimit(format!(
             "PDF rendering failed: {e}"
         )));
     }
     crate::rendering::encode_png(rendered.width, rendered.height, rendered.rgba.as_ref(), dpi)
+}
+
+fn check_content_warnings(warnings: &[RenderWarning]) -> Result<(), EngineError> {
+    if warnings.contains(&RenderWarning::ContentTruncated) {
+        return Err(EngineError::ResourceLimit(
+            "PDF decoded-content budget exceeded; partial output was discarded".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn add_text(text: &pdfcraft_render::PageText, page: &mut PagePayload) {
@@ -476,5 +487,19 @@ fn open_error(error: pdfcraft_render::OpenError) -> EngineError {
         pdfcraft_render::OpenError::Invalid(message) => {
             EngineError::Malformed(format!("invalid PDF: {message}"))
         }
+    }
+}
+
+#[cfg(test)]
+mod warning_tests {
+    use super::*;
+
+    #[test]
+    fn decoded_content_truncation_is_an_explicit_resource_failure() {
+        assert!(check_content_warnings(&[]).is_ok());
+        assert!(matches!(
+            check_content_warnings(&[RenderWarning::ContentTruncated]),
+            Err(EngineError::ResourceLimit(message)) if message.contains("partial output was discarded")
+        ));
     }
 }

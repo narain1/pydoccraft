@@ -79,3 +79,9 @@ Portable Markdown media packaging is Python projection over owned extracted valu
 WordCraft public section enumeration/mutation, part creation and native clone-on-write blocks support independent section stories without copying relationship serialization. The pinned layout treats NextColumn as a page transition; that start remains unavailable locally, and a public column-transition layout implementation is upstream work. Mixed-size continuous transitions are also rejected explicitly. General linked headers and unequal columns are not implied by the independent-section profile.
 
 DeckCraft public table grid mutations support the local merge/split/insert/delete profile. Its public renderer expands minimum row heights; exact height must not be advertised. `deckcraft_render::table::look` resolves inherited table styles but its module is private: a bounded public resolved-cell-style accessor is a useful upstream candidate for inspection. Local explicit-border editing does not need a new library API.
+
+## Grid and geometry findings
+
+WordCraft public row deletion removes the row without repairing a removed vertical-merge anchor; inserted rows can retain continuation properties. A public fallible span-preserving grid edit is an upstream candidate. The local adapter currently rejects orphan continuations atomically. General rich fragment copy also needs upstream note/comment/bookmark identity remapping before supporting semantic row cloning.
+
+PdfCraft page-box transforms, text colors and effective geometry are publicly available and integrated locally. ContentTruncated and outline_more signals now cause explicit local failures; finer caller-configurable inspection budgets remain upstream work.
