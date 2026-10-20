@@ -43,7 +43,7 @@ Editable child handles keep their document alive, but closing the document inval
 
 Iteration captures membership and handles when iteration first advances. Later insertions are omitted from that iteration. Stable DOCX identities and slide/shape identities continue referring to the same objects after unrelated edits; deleting an object makes its old handle unusable. PDF page, annotation and outline positions have generation checks: structural changes invalidate captured handles, including ones still waiting in an iterator, so they cannot silently point to a different object. Table grid edits similarly invalidate positional row/cell handles. Retrieve those handles again after structural edits. PDF field iteration explicitly rejects structural changes. Mutations invalidate derived layout/render snapshots; retained extracted values remain independent snapshots.
 
-DOCX and PPTX text accept LF newlines and rejects carriage returns (CR/CRLF); normalize external text to LF before insertion. This prevents inconsistent writer/parser paragraph normalization. Compound mutations validate before committing. Invalid styles, colors, geometry, text or media must leave the prior document usable. Native resource limits also apply to programmatic creation; a document's serializable model is not an unlimited storage container.
+DOCX and whole PPTX text bodies accept LF newlines and reject carriage returns (CR/CRLF); normalize external text to LF before insertion. Individual PPTX cell-paragraph edits reject LF: append another paragraph through the cell instead. This prevents inconsistent writer/parser paragraph normalization. Compound mutations validate before committing. Invalid styles, colors, geometry, text or media must leave the prior document usable. Native resource limits also apply to programmatic creation; a document's serializable model is not an unlimited storage container.
 
 ## DOCX text and page layout
 
@@ -105,6 +105,24 @@ Formatting follows one rule across `add_run`, range/paragraph `format`, and styl
 Character keys are `bold`, `italic`, `font_size`, `font`, `color`, `underline`, `strike`, `script`, `highlight`, `background`, and a character `style` ID/name. `color="auto"` uses native automatic color; `background` is RGB shading. Underline accepts bool or `none`, `single`, `words`, `double`, `thick`, `dotted`, `dash`, `dot_dash`, `dot_dot_dash`, `wave`, `double_wave`. Strike accepts bool or `none`, `single`, `double`; script accepts `baseline`, `superscript`, `subscript`. Highlight uses WordCraft's fixed palette (`yellow`, `bright_green`, `turquoise`, `pink`, `blue`, `red`, `dark_blue`, `teal`, `green`, `violet`, `dark_red`, `dark_yellow`, `gray50`, `gray25`, `black`, `white`, `none`). Unsupported names fail explicitly.
 
 `paragraph.format` accepts `alignment`, `indent_left`, `indent_right`, `indent_first`, `space_before`, `space_after`, `line_spacing`, `keep_with_next`, `keep_together`, `widow_control`, `page_break_before`, and `background`. Lengths use points and line spacing is a multiplier. Table-cell spacing inspection includes native table-style inheritance. Paragraph-style `format` accepts both character and paragraph properties, with `background` meaning paragraph shading; character-style background means run shading. Style bases are changed through `based_on`, not a formatting `style` field. Patches are flat, allowlisted and bounded to 16 KiB.
+
+The [cookbook](cookbook.md) composes these APIs into six executable workflows without adding package-specific recipe objects.
+
+## DOCX image backgrounds
+
+`document.background_image = png_bytes_or_source` uses a native stretched PNG over every DOCX page, including differently sized sections. The getter returns owned original PNG bytes; `None` clears only the image. `document.background` remains an independent color beneath it: transparent PNG pixels reveal that color, and changing the color preserves the image. This fill stretches to the page rectangle and can change the image's aspect ratio. It does not provide fit/crop modes, tiling, offsets, arbitrary opacity or section-local placement.
+
+The background shares native media deduplication with body and nested/story images. Replacing or clearing it retains any resources still used by those images; inline `document.images` collections do not include the background. Input is bounded to 16 MiB, 8,192 pixels per side, 16 million decoded pixels and a 64 MiB decode buffer, with a separate 64 MiB aggregate referenced encoded-media budget. Original bytes and independent copies remain valid after closing the owner. Native PNG/PDF output retains color/transparency and supports existing DPI/clipping calls.
+
+```python
+with doc_ex.new("docx") as report:
+    report.background = "#FAFAF7"
+    report.background_image = "page-art.png"
+    report.add_paragraph("Quarterly report")
+    report.save("report.docx")
+```
+
+Native tiling and text watermark rendering have reproduced PNG/PDF differences; see the [upstream findings](upstream-roadmap.md#docx-background-and-watermark-fidelity). They remain outside this profile.
 
 ## PDF pages and assembly
 
@@ -216,7 +234,7 @@ Text-bearing shapes reuse `add_run(text, **formatting)`, `find(text)`, contiguou
 
 PPTX character patches support bold/italic, font_size, font, color, underline, strike, script and RGB `highlight`. Underline accepts the shared readable DOCX names plus `thick_dotted`, `thick_dash`, `long_dash`, `thick_long_dash`, `thick_dot_dash`, `thick_dot_dot_dash`, and `thick_wave`. Native XML spellings are not public API. Run background shading and named DOCX styles have no equivalent in this profile and fail explicitly. Rich PPTX table-cell ranges remain separate work.
 
-A shape or text range's `link` accepts an HTTP/HTTPS/mailto URL, a Slide from the same presentation, or `None`. `link_tooltip` requires an existing target. Reading a range with mixed targets/tooltips fails explicitly; assigning `link` replaces or clears the whole range. Reassignment retains a uniform tooltip and clears mixed tooltips. URLs containing characters the XML writer cannot preserve are rejected before mutation. URL and internal slide links survive native serialization and PDF export. Reordering follows stable native slide IDs; deleting a slide still referenced by surviving shapes, text, cells, notes or groups is rejected. PPTX extraction currently reports internal actions as an explicit omission diagnostic; this save/export support does not complete internal-link extraction parity.
+A shape or text range's `link` accepts an HTTP/HTTPS/mailto URL, a Slide from the same presentation, or `None`. `link_tooltip` requires an existing target. Reading a range with mixed targets/tooltips fails explicitly; assigning `link` replaces or clears the whole range. Reassignment retains a uniform tooltip and clears mixed tooltips. URLs containing characters the XML writer cannot preserve are rejected before mutation. URL and internal slide links survive native serialization and PDF export. Reordering follows stable native slide IDs; deleting a slide still referenced by surviving shapes, text, cells, notes or groups is rejected. PPTX extraction resolves native fixed slide targets to `#page=N` and zero-based `target_page` metadata. Context-dependent, executable and unresolved actions remain outside that fixed-target profile; native reader omissions are documented in the [format guide](formats.md#pptx).
 
 Text edits preflight run/paragraph fragmentation (100,000 each), visible text and duplicated string properties (16 MiB each), URL targets (8 KiB) and tooltips (4 KiB). Unsupported executable actions are never constructed. Whole-shape text and font setters also respect these limits. Existing output and format fidelity limits still apply.
 
@@ -237,13 +255,30 @@ A newly appended section copies its predecessor's setup and receives independent
 
 `next_column` is rejected because the pinned layout path treats that transition as a new page. Continuous transitions with differing page sizes are rejected before mutation rather than promising geometry the upstream layout cannot represent. Odd/even starts, leading blank sections and mixed page dimensions have native PNG/PDF regression coverage.
 
+### Rich PPTX cell paragraphs
+
+PPTX cells reuse `cell.paragraphs`, `cell.add_paragraph(text)` and ordinary `Paragraph`/`TextRange` operations. Edit a paragraph's `.text`, `.alignment` or `.format(alignment=...)`; append styled text with `.add_run`, select with `[start:stop]`, or use `.find`/`.replace_text`. Range `.format`, `.link` and `.link_tooltip` follow the existing slide rules, including same-presentation Slide targets. `.formatting` reports direct alignment only. Named Word styles, lists, fields, breaks, paragraph spacing/indentation, effective Word style inspection, nested tables and cell images remain explicitly unsupported.
+
+```python
+cell = table[0, 0]
+paragraph = cell.paragraphs[0]
+paragraph.text = "Delivery: "
+paragraph.add_run("Complete", bold=True, color="green")
+terms = cell.add_paragraph("Read the terms")
+terms.find("terms")[0].link = "https://example.com/terms"
+```
+
+Each handle addresses one paragraph. LF is rejected in paragraph text/range replacement; use `cell.add_paragraph` for a new paragraph. Setting paragraph text to an empty string retains the paragraph. Adding a paragraph preserves earlier paragraph handles; ranges still become stale after unrelated document changes. Replacing `cell.text` invalidates that cell's old paragraph handles, and structural grid operations invalidate descendants. Covered coordinates share their canonical merged cell. Ordinary newly created/inserted cells contain an empty paragraph; splitting can expose a cell with no paragraphs, where `add_paragraph` creates the first one directly. Slide reordering and independent document copies retain their existing ownership rules.
+
+DeckCraft fits ordinary horizontal unmerged rows to content, which can draw below the stored table box. Merged-row and vertical cells keep native stored-height behavior. This API does not promise automatic font shrinking, page containment or a rewritten nominal table size; inspect rendered output for overflowing content.
+
 ### Shared cell layout and PPTX grid editing
 
-Both DOCX and PPTX cells expose `margins=(top, right, bottom, left)` in points; a scalar sets all sides, and `None` clears the direct override. Getters resolve native default margins. `cell.alignment` applies to direct cell paragraphs only, leaving nested tables alone. It returns a direct `left`/`center`/`right`/`justify` override or `None`; mixed paragraph overrides raise an explicit error. Setting `None` restores paragraph inheritance. This is separate from cell `vertical_alignment` and resolved `paragraph.alignment`.
+Both DOCX and PPTX cells expose `margins=(top, right, bottom, left)` in points; a scalar sets all sides, and `None` clears the direct override. Getters resolve native default margins. `cell.alignment` applies to direct cell paragraphs only, leaving nested tables alone. It returns a direct `left`/`center`/`right`/`justify` override or `None`; mixed paragraph overrides raise an explicit error. Setting `None` restores paragraph inheritance. This is separate from cell `vertical_alignment`. DOCX paragraph alignment resolves its native formatting; PPTX cell paragraph alignment reports its direct override or `None`.
 
 PPTX tables reuse `column_widths`, `borders`, `row(index)`, `merge(first,last)` and `cell.split()`. Covered coordinates address the merged anchor, while `table.rows` emits its text only once. Partial overlap with an existing merge is rejected. A split restores the existing merged grid and retains combined content at the former anchor; it does not recreate the original separate texts. Explicit `columns` is supported only when it matches an existing horizontal merge. DOCX's default split remains two horizontal columns.
 
-`table.insert_row(index)` returns the new row handle; `insert_column(index)` returns the new column's cell handles. `delete_row(index)` and `delete_column(index)` reject removing the last row/column. Insert indexes must be within the grid or immediately after it; negative indexes count from its existing end. These grid CRUD methods support DOCX and PPTX. Table/shape handles survive structural edits, while previous row/cell handles fail as stale. DOCX descendant paragraph/table/image handles also become invalid after structural edits; handles outside the changed table remain valid. DOCX edits preserve native spans, header-prefix rules and widths; edits that would leave an orphan vertical merge, exceed the containing width or remove positive text width inside explicit cell margins fail atomically. Column resizing enforces the same explicit-margin constraint. Retrieve fresh cells after merge/split/insert/delete. Scalar layout/text changes retain those handles.
+`table.insert_row(index)` returns the new row handle; `insert_column(index)` returns the new column's cell handles. `delete_row(index)` and `delete_column(index)` reject removing the last row/column. Insert indexes must be within the grid or immediately after it; negative indexes count from its existing end. These grid CRUD methods support DOCX and PPTX. Table/shape handles survive structural edits, while previous row/cell handles fail as stale. Descendant paragraph handles in both formats, and DOCX table/image handles, also become invalid after structural edits; handles outside the changed table remain valid. DOCX edits preserve native spans, header-prefix rules and widths; edits that would leave an orphan vertical merge, exceed the containing width or remove positive text width inside explicit cell margins fail atomically. Column resizing enforces the same explicit-margin constraint. Retrieve fresh cells after merge/split/insert/delete. Scalar layout/text changes retain those handles.
 
 PPTX `row.height=(points, "at_least")` is a minimum. Exact and automatic-height requests are rejected in this profile. Native layout may expand rendered text below the stored table box; the box is the stored grid extent. Width/height changes synchronize that extent, and resizing a table shape scales its grid. Explicit cell margins must still leave positive text width. Uniform border setters create explicit solid overrides; `borders=None` writes no-fill lines. Inspecting inherited or mixed borders raises an explicit unsupported/mixed error because a public resolved table-style accessor is unavailable upstream.
 

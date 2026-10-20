@@ -75,6 +75,7 @@ Track the work in the [GitHub Roadmap project](https://github.com/users/narain1/
 
 - [Python API](docs/api.md)
 - [Native authoring (unreleased)](docs/authoring.md)
+- [Six runnable cookbook workflows](docs/cookbook.md)
 - [Formats, rendering, and conversion](docs/formats.md)
 - [Safety and resource behavior](docs/safety.md)
 - [Dependencies, licensing, and attribution](docs/dependencies-and-licenses.md)

@@ -283,3 +283,16 @@ PDF copy/subset and page insertion reuse the private `_selected_pages` facade he
 ## EPUB extension architecture
 
 `rust/src/epub.rs` is a narrow LexePub adapter with shared ZIP and strict package/XML preflight; `rust/src/author_epub.rs` is a bounded semantic adapter over rbook. Python retains compatibility objects and save/lifecycle behavior. These exact-locked Apache-2.0 backends are explicitly authorized by the [EPUB design](../epub-support/design.md) because the selected ArtCraft repositories do not provide an EPUB engine. They do not authorize local reimplementation of EPUB packaging, rendering, conversion, CSS, DRM, or fixed-layout behavior.
+## Executable usability cookbook
+
+Five new standalone example modules plus the existing template recipe compose native authoring and PNG-byte rendering. Each exposes a normal function with an explicit output directory and a guarded argparse entry point. They format domain data with Python/Decimal, preserve native document ownership and write returned conversion/render bytes explicitly. No example implementation enters the public doc_ex surface. Installed-wheel acceptance imports the actual modules and runs their CLIs in temporary directories; shared PNG decoders verify artwork and requested resolution without requiring Pillow.
+
+## DOCX image backgrounds
+
+WordDocument.background_image reuses bounded Python source reading and native PNG validation, with private native background_image/set_background_image methods on the existing editable owner. The adapter assigns public Settings.page_picture to a PagePicture with frame fill and a media key returned by Document.add_media. Image and color remain independent native settings. The existing authored media-retention walk includes this one global reference before paragraph images; shared data counts once, and it is not counted as an inline placement on each rendered page. Empty-media commits still validate a nonempty background reference. No separate background object, image compositor, layout logic or image-processing dependency is introduced.
+
+## Presentation cell paragraphs
+
+A private Paragraph adapter reuses existing slide ranges and shared slicing/find/replace helpers. Its private target contains canonical row/column, paragraph ordinal, table generation and cell body generation; optional private keyword forwarding lets existing native text/range methods select a cell paragraph without duplicating a method family. Native helpers resolve the public TextBody and relative Pos values, while DeckCraft edit functions own insertion, deletion, formatting and link runs. Appending to a body with no paragraphs uses native first-paragraph insertion without a separator. Grid edits prune cell-generation entries and advance the table generation so old raw targets cannot revive. No cross-paragraph identity remapping is implemented.
+
+Shared literal find/replace normalizes validated string operands with base str semantics before truth, length, equality, handle capture or staged mutation. String-subclass hooks must not execute inside a replacement transaction and overwrite caller-owned changes.

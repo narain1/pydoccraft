@@ -636,6 +636,22 @@ class WordDocument(EditableDocument):
     def background(self, color):
         self._call("set_background", None if color is None else _hex_color(color), _change=True)
 
+    @property
+    def background_image(self) -> bytes | None:
+        """Owned PNG bytes stretched over every page, above the background color."""
+        value = self._call("background_image")
+        return None if value is None else bytes(value)
+
+    @background_image.setter
+    def background_image(self, source) -> None:
+        """Set a stretched PNG, or clear only the image with None."""
+        self._ensure_open()
+        from . import _read
+        data = None if source is None else _read(source, limit=16 * 1024 * 1024)[0]
+        # Reading caller-owned streams may close or edit the owner. _call checks
+        # lifetime again and applies this document-wide property to current state.
+        self._call("set_background_image", data, _change=True)
+
     def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
         style = _style_reference(style, self)
         if style is None:
@@ -903,27 +919,27 @@ class TextRange:
     @property
     def text(self) -> str:
         paragraph = self._paragraph
-        return paragraph._owner._call("range_text", *paragraph._range_args, self._start, self._end, self._revision)
+        return paragraph._owner._call("range_text", *paragraph._range_args, self._start, self._end, self._revision, **getattr(paragraph, "_range_kwargs", {}))
 
     @text.setter
     def text(self, value: str):
         paragraph = self._paragraph
-        self._start, self._end, self._revision = paragraph._owner._call("replace_range", *paragraph._range_args, self._start, self._end, self._revision, value, _change=True)
+        self._start, self._end, self._revision = paragraph._owner._call("replace_range", *paragraph._range_args, self._start, self._end, self._revision, value, _change=True, **getattr(paragraph, "_range_kwargs", {}))
 
     @property
     def link(self):
         paragraph = self._paragraph
-        return paragraph._owner._call("range_link", *paragraph._range_args, self._start, self._end, self._revision)
+        return paragraph._owner._call("range_link", *paragraph._range_args, self._start, self._end, self._revision, **getattr(paragraph, "_range_kwargs", {}))
 
     @link.setter
     def link(self, url: str | None):
         paragraph = self._paragraph
-        self._revision = paragraph._owner._call("set_range_link", *paragraph._range_args, self._start, self._end, self._revision, url, _change=True)
+        self._revision = paragraph._owner._call("set_range_link", *paragraph._range_args, self._start, self._end, self._revision, url, _change=True, **getattr(paragraph, "_range_kwargs", {}))
 
     def format(self, **formatting: Unpack[CharacterFormatting]) -> None:
         """Set character properties; omitted values stay and None inherits."""
         paragraph = self._paragraph
-        self._revision = paragraph._owner._call("format_range_patch", *paragraph._range_args, self._start, self._end, self._revision, _format_patch(formatting, rgb_highlight=isinstance(paragraph, Shape)), _change=True)
+        self._revision = paragraph._owner._call("format_range_patch", *paragraph._range_args, self._start, self._end, self._revision, _format_patch(formatting, rgb_highlight=paragraph._owner._format == "pptx"), _change=True, **getattr(paragraph, "_range_kwargs", {}))
 
 
 def _slice_range(content, key: slice, factory):
@@ -936,14 +952,19 @@ def _slice_range(content, key: slice, factory):
         raise ValueError("text selection requires a slice step of 1")
     # A forward slice with a stop before its start is empty, at the start.
     stop = max(start, stop)
-    selected, current_revision = content._owner._call("text_range", *content._range_args, start, stop)
+    selected, current_revision = content._owner._call("text_range", *content._range_args, start, stop, **getattr(content, "_range_kwargs", {}))
     if current_revision != revision or selected != text[start:stop]:
         raise ValueError("text changed during selection")
     return factory(content, start, stop, current_revision)
 
 
 def _find_ranges(content, text: str, factory):
-    if not isinstance(text, str) or not text:
+    if not isinstance(text, str):
+        raise ValueError("search text must be a nonempty string")
+    # Literal matching uses the stored string, not subclass conversion/length
+    # hooks which could edit the owner while ranges or a transaction are built.
+    text = str.__str__(text)
+    if not text:
         raise ValueError("search text must be a nonempty string")
     value = content.text
     args = content._range_args
@@ -951,7 +972,7 @@ def _find_ranges(content, text: str, factory):
     result = []
     while (start := value.find(text, position)) >= 0:
         end = start + len(text)
-        actual, revision = content._owner._call("text_range", *args, start, end)
+        actual, revision = content._owner._call("text_range", *args, start, end, **getattr(content, "_range_kwargs", {}))
         if actual != text:
             raise ValueError("text changed during search")
         result.append(factory(content, start, end, revision))
@@ -960,21 +981,25 @@ def _find_ranges(content, text: str, factory):
 
 
 def _replace_text(content, old: str, new: str) -> int:
-    if not isinstance(old, str) or not old:
+    if not isinstance(old, str):
+        raise ValueError("search text must be a nonempty string")
+    old = str.__str__(old)
+    if not old:
         raise ValueError("search text must be a nonempty string")
     if not isinstance(new, str):
         raise TypeError("replacement text must be a string")
+    new = str.__str__(new)
     args = content._range_args
     def replace(native):
-        value = getattr(native, content._native_text_method)(*args)
+        value = getattr(native, content._native_text_method)(*args, **getattr(content, "_range_kwargs", {}))
         positions = []
         offset = 0
         while (start := value.find(old, offset)) >= 0:
             positions.append(start)
             offset = start + len(old)
         for start in reversed(positions):
-            _, revision = native.text_range(*args, start, start + len(old))
-            native.replace_range(*args, start, start + len(old), revision, new)
+            _, revision = native.text_range(*args, start, start + len(old), **getattr(content, "_range_kwargs", {}))
+            native.replace_range(*args, start, start + len(old), revision, new, **getattr(content, "_range_kwargs", {}))
         return len(positions)
     return content._owner._atomic(replace)
 
@@ -1000,7 +1025,7 @@ def _slide_link_value(owner, value):
 class _SlideTextRange(TextRange):
     def _link_info(self, *, allow_mixed: bool = False):
         content = self._paragraph
-        return content._owner._call("range_link", *content._range_args, self._start, self._end, self._revision, allow_mixed)
+        return content._owner._call("range_link", *content._range_args, self._start, self._end, self._revision, allow_mixed, **getattr(content, "_range_kwargs", {}))
 
     @property
     def link(self) -> str | Slide | None:
@@ -1012,7 +1037,7 @@ class _SlideTextRange(TextRange):
         url, slide_id = _slide_link_target(content._owner, target)
         previous = self._link_info(allow_mixed=True)
         tooltip = previous[2] if previous is not None and target is not None else ""
-        self._revision = content._owner._call("set_range_link", *content._range_args, self._start, self._end, self._revision, url, slide_id, tooltip, _change=True)
+        self._revision = content._owner._call("set_range_link", *content._range_args, self._start, self._end, self._revision, url, slide_id, tooltip, _change=True, **getattr(content, "_range_kwargs", {}))
 
     @property
     def link_tooltip(self) -> str:
@@ -1025,7 +1050,7 @@ class _SlideTextRange(TextRange):
         if info is None:
             raise ValueError("set a link before setting its tooltip")
         content = self._paragraph
-        self._revision = content._owner._call("set_range_link", *content._range_args, self._start, self._end, self._revision, info[0], info[1], value, _change=True)
+        self._revision = content._owner._call("set_range_link", *content._range_args, self._start, self._end, self._revision, info[0], info[1], value, _change=True, **getattr(content, "_range_kwargs", {}))
 
 
 class Sections(_Collection["Section"]):
@@ -1529,7 +1554,7 @@ class EditableCell:
         self._check()
         table = self._table
         if table._slide is not None:
-            raise UnsupportedFormatError("rich PPTX cell content is not yet available")
+            raise UnsupportedFormatError("PPTX cells support text paragraphs, not nested tables or images")
         return table._id, self._row, self._column
 
     def _children(self, kind, factory):
@@ -1538,6 +1563,12 @@ class EditableCell:
 
     @property
     def paragraphs(self) -> _Collection[Paragraph]:
+        if self._table._slide is not None:
+            owner = self._table._owner
+            def targets():
+                row, column, grid, body, count = owner._call("cell_paragraph_info", *self._args)
+                return [(row, column, index, grid, body) for index in range(count)]
+            return _Collection(owner, targets, lambda owner, target: _SlideCellParagraph(self, target))
         return self._children("paragraph", Paragraph)
 
     @property
@@ -1550,6 +1581,12 @@ class EditableCell:
         return Pictures(owner, lambda: owner._call("cell_image_ids", *self._content_args()))
 
     def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
+        if self._table._slide is not None:
+            self._check()
+            if style is not None:
+                raise UnsupportedFormatError("named paragraph styles are unavailable in PPTX cells")
+            target = self._table._owner._call("cell_add_paragraph", *self._args, text, _change=True)
+            return _SlideCellParagraph(self, target)
         style = _style_reference(style, self._table._owner)
         args = self._content_args()
         def append(native):
@@ -2642,3 +2679,74 @@ class EpubChapter:
         from . import _read
         data, _ = _read(source)
         self._owner._call("add_image", self._id, data, media_type, alt, _change=True)
+
+
+class _SlideCellParagraph(Paragraph):
+    """A paragraph ordinal within a generation-checked, canonical PPTX cell."""
+    def __init__(self, cell, target):
+        self._cell, self._target = cell, target
+        self._owner = cell._table._owner
+
+    @property
+    def _range_args(self):
+        self._cell._check()
+        return self._cell._table._args
+
+    @property
+    def _range_kwargs(self):
+        return {"cell": self._target}
+
+    _native_text_method = "shape_text"
+
+    @property
+    def text(self):
+        return self._owner._call("shape_text", *self._range_args, **self._range_kwargs)
+
+    @text.setter
+    def text(self, value):
+        self[:].text = value
+
+    @property
+    def alignment(self):
+        return self._owner._call("cell_paragraph_alignment", *self._range_args, self._target)
+
+    @alignment.setter
+    def alignment(self, value):
+        self._owner._call("set_cell_paragraph_alignment", *self._range_args, self._target, value, _change=True)
+
+    @property
+    def formatting(self):
+        return {"alignment": self.alignment}
+
+    def format(self, **formatting):
+        if formatting.keys() - {"alignment"}:
+            self._unsupported()
+        if "alignment" in formatting:
+            self.alignment = formatting["alignment"]
+        else:
+            _ = self.text  # Empty patches still validate the owner and handle.
+
+    def add_run(self, text, **formatting):
+        patch = _format_patch(formatting, rgb_highlight=True)
+        start, end, revision = self._owner._call("add_run_patch", *self._range_args, text, patch,
+                                               _change=True, **self._range_kwargs)
+        return _SlideTextRange(self, start, end, revision)
+
+    def __getitem__(self, key):
+        return _slice_range(self, key, _SlideTextRange)
+
+    def find(self, text):
+        return _find_ranges(self, text, _SlideTextRange)
+
+    def _unsupported(self, *args, **kwargs):
+        self._owner._ensure_open()
+        raise UnsupportedFormatError("this Word paragraph operation is unavailable in PPTX cells")
+
+    style = property(_unsupported, _unsupported)
+    list_style = property(_unsupported)
+    page_break_before = property(_unsupported, _unsupported)
+    spacing = property(_unsupported, _unsupported)
+    resolved_formatting = property(_unsupported)
+    set_list = _unsupported
+    add_field = _unsupported
+    add_break = _unsupported

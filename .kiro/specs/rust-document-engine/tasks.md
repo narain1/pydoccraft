@@ -273,3 +273,22 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Authorize and link the dedicated EPUB extraction/creation spec.
 - [x] Add exact-locked permissive LexePub/rbook adapters, synchronized license evidence, and generated tests.
 - [ ] Track upstream bounded traversal/writer sinks before claiming hard intermediate-allocation ceilings.
+## Executable usability cookbook
+
+- [x] Compose six runnable workflows using the existing public surface and explicit output directories/DPI.
+- [x] Audit naming, units, ownership and save/close conventions; distinguish current guides from historical proposals.
+- [x] Verify all actual functions/CLIs and reopened rendered outputs in the complete installed-wheel suite; record artifact evidence before completing API10.
+
+## DOCX image backgrounds
+
+- [x] Reuse the background_image property vocabulary for native stretched DOCX PNG backgrounds and independent color reset semantics.
+- [x] Extend existing media accounting for the global reference, retaining shared images/fields and explicit bounded/atomic errors.
+- [x] Verify complete locked/native and installed-wheel read/render/export coverage and record artifact evidence.
+- [ ] Retain aspect-preserving fit/placement, tiling and watermark fidelity as broader open/upstream work.
+
+## Presentation cell paragraphs
+
+- [x] Reuse Cell/Paragraph/range vocabulary and public native text editing for rich PPTX cell paragraphs, formatting and links.
+- [x] Validate canonical anchors, body/table generations, native empty-body insertion, budgets, callbacks and explicit unsupported Word members.
+- [x] Verify complete locked/native and installed-wheel source/render/export coverage and record artifact evidence.
+- [ ] Retain paragraph spacing/indent fidelity, rich nested content and broader SLIDE3/grouped-content work.

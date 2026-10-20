@@ -12,7 +12,7 @@ This document describes the current source tree, including unreleased improvemen
 | URI links | Yes | Yes | Yes | Yes |
 | Semantic tables | Conservative geometry inference | Yes | Yes | Readable cell text only |
 | Embedded image bytes | Exportable images | Referenced images | Referenced pictures | Referenced images |
-| Notes | No dedicated model | Comments as comment blocks | Speaker notes | No |
+| Notes | No dedicated model | Owned footnote/endnote stories and body references | Speaker notes | No |
 | Comments | PDF comments not normalized | Comments and replies | Comments and replies | No |
 | PNG rendering | Yes | Yes | Yes | No |
 | Password input | Yes | Yes | Encrypted PPTX unsupported | DRM/password unsupported |
