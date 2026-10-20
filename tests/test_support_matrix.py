@@ -18,7 +18,7 @@ SPEC.loader.exec_module(checker)
 class SupportMatrixTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.original = json.loads((ROOT / 'docs/support-ledger.json').read_text())
+        cls.original = json.loads((ROOT / 'docs/support-ledger.json').read_text(encoding='utf-8'))
 
     def setUp(self):
         self.ledger = deepcopy(self.original)
@@ -34,7 +34,7 @@ class SupportMatrixTests(unittest.TestCase):
         self.assertEqual(self.ledger, self.original)
         self.assertEqual(len(self.ledger['coverage']), 139)
         self.assertEqual(len(self.ledger['profiles']), 7)
-        self.assertEqual(checker.generate(ROOT, self.ledger), (ROOT / 'docs/support-matrix.md').read_text())
+        self.assertEqual(checker.generate(ROOT, self.ledger), (ROOT / 'docs/support-matrix.md').read_text(encoding='utf-8'))
 
     def test_missing_unknown_coverage_and_unknown_profile_are_rejected(self):
         del self.ledger['coverage']['API1']
@@ -110,8 +110,8 @@ class SupportMatrixTests(unittest.TestCase):
             shutil.copytree(ROOT / 'docs', root / 'docs')
             shutil.copy(ROOT / 'TODO.md', root / 'TODO.md')
             before = checker.generate(root, self.ledger)
-            todo = (root / 'TODO.md').read_text().replace('- [ ] **API1:', '- [x] **API1:')
-            (root / 'TODO.md').write_text(todo)
+            todo = (root / 'TODO.md').read_text(encoding='utf-8').replace('- [ ] **API1:', '- [x] **API1:')
+            (root / 'TODO.md').write_text(todo, encoding='utf-8')
             after = checker.generate(root, self.ledger)
             self.assertNotEqual(before, after)
             self.assertIn('| W01 / implementation | checked |', after)
@@ -125,23 +125,23 @@ class SupportMatrixTests(unittest.TestCase):
             for name in ('TODO.md', 'Cargo.toml'):
                 shutil.copy(ROOT / name, root / name)
             command = [sys.executable, str(root / 'tools/support_matrix.py'), '--root', str(root)]
-            initial = subprocess.run(command, capture_output=True, text=True)
+            initial = subprocess.run(command, capture_output=True, text=True, encoding='utf-8')
             self.assertEqual(initial.returncode, 0, initial.stderr)
             matrix = root / 'docs/support-matrix.md'
-            matrix.write_text('stale\n')
-            stale = subprocess.run(command, capture_output=True, text=True)
+            matrix.write_text('stale\n', encoding='utf-8')
+            stale = subprocess.run(command, capture_output=True, text=True, encoding='utf-8')
             self.assertEqual(stale.returncode, 1)
             self.assertIn('generated support-matrix.md differs', stale.stderr)
-            self.assertEqual(matrix.read_text(), 'stale\n')
-            rebuilt = subprocess.run(command + ['--write'], capture_output=True, text=True)
+            self.assertEqual(matrix.read_text(encoding='utf-8'), 'stale\n')
+            rebuilt = subprocess.run(command + ['--write'], capture_output=True, text=True, encoding='utf-8')
             self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr)
-            self.assertEqual(matrix.read_text(), checker.generate(root, self.ledger))
+            self.assertEqual(matrix.read_text(encoding='utf-8'), checker.generate(root, self.ledger))
             malformed = root / 'docs/support-ledger.json'
-            malformed.write_text('{')
-            failed = subprocess.run(command + ['--write'], capture_output=True, text=True)
+            malformed.write_text('{', encoding='utf-8')
+            failed = subprocess.run(command + ['--write'], capture_output=True, text=True, encoding='utf-8')
             self.assertEqual(failed.returncode, 1)
             self.assertNotIn('Traceback', failed.stderr)
-            self.assertEqual(matrix.read_text(), checker.generate(root, self.ledger))
+            self.assertEqual(matrix.read_text(encoding='utf-8'), checker.generate(root, self.ledger))
 
 
 if __name__ == '__main__':
