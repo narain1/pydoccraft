@@ -64,6 +64,7 @@ pub fn extract(data: &[u8]) -> Result<DocumentPayload, EngineError> {
             ("height".into(), json!(presentation.slide_size.height)),
         ]),
         pages,
+        stories: Vec::new(),
     })
 }
 

@@ -1,5 +1,14 @@
 # Validation evidence
 
+## 2026-10-20 DOCX layout controls and auxiliary stories (unreleased)
+
+- Same offline Rust 1.95.0/Linux x86_64/Python 3.11.2 environment and unchanged locked upstream revisions as the authoring baseline.
+- Formatting, 41 full Rust tests and warnings-denied Clippy passed. Clean installed-wheel validation passed 68 Python tests with no skips, including the separately reviewed PPTX CR/CRLF regression.
+- New coverage verifies DOCX rich auxiliary header/footer/note/comment stories, source reference connections, owned values after close, nested-story grid/depth limits, and page-color pixels in both native PNG and PDF-rendered output. Table column widths/borders/row properties round-trip; explicit breaks yield three correctly ordered PDF pages.
+- Wheel: 16,419,239 bytes; uncompressed native extension: 38,033,224 bytes. Wheel SHA-256: `40664a866303fab98964c30c095a654d065924132507031853fbf75356406e34`. Lockfile SHA-256 remains `1b2bcaa846d1ffe42cc844fce299750cf9c288e1aab00a3e8aafc40b7a14b3c9`.
+- Story order is native part-ID order, not an invented original archive ordering. Auxiliary objects have no guessed page assignment. Legacy comments remain in page output for compatibility and are flagged when also exposed as stories. General Office source editing, multiple-section mutation, advanced fills and other unchecked roadmap criteria remain open.
+
+
 ## 2026-10-20 native authoring baseline (unreleased)
 
 - Built offline in the Rust 1.95.0 Debian container on Linux x86_64; Python 3.11.2, Maturin 1.8.1. All builds used `--locked`; upstream revisions remain unchanged from AGENTS.md.

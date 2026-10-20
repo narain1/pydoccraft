@@ -83,6 +83,7 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
         format: "pdf".into(),
         metadata,
         pages,
+        stories: Vec::new(),
     })
 }
 

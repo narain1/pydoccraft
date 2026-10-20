@@ -74,7 +74,7 @@ DPI must be finite and in 1–1200; the default is 144. Indexes are zero-based a
 
 ### Implemented authoring baseline (unreleased)
 
-The installed-wheel baseline now covers typed creation/save/copy for all three formats; DOCX paragraphs/ranges, nested table cells, PNG images, page/cell backgrounds, margins and header/footer variants; PDF page organization/import, text/images and note/highlight/link editing; PPTX slide/shape creation, stacking, metadata, notes, fills and PNG backgrounds. See [the exact surface and limitations](docs/authoring.md) and [validation evidence](.kiro/specs/rust-document-engine/validation.md). This is partial progress toward C2/C3, TXT/TBL/LAY/MED/PDF/SLIDE coverage, not completion of their broader criteria. Arbitrary source Office editing, full styles/lists/fields/review and advanced preservation remain open.
+The installed-wheel baseline now covers typed creation/save/copy for all three formats; DOCX paragraphs/ranges, nested table cells, PNG images, page/cell backgrounds, margins and header/footer variants; PDF page organization/import, text/images and note/highlight/link editing; PPTX slide/shape creation, stacking, metadata, notes, fills and PNG backgrounds. See [the exact surface and limitations](docs/authoring.md) and [validation evidence](.kiro/specs/rust-document-engine/validation.md). This is partial progress toward C2/C3, TXT/TBL/LAY/MED/PDF/SLIDE coverage, not completion of their broader criteria. DOCX table widths/uniform borders/row layout and explicit page breaks are also implemented, and reopened auxiliary content is exposed in `document.stories`. Arbitrary source Office editing, full styles/lists/fields/review and advanced preservation remain open.
 
 ## P1 — Extraction fidelity and useful differentiation
 
@@ -157,7 +157,7 @@ Unchecked items below remain incomplete even when an initial slice is implemente
 
 ### BG — Backgrounds, shading and watermarks (P1)
 
-- [ ] **BG1: Solid document background.** Add DOCX page color using the upstream native background model. Test stored color, native PNG and exported PDF; expose limitations if viewers/exporters treat it differently.
+- [x] **BG1: Solid document background.** Add DOCX page color using the upstream native background model. Test stored color, native PNG and exported PDF; expose limitations if viewers/exporters treat it differently.
 - [ ] **BG2: Background image recipe.** Reuse MED2/MED3 image placement with explicit fit, anchor, layer, offset and opacity. Preserve aspect ratio by default and verify clipping/layer order; do not introduce another image API.
 - [ ] **BG3: Text watermark recipe.** Reuse MED4 positioned text/shapes and LAY3 header/section scope, with font, color, rotation and opacity properties. Verify body content remains intact; no dedicated watermark method family.
 - [ ] **BG4: Image watermark recipe.** Reuse MED1–MED3 picture placement for logos/stamps with size, opacity, layering and anchors. Test asset deduplication and placement rather than building a separate watermark subsystem.

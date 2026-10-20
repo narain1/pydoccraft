@@ -60,3 +60,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Audit 263 normal/build packages with the checked license-expression validator; add the pinned lower-level `pdfcraft-organize` crate and direct existing `pdfcraft-annot` dependency without upgrading upstream revisions.
 - [x] Run Rust formatting, 37 Rust tests, warnings-denied Clippy and 61 installed-wheel Python tests; record artifact evidence and limits in validation.md.
 - [ ] Complete the broader C2/C3 content/font requirements, arbitrary Office preservation, full styles/lists, fields, review and advanced objects. Initial profile tests do not complete those coverage IDs.
+
+## DOCX layout/story integration (unreleased)
+
+- [x] Expose owned auxiliary `Story` values with reused normalized content, explicit part ordering, no guessed page assignment and native note reference connections.
+- [x] Extend extraction traversal budgets across auxiliary parts and separators; test nested header tables and oversized grid rejection.
+- [x] Expose checked table widths/uniform borders/row layout plus paragraph spacing and explicit page breaks; verify save/reopen and PDF pagination.
+- [x] Verify solid DOCX page-color pixels in native PNG and exported PDF rendering (BG1).
+- [x] Validate the combined 41-Rust/68-installed-Python-test artifact; record remaining scope limits separately.
+- [ ] Complete multiple sections, linked headers, advanced row/column CRUD, lists/styles and structured omission diagnostics.

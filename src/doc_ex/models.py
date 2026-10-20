@@ -171,3 +171,24 @@ class Block:
             "table": self.table.to_dict() if self.table else None,
             "metadata": self.metadata,
         }
+
+
+@dataclass(slots=True)
+class Story:
+    """Owned auxiliary content, independent of computed page placement."""
+
+    kind: str
+    blocks: list[Block] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"kind": self.kind, "blocks": [block.to_dict() for block in self.blocks], "metadata": self.metadata}
+
+    def get_text(self, option: str = "text") -> str | dict[str, Any]:
+        if option == "dict":
+            return self.to_dict()
+        if option == "json":
+            import json
+            return json.dumps(self.to_dict(), ensure_ascii=False)
+        from ._document import Page
+        return Page(0, self.blocks).get_text(option)

@@ -302,6 +302,10 @@ class WordDocument(EditableDocument):
             identifier = self._atomic(append)
         return Paragraph(self, identifier)
 
+    def add_page_break(self):
+        """Start a new layout page with an explicit native paragraph break."""
+        return Paragraph(self, self._call("add_page_break", _change=True))
+
     def add_table(self, rows) -> EditableTable:
         return EditableTable(self, self._call("add_table", _rows(rows), _change=True))
 
@@ -339,6 +343,25 @@ class Paragraph:
     @alignment.setter
     def alignment(self, value: str):
         self._owner._call("set_paragraph_alignment", self._id, value, _change=True)
+
+    @property
+    def page_break_before(self):
+        return self._owner._call("page_break_before", self._id)
+
+    @page_break_before.setter
+    def page_break_before(self, value: bool):
+        self._owner._call("set_page_break_before", self._id, value, _change=True)
+
+    @property
+    def spacing(self):
+        """Spacing before/after in points and line-spacing multiplier."""
+        return self._owner._call("paragraph_spacing", self._id)
+
+    @spacing.setter
+    def spacing(self, value):
+        if not isinstance(value, (tuple, list)) or len(value) != 3:
+            raise TypeError("spacing must be (before, after, line_spacing)")
+        self._owner._call("set_paragraph_spacing", self._id, *map(pt, value), _change=True)
 
     def add_run(self, text: str, *, bold: bool = False, italic: bool = False, size: float | None = None, font: str | None = None, color=None):
         start, end, revision = self._owner._call("add_run", self._id, text, bold, italic, None if size is None else pt(size), font, None if color is None else _hex_color(color), _change=True)
@@ -432,16 +455,16 @@ class Section:
         """Access the default, first-page or even-page header."""
         if variant not in {"default", "first", "even"}:
             raise ValueError("header variant must be default, first or even")
-        return Story(self._owner, "header", variant)
+        return EditableStory(self._owner, "header", variant)
 
     def footer(self, variant: str = "default"):
         """Access the default, first-page or even-page footer."""
         if variant not in {"default", "first", "even"}:
             raise ValueError("footer variant must be default, first or even")
-        return Story(self._owner, "footer", variant)
+        return EditableStory(self._owner, "footer", variant)
 
 
-class Story:
+class EditableStory:
     """A header or footer that shares the normal paragraph API."""
     def __init__(self, owner: WordDocument, kind: str, variant: str):
         self._owner, self._kind, self._variant = owner, kind, variant
@@ -510,6 +533,37 @@ class EditableTable:
         rows = self.rows
         return f"EditableTable(rows={len(rows)}, columns={len(rows[0]) if rows else 0})"
 
+    def _word_id(self):
+        if self._slide is not None:
+            raise UnsupportedFormatError("this table layout operation is currently DOCX-only")
+        return self._id
+
+    @property
+    def column_widths(self):
+        return self._owner._call("column_widths", self._word_id())
+
+    @column_widths.setter
+    def column_widths(self, widths):
+        self._owner._call("set_column_widths", self._word_id(), [pt(width) for width in widths], _change=True)
+
+    @property
+    def borders(self):
+        return self._owner._call("table_borders", self._word_id())
+
+    @borders.setter
+    def borders(self, value):
+        if value is None:
+            self._owner._call("clear_table_borders", self._word_id(), _change=True)
+        elif isinstance(value, (tuple, list)) and len(value) == 2:
+            self._owner._call("set_table_borders", self._word_id(), _hex_color(value[0]), pt(value[1]), _change=True)
+        else:
+            raise TypeError("borders must be (color, width) or None")
+
+    def row(self, index: int):
+        """Access native DOCX row layout properties without copying its cells."""
+        self._word_id()
+        return EditableRow(self, _index(index, len(self.rows)))
+
     def merge(self, first: tuple[int, int], last: tuple[int, int]):
         if self._slide is not None:
             raise UnsupportedFormatError("PPTX cell merging is not yet available")
@@ -517,6 +571,42 @@ class EditableTable:
         end = self[last]
         self._owner._call("merge_cells", self._id, start._row, start._column, end._row, end._column, _change=True)
         return self[first]
+
+
+class EditableRow:
+    def __init__(self, table: EditableTable, index: int):
+        self._table, self._index = table, index
+
+    @property
+    def height(self):
+        """(height in points or None, rule): auto, at_least or exact."""
+        return self._table._owner._call("row_height", self._table._word_id(), self._index)
+
+    @height.setter
+    def height(self, value):
+        if value is None:
+            height, rule = None, "auto"
+        elif isinstance(value, (tuple, list)) and len(value) == 2:
+            height, rule = None if value[0] is None else pt(value[0]), value[1]
+        else:
+            raise TypeError("height must be (points, rule) or None for automatic height")
+        self._table._owner._call("set_row_height", self._table._word_id(), self._index, height, rule, _change=True)
+
+    @property
+    def repeat_header(self):
+        return self._table._owner._call("row_repeat_header", self._table._word_id(), self._index)
+
+    @repeat_header.setter
+    def repeat_header(self, value: bool):
+        self._table._owner._call("set_row_repeat_header", self._table._word_id(), self._index, value, _change=True)
+
+    @property
+    def allow_split(self):
+        return self._table._owner._call("row_allow_split", self._table._word_id(), self._index)
+
+    @allow_split.setter
+    def allow_split(self, value: bool):
+        self._table._owner._call("set_row_allow_split", self._table._word_id(), self._index, value, _change=True)
 
 
 class EditableCell:

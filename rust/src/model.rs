@@ -6,6 +6,15 @@ pub struct DocumentPayload {
     pub format: String,
     pub metadata: Map<String, Value>,
     pub pages: Vec<PagePayload>,
+    #[serde(default)]
+    pub stories: Vec<StoryPayload>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct StoryPayload {
+    pub kind: String,
+    pub blocks: Vec<BlockPayload>,
+    pub metadata: Map<String, Value>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

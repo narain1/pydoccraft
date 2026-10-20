@@ -4,7 +4,7 @@ import json
 from typing import Any, Iterator
 
 from .errors import DocumentClosedError
-from .models import Block, Image, Link, Table
+from .models import Block, Image, Link, Story, Table
 
 
 def _table_blocks(table: Table) -> Iterator[Block]:
@@ -130,9 +130,10 @@ class Page:
 
 
 class Document:
-    def __init__(self, pages: list[Page], metadata: dict[str, Any], source: bytes, filetype: str, password: str | None) -> None:
+    def __init__(self, pages: list[Page], metadata: dict[str, Any], source: bytes, filetype: str, password: str | None, *, stories: list[Story] | None = None) -> None:
         self._pages = pages
         self.metadata = metadata
+        self.stories = list(stories or [])
         self._source = source
         self._filetype = filetype
         self._password = password

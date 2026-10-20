@@ -9,7 +9,7 @@ use std::{
 use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
 use wordcraft_doc::para::{Float, InlineObject};
-use wordcraft_doc::props::{VAlign, VMerge};
+use wordcraft_doc::props::{Border, BorderStyle, Borders, HeightRule, LineSpacing, VAlign, VMerge};
 use wordcraft_doc::{
     Align, Block, CharProps, Document, Paragraph, PartKind, Path, Pos, Rgb, StoryRef, StyleKind,
     Table, TextColor,
@@ -208,6 +208,202 @@ impl EditableDocx {
             }
         }
         Ok(rows)
+    }
+
+    pub fn column_widths(&self, id: usize) -> PyResult<Vec<f64>> {
+        Ok(self
+            .table(id)?
+            .grid
+            .iter()
+            .map(|width| f64::from(*width))
+            .collect())
+    }
+
+    pub fn set_column_widths(&mut self, id: usize, widths: Vec<f64>) -> PyResult<()> {
+        let table = self.table(id)?;
+        if widths.len() != table.cols()
+            || widths
+                .iter()
+                .any(|width| !width.is_finite() || *width < 6.0)
+        {
+            return Err(PyValueError::new_err(
+                "column widths require one finite value of at least 6 points per grid column",
+            ));
+        }
+        let total = widths.iter().sum::<f64>();
+        if total > f64::from(self.container_width(id)?) + 0.001 {
+            return Err(PyValueError::new_err(
+                "table columns exceed the available page or cell width",
+            ));
+        }
+        // A parent resize must not silently squeeze an explicitly sized nested table or image.
+        for (row_index, row) in table.rows.iter().enumerate() {
+            for (cell_index, cell) in row.cells.iter().enumerate() {
+                let start = table.grid_col(row_index, cell_index);
+                let width = widths[start..start + cell.span()].iter().sum::<f64>();
+                let margins =
+                    wordcraft_layout::cell_margins(self.document()?, table, row_index, cell_index);
+                let available = width - f64::from(margins[1] + margins[3]);
+                for block in &cell.blocks {
+                    let exceeds = match block.as_ref() {
+                        Block::Table(nested) => f64::from(nested.total_width()) > available + 0.001,
+                        Block::Para(paragraph) => paragraph.objects.iter().any(|object| matches!(object, InlineObject::Image { w, .. } if f64::from(*w) > available + 0.001)),
+                    };
+                    if exceeds {
+                        return Err(PyValueError::new_err("column resize would overflow an existing nested table or image; resize the child first"));
+                    }
+                }
+            }
+        }
+        let mut candidate = self.document()?.clone();
+        let table = self.table_mut(&mut candidate, id)?;
+        table.grid = widths.into_iter().map(|width| width as f32).collect();
+        table.props.width = Some(total as f32);
+        table.props.width_pct = None;
+        table.props.fixed = true;
+        for row in &mut table.rows {
+            let mut column = row.props.grid_before as usize;
+            for cell in &mut row.cells {
+                let end = column + cell.span();
+                cell.props.width = Some(table.grid[column..end].iter().sum());
+                cell.props.width_pct = None;
+                column = end;
+            }
+        }
+        self.commit(candidate)
+    }
+
+    pub fn row_height(&self, id: usize, row: usize) -> PyResult<(Option<f64>, &'static str)> {
+        let props = &self.row(id, row)?.props;
+        Ok((
+            props.height.map(f64::from),
+            match props.height_rule {
+                HeightRule::Auto => "auto",
+                HeightRule::AtLeast => "at_least",
+                HeightRule::Exact => "exact",
+            },
+        ))
+    }
+
+    #[pyo3(signature = (id, row, height=None, rule="auto"))]
+    pub fn set_row_height(
+        &mut self,
+        id: usize,
+        row: usize,
+        height: Option<f64>,
+        rule: &str,
+    ) -> PyResult<()> {
+        self.row(id, row)?;
+        let rule = match (rule, height) {
+            ("auto", None) => HeightRule::Auto,
+            ("at_least", Some(value)) | ("exact", Some(value)) if value.is_finite() && value > 0.0 && value <= 1584.0 => {
+                if rule == "exact" { HeightRule::Exact } else { HeightRule::AtLeast }
+            }
+            _ => return Err(PyValueError::new_err("row height requires (None, auto) or a finite height in (0, 1584] points with at_least/exact")),
+        };
+        let mut candidate = self.document()?.clone();
+        let props = &mut self.table_mut(&mut candidate, id)?.rows[row].props;
+        props.height = height.map(|height| height as f32);
+        props.height_rule = rule;
+        self.commit(candidate)
+    }
+
+    pub fn row_repeat_header(&self, id: usize, row: usize) -> PyResult<bool> {
+        Ok(self.row(id, row)?.props.header)
+    }
+
+    pub fn set_row_repeat_header(&mut self, id: usize, row: usize, repeat: bool) -> PyResult<()> {
+        self.row(id, row)?;
+        let rows = &self.table(id)?.rows;
+        if (repeat && rows[..row].iter().any(|row| !row.props.header))
+            || (!repeat && rows[row + 1..].iter().any(|row| row.props.header))
+        {
+            return Err(PyValueError::new_err(
+                "repeating header rows must form a contiguous prefix of the table",
+            ));
+        }
+        let mut candidate = self.document()?.clone();
+        self.table_mut(&mut candidate, id)?.rows[row].props.header = repeat;
+        self.commit(candidate)
+    }
+
+    pub fn row_allow_split(&self, id: usize, row: usize) -> PyResult<bool> {
+        Ok(!self.row(id, row)?.props.cant_split)
+    }
+
+    pub fn set_row_allow_split(&mut self, id: usize, row: usize, allow: bool) -> PyResult<()> {
+        self.row(id, row)?;
+        let mut candidate = self.document()?.clone();
+        self.table_mut(&mut candidate, id)?.rows[row]
+            .props
+            .cant_split = !allow;
+        self.commit(candidate)
+    }
+
+    pub fn table_borders(&self, id: usize) -> PyResult<Option<(String, f64)>> {
+        let table = self.table(id)?;
+        let inherited = table
+            .props
+            .style
+            .as_deref()
+            .and_then(|style| self.document().ok()?.styles.table_style(style))
+            .and_then(|style| style.parts.borders);
+        let mut borders = inherited.unwrap_or_default();
+        if let Some(direct) = table.props.borders {
+            borders.overlay(&direct);
+        }
+        if !borders.any_visible() {
+            return Ok(None);
+        }
+        let sides = [
+            borders.top,
+            borders.left,
+            borders.bottom,
+            borders.right,
+            borders.between,
+            borders.inside_v,
+        ];
+        let border =
+            sides[0].ok_or_else(|| PyValueError::new_err("table borders are not uniform"))?;
+        if border.style != BorderStyle::Single || sides.iter().any(|side| *side != Some(border)) {
+            return Err(PyValueError::new_err(
+                "table borders are not uniform solid lines",
+            ));
+        }
+        let Rgb(red, green, blue) = border.color.unwrap_or(Rgb(0, 0, 0));
+        Ok(Some((
+            format!("#{red:02X}{green:02X}{blue:02X}"),
+            f64::from(border.width),
+        )))
+    }
+
+    #[pyo3(signature = (id, color="#000000", width=0.5))]
+    pub fn set_table_borders(&mut self, id: usize, color: &str, width: f64) -> PyResult<()> {
+        self.table(id)?;
+        let color = parse_rgb(color)?;
+        if !width.is_finite() || !(0.125..=12.0).contains(&width) || (width * 8.0).fract() != 0.0 {
+            return Err(PyValueError::new_err(
+                "border width must be 0.125..12 points in eighth-point increments",
+            ));
+        }
+        let mut candidate = self.document()?.clone();
+        let mut border = Border::single(width as f32);
+        border.color = Some(color);
+        self.table_mut(&mut candidate, id)?.props.borders = Some(Borders::all(border));
+        self.commit(candidate)
+    }
+
+    pub fn clear_table_borders(&mut self, id: usize) -> PyResult<()> {
+        self.table(id)?;
+        let mut candidate = self.document()?.clone();
+        let border = Border {
+            style: BorderStyle::None,
+            width: 0.0,
+            color: None,
+            space: 0.0,
+        };
+        self.table_mut(&mut candidate, id)?.props.borders = Some(Borders::all(border));
+        self.commit(candidate)
     }
 
     pub fn cell_text(&self, id: usize, row: usize, column: usize) -> PyResult<String> {
@@ -559,6 +755,73 @@ impl EditableDocx {
         paragraph.touch();
         self.commit(candidate)?;
         Ok(())
+    }
+
+    pub fn page_break_before(&self, id: usize) -> PyResult<bool> {
+        let paragraph = self.paragraph(id)?;
+        Ok(self
+            .document()?
+            .styles
+            .resolve_para(&paragraph.props)
+            .page_break_before)
+    }
+
+    pub fn set_page_break_before(&mut self, id: usize, enabled: bool) -> PyResult<()> {
+        self.paragraph(id)?;
+        let mut candidate = self.document()?.clone();
+        let paragraph = self.paragraph_mut(&mut candidate, id)?;
+        paragraph.props.page_break_before = Some(enabled);
+        paragraph.touch();
+        self.commit(candidate)
+    }
+
+    pub fn add_page_break(&mut self) -> PyResult<usize> {
+        let mut candidate = self.copy()?;
+        let id = candidate.add_paragraph("")?;
+        candidate.set_page_break_before(id, true)?;
+        *self = candidate;
+        Ok(id)
+    }
+
+    pub fn paragraph_spacing(&self, id: usize) -> PyResult<(f64, f64, f64)> {
+        let paragraph = self.paragraph(id)?;
+        let props = self.document()?.styles.resolve_para(&paragraph.props);
+        let LineSpacing::Multiple(multiple) = props.line_spacing else {
+            return Err(PyValueError::new_err("paragraph uses a point-based line spacing rule; assign spacing to use a line multiple"));
+        };
+        Ok((
+            f64::from(props.space_before),
+            f64::from(props.space_after),
+            f64::from(multiple),
+        ))
+    }
+
+    #[pyo3(signature = (id, before, after, line_spacing=1.0))]
+    pub fn set_paragraph_spacing(
+        &mut self,
+        id: usize,
+        before: f64,
+        after: f64,
+        line_spacing: f64,
+    ) -> PyResult<()> {
+        self.paragraph(id)?;
+        if [before, after]
+            .iter()
+            .any(|value| !value.is_finite() || !(0.0..=1584.0).contains(value))
+            || !line_spacing.is_finite()
+            || !(0.06..=132.0).contains(&line_spacing)
+        {
+            return Err(PyValueError::new_err("paragraph spacing must be finite: before/after 0..1584 points and line multiple 0.06..132"));
+        }
+        let mut candidate = self.document()?.clone();
+        let paragraph = self.paragraph_mut(&mut candidate, id)?;
+        paragraph.props.space_before = Some(before as f32);
+        paragraph.props.space_after = Some(after as f32);
+        paragraph.props.space_before_auto = Some(false);
+        paragraph.props.space_after_auto = Some(false);
+        paragraph.props.line_spacing = Some(LineSpacing::Multiple(line_spacing as f32));
+        paragraph.touch();
+        self.commit(candidate)
     }
 
     #[pyo3(signature = (id, text, bold=false, italic=false, size=None, font=None, color=None))]
@@ -957,6 +1220,28 @@ impl Default for EditableDocx {
 }
 
 impl EditableDocx {
+    fn row(&self, id: usize, row: usize) -> PyResult<&wordcraft_doc::Row> {
+        self.table(id)?
+            .rows
+            .get(row)
+            .ok_or_else(|| PyIndexError::new_err("row index out of bounds"))
+    }
+
+    fn container_width(&self, id: usize) -> PyResult<f32> {
+        let (story, path) = self.location(id)?;
+        let Some((parent, row, cell)) = path.cell() else {
+            return Ok(self.document()?.last_section.text_width());
+        };
+        let table = self
+            .document()?
+            .table(story, &parent)
+            .ok_or_else(|| PyIndexError::new_err("parent table no longer exists"))?;
+        let start = table.grid_col(row, cell);
+        let end = start + table.rows[row].cells[cell].span();
+        let margins = wordcraft_layout::cell_margins(self.document()?, table, row, cell);
+        Ok(table.grid[start..end].iter().sum::<f32>() - margins[1] - margins[3])
+    }
+
     fn cell_container(&self, id: usize, row: usize, column: usize) -> PyResult<(StoryRef, Path)> {
         let (row, cell) = cell_anchor(self.table(id)?, row, column)?;
         let (story, table_path) = self.location(id)?;
@@ -1945,5 +2230,165 @@ mod tests {
         let later = document.add_image(&png, None, None, "Later").unwrap();
         assert_eq!(document.image_alt(later).unwrap(), "Later");
         assert_eq!(document.document().unwrap().media.len(), 2);
+    }
+
+    #[test]
+    fn table_layout_controls_roundtrip_and_reject_partial_mutations() {
+        let mut document = EditableDocx::new();
+        let table = document
+            .add_table(vec![
+                vec!["Header".into(), "Value".into()],
+                vec!["Body".into(), "Content".into()],
+            ])
+            .unwrap();
+        assert_eq!(
+            document.table_borders(table).unwrap(),
+            Some(("#000000".into(), 0.5))
+        );
+        document
+            .set_column_widths(table, vec![160.0, 240.0])
+            .unwrap();
+        document
+            .set_row_height(table, 0, Some(24.0), "at_least")
+            .unwrap();
+        document
+            .set_row_height(table, 1, Some(36.0), "exact")
+            .unwrap();
+        document.set_row_repeat_header(table, 0, true).unwrap();
+        document.set_row_allow_split(table, 1, false).unwrap();
+        document.set_table_borders(table, "#123456", 1.25).unwrap();
+        let revision = document.revision().unwrap();
+        for widths in [
+            vec![100.0],
+            vec![f64::NAN, 100.0],
+            vec![5.0, 100.0],
+            vec![1000.0, 1000.0],
+        ] {
+            assert!(document.set_column_widths(table, widths).is_err());
+        }
+        assert!(document
+            .set_row_height(table, 0, Some(24.0), "auto")
+            .is_err());
+        assert!(document.set_row_height(table, 0, None, "exact").is_err());
+        assert!(document
+            .set_row_height(table, 0, Some(f64::INFINITY), "exact")
+            .is_err());
+        assert!(document.set_row_allow_split(table, 2, false).is_err());
+        assert!(document.set_table_borders(table, "#123456", 0.6).is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.column_widths(table).unwrap(), vec![160.0, 240.0]);
+        assert_eq!(
+            document.row_height(table, 0).unwrap(),
+            (Some(24.0), "at_least")
+        );
+        assert!(document.row_repeat_header(table, 0).unwrap());
+        assert!(!document.row_allow_split(table, 1).unwrap());
+        let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+        let native = reopened.table(StoryRef::Body, &Path::top(table)).unwrap();
+        assert_eq!(native.grid, vec![160.0, 240.0]);
+        assert_eq!(native.rows[0].cells[1].props.width, Some(240.0));
+        assert_eq!(native.rows[1].props.height_rule, HeightRule::Exact);
+        assert_eq!(native.rows[1].props.height, Some(36.0));
+        assert!(native.rows[0].props.header);
+        assert!(native.rows[1].props.cant_split);
+        assert_eq!(
+            native.props.borders.unwrap().top.unwrap().color,
+            Some(Rgb(0x12, 0x34, 0x56))
+        );
+        document.set_row_repeat_header(table, 1, true).unwrap();
+        assert!(document.set_row_repeat_header(table, 0, false).is_err());
+        document.set_row_repeat_header(table, 1, false).unwrap();
+        document.set_row_repeat_header(table, 0, false).unwrap();
+        assert!(document.set_row_repeat_header(table, 1, true).is_err());
+        document.clear_table_borders(table).unwrap();
+        assert_eq!(document.table_borders(table).unwrap(), None);
+        let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+        assert!(!reopened
+            .table(StoryRef::Body, &Path::top(table))
+            .unwrap()
+            .props
+            .borders
+            .unwrap()
+            .any_visible());
+        document.set_row_height(table, 0, None, "auto").unwrap();
+        assert_eq!(document.row_height(table, 0).unwrap(), (None, "auto"));
+    }
+
+    #[test]
+    fn nested_column_widths_respect_containers_and_preserve_merged_spans() {
+        let mut document = EditableDocx::new();
+        let outer = document
+            .add_table(vec![vec!["A".into(), "B".into()]])
+            .unwrap();
+        document
+            .set_column_widths(outer, vec![200.0, 200.0])
+            .unwrap();
+        let inner = document
+            .cell_add_table(outer, 0, 0, vec![vec!["Nested".into()]])
+            .unwrap();
+        let revision = document.revision().unwrap();
+        assert!(document.set_column_widths(inner, vec![200.0]).is_err());
+        assert!(document
+            .set_column_widths(outer, vec![100.0, 300.0])
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        document.set_column_widths(inner, vec![80.0]).unwrap();
+        document
+            .set_column_widths(outer, vec![100.0, 300.0])
+            .unwrap();
+        document.merge_cells(outer, 0, 0, 0, 1).unwrap();
+        document
+            .set_column_widths(outer, vec![150.0, 250.0])
+            .unwrap();
+        let anchor = &document.table(outer).unwrap().rows[0].cells[0];
+        assert_eq!(anchor.span(), 2);
+        assert_eq!(anchor.props.width, Some(400.0));
+        assert_eq!(document.cell_text(outer, 0, 1).unwrap(), "A\nNested\nB");
+    }
+
+    #[test]
+    fn paragraph_spacing_and_page_breaks_roundtrip_and_paginate() {
+        let mut document = EditableDocx::new();
+        let first = document.add_paragraph("First page").unwrap();
+        document
+            .set_paragraph_spacing(first, 12.0, 6.0, 1.5)
+            .unwrap();
+        assert_eq!(document.paragraph_spacing(first).unwrap(), (12.0, 6.0, 1.5));
+        let revision = document.revision().unwrap();
+        assert!(document
+            .set_paragraph_spacing(first, -1.0, 0.0, 1.0)
+            .is_err());
+        assert!(document
+            .set_paragraph_spacing(first, 0.0, 0.0, f64::NAN)
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        let break_paragraph = document.add_page_break().unwrap();
+        assert!(document.page_break_before(break_paragraph).unwrap());
+        assert_eq!(document.paragraph_text(break_paragraph).unwrap(), "");
+        document.add_paragraph("Second page").unwrap();
+        let third = document.add_paragraph("Third page").unwrap();
+        document.set_page_break_before(third, true).unwrap();
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        let props = &reopened
+            .para(StoryRef::Body, &Path::top(first))
+            .unwrap()
+            .props;
+        assert_eq!(props.space_before, Some(12.0));
+        assert_eq!(props.line_spacing, Some(LineSpacing::Multiple(1.5)));
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        let extracted = crate::pdf::extract(&pdf, None).unwrap();
+        assert_eq!(extracted.pages.len(), 3);
+        for (page, expected) in
+            extracted
+                .pages
+                .iter()
+                .zip(["First page", "Second page", "Third page"])
+        {
+            assert!(page
+                .blocks
+                .iter()
+                .any(|block| block.text.contains(expected)));
+        }
     }
 }
