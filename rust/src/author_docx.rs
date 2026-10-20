@@ -6,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyInt};
 use serde_json::{json, Map, Value};
@@ -63,6 +63,7 @@ const MAX_STYLES: usize = 1024;
 const MAX_FORMAT_PATCH_BYTES: usize = 16 * 1024;
 const MAX_SECTIONS: usize = 128;
 const MAX_NOTES: usize = 10_000;
+const MAX_BOOKMARKS: usize = 1000;
 const MAX_TABLE_PATCH_BYTES: usize = 128 * 1024;
 const MAX_TABLE_METADATA_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TAB_STOPS: usize = 64;
@@ -2040,6 +2041,137 @@ impl EditableDocx {
         self.text_range(id, start, end).map(|(text, _)| text)
     }
 
+    pub fn bookmark_names(&self) -> PyResult<Vec<String>> {
+        let document = self.document()?;
+        validate_bookmark_links(document)?;
+        Ok(document
+            .bookmarks()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect())
+    }
+
+    pub fn bookmark_range(&mut self, name: &str) -> PyResult<(usize, usize, usize, u64)> {
+        let spans = validate_bookmark_links(self.document()?)?;
+        let span = spans
+            .get(name)
+            .ok_or_else(|| PyKeyError::new_err(name.to_owned()))?;
+        let paragraph = self
+            .document()?
+            .para(StoryRef::Body, &span.path)
+            .ok_or_else(|| PyValueError::new_err("bookmark paragraph no longer exists"))?;
+        let start = paragraph.text[..span.start + 3].chars().count();
+        let end = paragraph.text[..span.end].chars().count();
+        let id = self.register_location(StoryRef::Body, span.path.clone(), false)?;
+        Ok((id, start, end, self.revision))
+    }
+
+    pub fn set_bookmark(
+        &mut self,
+        name: &str,
+        id: usize,
+        start: usize,
+        end: usize,
+        revision: u64,
+    ) -> PyResult<()> {
+        self.check_revision(revision)?;
+        validate_bookmark_name(name)?;
+        let document = self.document()?;
+        let spans = validate_bookmark_links(document)?;
+        let old = spans.get(name);
+        if old.is_none() && spans.len() >= MAX_BOOKMARKS {
+            return Err(limit("document exceeds 1000 bookmarks"));
+        }
+        let (story, path) = self.location(id)?;
+        if story != StoryRef::Body {
+            return Err(EngineError::Unsupported(
+                "bookmark targets require a body paragraph, including supported body table cells"
+                    .into(),
+            )
+            .into());
+        }
+        let paragraph = self.paragraph(id)?;
+        let (mut from, mut to) = range_offsets(&paragraph.text, start, end)?;
+        reject_semantic_range_except(paragraph, from, to, old.map(|_| name))?;
+        if paragraph
+            .object_offsets()
+            .into_iter()
+            .zip(&paragraph.objects)
+            .any(|(offset, object)| {
+                from <= offset && offset < to && matches!(object, InlineObject::Field { .. })
+            })
+        {
+            return Err(EngineError::Unsupported(
+                "bookmark selection cannot include evaluated field anchors".into(),
+            )
+            .into());
+        }
+        let text_bytes = self.updated_text_bytes(if old.is_some() { 6 } else { 0 }, 6)?;
+        let mut candidate = document.clone();
+        if let Some(old) = old {
+            for offset in [old.end, old.start] {
+                candidate
+                    .delete_range(
+                        &Pos::new(StoryRef::Body, old.path.clone(), offset),
+                        &Pos::new(StoryRef::Body, old.path.clone(), offset + 3),
+                    )
+                    .map_err(model_error)?;
+            }
+            if old.path == path {
+                from -= [old.start, old.end]
+                    .iter()
+                    .filter(|offset| **offset < from)
+                    .count()
+                    * 3;
+                to -= [old.start, old.end]
+                    .iter()
+                    .filter(|offset| **offset < to)
+                    .count()
+                    * 3;
+            }
+        }
+        candidate
+            .insert_object(
+                &Pos::new(story, path.clone(), to),
+                InlineObject::BookmarkEnd { name: name.into() },
+                &CharProps::default(),
+            )
+            .map_err(model_error)?;
+        candidate
+            .insert_object(
+                &Pos::new(story, path, from),
+                InlineObject::BookmarkStart { name: name.into() },
+                &CharProps::default(),
+            )
+            .map_err(model_error)?;
+        validate_unsplittable_page_bounds(&candidate)?;
+        self.commit(candidate)?;
+        self.text_bytes = text_bytes;
+        Ok(())
+    }
+
+    pub fn delete_bookmark(&mut self, name: &str) -> PyResult<()> {
+        let document = self.document()?;
+        let spans = validate_bookmark_links(document)?;
+        let span = spans
+            .get(name)
+            .ok_or_else(|| PyKeyError::new_err(name.to_owned()))?;
+        let text_bytes = self.updated_text_bytes(6, 0)?;
+        let mut candidate = document.clone();
+        for offset in [span.end, span.start] {
+            candidate
+                .delete_range(
+                    &Pos::new(StoryRef::Body, span.path.clone(), offset),
+                    &Pos::new(StoryRef::Body, span.path.clone(), offset + 3),
+                )
+                .map_err(model_error)?;
+        }
+        // The central reference scan rejects deletion while any story still links here.
+        self.commit_checked(candidate, Some(name))?;
+        self.text_bytes = text_bytes;
+        Ok(())
+    }
+
     pub fn range_link(
         &self,
         id: usize,
@@ -2084,7 +2216,14 @@ impl EditableDocx {
         }
         if let Some(url) = url {
             validate_text(url)?;
-            if url.len() > 8192
+            if let Some(name) = url.strip_prefix('#') {
+                validate_bookmark_name(name)?;
+                if !validate_bookmark_links(self.document()?)?.contains_key(name) {
+                    return Err(PyValueError::new_err(
+                        "internal hyperlink requires an existing body bookmark",
+                    ));
+                }
+            } else if url.len() > 8192
                 || url.chars().any(|ch| ch.is_control() || ch.is_whitespace())
                 || !wordcraft_doc::link::is_web_or_mail_link(url)
                 || url
@@ -2128,6 +2267,9 @@ impl EditableDocx {
                 },
             )
             .map_err(model_error)?;
+        if url.is_some_and(|target| target.starts_with('#')) {
+            validate_unsplittable_page_bounds(&candidate)?;
+        }
         self.commit(candidate)?;
         Ok(self.revision)
     }
@@ -3677,7 +3819,16 @@ impl EditableDocx {
         let (story, path) = self.location(id)?;
         document.table_mut(story, &path).map_err(model_error)
     }
-    fn commit(&mut self, mut document: Document) -> PyResult<()> {
+    fn commit(&mut self, document: Document) -> PyResult<()> {
+        self.commit_checked(document, None)
+    }
+
+    fn commit_checked(
+        &mut self,
+        mut document: Document,
+        removed_bookmark: Option<&str>,
+    ) -> PyResult<()> {
+        validate_bookmark_links(&document)?;
         let media_bytes = if document.media.is_empty() && document.settings.page_picture.is_none() {
             0
         } else {
@@ -3691,12 +3842,23 @@ impl EditableDocx {
         // marker identities and multiplicities must survive every ordinary mutation.
         // New notes may add an identity; removing or duplicating one is unsupported.
         let existing = semantic_anchors(self.document()?);
+        if let Some(name) = removed_bookmark {
+            let next = semantic_anchors(&document);
+            if [2, 3].iter().any(|kind| {
+                existing.get(&(*kind, name.to_owned())) != Some(&1)
+                    || next.contains_key(&(*kind, name.to_owned()))
+            }) {
+                return Err(PyValueError::new_err(
+                    "bookmark deletion must remove exactly its own marker pair",
+                ));
+            }
+        }
         if !existing.is_empty() {
             let next = semantic_anchors(&document);
-            if existing
-                .iter()
-                .any(|(key, count)| next.get(key) != Some(count))
-            {
+            if existing.iter().any(|(key, count)| {
+                !(removed_bookmark == Some(key.1.as_str()) && matches!(key.0, 2 | 3))
+                    && next.get(key) != Some(count)
+            }) {
                 return Err(EngineError::Unsupported(
                     "edit would remove or duplicate a note, bookmark or comment anchor; semantic deletion is not available".into(),
                 ).into());
@@ -4087,7 +4249,7 @@ fn retain_authored_image_media(document: &mut Document) -> PyResult<usize> {
                         }
                         used.insert(media.clone());
                     }
-                    InlineObject::NoteRef { .. } => {}
+                    InlineObject::NoteRef { .. } | InlineObject::BookmarkStart { .. } | InlineObject::BookmarkEnd { .. } => {}
                     // Fields own instruction/result text, not media references. Legacy
                     // form XML is outside our authored page-field profile.
                     InlineObject::Field { form, .. } if form.is_empty() => {}
@@ -4517,7 +4679,8 @@ fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
         .sections()
         .iter()
         .any(|(_, section)| section.line_numbers.is_some());
-    if guarded.is_empty() && rich.is_empty() && !numbered {
+    let bookmarks = validate_bookmark_links(document)?;
+    if guarded.is_empty() && rich.is_empty() && !numbered && bookmarks.is_empty() {
         return Ok(());
     }
     let layout = wordcraft_layout::layout(
@@ -4569,6 +4732,9 @@ fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
                 }
             }
         }
+    }
+    if !bookmarks.is_empty() {
+        validate_bookmark_layout(document, &layout, &bookmarks)?;
     }
     Ok(())
 }
@@ -4873,13 +5039,27 @@ fn note_numbering_name(value: NumFormat) -> PyResult<&'static str> {
 }
 
 fn reject_semantic_range(paragraph: &Paragraph, start: usize, end: usize) -> PyResult<()> {
+    reject_semantic_range_except(paragraph, start, end, None)
+}
+
+// Only relocation of an already validated pair may select its own markers.
+fn reject_semantic_range_except(
+    paragraph: &Paragraph,
+    start: usize,
+    end: usize,
+    relocated_bookmark: Option<&str>,
+) -> PyResult<()> {
     if paragraph
         .object_offsets()
         .into_iter()
         .zip(&paragraph.objects)
         .any(|(offset, object)| {
+            let own_pair = matches!(object,
+                InlineObject::BookmarkStart { name } | InlineObject::BookmarkEnd { name }
+                if relocated_bookmark == Some(name.as_str()));
             start <= offset
                 && offset < end
+                && !own_pair
                 && matches!(
                     object,
                     InlineObject::NoteRef { .. }
@@ -4894,6 +5074,268 @@ fn reject_semantic_range(paragraph: &Paragraph, start: usize, end: usize) -> PyR
             "text replacement cannot remove note, bookmark or comment anchors".into(),
         )
         .into());
+    }
+    Ok(())
+}
+
+#[derive(Clone)]
+struct BookmarkSpan {
+    path: Path,
+    start: usize,
+    end: usize,
+}
+
+fn validate_bookmark_name(name: &str) -> PyResult<()> {
+    let bytes = name.as_bytes();
+    if bytes.is_empty()
+        || bytes.len() > 40
+        || !bytes[0].is_ascii_alphabetic()
+        || !bytes
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || *b == b'_')
+    {
+        return Err(PyValueError::new_err("bookmark name requires 1..40 ASCII letters, digits or underscores, starting with a letter"));
+    }
+    Ok(())
+}
+
+/// Inspect only public native paragraph paths/inline markers. Names are identities,
+/// not cached coordinates; table grid edits may move their paths.
+fn validate_bookmark_links(document: &Document) -> PyResult<BTreeMap<String, BookmarkSpan>> {
+    let mut starts = BTreeMap::new();
+    let mut ends = BTreeMap::new();
+    let mut targets = BTreeSet::new();
+    let mut visited = 0usize;
+    let mut unsupported_objects = false;
+    for story in
+        std::iter::once(StoryRef::Body).chain(document.parts.keys().map(|id| StoryRef::Part(*id)))
+    {
+        for path in document.para_paths(story) {
+            visited += 1;
+            if visited > MAX_LAYOUT_ITEMS {
+                return Err(limit("bookmark validation exceeds 2000000 paragraph paths"));
+            }
+            let paragraph = document
+                .para(story, &path)
+                .ok_or_else(|| PyValueError::new_err("native paragraph path no longer exists"))?;
+            for (offset, object) in paragraph
+                .object_offsets()
+                .into_iter()
+                .zip(&paragraph.objects)
+            {
+                unsupported_objects |= !matches!(
+                    object,
+                    InlineObject::Image { ole: None, .. }
+                        | InlineObject::NoteRef { .. }
+                        | InlineObject::BookmarkStart { .. }
+                        | InlineObject::BookmarkEnd { .. }
+                ) && !matches!(object, InlineObject::Field { form, .. } if form.is_empty());
+                let (name, map) = match object {
+                    InlineObject::BookmarkStart { name } => (name, &mut starts),
+                    InlineObject::BookmarkEnd { name } => (name, &mut ends),
+                    _ => continue,
+                };
+                validate_bookmark_name(name)?;
+                if story != StoryRef::Body {
+                    return Err(EngineError::Unsupported("bookmark targets outside the body are not exported by the pinned native engine".into()).into());
+                }
+                if map.insert(name.clone(), (path.clone(), offset)).is_some() {
+                    return Err(PyValueError::new_err("duplicate bookmark marker identity"));
+                }
+                if map.len() > MAX_BOOKMARKS {
+                    return Err(limit("document exceeds 1000 bookmarks"));
+                }
+            }
+            for (_, props) in paragraph.run_ranges() {
+                if let Some(name) = props
+                    .link
+                    .as_deref()
+                    .and_then(|link| link.strip_prefix('#'))
+                {
+                    validate_bookmark_name(name)?;
+                    targets.insert(name.to_owned());
+                    if targets.len() > MAX_BOOKMARKS {
+                        return Err(limit("document exceeds 1000 internal link targets"));
+                    }
+                }
+            }
+        }
+    }
+    if unsupported_objects && (!starts.is_empty() || !ends.is_empty() || !targets.is_empty()) {
+        return Err(EngineError::Unsupported("navigation requires the authored image/note/page-field/bookmark profile; other objects need upstream export auditing".into()).into());
+    }
+    let mut spans = BTreeMap::new();
+    for (name, (path, start)) in starts {
+        let (end_path, end) = ends
+            .remove(&name)
+            .ok_or_else(|| PyValueError::new_err("bookmark is missing its end marker"))?;
+        if path != end_path || start >= end {
+            return Err(EngineError::Unsupported(
+                "bookmark pairs require an ordered range within one body paragraph".into(),
+            )
+            .into());
+        }
+        spans.insert(name, BookmarkSpan { path, start, end });
+    }
+    if !ends.is_empty() {
+        return Err(PyValueError::new_err(
+            "bookmark is missing its start marker",
+        ));
+    }
+    if targets.iter().any(|name| !spans.contains_key(name)) {
+        return Err(PyValueError::new_err(
+            "internal hyperlink refers to a missing bookmark; remove or retarget its links first",
+        ));
+    }
+    Ok(spans)
+}
+
+/// One linked Glyphs batch can call native link_rect at most once. Recursive
+/// wrappers never duplicate calls. This conservatively bounds the native 10000
+/// rectangles/page cap without copying its private coalescing/geometry algorithm.
+fn validate_bookmark_draws(draws: &[wordcraft_layout::display::Draw]) -> PyResult<usize> {
+    use wordcraft_layout::display::Draw;
+    if draws.len() > MAX_LAYOUT_ITEMS {
+        return Err(limit("navigation display traversal exceeds 2000000 items"));
+    }
+    let mut pending = draws
+        .iter()
+        .map(|draw| (draw, 0usize, false))
+        .collect::<Vec<_>>();
+    let mut visited = 0usize;
+    let mut linked = 0usize;
+    while let Some((draw, depth, unsupported)) = pending.pop() {
+        visited += 1;
+        if visited.saturating_add(pending.len()) > MAX_LAYOUT_ITEMS || depth > 32 {
+            return Err(limit(
+                "navigation display traversal exceeds its item/depth budget",
+            ));
+        }
+        match draw {
+            Draw::Glyphs {
+                link: Some(_),
+                glyphs,
+                ..
+            } if !glyphs.is_empty() => {
+                if unsupported {
+                    return Err(EngineError::Unsupported("internal navigation cannot preserve links in clipped, turned, rotated or figure display contexts at this native revision".into()).into());
+                }
+                linked += 1;
+                if linked > 10_000 {
+                    return Err(limit("navigation exceeds 10000 linked native glyph batches on one page; native PDF export could omit annotations"));
+                }
+            }
+            Draw::Clip { items, .. } | Draw::Turned { items, .. } | Draw::Rotated { items, .. } => {
+                if visited
+                    .saturating_add(pending.len())
+                    .saturating_add(items.len())
+                    > MAX_LAYOUT_ITEMS
+                {
+                    return Err(limit("navigation display traversal exceeds 2000000 items"));
+                }
+                pending.extend(items.iter().map(|item| (item, depth + 1, true)))
+            }
+            Draw::Figure { draws, .. } => {
+                if visited
+                    .saturating_add(pending.len())
+                    .saturating_add(draws.len())
+                    > MAX_LAYOUT_ITEMS
+                {
+                    return Err(limit("navigation display traversal exceeds 2000000 items"));
+                }
+                pending.extend(draws.iter().map(|item| (item, depth + 1, true)))
+            }
+            _ => {}
+        }
+    }
+    Ok(linked)
+}
+
+fn validate_bookmark_layout(
+    document: &Document,
+    layout: &wordcraft_layout::DocLayout,
+    spans: &BTreeMap<String, BookmarkSpan>,
+) -> PyResult<()> {
+    for span in spans.values() {
+        let caret = layout.caret(&Pos::new(StoryRef::Body, span.path.clone(), span.start)).ok_or_else(|| EngineError::Unsupported("bookmark has no native layout caret; paragraph fallback would change its destination".into()))?;
+        let page = layout
+            .pages
+            .get(caret.page)
+            .ok_or_else(|| PyValueError::new_err("bookmark destination page no longer exists"))?;
+        if ![caret.x, caret.top, page.w, page.h]
+            .iter()
+            .all(|v| v.is_finite())
+            || caret.x < 0.0
+            || caret.x > page.w
+            || caret.top < 0.0
+            || caret.top > page.h
+        {
+            return Err(EngineError::Unsupported(
+                "bookmark destination is outside the physical page".into(),
+            )
+            .into());
+        }
+        for item in &page.items {
+            match item {
+                wordcraft_layout::Placed::Cell {
+                    story: StoryRef::Body,
+                    table,
+                    row,
+                    cell,
+                    clip: true,
+                    ..
+                } => {
+                    let prefix = [table.0.as_slice(), &[*row as u32, *cell as u32]].concat();
+                    if span.path.0.starts_with(&prefix) {
+                        return Err(EngineError::Unsupported(
+                            "bookmark targets in clipped table cells are not supported".into(),
+                        )
+                        .into());
+                    }
+                }
+                wordcraft_layout::Placed::Lines {
+                    story: StoryRef::Body,
+                    path,
+                    turn,
+                    ..
+                } if path == &span.path && *turn != TextDirection::Horizontal => {
+                    return Err(EngineError::Unsupported(
+                        "bookmark targets in turned table text are not supported".into(),
+                    )
+                    .into())
+                }
+                _ => {}
+            }
+        }
+    }
+    let options = wordcraft_layout::display::DisplayOptions {
+        marks: false,
+        dim_header: false,
+        dim_body: false,
+        markup: false,
+        placeholders: false,
+        ..Default::default()
+    };
+    for page in &layout.pages {
+        // The pinned native vertical-text display drops link metadata, so a
+        // draw-only count cannot detect those missing annotations.
+        for item in page.items.iter().chain(&page.header).chain(&page.footer) {
+            if let wordcraft_layout::Placed::Lines {
+                story, path, turn, ..
+            } = item
+            {
+                if *turn != TextDirection::Horizontal
+                    && document
+                        .para(*story, path)
+                        .is_some_and(|p| p.runs.iter().any(|run| run.props.link.is_some()))
+                {
+                    return Err(EngineError::Unsupported("internal navigation cannot preserve links in turned table text at this native revision".into()).into());
+                }
+            }
+        }
+        validate_bookmark_draws(&wordcraft_layout::display::page_display(
+            document, page, &options,
+        ))?;
     }
     Ok(())
 }
@@ -13708,5 +14150,436 @@ mod tests {
             .format_paragraph(paragraph, r#"{"direction":"rtl"}"#)
             .is_err());
         assert!(copied.to_bytes().is_ok());
+    }
+    fn raw_bookmark(
+        document: &mut Document,
+        story: StoryRef,
+        path: Path,
+        name: &str,
+        start: usize,
+        end: usize,
+    ) {
+        document
+            .insert_object(
+                &Pos::new(story, path.clone(), end),
+                InlineObject::BookmarkEnd { name: name.into() },
+                &CharProps::default(),
+            )
+            .unwrap();
+        document
+            .insert_object(
+                &Pos::new(story, path, start),
+                InlineObject::BookmarkStart { name: name.into() },
+                &CharProps::default(),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn bookmarks_owned_ranges_move_delete_copy_and_semantic_protection() {
+        let mut document = EditableDocx::new();
+        let p = document.add_paragraph("Before Target 😀 after").unwrap();
+        let link = document.add_paragraph("JumpLabel").unwrap();
+        let before_png = crate::docx::render(&document.to_bytes().unwrap(), 0, 72.0, None).unwrap();
+        document
+            .set_bookmark("Target", p, 7, 15, document.revision().unwrap())
+            .unwrap();
+        let (id, start, end, revision) = document.bookmark_range("Target").unwrap();
+        assert_eq!(
+            document.range_text(id, start, end, revision).unwrap(),
+            "Target 😀"
+        );
+        assert_eq!(
+            before_png,
+            crate::docx::render(&document.to_bytes().unwrap(), 0, 72.0, None).unwrap()
+        );
+        document
+            .set_range_link(link, 0, 9, revision, Some("#Target"))
+            .unwrap();
+        let before = document.to_bytes().unwrap();
+        assert!(document.delete_bookmark("Target").is_err());
+        assert!(document.set_paragraph_text(p, "lost").is_err());
+        assert_eq!(document.to_bytes().unwrap(), before);
+        let mut copied = document.copy().unwrap();
+        copied
+            .set_bookmark("Target", p, 0, 6, copied.revision().unwrap())
+            .unwrap();
+        let (_, a, b, r) = copied.bookmark_range("Target").unwrap();
+        assert_eq!(copied.range_text(p, a, b, r).unwrap(), "Before");
+        assert!(document.range_text(id, start, end, revision).is_err());
+        assert_eq!(document.bookmark_names().unwrap(), vec!["Target"]);
+        let reopened = wordcraft_docx::read(&copied.to_bytes().unwrap()).unwrap();
+        assert_eq!(reopened.bookmarks().len(), 1);
+        copied.set_range_link(link, 0, 9, r, None).unwrap();
+        copied.delete_bookmark("Target").unwrap();
+        assert_eq!(copied.paragraph_text(p).unwrap(), "Before Target 😀 after");
+        assert!(copied.bookmark_names().unwrap().is_empty());
+        copied
+            .set_bookmark("Point", p, 0, 0, copied.revision().unwrap())
+            .unwrap();
+        let (_, a, b, r) = copied.bookmark_range("Point").unwrap();
+        assert_eq!(a, b);
+        assert_eq!(copied.range_text(p, a, b, r).unwrap(), "");
+        document.close();
+        assert!(document.bookmark_range("Target").is_err());
+        assert!(copied.to_bytes().is_ok());
+    }
+
+    #[test]
+    fn bookmarks_nested_target_grid_and_late_paragraph_pdf_destination() {
+        let mut document = EditableDocx::new();
+        document.set_page_size(300.0, 300.0).unwrap();
+        document.set_margins(30.0, 30.0, 30.0, 30.0).unwrap();
+        let link = document.add_paragraph("JumpLabel").unwrap();
+        let p = document.add_paragraph(&"Before\n".repeat(45)).unwrap();
+        let (from, to, _) = document
+            .add_run_patch(p, "Destination", r#"{"bold":true}"#)
+            .unwrap();
+        document
+            .set_bookmark("Late", p, from, to, document.revision().unwrap())
+            .unwrap();
+        document
+            .set_range_link(link, 0, 9, document.revision().unwrap(), Some("#Late"))
+            .unwrap();
+        let bytes = document.to_bytes().unwrap();
+        let native = wordcraft_docx::read(&bytes).unwrap();
+        let layout =
+            wordcraft_layout::layout(&native, &mut Default::default(), &Default::default());
+        let caret = layout.caret(&native.bookmarks()[0].1).unwrap();
+        assert!(caret.page > 0);
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        let extracted = crate::pdf::extract(&pdf, None).unwrap();
+        assert_eq!(
+            extracted.pages[0].links[0].metadata["target_page"],
+            caret.page
+        );
+        assert_eq!(extracted.pages[0].links[0].text, "JumpLabel");
+        let table = document
+            .add_table(vec![vec!["Cell target".into()], vec!["Keep".into()]])
+            .unwrap();
+        let cell = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
+        document
+            .set_bookmark("Cell", cell, 0, 4, document.revision().unwrap())
+            .unwrap();
+        document.insert_row(table, 0).unwrap();
+        assert!(document.paragraph_text(cell).is_err());
+        let (fresh, a, b, r) = document.bookmark_range("Cell").unwrap();
+        assert_ne!(fresh, cell);
+        assert_eq!(document.range_text(fresh, a, b, r).unwrap(), "Cell");
+        document
+            .set_range_link(link, 0, 9, r, Some("#Cell"))
+            .unwrap();
+        assert!(document.delete_row(table, 1).is_err());
+        for kind in ["header", "footer"] {
+            let story = document.ensure_story(kind, "default", 0).unwrap();
+            let label = document.story_add_paragraph(story, kind).unwrap();
+            document
+                .set_range_link(
+                    label,
+                    0,
+                    kind.len(),
+                    document.revision().unwrap(),
+                    Some("#Cell"),
+                )
+                .unwrap();
+        }
+        let native = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+        let placed =
+            wordcraft_layout::layout(&native, &mut Default::default(), &Default::default());
+        let options = wordcraft_layout::display::DisplayOptions {
+            marks: false,
+            dim_header: false,
+            dim_body: false,
+            markup: false,
+            placeholders: false,
+            ..Default::default()
+        };
+        let batches: usize = placed
+            .pages
+            .iter()
+            .map(|page| {
+                validate_bookmark_draws(&wordcraft_layout::display::page_display(
+                    &native, page, &options,
+                ))
+                .unwrap()
+            })
+            .sum();
+        let pdf = crate::docx::to_pdf(&document.to_bytes().unwrap(), None).unwrap();
+        let annotation_count = pdfcraft_render::inspect(Arc::new(pdf), None)
+            .unwrap()
+            .links
+            .len();
+        assert!(annotation_count > 2);
+        assert!(
+            batches >= annotation_count,
+            "native body/cell/repeated story draws upper-bound actual annotation count"
+        );
+        let output = crate::pdf::extract(
+            &crate::docx::to_pdf(&document.to_bytes().unwrap(), None).unwrap(),
+            None,
+        )
+        .unwrap();
+        let jump = output.pages[0]
+            .links
+            .iter()
+            .find(|link| link.text == "JumpLabel")
+            .unwrap();
+        assert!(jump.metadata["target_page"].as_u64().unwrap() > 0);
+    }
+
+    #[test]
+    fn bookmarks_native_missing_header_and_wrapped_annotation_limits() {
+        for header in [false, true] {
+            let mut document = EditableDocx::new();
+            let p = document.add_paragraph("JumpLabel").unwrap();
+            let mut raw = document.document().unwrap().clone();
+            raw.para_mut(StoryRef::Body, &Path::top(p)).unwrap().runs[0]
+                .props
+                .link = Some("#Absent".into());
+            if header {
+                let story = document.ensure_story("header", "default", 0).unwrap();
+                document.story_add_paragraph(story, "Destination").unwrap();
+                raw = document.document().unwrap().clone();
+                raw.para_mut(StoryRef::Body, &Path::top(p)).unwrap().runs[0]
+                    .props
+                    .link = Some("#Absent".into());
+                raw_bookmark(
+                    &mut raw,
+                    StoryRef::Part(story),
+                    Path::top(0),
+                    "Absent",
+                    0,
+                    0,
+                );
+            }
+            let bytes = wordcraft_docx::write(&raw).unwrap();
+            let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+            assert!(
+                crate::pdf::extract(&pdf, None).unwrap().pages[0]
+                    .links
+                    .is_empty(),
+                "pinned native drops missing/auxiliary targets"
+            );
+            assert!(validate_bookmark_links(&raw).is_err());
+        }
+        // Turned/clip link geometry is audited separately from the conservative
+        // display count. Keep a direct-native repro rather than compensating it.
+        for turned in [false, true] {
+            let mut document = EditableDocx::new();
+            let target = document.add_paragraph("Target").unwrap();
+            let table = document
+                .add_table(vec![vec![if turned {
+                    "Vertical link".into()
+                } else {
+                    "Clipped\nHidden link".into()
+                }]])
+                .unwrap();
+            if turned {
+                document
+                    .cell_format_patch(table, 0, 0, r#"{"text_direction":"down"}"#)
+                    .unwrap();
+            } else {
+                document
+                    .set_row_height(table, 0, Some(20.0), "exact")
+                    .unwrap();
+            }
+            let cell = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
+            let mut raw = document.document().unwrap().clone();
+            raw_bookmark(&mut raw, StoryRef::Body, Path::top(target), "Target", 0, 0);
+            for run in &mut document.paragraph_mut(&mut raw, cell).unwrap().runs {
+                run.props.link = Some("#Target".into());
+            }
+            let layout =
+                wordcraft_layout::layout(&raw, &mut Default::default(), &Default::default());
+            let bounds = layout.pages[0]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    wordcraft_layout::Placed::Cell {
+                        table: path, rect, ..
+                    } if path == &Path::top(table) => Some(*rect),
+                    _ => None,
+                })
+                .unwrap();
+            let pdf = crate::docx::to_pdf(&wordcraft_docx::write(&raw).unwrap(), None).unwrap();
+            let extracted = crate::pdf::extract(&pdf, None).unwrap();
+            if turned {
+                assert!(extracted.pages[0]
+                    .blocks
+                    .iter()
+                    .any(|block| block.text.contains("Vertical link")));
+                assert!(
+                    extracted.pages[0].links.is_empty(),
+                    "native vertical text drops hyperlink metadata while preserving visible label"
+                );
+            } else {
+                assert!(!extracted.pages[0].links.is_empty());
+                assert!(
+                    extracted.pages[0].links.iter().any(|link| link
+                        .bbox
+                        .is_some_and(|b| b[3] > f64::from(bounds.bottom()) + 0.1)),
+                    "native annotation exceeds the cell clip: {:?} {:?}",
+                    bounds,
+                    extracted.pages[0].links
+                );
+            }
+            assert!(validate_unsplittable_page_bounds(&raw).is_err());
+        }
+    }
+
+    #[test]
+    fn bookmarks_native_link_batch_cap_is_a_conservative_export_bound() {
+        use wordcraft_layout::display::{page_display, DisplayOptions, Draw};
+        let mut document = EditableDocx::new();
+        document.set_page_size(1500.0, 1500.0).unwrap();
+        document.set_margins(10.0, 10.0, 10.0, 10.0).unwrap();
+        let target = document.add_paragraph("Target").unwrap();
+        let mut raw = document.document().unwrap().clone();
+        raw_bookmark(&mut raw, StoryRef::Body, Path::top(target), "A", 0, 0);
+        raw_bookmark(&mut raw, StoryRef::Body, Path::top(target), "B", 0, 0);
+        let mut paragraph = Paragraph::new();
+        for index in 0..10001 {
+            paragraph
+                .insert_text(
+                    paragraph.text.len(),
+                    "x",
+                    &CharProps {
+                        size: Some(1.0),
+                        link: Some(if index % 2 == 0 { "#A" } else { "#B" }.into()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        }
+        raw.body.push(Arc::new(Block::Para(paragraph)));
+        let layout = wordcraft_layout::layout(&raw, &mut Default::default(), &Default::default());
+        assert_eq!(layout.pages.len(), 1);
+        let options = DisplayOptions {
+            marks: false,
+            dim_header: false,
+            dim_body: false,
+            markup: false,
+            placeholders: false,
+            ..Default::default()
+        };
+        let draws = page_display(&raw, &layout.pages[0], &options);
+        let count = draws
+            .iter()
+            .filter(
+                |draw| matches!(draw,Draw::Glyphs {link:Some(_),glyphs,..} if !glyphs.is_empty()),
+            )
+            .count();
+        assert_eq!(count, 10001);
+        assert!(validate_bookmark_draws(&draws).is_err());
+        let pdf = crate::docx::to_pdf(&wordcraft_docx::write(&raw).unwrap(), None).unwrap();
+        let extracted = pdfcraft_render::inspect(Arc::new(pdf), None).unwrap();
+        assert_eq!(
+            extracted.links.len(),
+            10000,
+            "direct native export silently omits the final link batch"
+        );
+        let linked = draws
+            .iter()
+            .filter(|draw| matches!(draw, Draw::Glyphs { link: Some(_), .. }))
+            .take(10000)
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(validate_bookmark_draws(&linked).unwrap(), 10000);
+        let glyph = linked[0].clone();
+        for wrapped in [
+            Draw::Clip {
+                rect: layout.pages[0].body,
+                items: vec![glyph.clone()],
+            },
+            Draw::Turned {
+                x: 0.0,
+                y: 0.0,
+                turn: TextDirection::Down,
+                items: vec![glyph.clone()],
+            },
+            Draw::Rotated {
+                cx: 0.0,
+                cy: 0.0,
+                spin: Default::default(),
+                items: vec![glyph.clone()],
+            },
+            Draw::Figure {
+                alt: String::new(),
+                kind: wordcraft_doc::graphic::GraphicKind::Chart,
+                draws: vec![glyph],
+            },
+        ] {
+            assert!(
+                validate_bookmark_draws(&[wrapped]).is_err(),
+                "unaudited wrapper contexts cannot bypass navigation validation"
+            );
+        }
+
+        assert!(validate_unsplittable_page_bounds(&raw).is_err());
+    }
+    #[test]
+    fn bookmarks_pair_budget_malformed_state_and_limited_deletion_permission() {
+        let mut document = EditableDocx::new();
+        let id = document.add_paragraph("Keep").unwrap();
+        let mut raw = document.document().unwrap().clone();
+        for index in 0..MAX_BOOKMARKS {
+            raw_bookmark(
+                &mut raw,
+                StoryRef::Body,
+                Path::top(id),
+                &format!("Mark{index}"),
+                0,
+                0,
+            );
+        }
+        document.commit(raw).unwrap();
+        document.text_bytes = 4 + MAX_BOOKMARKS * 6;
+        assert_eq!(document.bookmark_names().unwrap().len(), MAX_BOOKMARKS);
+        let before = wordcraft_docx::write(document.document().unwrap()).unwrap();
+        let revision = document.revision().unwrap();
+        assert!(document
+            .set_bookmark("Overflow", id, 0, 0, revision)
+            .is_err());
+        assert_eq!(
+            wordcraft_docx::write(document.document().unwrap()).unwrap(),
+            before
+        );
+        assert_eq!(document.revision().unwrap(), revision);
+        for malformed in [0, 1, 2] {
+            let mut raw = document.document().unwrap().clone();
+            match malformed {
+                0 => {
+                    let span = validate_bookmark_links(&raw)
+                        .unwrap()
+                        .remove("Mark0")
+                        .unwrap();
+                    raw.delete_range(&Pos::body(id, span.end), &Pos::body(id, span.end + 3))
+                        .unwrap();
+                }
+                1 => raw_bookmark(&mut raw, StoryRef::Body, Path::top(id), "Mark0", 0, 0),
+                _ => {
+                    raw.delete_range(&Pos::body(id, 0), &Pos::body(id, 3))
+                        .unwrap();
+                }
+            }
+            assert!(document.commit(raw).is_err());
+            assert_eq!(document.revision().unwrap(), revision);
+        }
+        // A private deletion transaction cannot waive unrelated marker loss.
+        let mut raw = document.document().unwrap().clone();
+        for name in ["Mark0", "Mark1"] {
+            let span = validate_bookmark_links(&raw).unwrap().remove(name).unwrap();
+            for offset in [span.end, span.start] {
+                raw.delete_range(
+                    &Pos::new(StoryRef::Body, span.path.clone(), offset),
+                    &Pos::new(StoryRef::Body, span.path.clone(), offset + 3),
+                )
+                .unwrap();
+            }
+        }
+        assert!(document.commit_checked(raw, Some("Mark0")).is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        document.delete_bookmark("Mark0").unwrap();
+        assert_eq!(document.bookmark_names().unwrap().len(), MAX_BOOKMARKS - 1);
     }
 }

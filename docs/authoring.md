@@ -529,3 +529,26 @@ Generated appearance work is preflighted and actual staged stream bytes are char
 `page.annotations.add(kind, box=..., text="", author="", color=...)` also accepts `underline`, `strikeout` and `squiggly`, alongside `note` and `highlight`. Existing annotation properties and `update` move the markup, change text/author/color, and preserve searchable page text. Deletion remains `del page.annotations[index]`. Boxes use current displayed-page points; native quadrilaterals preserve rotation, CropBox and UserUnit geometry. Each new mark uses one quadrilateral. Movement is supported; resizing and multi-quad authoring remain unavailable.
 
 Native appearance generation is preflighted before potentially allocating it, including when updating imported highlights. Direct quadrilateral arrays are limited to 1,024 quads with finite coordinates within ±1,000,000 PDF user units (the editable page-box coordinate limit), plus a conservative work estimate within the remaining document-input budget; generated appearance bytes are charged after successful staging. Squiggly's native 10,000-segment cap coarsens the whole line rather than truncating its extent. Unsupported/malformed/over-budget updates leave bytes and cached renders unchanged. Deletion reads the subtype without rebuilding appearances, so an over-budget appearance does not prevent removal. This profile does not establish complete imported-form, reply-thread or arbitrary annotation appearance support.
+
+
+### DOCX named ranges and internal links
+
+`word.bookmarks` maps names to existing `TextRange` values. Assign a fresh range to create or move a target; lookup returns a fresh range, and iteration yields names in document order. PDF `bookmarks` remain outline entries with their existing interface.
+
+```python
+word = doc_ex.new("docx")
+target = word.add_paragraph("Summary")
+word.bookmarks["summary"] = target[:]
+label = word.add_paragraph("Read summary")
+label[:].link = "#summary"
+selected = word.bookmarks["summary"]
+assert selected.text == "Summary"
+```
+
+Names are case-sensitive ASCII identifiers matching `[A-Za-z][A-Za-z0-9_]{0,39}`, with at most 1,000 targets. Each target stays within one body paragraph, including supported horizontal nested table cells; an empty slice makes a point target. Auxiliary-story, cross-paragraph, foreign-document and clipped/turned targets are unavailable. A selection cannot contain note/comment/other-bookmark or evaluated-field anchors. Moving a target may select its own existing marker pair, including enlargement or contraction, without changing links to its name.
+
+Native markers remain U+FFFC characters in authored paragraph text and count in range offsets; native extraction/rendering hide them. Any mutation invalidates previous ranges. Use fresh lookup after grid changes or edits; names resolve current native paths, not saved offsets. Whole-document copies retain independent targets and links. Generic range/table deletion cannot destroy markers: clear all links to a target, then use `del word.bookmarks["summary"]` before removing its content. Links from headers, footers and notes count too. There is no implicit rename or cross-reference field evaluation.
+
+Adding the first bookmark activates stricter checks for all existing links. Internal-link assignment and bookmark creation/movement check native layout before committing. Serialization rechecks after later formatting/layout edits; unsupported output leaves an existing save destination intact, and resetting the unsupported formatting allows saving again. The current native PDF exporter loses vertical-cell links and can place clipped-cell annotations outside their clip. Linked clipped/turned/rotated/figure contexts are therefore rejected; linked figures are outside the audited profile, not asserted intrinsically defective. Targets require actual native carets within the physical page, without paragraph-start fallback.
+
+At most 10,000 nonempty linked native glyph batches per page are allowed when navigation is active, counting repeated stories and external links too. This conservatively avoids the native annotation cap; coalescing can make the limit stricter than the final annotation count. Native layout/display generation happens before observed-result item/depth checks, so these checks are not a preallocation memory guarantee. Broader transformed graphics, tooltips, imported editing, heading-outline export and REF/PAGEREF evaluation remain open.

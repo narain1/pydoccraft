@@ -610,6 +610,11 @@ class WordDocument(EditableDocument):
         self._call("update_metadata", "".join(chunks), _change=True)
 
     @property
+    def bookmarks(self) -> _WordBookmarks:
+        """Named body ranges; lookup returns a fresh revision-bound TextRange."""
+        return _WordBookmarks(self)
+
+    @property
     def notes(self) -> Notes:
         return Notes(self)
 
@@ -1946,6 +1951,32 @@ class PdfField:
             raise ValueError("field values must not exceed 4096 bytes")
         self._owner._call("set_field_value", self._name,
                           json.dumps(value, ensure_ascii=False, allow_nan=False), _change=True)
+
+
+class _WordBookmarks:
+    """DOCX named ranges, distinct from PDF outline bookmarks."""
+    def __init__(self, owner: WordDocument):
+        self._owner = owner
+
+    def __len__(self) -> int:
+        return len(self._owner._call("bookmark_names"))
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._owner._call("bookmark_names"))
+
+    def __getitem__(self, name: str) -> TextRange:
+        identifier, start, end, revision = self._owner._call("bookmark_range", name)
+        return TextRange(Paragraph(self._owner, identifier), start, end, revision)
+
+    def __setitem__(self, name: str, selection: TextRange) -> None:
+        self._owner._ensure_open()
+        if not isinstance(selection, TextRange) or selection._paragraph._owner is not self._owner:
+            raise ValueError("bookmark selection must be a TextRange from this document")
+        self._owner._call("set_bookmark", name, selection._paragraph._id,
+                          selection._start, selection._end, selection._revision, _change=True)
+
+    def __delitem__(self, name: str) -> None:
+        self._owner._call("delete_bookmark", name, _change=True)
 
 
 class Bookmarks(_Collection["Bookmark"]):
