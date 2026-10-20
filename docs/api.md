@@ -196,9 +196,9 @@ Image(
 Table(rows, bbox=None, page=None, metadata={}, cells=[])
 ```
 
-`rows` is the compatible `list[list[str]]` text view. DOCX tables additionally provide `cells: list[list[Cell]]`, preserving paragraphs and nested tables in source order. PDF/PPTX currently leave `cells` empty. `to_dict()` adds the `cells` key only when this structure is available.
+`rows` is the compatible `list[list[str]]` text view. DOCX and PPTX tables additionally provide `cells: list[list[Cell]]`, preserving paragraphs and source merge metadata; DOCX also retains nested tables in source order. Inferred PDF tables leave `cells` empty. `to_dict()` adds the `cells` key only when this structure is available.
 
-Simple `to_markdown()` output treats the first row as the header, pads ragged rows, escapes `|`, and converts cell newlines to `<br>`. Nested, merged, or rich DOCX tables use escaped HTML tables inside Markdown because pipe tables cannot represent that structure. Plain text uses the flat rows once.
+Simple `to_markdown()` output treats the first row as the header, pads ragged rows, escapes `|`, and converts cell newlines to `<br>`. Nested, merged, or rich Office tables use escaped HTML tables inside Markdown because pipe tables cannot represent that structure. Plain text uses the flat rows once.
 
 ### `Cell`
 
@@ -206,7 +206,7 @@ Simple `to_markdown()` output treats the first row as the header, pads ragged ro
 Cell(blocks=[], col_span=1, row_span=1, covered=False, metadata={})
 ```
 
-`blocks` contains owned `Block` values; a nested table is available through `block.table`. Span counts are positive, and `covered` identifies a vertical merge continuation. `metadata["vertical_merge"]` records the source merge state; `metadata["grid_column"]` gives its zero-based logical column, including omitted leading grid cells. WordCraft may insert a required empty paragraph after a nested table, which remains in `blocks`. These extracted values remain usable after the source document closes; changing them does not edit the source document.
+`blocks` contains owned `Block` values; a nested table is available through `block.table`. Span counts are positive, and `covered` identifies a covered source-grid slot (including DOCX vertical-merge continuations and PPTX merge coverage). `metadata["vertical_merge"]` is a DOCX state string (`"none"`, `"restart"`, or `"continue"`) or a PPTX boolean; PPTX also records a `horizontal_merge` boolean. `metadata["grid_column"]` gives the zero-based logical column, including omitted leading DOCX grid cells. WordCraft may insert a required empty paragraph after a nested table, which remains in `blocks`. These extracted values remain usable after the source document closes; changing them does not edit the source document.
 
 ## Errors
 
