@@ -28,6 +28,7 @@ pdfcraft-create = { git = "https://github.com/storytold/pdfcraft", rev = "645016
 pdfcraft-edit = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
 pdfcraft-export = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
 pdfcraft-fonts = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
+pdfcraft-forms = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
 pdfcraft-organize = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
 pdfcraft-render = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
 png = "=0.18.1"

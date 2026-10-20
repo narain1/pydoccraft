@@ -49,3 +49,26 @@ class DocxGridTests(unittest.TestCase):
             with self.assertRaises((ValueError, doc_ex.DocExError)):
                 table.delete_row(0)
             self.assertEqual(len(table.rows), 1)
+
+    def test_grid_changes_preserve_positive_width_inside_explicit_margins(self):
+        with doc_ex.new("docx") as document:
+            table = document.add_table([["A", "B"]])
+            table.column_widths = [100, 100]
+            cell = table.merge((0, 0), (0, 1))
+            cell.margins = (0, 75, 0, 75)
+            paragraph = cell.paragraphs[0]
+            for operation in (
+                lambda: table.delete_column(1),
+                lambda: cell.split(),
+                lambda: setattr(table, "column_widths", [50, 50]),
+            ):
+                with self.assertRaisesRegex(ValueError, "explicit cell margins"):
+                    operation()
+                self.assertEqual(table.column_widths, [100, 100])
+                self.assertEqual(cell.margins, (0, 75, 0, 75))
+                self.assertEqual(cell.text, "A\nB")
+                self.assertEqual(paragraph.text, "A")
+            cell.margins = (0, 10, 0, 10)
+            table.delete_column(1)
+            with doc_ex.open(document.to_bytes()) as reopened:
+                self.assertEqual(reopened[0].find_tables()[0].rows, [["A\nB"]])
