@@ -4,7 +4,7 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 use deckcraft_model::style::PictureFill;
-use deckcraft_model::text::{Anchor, AutoFit, RunProps, TextBody};
+use deckcraft_model::text::{Action, Anchor, AutoFit, Hyperlink, RunProps, Strike, TextBody};
 use deckcraft_model::{
     Background, ColorBase, ColorRef, Fill, Geom, LayoutType, Line, Presentation, Rgba, Shape,
     ShapeId, ShapeKind, Size, SlideId, Table, Theme, Xfrm,
@@ -21,6 +21,9 @@ const MAX_MEDIA: usize = 64 * 1024 * 1024;
 const MAX_IMAGE: usize = 16 * 1024 * 1024;
 const MAX_SIDE: f64 = 14_400.0;
 const MAX_PARAGRAPHS: usize = 100_000;
+const MAX_RUNS: usize = 100_000;
+const MAX_PROPERTIES: usize = 16 * 1024 * 1024;
+const MAX_PATCH: usize = 16 * 1024;
 
 type TextFormat = (
     Option<f64>,
@@ -30,6 +33,7 @@ type TextFormat = (
     Option<String>,
 );
 type Stroke = Option<((u8, u8, u8), f64)>;
+type LinkValue = Option<(Option<String>, Option<u32>, String)>;
 
 #[pyclass(module = "doc_ex._core")]
 #[derive(Clone)]
@@ -38,6 +42,7 @@ pub struct EditablePptx {
     text_bytes: usize,
     media_bytes: usize,
     shapes: usize,
+    revision: u64,
 }
 
 impl EditablePptx {
@@ -53,6 +58,7 @@ impl EditablePptx {
     ) -> PyResult<T> {
         let mut staged = self.document()?.clone();
         let result = operation(&mut staged)?;
+        content_budget(&staged)?;
         let errors = staged.validate();
         if !errors.is_empty() {
             return Err(EngineError::Malformed(format!(
@@ -61,8 +67,29 @@ impl EditablePptx {
             ))
             .into());
         }
+        let revision = self.revision.checked_add(1).ok_or_else(|| {
+            EngineError::ResourceLimit("presentation revision limit reached".into())
+        })?;
         self.presentation = Some(staged);
+        self.revision = revision;
         Ok(result)
+    }
+
+    fn check_revision(&self, revision: u64) -> PyResult<()> {
+        self.document()?;
+        if self.revision != revision {
+            return Err(PyValueError::new_err(
+                "text range is stale after a document change",
+            ));
+        }
+        Ok(())
+    }
+
+    fn text_body(&self, slide: usize, id: u32) -> PyResult<&TextBody> {
+        self.shape(slide, id)?
+            .text
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("shape has no text body"))
     }
 
     fn check_slide(&self, slide: usize) -> PyResult<()> {
@@ -185,7 +212,13 @@ impl EditablePptx {
             text_bytes: 0,
             media_bytes: 0,
             shapes: 0,
+            revision: 0,
         })
+    }
+
+    pub fn revision(&self) -> PyResult<u64> {
+        self.document()?;
+        Ok(self.revision)
     }
 
     pub fn copy(&self) -> PyResult<Self> {
@@ -284,6 +317,7 @@ impl EditablePptx {
 
     pub fn remove_slide(&mut self, slide: usize) -> PyResult<()> {
         self.check_slide(slide)?;
+        reject_referenced_slide(self.document()?, self.document()?.slides[slide].id)?;
         organization_profile(self.document()?)?;
         self.mutate(|document| {
             document.slides.remove(slide);
@@ -651,27 +685,225 @@ impl EditablePptx {
             .ok_or_else(|| PyValueError::new_err("shape has no text body"))
     }
 
-    pub fn set_shape_text(&mut self, slide: usize, id: u32, text: &str) -> PyResult<()> {
-        let old = self.shape_text(slide, id)?.len();
-        text_value(text)?;
-        self.check_text_budget(text.len().saturating_sub(old))?;
-        self.check_paragraph_budget(
-            paragraph_count(text),
-            self.shape(slide, id)?
-                .text
-                .as_ref()
-                .map_or(0, |body| body.paragraphs.len()),
+    pub fn text_range(
+        &self,
+        slide: usize,
+        id: u32,
+        start: usize,
+        end: usize,
+    ) -> PyResult<(String, u64)> {
+        let body = self.text_body(slide, id)?;
+        let (a, b) = text_positions(body, start, end)?;
+        Ok((deckcraft_model::edit::text_range(body, a, b), self.revision))
+    }
+
+    pub fn range_text(
+        &self,
+        slide: usize,
+        id: u32,
+        start: usize,
+        end: usize,
+        revision: u64,
+    ) -> PyResult<String> {
+        self.check_revision(revision)?;
+        Ok(self.text_range(slide, id, start, end)?.0)
+    }
+
+    #[pyo3(signature = (slide, id, text, patch="{}"))]
+    pub fn add_run_patch(
+        &mut self,
+        slide: usize,
+        id: u32,
+        text: &str,
+        patch: &str,
+    ) -> PyResult<(usize, usize, u64)> {
+        let patch = FormatPatch::parse(patch)?;
+        let start = self.text_body(slide, id)?.char_len();
+        let body = edited_body(
+            self.document()?,
+            slide,
+            id,
+            start,
+            start,
+            text,
+            Some(&patch),
+        )?;
+        self.mutate(|document| {
+            shape_mut(document, slide, id)?.text = Some(body);
+            Ok(())
+        })?;
+        self.refresh_budgets()?;
+        Ok((start, start + text.chars().count(), self.revision))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn replace_range(
+        &mut self,
+        slide: usize,
+        id: u32,
+        start: usize,
+        end: usize,
+        revision: u64,
+        text: &str,
+    ) -> PyResult<(usize, usize, u64)> {
+        self.check_revision(revision)?;
+        let body = edited_body(self.document()?, slide, id, start, end, text, None)?;
+        self.mutate(|document| {
+            shape_mut(document, slide, id)?.text = Some(body);
+            Ok(())
+        })?;
+        self.refresh_budgets()?;
+        Ok((start, start + text.chars().count(), self.revision))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn format_range_patch(
+        &mut self,
+        slide: usize,
+        id: u32,
+        start: usize,
+        end: usize,
+        revision: u64,
+        patch: &str,
+    ) -> PyResult<u64> {
+        self.check_revision(revision)?;
+        let patch = FormatPatch::parse(patch)?;
+        let body = self.text_body(slide, id)?;
+        let (a, b) = text_positions(body, start, end)?;
+        preflight_format(
+            self.document()?,
+            body,
+            a,
+            b,
+            &|props| patch.apply(props),
+            false,
         )?;
         self.mutate(|document| {
             let body = shape_mut(document, slide, id)?
                 .text
                 .as_mut()
                 .ok_or_else(|| PyValueError::new_err("shape has no text body"))?;
-            replace_text(body, text);
+            deckcraft_model::edit::format(body, a, b, &|props| patch.apply(props));
             Ok(())
         })?;
-        self.text_bytes = self.text_bytes.saturating_sub(old) + text.len();
-        Ok(())
+        Ok(self.revision)
+    }
+
+    pub fn range_link(
+        &self,
+        slide: usize,
+        id: u32,
+        start: usize,
+        end: usize,
+        revision: u64,
+    ) -> PyResult<LinkValue> {
+        self.check_revision(revision)?;
+        let body = self.text_body(slide, id)?;
+        let (a, b) = text_positions(body, start, end)?;
+        if start == end {
+            return Err(PyValueError::new_err(
+                "a link requires a nonempty text range",
+            ));
+        }
+        let mut found: Option<&Option<Hyperlink>> = None;
+        for (pi, paragraph) in body.paragraphs.iter().enumerate().take(b.0 + 1).skip(a.0) {
+            let from = if pi == a.0 { a.1 } else { 0 };
+            let to = if pi == b.0 { b.1 } else { paragraph.char_len() };
+            let mut offset = 0;
+            for run in &paragraph.runs {
+                let next = offset + run.char_len();
+                if offset < to && next > from {
+                    if found.is_some_and(|value| value != &run.props.link) {
+                        return Err(PyValueError::new_err(
+                            "range contains mixed hyperlink targets or tooltips",
+                        ));
+                    }
+                    found = Some(&run.props.link);
+                }
+                offset = next;
+            }
+        }
+        link_value(found.and_then(Option::as_ref))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (slide, id, start, end, revision, url=None, target_slide=None, tooltip=""))]
+    pub fn set_range_link(
+        &mut self,
+        slide: usize,
+        id: u32,
+        start: usize,
+        end: usize,
+        revision: u64,
+        url: Option<&str>,
+        target_slide: Option<u32>,
+        tooltip: &str,
+    ) -> PyResult<u64> {
+        self.check_revision(revision)?;
+        let link = make_link(self.document()?, url, target_slide, tooltip)?;
+        let body = self.text_body(slide, id)?;
+        let (a, b) = text_positions(body, start, end)?;
+        if start == end || !range_has_text(body, a, b) {
+            return Err(PyValueError::new_err(
+                "a link requires a range containing text",
+            ));
+        }
+        preflight_format(
+            self.document()?,
+            body,
+            a,
+            b,
+            &|props| props.link = link.clone(),
+            true,
+        )?;
+        self.mutate(|document| {
+            let body = shape_mut(document, slide, id)?
+                .text
+                .as_mut()
+                .ok_or_else(|| PyValueError::new_err("shape has no text body"))?;
+            // A labeled link never changes the insertion/end-mark formatting.
+            let ends: Vec<_> = body.paragraphs[a.0..=b.0]
+                .iter()
+                .map(|p| p.end_props.clone())
+                .collect();
+            deckcraft_model::edit::format(body, a, b, &|props| props.link = link.clone());
+            for (paragraph, props) in body.paragraphs[a.0..=b.0].iter_mut().zip(ends) {
+                paragraph.end_props = props;
+            }
+            Ok(())
+        })?;
+        Ok(self.revision)
+    }
+
+    pub fn shape_link(&self, slide: usize, id: u32) -> PyResult<LinkValue> {
+        link_value(self.shape(slide, id)?.click.as_ref())
+    }
+
+    #[pyo3(signature = (slide, id, url=None, target_slide=None, tooltip=""))]
+    pub fn set_shape_link(
+        &mut self,
+        slide: usize,
+        id: u32,
+        url: Option<&str>,
+        target_slide: Option<u32>,
+        tooltip: &str,
+    ) -> PyResult<()> {
+        self.shape(slide, id)?;
+        let link = make_link(self.document()?, url, target_slide, tooltip)?;
+        self.mutate(|document| {
+            shape_mut(document, slide, id)?.click = link;
+            Ok(())
+        })
+    }
+
+    pub fn set_shape_text(&mut self, slide: usize, id: u32, text: &str) -> PyResult<()> {
+        let end = self.text_body(slide, id)?.char_len();
+        let body = edited_body(self.document()?, slide, id, 0, end, text, None)?;
+        self.mutate(|document| {
+            shape_mut(document, slide, id)?.text = Some(body);
+            Ok(())
+        })?;
+        self.refresh_budgets()
     }
 
     pub fn shape_box(&self, slide: usize, id: u32) -> PyResult<(f64, f64, f64, f64)> {
@@ -883,30 +1115,51 @@ impl EditablePptx {
                 ));
             }
         }
+        let apply = |props: &mut RunProps| {
+            if let Some(value) = size {
+                props.size = Some(value);
+            }
+            if let Some(value) = color {
+                props.fill = Some(Fill::solid(ColorRef::rgb(Rgba::rgb(
+                    value.0, value.1, value.2,
+                ))));
+            }
+            if let Some(value) = bold {
+                props.bold = Some(value);
+            }
+            if let Some(value) = italic {
+                props.italic = Some(value);
+            }
+            if let Some(value) = font {
+                props.font = Some(value.to_owned());
+            }
+        };
+        let body = self.text_body(slide, id)?;
+        let old = body_budget(body);
+        let mut projected = old;
+        for paragraph in &body.paragraphs {
+            for props in paragraph
+                .runs
+                .iter()
+                .map(|run| &run.props)
+                .chain([&paragraph.def_props, &paragraph.end_props])
+            {
+                let mut updated = props.clone();
+                apply(&mut updated);
+                projected.properties = projected
+                    .properties
+                    .saturating_sub(props_cost(props))
+                    .saturating_add(props_cost(&updated));
+            }
+        }
+        content_budget(self.document()?)?
+            .replacing(old, projected)
+            .check()?;
         self.mutate(|document| {
             let body = shape_mut(document, slide, id)?
                 .text
                 .as_mut()
                 .ok_or_else(|| PyValueError::new_err("shape has no text body"))?;
-            let apply = |props: &mut RunProps| {
-                if let Some(value) = size {
-                    props.size = Some(value);
-                }
-                if let Some(value) = color {
-                    props.fill = Some(Fill::solid(ColorRef::rgb(Rgba::rgb(
-                        value.0, value.1, value.2,
-                    ))));
-                }
-                if let Some(value) = bold {
-                    props.bold = Some(value);
-                }
-                if let Some(value) = italic {
-                    props.italic = Some(value);
-                }
-                if let Some(value) = font {
-                    props.font = Some(value.to_owned());
-                }
-            };
             deckcraft_model::edit::format_all(body, &apply);
             for paragraph in &mut body.paragraphs {
                 apply(&mut paragraph.def_props);
@@ -1055,6 +1308,541 @@ impl EditablePptx {
     }
 }
 
+enum FormatChange {
+    Bold(Option<bool>),
+    Italic(Option<bool>),
+    Size(Option<f64>),
+    Font(Option<String>),
+    Color(Option<ColorRef>),
+    Underline(Option<String>),
+    Strike(Option<Strike>),
+    Baseline(Option<f64>),
+    Highlight(Option<ColorRef>),
+}
+
+struct FormatPatch(Vec<FormatChange>);
+
+// Keep public names aligned with DOCX; project to DrawingML only at this adapter.
+const UNDERLINES: &[(&str, &str)] = &[
+    ("none", "none"),
+    ("single", "sng"),
+    ("words", "words"),
+    ("double", "dbl"),
+    ("thick", "heavy"),
+    ("dotted", "dotted"),
+    ("dash", "dash"),
+    ("dot_dash", "dotDash"),
+    ("dot_dot_dash", "dotDotDash"),
+    ("wave", "wavy"),
+    ("double_wave", "wavyDbl"),
+    ("thick_dotted", "dottedHeavy"),
+    ("thick_dash", "dashHeavy"),
+    ("long_dash", "dashLong"),
+    ("thick_long_dash", "dashLongHeavy"),
+    ("thick_dot_dash", "dotDashHeavy"),
+    ("thick_dot_dot_dash", "dotDotDashHeavy"),
+    ("thick_wave", "wavyHeavy"),
+];
+
+impl FormatPatch {
+    fn parse(source: &str) -> PyResult<Self> {
+        if source.len() > MAX_PATCH {
+            return Err(EngineError::ResourceLimit("format patch exceeds 16 KiB".into()).into());
+        }
+        let value: serde_json::Value = serde_json::from_str(source)
+            .map_err(|_| PyValueError::new_err("format patch must be a JSON object"))?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| PyValueError::new_err("format patch must be a flat object"))?;
+        let mut changes = Vec::new();
+        for (key, value) in object {
+            let invalid =
+                || PyValueError::new_err(format!("invalid PPTX formatting value for {key}"));
+            let change = match key.as_str() {
+                "bold" | "italic" => {
+                    let v = if value.is_null() {
+                        None
+                    } else {
+                        Some(value.as_bool().ok_or_else(invalid)?)
+                    };
+                    if key == "bold" {
+                        FormatChange::Bold(v)
+                    } else {
+                        FormatChange::Italic(v)
+                    }
+                }
+                "font_size" => {
+                    let v = if value.is_null() {
+                        None
+                    } else {
+                        let v = value.as_f64().ok_or_else(invalid)?;
+                        font_size(v)?;
+                        Some(v)
+                    };
+                    FormatChange::Size(v)
+                }
+                "font" => {
+                    let v = if value.is_null() {
+                        None
+                    } else {
+                        let v = value.as_str().ok_or_else(invalid)?;
+                        text_value(v)?;
+                        if v.trim().is_empty()
+                            || v.chars().count() > 255
+                            || v.chars().any(char::is_control)
+                        {
+                            return Err(invalid());
+                        }
+                        Some(v.to_owned())
+                    };
+                    FormatChange::Font(v)
+                }
+                "color" | "highlight" => {
+                    let v = if value.is_null() {
+                        None
+                    } else {
+                        Some(parse_color(value.as_str().ok_or_else(invalid)?)?)
+                    };
+                    if key == "color" {
+                        FormatChange::Color(v)
+                    } else {
+                        FormatChange::Highlight(v)
+                    }
+                }
+                "underline" => {
+                    let v = match value {
+                        serde_json::Value::Null => None,
+                        serde_json::Value::Bool(v) => Some(if *v { "sng" } else { "none" }.into()),
+                        serde_json::Value::String(v) => Some(
+                            UNDERLINES
+                                .iter()
+                                .find(|(name, _)| *name == v)
+                                .map(|(_, native)| (*native).to_owned())
+                                .ok_or_else(invalid)?,
+                        ),
+                        _ => return Err(invalid()),
+                    };
+                    FormatChange::Underline(v)
+                }
+                "strike" => {
+                    let v = match value {
+                        serde_json::Value::Null => None,
+                        serde_json::Value::Bool(v) => {
+                            Some(if *v { Strike::Single } else { Strike::None })
+                        }
+                        serde_json::Value::String(v) if v == "single" => Some(Strike::Single),
+                        serde_json::Value::String(v) if v == "double" => Some(Strike::Double),
+                        _ => return Err(invalid()),
+                    };
+                    FormatChange::Strike(v)
+                }
+                "script" => FormatChange::Baseline(match value.as_str() {
+                    Some("baseline") => Some(0.0),
+                    Some("superscript") => Some(0.3),
+                    Some("subscript") => Some(-0.25),
+                    _ if value.is_null() => None,
+                    _ => return Err(invalid()),
+                }),
+                _ => {
+                    return Err(PyValueError::new_err(format!(
+                        "unsupported PPTX formatting property: {key}"
+                    )))
+                }
+            };
+            changes.push(change);
+        }
+        Ok(Self(changes))
+    }
+
+    fn apply(&self, props: &mut RunProps) {
+        for change in &self.0 {
+            match change {
+                FormatChange::Bold(v) => props.bold = *v,
+                FormatChange::Italic(v) => props.italic = *v,
+                FormatChange::Size(v) => props.size = *v,
+                FormatChange::Font(v) => props.font = v.clone(),
+                FormatChange::Color(v) => props.fill = v.clone().map(Fill::solid),
+                FormatChange::Underline(v) => props.underline = v.clone(),
+                FormatChange::Strike(v) => props.strike = *v,
+                FormatChange::Baseline(v) => props.baseline = *v,
+                FormatChange::Highlight(v) => props.highlight = v.clone(),
+            }
+        }
+    }
+}
+
+fn parse_color(value: &str) -> PyResult<ColorRef> {
+    let v = value.strip_prefix('#').unwrap_or(value);
+    if v.len() != 6 || !v.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return Err(PyValueError::new_err(
+            "color must be a six-digit RGB hex string",
+        ));
+    }
+    let rgb = u32::from_str_radix(v, 16).map_err(|_| PyValueError::new_err("invalid RGB color"))?;
+    Ok(color_ref(((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)))
+}
+
+type TextPositions = (deckcraft_model::edit::Pos, deckcraft_model::edit::Pos);
+
+fn text_positions(body: &TextBody, start: usize, end: usize) -> PyResult<TextPositions> {
+    if start > end || end > body.char_len() || body.paragraphs.is_empty() {
+        return Err(PyIndexError::new_err(
+            "text range is outside the shape text",
+        ));
+    }
+    let position = |mut offset: usize| {
+        for (index, paragraph) in body.paragraphs.iter().enumerate() {
+            let size = paragraph.char_len();
+            if offset <= size {
+                return (index, offset);
+            }
+            offset -= size + 1;
+        }
+        // Bounds checked above; the final paragraph end is a valid caret.
+        (
+            body.paragraphs.len() - 1,
+            body.paragraphs.last().map_or(0, |p| p.char_len()),
+        )
+    };
+    Ok((position(start), position(end)))
+}
+
+fn range_has_text(
+    body: &TextBody,
+    a: deckcraft_model::edit::Pos,
+    b: deckcraft_model::edit::Pos,
+) -> bool {
+    body.paragraphs
+        .iter()
+        .enumerate()
+        .take(b.0 + 1)
+        .skip(a.0)
+        .any(|(pi, p)| {
+            let from = if pi == a.0 { a.1 } else { 0 };
+            let to = if pi == b.0 { b.1 } else { p.char_len() };
+            to > from
+        })
+}
+
+fn validate_uri(value: &str) -> PyResult<()> {
+    let valid = ["https://", "http://", "mailto:"].iter().any(|prefix| {
+        value
+            .get(..prefix.len())
+            .is_some_and(|s| s.eq_ignore_ascii_case(prefix))
+            && value.len() > prefix.len()
+    });
+    if value.len() > 8192 || !valid || value.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err(PyValueError::new_err("link must be a nonempty http, https or mailto URI of at most 8192 bytes without whitespace or controls"));
+    }
+    Ok(())
+}
+
+fn make_link(
+    document: &Presentation,
+    url: Option<&str>,
+    target: Option<u32>,
+    tooltip: &str,
+) -> PyResult<Option<Hyperlink>> {
+    text_value(tooltip)?;
+    if tooltip.len() > 4096 || tooltip.chars().any(char::is_control) {
+        return Err(PyValueError::new_err(
+            "link tooltip must be at most 4096 bytes without controls",
+        ));
+    }
+    let action = match (url, target) {
+        (Some(url), None) => {
+            validate_uri(url)?;
+            Action::Url { url: url.into() }
+        }
+        (None, Some(id)) => {
+            if document.slide(SlideId(id)).is_none() {
+                return Err(PyValueError::new_err("target slide no longer exists"));
+            }
+            Action::Slide { slide: SlideId(id) }
+        }
+        (None, None) if tooltip.is_empty() => return Ok(None),
+        (None, None) => return Err(PyValueError::new_err("a tooltip requires a link target")),
+        _ => {
+            return Err(PyValueError::new_err(
+                "choose either a URL or a target slide",
+            ))
+        }
+    };
+    Ok(Some(Hyperlink {
+        action,
+        tooltip: tooltip.into(),
+        highlight_click: false,
+        sound: None,
+        stop_sound: false,
+        zoom_return: None,
+    }))
+}
+
+fn link_value(link: Option<&Hyperlink>) -> PyResult<LinkValue> {
+    match link {
+        None => Ok(None),
+        Some(link) => match &link.action {
+            Action::Url { url } => Ok(Some((Some(url.clone()), None, link.tooltip.clone()))),
+            Action::Slide { slide } => Ok(Some((None, Some(slide.0), link.tooltip.clone()))),
+            _ => Err(EngineError::Unsupported("hyperlink action is unavailable".into()).into()),
+        },
+    }
+}
+
+#[derive(Default, Clone, Copy)]
+struct ContentBudget {
+    text: usize,
+    properties: usize,
+    runs: usize,
+    paragraphs: usize,
+}
+
+impl ContentBudget {
+    fn check(self) -> PyResult<Self> {
+        if self.text > MAX_TEXT
+            || self.properties > MAX_PROPERTIES
+            || self.runs > MAX_RUNS
+            || self.paragraphs > MAX_PARAGRAPHS
+        {
+            return Err(EngineError::ResourceLimit("presentation exceeds text (16 MiB), formatting/link properties (16 MiB), runs (100000) or paragraphs (100000) limit".into()).into());
+        }
+        Ok(self)
+    }
+    fn add(&mut self, other: Self) {
+        self.text = self.text.saturating_add(other.text);
+        self.properties = self.properties.saturating_add(other.properties);
+        self.runs = self.runs.saturating_add(other.runs);
+        self.paragraphs = self.paragraphs.saturating_add(other.paragraphs);
+    }
+    fn replacing(self, old: Self, new: Self) -> Self {
+        Self {
+            text: self.text.saturating_sub(old.text).saturating_add(new.text),
+            properties: self
+                .properties
+                .saturating_sub(old.properties)
+                .saturating_add(new.properties),
+            runs: self.runs.saturating_sub(old.runs).saturating_add(new.runs),
+            paragraphs: self
+                .paragraphs
+                .saturating_sub(old.paragraphs)
+                .saturating_add(new.paragraphs),
+        }
+    }
+}
+
+fn link_cost(link: &Option<Hyperlink>) -> usize {
+    link.as_ref().map_or(0, |link| {
+        link.tooltip.len().saturating_add(match &link.action {
+            Action::Url { url } => url.len(),
+            Action::Program { path } => path.len(),
+            Action::CustomShow { name, .. } => name.len(),
+            _ => 0,
+        })
+    })
+}
+
+fn props_cost(props: &RunProps) -> usize {
+    [
+        &props.font,
+        &props.font_ea,
+        &props.font_cs,
+        &props.font_sym,
+        &props.underline,
+        &props.lang,
+    ]
+    .iter()
+    .map(|v| v.as_ref().map_or(0, String::len))
+    .sum::<usize>()
+    .saturating_add(link_cost(&props.link))
+    .saturating_add(link_cost(&props.hover))
+}
+
+fn body_budget(body: &TextBody) -> ContentBudget {
+    let mut budget = ContentBudget {
+        paragraphs: body.paragraphs.len(),
+        text: body.paragraphs.len().saturating_sub(1),
+        ..Default::default()
+    };
+    for paragraph in &body.paragraphs {
+        budget.properties = budget
+            .properties
+            .saturating_add(props_cost(&paragraph.def_props))
+            .saturating_add(props_cost(&paragraph.end_props));
+        budget.runs = budget.runs.saturating_add(paragraph.runs.len());
+        for run in &paragraph.runs {
+            budget.text = budget.text.saturating_add(run.content().len());
+            budget.properties = budget.properties.saturating_add(props_cost(&run.props));
+        }
+    }
+    budget
+}
+
+fn content_budget(document: &Presentation) -> PyResult<ContentBudget> {
+    let mut budget = ContentBudget::default();
+    for slide in &document.slides {
+        budget.text = budget.text.saturating_add(slide.name.len());
+        budget.add(body_budget(&slide.notes));
+        visit_shapes(&slide.shapes, &mut |shape| {
+            budget.text = budget.text.saturating_add(shape.descr.len());
+            budget.properties = budget
+                .properties
+                .saturating_add(link_cost(&shape.click))
+                .saturating_add(link_cost(&shape.hover));
+            if let Some(body) = &shape.text {
+                budget.add(body_budget(body));
+            }
+            if let ShapeKind::Table(table) = &shape.kind {
+                for cell in table.rows.iter().flat_map(|row| &row.cells) {
+                    budget.add(body_budget(&cell.text));
+                }
+            }
+            budget.check().map(|_| ())
+        })?;
+        budget.check()?;
+    }
+    budget.check()
+}
+
+fn visit_shapes(
+    shapes: &[Shape],
+    visitor: &mut impl FnMut(&Shape) -> PyResult<()>,
+) -> PyResult<()> {
+    let mut stack = vec![(shapes.iter(), 0usize)];
+    let mut count = 0usize;
+    while let Some((iter, depth)) = stack.last_mut() {
+        let Some(shape) = iter.next() else {
+            stack.pop();
+            continue;
+        };
+        count += 1;
+        if count > MAX_SHAPES || *depth > 32 {
+            return Err(EngineError::ResourceLimit(
+                "presentation shape count or group depth exceeds limit".into(),
+            )
+            .into());
+        }
+        visitor(shape)?;
+        if let ShapeKind::Group { children, .. } = &shape.kind {
+            let next = *depth + 1;
+            stack.push((children.iter(), next));
+        }
+    }
+    Ok(())
+}
+
+fn edited_body(
+    document: &Presentation,
+    slide: usize,
+    id: u32,
+    start: usize,
+    end: usize,
+    text: &str,
+    patch: Option<&FormatPatch>,
+) -> PyResult<TextBody> {
+    text_value(text)?;
+    let body = document
+        .slides
+        .get(slide)
+        .and_then(|s| s.shape(ShapeId(id)))
+        .and_then(|s| s.text.as_ref())
+        .ok_or_else(|| PyValueError::new_err("shape has no text body"))?;
+    let (a, b) = text_positions(body, start, end)?;
+    // props_at describes the character before the caret. Replacement takes the
+    // first selected character's appearance, including at a run boundary.
+    let props_position = if start < end && a.1 < body.paragraphs[a.0].char_len() {
+        (a.0, a.1 + 1)
+    } else {
+        a
+    };
+    let mut props = deckcraft_model::edit::props_at(body, props_position);
+    if let Some(patch) = patch {
+        // Appending inherits appearance, not an adjacent label's navigation target.
+        props.link = None;
+        props.hover = None;
+        patch.apply(&mut props);
+    }
+    let total = content_budget(document)?;
+    let old = body_budget(body);
+    let removed = deckcraft_model::edit::text_range(body, a, b).len();
+    if total
+        .text
+        .saturating_sub(removed)
+        .saturating_add(text.len())
+        > MAX_TEXT
+    {
+        return Err(EngineError::ResourceLimit("presentation text exceeds 16 MiB".into()).into());
+    }
+    let mut edited = body.clone();
+    deckcraft_model::edit::delete(&mut edited, a, b);
+    let mut projected = body_budget(&edited);
+    let added_paragraphs = paragraph_count(text) - 1;
+    // Preflight cloning of insertion and paragraph properties before upstream insert.
+    projected.paragraphs = projected.paragraphs.saturating_add(added_paragraphs);
+    projected.runs = projected
+        .runs
+        .saturating_add(added_paragraphs)
+        .saturating_add(3);
+    projected.text = projected.text.saturating_add(text.len());
+    let paragraph_defaults = edited
+        .paragraphs
+        .get(a.0)
+        .map_or(0, |p| props_cost(&p.def_props) + props_cost(&p.end_props));
+    projected.properties = projected
+        .properties
+        .saturating_add((added_paragraphs + 3).saturating_mul(props_cost(&props)))
+        .saturating_add(added_paragraphs.saturating_mul(paragraph_defaults));
+    total.replacing(old, projected).check()?;
+    deckcraft_model::edit::insert(&mut edited, a, text, Some(props));
+    total.replacing(old, body_budget(&edited)).check()?;
+    Ok(edited)
+}
+
+fn preflight_format(
+    document: &Presentation,
+    body: &TextBody,
+    a: deckcraft_model::edit::Pos,
+    b: deckcraft_model::edit::Pos,
+    apply: &impl Fn(&mut RunProps),
+    preserve_ends: bool,
+) -> PyResult<()> {
+    let old = body_budget(body);
+    let mut projected = old;
+    for (pi, paragraph) in body.paragraphs.iter().enumerate().take(b.0 + 1).skip(a.0) {
+        let from = if pi == a.0 { a.1 } else { 0 };
+        let to = if pi == b.0 { b.1 } else { paragraph.char_len() };
+        let mut offset = 0;
+        for run in &paragraph.runs {
+            let next = offset + run.char_len();
+            if offset < to && next > from {
+                let mut props = run.props.clone();
+                apply(&mut props);
+                let extra = usize::from(offset < from) + usize::from(next > to);
+                projected.runs = projected.runs.saturating_add(extra);
+                projected.properties = projected
+                    .properties
+                    .saturating_sub(props_cost(&run.props))
+                    .saturating_add(props_cost(&props))
+                    .saturating_add(extra.saturating_mul(props_cost(&run.props)));
+            }
+            offset = next;
+        }
+        if !preserve_ends
+            && (paragraph.runs.is_empty() || (a == b && from == to) || to == paragraph.char_len())
+        {
+            let mut props = paragraph.end_props.clone();
+            apply(&mut props);
+            projected.properties = projected
+                .properties
+                .saturating_sub(props_cost(&paragraph.end_props))
+                .saturating_add(props_cost(&props));
+        }
+    }
+    content_budget(document)?
+        .replacing(old, projected)
+        .check()
+        .map(|_| ())
+}
+
 fn color_ref(color: (u8, u8, u8)) -> ColorRef {
     ColorRef::rgb(Rgba::rgb(color.0, color.1, color.2))
 }
@@ -1132,8 +1920,14 @@ fn organization_profile(document: &Presentation) -> PyResult<()> {
     let body_links = |body: &TextBody| {
         body.paragraphs
             .iter()
-            .flat_map(|paragraph| &paragraph.runs)
-            .any(|run| run.props.link.is_some() || run.props.hover.is_some())
+            .flat_map(|paragraph| {
+                paragraph
+                    .runs
+                    .iter()
+                    .map(|r| &r.props)
+                    .chain([&paragraph.def_props, &paragraph.end_props])
+            })
+            .any(|props| !safe_link(props.link.as_ref(), document) || props.hover.is_some())
     };
     let extra_refs = !document.sections.is_empty()
         || !document.custom_shows.is_empty()
@@ -1155,7 +1949,7 @@ fn organization_profile(document: &Presentation) -> PyResult<()> {
                 }) if fill.artistic.is_some()
             )
             || slide.shapes.iter().any(|shape| {
-                shape.click.is_some()
+                !safe_link(shape.click.as_ref(), document)
                     || shape.hover.is_some()
                     || shape.raw_ext.is_some()
                     || !shape.tags.is_empty()
@@ -1177,7 +1971,60 @@ fn organization_profile(document: &Presentation) -> PyResult<()> {
             })
     });
     if extra_refs || unsupported {
-        return Err(EngineError::Unsupported("slide organization requires the authored text/table/PNG profile without navigation, animation or package references".into()).into());
+        return Err(EngineError::Unsupported("slide organization requires the authored text/table/PNG profile with URL or slide links and without animation or package references".into()).into());
+    }
+    Ok(())
+}
+
+fn safe_link(link: Option<&Hyperlink>, document: &Presentation) -> bool {
+    link.is_none_or(|link| {
+        link.sound.is_none()
+            && !link.stop_sound
+            && link.zoom_return.is_none()
+            && match &link.action {
+                Action::Url { url } => validate_uri(url).is_ok(),
+                Action::Slide { slide } => document.slide(*slide).is_some(),
+                _ => false,
+            }
+    })
+}
+
+fn reject_referenced_slide(document: &Presentation, target: SlideId) -> PyResult<()> {
+    let references = |link: Option<&Hyperlink>| {
+        link.is_some_and(|link| {
+            matches!(link.action, Action::Slide { slide } if slide == target)
+                || link.zoom_return == Some(target)
+        })
+    };
+    let body_references = |body: &TextBody| {
+        body.paragraphs.iter().any(|paragraph| {
+            paragraph
+                .runs
+                .iter()
+                .map(|run| &run.props)
+                .chain([&paragraph.def_props, &paragraph.end_props])
+                .any(|props| references(props.link.as_ref()) || references(props.hover.as_ref()))
+        })
+    };
+    for slide in document.slides.iter().filter(|slide| slide.id != target) {
+        let mut found = body_references(&slide.notes);
+        visit_shapes(&slide.shapes, &mut |shape| {
+            found |= references(shape.click.as_ref()) || references(shape.hover.as_ref());
+            found |= shape.text.as_ref().is_some_and(&body_references);
+            if let ShapeKind::Table(table) = &shape.kind {
+                found |= table
+                    .rows
+                    .iter()
+                    .flat_map(|row| &row.cells)
+                    .any(|cell| body_references(&cell.text));
+            }
+            Ok(())
+        })?;
+        if found {
+            return Err(PyValueError::new_err(
+                "target slide is referenced by a surviving hyperlink",
+            ));
+        }
     }
     Ok(())
 }
@@ -1802,5 +2649,349 @@ mod tests {
             reopened.slides[0].shapes[0].text.as_ref().unwrap().text(),
             "a\nb"
         );
+    }
+
+    #[test]
+    fn rich_ranges_preserve_unicode_paragraphs_and_roundtrip_formatting() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide().unwrap();
+        let id = author
+            .add_text(0, "Aλ", 20.0, 20.0, 500.0, 200.0, 18.0)
+            .unwrap();
+        let (_, _, revision) = author.add_run_patch(0, id, "日本\nSecond", r##"{"bold":true,"italic":true,"font_size":24,"color":"#224466","underline":true,"strike":"double","script":"superscript","highlight":"#FFFF00"}"##).unwrap();
+        assert_eq!(author.text_range(0, id, 1, 7).unwrap().0, "λ日本\nSe");
+        let (start, end, current) = author
+            .replace_range(0, id, 1, 7, revision, "é🙂\nX")
+            .unwrap();
+        assert_eq!((start, end), (1, 5));
+        assert_eq!(author.shape_text(0, id).unwrap(), "Aé🙂\nXcond");
+        assert!(author.range_text(0, id, 1, 7, revision).is_err());
+        let current = author.format_range_patch(0, id, 5, 9, current, r#"{"bold":false,"italic":null,"font_size":null,"underline":false,"strike":false,"script":"baseline","highlight":null}"#).unwrap();
+        assert_eq!(author.range_text(0, id, 5, 9, current).unwrap(), "cond");
+        let reopened = deckcraft_pptx::import(&author.to_bytes().unwrap()).unwrap();
+        let body = reopened.slides[0].shapes[0].text.as_ref().unwrap();
+        assert_eq!(body.text(), "Aé🙂\nXcond");
+        let props = &body.paragraphs[1].runs.last().unwrap().props;
+        assert_eq!(props.bold, Some(false));
+        assert_eq!(props.italic, None);
+        assert_eq!(props.size, None);
+        assert_eq!(props.underline.as_deref(), Some("none"));
+        assert_eq!(props.strike, Some(Strike::None));
+        assert_eq!(props.baseline, Some(0.0));
+        assert_eq!(props.highlight, None);
+        assert!(matches!(props.fill, Some(Fill::Solid { .. })));
+    }
+
+    #[test]
+    fn replacement_at_run_boundary_uses_selected_character_format() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide().unwrap();
+        let id = author
+            .add_text(0, "Prefix ", 20.0, 20.0, 500.0, 100.0, 18.0)
+            .unwrap();
+        let (_, _, revision) = author
+            .add_run_patch(0, id, "{{name}}", r#"{"bold":true,"font_size":24}"#)
+            .unwrap();
+        author
+            .replace_range(0, id, 7, 15, revision, "Acme")
+            .unwrap();
+        let body = author.text_body(0, id).unwrap();
+        assert_eq!(body.text(), "Prefix Acme");
+        assert_eq!(body.paragraphs[0].runs[0].props.bold, None);
+        assert_eq!(
+            body.paragraphs[0].runs.last().unwrap().props.bold,
+            Some(true)
+        );
+        assert_eq!(
+            body.paragraphs[0].runs.last().unwrap().props.size,
+            Some(24.0)
+        );
+    }
+
+    #[test]
+    fn readable_underline_names_roundtrip_through_native_writer() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide().unwrap();
+        let id = author
+            .add_text(0, "Styled", 20.0, 20.0, 500.0, 100.0, 18.0)
+            .unwrap();
+        for (name, native) in UNDERLINES {
+            let patch = serde_json::json!({"underline": name}).to_string();
+            author
+                .format_range_patch(0, id, 0, 6, author.revision().unwrap(), &patch)
+                .unwrap();
+            let reopened = deckcraft_pptx::import(&author.to_bytes().unwrap()).unwrap();
+            let props = &reopened.slides[0].shapes[0]
+                .text
+                .as_ref()
+                .unwrap()
+                .paragraphs[0]
+                .runs[0]
+                .props;
+            assert_eq!(props.underline.as_deref(), Some(*native), "{name}");
+        }
+        let revision = author.revision().unwrap();
+        let before = author.document().unwrap().clone();
+        for native in [
+            "sng", "dbl", "heavy", "dotDash", "wavy", "wavyDbl", "invented",
+        ] {
+            let patch = serde_json::json!({"underline": native}).to_string();
+            assert!(author
+                .format_range_patch(0, id, 0, 6, revision, &patch)
+                .is_err());
+        }
+        assert_eq!(author.document().unwrap(), &before);
+        assert_eq!(author.revision().unwrap(), revision);
+    }
+
+    #[test]
+    fn links_cross_runs_preserve_labels_and_export_native_navigation() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide().unwrap();
+        author.add_slide().unwrap();
+        let first = author.slide_id(0).unwrap();
+        let target = author.slide_id(1).unwrap();
+        let id = author
+            .add_text(0, "Before λ", 20.0, 20.0, 500.0, 100.0, 18.0)
+            .unwrap();
+        let (_, _, revision) = author
+            .add_run_patch(0, id, "日本 after", r#"{"bold":true}"#)
+            .unwrap();
+        let url = "https://example.com/deck?a=1&b=2";
+        let revision = author
+            .set_range_link(0, id, 7, 10, revision, Some(url), None, "Website")
+            .unwrap();
+        assert_eq!(
+            author.range_link(0, id, 7, 10, revision).unwrap(),
+            Some((Some(url.into()), None, "Website".into()))
+        );
+        assert!(author.range_link(0, id, 6, 10, revision).is_err());
+        author
+            .set_shape_link(0, id, None, Some(target), "Last page")
+            .unwrap();
+        author.move_slide(1, 0).unwrap();
+        assert_eq!(author.slide_id(1).unwrap(), first);
+        let snapshot = author.document().unwrap().clone();
+        let revision = author.revision().unwrap();
+        assert!(author.remove_slide(0).is_err());
+        assert_eq!(author.document().unwrap(), &snapshot);
+        assert_eq!(author.revision().unwrap(), revision);
+        let bytes = author.to_bytes().unwrap();
+        let reopened = deckcraft_pptx::import(&bytes).unwrap();
+        let source = &reopened.slides[1].shapes[0];
+        assert!(
+            matches!(source.click.as_ref().unwrap().action, Action::Slide { slide } if slide == reopened.slides[0].id)
+        );
+        assert_eq!(source.click.as_ref().unwrap().tooltip, "Last page");
+        assert_eq!(source.text.as_ref().unwrap().text(), "Before λ日本 after");
+        let extracted = crate::pptx::extract(&bytes).unwrap();
+        assert_eq!(
+            extracted.pages[1]
+                .links
+                .iter()
+                .filter(|l| l.uri == url)
+                .map(|l| l.text.as_str())
+                .collect::<String>(),
+            "λ日本"
+        );
+        let pdf = crate::pptx::to_pdf(&bytes).unwrap();
+        let extracted_pdf = crate::pdf::extract(&pdf, None).unwrap();
+        assert_eq!(extracted_pdf.pages.len(), 2);
+        assert!(extracted_pdf.pages[1].links.iter().any(|l| l.uri == url));
+        assert!(extracted_pdf.pages[1]
+            .links
+            .iter()
+            .any(|l| l.uri == "#page=1"));
+        author.set_shape_link(1, id, None, None, "").unwrap();
+        author.remove_slide(0).unwrap();
+        assert_eq!(author.shape_text(0, id).unwrap(), "Before λ日本 after");
+    }
+
+    #[test]
+    fn rejects_invalid_ranges_patches_and_links_atomically() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide().unwrap();
+        let id = author
+            .add_text(0, "text\nnext", 20.0, 20.0, 500.0, 100.0, 18.0)
+            .unwrap();
+        let revision = author.revision().unwrap();
+        let before = author.document().unwrap().clone();
+        for patch in [
+            r#"{"unknown":1}"#,
+            r#"{"bold":1}"#,
+            r#"{"font_size":true}"#,
+            r#"{"font_size":0}"#,
+            r#"{"font":[]}"#,
+            r#"{"underline":"not-style"}"#,
+            r#"{"background":"FFFFFF"}"#,
+            r#"{"color":{"r":1}}"#,
+            "[]",
+        ] {
+            assert!(author
+                .format_range_patch(0, id, 0, 2, revision, patch)
+                .is_err());
+        }
+        for url in [
+            "file:///tmp/a",
+            "javascript:alert(1)",
+            "https://",
+            "mailto:",
+            "https://x/a b",
+            "https://x/\n",
+        ] {
+            assert!(author
+                .set_range_link(0, id, 0, 2, revision, Some(url), None, "")
+                .is_err());
+        }
+        assert!(author
+            .format_range_patch(0, id, 0, 100, revision, "{}")
+            .is_err());
+        assert!(author.replace_range(0, id, 3, 2, revision, "bad").is_err());
+        assert!(author.add_run_patch(0, id, "\r", "{}").is_err());
+        assert!(author
+            .set_range_link(0, id, 4, 5, revision, Some("https://example.com"), None, "")
+            .is_err());
+        assert!(author
+            .set_shape_link(0, id, None, Some(u32::MAX), "")
+            .is_err());
+        assert!(author
+            .set_shape_link(
+                0,
+                id,
+                Some("https://example.com"),
+                Some(author.slide_id(0).unwrap()),
+                ""
+            )
+            .is_err());
+        assert!(author
+            .set_shape_link(0, id, None, None, "orphan tooltip")
+            .is_err());
+        assert_eq!(author.document().unwrap(), &before);
+        assert_eq!(author.revision().unwrap(), revision);
+        let current = author
+            .set_range_link(0, id, 0, 4, revision, Some("https://example.com"), None, "")
+            .unwrap();
+        assert!(author.range_text(0, id, 0, 4, revision).is_err());
+        let current = author
+            .set_range_link(0, id, 0, 4, current, None, None, "")
+            .unwrap();
+        assert_eq!(author.range_link(0, id, 0, 4, current).unwrap(), None);
+        let current = author
+            .set_range_link(0, id, 5, 9, current, Some("https://example.com"), None, "")
+            .unwrap();
+        let (_, _, latest) = author.add_run_patch(0, id, " extra", "{}").unwrap();
+        assert!(latest > current);
+        assert_eq!(author.range_link(0, id, 9, 15, latest).unwrap(), None);
+    }
+
+    #[test]
+    fn deletion_detects_table_and_nested_group_references() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide().unwrap();
+        author.add_slide().unwrap();
+        let target = author.slide_id(1).unwrap();
+        let id = author
+            .add_table(
+                0,
+                vec![vec!["Linked cell".into()]],
+                20.0,
+                20.0,
+                400.0,
+                100.0,
+                18.0,
+            )
+            .unwrap();
+        let link = make_link(
+            author.document().unwrap(),
+            None,
+            Some(target),
+            "Cell target",
+        )
+        .unwrap();
+        let document = author.presentation.as_mut().unwrap();
+        cell_mut(document, 0, id, 0, 0).unwrap().text.paragraphs[0].runs[0]
+            .props
+            .link = link;
+        let before = author.document().unwrap().clone();
+        assert!(author.remove_slide(1).is_err());
+        assert_eq!(author.document().unwrap(), &before);
+        let document = author.presentation.as_mut().unwrap();
+        let slide = Arc::make_mut(&mut document.slides[0]);
+        let child = slide.shapes.remove(0);
+        slide.shapes.push(Shape {
+            id: ShapeId(id + 1),
+            kind: ShapeKind::Group {
+                children: vec![child],
+                child: Xfrm::new(0.0, 0.0, 400.0, 100.0),
+            },
+            ..Default::default()
+        });
+        assert!(reject_referenced_slide(author.document().unwrap(), SlideId(target)).is_err());
+        assert!(reject_referenced_slide(
+            author.document().unwrap(),
+            SlideId(author.slide_id(0).unwrap())
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn rich_text_preflights_fragmentation_and_cloned_link_budgets() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide().unwrap();
+        let id = author
+            .add_text(0, "text", 20.0, 20.0, 500.0, 100.0, 18.0)
+            .unwrap();
+        let paragraph = &mut shape_mut(author.presentation.as_mut().unwrap(), 0, id)
+            .unwrap()
+            .text
+            .as_mut()
+            .unwrap()
+            .paragraphs[0];
+        paragraph.runs = (0..3000)
+            .map(|i| {
+                deckcraft_model::text::Run::with(
+                    "x",
+                    RunProps {
+                        bold: Some(i % 2 == 0),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
+        let revision = author.revision().unwrap();
+        let before = author.document().unwrap().clone();
+        let uri = format!("https://example.com/{}", "x".repeat(8000));
+        assert!(author
+            .set_range_link(0, id, 0, 3000, revision, Some(&uri), None, "")
+            .is_err());
+        assert_eq!(author.document().unwrap(), &before);
+        let paragraph = &mut shape_mut(author.presentation.as_mut().unwrap(), 0, id)
+            .unwrap()
+            .text
+            .as_mut()
+            .unwrap()
+            .paragraphs[0];
+        paragraph.runs = (0..MAX_RUNS)
+            .map(|i| {
+                deckcraft_model::text::Run::with(
+                    "abc",
+                    RunProps {
+                        bold: Some(i % 2 == 0),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
+        assert!(author
+            .format_range_patch(0, id, 1, 2, revision, r#"{"italic":true}"#)
+            .is_err());
+        assert_eq!(author.revision().unwrap(), revision);
     }
 }

@@ -7,14 +7,79 @@ import operator
 import os
 import stat
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from numbers import Real
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Generic, Literal, TypeVar, TypedDict, Unpack, overload
 
 from . import _core
 from .errors import DocumentClosedError, UnsupportedFormatError
 
+
+
+class _CharacterProperties(TypedDict, total=False):
+    bold: bool | None
+    italic: bool | None
+    font_size: float | None
+    font: str | None
+    color: str | tuple[int, int, int] | None
+    underline: bool | str | None
+    strike: bool | str | None
+    script: str | None
+    highlight: str | tuple[int, int, int] | None
+    background: str | tuple[int, int, int] | None
+
+
+class CharacterFormatting(_CharacterProperties, total=False):
+    style: str | None
+
+
+class ParagraphFormatting(TypedDict, total=False):
+    alignment: str | None
+    indent_left: float | None
+    indent_right: float | None
+    indent_first: float | None
+    space_before: float | None
+    space_after: float | None
+    line_spacing: float | None
+    keep_with_next: bool | None
+    keep_together: bool | None
+    widow_control: bool | None
+    page_break_before: bool | None
+    background: str | tuple[int, int, int] | None
+
+
+class StyleFormatting(_CharacterProperties, ParagraphFormatting):
+    pass
+
+
+def _format_patch(values, *, rgb_highlight: bool = False) -> str:
+    # Preserve omission versus explicit None; native adapters own allowed keys.
+    if len(values) > 32:
+        raise ValueError("too many formatting properties")
+    patch = {}
+    for key, value in values.items():
+        if isinstance(value, str) and len(value) > 16384:
+            raise ValueError("formatting value exceeds the patch limit")
+        if (key in {"color", "background"} or (rgb_highlight and key == "highlight")) and value is not None:
+            value = "auto" if value == "auto" else _hex_color(value)
+        if value is not None and not isinstance(value, (str, bool, int, float)):
+            raise TypeError("formatting values must be scalar values or None")
+        patch[key] = value
+    encoded = json.dumps(patch, ensure_ascii=False, allow_nan=False)
+    if len(encoded.encode("utf-8")) > 16384:
+        raise ValueError("formatting patch exceeds 16 KiB")
+    return encoded
+
+
+def _style_reference(value, owner):
+    if isinstance(value, Style):
+        if value._owner is not owner:
+            raise ValueError("style must belong to this document")
+        value = value.id
+    if value is not None and not isinstance(value, str):
+        raise TypeError("style must be a name, ID or Style from this document")
+    return value
 
 def pt(value: Real) -> float:
     """Return a finite length in points (1/72 inch)."""
@@ -109,6 +174,19 @@ def _rows(rows) -> list[list[str]]:
     if len(result) * len(result[0]) > 100000:
         raise ValueError("table must not exceed 100000 cells")
     return result
+
+
+@overload
+def new(filetype: Literal["docx", "word"], *, size=None) -> WordDocument: ...
+
+@overload
+def new(filetype: Literal["pdf"], *, size=None) -> PdfDocument: ...
+
+@overload
+def new(filetype: Literal["pptx", "powerpoint"], *, size=None) -> Presentation: ...
+
+@overload
+def new(filetype: str, *, size=None) -> EditableDocument: ...
 
 
 def new(filetype: str, *, size=None) -> EditableDocument:
@@ -249,13 +327,29 @@ class EditableDocument:
         return f"{type(self).__name__}(filetype={self._format!r}, closed={self.closed})"
 
 
-class _Collection(Sequence):
+_Item = TypeVar("_Item")
+
+
+class _Collection(Sequence[_Item], Generic[_Item]):
     def __init__(self, owner, ids, factory):
         self._owner, self._ids, self._factory = owner, ids, factory
 
     def __len__(self):
         self._owner._ensure_open()
         return len(self._ids())
+
+    def __iter__(self) -> Iterator[_Item]:
+        self._owner._ensure_open()
+        identifiers = self._ids()
+        for identifier in identifiers:
+            self._owner._ensure_open()
+            yield self._factory(self._owner, identifier)
+
+    @overload
+    def __getitem__(self, index: int) -> _Item: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> list[_Item]: ...
 
     def __getitem__(self, index):
         self._owner._ensure_open()
@@ -269,19 +363,23 @@ class WordDocument(EditableDocument):
     _format = "docx"
 
     @property
-    def paragraphs(self):
+    def styles(self) -> Styles:
+        return Styles(self)
+
+    @property
+    def paragraphs(self) -> _Collection[Paragraph]:
         return _Collection(self, lambda: self._call("paragraph_ids"), Paragraph)
 
     @property
-    def tables(self):
+    def tables(self) -> _Collection[EditableTable]:
         return _Collection(self, lambda: self._call("table_ids"), EditableTable)
 
     @property
-    def sections(self):
+    def sections(self) -> _Collection[Section]:
         return _Collection(self, lambda: [0], Section)
 
     @property
-    def images(self):
+    def images(self) -> _Collection[Picture]:
         return _Collection(self, lambda: self._call("image_ids"), Picture)
 
     @property
@@ -292,7 +390,8 @@ class WordDocument(EditableDocument):
     def background(self, color):
         self._call("set_background", None if color is None else _hex_color(color), _change=True)
 
-    def add_paragraph(self, text: str = "", *, style: str | None = None) -> Paragraph:
+    def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
+        style = _style_reference(style, self)
         if style is None:
             identifier = self._call("add_paragraph", text, _change=True)
         else:
@@ -317,6 +416,78 @@ class WordDocument(EditableDocument):
         return Picture(self, identifier)
 
 
+class Styles(_Collection["Style"]):
+    """Ordered named paragraph and character styles; look up by ID or name."""
+    def __init__(self, owner: WordDocument):
+        super().__init__(owner, lambda: owner._call("style_ids"), Style)
+
+    @overload
+    def __getitem__(self, key: str | int) -> Style: ...
+
+    @overload
+    def __getitem__(self, key: slice) -> list[Style]: ...
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            return Style(self._owner, json.loads(self._owner._call("style_info", key))["id"])
+        return super().__getitem__(key)
+
+    def add(self, name: str, *, kind: str = "paragraph", based_on: str | Style | None = None) -> Style:
+        identifier = self._owner._call("add_style", name, kind, _style_reference(based_on, self._owner), _change=True)
+        return Style(self._owner, identifier)
+
+
+class Style:
+    """A native named style with an immutable ID, name and kind."""
+    def __init__(self, owner: WordDocument, identifier: str):
+        self._owner, self._id = owner, identifier
+
+    def _info(self):
+        return json.loads(self._owner._call("style_info", self._id))
+
+    @property
+    def id(self) -> str:
+        return self._info()["id"]
+
+    @property
+    def name(self) -> str:
+        return self._info()["name"]
+
+    @property
+    def kind(self) -> str:
+        return self._info()["kind"]
+
+    @property
+    def builtin(self) -> bool:
+        return self._info()["builtin"]
+
+    @property
+    def based_on(self) -> Style | None:
+        identifier = self._info()["based_on"]
+        return None if identifier is None else Style(self._owner, identifier)
+
+    @based_on.setter
+    def based_on(self, value: str | Style | None):
+        self._owner._call("set_style_base", self._id, _style_reference(value, self._owner), _change=True)
+
+    @property
+    def formatting(self) -> dict:
+        """Direct properties; None denotes inheritance."""
+        return json.loads(self._owner._call("style_formatting", self._id))
+
+    @property
+    def resolved_formatting(self) -> dict:
+        """Formatting resolved through the native style inheritance chain."""
+        return json.loads(self._owner._call("style_formatting", self._id, True))
+
+    def format(self, **formatting: Unpack[StyleFormatting]) -> None:
+        """Omitted values stay unchanged; None clears an override."""
+        self._owner._call("format_style", self._id, _format_patch(formatting), _change=True)
+
+    def __repr__(self):
+        return f"Style(id={self.id!r}, name={self.name!r}, kind={self.kind!r})"
+
+
 class Paragraph:
     def __init__(self, owner: WordDocument, identifier: int):
         self._owner, self._id = owner, identifier
@@ -334,8 +505,8 @@ class Paragraph:
         return self._owner._call("paragraph_style", self._id)
 
     @style.setter
-    def style(self, value: str):
-        self._owner._call("set_paragraph_style", self._id, value, _change=True)
+    def style(self, value: str | Style):
+        self._owner._call("set_paragraph_style", self._id, _style_reference(value, self._owner), _change=True)
 
     @property
     def alignment(self) -> str:
@@ -373,42 +544,27 @@ class Paragraph:
             raise TypeError("spacing must be (before, after, line_spacing)")
         self._owner._call("set_paragraph_spacing", self._id, *map(pt, value), _change=True)
 
-    def add_run(self, text: str, *, bold: bool = False, italic: bool = False, font_size: float | None = None, font: str | None = None, color=None):
-        start, end, revision = self._owner._call("add_run", self._id, text, bold, italic, None if font_size is None else pt(font_size), font, None if color is None else _hex_color(color), _change=True)
+    @property
+    def _range_args(self):
+        return (self._id,)
+
+    def format(self, **formatting: Unpack[ParagraphFormatting]) -> None:
+        """Set paragraph properties; None restores inheritance."""
+        self._owner._call("format_paragraph", self._id, _format_patch(formatting), _change=True)
+
+    def add_run(self, text: str, **formatting: Unpack[CharacterFormatting]) -> TextRange:
+        start, end, revision = self._owner._call("add_run_patch", self._id, text, _format_patch(formatting), _change=True)
         return TextRange(self, start, end, revision)
 
+    _native_text_method = "paragraph_text"
+
     def find(self, text: str) -> list[TextRange]:
-        """Find non-overlapping literal matches; later edits invalidate these ranges."""
-        if not isinstance(text, str) or not text:
-            raise ValueError("search text must be a nonempty string")
-        content = self.text
-        position = 0
-        result = []
-        while (start := content.find(text, position)) >= 0:
-            end = start + len(text)
-            actual, revision = self._owner._call("text_range", self._id, start, end)
-            if actual != text:
-                raise ValueError("paragraph changed during search")
-            result.append(TextRange(self, start, end, revision))
-            position = end
-        return result
+        """Find non-overlapping literal matches; later edits invalidate ranges."""
+        return _find_ranges(self, text, TextRange)
 
     def replace_text(self, old: str, new: str) -> int:
-        """Atomically replace literal matches, preserving surrounding run formatting."""
-        if not isinstance(old, str) or not old:
-            raise ValueError("search text must be a nonempty string")
-        def replace(native):
-            content = native.paragraph_text(self._id)
-            positions = []
-            offset = 0
-            while (start := content.find(old, offset)) >= 0:
-                positions.append(start)
-                offset = start + len(old)
-            for start in reversed(positions):
-                _, revision = native.text_range(self._id, start, start + len(old))
-                native.replace_range(self._id, start, start + len(old), revision, new)
-            return len(positions)
-        return self._owner._atomic(replace)
+        """Atomically replace literal matches, preserving surrounding formatting."""
+        return _replace_text(self, old, new)
 
     def __repr__(self):
         return f"Paragraph(text={self.text!r})"
@@ -416,33 +572,120 @@ class Paragraph:
 
 class TextRange:
     """A Unicode character range that fails explicitly after incompatible edits."""
-    def __init__(self, paragraph: Paragraph, start: int, end: int, revision: int):
+    def __init__(self, paragraph: Paragraph | Shape, start: int, end: int, revision: int):
         self._paragraph = paragraph
         self._start, self._end, self._revision = start, end, revision
 
     @property
     def text(self) -> str:
         paragraph = self._paragraph
-        return paragraph._owner._call("range_text", paragraph._id, self._start, self._end, self._revision)
+        return paragraph._owner._call("range_text", *paragraph._range_args, self._start, self._end, self._revision)
 
     @text.setter
     def text(self, value: str):
         paragraph = self._paragraph
-        self._start, self._end, self._revision = paragraph._owner._call("replace_range", paragraph._id, self._start, self._end, self._revision, value, _change=True)
+        self._start, self._end, self._revision = paragraph._owner._call("replace_range", *paragraph._range_args, self._start, self._end, self._revision, value, _change=True)
 
     @property
     def link(self):
         paragraph = self._paragraph
-        return paragraph._owner._call("range_link", paragraph._id, self._start, self._end, self._revision)
+        return paragraph._owner._call("range_link", *paragraph._range_args, self._start, self._end, self._revision)
 
     @link.setter
     def link(self, url: str | None):
         paragraph = self._paragraph
-        self._revision = paragraph._owner._call("set_range_link", paragraph._id, self._start, self._end, self._revision, url, _change=True)
+        self._revision = paragraph._owner._call("set_range_link", *paragraph._range_args, self._start, self._end, self._revision, url, _change=True)
 
-    def format(self, *, bold: bool | None = None, italic: bool | None = None, font_size: float | None = None, font: str | None = None, color=None) -> None:
+    def format(self, **formatting: Unpack[CharacterFormatting]) -> None:
+        """Set character properties; omitted values stay and None inherits."""
         paragraph = self._paragraph
-        self._revision = paragraph._owner._call("format_range", paragraph._id, self._start, self._end, self._revision, bold, italic, None if font_size is None else pt(font_size), font, None if color is None else _hex_color(color), _change=True)
+        self._revision = paragraph._owner._call("format_range_patch", *paragraph._range_args, self._start, self._end, self._revision, _format_patch(formatting, rgb_highlight=isinstance(paragraph, Shape)), _change=True)
+
+
+def _find_ranges(content, text: str, factory):
+    if not isinstance(text, str) or not text:
+        raise ValueError("search text must be a nonempty string")
+    value = content.text
+    args = content._range_args
+    position = 0
+    result = []
+    while (start := value.find(text, position)) >= 0:
+        end = start + len(text)
+        actual, revision = content._owner._call("text_range", *args, start, end)
+        if actual != text:
+            raise ValueError("text changed during search")
+        result.append(factory(content, start, end, revision))
+        position = end
+    return result
+
+
+def _replace_text(content, old: str, new: str) -> int:
+    if not isinstance(old, str) or not old:
+        raise ValueError("search text must be a nonempty string")
+    if not isinstance(new, str):
+        raise TypeError("replacement text must be a string")
+    args = content._range_args
+    def replace(native):
+        value = getattr(native, content._native_text_method)(*args)
+        positions = []
+        offset = 0
+        while (start := value.find(old, offset)) >= 0:
+            positions.append(start)
+            offset = start + len(old)
+        for start in reversed(positions):
+            _, revision = native.text_range(*args, start, start + len(old))
+            native.replace_range(*args, start, start + len(old), revision, new)
+        return len(positions)
+    return content._owner._atomic(replace)
+
+
+def _slide_link_target(owner, target):
+    if isinstance(target, Slide):
+        if target._owner is not owner:
+            raise ValueError("link destination must belong to this presentation")
+        target.number  # Reject a deleted target before mutation.
+        return None, target._id
+    if target is not None and not isinstance(target, str):
+        raise TypeError("link destination must be a URL, Slide or None")
+    return target, None
+
+
+def _slide_link_value(owner, value):
+    if value is None:
+        return None
+    url, slide_id, _ = value
+    return url if slide_id is None else Slide(owner, slide_id)
+
+
+class _SlideTextRange(TextRange):
+    def _link_info(self):
+        content = self._paragraph
+        return content._owner._call("range_link", *content._range_args, self._start, self._end, self._revision)
+
+    @property
+    def link(self) -> str | Slide | None:
+        return _slide_link_value(self._paragraph._owner, self._link_info())
+
+    @link.setter
+    def link(self, target: str | Slide | None):
+        content = self._paragraph
+        url, slide_id = _slide_link_target(content._owner, target)
+        previous = self._link_info()
+        tooltip = previous[2] if previous is not None and target is not None else ""
+        self._revision = content._owner._call("set_range_link", *content._range_args, self._start, self._end, self._revision, url, slide_id, tooltip, _change=True)
+
+    @property
+    def link_tooltip(self) -> str:
+        value = self._link_info()
+        return "" if value is None else value[2]
+
+    @link_tooltip.setter
+    def link_tooltip(self, value: str):
+        info = self._link_info()
+        if info is None:
+            raise ValueError("set a link before setting its tooltip")
+        content = self._paragraph
+        self._revision = content._owner._call("set_range_link", *content._range_args, self._start, self._end, self._revision, info[0], info[1], value, _change=True)
 
 
 class Section:
@@ -471,13 +714,13 @@ class Section:
         self._owner._call("set_margins", *map(pt, value), _change=True)
 
 
-    def header(self, variant: str = "default"):
+    def header(self, variant: str = "default") -> EditableStory:
         """Access the default, first-page or even-page header."""
         if variant not in {"default", "first", "even"}:
             raise ValueError("header variant must be default, first or even")
         return EditableStory(self._owner, "header", variant)
 
-    def footer(self, variant: str = "default"):
+    def footer(self, variant: str = "default") -> EditableStory:
         """Access the default, first-page or even-page footer."""
         if variant not in {"default", "first", "even"}:
             raise ValueError("footer variant must be default, first or even")
@@ -493,13 +736,14 @@ class EditableStory:
         return self._owner._call("story_id", self._kind, self._variant)
 
     @property
-    def paragraphs(self):
+    def paragraphs(self) -> _Collection[Paragraph]:
         def identifiers():
             identifier = self._identifier()
             return [] if identifier is None else self._owner._call("story_paragraph_ids", identifier)
         return _Collection(self._owner, identifiers, Paragraph)
 
-    def add_paragraph(self, text: str = "", *, style: str | None = None):
+    def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
+        style = _style_reference(style, self._owner)
         def append(native):
             story = native.ensure_story(self._kind, self._variant)
             identifier = native.story_add_paragraph(story, text)
@@ -659,18 +903,19 @@ class EditableCell:
         return _Collection(owner, lambda: owner._call(f"cell_{kind}_ids", *self._content_args()), factory)
 
     @property
-    def paragraphs(self):
+    def paragraphs(self) -> _Collection[Paragraph]:
         return self._children("paragraph", Paragraph)
 
     @property
-    def tables(self):
+    def tables(self) -> _Collection[EditableTable]:
         return self._children("table", EditableTable)
 
     @property
-    def images(self):
+    def images(self) -> _Collection[Picture]:
         return self._children("image", Picture)
 
-    def add_paragraph(self, text: str = "", *, style: str | None = None):
+    def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
+        style = _style_reference(style, self._table._owner)
         args = self._content_args()
         def append(native):
             identifier = native.cell_add_paragraph(*args, text)
@@ -738,7 +983,7 @@ class PdfDocument(EditableDocument):
         self._call("update_metadata", json.dumps(values, ensure_ascii=False, allow_nan=False), _change=True)
 
     @property
-    def bookmarks(self):
+    def bookmarks(self) -> Bookmarks:
         return Bookmarks(self)
 
     @property
@@ -746,7 +991,7 @@ class PdfDocument(EditableDocument):
         return self._call("page_count")
 
     @property
-    def pages(self):
+    def pages(self) -> PdfPages:
         return PdfPages(self)
 
     def copy(self, *, pages=None):
@@ -756,7 +1001,7 @@ class PdfDocument(EditableDocument):
         return type(self)(self._call("subset", indices))
 
 
-class Bookmarks(_Collection):
+class Bookmarks(_Collection["Bookmark"]):
     def __init__(self, owner: PdfDocument, path=(), parent=None):
         self._path, self._parent = tuple(path), parent
         def identifiers():
@@ -861,7 +1106,7 @@ class Bookmark:
         self._owner._call("update_bookmark", list(self._path), open=value, _change=True)
 
 
-class PdfPages(_Collection):
+class PdfPages(_Collection["PdfPage"]):
     def __init__(self, owner):
         super().__init__(owner, lambda: range(owner.page_count), PdfPage)
 
@@ -939,7 +1184,7 @@ class PdfPage:
         self._generation = self._owner._page_generation
 
     @property
-    def annotations(self):
+    def annotations(self) -> Annotations:
         self._check()
         return Annotations(self)
 
@@ -998,7 +1243,7 @@ def _annotation_rect(box):
     return x, y, x + width, y + height
 
 
-class Annotations(_Collection):
+class Annotations(_Collection["Annotation"]):
     def __init__(self, page: PdfPage):
         self._page = page
         def identifiers():
@@ -1118,11 +1363,11 @@ class Presentation(EditableDocument):
         return self._call("slide_count")
 
     @property
-    def slides(self):
+    def slides(self) -> Slides:
         return Slides(self)
 
 
-class Slides(_Collection):
+class Slides(_Collection["Slide"]):
     def __init__(self, owner):
         super().__init__(owner, lambda: [owner._call("slide_id", index) for index in range(owner.page_count)], Slide)
 
@@ -1184,7 +1429,7 @@ class Slide:
         self._owner._call("background", self.number, _color(color), _change=True)
 
     @property
-    def shapes(self):
+    def shapes(self) -> Shapes:
         return Shapes(self)
 
     @property
@@ -1231,7 +1476,7 @@ class Slide:
         return self._owner._snapshot()[self.number].get_text(option)
 
 
-class Shapes(_Collection):
+class Shapes(_Collection["Shape | SlideTable"]):
     def __init__(self, slide: Slide):
         self._slide_owner = slide
         def factory(owner, pair):
@@ -1258,6 +1503,50 @@ class Shape:
     @property
     def _slide_number(self):
         return self._owner._call("slide_index", self._slide)
+
+    @property
+    def _range_args(self):
+        return self._slide_number, self._id
+
+    _native_text_method = "shape_text"
+
+    def add_run(self, text: str, **formatting: Unpack[CharacterFormatting]) -> _SlideTextRange:
+        start, end, revision = self._owner._call("add_run_patch", *self._range_args, text, _format_patch(formatting, rgb_highlight=True), _change=True)
+        return _SlideTextRange(self, start, end, revision)
+
+    def find(self, text: str) -> list[_SlideTextRange]:
+        """Find literal ranges across runs and LF-separated paragraphs."""
+        return _find_ranges(self, text, _SlideTextRange)
+
+    def replace_text(self, old: str, new: str) -> int:
+        """Atomically replace literal matches while retaining other formatting."""
+        return _replace_text(self, old, new)
+
+    def _link_info(self):
+        return self._owner._call("shape_link", self._slide_number, self._id)
+
+    @property
+    def link(self) -> str | Slide | None:
+        return _slide_link_value(self._owner, self._link_info())
+
+    @link.setter
+    def link(self, target: str | Slide | None):
+        url, slide_id = _slide_link_target(self._owner, target)
+        previous = self._link_info()
+        tooltip = previous[2] if previous is not None and target is not None else ""
+        self._owner._call("set_shape_link", self._slide_number, self._id, url, slide_id, tooltip, _change=True)
+
+    @property
+    def link_tooltip(self) -> str:
+        info = self._link_info()
+        return "" if info is None else info[2]
+
+    @link_tooltip.setter
+    def link_tooltip(self, value: str):
+        info = self._link_info()
+        if info is None:
+            raise ValueError("set a link before setting its tooltip")
+        self._owner._call("set_shape_link", self._slide_number, self._id, info[0], info[1], value, _change=True)
 
     @property
     def rotation(self):

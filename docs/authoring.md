@@ -37,7 +37,7 @@ DOCX and PPTX text accept LF newlines and rejects carriage returns (CR/CRLF); no
 
 ## DOCX text and page layout
 
-`document.add_paragraph(text="", style=None)` returns a paragraph. Its `text`, `style` and `alignment` properties are writable; styles must already exist in the upstream default style set. Setting paragraph text intentionally replaces run formatting. `add_run(text, bold=False, italic=False, font_size=None, font=None, color=None)` returns a revision-bound text range. `paragraph.set_list("bullet" | "numbered", level=0, restart=False)` controls native list membership; `None` clears it. Ordinary items continue the nearest matching sequence in the same story; restart creates a separate sequence. `paragraph.list_style` returns the current kind and level.
+`document.add_paragraph(text="", style=None)` returns a paragraph. Its `text`, `style` and `alignment` properties are writable; styles can be built-in or created through `document.styles`. Setting paragraph text intentionally replaces run formatting. `add_run(text, **formatting)` returns a revision-bound text range. `paragraph.set_list("bullet" | "numbered", level=0, restart=False)` controls native list membership; `None` clears it. Ordinary items continue the nearest matching sequence in the same story; restart creates a separate sequence. `paragraph.list_style` returns the current kind and level.
 
 `paragraph.find(literal)` returns non-overlapping Unicode-character ranges. A range exposes writable `text` and `format(bold=None, italic=None, font_size=None, font=None, color=None)`. An edit invalidates other existing ranges; stale access fails explicitly. `paragraph.replace_text(old, new)` replaces literal matches across run boundaries atomically and returns the count, preserving surrounding formatting. A range's `link` property reads/sets/clears an HTTP, HTTPS or mailto URL while preserving surrounding formatting. Mixed targets, stale ranges and unsafe URLs fail explicitly. This is a paragraph-scoped primitive, not a template engine or a promise to preserve arbitrary input DOCX packages.
 
@@ -46,6 +46,31 @@ DOCX and PPTX text accept LF newlines and rejects carriage returns (CR/CRLF); no
 `document.add_image(png_bytes_or_path, width=None, height=None, alt="")` returns a picture with writable `size` and `alt`. A single requested dimension preserves aspect ratio. PNG data is decoded and checked before insertion. DOCX authoring currently accepts PNG only, unlike the broader extraction surface.
 
 DOCX tables support rectangular string rows, writable cell text/background/vertical alignment, `table.merge((row, column), (last_row, last_column))`, and horizontal `cell.split(columns=2)`. Merged coordinates address the anchor; text snapshots contain content at the anchor once and empty covered cells. Partial or intersecting merges and unsupported vertical splits fail. Cells expose `paragraphs`, `tables` and `images`, plus the same `add_paragraph`, `add_table` and `add_image` primitives as the document. Rich nested content stays in its native container; `cell.text = ...` intentionally replaces it and invalidates old descendant handles. Table `column_widths` are point values constrained by the containing page/cell and existing nested content. `borders=(color, width)` applies uniform solid borders; `None` explicitly removes them. `table.row(index)` exposes `height=(points, "at_least" | "exact")` or `None` for automatic height, `repeat_header` and `allow_split`. Repeated header rows must form a contiguous prefix. Integer/decimal/date formatting belongs in ordinary Python before table insertion.
+
+### Named styles and formatting
+
+```python
+with doc_ex.new("docx") as document:
+    base = document.styles.add("Report body", based_on="Normal")
+    base.format(font_size=11, color="navy", space_after=8)
+    heading = document.styles.add("Report heading", based_on=base)
+    heading.format(bold=True, font_size=18, keep_with_next=True)
+    paragraph = document.add_paragraph("Revenue", style=heading)
+    paragraph.add_run(" this quarter")  # inherits the paragraph style
+    selected = paragraph.find("quarter")[0]
+    selected.format(italic=True, underline="single")
+    selected.format(italic=None)  # restore inherited italics
+```
+
+`document.styles` iterates paragraph/character styles in native order and supports integer/slice access or lookup by ID/name. `styles.add(name, kind="paragraph", based_on=None)` returns a style with immutable `id`, `name`, `kind`, `builtin`, writable `based_on`, and `format(**properties)`. IDs and display names are distinct. Passing a Style handle from another document is rejected. Table-style editing, next/linked styles, theme changes and style deletion/import remain open.
+
+`style.formatting` returns direct values; `None` indicates inheritance. `style.resolved_formatting` asks the upstream resolver for effective properties. `based_on` returns another Style or `None`. Duplicate/ambiguous names, wrong-kind or missing bases, inheritance cycles and chains exceeding 32 styles fail before mutation. A document accepts at most 1,024 named styles.
+
+Formatting follows one rule across `add_run`, range/paragraph `format`, and style `format`: omitted properties stay unchanged, `None` removes a direct override, and `False` explicitly disables a boolean property. New runs with omitted bold/italic inherit. `font_size` always means points. A successful range edit refreshes that range; other captured ranges may become stale after any document mutation.
+
+Character keys are `bold`, `italic`, `font_size`, `font`, `color`, `underline`, `strike`, `script`, `highlight`, `background`, and a character `style` ID/name. `color="auto"` uses native automatic color; `background` is RGB shading. Underline accepts bool or `none`, `single`, `words`, `double`, `thick`, `dotted`, `dash`, `dot_dash`, `dot_dot_dash`, `wave`, `double_wave`. Strike accepts bool or `none`, `single`, `double`; script accepts `baseline`, `superscript`, `subscript`. Highlight uses WordCraft's fixed palette (`yellow`, `bright_green`, `turquoise`, `pink`, `blue`, `red`, `dark_blue`, `teal`, `green`, `violet`, `dark_red`, `dark_yellow`, `gray50`, `gray25`, `black`, `white`, `none`). Unsupported names fail explicitly.
+
+`paragraph.format` accepts `alignment`, `indent_left`, `indent_right`, `indent_first`, `space_before`, `space_after`, `line_spacing`, `keep_with_next`, `keep_together`, `widow_control`, `page_break_before`, and `background`. Lengths use points and line spacing is a multiplier. Table-cell spacing inspection includes native table-style inheritance. Paragraph-style `format` accepts both character and paragraph properties, with `background` meaning paragraph shading; character-style background means run shading. Style bases are changed through `based_on`, not a formatting `style` field. Patches are flat, allowlisted and bounded to 16 KiB.
 
 ## PDF pages and assembly
 
@@ -79,7 +104,7 @@ Notes use the upstream fixed 20×20 PDF-user-unit icon size. Notes and highlight
 
 `pdf.metadata` is a snapshot. `pdf.update_metadata(title=..., author=..., subject=..., keywords=...)` updates supported document-info fields, with `None` or an empty string clearing a field. Unknown keys and invalid batches fail atomically.
 
-`pdf.bookmarks` is an ordered hierarchy. `bookmarks.add(title, page, index=None)` returns an entry with `title`, `page`, `expanded` and `children`. Child collections support the same insertion, deletion and `move(index, destination, to=another_collection)` operations. Structural outline edits invalidate existing bookmark handles; retrieve them again. Targets track native page organization. Native write depth is limited to 32, and imported outlines deeper than the upstream listing limit are not advertised as fully inspectable. Attachments require a separately bounded upstream API.
+`pdf.bookmarks` is an ordered hierarchy. `bookmarks.add(title, page, index=None)` returns an entry with `title`, `page`, `expanded` and `children`. Child collections support the same insertion, deletion and `move(index, destination, to=another_collection)` operations. Structural outline edits invalidate unrelated bookmark handles; retrieve them again. A child collection refreshes its originating parent after its own insertion, deletion or same-parent move, so it remains usable. Targets track native page organization. Native write depth is limited to 32, and imported outlines deeper than the upstream listing limit are not advertised as fully inspectable. Attachments require a separately bounded upstream API.
 
 ## PPTX slides and typed shapes
 
@@ -131,3 +156,13 @@ with doc_ex.new("docx") as report:
 ```
 
 The installed-wheel recipe test reopens both outputs, checks table rows appear once, verifies the link and renders both. DOCX reflows through WordCraft; the PDF is fixed output from its native layout, with the same documented font/layout limitations.
+
+### PPTX rich text and navigation
+
+Text-bearing shapes reuse `add_run(text, **formatting)`, `find(text)` and `replace_text(old, new)`; matches may cross runs and LF-separated paragraphs. Ranges expose `text`, `format`, `link` and `link_tooltip`. Unicode character offsets are private, checked and revision-bound. Replacement preserves surrounding formatting and uses the first selected character's appearance. Appended runs inherit appearance but do not inherit an adjacent hyperlink.
+
+PPTX character patches support bold/italic, font_size, font, color, underline, strike, script and RGB `highlight`. Underline accepts the shared readable DOCX names plus `thick_dotted`, `thick_dash`, `long_dash`, `thick_long_dash`, `thick_dot_dash`, `thick_dot_dot_dash`, and `thick_wave`. Native XML spellings are not public API. Run background shading and named DOCX styles have no equivalent in this profile and fail explicitly. Rich PPTX table-cell ranges remain separate work.
+
+A shape or text range's `link` accepts an HTTP/HTTPS/mailto URL, a Slide from the same presentation, or `None`. `link_tooltip` requires an existing target. URL and internal slide links survive native serialization and PDF export. Reordering follows stable native slide IDs; deleting a slide still referenced by surviving shapes, text, cells, notes or groups is rejected. PPTX extraction currently reports internal actions as an explicit omission diagnostic; this save/export support does not complete internal-link extraction parity.
+
+Text edits preflight run/paragraph fragmentation (100,000 each), visible text and duplicated string properties (16 MiB each), URL targets (8 KiB) and tooltips (4 KiB). Unsupported executable actions are never constructed. Whole-shape text and font setters also respect these limits. Existing output and format fidelity limits still apply.

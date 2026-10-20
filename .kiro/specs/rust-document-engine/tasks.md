@@ -21,7 +21,7 @@ The original checklist above records the engine implementation. Track subsequent
 | P0 | R3 | Consistent PNG metadata at requested DPI | Verified in unreleased installed wheel |
 | P0 | R2, R4 | Dimensions, visible output and limit validation | Partial; broader geometry corpus and upstream failure reporting remain |
 | P1 | C1–C5 | Authoring contract, DOCX/PDF creation, reports, templates | Initial native creation/edit/save profile verified; broader criteria remain open |
-| P1 | E1–E6 | Structured tables, source locators, Office semantics, PDF links, diagnostics, Markdown assets | E1 DOCX/PPTX recursive cells/spans and unambiguous E4 PDF link offsets verified; broader E1 and E2–E6 remain open |
+| P1 | E1–E6 | Structured tables, source locators, Office semantics, PDF links, diagnostics, Markdown assets | E1 DOCX/PPTX recursive cells/spans and unambiguous E4 PDF link offsets verified; E6 portable media export is verified; broader E1 and E2–E5 remain open |
 | P2 | P1–P4 | Parse/layout reuse, region rendering, PDF assembly, bounded extraction | Basic native PDF assembly verified; complete preservation and performance criteria remain open |
 
 Completion criteria live with each roadmap item. Update requirements/design and record installed-wheel evidence in `validation.md` as features are implemented; existing rendering signature tests do not complete R2–R4.
@@ -74,9 +74,19 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 
 - [x] Complete C2 basic DOCX creation with native lists and revision-bound URL links.
 - [x] Complete C3 basic PDF creation with supplied-font Unicode text and native vector paths; verify visible glyphs, font rejection and geometry.
-- [x] Verify blank DOCX lifecycle (DOC1), native report DOCX/PDF recipe (C4) and repeated-table-header PDF rendering (TBL11).
+- [x] Verify blank DOCX lifecycle (DOC1), native report DOCX/PDF and structured-row recipes (C4/TBL11), plus repeated-table-header PDF rendering (part of TBL6).
 - [x] Add native PDF metadata and hierarchical bookmark editing with atomic validation and explicit collection/handle lifetimes.
 - [x] Add bounded model-derived DOCX/PPTX omission diagnostics and 128 MiB input/64 MiB serialized-payload guards.
 - [x] Correct header/footer read side effects and child bookmark collection self-invalidation; standardize public authoring font_size spelling.
 - [x] Verify 63 Rust and 85 installed-wheel Python tests, locked release artifact, formatting, Clippy and unchanged 263-package license graph.
 - [ ] Complete full diagnostics/conversion coverage, complex-script font fidelity, advanced lists/styles, selective extraction and all remaining unchecked roadmap criteria.
+
+## Styles, slide ranges and Markdown assets (unreleased)
+
+- [x] Add bounded DOCX named paragraph/character styles, inherited/direct formatting snapshots and explicit reset/false semantics.
+- [x] Complete basic character formatting (TXT2), including underline variants, strike/double-strike, scripts, highlight and shading with native round trips.
+- [x] Reuse revision-bound ranges for PPTX Unicode text, replacement, formatting and URL/internal navigation; verify native PPTX/PDF output and referenced-target deletion safety.
+- [x] Complete E6 with owned in-memory Markdown/media/manifest files, separate stories, shared nested-table HTML rendering and explicit resource limits.
+- [x] Improve typed Python factory/collections/formatting discovery and keep canonical font_size/underline spelling across adapters.
+- [x] Verify 75 Rust tests, 97 installed-wheel Python tests, formatting, Clippy and the locked artifact with unchanged dependencies/attribution.
+- [ ] Complete table-style/theme/next-linked-style editing, multiple sections, full PPTX table semantics and remaining source-preservation/advanced criteria.
