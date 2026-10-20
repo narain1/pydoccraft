@@ -396,3 +396,10 @@ One private matcher compares nine effective native Level values against once-per
 A cheap canonical-Legal activation pass collects top-level source paragraph indices with owning section indices. It bounds body visits at 100,000 and target work at 100,000 (four per UTF-8 byte, one per paragraph and inline object). The existing native pagination pass supplies Page.body, section identity, Label extents and first-line caret coordinates. The adapter checks finite logical extents, resolved-direction nonintersection and body containment, without computing indentation, bidi placement or counters. Empty text carets are permitted; missing/duplicate label placements fail. Existing 10,000-page and 2,000,000-item limits remain, with a cumulative 2,000,000 label-glyph/run/caret scan budget.
 
 Assignment validates staged geometry; every commit rechecks cheap scope, and save/render/export recheck geometry after later formatting. There is no cell-map framework, ancestor transform reconstruction or second paginator. The new profile does not change the old bullet/numbered narrow-cell limitations or imply arbitrary glyph-ink containment.
+
+
+## 63. Resolve presentation ordinals after normalization
+
+PPTX handles retain stable slide and shape IDs, unlike the conservative PDF page-generation model. The facade first validates a slide through its existing number lookup or a shape through the cheap native shape_placeholder lookup. It then normalizes numeric/color/format inputs and resolves the current slide index again for native mutation. Existing native per-slide shape lookup rejects deleted shapes; no identifier-to-ordinal cache or replacement handle is added.
+
+The same callback discipline applies to generic range formatting: an initial existing revision query provides fast stale/closed rejection without retrieving text, while the native mutation still enforces the captured range revision after callbacks. Changes made by the caller are preserved; this is not automatic rollback of callback effects.

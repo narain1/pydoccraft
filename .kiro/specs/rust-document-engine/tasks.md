@@ -424,3 +424,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Verify isolated native/public hierarchy, nine-level maximum-start LTR/RTL ink, source/PDF output, copy/wrapping/callback and compatibility regressions.
 - [ ] Complete integrated locked native/release/installed-wheel validation and independent manual review/current-main CI.
 - [ ] Keep broader custom list definitions, cell/auxiliary outline placement and TXT5 completion open.
+
+
+## Presentation and range callback ownership
+
+- [x] Reproduce wrong-slide background updates and stale-ordinal shape failures, then resolve stable target IDs after normalization.
+- [x] Verify focused stable-ID/control-output, early/late invalidation, copy and appended-range regressions; retain native final checks.
+- [x] Complete early stale-range normalization guard and DOCX/PPTX shape/cell controls.
+- [ ] Complete integrated clean-wheel validation, independent review and exact-head/current-main CI before manual merge.
