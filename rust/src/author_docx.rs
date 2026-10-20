@@ -348,6 +348,11 @@ impl EditableDocx {
                 let margins =
                     wordcraft_layout::cell_margins(self.document()?, table, row_index, cell_index);
                 let available = width - f64::from(margins[1] + margins[3]);
+                if cell.props.margins.is_some() && available <= 0.0 {
+                    return Err(PyValueError::new_err(
+                        "column resize must leave positive width inside explicit cell margins",
+                    ));
+                }
                 for block in &cell.blocks {
                     let exceeds = match block.as_ref() {
                         Block::Table(nested) => f64::from(nested.total_width()) > available + 0.001,
@@ -3442,6 +3447,11 @@ fn validate_grid_children(document: &Document, table: &Table) -> PyResult<()> {
             let end = column + cell.span();
             let margins = wordcraft_layout::cell_margins(document, table, row_index, cell_index);
             let available = table.grid[column..end].iter().sum::<f32>() - margins[1] - margins[3];
+            if cell.props.margins.is_some() && available <= 0.0 {
+                return Err(PyValueError::new_err(
+                    "table edit must leave positive width inside explicit cell margins",
+                ));
+            }
             blocks_fit_width(&cell.blocks, available)?;
             column = end;
         }
@@ -5590,5 +5600,38 @@ mod tests {
         assert_eq!(document.cell_paragraph_ids(second, 0, 0).unwrap().len(), 1);
         document.split_cell(second, 0, 0, 2).unwrap();
         assert_eq!(document.cell_paragraph_ids(second, 0, 0).unwrap().len(), 1);
+    }
+    #[test]
+    fn grid_edits_reject_explicit_margin_overflow_before_invalidating_handles() {
+        let mut document = EditableDocx::new();
+        let table = document
+            .add_table(vec![vec!["A".into(), "B".into()]])
+            .unwrap();
+        document
+            .set_column_widths(table, vec![100.0, 100.0])
+            .unwrap();
+        document.merge_cells(table, 0, 0, 0, 1).unwrap();
+        document
+            .set_cell_margins(table, 0, 0, Some((0.0, 75.0, 0.0, 75.0)))
+            .unwrap();
+        let paragraph = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
+        let revision = document.revision().unwrap();
+        let generation = document.table_generation(table).unwrap();
+        let before = document.document().unwrap().clone();
+        assert!(document.delete_column(table, 1).is_err());
+        assert!(document.split_cell(table, 0, 0, 2).is_err());
+        assert!(document.set_column_widths(table, vec![50.0, 50.0]).is_err());
+        assert_eq!(document.document().unwrap(), &before);
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.table_generation(table).unwrap(), generation);
+        assert_eq!(document.paragraph_text(paragraph).unwrap(), "A");
+        document
+            .set_cell_margins(table, 0, 0, Some((0.0, 10.0, 0.0, 10.0)))
+            .unwrap();
+        document.delete_column(table, 1).unwrap();
+        assert_eq!(document.column_widths(table).unwrap(), vec![100.0]);
+        let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+        assert!(reopened.plain_text(StoryRef::Body).contains('A'));
+        assert!(reopened.plain_text(StoryRef::Body).contains('B'));
     }
 }
