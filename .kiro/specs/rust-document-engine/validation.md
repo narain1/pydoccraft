@@ -227,3 +227,12 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 - pydoccraft median capability baselines were 20.16 ms for DOCX extraction, 5.07 ms for PPTX extraction, 9.84 ms for PDF→DOCX, 22.67 ms for DOCX→PDF, and 154.19 ms for PPTX→PDF.
 - openpyxl 3.1.5 was measured only as a separate XLSX baseline because it has no equivalent PDF/DOCX/PPTX parsing, rendering, or conversion operation.
 - Conversion outputs reopened and contained text; render outputs had valid PNG signatures. See `docs/benchmarks.md` for methodology, environment, hashes, limitations, and rough-edge tracking links.
+
+## 2026-10-20 anonymized local-file performance baseline
+
+- Benchmarked five local files without publishing filenames, paths, hashes, or extracted text: three PDFs, one DOCX, and one PPTX.
+- Used one warmup and five measured iterations on Apple M5 Pro / macOS 26.6.2 / CPython 3.13.12; generated outputs were validated after timing and not retained.
+- Across PDFs of 14, 65, and 391 pages, PyMuPDF text extraction was 4.16×, 4.57×, and 3.15× faster respectively.
+- First-page 144-DPI RGBA rendering favored PyMuPDF by 1.93×, 5.41×, and 59.83×. The 391-page result confirms that pydoccraft first-page latency is dominated by eager whole-document extraction plus render reopening.
+- pydoccraft PDF→DOCX conversion medians ranged from 69.38 ms to 759.18 ms. The 2-page DOCX extracted in 5.18 ms, rendered in 16.49 ms, and converted to PDF in 6.65 ms. The 14-slide PPTX extracted in 41.93 ms, rendered in 72.73 ms, and converted to PDF in 168.11 ms.
+- Full anonymized numeric results and methodology are in `docs/benchmarks.md`; the reusable local runner is `benchmarks/benchmark_test_files.py`.
