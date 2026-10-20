@@ -320,3 +320,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Share native placed-frame validation and disable editor-only story dimming for document PNG output.
 - [x] Verify the complete locked/native and clean installed-wheel corpus and record artifact evidence.
 - [ ] Retain header/footer linkage, clearing/general movement, rich notes and unmeasured inactive-variant geometry as broader open work.
+
+
+## Bounded native line numbering
+
+- [x] Add Section.line_numbers through existing native section patches and readable restart names.
+- [x] Preserve native multi-column and continuous-resume defect repros, rejecting affected authored configurations atomically.
+- [x] Preflight label work before both authored full-layout validation paths and share the existing physical-bound validation pass.
+- [x] Verify complete locked/native and clean installed-wheel acceptance; record artifact and upstream evidence.
+- [ ] Retain multi-column labels, affected continuous page restarts and broader LAY6 numbering fidelity as upstream work.
