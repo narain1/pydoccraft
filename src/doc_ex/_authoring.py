@@ -41,6 +41,7 @@ class TabStop(TypedDict, total=False):
 
 
 class ParagraphFormatting(TypedDict, total=False):
+    borders: dict[str, BorderFormatting | None] | None
     tabs: list[TabStop] | None
     alignment: str | None
     indent_left: float | None
@@ -62,7 +63,6 @@ class _StyleProperties(_CharacterProperties, ParagraphFormatting, total=False):
 
 class StyleFormatting(_StyleProperties, total=False):
     vertical_alignment: str | None
-    borders: dict[str, BorderFormatting | None] | None
     margins: float | tuple[float, float, float, float] | None
     row_band_size: int | None
 
@@ -183,6 +183,9 @@ def _format_patch(values, *, rgb_highlight: bool = False) -> str:
         raise ValueError("too many formatting properties")
     patch = {}
     for key, value in values.items():
+        if key == "borders":
+            patch.update(json.loads(_table_format_patch({key: value}, cell=True)))
+            continue
         if key == "tabs" and value is not None:
             if not isinstance(value, (list, tuple)) or len(value) > 64:
                 raise ValueError("tabs must contain at most 64 tab-stop mappings")

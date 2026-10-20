@@ -3307,6 +3307,14 @@ fn border_value(value: &Value) -> PyResult<Option<Border>> {
             "border width must be 0.125..12 points in eighth-point increments",
         ));
     }
+    if matches!(style, BorderStyle::Triple | BorderStyle::DotDash)
+        || (style != BorderStyle::None && width < 0.25)
+        || (style == BorderStyle::Thick && width < 1.5)
+    {
+        return Err(EngineError::Unsupported(
+            "native DOCX borders require width at least 0.25pt (1.5pt for thick); triple and dot_dash styles are unavailable".into(),
+        ).into());
+    }
     Ok(Some(Border {
         style,
         width: width as f32,
@@ -3337,10 +3345,23 @@ fn apply_border_patch(target: &mut Option<Borders>, value: &Value, inner: bool) 
                 )))
             }
         };
-        *side = border_value(value)?;
+        *side = border_for_side(value, key)?;
     }
     *target = (borders != Borders::default()).then_some(borders);
     Ok(())
+}
+fn border_for_side(value: &Value, side: &str) -> PyResult<Option<Border>> {
+    let border = border_value(value)?;
+    if matches!(side, "left" | "right" | "inside_vertical")
+        && border
+            .is_some_and(|border| matches!(border.style, BorderStyle::Double | BorderStyle::Wave))
+    {
+        return Err(EngineError::Unsupported(
+            "native DOCX double and wave borders support only horizontal edges".into(),
+        )
+        .into());
+    }
+    Ok(border)
 }
 fn borders_snapshot(borders: Option<Borders>, inner: bool) -> Value {
     let Some(borders) = borders else {
@@ -4325,12 +4346,11 @@ fn format_patch(input: &str) -> PyResult<Map<String, Value>> {
     let Value::Object(values) = value else {
         return Err(PyValueError::new_err("format patch must be a JSON object"));
     };
-    if values
-        .iter()
-        .any(|(key, value)| value.is_object() || (value.is_array() && key != "tabs"))
-    {
+    if values.iter().any(|(key, value)| {
+        (value.is_object() && key != "borders") || (value.is_array() && key != "tabs")
+    }) {
         return Err(PyValueError::new_err(
-            "format patch values must be scalar, except the tabs list",
+            "format patch values must be scalar, except the tabs list and borders mapping",
         ));
     }
     Ok(values)
@@ -4567,6 +4587,7 @@ fn is_paragraph_key(key: &str) -> bool {
             | "page_break_before"
             | "background"
             | "tabs"
+            | "borders"
     )
 }
 
@@ -4574,6 +4595,7 @@ fn is_paragraph_key(key: &str) -> bool {
 struct ParaPatch {
     values: ParaProps,
     clear: BTreeSet<String>,
+    border_sides: BTreeMap<String, Option<Border>>,
 }
 
 impl ParaPatch {
@@ -4629,6 +4651,20 @@ impl ParaPatch {
                 "widow_control" => patch.values.widow_control = bool_value(value)?,
                 "page_break_before" => patch.values.page_break_before = bool_value(value)?,
                 "background" => patch.values.shading = Some(parse_rgb(text_value(value)?)?),
+                "borders" => {
+                    let sides = value.as_object().ok_or_else(|| {
+                        PyValueError::new_err("borders requires a side mapping or None")
+                    })?;
+                    for (side, value) in sides {
+                        if !matches!(side.as_str(), "top" | "right" | "bottom" | "left") {
+                            return Err(PyValueError::new_err(
+                                "paragraph borders support only top, right, bottom and left",
+                            ));
+                        }
+                        let border = border_for_side(value, side)?;
+                        patch.border_sides.insert(side.clone(), border);
+                    }
+                }
                 "tabs" => {
                     let tabs = parse_tabs(value)?;
                     if tabs.is_empty() {
@@ -4674,10 +4710,24 @@ impl ParaPatch {
                 "page_break_before" => props.page_break_before = None,
                 "background" => props.shading = None,
                 "tabs" => props.tabs = None,
+                "borders" => props.borders = None,
                 _ => {}
             }
         }
         props.overlay(&self.values);
+        if !self.border_sides.is_empty() {
+            let mut borders = props.borders.unwrap_or_default();
+            for (side, border) in &self.border_sides {
+                match side.as_str() {
+                    "top" => borders.top = *border,
+                    "right" => borders.right = *border,
+                    "bottom" => borders.bottom = *border,
+                    "left" => borders.left = *border,
+                    _ => unreachable!("validated paragraph border side"),
+                }
+            }
+            props.borders = (borders != Borders::default()).then_some(borders);
+        }
     }
 }
 
@@ -4786,6 +4836,7 @@ fn resolved_char_snapshot(props: &wordcraft_doc::resolve::ResolvedChar) -> Map<S
 
 fn para_snapshot(props: &ParaProps) -> PyResult<Map<String, Value>> {
     Ok(snapshot([
+        ("borders", borders_snapshot(props.borders, false)),
         (
             "tabs",
             props
@@ -4820,6 +4871,7 @@ fn resolved_para_snapshot(
     props: &wordcraft_doc::resolve::ResolvedPara,
 ) -> PyResult<Map<String, Value>> {
     Ok(snapshot([
+        ("borders", borders_snapshot(props.borders, false)),
         ("tabs", tabs_snapshot(&props.tabs)),
         ("alignment", json!(alignment_name(props.align))),
         ("indent_left", json!(props.indent_left)),
@@ -5345,6 +5397,436 @@ fn range_offsets(text: &str, start: usize, end: usize) -> PyResult<(usize, usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn border_pixels(png: Vec<u8>, channel: usize) -> usize {
+        let mut reader = png::Decoder::new(Cursor::new(png)).read_info().unwrap();
+        let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+        let frame = reader.next_frame(&mut pixels).unwrap();
+        assert_eq!(frame.color_type, png::ColorType::Rgba);
+        pixels[..frame.buffer_size()]
+            .chunks_exact(4)
+            .filter(|pixel| {
+                // Native preview dims header/footer ink; count clear hue dominance
+                // rather than requiring fully saturated pixels.
+                pixel[channel] > 200
+                    && pixel[channel].saturating_sub(pixel[(channel + 1) % 3]) > 40
+                    && pixel[channel].saturating_sub(pixel[(channel + 2) % 3]) > 40
+            })
+            .count()
+    }
+
+    #[test]
+    fn paragraph_borders_inherit_as_groups_and_reset_direct_sides() {
+        let mut document = EditableDocx::new();
+        let style = document.add_style("Bordered", "paragraph", None).unwrap();
+        document
+            .format_defaults(r##"{"borders":{"top":{"color":"#FF0000","width":2}}}"##)
+            .unwrap();
+        document
+            .format_style(
+                &style,
+                r##"{"borders":{"bottom":{"color":"#00FF00","width":2}}}"##,
+                None,
+            )
+            .unwrap();
+        let inherited = document.add_paragraph("Default border").unwrap();
+        let paragraph = document.add_paragraph("Style border").unwrap();
+        document.set_paragraph_style(paragraph, &style).unwrap();
+        let second = document.add_paragraph("Same style border").unwrap();
+        document.set_paragraph_style(second, &style).unwrap();
+        document
+            .format_paragraph(
+                paragraph,
+                r##"{"borders":{"right":{"color":"#0000FF","width":2}}}"##,
+            )
+            .unwrap();
+        let resolved: Value =
+            serde_json::from_str(&document.paragraph_formatting(paragraph, true).unwrap()).unwrap();
+        assert!(resolved["borders"]["top"].is_null());
+        assert!(resolved["borders"]["bottom"].is_null());
+        assert_eq!(resolved["borders"]["right"]["color"], "#0000FF");
+        document
+            .format_paragraph(
+                paragraph,
+                r##"{"borders":{"left":{"color":"#FF0000","width":1}}}"##,
+            )
+            .unwrap();
+        document
+            .format_paragraph(paragraph, r#"{"borders":{"left":null}}"#)
+            .unwrap();
+        let direct: Value =
+            serde_json::from_str(&document.paragraph_formatting(paragraph, false).unwrap())
+                .unwrap();
+        assert!(direct["borders"]["left"].is_null());
+        assert_eq!(direct["borders"]["right"]["width"], 2.0);
+        let output = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&output).unwrap();
+        for (id, side, color) in [
+            (inherited, "top", "#FF0000"),
+            (paragraph, "right", "#0000FF"),
+            (second, "bottom", "#00FF00"),
+        ] {
+            let para = reopened.para(StoryRef::Body, &Path::top(id)).unwrap();
+            let snapshot =
+                resolved_para_snapshot(&reopened.styles.resolve_para(&para.props)).unwrap();
+            assert_eq!(snapshot["borders"][side]["color"], color);
+        }
+        let pdf = crate::docx::to_pdf(&output, None).unwrap();
+        for channel in 0..3 {
+            assert!(
+                border_pixels(
+                    crate::docx::render(&output, 0, 72.0, None).unwrap(),
+                    channel
+                ) > 10
+            );
+            assert!(border_pixels(crate::pdf::render(&pdf, 0, 72.0, None).unwrap(), channel) > 10);
+        }
+        let mut copy = document.copy().unwrap();
+        copy.format_paragraph(paragraph, r#"{"borders":null}"#)
+            .unwrap();
+        let reset: Value =
+            serde_json::from_str(&copy.paragraph_formatting(paragraph, true).unwrap()).unwrap();
+        assert_eq!(reset["borders"]["bottom"]["color"], "#00FF00");
+        assert!(reset["borders"]["right"].is_null());
+        copy.format_style(&style, r#"{"borders":null}"#, None)
+            .unwrap();
+        let reset: Value =
+            serde_json::from_str(&copy.paragraph_formatting(paragraph, true).unwrap()).unwrap();
+        assert_eq!(reset["borders"]["top"]["color"], "#FF0000");
+        copy.format_defaults(r#"{"borders":null}"#).unwrap();
+        let reset: Value =
+            serde_json::from_str(&copy.paragraph_formatting(paragraph, true).unwrap()).unwrap();
+        assert!(reset["borders"].is_null());
+        let output = copy.to_bytes().unwrap();
+        assert_eq!(
+            border_pixels(crate::docx::render(&output, 0, 72.0, None).unwrap(), 0),
+            0
+        );
+        assert_eq!(
+            document.paragraph_formatting(paragraph, false).unwrap(),
+            Value::Object(direct.as_object().unwrap().clone()).to_string()
+        );
+    }
+
+    #[test]
+    fn paragraph_border_styles_draw_colored_edges_in_docx_and_pdf() {
+        for style in ["single", "double", "dotted", "dashed", "thick", "wave"] {
+            let vertical = if matches!(style, "double" | "wave") {
+                "single"
+            } else {
+                style
+            };
+            let mut document = EditableDocx::new();
+            document.set_page_size(300.0, 300.0).unwrap();
+            document.set_margins(40.0, 40.0, 40.0, 40.0).unwrap();
+            let paragraph = document.add_paragraph("Four colored borders").unwrap();
+            document
+                .format_paragraph(
+                    paragraph,
+                    &json!({"borders":{
+                        "top":{"style":style,"color":"#FF0000","width":2},
+                        "right":{"style":vertical,"color":"#00FF00","width":2},
+                        "bottom":{"style":style,"color":"#0000FF","width":2},
+                        "left":{"style":vertical,"color":"#FF0000","width":2}
+                    }})
+                    .to_string(),
+                )
+                .unwrap();
+            let output = document.to_bytes().unwrap();
+            let reopened = wordcraft_docx::read(&output).unwrap();
+            let props = &reopened
+                .para(StoryRef::Body, &Path::top(paragraph))
+                .unwrap()
+                .props;
+            assert_eq!(
+                borders_snapshot(props.borders, false)["top"]["style"],
+                style
+            );
+            let pdf = crate::docx::to_pdf(&output, None).unwrap();
+            for channel in 0..3 {
+                assert!(
+                    border_pixels(
+                        crate::docx::render(&output, 0, 144.0, None).unwrap(),
+                        channel
+                    ) > 10,
+                    "{style} channel {channel}"
+                );
+                assert!(
+                    border_pixels(crate::pdf::render(&pdf, 0, 144.0, None).unwrap(), channel) > 10,
+                    "{style} PDF channel {channel}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn paragraph_borders_render_in_cell_header_and_footer_scopes() {
+        for scope in ["cell", "header", "footer"] {
+            let mut document = EditableDocx::new();
+            document.add_paragraph("Body text").unwrap();
+            let paragraph = if scope == "cell" {
+                let table = document
+                    .add_table(vec![vec!["Cell paragraph".into()]])
+                    .unwrap();
+                document.cell_paragraph_ids(table, 0, 0).unwrap()[0]
+            } else {
+                let story = document.ensure_story(scope, "default", 0).unwrap();
+                document
+                    .story_add_paragraph(story, "Story paragraph")
+                    .unwrap()
+            };
+            document
+                .format_paragraph(
+                    paragraph,
+                    r##"{"borders":{"bottom":{"color":"#FF0000","width":2}}}"##,
+                )
+                .unwrap();
+            let output = document.to_bytes().unwrap();
+            let pdf = crate::docx::to_pdf(&output, None).unwrap();
+            assert!(
+                border_pixels(crate::docx::render(&output, 0, 144.0, None).unwrap(), 0) > 100,
+                "{scope}"
+            );
+            assert!(
+                border_pixels(crate::pdf::render(&pdf, 0, 144.0, None).unwrap(), 0) > 100,
+                "{scope} PDF"
+            );
+        }
+    }
+
+    #[test]
+    fn paragraph_border_patches_are_atomic_and_preserve_table_border_dispatch() {
+        let mut document = EditableDocx::new();
+        let paragraph = document.add_paragraph("Atomic border").unwrap();
+        let style = document
+            .add_style("Paragraph border", "paragraph", None)
+            .unwrap();
+        let table_style = document.add_style("Table border", "table", None).unwrap();
+        let table = document.add_table(vec![vec!["Table cell".into()]]).unwrap();
+        document
+            .format_style(
+                &table_style,
+                r##"{"borders":{"inside_horizontal":{"color":"#123456","width":1}}}"##,
+                None,
+            )
+            .unwrap();
+        let table_snapshot: Value = serde_json::from_str(
+            &document
+                .style_formatting(&table_style, false, None)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            table_snapshot["borders"]["inside_horizontal"]["color"],
+            "#123456"
+        );
+        assert!(document
+            .document()
+            .unwrap()
+            .styles
+            .get(&table_style)
+            .unwrap()
+            .para
+            .borders
+            .is_none());
+        let before = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        for borders in [
+            json!({"between":{}}),
+            json!({"bar":{}}),
+            json!({"inside_horizontal":{}}),
+            json!({"top":{"style":"triple"}}),
+            json!({"left":{"style":"dot_dash"}}),
+            json!({"right":{"width":0.125}}),
+            json!({"bottom":{"style":"thick","width":1}}),
+            json!({"left":{"style":"double","width":2}}),
+            json!({"right":{"style":"wave","width":2}}),
+            json!({"top":{"space":1}}),
+            json!({"top":{"color":"bad"}}),
+            json!({"top":{"width":13}}),
+        ] {
+            let patch = json!({"space_before":10,"borders":borders}).to_string();
+            assert!(document.format_paragraph(paragraph, &patch).is_err());
+            assert!(document.format_style(&style, &patch, None).is_err());
+            assert!(document.format_defaults(&patch).is_err());
+            assert_eq!(document.revision().unwrap(), revision);
+            assert_eq!(document.to_bytes().unwrap(), before);
+        }
+        document
+            .format_paragraph(paragraph, r#"{"borders":{"top":{"style":"none"}}}"#)
+            .unwrap();
+        let direct: Value =
+            serde_json::from_str(&document.paragraph_formatting(paragraph, false).unwrap())
+                .unwrap();
+        assert_eq!(direct["borders"]["top"]["style"], "none");
+        assert_eq!(direct["borders"]["top"]["width"], 0.0);
+        let before = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        for border in [
+            json!({"style":"triple"}),
+            json!({"style":"dot_dash"}),
+            json!({"width":0.125}),
+            json!({"style":"thick","width":1}),
+        ] {
+            let patch = json!({"borders":{"bottom":border}}).to_string();
+            assert!(document.table_format_patch(table, &patch).is_err());
+            assert!(document.cell_format_patch(table, 0, 0, &patch).is_err());
+            assert!(document
+                .format_style(&table_style, &patch, Some("first_row"))
+                .is_err());
+            assert!(document.format_style(&table_style, &patch, None).is_err());
+            assert_eq!(document.revision().unwrap(), revision);
+            assert_eq!(document.to_bytes().unwrap(), before);
+        }
+        for side in ["left", "right", "inside_vertical"] {
+            for style in ["double", "wave"] {
+                let patch = json!({"borders":{side:{"style":style,"width":2}}}).to_string();
+                assert!(document.table_format_patch(table, &patch).is_err());
+                assert!(document.cell_format_patch(table, 0, 0, &patch).is_err());
+                assert!(document
+                    .format_style(&table_style, &patch, Some("first_row"))
+                    .is_err());
+                assert_eq!(document.revision().unwrap(), revision);
+                assert_eq!(document.to_bytes().unwrap(), before);
+            }
+        }
+    }
+
+    #[test]
+    fn upstream_between_paragraph_border_is_serialized_but_not_drawn() {
+        let mut document = Document::new();
+        let props = ParaProps {
+            borders: Some(Borders {
+                between: Some(Border::single(2.0)),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut paragraph = Paragraph::with_text("Between borders", CharProps::default());
+        paragraph.props = props;
+        document.body = vec![
+            Arc::new(Block::Para(paragraph.clone())),
+            Arc::new(Block::Para(paragraph)),
+        ];
+        let output = wordcraft_docx::write(&document).unwrap();
+        let reopened = wordcraft_docx::read(&output).unwrap();
+        assert!(reopened
+            .para(StoryRef::Body, &Path::top(0))
+            .unwrap()
+            .props
+            .borders
+            .unwrap()
+            .between
+            .is_some());
+        let layout = wordcraft_layout::layout(
+            &reopened,
+            &mut wordcraft_layout::LayoutCache::new(),
+            &wordcraft_layout::LayoutOptions::default(),
+        );
+        assert!(!layout
+            .pages
+            .iter()
+            .flat_map(|page| &page.items)
+            .any(|item| matches!(item, wordcraft_layout::Placed::Rule { .. })));
+    }
+
+    #[test]
+    fn upstream_border_styles_and_widths_are_approximated_in_native_output() {
+        fn raw_border(style: BorderStyle, width: f32) -> Vec<u8> {
+            let mut document = Document::new();
+            let mut paragraph = Paragraph::with_text("Raw native border", CharProps::default());
+            paragraph.props.borders = Some(Borders {
+                bottom: Some(Border {
+                    style,
+                    width,
+                    color: Some(Rgb(255, 0, 0)),
+                    space: 0.0,
+                }),
+                ..Default::default()
+            });
+            document.body = vec![Arc::new(Block::Para(paragraph))];
+            wordcraft_docx::write(&document).unwrap()
+        }
+        for (style, width, substitute, actual_width) in [
+            (BorderStyle::Triple, 2.0, BorderStyle::Double, 2.0),
+            (BorderStyle::DotDash, 2.0, BorderStyle::Dashed, 2.0),
+            (BorderStyle::Single, 0.125, BorderStyle::Single, 0.25),
+            (BorderStyle::Thick, 1.0, BorderStyle::Single, 1.5),
+        ] {
+            let raw = raw_border(style, width);
+            let substitute = raw_border(substitute, actual_width);
+            assert_eq!(
+                crate::docx::render(&raw, 0, 144.0, None).unwrap(),
+                crate::docx::render(&substitute, 0, 144.0, None).unwrap()
+            );
+            let raw_pdf = crate::docx::to_pdf(&raw, None).unwrap();
+            let substitute_pdf = crate::docx::to_pdf(&substitute, None).unwrap();
+            assert_eq!(
+                crate::pdf::render(&raw_pdf, 0, 144.0, None).unwrap(),
+                crate::pdf::render(&substitute_pdf, 0, 144.0, None).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn upstream_vertical_wave_is_empty_and_double_strokes_overlap() {
+        for style in [BorderStyle::Wave, BorderStyle::Double] {
+            let mut document = Document::new();
+            let mut paragraph = Paragraph::with_text("Vertical border", CharProps::default());
+            paragraph.props.borders = Some(Borders {
+                left: Some(Border {
+                    style,
+                    width: 2.0,
+                    color: Some(Rgb(255, 0, 0)),
+                    space: 0.0,
+                }),
+                ..Default::default()
+            });
+            document.body = vec![Arc::new(Block::Para(paragraph))];
+            let raw = wordcraft_docx::write(&document).unwrap();
+            let layout = wordcraft_layout::layout(
+                &document,
+                &mut wordcraft_layout::LayoutCache::new(),
+                &wordcraft_layout::LayoutOptions::default(),
+            );
+            let (x, y) = layout.pages[0]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    wordcraft_layout::Placed::Rule { x0, y0, x1, y1, .. }
+                        if (x0 - x1).abs() < 0.01 =>
+                    {
+                        Some((*x0, (y0 + y1) / 2.0))
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            let png = crate::docx::render(&raw, 0, 144.0, None).unwrap();
+            if style == BorderStyle::Wave {
+                assert_eq!(border_pixels(png, 0), 0);
+                continue;
+            }
+            let mut reader = png::Decoder::new(Cursor::new(png)).read_info().unwrap();
+            let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+            let frame = reader.next_frame(&mut pixels).unwrap();
+            let row = (y * 2.0) as usize;
+            let mut runs = 0;
+            let mut previous = false;
+            for column in ((x - 6.0) * 2.0) as usize..=((x + 6.0) * 2.0) as usize {
+                let offset = (row * frame.width as usize + column) * 4;
+                let p = &pixels[offset..offset + 4];
+                let red = p[0] > 200 && p[1] < 80 && p[2] < 80;
+                if red && !previous {
+                    runs += 1;
+                }
+                previous = red;
+            }
+            assert_eq!(
+                runs, 1,
+                "native vertical double produces one overlapping stroke, not two separated strokes"
+            );
+        }
+    }
 
     fn pagination_row(lines: usize) -> (EditableDocx, usize, usize) {
         let mut document = EditableDocx::new();
@@ -8579,7 +9061,19 @@ mod tests {
         let table = document
             .add_table(vec![vec!["Turned text".into(), "Normal text".into()]])
             .unwrap();
-        document.cell_format_patch(table,0,0,r##"{"background":"#ABCDEF","margins":[2,3,4,5],"alignment":"center","vertical_alignment":"bottom","text_direction":"down","no_wrap":true,"borders":{"left":{"style":"wave","color":"#123456","width":1},"top":{"style":"none"}}}"##).unwrap();
+        // The old left-wave fixture checked only serialization and file headers.
+        // Native raster output omits vertical waves, so reject that loss explicitly.
+        let revision = document.revision().unwrap();
+        assert!(document
+            .cell_format_patch(
+                table,
+                0,
+                0,
+                r#"{"borders":{"left":{"style":"wave","width":1}}}"#
+            )
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        document.cell_format_patch(table,0,0,r##"{"background":"#ABCDEF","margins":[2,3,4,5],"alignment":"center","vertical_alignment":"bottom","text_direction":"down","no_wrap":true,"borders":{"left":{"style":"dashed","color":"#123456","width":1},"top":{"style":"none"}}}"##).unwrap();
         let value: Value =
             serde_json::from_str(&document.cell_formatting(table, 0, 0).unwrap()).unwrap();
         assert_eq!(value["background"], "#ABCDEF");
@@ -8598,7 +9092,7 @@ mod tests {
         assert!(cell.props.no_wrap);
         assert_eq!(
             cell.props.borders.unwrap().left.unwrap().style,
-            BorderStyle::Wave
+            BorderStyle::Dashed
         );
         assert!(crate::docx::render(&bytes, 0, 72.0, None)
             .unwrap()
