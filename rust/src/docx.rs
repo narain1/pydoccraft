@@ -346,14 +346,85 @@ fn numbering_observations(
     Ok(observations)
 }
 
-fn extraction_diagnostics(document: &Document) -> Value {
-    let mut diagnostics = Diagnostics::default();
+const MAX_CUSTOM_PROPERTIES: usize = 1024;
+const MAX_CUSTOM_VALUE_BYTES: usize = 64 * 1024;
+const MAX_CUSTOM_PROPERTY_BYTES: usize = 256 * 1024;
+
+// Match the existing authored scalar profile exactly. Native CustomProp retains
+// literal text; do not infer aliases, trim whitespace, or interpret raw variant XML.
+pub(crate) fn custom_scalar(property: &wordcraft_doc::CustomProp) -> Option<Value> {
+    Some(match property.kind.as_str() {
+        "lpwstr" => Value::String(property.value.clone()),
+        "bool" => json!(property.value.parse::<bool>().ok()?),
+        "i8" => json!(property.value.parse::<i64>().ok()?),
+        "r8" => {
+            let value = property.value.parse::<f64>().ok()?;
+            if !value.is_finite() {
+                return None;
+            }
+            json!(value)
+        }
+        _ => return None,
+    })
+}
+
+fn validate_custom_properties(document: &Document) -> Result<(), EngineError> {
+    let exceeded = || {
+        EngineError::ResourceLimit("DOCX custom properties exceed 1024 entries, 64 KiB per value or 256 KiB aggregate raw names/kinds/values".into())
+    };
+    if document.custom_props.len() > MAX_CUSTOM_PROPERTIES {
+        return Err(exceeded());
+    }
+    let mut bytes = 0usize;
+    for property in &document.custom_props {
+        bytes = bytes
+            .saturating_add(property.name.len())
+            .saturating_add(property.kind.len())
+            .saturating_add(property.value.len());
+        if property.value.len() > MAX_CUSTOM_VALUE_BYTES || bytes > MAX_CUSTOM_PROPERTY_BYTES {
+            return Err(exceeded());
+        }
+    }
+    Ok(())
+}
+
+fn imported_custom_metadata(document: &Document, diagnostics: &mut Diagnostics) -> Value {
+    // validate_stories checks sizes before this first allocation. Match the native
+    // property's ASCII-insensitive identity; omit every conflicting entry, not a winner.
+    let mut counts = HashMap::<String, usize>::new();
+    for property in &document.custom_props {
+        *counts
+            .entry(property.name.to_ascii_lowercase())
+            .or_default() += 1;
+    }
+    let mut values = Map::new();
+    for (index, property) in document.custom_props.iter().enumerate() {
+        let notice = if counts[&property.name.to_ascii_lowercase()] > 1 {
+            Some(("ambiguous_custom_property", "Custom properties with case-insensitive duplicate names are omitted from the scalar mapping."))
+        } else if let Some(value) = custom_scalar(property) {
+            values.insert(property.name.clone(), value);
+            None
+        } else if matches!(property.kind.as_str(), "lpwstr" | "bool" | "i8" | "r8") {
+            Some(("malformed_custom_property", "A retained custom property cannot be converted using the supported strict scalar type and is omitted."))
+        } else {
+            Some(("unsupported_custom_property", "A retained custom property uses an unsupported scalar or raw variant type and is omitted."))
+        };
+        if let Some((code, message)) = notice {
+            // The ordinal locates the retained native record without copying a potentially
+            // large name or raw XML. Diagnostics already cap aggregate source examples.
+            diagnostics.record(code, "warning", message, json!({"property_index": index, "kind": property.kind.chars().take(32).collect::<String>()}));
+        }
+    }
+    Value::Object(values)
+}
+
+fn extraction_diagnostics(document: &Document, diagnostics: &mut Diagnostics) {
     diagnose_blocks(
         document,
         &document.body,
         &[],
         &json!({"story": "body"}),
-        &mut diagnostics,
+        diagnostics,
     );
     for (id, part) in &document.parts {
         diagnose_blocks(
@@ -361,7 +432,7 @@ fn extraction_diagnostics(document: &Document) -> Value {
             &part.blocks,
             &[],
             &json!({"story_part_id": id}),
-            &mut diagnostics,
+            diagnostics,
         );
     }
     for (kind, role, blocks) in separator_stories(document) {
@@ -370,10 +441,9 @@ fn extraction_diagnostics(document: &Document) -> Value {
             blocks,
             &[],
             &json!({"story_kind": kind, "story_role": role}),
-            &mut diagnostics,
+            diagnostics,
         );
     }
-    diagnostics.into_json()
 }
 
 fn diagnose_blocks(
@@ -448,6 +518,7 @@ fn diagnose_object(
 }
 
 fn validate_stories(document: &Document) -> Result<(), EngineError> {
+    validate_custom_properties(document)?;
     if document.numbering.nums.len() > 100_000 || document.numbering.abstracts.len() > 100_000 {
         return Err(numbering_limit());
     }
@@ -495,6 +566,11 @@ fn validate_stories(document: &Document) -> Result<(), EngineError> {
                 count = count.saturating_add(1);
                 match block.as_ref() {
                     Block::Table(table) => {
+                        text_bytes = text_bytes
+                            .saturating_add(table.props.caption.as_ref().map_or(0, String::len))
+                            .saturating_add(
+                                table.props.description.as_ref().map_or(0, String::len),
+                            );
                         for row in &table.rows {
                             for cell in &row.cells {
                                 pending.push(&cell.blocks);
@@ -949,7 +1025,13 @@ impl<'a> Adapter<'a> {
             Value::String("wordcraft-layout; blocks assigned to their first computed page".into()),
         );
         let stories = self.stories();
-        metadata.insert("diagnostics".into(), extraction_diagnostics(self.document));
+        let mut diagnostics = Diagnostics::default();
+        metadata.insert(
+            "custom".into(),
+            imported_custom_metadata(self.document, &mut diagnostics),
+        );
+        extraction_diagnostics(self.document, &mut diagnostics);
+        metadata.insert("diagnostics".into(), diagnostics.into_json());
         if self.numbering_bytes.get() > MAX_NUMBERING_BYTES
             || self.numbering_lookup_work.get() > MAX_NUMBERING_LOOKUP_WORK
         {
@@ -1102,6 +1184,15 @@ impl<'a> Adapter<'a> {
             cells.push(output_row);
             active_merges = next_merges;
         }
+        let mut metadata = Map::from_iter([("column_widths".into(), json!(table.grid))]);
+        for (key, value) in [
+            ("title", &table.props.caption),
+            ("description", &table.props.description),
+        ] {
+            if let Some(value) = value {
+                metadata.insert(key.into(), json!(value));
+            }
+        }
         TablePayload {
             rows: table
                 .rows
@@ -1115,7 +1206,7 @@ impl<'a> Adapter<'a> {
                 .collect(),
             cells,
             page: page_number,
-            metadata: Map::from_iter([("column_widths".into(), json!(table.grid))]),
+            metadata,
             ..TablePayload::default()
         }
     }
@@ -2126,5 +2217,151 @@ mod offset_tests {
         assert_eq!(segment.links.last().unwrap().text, "終");
         assert_eq!(segment.links.last().unwrap().metadata["start"], offset);
         assert_eq!(segment.char_count, offset + 1);
+    }
+}
+
+#[cfg(test)]
+mod imported_property_tests {
+    use super::*;
+    use std::sync::Arc;
+    use wordcraft_doc::CustomProp;
+
+    fn property(name: &str, kind: &str, value: &str) -> CustomProp {
+        CustomProp {
+            name: name.into(),
+            kind: kind.into(),
+            value: value.into(),
+        }
+    }
+
+    #[test]
+    fn custom_scalar_matches_existing_strict_authored_types() {
+        for (kind, text, expected) in [
+            ("lpwstr", "  Ω <&>  ", json!("  Ω <&>  ")),
+            ("lpwstr", "", json!("")),
+            ("bool", "true", json!(true)),
+            ("bool", "false", json!(false)),
+            ("i8", "-9223372036854775808", json!(i64::MIN)),
+            ("i8", "9223372036854775807", json!(i64::MAX)),
+            ("r8", "1.25", json!(1.25)),
+        ] {
+            assert_eq!(
+                custom_scalar(&property("value", kind, text)),
+                Some(expected)
+            );
+        }
+        for (kind, text) in [
+            ("bool", "1"),
+            ("bool", "TRUE"),
+            ("bool", " true"),
+            ("i8", "9223372036854775808"),
+            ("i8", "1.0"),
+            ("i8", " 1"),
+            ("r8", "NaN"),
+            ("r8", "inf"),
+            ("r8", "1e999"),
+            ("r8", " 1.25"),
+            ("i4", "42"),
+            ("lpstr", "text"),
+            ("raw", "<vt:vector/>"),
+        ] {
+            assert_eq!(
+                custom_scalar(&property("value", kind, text)),
+                None,
+                "{kind}: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn custom_projection_omits_all_ambiguous_names_and_bounds_diagnostic_sources() {
+        let mut document = Document::new();
+        document.custom_props = vec![
+            property("Kept", "i8", "7"),
+            property("Duplicate", "lpwstr", "First"),
+            property("DUPLICATE", "lpwstr", "Second"),
+            property("BadBool", "bool", "1"),
+            property("Other", "filetime", "2026-10-20T00:00:00Z"),
+        ];
+        document
+            .custom_props
+            .extend((0..150).map(|i| property(&format!("Raw{i}"), "raw", "<vt:vector/>")));
+        validate_custom_properties(&document).unwrap();
+        let mut diagnostics = Diagnostics::default();
+        assert_eq!(
+            imported_custom_metadata(&document, &mut diagnostics),
+            json!({"Kept":7})
+        );
+        let diagnostics = diagnostics.into_json();
+        assert_eq!(diagnostics[0]["code"], "ambiguous_custom_property");
+        assert_eq!(diagnostics[0]["count"], 2);
+        assert_eq!(
+            diagnostics[0]["sources"][0],
+            json!({"property_index":1,"kind":"lpwstr"})
+        );
+        assert_eq!(diagnostics[1]["code"], "malformed_custom_property");
+        assert_eq!(diagnostics[2]["count"], 151);
+        assert_eq!(
+            diagnostics
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|d| d["sources"].as_array().unwrap().len())
+                .sum::<usize>(),
+            100
+        );
+    }
+
+    #[test]
+    fn imported_property_limits_precede_scalar_cloning() {
+        let mut document = Document::new();
+        document.custom_props = (0..1024)
+            .map(|i| property(&i.to_string(), "i8", "0"))
+            .collect();
+        validate_stories(&document).unwrap();
+        document.custom_props.push(property("extra", "i8", "0"));
+        assert!(matches!(
+            validate_stories(&document),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        document.custom_props = vec![property(
+            "value",
+            "lpwstr",
+            &"x".repeat(MAX_CUSTOM_VALUE_BYTES),
+        )];
+        validate_stories(&document).unwrap();
+        document.custom_props[0].value.push('x');
+        assert!(matches!(
+            validate_stories(&document),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        document.custom_props = (0..4)
+            .map(|i| {
+                property(
+                    &i.to_string(),
+                    "lpwstr",
+                    &"x".repeat((MAX_CUSTOM_PROPERTY_BYTES - 28) / 4),
+                )
+            })
+            .collect();
+        validate_stories(&document).unwrap();
+        document.custom_props[0].value.push('x');
+        assert!(matches!(
+            validate_stories(&document),
+            Err(EngineError::ResourceLimit(_))
+        ));
+    }
+
+    #[test]
+    fn table_alternative_metadata_uses_existing_extraction_text_budget() {
+        let mut document = Document::new();
+        let mut table = Table::new(1, 1, 100.0);
+        table.props.caption = Some("x".repeat(32 * 1024 * 1024));
+        table.props.description = Some("x".into());
+        document.body = vec![Arc::new(Block::Table(table))];
+        assert!(matches!(
+            validate_stories(&document),
+            Err(EngineError::ResourceLimit(_))
+        ));
     }
 }

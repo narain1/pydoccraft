@@ -855,6 +855,15 @@ class Paragraph:
         start, end, revision = self._owner._call("add_run_patch", self._id, text, _format_patch(formatting), _change=True)
         return TextRange(self, start, end, revision)
 
+    def add_field(self, kind: str) -> TextRange:
+        """Append a decimal page, page_count or section_page_count field.
+
+        The returned range contains one object marker. Native rendering evaluates
+        the number; source extraction retains the empty stored field result.
+        """
+        start, end, revision = self._owner._call("add_paragraph_field", self._id, kind, _change=True)
+        return TextRange(self, start, end, revision)
+
     def add_break(self, kind: str = "line") -> TextRange:
         """Append a native line, page or column break and return its text range."""
         start, end, revision = self._owner._call("add_paragraph_break", self._id, kind, _change=True)
@@ -1039,6 +1048,21 @@ class Section:
     @start.setter
     def start(self, value: str):
         self._set(start=value)
+
+    @property
+    def page_number_start(self) -> int | None:
+        """First displayed page number, or None to continue the prior section."""
+        return self._props()["page_number_start"]
+
+    @page_number_start.setter
+    def page_number_start(self, value: int | None) -> None:
+        if value is not None:
+            if isinstance(value, bool):
+                raise TypeError("page_number_start must be an integer, not a boolean")
+            value = operator.index(value)
+            if not 1 <= value <= 32767:
+                raise ValueError("page_number_start must be between 1 and 32767")
+        self._set(page_number_start=value)
 
     @property
     def page_size(self) -> tuple[float, float]:
