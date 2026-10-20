@@ -754,6 +754,13 @@ Independent exact-head CI then exposed a substantive native shaping defect: addi
 - No dependency, revision, API or conversion-matrix change. Complete integrated artifact and independent review remain pending. TBL7 stays open; the correction does not provide patterned shading or full shared-edge conflict resolution.
 
 
+## Conditional table vertical borders — complete local artifact
+
+- Runtime `1cef0262d2a73c0aab2d5fbe4b838ee858e2f732` passes all 282 locked Rust tests and 405 clean installed-wheel Python tests, zero skips/failures/errors, with exact installed-byte matching. Formatting, all-targets warnings-denied Clippy, strict installed-package typing, roadmap/support/cached-reference checks and the unchanged 264-package license audit pass.
+- Linux x86_64 / CPython 3.11.2 wheel: 17,485,323 bytes; extension: 40,563,912; SHA-256 `2411b9c817d58c9d8be1aea9b1dd44526d6c83a5a917e37c8545100b0a37cadb`; lock SHA-256 `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. Evidence: `dist/docx-conditional-borders/validation.json` and `/opt/docxconditionalborderstest`. No upstream revision, dependency or conversion-matrix change.
+- This supersedes focused-only correction evidence for local acceptance. The raw native regression retains both dropped visible borders and failed nil suppression, while supported direct/whole-table controls remain visible. Independent review and exact-head/current-main CI remain required before manual merge; U02/TBL7 remain open.
+
+
 ## Owned PDF field tooltips — focused integration evidence
 
 - The isolated implementation passes three native groups, all-targets warnings-denied Clippy, debug build and 13 related public field/geometry tests (four new workflows). Native tests verify exact Field state except tooltip, TU source roundtrip/removal and raw appearance equality; public controls cover every supported kind across four rotated CropBox/UserUnit profiles, exact metadata-only PNG equality, copies, later geometry/value edits, paired flatten controls and stale/deleted/closed handles.

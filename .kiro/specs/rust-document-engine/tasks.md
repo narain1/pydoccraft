@@ -441,7 +441,8 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Audit existing border APIs to avoid duplication; reproduce native conditional interior-vertical loss and nil-suppression loss.
 - [x] Reject affected assignments in the existing staged parser; preserve resets and supported direct/whole-table/outer-edge controls.
 - [x] Retain raw-native source/readback/placed-rule/PNG/PDF repros and focused public atomicity/inheritance/cache/copy checks.
-- [ ] Complete integrated locked native/release/installed-wheel validation and independent manual review/current-main CI.
+- [x] Complete integrated locked native/release/installed-wheel validation (282 Rust / 405 Python).
+- [ ] Complete independent manual review/current-main CI.
 - [ ] Keep native conditional-edge selection, patterned shading and full shared-edge conflict resolution under existing U02/TBL7.
 
 
