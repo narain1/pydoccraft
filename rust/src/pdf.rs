@@ -213,26 +213,32 @@ pub fn extract_text(
     pages: Option<&[isize]>,
 ) -> Result<String, EngineError> {
     let bytes = Arc::new(data.to_vec());
-    let info = inspect(bytes.clone(), password).map_err(open_error)?;
-    if info.pages.is_empty() {
-        return Err(EngineError::Malformed("PDF contains no pages".into()));
-    }
-    let selected_count = pages.map_or(info.pages.len(), <[isize]>::len);
-    check_selected_count(selected_count)?;
-    for &index in pages.unwrap_or_default() {
-        selected_page(index, info.pages.len())?;
-    }
     let mut renderer = PageRenderer::new(
-        bytes,
+        bytes.clone(),
         RenderConfig {
             password: password.map(Arc::from),
             ..Default::default()
         },
     );
+    let page_count = renderer.page_count();
+    if page_count == 0 {
+        let info = inspect(bytes, password).map_err(open_error)?;
+        if info.pages.is_empty() {
+            return Err(EngineError::Malformed("PDF contains no pages".into()));
+        }
+        return Err(EngineError::Malformed(
+            "PDF text renderer could not open the inspected document".into(),
+        ));
+    }
+    let selected_count = pages.map_or(page_count, <[isize]>::len);
+    check_selected_count(selected_count)?;
+    for &index in pages.unwrap_or_default() {
+        selected_page(index, page_count)?;
+    }
     let mut output = String::new();
     for position in 0..selected_count {
         let page = match pages {
-            Some(indices) => selected_page(indices[position], info.pages.len())?,
+            Some(indices) => selected_page(indices[position], page_count)?,
             None => position,
         };
         let rendered = renderer.render(RenderRequest {

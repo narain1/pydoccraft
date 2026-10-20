@@ -422,3 +422,12 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 - DeckCraft blank/title/title_and_content/two_content layouts preserve native master/layout references and fresh identities. Filled placeholders remain editable and visible in PNG and searchable PDF; native resolved transforms support geometry edits without changing unrelated inherited state. ID/shape/paragraph budget, invalid-layout and stale-owner regressions pass. Additional layouts, source theme/master import and safe slide-copy remapping remain open under SLIDE1/SLIDE2.
 - This integrated artifact includes the independently identified PR39 markup-coordinate correction: finite but extreme imported quad coordinates now fail before native interpolation can emit infinity. All four markup kinds preserve bytes on failed recolor/text patches; deletion remains available.
 - Wheel: 17,324,430 bytes; uncompressed extension: 40,173,336 bytes; SHA-256 `173e785889b3888af2f52485c8c3b42dbffdb725f0e94e85a1f16d1d40c4d3dd`. Cargo.lock SHA-256 remains `fcfb4a174387cf25cceddadeba9e6be930ec790c840dca0bb5f169431a6c089c`. No dependency or attribution changes; the 264-package permissive graph and all four pinned upstream revisions remain unchanged.
+
+## 2026-10-20 PyMuPDF-only post-optimization benchmark
+
+- Compared only pydoccraft and PyMuPDF 2.0 on three anonymous PDFs using Linux ARM64 CPython 3.13 release wheels.
+- Warm first-page RGBA rendering now favors pydoccraft by 2.86×, 1.84×, and 1.12× after parser-session reuse.
+- Cold open+render remains 45.75×, 4.49×, and 1.82× slower because pydoccraft eagerly builds the complete structured model before rendering; this is not a rasterizer-only comparison.
+- The selective all-page text path was 2.06×, 2.30×, and 1.22× slower than PyMuPDF after removing its redundant valid-document `inspect()` parse.
+- The single-parse change improved pydoccraft versus its preceding merged implementation by approximately 1.10×, 1.04×, and 1.00×. Rust 1.95 tests/Clippy passed: 194 tests.
+- Remaining structured-open costs are duplicate PdfCraft text interpretation for table detection and unconditional image traversal; exact semantic optimizations require focused upstream PdfCraft APIs rather than local PDF heuristics.
