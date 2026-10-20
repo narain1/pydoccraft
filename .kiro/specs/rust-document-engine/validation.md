@@ -806,3 +806,25 @@ Native `Object::as_int` accepts finite integral Reals. The new mutation delibera
 Consumer typing assertions cover the bool getter/setter and existing str PdfField.tooltip identity/getter/setter. Strict mypy passed against a separate environment containing the copied matching package/debug extension; it is not release-wheel installation evidence. The parent will repeat the check against the final installed wheel. Documentation append context was rebased onto08ae30d; native/facade sources remain the validated fe23c89 baseline plus this patch.
 
 Full integrated locked tests, release wheel, installed-wheel corpus and independent review remain pending. Existing global annotation summaries and initial inspection can allocate before adapter caps; this slice bounds only the new target mutation and does not close PDF6/U10.
+
+
+## Annotation editing locks — complete local artifact
+
+- Runtime `a21fc5c80abe556ac03b471f1906a7ec6b6a3f16` passes all 288 locked Rust tests and 413 clean installed-wheel Python tests, zero skips/failures/errors, with exact installed-byte matching. Formatting, all-targets warnings-denied Clippy, strict installed-package typing, roadmap/support/cached-reference checks and the unchanged 264-package license audit pass.
+- Linux x86_64 / CPython 3.11.2 wheel: 17,495,963 bytes; extension: 40,586,536; SHA-256 `2c54fbb1b41472fd5a07e7ba8e9019c91bdfa125eebc45c4bb770203cb759d5f`; lock SHA-256 `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. Evidence: `dist/pdf-annotation-lock/validation.json` and `/opt/pdfannotationlocktest`. No upstream revision, dependency or conversion-matrix change.
+- This supersedes focused-only lock evidence for local acceptance. All seven comment kinds retain tested appearances and pixels across transformed pages; native lock refusals preserve staged state. Inventory/initial-inspection limits, foreign profiles, links and reply-thread semantics remain outside this mutation profile. Independent review and exact-head/current-main CI remain required before manual merge; PDF6/U10 stay open.
+
+
+## Independent manual merge evidence through PR 69
+
+GitHub merge state was verified on 2026-10-20. Each change passed independent review, required fixes and fresh exact-head/current-main CI before manual merge; repository auto-merge remains disabled. These gates complete the corresponding delivery tasks, not broader roadmap criteria. Historical artifact sections above retain their original validation scope.
+
+| PR | Merge commit | Final CI Rust / installed Python |
+|---|---|---|
+| [64](https://github.com/narain1/pydoccraft/pull/64) | `fd6b1b1f6fafd04dea520ca7ea9ce3d4888b818d` | 262 / 360 |
+| [65](https://github.com/narain1/pydoccraft/pull/65) | `de2b0b44c3479108157da1d5e04f70edbe480997` | 265 / 365 |
+| [67](https://github.com/narain1/pydoccraft/pull/67) | `9accfa2a667c6521cf6501c3603ec0a0cb6c092d` | 268 / 369 |
+| [68](https://github.com/narain1/pydoccraft/pull/68) | `b733c6ab41c44728920e97e6ba3b31e782b36aaa` | 276 / 379 |
+| [69](https://github.com/narain1/pydoccraft/pull/69) | `e59de48ce0c13c5ade87a626d25f7e2e74dc122a` | 276 / 379 |
+
+Formatting, warnings-denied Clippy, strict installed-package typing and the unchanged 264-package runtime/build license audit passed in each final CI run. PR69 changes source-audit documentation/data only.
