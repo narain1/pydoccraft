@@ -42,7 +42,7 @@ This deliberately favors false negatives over fabricated tables. Borderless, irr
 
 ### PDF links
 
-PdfCraft exposes link destinations, rectangles and text geometry. The adapter recovers unambiguous labels with normalized character offsets, including repeated labels, and Markdown attaches those targets inline. Links inside inferred PDF table cells currently retain empty labels to avoid duplicating cell text. Ambiguous geometry-only links retain empty labels and appear in the final **Links** section; successful multiline-label recovery remains tracked in E4.
+PdfCraft exposes link destinations, rectangles and text geometry. The adapter recovers unambiguous labels with normalized Unicode character offsets, including repeated labels and contiguous multiline labels, and Markdown attaches those targets inline. Accepted multiline annotations coalesce their consecutive paragraph blocks while retaining native spaces/newlines and unchanged plain text. Neighboring links retain correct offsets. Links inside inferred PDF table cells retain empty labels to avoid duplicating cell text. Overlapping, noncontiguous or ambiguous geometry-only links also retain empty labels and appear in the final **Links** section; the adapter does not infer a reading order across columns or guess omitted glyphs.
 
 ### PDF images
 

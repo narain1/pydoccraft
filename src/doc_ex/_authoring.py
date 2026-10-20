@@ -49,8 +49,11 @@ class ParagraphFormatting(TypedDict, total=False):
     background: str | tuple[int, int, int] | None
 
 
-class StyleFormatting(_CharacterProperties, ParagraphFormatting):
-    pass
+class StyleFormatting(_CharacterProperties, ParagraphFormatting, total=False):
+    vertical_alignment: str | None
+    borders: dict[str, BorderFormatting | None] | None
+    margins: float | tuple[float, float, float, float] | None
+    row_band_size: int | None
 
 
 class NoteOptions(TypedDict, total=False):
@@ -66,7 +69,18 @@ class BorderFormatting(TypedDict, total=False):
     width: float
 
 
+class TableLook(TypedDict, total=False):
+    header_row: bool
+    total_row: bool
+    banded_rows: bool
+    first_column: bool
+    last_column: bool
+    banded_columns: bool
+
+
 class TableFormatting(TypedDict, total=False):
+    style: str | Style | None
+    look: TableLook | None
     alignment: str | None
     indent: float | None
     width: float | None
@@ -94,6 +108,13 @@ def _table_format_patch(values, *, cell: bool = False) -> str:
         raise ValueError("unknown cell/table formatting property")
     patch = {}
     for key, value in values.items():
+        if key == "look" and value is not None:
+            if not isinstance(value, dict) or value.keys() - TableLook.__annotations__.keys():
+                raise ValueError("look must contain supported table look flags")
+            if any(not isinstance(flag, bool) for flag in value.values()):
+                raise TypeError("table look flags must be bool values")
+            patch[key] = dict(value)
+            continue
         if key == "borders" and value is not None:
             if not isinstance(value, dict) or len(value) > 6:
                 raise TypeError("borders must be a mapping of at most six sides")
@@ -121,7 +142,10 @@ def _table_format_patch(values, *, cell: bool = False) -> str:
                 borders[side] = border
             patch[key] = borders
             continue
-        if key in {"title", "description"}:
+        if key == "style":
+            if value is not None and (not isinstance(value, str) or len(value) > 1024):
+                raise ValueError("style must be a bounded style name/ID or None")
+        elif key in {"title", "description"}:
             if value is not None and (not isinstance(value, str) or len(value) > 10000):
                 raise ValueError("table title/description must be strings of at most 10000 characters or None")
         elif key == "background" and value is not None:
@@ -158,6 +182,22 @@ def _format_patch(values, *, rgb_highlight: bool = False) -> str:
     encoded = json.dumps(patch, ensure_ascii=False, allow_nan=False)
     if len(encoded.encode("utf-8")) > 16384:
         raise ValueError("formatting patch exceeds 16 KiB")
+    return encoded
+
+
+def _style_format_patch(values) -> str:
+    extras = {}
+    scalars = dict(values)
+    if "borders" in scalars:
+        extras.update(json.loads(_table_format_patch({"borders": scalars.pop("borders")})))
+    if "margins" in scalars:
+        margins = scalars.pop("margins")
+        extras["margins"] = None if margins is None else _margins(margins)
+    patch = json.loads(_format_patch(scalars))
+    patch.update(extras)
+    encoded = json.dumps(patch, ensure_ascii=False, allow_nan=False)
+    if len(encoded.encode("utf-8")) > 16384:
+        raise ValueError("style formatting patch exceeds 16 KiB")
     return encoded
 
 
@@ -518,7 +558,7 @@ class WordDocument(EditableDocument):
 
 
 class Styles(_Collection["Style"]):
-    """Ordered named paragraph and character styles; look up by ID or name."""
+    """Ordered named paragraph, character and table styles; look up by ID or name."""
     def __init__(self, owner: WordDocument):
         super().__init__(owner, lambda: owner._call("style_ids"), Style)
 
@@ -581,9 +621,11 @@ class Style:
         """Formatting resolved through the native style inheritance chain."""
         return json.loads(self._owner._call("style_formatting", self._id, True))
 
-    def format(self, **formatting: Unpack[StyleFormatting]) -> None:
-        """Omitted values stay unchanged; None clears an override."""
-        self._owner._call("format_style", self._id, _format_patch(formatting), _change=True)
+    def format(self, *, region: str | None = None, **formatting: Unpack[StyleFormatting]) -> None:
+        """Set direct properties; an optional region selects table-style formatting."""
+        if region is not None and (not isinstance(region, str) or len(region) > 32):
+            raise ValueError("region must be a supported table-style region name or None")
+        self._owner._call("format_style", self._id, _style_format_patch(formatting), region, _change=True)
 
     def __repr__(self):
         return f"Style(id={self.id!r}, name={self.name!r}, kind={self.kind!r})"
@@ -1039,6 +1081,8 @@ class EditableTable:
         return json.loads(self._owner._call("table_formatting", self._word_id()))
 
     def format(self, **formatting: Unpack[TableFormatting]) -> None:
+        if "style" in formatting:
+            formatting["style"] = _style_reference(formatting["style"], self._owner)
         self._owner._call("table_format_patch", self._word_id(),
                           _table_format_patch(formatting), _change=True)
 

@@ -116,9 +116,9 @@ class RenderGeometryTests(unittest.TestCase):
     def test_landscape_multipage_docx_visible_content_at_each_dpi(self):
         with doc_ex.new("docx", size=(360, 240)) as authored:
             authored.sections[0].margins = 24
-            authored.add_paragraph("RED PAGE ONE").find("RED PAGE ONE")[0].format(color="red")
+            authored.add_paragraph("RED PAGE ONE").find("RED PAGE ONE")[0].format(color="red", font_size=24)
             authored.add_page_break()
-            authored.add_paragraph("BLUE PAGE TWO").find("BLUE PAGE TWO")[0].format(color="blue")
+            authored.add_paragraph("BLUE PAGE TWO").find("BLUE PAGE TWO")[0].format(color="blue", font_size=24)
             with doc_ex.open(authored.to_bytes()) as document:
                 self.assertEqual(document.page_count, 2)
                 for page in range(2):
