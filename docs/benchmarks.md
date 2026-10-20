@@ -54,7 +54,7 @@ The implementations still do different amounts of work. `doc_ex.open()` eagerly 
 
 ## Corpus and correctness checks
 
-Inputs were generated before timing with PyMuPDF, python-docx, python-pptx, and openpyxl so pydoccraft did not generate its own benchmark corpus. OOXML ZIP timestamps and core-property timestamps are normalized. PyMuPDF may generate a different PDF file identifier on another run; the hash below identifies the exact bytes used here.
+Inputs were generated before timing with PyMuPDF, python-docx, python-pptx, and openpyxl so pydoccraft did not generate its own benchmark corpus. The corrected harness normalizes OOXML ZIP timestamps and core-property timestamps after serialization. The recorded run preceded the post-serialization correction: openpyxl overwrote its modified timestamp during save, so its historical XLSX hash identifies that run rather than a reproducible file. The correction changes fixture metadata and hashes without changing cell values or timed operations. PyMuPDF may generate a different PDF file identifier on another run; the hash below identifies the exact bytes used here.
 
 | Input | Shape | Bytes | SHA-256 |
 |---|---|---:|---|
@@ -115,10 +115,10 @@ Conversions reopen successfully, but elapsed time and valid output do not tell c
 
 ## Reproduce
 
-Run from the repository root in an isolated environment. The benchmark uses the published wheel, not `src/`:
+Run from the repository root in an isolated Python 3.13 environment (the recorded lock was resolved with Python 3.13). The benchmark uses the published wheel, not `src/`:
 
 ```console
-python3 -m venv /tmp/pydoccraft-benchmark
+python3.13 -m venv /tmp/pydoccraft-benchmark
 /tmp/pydoccraft-benchmark/bin/python -m pip install -r benchmarks/requirements-lock.txt
 PYTHONPATH= /tmp/pydoccraft-benchmark/bin/python benchmarks/benchmark_documents.py \
   --pages 25 \
@@ -132,6 +132,6 @@ PYTHONPATH= /tmp/pydoccraft-benchmark/bin/python benchmarks/benchmark_documents.
   --output /tmp/pydoccraft-benchmark-results/results.json
 ```
 
-The command writes raw JSON and generated Markdown outside the repository. Do not commit generated documents, rendered images, converted outputs, profiles, virtual environments, or timing dumps.
+The command writes raw JSON and generated Markdown outside the repository. The `--output` path must not end in `.md`, which is reserved for the companion report. Run focused harness checks with `/tmp/pydoccraft-benchmark/bin/python -m unittest discover -s benchmarks -v`. Do not commit generated documents, rendered images, converted outputs, profiles, virtual environments, or timing dumps.
 
 Run results vary with hardware, power state, thermal state, operating system, Python version, library version, and document structure. Repeat on representative real documents and every supported release platform before making broad performance claims.

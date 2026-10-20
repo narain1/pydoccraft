@@ -256,3 +256,9 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 - pydoccraft median capability baselines were 20.16 ms for DOCX extraction, 5.07 ms for PPTX extraction, 9.84 ms for PDF→DOCX, 22.67 ms for DOCX→PDF, and 154.19 ms for PPTX→PDF.
 - openpyxl 3.1.5 was measured only as a separate XLSX baseline because it has no equivalent PDF/DOCX/PPTX parsing, rendering, or conversion operation.
 - Conversion outputs reopened and contained text; render outputs had valid PNG signatures. See `docs/benchmarks.md` for methodology, environment, hashes, limitations, and rough-edge tracking links.
+
+### PR27 independent benchmark review
+
+- Ran the published-wheel benchmark in a fresh Linux x86_64/CPython 3.13.13 environment with the complete pinned comparator lock; `pip check` passed. A small smoke run and the full default 25-page/25-slide/20,000-cell corpus both completed all 12 scenarios. The full run used two warmups and seven measured iterations; conversions reopened with text and both renderers returned PNG. This independently validates the harness, not the historical macOS timings.
+- Corrected post-save OOXML core timestamps: openpyxl overwrites `modified` during serialization, so ZIP timestamp normalization alone did not yield stable XLSX bytes. A regression injects different writer clocks and verifies identical normalized bytes and exact reopened cell values. Historical recorded hashes remain labeled as pre-correction evidence.
+- Rejected `.md` JSON output paths before generation to prevent the companion Markdown report from overwriting JSON. Both focused benchmark-only regression tests passed; this tooling remains outside runtime dependencies and the normal installed-wheel suite.

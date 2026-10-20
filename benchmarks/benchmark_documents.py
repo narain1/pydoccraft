@@ -13,6 +13,7 @@ import platform
 import statistics
 import time
 import zipfile
+from xml.etree import ElementTree as ET
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,7 +62,15 @@ class Result:
 
 
 def normalize_ooxml(data: bytes) -> bytes:
-    """Remove variable ZIP timestamps so generated OOXML bytes are reproducible."""
+    """Normalize ZIP and core timestamps after fixture writers have serialized them."""
+    namespaces = {
+        "cp": "http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
+        "dc": "http://purl.org/dc/elements/1.1/",
+        "dcterms": "http://purl.org/dc/terms/",
+        "xsi": "http://www.w3.org/2001/XMLSchema-instance",
+    }
+    for prefix, uri in namespaces.items():
+        ET.register_namespace(prefix, uri)
     source = zipfile.ZipFile(io.BytesIO(data))
     output = io.BytesIO()
     with source, zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
@@ -69,7 +78,15 @@ def normalize_ooxml(data: bytes) -> bytes:
             info = zipfile.ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = source.getinfo(name).external_attr
-            archive.writestr(info, source.read(name))
+            data = source.read(name)
+            if name == "docProps/core.xml":
+                root = ET.fromstring(data)
+                for field in ("created", "modified"):
+                    element = root.find(f"{{{namespaces['dcterms']}}}{field}")
+                    if element is not None:
+                        element.text = "2020-01-01T00:00:00Z"
+                data = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+            archive.writestr(info, data)
     return output.getvalue()
 
 
@@ -395,7 +412,10 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--dpi", type=float, default=144)
     parser.add_argument("--repository-revision", default="unknown")
     parser.add_argument("--output", type=Path)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.output is not None and args.output.suffix.lower() == ".md":
+        parser.error("--output must not use .md: JSON and Markdown require distinct paths")
+    return args
 
 
 def main() -> int:
