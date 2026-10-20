@@ -900,32 +900,24 @@ class EditableTable:
 
 
     def _structure_generation(self):
-        return None if self._slide is None else self._owner._call("table_generation", *self._args)
-
-    def _slide_table(self):
-        if self._slide is None:
-            raise UnsupportedFormatError("table row/column insertion and deletion are currently PPTX-only")
+        return self._owner._call("table_generation", *self._args)
 
     def insert_row(self, index: int) -> EditableRow:
-        self._slide_table()
         index = _insertion_index(index, len(self.rows))
         self._owner._call("insert_row", *self._args, index, _change=True)
         return EditableRow(self, index)
 
     def delete_row(self, index: int) -> None:
-        self._slide_table()
         index = _index(index, len(self.rows))
         self._owner._call("delete_row", *self._args, index, _change=True)
 
     def insert_column(self, index: int) -> list[EditableCell]:
-        self._slide_table()
         rows = self.rows
         index = _insertion_index(index, len(rows[0]))
         self._owner._call("insert_column", *self._args, index, _change=True)
         return [EditableCell(self, row, index) for row in range(len(rows))]
 
     def delete_column(self, index: int) -> None:
-        self._slide_table()
         index = _index(index, len(self.rows[0]))
         self._owner._call("delete_column", *self._args, index, _change=True)
 
@@ -1313,6 +1305,23 @@ class PdfPage:
         return self._owner._call("page_size", self._id)
 
     @property
+    def boxes(self) -> dict[str, tuple[float, float, float, float]]:
+        """Effective PDF boxes as (x, y, width, height) in current view points."""
+        self._check()
+        return {name: tuple(box) for name, box in json.loads(self._owner._call("page_boxes", self._id)).items()}
+
+    def set_box(self, kind: str, box=None) -> None:
+        """Set media/crop/bleed/trim/art geometry; None resets a non-media box."""
+        self._check()
+        if box is not None:
+            if not isinstance(box, (tuple, list)) or len(box) != 4:
+                raise TypeError("box must be (x, y, width, height) in current view points")
+            box = tuple(map(pt, box))
+        self._owner._call("set_page_box", self._id, kind, box, _change=True)
+        self._owner._page_generation += 1
+        self._generation = self._owner._page_generation
+
+    @property
     def background(self):
         self._check()
         value = self._owner._call("background", self._id)
@@ -1334,16 +1343,16 @@ class PdfPage:
         self._check()
         return Annotations(self)
 
-    def draw_text(self, text: str, *, at: tuple[float, float], font_size: float = 12, font=None):
+    def draw_text(self, text: str, *, at: tuple[float, float], font_size: float = 12, font=None, color="black"):
         self._check()
         if not isinstance(at, (tuple, list)) or len(at) != 2:
             raise TypeError("at must be an (x, y) pair in top-left points")
         if font is None:
-            self._owner._call("add_text", self._id, text, pt(at[0]), pt(at[1]), pt(font_size), _change=True)
+            self._owner._call("add_text", self._id, text, pt(at[0]), pt(at[1]), pt(font_size), _color(color), _change=True)
         else:
             from . import _read
             data, _ = _read(font, limit=16 * 1024 * 1024)
-            self._owner._call("add_text_with_font", self._id, text, pt(at[0]), pt(at[1]), pt(font_size), data, _change=True)
+            self._owner._call("add_text_with_font", self._id, text, pt(at[0]), pt(at[1]), pt(font_size), data, _color(color), _change=True)
 
     def draw_path(self, commands, *, stroke="black", fill=None, width: float = 1, close: bool = False):
         """Draw move/line/curve commands in top-left points through the native writer."""

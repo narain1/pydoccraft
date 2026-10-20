@@ -100,4 +100,14 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete literal-template and independent batch recipes (FORM1/FORM6) over authored models; verify missing/unused/invalid values, cross-run replacement, links and source isolation.
 - [x] Record the existing native DOCX-to-PDF report/table path as PDF4's supported flow route.
 - [x] Verify 86 Rust tests, 107 installed-wheel tests, formatting, Clippy and locked artifact; dependencies/revisions remain unchanged.
-- [ ] Complete unequal columns, linked stories, source template preservation, DOCX grid CRUD, richer table formatting and other unchecked criteria.
+- [ ] Complete unequal columns, linked stories, source template preservation, richer table formatting and other unchecked criteria.
+
+## DOCX grid and PDF geometry
+
+- [x] Add atomic DOCX row/column insertion/deletion through public native table operations, preserving placeholders, widths, spans and header prefixes.
+- [x] Apply per-table structural generations and reject unsafe orphan vertical merges.
+- [x] Complete PDF1 with native page-box inspection/reset/edit, rotated geometry and explicit effective-intersection semantics.
+- [x] Add RGB PDF text color for built-in and supplied-font paths.
+- [x] Reject known PDF content truncation and incomplete editable outline inspection.
+- [x] Validate the locked release wheel, reopened outputs and native tests; record evidence.
+- [ ] Complete ordered table column views, general rich-row copying and remaining table criteria.

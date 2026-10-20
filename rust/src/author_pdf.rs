@@ -72,6 +72,13 @@ impl EditablePdf {
         if info.pages.len() > MAX_PAGES {
             return Err(EngineError::ResourceLimit("PDF exceeds 10000 pages".into()).into());
         }
+        if info.outline_more {
+            return Err(EngineError::ResourceLimit(
+                "PDF outline exceeds the bounded inspection count or depth; editing is unavailable"
+                    .into(),
+            )
+            .into());
+        }
         if info.encrypted {
             return Err(
                 EngineError::Unsupported("editing encrypted PDFs is not available".into()).into(),
@@ -170,6 +177,113 @@ impl EditablePdf {
 
     pub fn page_size(&self, page: isize) -> PyResult<(f64, f64)> {
         Ok(self.sizes[self.page_index(page)?])
+    }
+
+    /// Effective boxes expressed as x, y, width, height in the current displayed view.
+    pub fn page_boxes(&self, page: isize) -> PyResult<String> {
+        let page = self.page_index(page)?;
+        let boxes = pdfcraft_organize::page_boxes(self.document()?).map_err(organize_error)?;
+        let values: serde_json::Map<String, Value> = ["media", "crop", "bleed", "trim", "art"]
+            .into_iter()
+            .zip(boxes[page])
+            .map(|(name, rect)| {
+                let r = view_rect(&self.geometry[page], rect.map(|value| value as f32));
+                (name.into(), json!([r[0], r[1], r[2] - r[0], r[3] - r[1]]))
+            })
+            .collect();
+        crate::limits::bounded_json(&values, 4096).map_err(Into::into)
+    }
+
+    #[pyo3(signature = (page, kind, rect=None))]
+    pub fn set_page_box(
+        &mut self,
+        page: isize,
+        kind: &str,
+        rect: Option<(f64, f64, f64, f64)>,
+    ) -> PyResult<()> {
+        use pdfcraft_organize::{BoxSpec, PageBox};
+        let page = self.page_index(page)?;
+        let which = match kind {
+            "media" => PageBox::Media,
+            "crop" => PageBox::Crop,
+            "bleed" => PageBox::Bleed,
+            "trim" => PageBox::Trim,
+            "art" => PageBox::Art,
+            _ => return Err(PyValueError::new_err("unknown PDF page box")),
+        };
+        let before = pdfcraft_organize::page_boxes(self.document()?).map_err(organize_error)?;
+        let spec = if let Some((x, y, width, height)) = rect {
+            if ![x, y, width, height, x + width, y + height]
+                .iter()
+                .all(|v| v.is_finite() && v.abs() <= 1_000_000.0)
+                || width <= 0.0
+                || height <= 0.0
+            {
+                return Err(PyValueError::new_err(
+                    "page box must have finite coordinates within 1000000 points and positive dimensions",
+                ));
+            }
+            let r = self.geometry[page]
+                .view_rect_to_user([x as f32, y as f32, (x + width) as f32, (y + height) as f32])
+                .map(f64::from);
+            if r[2] - r[0] < 1.0 || r[3] - r[1] < 1.0 {
+                return Err(PyValueError::new_err(
+                    "page box must span at least one PDF user-space unit per side",
+                ));
+            }
+            let media = before[page][0];
+            if which != PageBox::Media
+                && (r[0] < media[0] - 0.001
+                    || r[1] < media[1] - 0.001
+                    || r[2] > media[2] + 0.001
+                    || r[3] > media[3] + 0.001)
+            {
+                return Err(PyValueError::new_err(
+                    "page box must lie within the media box",
+                ));
+            }
+            if which == PageBox::Media
+                && before[page][1..].iter().any(|child| {
+                    child[2].min(r[2]) - child[0].max(r[0]) < 1.0
+                        || child[3].min(r[3]) - child[1].max(r[1]) < 1.0
+                })
+            {
+                return Err(PyValueError::new_err(
+                    "media box would empty an existing effective page box",
+                ));
+            }
+            BoxSpec::Rect(r)
+        } else {
+            if which == PageBox::Media {
+                return Err(PyValueError::new_err("media box cannot be reset"));
+            }
+            BoxSpec::Remove
+        };
+        let mut edited = self.document()?.clone();
+        pdfcraft_organize::set_page_box(&mut edited, &[page], which, spec)
+            .map_err(organize_error)?;
+        let output =
+            pdfcraft_cos::write_full(&edited, &SaveOptions::default()).map_err(|error| {
+                EngineError::Conversion(format!("PDF geometry serialization failed: {error}"))
+            })?;
+        if output.len() > MAX_OUTPUT_BYTES {
+            return Err(EngineError::ResourceLimit("PDF output exceeds 256 MiB".into()).into());
+        }
+        let info = pdfcraft_render::inspect(Arc::new(output), None).map_err(|error| {
+            EngineError::Malformed(format!("invalid updated PDF geometry: {error}"))
+        })?;
+        for geometry in &info.pages {
+            validate_page_size(f64::from(geometry.width), f64::from(geometry.height))?;
+        }
+        self.sizes = info
+            .pages
+            .iter()
+            .map(|g| (f64::from(g.width), f64::from(g.height)))
+            .collect();
+        self.geometry = info.pages;
+        self.backgrounds[page] = BackgroundState::Unknown;
+        self.document = Some(edited);
+        Ok(())
     }
 
     #[pyo3(signature = (width=612.0, height=792.0))]
@@ -666,7 +780,7 @@ impl EditablePdf {
         match self.backgrounds[self.page_index(page)?] {
             BackgroundState::Known(color) => Ok(color),
             BackgroundState::Unknown => Err(EngineError::Unsupported(
-                "the background of an imported PDF page cannot be inferred; set a background to manage it".into(),
+                "the background is unknown after import or geometry changes; set a background to manage it".into(),
             ).into()),
         }
     }
@@ -1005,6 +1119,7 @@ impl EditablePdf {
 
     /// Explicit rows with a caller-supplied embeddable font; no system-font lookup or fallback.
     #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (page, text, x, y, size, font_bytes, color=(0, 0, 0)))]
     pub fn add_text_with_font(
         &mut self,
         page: isize,
@@ -1013,6 +1128,7 @@ impl EditablePdf {
         y: f64,
         size: f64,
         font_bytes: &[u8],
+        color: (u8, u8, u8),
     ) -> PyResult<()> {
         use pdfcraft_cos::{Dict, Object, PdfString};
         let page = self.page_index(page)?;
@@ -1072,7 +1188,10 @@ impl EditablePdf {
         }
         let baseline = y + metrics.ascent * size;
         let leading = (1.2_f64).max(metrics.ascent - metrics.descent) * size;
-        let mut ops = vec![Op::new("q", vec![])];
+        let mut ops = vec![
+            Op::new("q", vec![]),
+            Op::new("rg", rgb(color).map(Object::Real).to_vec()),
+        ];
         let mut glyph_count = 0usize;
         for (row, line) in text.split('\n').enumerate() {
             let row_baseline = baseline + row as f64 * leading;
@@ -1150,10 +1269,6 @@ impl EditablePdf {
                 })?;
                 ops.push(Op::new("BT", vec![]));
                 ops.push(Op::new(
-                    "rg",
-                    vec![Object::Int(0), Object::Int(0), Object::Int(0)],
-                ));
-                ops.push(Op::new(
                     "Tf",
                     vec![Object::name(&resource), Object::Real(size)],
                 ));
@@ -1188,8 +1303,17 @@ impl EditablePdf {
     }
 
     /// x/y are the top-left of a text box, in points. Text wraps to the page's right edge.
-    #[pyo3(signature = (page, text, x, y, size=12.0))]
-    pub fn add_text(&mut self, page: isize, text: &str, x: f64, y: f64, size: f64) -> PyResult<()> {
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (page, text, x, y, size=12.0, color=(0, 0, 0)))]
+    pub fn add_text(
+        &mut self,
+        page: isize,
+        text: &str,
+        x: f64,
+        y: f64,
+        size: f64,
+        color: (u8, u8, u8),
+    ) -> PyResult<()> {
         let page = self.page_index(page)?;
         self.validate_input(text.len())?;
         if text.len() > MAX_TEXT_BYTES {
@@ -1214,6 +1338,7 @@ impl EditablePdf {
             rect: [x, 0.0, width, height - y],
             text: text.into(),
             size,
+            color: rgb(color),
             ..AddedText::default()
         };
         if let Some(character) = pdfcraft_edit::first_undrawable(&item) {
@@ -1585,6 +1710,198 @@ mod tests {
     use super::*;
 
     #[test]
+    fn page_boxes_follow_view_geometry_and_reset_for_every_rotation() {
+        use pdfcraft_cos::Object;
+        let mut source = pdfcraft_create::blank(300.0, 400.0, 1).unwrap();
+        let page = pdfcraft_organize::pages(&source).unwrap()[0].obj;
+        source
+            .update_dict(page, |page| {
+                page.set(
+                    b"MediaBox".to_vec(),
+                    Object::Array([10.0, 20.0, 310.0, 420.0].map(Object::Real).to_vec()),
+                );
+                page.set(
+                    b"CropBox".to_vec(),
+                    Object::Array([30.0, 40.0, 230.0, 340.0].map(Object::Real).to_vec()),
+                );
+                page.set(b"UserUnit".to_vec(), Object::Real(1.25));
+            })
+            .unwrap();
+        let bytes = pdfcraft_cos::write_full(&source, &SaveOptions::default()).unwrap();
+        for rotation in [0, 90, 180, 270] {
+            let mut document = EditablePdf::from_bytes(&bytes, None).unwrap();
+            document.rotate_page(0, rotation).unwrap();
+            let old_size = document.page_size(0).unwrap();
+            let boxes: Value = serde_json::from_str(&document.page_boxes(0).unwrap()).unwrap();
+            assert_eq!(boxes["crop"], json!([0.0, 0.0, old_size.0, old_size.1]));
+            assert!(boxes["media"][0].as_f64().unwrap() < 0.0);
+            assert!(boxes["media"][1].as_f64().unwrap() < 0.0);
+            document
+                .set_page_box(0, "trim", Some((10.0, 15.0, 100.0, 120.0)))
+                .unwrap();
+            let boxes: Value = serde_json::from_str(&document.page_boxes(0).unwrap()).unwrap();
+            let actual: Vec<f64> = serde_json::from_value(boxes["trim"].clone()).unwrap();
+            for (a, b) in actual.iter().zip([10.0, 15.0, 100.0, 120.0]) {
+                assert!((a - b).abs() < 0.001, "rotation {rotation}: {actual:?}");
+            }
+            document.set_page_box(0, "trim", None).unwrap();
+            document
+                .set_page_box(0, "crop", Some((25.0, 25.0, 150.0, 200.0)))
+                .unwrap();
+            let size = document.page_size(0).unwrap();
+            assert!((size.0 - 150.0).abs() < 0.001 && (size.1 - 200.0).abs() < 0.001);
+            let output = document.to_bytes().unwrap();
+            let reopened = EditablePdf::from_bytes(&output, None).unwrap();
+            assert_eq!(reopened.page_size(0).unwrap(), size);
+            let png = crate::pdf::render(&output, 0, 144.0, None).unwrap();
+            let reader = png::Decoder::new(Cursor::new(png)).read_info().unwrap();
+            assert_eq!((reader.info().width, reader.info().height), (300, 400));
+            document.set_page_box(0, "crop", None).unwrap();
+            let expected = if rotation % 180 == 0 {
+                (375.0, 500.0)
+            } else {
+                (500.0, 375.0)
+            };
+            assert_eq!(document.page_size(0).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn page_box_failures_are_atomic_and_media_expansion_clears_background_claim() {
+        let mut document = EditablePdf::new(200.0, 300.0).unwrap();
+        document
+            .set_page_box(0, "crop", Some((25.0, 25.0, 150.0, 250.0)))
+            .unwrap();
+        document
+            .set_page_box(0, "trim", Some((10.0, 10.0, 30.0, 30.0)))
+            .unwrap();
+        let before = document.to_bytes().unwrap();
+        for (kind, rect) in [
+            ("media", None),
+            ("crop", Some((-100.0, 0.0, 20.0, 20.0))),
+            ("crop", Some((0.0, 0.0, -20.0, 20.0))),
+            ("crop", Some((f64::NAN, 0.0, 20.0, 20.0))),
+            ("other", None),
+            ("media", Some((100.0, 100.0, 20.0, 20.0))),
+        ] {
+            assert!(document.set_page_box(0, kind, rect).is_err());
+            assert_eq!(document.to_bytes().unwrap(), before);
+        }
+        document.set_background(0, (255, 0, 0)).unwrap();
+        document
+            .set_page_box(0, "media", Some((-50.0, -50.0, 250.0, 350.0)))
+            .unwrap();
+        assert!(document.background(0).is_err());
+    }
+
+    #[test]
+    fn resetting_inherited_crop_pins_media_default_without_changing_siblings() {
+        use pdfcraft_cos::Object;
+        let mut source = pdfcraft_create::blank(200.0, 300.0, 2).unwrap();
+        let pages = pdfcraft_organize::pages(&source).unwrap();
+        let parent = source
+            .get(pages[0].obj)
+            .as_dict()
+            .unwrap()
+            .reference(b"Parent")
+            .unwrap();
+        source
+            .update_dict(parent, |d| {
+                d.set(
+                    b"CropBox".to_vec(),
+                    Object::Array([25.0, 25.0, 175.0, 275.0].map(Object::Real).to_vec()),
+                );
+            })
+            .unwrap();
+        let bytes = pdfcraft_cos::write_full(&source, &SaveOptions::default()).unwrap();
+        let mut document = EditablePdf::from_bytes(&bytes, None).unwrap();
+        assert_eq!(document.page_size(0).unwrap(), (150.0, 250.0));
+        document.set_page_box(0, "crop", None).unwrap();
+        assert_eq!(document.page_size(0).unwrap(), (200.0, 300.0));
+        assert_eq!(document.page_size(1).unwrap(), (150.0, 250.0));
+    }
+
+    #[test]
+    fn builtin_and_supplied_font_colors_render_without_affecting_extraction() {
+        let mut document = EditablePdf::new(240.0, 140.0).unwrap();
+        document
+            .add_text(0, "Red", 10.0, 10.0, 24.0, (255, 0, 0))
+            .unwrap();
+        document
+            .add_text_with_font(
+                0,
+                "Blue Ω",
+                10.0,
+                60.0,
+                24.0,
+                pdfcraft_fonts::INTER_REGULAR,
+                (0, 0, 255),
+            )
+            .unwrap();
+        let bytes = document.to_bytes().unwrap();
+        let extracted = crate::pdf::extract(&bytes, None).unwrap();
+        assert!(extracted.pages[0]
+            .blocks
+            .iter()
+            .any(|b| b.text.contains("Red")));
+        assert!(extracted.pages[0]
+            .blocks
+            .iter()
+            .any(|b| b.text.contains("Blue Ω")));
+        let png = crate::pdf::render(&bytes, 0, 144.0, None).unwrap();
+        let mut reader = png::Decoder::new(Cursor::new(png)).read_info().unwrap();
+        let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+        reader.next_frame(&mut pixels).unwrap();
+        assert!(pixels
+            .chunks_exact(4)
+            .any(|rgba| rgba[0] > 200 && rgba[1] < 30 && rgba[2] < 30));
+        assert!(pixels
+            .chunks_exact(4)
+            .any(|rgba| rgba[0] < 30 && rgba[1] < 30 && rgba[2] > 200));
+    }
+
+    #[test]
+    fn imported_omitted_outline_is_rejected_but_complete_outline_remains_editable() {
+        use pdfcraft_cos::{Dict, Object, PdfString};
+        let mut source = pdfcraft_create::blank(100.0, 100.0, 1).unwrap();
+        pdfcraft_organize::add_bookmark(&mut source, &[], 0, "Normal", 0).unwrap();
+        let bytes = pdfcraft_cos::write_full(&source, &SaveOptions::default()).unwrap();
+        assert!(EditablePdf::from_bytes(&bytes, None).is_ok());
+        // Deliberately hostile depth fixture: ordinary editing APIs cap the depth already.
+        let root = source.root().unwrap();
+        let outline = source
+            .get(root)
+            .as_dict()
+            .unwrap()
+            .reference(b"Outlines")
+            .unwrap();
+        let mut parent = outline;
+        for index in 0..40 {
+            let mut node = Dict::new();
+            node.set(
+                b"Title".to_vec(),
+                Object::String(PdfString::text(&format!("Level {index}"))),
+            );
+            node.set(b"Parent".to_vec(), Object::Ref(parent));
+            let child = source.add(Object::Dict(node));
+            source
+                .update_dict(parent, |d| {
+                    d.set(b"First".to_vec(), Object::Ref(child));
+                    d.set(b"Last".to_vec(), Object::Ref(child));
+                })
+                .unwrap();
+            parent = child;
+        }
+        let bytes = pdfcraft_cos::write_full(&source, &SaveOptions::default()).unwrap();
+        assert!(
+            pdfcraft_render::inspect(Arc::new(bytes.clone()), None)
+                .unwrap()
+                .outline_more
+        );
+        assert!(EditablePdf::from_bytes(&bytes, None).is_err());
+    }
+
+    #[test]
     fn metadata_updates_roundtrip_and_invalid_batch_is_atomic() {
         let mut document = EditablePdf::new(200.0, 300.0).unwrap();
         document.update_metadata(r#"{"title":" A title Ω ","author":"Author","subject":"Subject","keywords":"one two"}"#).unwrap();
@@ -1746,7 +2063,15 @@ mod tests {
         let mut document = EditablePdf::new(300.0, 250.0).unwrap();
         let text = "Aé ΩЖ €\nCombining: e\u{301} office";
         document
-            .add_text_with_font(0, text, 20.0, 20.0, 16.0, pdfcraft_fonts::INTER_REGULAR)
+            .add_text_with_font(
+                0,
+                text,
+                20.0,
+                20.0,
+                16.0,
+                pdfcraft_fonts::INTER_REGULAR,
+                (0, 0, 0),
+            )
             .unwrap();
         let bytes = document.to_bytes().unwrap();
         let extracted = crate::pdf::extract(&bytes, None).unwrap();
@@ -1800,7 +2125,7 @@ mod tests {
             ),
         ] {
             assert!(document
-                .add_text_with_font(0, text, x, y, size, font)
+                .add_text_with_font(0, text, x, y, size, font, (0, 0, 0))
                 .is_err());
             assert_eq!(document.to_bytes().unwrap(), before);
         }
@@ -1825,7 +2150,15 @@ mod tests {
             let mut document = EditablePdf::from_bytes(&bytes, None).unwrap();
             document.rotate_page(0, rotation).unwrap();
             document
-                .add_text_with_font(0, "ΩЖ", 20.0, 20.0, 16.0, pdfcraft_fonts::INTER_REGULAR)
+                .add_text_with_font(
+                    0,
+                    "ΩЖ",
+                    20.0,
+                    20.0,
+                    16.0,
+                    pdfcraft_fonts::INTER_REGULAR,
+                    (0, 0, 0),
+                )
                 .unwrap();
             document
                 .draw_path(
@@ -2083,7 +2416,9 @@ mod tests {
     #[test]
     fn blank_text_image_and_page_roundtrip() {
         let mut document = EditablePdf::new(300.0, 400.0).unwrap();
-        document.add_text(0, "Hello PDF", 20.0, 30.0, 12.0).unwrap();
+        document
+            .add_text(0, "Hello PDF", 20.0, 30.0, 12.0, (0, 0, 0))
+            .unwrap();
         let png = crate::rendering::encode_png(1, 1, &[255, 0, 0, 255], 72.0).unwrap();
         document.add_image(0, &png, 20.0, 60.0, 10.0, 10.0).unwrap();
         assert_eq!(document.add_page(400.0, 300.0).unwrap(), 1);
@@ -2103,16 +2438,24 @@ mod tests {
     fn invalid_operations_are_atomic_and_copies_are_independent() {
         let mut original = EditablePdf::new(100.0, 100.0).unwrap();
         let before = original.to_bytes().unwrap();
-        assert!(original.add_text(0, "too low", 0.0, 99.0, 12.0).is_err());
-        assert!(original.add_text(0, "\u{1f600}", 0.0, 0.0, 12.0).is_err());
-        assert!(original.add_text(1, "bad page", 0.0, 0.0, 12.0).is_err());
+        assert!(original
+            .add_text(0, "too low", 0.0, 99.0, 12.0, (0, 0, 0))
+            .is_err());
+        assert!(original
+            .add_text(0, "\u{1f600}", 0.0, 0.0, 12.0, (0, 0, 0))
+            .is_err());
+        assert!(original
+            .add_text(1, "bad page", 0.0, 0.0, 12.0, (0, 0, 0))
+            .is_err());
         assert!(original
             .add_image(0, b"not png", 0.0, 0.0, 10.0, 10.0)
             .is_err());
         assert!(original.add_page(f64::INFINITY, 100.0).is_err());
         assert_eq!(original.to_bytes().unwrap(), before);
         let mut copied = original.copy().unwrap();
-        copied.add_text(0, "copy", 10.0, 10.0, 12.0).unwrap();
+        copied
+            .add_text(0, "copy", 10.0, 10.0, 12.0, (0, 0, 0))
+            .unwrap();
         assert_eq!(original.to_bytes().unwrap(), before);
         assert_ne!(copied.to_bytes().unwrap(), before);
         copied.close();
@@ -2125,7 +2468,9 @@ mod tests {
     #[test]
     fn reopens_native_model_and_replaces_background_without_losing_text() {
         let mut source = EditablePdf::new(100.0, 100.0).unwrap();
-        source.add_text(0, "Kept", 10.0, 10.0, 12.0).unwrap();
+        source
+            .add_text(0, "Kept", 10.0, 10.0, 12.0, (0, 0, 0))
+            .unwrap();
         let mut edited = EditablePdf::from_bytes(&source.to_bytes().unwrap(), None).unwrap();
         edited.set_background(0, (255, 0, 0)).unwrap();
         edited.set_background(0, (0, 255, 0)).unwrap();
@@ -2145,10 +2490,14 @@ mod tests {
     #[test]
     fn organizes_pages_preserving_content_and_known_backgrounds() {
         let mut document = EditablePdf::new(300.0, 400.0).unwrap();
-        document.add_text(0, "First", 20.0, 20.0, 12.0).unwrap();
+        document
+            .add_text(0, "First", 20.0, 20.0, 12.0, (0, 0, 0))
+            .unwrap();
         document.set_background(0, (200, 210, 220)).unwrap();
         document.add_page(200.0, 300.0).unwrap();
-        document.add_text(1, "Second", 20.0, 20.0, 12.0).unwrap();
+        document
+            .add_text(1, "Second", 20.0, 20.0, 12.0, (0, 0, 0))
+            .unwrap();
         document.move_page(0, -1).unwrap();
         assert_eq!(document.page_size(0).unwrap(), (200.0, 300.0));
         assert_eq!(document.background(0).unwrap(), None);
@@ -2156,7 +2505,7 @@ mod tests {
         document.rotate_page(-1, 90).unwrap();
         assert_eq!(document.page_size(1).unwrap(), (400.0, 300.0));
         document
-            .add_text(1, "After rotation", 20.0, 70.0, 12.0)
+            .add_text(1, "After rotation", 20.0, 70.0, 12.0, (0, 0, 0))
             .unwrap();
         let bytes = document.to_bytes().unwrap();
         let extracted = crate::pdf::extract(&bytes, None).unwrap();
@@ -2238,15 +2587,19 @@ mod tests {
     #[test]
     fn imports_and_extracts_pages_in_requested_order_with_independent_resources() {
         let mut source = EditablePdf::new(100.0, 120.0).unwrap();
-        source.add_text(0, "Source A", 10.0, 10.0, 10.0).unwrap();
+        source
+            .add_text(0, "Source A", 10.0, 10.0, 10.0, (0, 0, 0))
+            .unwrap();
         let image = crate::rendering::encode_png(1, 1, &[255, 0, 0, 255], 72.0).unwrap();
         source.add_image(0, &image, 10.0, 40.0, 20.0, 20.0).unwrap();
         source.add_page(120.0, 100.0).unwrap();
-        source.add_text(1, "Source B", 10.0, 10.0, 10.0).unwrap();
+        source
+            .add_text(1, "Source B", 10.0, 10.0, 10.0, (0, 0, 0))
+            .unwrap();
         let source_bytes = source.to_bytes().unwrap();
         let mut destination = EditablePdf::new(100.0, 100.0).unwrap();
         destination
-            .add_text(0, "Destination", 10.0, 10.0, 10.0)
+            .add_text(0, "Destination", 10.0, 10.0, 10.0, (0, 0, 0))
             .unwrap();
         assert_eq!(
             destination
@@ -2267,7 +2620,9 @@ mod tests {
         }
         assert_eq!(output.pages[1].images.len(), 1);
         let mut subset = destination.subset(vec![-1, 1]).unwrap();
-        subset.add_text(0, "Subset", 10.0, 50.0, 10.0).unwrap();
+        subset
+            .add_text(0, "Subset", 10.0, 50.0, 10.0, (0, 0, 0))
+            .unwrap();
         let extracted = crate::pdf::extract(&subset.to_bytes().unwrap(), None).unwrap();
         assert_eq!(extracted.pages.len(), 2);
         assert!(extracted.pages[0]

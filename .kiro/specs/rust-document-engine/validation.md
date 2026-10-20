@@ -1,5 +1,12 @@
 # Validation evidence
 
+## 2026-10-20 DOCX grid and PDF geometry (unreleased)
+
+- Offline Linux x86_64, Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1: formatting, 97 Rust tests, warnings-denied Clippy, locked release build and 112 installed-wheel Python tests passed, with zero skips and matching installed artifact identity.
+- DOCX tests cover native row/column CRUD, rich content, nested generations, placeholders, header prefixes, span validation, width/budget rollback, stale descendants and reopened DOCX/PNG/PDF output. PDF tests cover four rotations, nonzero origins, UserUnit, inherited boxes, reset, sibling preservation, failed-edit rollback, background invalidation and searchable colored built-in/supplied-font text. Content-truncation mapping is tested directly; no oversized render fixture is claimed.
+- Wheel: `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`, 16,828,282 bytes; extension: 38,999,256 bytes. SHA-256: `874550581aeae32e6279508ce0f00cd6fdce314749aba48592b01fd126233cca`. Lockfile SHA-256: `07d283b629c33e1994e4bd2b9e3e8f16876ee5efda73c46428581e20869fcdf8`. All pinned revisions, the 263-package audited graph and assets are unchanged.
+- PDF1 is completed within documented geometry semantics. Ordered table column views, rich semantic row copying, unsafe vertical-merge repairs and remaining unchecked criteria stay open. This is not a release declaration.
+
 ## 2026-10-20 sections, slide tables and template recipes (unreleased)
 
 - Offline Linux x86_64, Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1. Formatting, 86 Rust tests, warnings-denied Clippy, locked release build and 107 installed-wheel Python tests passed; zero skips and exact installed artifact identity.

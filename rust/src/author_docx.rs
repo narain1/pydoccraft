@@ -50,6 +50,7 @@ pub struct EditableDocx {
     stories: BTreeMap<u32, Vec<usize>>,
     next_story_block: usize,
     cell_placeholders: BTreeSet<(StoryRef, Path)>,
+    table_generations: BTreeMap<usize, u64>,
 }
 
 #[pymethods]
@@ -68,6 +69,7 @@ impl EditableDocx {
             stories: BTreeMap::new(),
             next_story_block: MAX_BLOCKS,
             cell_placeholders: BTreeSet::new(),
+            table_generations: BTreeMap::new(),
         }
     }
 
@@ -84,6 +86,7 @@ impl EditableDocx {
             stories: self.stories.clone(),
             next_story_block: self.next_story_block,
             cell_placeholders: self.cell_placeholders.clone(),
+            table_generations: self.table_generations.clone(),
         })
     }
 
@@ -220,6 +223,95 @@ impl EditableDocx {
             }
         }
         Ok(rows)
+    }
+
+    pub fn table_generation(&self, id: usize) -> PyResult<u64> {
+        self.table(id)?;
+        Ok(*self.table_generations.get(&id).unwrap_or(&0))
+    }
+
+    pub fn insert_row(&mut self, id: usize, index: usize) -> PyResult<()> {
+        let table = self.table(id)?;
+        if index > table.rows.len() {
+            return Err(PyIndexError::new_err(
+                "table insertion row index out of range",
+            ));
+        }
+        if table.rows.len() >= wordcraft_doc::table::MAX_ROWS {
+            return Err(limit("table exceeds 32767 rows"));
+        }
+        let like = index.saturating_sub(1);
+        if self.cell_count.saturating_add(table.rows[like].cells.len()) > MAX_CELLS {
+            return Err(limit("document exceeds 100000 table cells"));
+        }
+        self.mutate_table_structure(id, |table| {
+            table.insert_row(index, like);
+            Ok(())
+        })
+    }
+
+    pub fn delete_row(&mut self, id: usize, index: usize) -> PyResult<()> {
+        let table = self.table(id)?;
+        if index >= table.rows.len() {
+            return Err(PyIndexError::new_err("table row index out of range"));
+        }
+        if table.rows.len() == 1 {
+            return Err(PyValueError::new_err("cannot delete the final table row"));
+        }
+        self.mutate_table_structure(id, |table| {
+            table.delete_row(index);
+            Ok(())
+        })
+    }
+
+    pub fn insert_column(&mut self, id: usize, index: usize) -> PyResult<()> {
+        let table = self.table(id)?;
+        if index > table.grid.len() {
+            return Err(PyIndexError::new_err(
+                "table insertion column index out of range",
+            ));
+        }
+        if table.grid.len() >= wordcraft_doc::table::MAX_COLS {
+            return Err(limit("table exceeds 63 columns"));
+        }
+        let added = table
+            .rows
+            .iter()
+            .filter(|row| {
+                let mut start = 0;
+                for cell in &row.cells {
+                    let end = start + cell.span();
+                    if start < index && index < end {
+                        return false;
+                    }
+                    start = end;
+                }
+                true
+            })
+            .count();
+        if self.cell_count.saturating_add(added) > MAX_CELLS {
+            return Err(limit("document exceeds 100000 table cells"));
+        }
+        self.mutate_table_structure(id, |table| {
+            table.insert_col(index);
+            Ok(())
+        })
+    }
+
+    pub fn delete_column(&mut self, id: usize, index: usize) -> PyResult<()> {
+        let table = self.table(id)?;
+        if index >= table.grid.len() {
+            return Err(PyIndexError::new_err("table column index out of range"));
+        }
+        if table.grid.len() == 1 {
+            return Err(PyValueError::new_err(
+                "cannot delete the final table column",
+            ));
+        }
+        self.mutate_table_structure(id, |table| {
+            table.delete_col(index);
+            Ok(())
+        })
     }
 
     pub fn column_widths(&self, id: usize) -> PyResult<Vec<f64>> {
@@ -583,16 +675,10 @@ impl EditableDocx {
                 ));
             }
         }
-        let before = table.rows.iter().map(|row| row.cells.len()).sum::<usize>();
-        let mut candidate = self.document()?.clone();
-        let table = self.table_mut(&mut candidate, id)?;
-        table.merge(r0, r1, c0, c1);
-        let after = table.rows.iter().map(|row| row.cells.len()).sum::<usize>();
-        self.commit(candidate)?;
-        let (story, path) = self.location(id)?;
-        self.invalidate_descendants(story, &path);
-        self.cell_count = self.cell_count - before + after;
-        Ok(())
+        self.mutate_table_structure(id, |table| {
+            table.merge(r0, r1, c0, c1);
+            Ok(())
+        })
     }
 
     #[pyo3(signature = (id, row, column, columns=2))]
@@ -627,20 +713,16 @@ impl EditableDocx {
             ));
         }
         let before = table.rows[row].cells.len();
-        let mut candidate = self.document()?.clone();
-        let table = self.table_mut(&mut candidate, id)?;
-        table.split_cell(row, cell_index, columns);
-        if table.rows[row].cells.len() != before + columns - 1 {
-            return Err(EngineError::Unsupported(
-                "upstream could not split the selected cell exactly".into(),
-            )
-            .into());
-        }
-        self.commit(candidate)?;
-        let (story, path) = self.location(id)?;
-        self.invalidate_descendants(story, &path);
-        self.cell_count += columns - 1;
-        Ok(())
+        self.mutate_table_structure(id, |table| {
+            table.split_cell(row, cell_index, columns);
+            if table.rows[row].cells.len() != before + columns - 1 {
+                return Err(EngineError::Unsupported(
+                    "upstream could not split the selected cell exactly".into(),
+                )
+                .into());
+            }
+            Ok(())
+        })
     }
 
     pub fn cell_margins(
@@ -2037,11 +2119,82 @@ impl EditableDocx {
         ))
     }
 
+    fn mutate_table_structure(
+        &mut self,
+        id: usize,
+        operation: impl FnOnce(&mut Table) -> PyResult<()>,
+    ) -> PyResult<()> {
+        let original = self.table(id)?;
+        let before = table_usage(original);
+        let generation = self
+            .table_generation(id)?
+            .checked_add(1)
+            .ok_or_else(|| limit("table generation limit reached"))?;
+        let (story, path) = self.location(id)?;
+        // Keep original blocks alive through staging. Arc identity follows the native moves,
+        // including merged cells, without inventing an OOXML path-remapping algorithm.
+        let hidden = self
+            .cell_placeholders
+            .iter()
+            .filter(|(owner, child)| *owner == story && child.0.starts_with(&path.0))
+            .filter_map(|(_, child)| {
+                self.document()
+                    .ok()?
+                    .container(story, child)?
+                    .get(child.last())
+            })
+            .map(|block| Arc::as_ptr(block) as usize)
+            .collect::<BTreeSet<_>>();
+        let mut candidate = self.document()?.clone();
+        let table = self.table_mut(&mut candidate, id)?;
+        operation(table)?;
+        validate_editable_grid(table)?;
+        synchronize_grid_widths(table);
+        let after = table_usage(table);
+        let text_bytes = self.updated_text_bytes(before.0, after.0)?;
+        let cells = self
+            .cell_count
+            .checked_sub(before.1)
+            .and_then(|count| count.checked_add(after.1))
+            .filter(|count| *count <= MAX_CELLS)
+            .ok_or_else(|| limit("document exceeds 100000 table cells"))?;
+        if table.total_width() > self.container_width(id)? + 0.001 {
+            return Err(PyValueError::new_err("table columns exceed the available page or cell width; resize columns before inserting"));
+        }
+        validate_grid_children(
+            &candidate,
+            candidate
+                .table(story, &path)
+                .ok_or_else(|| PyIndexError::new_err("table no longer exists"))?,
+        )?;
+        let placeholders = candidate
+            .para_paths(story)
+            .into_iter()
+            .filter(|child| child.0.len() > path.0.len() && child.0.starts_with(&path.0))
+            .filter(|child| {
+                candidate
+                    .container(story, child)
+                    .and_then(|blocks| blocks.get(child.last()))
+                    .is_some_and(|block| hidden.contains(&(Arc::as_ptr(block) as usize)))
+            })
+            .collect::<Vec<_>>();
+        self.commit(candidate)?;
+        self.invalidate_descendants(story, &path);
+        self.cell_placeholders
+            .extend(placeholders.into_iter().map(|path| (story, path)));
+        self.table_generations.insert(id, generation);
+        self.text_bytes = text_bytes;
+        self.cell_count = cells;
+        Ok(())
+    }
+
     fn invalidate_descendants(&mut self, story: StoryRef, prefix: &Path) {
         self.locations.retain(|_, (owner, path)| {
             *owner != story || path.0.len() <= prefix.0.len() || !path.0.starts_with(&prefix.0)
         });
         self.images.retain(|id| self.locations.contains_key(id));
+        self.table_generations
+            .retain(|id, _| self.locations.contains_key(id));
         self.cell_placeholders
             .retain(|(owner, path)| *owner != story || !path.0.starts_with(&prefix.0));
     }
@@ -3153,7 +3306,7 @@ fn blocks_fit_width(blocks: &[Arc<Block>], width: f32) -> PyResult<()> {
         };
         if exceeds {
             return Err(PyValueError::new_err(
-                "section resize would overflow an existing table or image; resize the child first",
+                "operation would overflow an existing table or image; resize the child first",
             ));
         }
     }
@@ -3190,6 +3343,108 @@ fn validate_section_content(document: &Document, section: usize) -> PyResult<()>
             .get(&id)
             .ok_or_else(|| PyValueError::new_err("section references a missing story"))?;
         blocks_fit_width(&part.blocks, props.text_width())?;
+    }
+    Ok(())
+}
+
+fn table_usage(table: &Table) -> (usize, usize) {
+    let mut bytes = 0;
+    let mut cells = 0;
+    for row in &table.rows {
+        cells += row.cells.len();
+        for cell in &row.cells {
+            let (nested_bytes, nested_cells) = content_usage(&cell.blocks);
+            bytes += nested_bytes;
+            cells += nested_cells;
+        }
+    }
+    (bytes, cells)
+}
+
+fn validate_editable_grid(table: &Table) -> PyResult<()> {
+    let columns = table.grid.len();
+    if table.rows.is_empty()
+        || table.rows.len() > wordcraft_doc::table::MAX_ROWS
+        || columns == 0
+        || columns > wordcraft_doc::table::MAX_COLS
+        || table
+            .grid
+            .iter()
+            .any(|width| !width.is_finite() || *width < 6.0)
+    {
+        return Err(PyValueError::new_err(
+            "table requires 1..32767 rows and 1..63 columns of at least 6 points",
+        ));
+    }
+    let mut previous_merges = BTreeSet::new();
+    let mut body_seen = false;
+    for row in &table.rows {
+        if row.props.header && body_seen {
+            return Err(PyValueError::new_err(
+                "table edit would interrupt the repeated-header prefix; clear repeat_header first",
+            ));
+        }
+        body_seen |= !row.props.header;
+        if row.props.grid_before != 0 || row.props.grid_after != 0 {
+            return Err(PyValueError::new_err(
+                "table grid edits require complete rows",
+            ));
+        }
+        let mut column = 0_usize;
+        let mut merges = BTreeSet::new();
+        for cell in &row.cells {
+            let span = cell.props.span as usize;
+            let end = column.saturating_add(span);
+            if span == 0 || span > wordcraft_doc::table::MAX_COLS || end > columns {
+                return Err(PyValueError::new_err(
+                    "table edit produced an invalid cell span",
+                ));
+            }
+            if cell.props.vmerge == VMerge::Continue && !previous_merges.contains(&(column, end)) {
+                return Err(EngineError::Unsupported(
+                    "upstream cannot preserve this vertical merge during the row edit".into(),
+                )
+                .into());
+            }
+            if cell.props.vmerge != VMerge::None {
+                merges.insert((column, end));
+            }
+            column = end;
+        }
+        if column != columns {
+            return Err(PyValueError::new_err(
+                "table edit produced an incomplete row",
+            ));
+        }
+        previous_merges = merges;
+    }
+    Ok(())
+}
+
+fn synchronize_grid_widths(table: &mut Table) {
+    table.props.width = Some(table.grid.iter().sum());
+    table.props.width_pct = None;
+    for row in &mut table.rows {
+        let mut column = 0;
+        for cell in &mut row.cells {
+            let end = column + cell.span();
+            cell.props.width = Some(table.grid[column..end].iter().sum());
+            cell.props.width_pct = None;
+            column = end;
+        }
+    }
+}
+
+fn validate_grid_children(document: &Document, table: &Table) -> PyResult<()> {
+    for (row_index, row) in table.rows.iter().enumerate() {
+        let mut column = 0;
+        for (cell_index, cell) in row.cells.iter().enumerate() {
+            let end = column + cell.span();
+            let margins = wordcraft_layout::cell_margins(document, table, row_index, cell_index);
+            let available = table.grid[column..end].iter().sum::<f32>() - margins[1] - margins[3];
+            blocks_fit_width(&cell.blocks, available)?;
+            column = end;
+        }
     }
     Ok(())
 }
@@ -5034,5 +5289,306 @@ mod tests {
             document.cell_margins(table, 0, 0).unwrap(),
             (1.0, 2.0, 3.0, 4.0)
         );
+    }
+    #[test]
+    fn grid_crud_preserves_table_identity_and_invalidates_only_its_children() {
+        let mut document = EditableDocx::new();
+        let body = document.add_paragraph("Outside paragraph").unwrap();
+        let table = document
+            .add_table(vec![
+                vec!["Anchor".into(), "Other".into()],
+                vec!["Bottom".into(), "Last".into()],
+            ])
+            .unwrap();
+        document
+            .set_column_widths(table, vec![100.0, 100.0])
+            .unwrap();
+        let anchor = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
+        document
+            .add_run_patch(anchor, " bold", r#"{"bold":true}"#)
+            .unwrap();
+        document
+            .set_row_height(table, 0, Some(30.0), "at_least")
+            .unwrap();
+        document
+            .set_cell_background(table, 0, 0, Some("#123456"))
+            .unwrap();
+        let nested = document
+            .cell_add_table(table, 0, 0, vec![vec!["Nested".into()]])
+            .unwrap();
+        let outside = document
+            .add_table(vec![vec!["Outside cell".into()]])
+            .unwrap();
+        let outside_child = document.cell_paragraph_ids(outside, 0, 0).unwrap()[0];
+        document.insert_row(table, 1).unwrap();
+        assert_eq!(document.table_generation(table).unwrap(), 1);
+        assert_eq!(document.table_generation(outside).unwrap(), 0);
+        assert!(document.paragraph_text(anchor).is_err());
+        assert!(document.table_rows(nested).is_err());
+        assert_eq!(document.paragraph_text(body).unwrap(), "Outside paragraph");
+        assert_eq!(
+            document.paragraph_text(outside_child).unwrap(),
+            "Outside cell"
+        );
+        assert_eq!(document.table_rows(table).unwrap()[1], vec!["", ""]);
+        assert_eq!(
+            document.row_height(table, 1).unwrap(),
+            (Some(30.0), "at_least")
+        );
+        assert_eq!(
+            document.cell_background(table, 1, 0).unwrap(),
+            Some("#123456".into())
+        );
+        let children = document.cell_paragraph_ids(table, 0, 0).unwrap();
+        assert_eq!(
+            children.len(),
+            1,
+            "synthetic trailing paragraph must remain hidden"
+        );
+        let new_anchor = children[0];
+        assert!(new_anchor > anchor);
+        assert_eq!(
+            document
+                .paragraph(new_anchor)
+                .unwrap()
+                .runs
+                .last()
+                .unwrap()
+                .props
+                .bold,
+            Some(true)
+        );
+        let new_nested = document.cell_table_ids(table, 0, 0).unwrap()[0];
+        assert!(new_nested > nested);
+        document
+            .cell_add_paragraph(table, 0, 0, "After nested")
+            .unwrap();
+        assert_eq!(document.cell_paragraph_ids(table, 0, 0).unwrap().len(), 2);
+        document.insert_column(table, 1).unwrap();
+        assert_eq!(
+            document.column_widths(table).unwrap(),
+            vec![100.0, 100.0, 100.0]
+        );
+        document.delete_column(table, 1).unwrap();
+        document.delete_row(table, 1).unwrap();
+        assert_eq!(document.table_generation(table).unwrap(), 4);
+        assert_eq!(document.column_widths(table).unwrap(), vec![100.0, 100.0]);
+        assert_eq!(document.table_rows(table).unwrap().len(), 2);
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        let native = reopened.table(StoryRef::Body, &Path::top(table)).unwrap();
+        assert_eq!(native.props.width, Some(200.0));
+        assert_eq!(native.rows[0].cells[0].props.width, Some(100.0));
+        assert_eq!(native.rows[1].cells[1].props.width, Some(100.0));
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        let extracted = crate::pdf::extract(&pdf, None).unwrap();
+        let text = extracted
+            .pages
+            .iter()
+            .flat_map(|page| &page.blocks)
+            .map(|block| block.text.as_str())
+            .collect::<String>();
+        assert_eq!(text.matches("Anchor bold").count(), 1);
+        assert_eq!(text.matches("Nested").count(), 1);
+        assert!(crate::docx::render(&bytes, 0, 72.0, None)
+            .unwrap()
+            .starts_with(b"\x89PNG"));
+        let mut copied = document.copy().unwrap();
+        copied.insert_row(table, 2).unwrap();
+        assert_eq!(copied.table_generation(table).unwrap(), 5);
+        assert_eq!(document.table_generation(table).unwrap(), 4);
+        document.close();
+        assert!(document.table_generation(table).is_err());
+        assert_eq!(
+            copied.paragraph_text(outside_child).unwrap(),
+            "Outside cell"
+        );
+    }
+
+    #[test]
+    fn grid_edits_preserve_supported_merges_and_reject_orphan_continuations_atomically() {
+        let mut document = EditableDocx::new();
+        let table = document
+            .add_table(vec![
+                vec!["A".into(), "B".into(), "C".into()],
+                vec!["D".into(), "E".into(), "F".into()],
+                vec!["G".into(), "H".into(), "I".into()],
+            ])
+            .unwrap();
+        document
+            .set_column_widths(table, vec![80.0, 80.0, 80.0])
+            .unwrap();
+        document.merge_cells(table, 0, 0, 0, 1).unwrap();
+        assert_eq!(document.table_generation(table).unwrap(), 1);
+        document.insert_column(table, 1).unwrap();
+        assert_eq!(document.table(table).unwrap().rows[0].cells[0].span(), 3);
+        assert_eq!(document.cell_text(table, 0, 2).unwrap(), "A\nB");
+        document.delete_column(table, 1).unwrap();
+        assert_eq!(document.table(table).unwrap().rows[0].cells[0].span(), 2);
+        document.merge_cells(table, 1, 2, 2, 2).unwrap();
+        let before = document.revision().unwrap();
+        let generation = document.table_generation(table).unwrap();
+        let rows = document.table_rows(table).unwrap();
+        assert!(document.insert_row(table, 2).is_err());
+        assert!(document.delete_row(table, 1).is_err());
+        assert_eq!(document.revision().unwrap(), before);
+        assert_eq!(document.table_generation(table).unwrap(), generation);
+        assert_eq!(document.table_rows(table).unwrap(), rows);
+        document.insert_row(table, 3).unwrap();
+        assert_eq!(document.cell_text(table, 3, 2).unwrap(), "F\nI");
+        document.delete_row(table, 2).unwrap();
+        assert_eq!(document.cell_text(table, 2, 2).unwrap(), "F\nI");
+        document.delete_column(table, 2).unwrap();
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        validate_editable_grid(reopened.table(StoryRef::Body, &Path::top(table)).unwrap()).unwrap();
+        assert!(!reopened.plain_text(StoryRef::Body).contains('F'));
+        let before = document.table_generation(table).unwrap();
+        document.split_cell(table, 0, 0, 2).unwrap();
+        assert_eq!(document.table_generation(table).unwrap(), before + 1);
+    }
+
+    #[test]
+    fn grid_limits_headers_widths_and_failed_edits_keep_generations_and_handles() {
+        let mut document = EditableDocx::new();
+        let table = document
+            .add_table(vec![
+                vec!["A".into(), "B".into()],
+                vec!["C".into(), "D".into()],
+            ])
+            .unwrap();
+        let child = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
+        let before = document.revision().unwrap();
+        assert!(
+            document.insert_column(table, 1).is_err(),
+            "default full-width table cannot silently grow past its container"
+        );
+        assert!(document.insert_row(table, 3).is_err());
+        assert!(document.delete_row(table, 2).is_err());
+        assert!(document.insert_column(table, 3).is_err());
+        assert!(document.delete_column(table, 2).is_err());
+        assert_eq!(document.revision().unwrap(), before);
+        assert_eq!(document.table_generation(table).unwrap(), 0);
+        assert_eq!(document.paragraph_text(child).unwrap(), "A");
+        document.set_row_repeat_header(table, 0, true).unwrap();
+        document.set_row_repeat_header(table, 1, true).unwrap();
+        let before = document.revision().unwrap();
+        assert!(document.insert_row(table, 0).is_err());
+        assert!(document.insert_row(table, 1).is_err());
+        assert_eq!(document.revision().unwrap(), before);
+        document.insert_row(table, 2).unwrap();
+        assert!(!document.row_repeat_header(table, 2).unwrap());
+        document.delete_row(table, 0).unwrap();
+        assert!(document.row_repeat_header(table, 0).unwrap());
+        document.delete_row(table, 1).unwrap();
+        document.delete_column(table, 1).unwrap();
+        let before = document.revision().unwrap();
+        assert!(document.delete_row(table, 0).is_err());
+        assert!(document.delete_column(table, 0).is_err());
+        assert_eq!(document.revision().unwrap(), before);
+        document.table_generations.insert(table, u64::MAX);
+        assert!(document.insert_row(table, 1).is_err());
+        assert_eq!(document.revision().unwrap(), before);
+        let mut limits = EditableDocx::new();
+        let table = limits.add_table(vec![vec![String::new(); 63]]).unwrap();
+        assert!(limits.insert_column(table, 0).is_err());
+        limits.cell_count = MAX_CELLS;
+        assert!(limits.insert_row(table, 0).is_err());
+        assert_eq!(limits.table_generation(table).unwrap(), 0);
+    }
+
+    #[test]
+    fn grid_deletion_releases_text_and_nested_cell_budget_without_reusing_handles() {
+        let mut document = EditableDocx::new();
+        let table = document
+            .add_table(vec![
+                vec!["Keep".into(), "Keep2".into()],
+                vec!["Drop".into(), "Drop2".into()],
+            ])
+            .unwrap();
+        let nested = document
+            .cell_add_table(
+                table,
+                1,
+                0,
+                vec![vec!["Nested drop".into(), "Second drop".into()]],
+            )
+            .unwrap();
+        let nested_child = document.cell_paragraph_ids(nested, 0, 0).unwrap()[0];
+        let png = crate::rendering::encode_png(1, 1, &[0, 0, 0, 255], 72.0).unwrap();
+        let picture = document
+            .cell_add_image(table, 1, 1, &png, Some(10.0), Some(10.0), "Drop image")
+            .unwrap();
+        let old_bytes = document.text_bytes;
+        let old_cells = document.cell_count;
+        document.delete_row(table, 1).unwrap();
+        assert_eq!(document.text_bytes, "KeepKeep2".len());
+        assert!(document.text_bytes < old_bytes);
+        assert_eq!(document.cell_count, 2);
+        assert!(document.cell_count < old_cells);
+        assert!(document.table_rows(nested).is_err());
+        assert!(document.paragraph_text(nested_child).is_err());
+        assert!(document.image_size(picture).is_err());
+        assert!(document.image_ids().unwrap().is_empty());
+        let fresh = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
+        assert!(fresh > picture);
+        assert_eq!(document.paragraph_text(fresh).unwrap(), "Keep");
+    }
+    #[test]
+    fn nested_grid_changes_preserve_parent_handles_and_guard_merged_child_widths() {
+        let mut document = EditableDocx::new();
+        let outer = document
+            .add_table(vec![vec!["Outer".into(), String::new()]])
+            .unwrap();
+        document
+            .set_column_widths(outer, vec![100.0, 100.0])
+            .unwrap();
+        document.merge_cells(outer, 0, 0, 0, 1).unwrap();
+        let outer_paragraph = document.cell_paragraph_ids(outer, 0, 0).unwrap()[0];
+        let inner = document
+            .cell_add_table(
+                outer,
+                0,
+                0,
+                vec![vec!["Inner".into()], vec!["Second".into()]],
+            )
+            .unwrap();
+        let old_inner_paragraph = document.cell_paragraph_ids(inner, 0, 0).unwrap()[0];
+        document.insert_row(inner, 1).unwrap();
+        assert_eq!(document.table_generation(inner).unwrap(), 1);
+        assert_eq!(document.table_generation(outer).unwrap(), 1);
+        assert!(document.paragraph_text(old_inner_paragraph).is_err());
+        assert_eq!(document.paragraph_text(outer_paragraph).unwrap(), "Outer");
+        let before = document.revision().unwrap();
+        assert!(document.delete_column(outer, 1).is_err());
+        assert!(document.split_cell(outer, 0, 0, 2).is_err());
+        assert_eq!(document.revision().unwrap(), before);
+        assert_eq!(document.table_generation(outer).unwrap(), 1);
+        assert_eq!(
+            document.cell_paragraph_ids(outer, 0, 0).unwrap(),
+            vec![outer_paragraph]
+        );
+        document.set_column_widths(inner, vec![80.0]).unwrap();
+        document.delete_column(outer, 1).unwrap();
+        assert!(document.table_generation(inner).is_err());
+        assert!(!document.table_generations.contains_key(&inner));
+        let rebound = document.cell_table_ids(outer, 0, 0).unwrap()[0];
+        assert_eq!(document.table_generation(rebound).unwrap(), 0);
+        assert_eq!(document.cell_paragraph_ids(outer, 0, 0).unwrap().len(), 1);
+        document
+            .cell_add_paragraph(outer, 0, 0, "Trailing")
+            .unwrap();
+        assert_eq!(document.cell_paragraph_ids(outer, 0, 0).unwrap().len(), 2);
+        let second = document
+            .add_table(vec![vec!["Start".into(), String::new()]])
+            .unwrap();
+        let nested = document
+            .cell_add_table(second, 0, 0, vec![vec!["Content".into()]])
+            .unwrap();
+        document.set_column_widths(nested, vec![80.0]).unwrap();
+        document.merge_cells(second, 0, 0, 0, 1).unwrap();
+        assert_eq!(document.cell_paragraph_ids(second, 0, 0).unwrap().len(), 1);
+        document.split_cell(second, 0, 0, 2).unwrap();
+        assert_eq!(document.cell_paragraph_ids(second, 0, 0).unwrap().len(), 1);
     }
 }

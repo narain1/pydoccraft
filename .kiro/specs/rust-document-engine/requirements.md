@@ -156,3 +156,9 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 4. PPTX table merge/split and row/column CRUD SHALL call public native algorithms, preserve anchors and shape identity, emit covered text once and invalidate old row/cell handles after structural changes. Partial overlaps and final-row/column deletion SHALL fail atomically.
 5. PPTX row heights SHALL be identified as minimums, not exact dimensions. Grid extents SHALL remain synchronized with stored shape geometry; margins, aggregate cells and scalar dimensions SHALL be checked before publication. Inherited/mixed border inspection SHALL fail explicitly when native resolution is unavailable publicly.
 6. Literal-template and batch examples SHALL compose existing copies, explicit story scopes, replacement and saves with caller-owned failure handling. Missing/unused values and replacement counts SHALL be checked; source templates SHALL remain unchanged after success or failure. These recipes SHALL NOT imply arbitrary source-DOCX preservation.
+
+## 16. Grid structure and PDF geometry
+
+1. DOCX row/column edits SHALL use native table operations, stage mutations atomically and preserve valid spans, placeholders, width constraints and repeated-header prefixes. Unsafe vertical-merge continuations SHALL fail explicitly. Structural edits SHALL invalidate affected positional and descendant handles while retaining the table and unrelated handles.
+2. PDF page-box inspection/editing SHALL use native geometry with top-left view coordinates, rotation and UserUnit. Non-media boxes SHALL fit within media; media edits MAY clip existing effective boxes but SHALL reject empty intersections. Geometry mutations SHALL refresh cached sizes and invalidate stale handles/background knowledge.
+3. Both PDF text paths SHALL support checked RGB color. Known native content truncation SHALL raise the stable resource-limit error; editable imports SHALL reject incomplete outlines.
