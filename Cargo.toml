@@ -17,6 +17,8 @@ extension-module = ["pyo3/extension-module"]
 
 [dependencies]
 base64 = "=0.22.1"
+futures = "=0.3.32"
+lexepub = { version = "=0.1.2", default-features = false }
 deckcraft-model = { git = "https://github.com/storytold/deckcraft", rev = "22db9261f9d1a214c296fd390173130c45d76d66" }
 deckcraft-pdf = { git = "https://github.com/storytold/deckcraft", rev = "22db9261f9d1a214c296fd390173130c45d76d66" }
 deckcraft-pptx = { git = "https://github.com/storytold/deckcraft", rev = "22db9261f9d1a214c296fd390173130c45d76d66" }
@@ -36,8 +38,9 @@ pdfcraft-render = { git = "https://github.com/storytold/pdfcraft", rev = "645016
 png = "=0.18.1"
 pyo3 = { version = "=0.23.5" }
 quick-xml = "=0.41.0"
+rbook = { version = "=0.7.12", default-features = false, features = ["write"] }
 serde = { version = "=1.0.228", features = ["derive"] }
-serde_json = "=1.0.138"
+serde_json = "=1.0.149"
 skrifa = "=0.44.0"
 thiserror = "=2.0.21"
 wordcraft-doc = { git = "https://github.com/storytold/wordcraft", rev = "f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22" }

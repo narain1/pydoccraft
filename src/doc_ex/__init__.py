@@ -20,10 +20,10 @@ from .errors import (
     UnsupportedFormatError,
 )
 from .models import Block, Cell, Image, Link, Story, Table
-from ._authoring import EditableDocument, new, pt, mm, cm, inches
+from ._authoring import EditableDocument, EpubChapter, EpubDocument, new, pt, mm, cm, inches
 
 __all__ = [
-    "open", "convert", "extract_text", "new", "pt", "mm", "cm", "inches", "EditableDocument", "Document", "Page", "Block", "Cell", "Table", "Link", "Image", "Story",
+    "open", "convert", "extract_text", "new", "pt", "mm", "cm", "inches", "EditableDocument", "EpubDocument", "EpubChapter", "Document", "Page", "Block", "Cell", "Table", "Link", "Image", "Story",
     "DocExError", "DocumentClosedError", "MalformedDocumentError", "UnsafeArchiveError",
     "UnsupportedFormatError", "ToolExecutionError", "ToolNotFoundError",
 ]
@@ -65,7 +65,7 @@ def _read(source, *, limit: int | None = None) -> tuple[bytes, str]:
 
 def _kind(data: bytes, suffix: str, filetype: str | None) -> str:
     if filetype:
-        aliases = {"pdf": "pdf", "docx": "docx", "word": "docx", "pptx": "pptx", "powerpoint": "pptx"}
+        aliases = {"pdf": "pdf", "docx": "docx", "word": "docx", "pptx": "pptx", "powerpoint": "pptx", "epub": "epub", "ebook": "epub"}
         normalized = filetype.lower().lstrip(".")
         if normalized not in aliases:
             raise UnsupportedFormatError(f"Unsupported file type: {filetype}")
@@ -74,7 +74,7 @@ def _kind(data: bytes, suffix: str, filetype: str | None) -> str:
         if detected != kind:
             raise UnsupportedFormatError(f"Input is {detected}, not {kind}")
         return kind
-    if suffix.lower().lstrip(".") in {"pdf", "docx", "pptx"}:
+    if suffix.lower().lstrip(".") in {"pdf", "docx", "pptx", "epub"}:
         expected = suffix.lower().lstrip(".")
         detected = _native(lambda: _core.detect(data))
         if detected != expected:
@@ -89,8 +89,11 @@ def open(path_or_bytes: str | Path | bytes | bytearray | memoryview | BinaryIO, 
     kind = _kind(data, suffix, filetype)
     if kind == "pdf":
         render_session, encoded = _native(lambda: _core._open_pdf(data, password))
-    else:
+    elif kind in {"docx", "pptx"}:
         render_session, encoded = _native(lambda: _core._open_office(data, kind, password))
+    else:
+        render_session = None
+        encoded = _native(lambda: _core.extract(data, kind, password))
     try:
         payload = json.loads(encoded)
         pages = [_page(value) for value in payload["pages"]]
@@ -100,7 +103,8 @@ def open(path_or_bytes: str | Path | bytes | bytearray | memoryview | BinaryIO, 
         return Document(pages, metadata, data, kind, password, stories=stories, _render_session=render_session)
     except BaseException:
         # A retained traceback must not keep an unreturned native session alive.
-        render_session.close()
+        if render_session is not None:
+            render_session.close()
         raise
 
 

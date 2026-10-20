@@ -1,6 +1,6 @@
 # Native authoring (unreleased)
 
-The branch adds `doc_ex.new("docx" | "pdf" | "pptx")`. Editable documents own the upstream native model; extracted `Document`, `Block`, `Table` and `Cell` values remain snapshots. This page describes the implemented surface, while [the roadmap](../TODO.md) retains broader parity work. These additions are not part of the published 0.2.1 release.
+The branch adds `doc_ex.new("docx" | "pdf" | "pptx" | "epub")`. Editable documents own the upstream native model; extracted `Document`, `Block`, `Table` and `Cell` values remain snapshots. This page describes the implemented surface, while [the roadmap](../TODO.md) retains broader parity work. These additions are not part of the published 0.2.1 release.
 
 ## Create, save, copy and render
 
@@ -27,9 +27,15 @@ with doc_ex.new("docx") as report:
 
 A new PDF starts with one Letter page unless `size` is supplied. `pdf.pages.add()` defaults to Letter independently of the first page; pass `size` explicitly for another size. A new DOCX has a default section and styles; its required blank paragraph is omitted from the user paragraph collection. An explicitly inserted empty paragraph is retained. A presentation starts with no slides and must have at least one slide before serialization.
 
+### EPUB reflowable books
+
+`doc_ex.new("epub" | "ebook")` creates an append-only EPUB 3 book. Set required title, identifier, and language metadata, add ordered chapters, then append headings, paragraphs, HTTP(S)/mailto/fragment links, and PNG/JPEG/GIF images. Text must be valid XML 1.0. Images are signature checked, limited to 16 MiB each and 64 MiB total; authored content is limited to 64 MiB and estimated/actual output to 128 MiB. SVG is rejected because arbitrary SVG cannot be guaranteed inert. `copy()`, bytes/path/stream save, context management, and close follow the lifecycle above.
+
+EPUB rendering, conversion, CSS, raw XHTML/OPF, scripts, fixed layout, editing an existing book, and physical pagination are unavailable. The extraction API maps each spine chapter to one compatibility page.
+
 ## Typing and inspection
 
-The package ships `py.typed`. Literal `new("docx")`, `new("pdf")` and `new("pptx")` calls retain the matching document type through context managers and copies. Common creation methods return typed handles; collections and table slices retain their element types. `get_text("dict")` returns a dictionary, while text/Markdown/JSON modes return strings. A dynamic mode string retains the union. These hints describe successful results; existing format, ownership and value checks still apply.
+The package ships `py.typed`. Literal `new("docx")`, `new("pdf")`, `new("pptx")` and `new("epub")` calls retain the matching document type through context managers and copies. Common creation methods return typed handles; collections and table slices retain their element types. `get_text("dict")` returns a dictionary, while text/Markdown/JSON modes return strings. A dynamic mode string retains the union. These hints describe successful results; existing format, ownership and value checks still apply.
 
 Paragraph, table and style reprs show identity and owner closure without reading document content, including stale handles. A repr is not a validity check: retrieve the desired property to apply normal lifetime checks. Other authoring annotations remain incomplete. The development consumer check is deliberately narrower than a full-package strict-typing guarantee:
 
@@ -505,3 +511,27 @@ Ordinary DOCX extraction exposes the supported core properties. Imported custom-
 `page.annotations.add(kind, box=..., text="", author="", color=...)` also accepts `underline`, `strikeout` and `squiggly`, alongside `note` and `highlight`. Existing annotation properties and `update` move the markup, change text/author/color, and preserve searchable page text. Deletion remains `del page.annotations[index]`. Boxes use current displayed-page points; native quadrilaterals preserve rotation, CropBox and UserUnit geometry. Each new mark uses one quadrilateral. Movement is supported; resizing and multi-quad authoring remain unavailable.
 
 Native appearance generation is preflighted before potentially allocating it, including when updating imported highlights. Direct quadrilateral arrays are limited to 1,024 quads with finite coordinates within ±1,000,000 PDF user units (the editable page-box coordinate limit), plus a conservative work estimate within the remaining document-input budget; generated appearance bytes are charged after successful staging. Squiggly's native 10,000-segment cap coarsens the whole line rather than truncating its extent. Unsupported/malformed/over-budget updates leave bytes and cached renders unchanged. Deletion reads the subtype without rebuilding appearances, so an over-budget appearance does not prevent removal. This profile does not establish complete imported-form, reply-thread or arbitrary annotation appearance support.
+
+## EPUB creation (feature branch)
+
+```python
+import doc_ex
+
+with doc_ex.new("epub") as book:
+    book.set_metadata(
+        title="Example book",
+        identifier="urn:example:book",
+        language="en",
+        authors=["Example Author"],
+    )
+    chapter = book.add_chapter("Introduction")
+    chapter.add_heading("Welcome", level=1)
+    chapter.add_paragraph("A reflowable paragraph.")
+    chapter.add_link("Project", "https://example.com")
+    chapter.add_image(png_bytes, media_type="image/png", alt="Diagram")
+    epub_bytes = book.to_bytes()
+```
+
+EPUB creation is append-only and semantic. `EpubDocument` supports the shared `to_bytes`, path/stream `save`, `copy`, context manager and idempotent `close` lifecycle. Required metadata is title, identifier and language. Links are inert ASCII-case-insensitive HTTP(S), mailto or safe fragment targets; remote resources are never fetched. Supported image resources are signature-checked PNG, JPEG and GIF bytes, limited to 16 MiB each and 64 MiB total. SVG authoring is rejected because active content cannot be guaranteed inert.
+
+Callers cannot inject raw XHTML, OPF, CSS, SVG, scripts or archive paths. Existing EPUB editing, fixed-layout content, rendering, conversion, DRM and media overlays are unsupported.
