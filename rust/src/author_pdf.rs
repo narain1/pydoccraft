@@ -2332,10 +2332,15 @@ fn with_annotation_dict<T>(
 }
 
 fn markup_quad_peak(quad: &[f64; 8], squiggly: bool) -> PyResult<usize> {
-    if quad.iter().any(|n| !n.is_finite()) {
-        return Err(
-            EngineError::Unsupported("markup quad contains a nonfinite coordinate".into()).into(),
-        );
+    // Use the same absolute user-space limit as editable page boxes. Finite
+    // inputs alone do not make native interpolation finite: subtracting opposite
+    // near-f64::MAX corners can overflow even when the measured left/bottom
+    // edges remain finite. This also keeps downstream f32 geometry representable.
+    if quad.iter().any(|n| !n.is_finite() || n.abs() > 1_000_000.0) {
+        return Err(EngineError::Unsupported(
+            "markup quad coordinates must be finite and within 1000000 PDF user units".into(),
+        )
+        .into());
     }
     let height = (quad[0] - quad[4]).hypot(quad[1] - quad[5]);
     let length = (quad[6] - quad[4]).hypot(quad[7] - quad[5]);
@@ -5196,6 +5201,12 @@ mod tests {
             Object::Array(vec![Object::Real(f64::NAN); 8]),
         );
         assert!(markup_dict_peak(&dict).is_err());
+        // Opposing right corners overflow native interpolation without changing
+        // the finite left height or bottom length used for the work estimate.
+        let extreme = [-1e308, 40.0, 1e308, 40.0, -1e308, 20.0, -1e308, 20.0];
+        assert!(markup_quad_peak(&extreme, false).is_err());
+        assert!(markup_quad_peak(&[1_000_000.0; 8], false).is_ok());
+        assert!(markup_quad_peak(&[1_000_001.0; 8], false).is_err());
         let long = [0.0, 1.0, 20000.0, 1.0, 0.0, 0.0, 20000.0, 0.0];
         assert_eq!(markup_quad_peak(&long, true).unwrap(), 4096 + 10001 * 1024);
         dict.set(

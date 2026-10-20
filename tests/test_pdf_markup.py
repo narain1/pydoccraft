@@ -17,7 +17,43 @@ def colored_pixels(png, channel):
                 for other in range(3) if other != channel) + 30]
 
 
+def imported_extreme_markup(kind):
+    # All coordinates are finite f64 values. Only the right vertical difference
+    # overflows, so checking the left height/bottom length alone misses it.
+    huge = "1" + "0" * 308
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
+               b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+               b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [4 0 R] /Resources << >> >>",
+               (f"<< /Type /Annot /Subtype /{kind} /Rect [20 20 140 40] /C [1 0 0] "
+                f"/QuadPoints [-{huge} 40 {huge} 40 -{huge} 20 -{huge} 20] >>").encode()]
+    output = bytearray(b"%PDF-1.7\n")
+    offsets = []
+    for index, value in enumerate(objects, 1):
+        offsets.append(len(output))
+        output.extend(f"{index} 0 obj\n".encode() + value + b"\nendobj\n")
+    xref = len(output)
+    output.extend(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode())
+    for offset in offsets:
+        output.extend(f"{offset:010} 00000 n \n".encode())
+    output.extend(f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode())
+    return bytes(output)
+
+
 class PdfMarkupTests(unittest.TestCase):
+    def test_imported_extreme_quad_recolor_rejects_before_native_appearance(self):
+        for kind in ("Highlight", "Underline", "StrikeOut", "Squiggly"):
+            with self.subTest(kind=kind), doc_ex.open(imported_extreme_markup(kind)) as source, source.edit() as document:
+                mark = document.pages[0].annotations[0]
+                before = document.to_bytes()
+                with self.assertRaisesRegex(UnsupportedFormatError, "quad coordinates"):
+                    mark.update(color="blue", text="Do not commit")
+                self.assertEqual(document.to_bytes(), before)
+                self.assertEqual(mark.color, "#FF0000")
+                del document.pages[0].annotations[0]
+                self.assertEqual(len(document.pages[0].annotations), 0)
+                with doc_ex.open(document.to_bytes()) as reopened:
+                    self.assertEqual(reopened.page_count, 1)
+
     def test_metadata_move_recolor_reopen_delete_and_stale_handles(self):
         for kind in KINDS:
             with self.subTest(kind=kind), doc_ex.new("pdf", size=(220, 220)) as document:
