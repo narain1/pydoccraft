@@ -384,5 +384,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reuse native SaveOptions.object_streams through existing PDF serialization methods with strict bool/default compatibility.
 - [x] Keep one atomic save implementation and verify both-mode representation, content, pixels, fields, ownership, callbacks and limit behavior.
 - [x] Complete the local locked native/release/clean-wheel corpus and record the new artifact.
-- [ ] Resolve the prerequisite bookmark CI rendering failure and pass independent review plus exact current-main CI before merge.
+- [x] Integrate the reviewed bookmark shaping correction and verify the complete local corpus with exact safe-profile PNG assertions.
+- [ ] Pass independent review and corrected prerequisite/current-main CI before merge.
 - [ ] Retain optimization, version/conformance profiles, incremental writing and broader PDF8 preservation as open work.
