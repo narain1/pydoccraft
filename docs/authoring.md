@@ -132,6 +132,19 @@ with doc_ex.new("pptx", size=(720, 540)) as deck:
 
 Slides expose `number`, `size`, writable `name`, `notes`, `hidden` and solid `background`, plus existing PNG/text readback. Shapes have writable `box`; text shapes also have `text`, `font_size`, `font`, `color`, `bold` and `italic`. Uniform formatting getters return `None` for mixed/unresolved inherited values. Tables reuse cell access/background/vertical alignment and add a placement box. PPTX table merging/splitting and grid layout are described below. Image insertion accepts fully validated PNG input.
 
+`slides.add(layout="blank")` also accepts the native `title`, `title_and_content` and `two_content` layouts. Native placeholders remain editable text shapes; `shape.placeholder` reports their role (`title`, `center_title`, `subtitle` or `content` for this profile), or `None` for an ordinary shape. Iterate existing `slide.shapes` to select a role; there is no second placeholder collection. Setting placeholder text retains the native layout/master references and inherited styles. `box` and `rotation` read native resolved geometry; changing either materializes that transform on the shape while preserving its placeholder identity and other inheritance.
+
+```python
+slide = deck.slides.add(layout="title_and_content")
+for shape in slide.shapes:
+    if shape.placeholder == "title":
+        shape.text = "Quarterly results"
+    elif shape.placeholder == "content":
+        shape.text = "Revenue increased\nCosts remained stable"
+```
+
+Other known native layout names raise `UnsupportedFormatError`; unknown names raise `ValueError`. Layout/master/theme import, changing an existing slide's layout and cross-presentation copying remain unavailable. Native source support alone does not establish rendering fidelity for vertical, picture or comparison layouts.
+
 `slide.add_shape("rectangle" | "ellipse" | "line", box=..., fill=None, stroke=None, stroke_width=1)` returns a shape with writable `rotation`, `fill` and `stroke=(color, width)` properties. `None` removes a fill or stroke. Line boxes can have one zero dimension. `slide.shapes` lists typed handles in stacking order, supports `move(index, destination)` and deletion, and preserves surviving identities. A PNG `slide.background_image` uses the native picture fill; reading solid `background` for an image fill raises an explicit unsupported error. Setting a solid background replaces the image fill and removes unreferenced owned media.
 
 `deck.slides.move(index, destination)` and `del deck.slides[index]` preserve the identities of remaining slide and shape handles. Handles to removed content fail explicitly. These operations are limited to the new authored profile, which has no imported animations, custom shows, navigation or unknown relationships. General slide cloning and source-presentation editing need additional upstream support and preservation checks.
@@ -175,9 +188,18 @@ Text edits preflight run/paragraph fragmentation (100,000 each), visible text an
 
 ### Multiple DOCX sections
 
-Each section exposes `start`, `page_size`, `margins`, `header_distance`, `footer_distance` and `columns=(count, gap_points, separator_bool)`. Section creation appends flowing content; subsequent document insertions belong to the final section. Section deletion/reorder and insertion into an earlier section are not yet exposed. Equal columns are limited to 1–45, with at least 18 points of usable width per column; unequal columns remain open. There are at most 128 sections.
+Each section exposes `start`, `page_size`, `margins`, `gutter`, `header_distance`, `footer_distance` and `columns=(count, gap_points, separator_bool)`. Section creation appends flowing content; subsequent document insertions belong to the final section. Section deletion/reorder and insertion into an earlier section are not yet exposed. Columns are limited to 1–45, with at least 18 points of usable width per column. There are at most 128 sections.
 
-A newly appended section copies its predecessor's setup and receives independent header/footer parts, including independent empty parts for missing variants. Editing an earlier header later cannot leak into the new section. This initial API deliberately has no linked-to-previous switch. Body table/image widths use the owning section's column width, while header/footer content uses that section's full content width. Existing nested cell limits also apply.
+`gutter` adds a left binding inset in points, reducing usable width. It accepts 0–1584 points subject to the page's remaining content area. Set `column_widths` to a tuple of explicit point widths matching the current column count; widths are 18–1584 points each, share the gap in `columns`, and must fit the usable width together with those gaps. Unused trailing space is allowed. The native layout positions and flows text; widths are never automatically scaled. `column_widths=None` restores equal columns. Assigning `columns` also clears explicit widths. Page dimensions determine orientation; mirrored/top gutters and independent per-column gaps are not exposed.
+
+```python
+section = document.sections[0]
+section.gutter = doc_ex.mm(5)
+section.columns = (2, 18, True)
+section.column_widths = (180, 240)
+```
+
+A newly appended section copies its predecessor's setup and receives independent header/footer parts, including independent empty parts for missing variants. Editing an earlier header later cannot leak into the new section. This initial API deliberately has no linked-to-previous switch. Body tables and images must fit the owning section's narrowest column, while header/footer content uses that section's full content width. This conservative limit protects tables continuing from a wider column: the pinned layout measures a table once and does not reflow its grid for narrower subsequent columns. New body tables in unequal-column sections start with fixed width equal to the narrowest column. Existing tables are not silently reformatted: percentage/autofit tables can be rejected even when they initially fit a wider column. Serialization rechecks unequal-section table geometry because later text/font edits can move a table between columns. Existing nested cell limits also apply. Changing page size, margins, gutter or columns validates existing children atomically.
 
 `next_column` is rejected because the pinned layout path treats that transition as a new page. Continuous transitions with differing page sizes are rejected before mutation rather than promising geometry the upstream layout cannot represent. Odd/even starts, leading blank sections and mixed page dimensions have native PNG/PDF regression coverage.
 

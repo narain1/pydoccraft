@@ -181,6 +181,7 @@ impl EditableDocx {
 
     pub fn to_bytes(&self) -> PyResult<Vec<u8>> {
         validate_unsplittable_page_bounds(self.document()?)?;
+        validate_unequal_column_tables(self.document()?)?;
         let output = wordcraft_docx::write(self.document()?).map_err(|error| {
             EngineError::Conversion(format!("DOCX serialization failed: {error}"))
         })?;
@@ -255,8 +256,15 @@ impl EditableDocx {
 
     pub fn add_table(&mut self, rows: Vec<Vec<String>>) -> PyResult<usize> {
         self.reserve_block()?;
-        let (table, added_text, cells) =
-            self.make_table(rows, column_width(&self.document()?.last_section))?;
+        let section = &self.document()?.last_section;
+        let width = column_width(section);
+        let (mut table, added_text, cells) = self.make_table(rows, width)?;
+        if !section.columns.widths.is_empty() {
+            // Native autofit can enlarge a new table to its starting column and
+            // retain that width when it flows into a narrower one.
+            table.props.width = Some(width);
+            table.props.fixed = true;
+        }
         let text_bytes = self.updated_text_bytes(0, added_text)?;
         let mut candidate = self.document()?.clone();
         if candidate.body.len() + 2 > MAX_BLOCKS {
@@ -2294,8 +2302,12 @@ impl EditableDocx {
             "start": section_start_name(props.start),
             "page_size": [props.page_w, props.page_h],
             "margins": [props.margin_top, props.margin_right, props.margin_bottom, props.margin_left],
+            "gutter": props.gutter,
             "distances": [props.header, props.footer],
-            "columns": [props.columns.count, props.columns.space, props.columns.separator]
+            "columns": [props.columns.count, props.columns.space, props.columns.separator],
+            "column_widths": if props.columns.widths.is_empty() { None } else {
+                Some(props.columns.widths.iter().map(|(width, _)| *width).collect::<Vec<_>>())
+            }
         }).to_string())
     }
 
@@ -2337,6 +2349,18 @@ impl EditableDocx {
                     props.header = header;
                     props.footer = footer;
                 }
+                "gutter" => {
+                    props.gutter = value
+                        .as_f64()
+                        .filter(|number| number.is_finite() && *number >= 0.0 && *number <= 1584.0)
+                        .ok_or_else(|| {
+                            PyValueError::new_err(
+                                "gutter must be finite and between 0 and 1584 points",
+                            )
+                        })? as f32;
+                }
+                // Apply explicit widths after columns, independent of JSON key order.
+                "column_widths" => {}
                 "columns" => {
                     let values = value.as_array().filter(|v| v.len() == 3).ok_or_else(|| {
                         PyValueError::new_err("columns must contain count, gap and separator")
@@ -2369,6 +2393,34 @@ impl EditableDocx {
                     )))
                 }
             }
+        }
+        if let Some(value) = object.get("column_widths") {
+            props.columns.widths = if value.is_null() {
+                Vec::new()
+            } else {
+                let widths = value.as_array().filter(|widths| widths.len() == props.columns.count as usize)
+                    .ok_or_else(|| PyValueError::new_err("column_widths must contain one width for each configured column, or null"))?;
+                widths
+                    .iter()
+                    .enumerate()
+                    .map(|(index, width)| {
+                        let width = width
+                            .as_f64()
+                            .filter(|width| width.is_finite() && *width >= 18.0 && *width <= 1584.0)
+                            .ok_or_else(|| {
+                                PyValueError::new_err(
+                                    "column widths must be finite and between 18 and 1584 points",
+                                )
+                            })?;
+                        let gap = if index + 1 == widths.len() {
+                            0.0
+                        } else {
+                            props.columns.space
+                        };
+                        Ok((width as f32, gap))
+                    })
+                    .collect::<PyResult<Vec<_>>>()?
+            };
         }
         validate_section_geometry(&props)?;
         let mut candidate = self.document()?.clone();
@@ -3917,6 +3969,33 @@ fn native_table_roots(document: &Document) -> Vec<(StoryRef, Path)> {
     roots
 }
 
+fn validate_unequal_column_tables(document: &Document) -> PyResult<()> {
+    let mut roots = Vec::new();
+    let mut begin = 0;
+    for (end, section) in document.sections() {
+        if !section.columns.widths.is_empty() {
+            let blocks = document
+                .body
+                .get(begin..=end)
+                .ok_or_else(|| PyValueError::new_err("native section has invalid body bounds"))?;
+            roots.extend(blocks.iter().enumerate().filter_map(|(index, block)| {
+                matches!(block.as_ref(), Block::Table(_)).then_some(Path::top(begin + index))
+            }));
+        }
+        begin = end + 1;
+    }
+    if roots.is_empty() {
+        return Ok(());
+    }
+    // Recheck actual public layout at serialization, since edits to preceding
+    // text can move an autofit table to a different-width column.
+    let widths = native_cell_widths(document)?;
+    for path in roots {
+        validate_native_table_layout(document, &widths, StoryRef::Body, path)?;
+    }
+    Ok(())
+}
+
 fn validate_style_tables(original: &Document, candidate: &Document) -> PyResult<()> {
     let roots = native_table_roots(candidate);
     if roots.is_empty() {
@@ -5446,16 +5525,39 @@ fn section_numbers<const N: usize>(value: &Value, key: &str) -> PyResult<[f32; N
 }
 
 fn column_width(section: &SectionProps) -> f32 {
-    (section.text_width() - section.columns.space * (section.columns.count - 1) as f32)
-        / section.columns.count as f32
+    // Content can flow into any column after later edits. In particular native
+    // table layout reuses its initial width when it advances into another column.
+    section
+        .column_boxes()
+        .iter()
+        .map(|(_, width)| *width)
+        .fold(f32::INFINITY, f32::min)
 }
 
 fn validate_section_geometry(section: &SectionProps) -> PyResult<()> {
+    let columns = &section.columns;
+    let text_width = section.page_w - section.margin_left - section.margin_right - section.gutter;
+    let column_width_valid = if columns.widths.is_empty() {
+        text_width - columns.space * columns.count.saturating_sub(1) as f32
+            >= 18.0 * columns.count as f32
+    } else {
+        columns.widths.len() == columns.count as usize
+            && columns.widths.iter().all(|(width, gap)| {
+                width.is_finite() && *width >= 18.0 && gap.is_finite() && *gap >= 0.0
+            })
+            && columns
+                .widths
+                .iter()
+                .map(|(width, gap)| width + gap)
+                .sum::<f32>()
+                <= text_width + 0.001
+    };
     if section.page_w < section.margin_left + section.margin_right + section.gutter + 18.0
         || section.page_h < section.margin_top + section.margin_bottom + 18.0
         || section.header > section.page_h
         || section.footer > section.page_h
-        || column_width(section) < 18.0
+        || !(1..=45).contains(&columns.count)
+        || !column_width_valid
     {
         return Err(PyValueError::new_err("section geometry must leave 18 points per column and of body height; header/footer distances must fit the page"));
     }
@@ -8749,6 +8851,247 @@ mod tests {
         document.add_section("next_page").unwrap();
         assert_eq!(document.paragraph_ids().unwrap(), vec![id]);
         assert_eq!(document.table_rows(table).unwrap(), vec![vec!["Cell"]]);
+    }
+
+    #[test]
+    fn gutter_and_unequal_columns_use_native_positions_and_roundtrip() {
+        let mut document = EditableDocx::new();
+        document.set_section_props(0, r#"{"page_size":[440,300],"margins":[20,20,20,20],"gutter":20,"columns":[2,20,true],"column_widths":[120,240]}"#).unwrap();
+        let paragraph = document.add_paragraph("").unwrap();
+        document
+            .add_run_patch(paragraph, "LEFT", r##"{"color":"#FF0000","font_size":18}"##)
+            .unwrap();
+        document.add_paragraph_break(paragraph, "column").unwrap();
+        document
+            .add_run_patch(
+                paragraph,
+                "RIGHT",
+                r##"{"color":"#00FF00","font_size":18}"##,
+            )
+            .unwrap();
+        document.add_paragraph_break(paragraph, "column").unwrap();
+        document
+            .add_run_patch(paragraph, "NEXT", r##"{"color":"#0000FF","font_size":18}"##)
+            .unwrap();
+        let source = &document.paragraph(paragraph).unwrap().text;
+        let layout = wordcraft_layout::layout(
+            document.document().unwrap(),
+            &mut Default::default(),
+            &Default::default(),
+        );
+        assert_eq!(layout.pages.len(), 2);
+        let mut positions = BTreeMap::new();
+        for (page_number, page) in layout.pages.iter().enumerate() {
+            assert_eq!((page.body.x, page.body.w), (40.0, 380.0));
+            for item in &page.items {
+                if let wordcraft_layout::Placed::Lines {
+                    path,
+                    para,
+                    l0,
+                    l1,
+                    x,
+                    ..
+                } = item
+                {
+                    if path == &Path::top(paragraph) {
+                        for line in &para.lines[*l0..*l1] {
+                            let text = &source[line.start..line.stop];
+                            for label in ["LEFT", "RIGHT", "NEXT"] {
+                                if text.contains(label) {
+                                    positions.insert(label, (page_number, *x));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(positions["LEFT"], (0, 40.0));
+        assert_eq!(positions["RIGHT"], (0, 180.0));
+        assert_eq!(positions["NEXT"], (1, 40.0));
+        let copy = document.copy().unwrap();
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        assert_eq!(reopened.last_section.gutter, 20.0);
+        assert_eq!(
+            reopened.last_section.columns.widths,
+            vec![(120.0, 20.0), (240.0, 0.0)]
+        );
+        assert_eq!(
+            reopened.last_section.column_boxes(),
+            vec![(0.0, 120.0), (140.0, 240.0)]
+        );
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        assert_eq!(crate::pdf::extract(&pdf, None).unwrap().pages.len(), 2);
+        for png in [
+            crate::docx::render(&bytes, 0, 144.0, None).unwrap(),
+            crate::pdf::render(&pdf, 0, 144.0, None).unwrap(),
+        ] {
+            assert!(border_pixels(png.clone(), 0) > 10);
+            assert!(border_pixels(png, 1) > 10);
+        }
+        document
+            .set_section_props(0, r#"{"column_widths":null}"#)
+            .unwrap();
+        assert!(document
+            .document()
+            .unwrap()
+            .last_section
+            .columns
+            .widths
+            .is_empty());
+        assert_eq!(
+            copy.document().unwrap().last_section.columns.widths.len(),
+            2
+        );
+        document
+            .set_section_props(0, r#"{"column_widths":[120,240]}"#)
+            .unwrap();
+        document
+            .set_section_props(0, r#"{"columns":[2,18,false]}"#)
+            .unwrap();
+        assert!(document
+            .document()
+            .unwrap()
+            .last_section
+            .columns
+            .widths
+            .is_empty());
+    }
+
+    #[test]
+    fn unequal_column_and_gutter_geometry_rejects_overflow_atomically() {
+        let mut document = EditableDocx::new();
+        document.set_section_props(0, r#"{"page_size":[440,300],"margins":[20,20,20,20],"columns":[2,20,false],"column_widths":[120,260]}"#).unwrap();
+        let table = document.add_table(vec![vec!["Outer".into()]]).unwrap();
+        assert_eq!(document.column_widths(table).unwrap(), vec![120.0]);
+        let nested = document
+            .cell_add_table(table, 0, 0, vec![vec!["Nested".into()]])
+            .unwrap();
+        let png = media_png(1, 1, [255, 0, 0, 255]);
+        let image = document
+            .add_image(&png, Some(100.0), Some(10.0), "Image")
+            .unwrap();
+        let before = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        for patch in [
+            r#"{"column_widths":[]}"#,
+            r#"{"column_widths":[120]}"#,
+            r#"{"column_widths":[17,260]}"#,
+            r#"{"column_widths":[120,261]}"#,
+            r#"{"column_widths":[true,260]}"#,
+            r#"{"column_widths":[-1,260]}"#,
+            r#"{"gutter":1}"#,
+            r#"{"gutter":-1}"#,
+            r#"{"gutter":null}"#,
+            r#"{"column_widths":[80,260]}"#,
+        ] {
+            assert!(document.set_section_props(0, patch).is_err(), "{patch}");
+            assert_eq!(document.revision().unwrap(), revision);
+            assert_eq!(document.to_bytes().unwrap(), before);
+        }
+        assert!(document.set_image_size(image, 121.0, 10.0).is_err());
+        assert!(document.set_column_widths(table, vec![121.0]).is_err());
+        assert!(document.set_column_widths(nested, vec![120.0]).is_err());
+        document
+            .set_section_props(0, r#"{"gutter":20,"column_widths":[120,240]}"#)
+            .unwrap();
+        assert_eq!(document.table_rows(nested).unwrap(), vec![vec!["Nested"]]);
+    }
+
+    #[test]
+    fn unequal_column_table_preflight_detects_relocation_and_can_recover() {
+        let mut document = EditableDocx::new();
+        document.set_section_props(0, r#"{"page_size":[440,300],"margins":[20,20,20,20],"columns":[2,20,false],"column_widths":[260,120]}"#).unwrap();
+        let before = document.add_paragraph("").unwrap();
+        document.add_paragraph_break(before, "column").unwrap();
+        let table = document
+            .add_table(vec![vec!["WideContent".repeat(5)]])
+            .unwrap();
+        assert!(document.table(table).unwrap().props.fixed);
+        assert_eq!(document.table(table).unwrap().props.width, Some(120.0));
+        document
+            .table_format_patch(table, r#"{"layout":"autofit","width":null}"#)
+            .unwrap();
+        document.to_bytes().unwrap();
+        document
+            .set_paragraph_text(before, "Moved before table")
+            .unwrap();
+        let revision = document.revision().unwrap();
+        assert!(
+            document.to_bytes().is_err(),
+            "relocated table props: {:?}; column boxes: {:?}",
+            document.table(table).unwrap().props,
+            document.document().unwrap().last_section.column_boxes()
+        );
+        assert_eq!(document.revision().unwrap(), revision);
+        document.set_column_widths(table, vec![120.0]).unwrap();
+        let bytes = document.to_bytes().unwrap();
+        crate::docx::render(&bytes, 0, 72.0, None).unwrap();
+        crate::docx::to_pdf(&bytes, None).unwrap();
+    }
+
+    #[test]
+    fn upstream_spanning_table_keeps_starting_width_in_unequal_columns() {
+        let mut native = Document::new();
+        native.last_section.page_w = 440.0;
+        native.last_section.page_h = 200.0;
+        native.last_section.margin_top = 20.0;
+        native.last_section.margin_bottom = 20.0;
+        native.last_section.margin_left = 20.0;
+        native.last_section.margin_right = 20.0;
+        native.last_section.columns.count = 2;
+        native.last_section.columns.widths = vec![(260.0, 20.0), (120.0, 0.0)];
+        let mut table = Table::new(20, 1, 260.0);
+        for (index, row) in table.rows.iter_mut().enumerate() {
+            row.cells[0].blocks = vec![wordcraft_doc::para_block(Paragraph::with_text(
+                &format!("Row {index}"),
+                CharProps::default(),
+            ))];
+        }
+        native.body = vec![Arc::new(Block::Table(table))];
+        let layout =
+            wordcraft_layout::layout(&native, &mut Default::default(), &Default::default());
+        assert!(layout.pages.iter().flat_map(|page| &page.items).any(|item| {
+            matches!(item, wordcraft_layout::Placed::Cell { rect, .. } if rect.x >= 299.0 && rect.w > 120.0 && rect.right() > 440.0)
+        }), "raw native spanning table must reproduce the narrower-column overflow");
+        let mut document = EditableDocx::new();
+        document.set_section_props(0, r#"{"page_size":[440,200],"margins":[20,20,20,20],"columns":[2,20,false],"column_widths":[260,120]}"#).unwrap();
+        let table = document
+            .add_table(
+                (0..20)
+                    .map(|index| vec![format!("Entry{index:02}")])
+                    .collect(),
+            )
+            .unwrap();
+        assert_eq!(document.column_widths(table).unwrap(), vec![120.0]);
+        for row in 0..20 {
+            document
+                .set_row_height(table, row, Some(20.0), "at_least")
+                .unwrap();
+        }
+        let layout = wordcraft_layout::layout(
+            document.document().unwrap(),
+            &mut Default::default(),
+            &Default::default(),
+        );
+        assert!(layout.pages.len() >= 2);
+        let mut reached_right = false;
+        for page in &layout.pages {
+            for item in &page.items {
+                if let wordcraft_layout::Placed::Cell { rect, .. } = item {
+                    reached_right |= rect.x >= 299.0;
+                    // Native TableGrid places the cell rect one half of its
+                    // 0.5pt border beyond the column origin.
+                    assert!(
+                        rect.w <= 120.01 && rect.right() <= 420.26,
+                        "safe table rect: {rect:?}"
+                    );
+                }
+            }
+        }
+        assert!(reached_right);
+        document.to_bytes().unwrap();
     }
 
     #[test]

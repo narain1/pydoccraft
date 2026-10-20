@@ -1019,6 +1019,15 @@ class Section:
         self._set(margins=_margins(value))
 
     @property
+    def gutter(self) -> float:
+        """Additional left binding space in points."""
+        return self._props()["gutter"]
+
+    @gutter.setter
+    def gutter(self, value):
+        self._set(gutter=pt(value))
+
+    @property
     def header_distance(self) -> float:
         return self._props()["distances"][0]
 
@@ -1047,6 +1056,23 @@ class Section:
         if isinstance(count, bool) or not isinstance(separator, bool):
             raise TypeError("column count must be an integer and separator a bool")
         self._set(columns=[operator.index(count), pt(gap), separator])
+
+    @property
+    def column_widths(self) -> tuple[float, ...] | None:
+        """Explicit widths in points, or None for equal-width native columns."""
+        widths = self._props()["column_widths"]
+        return None if widths is None else tuple(widths)
+
+    @column_widths.setter
+    def column_widths(self, value):
+        if value is None:
+            self._set(column_widths=None)
+            return
+        if not isinstance(value, (tuple, list)):
+            raise TypeError("column_widths must be a sequence of point widths or None")
+        if not 1 <= len(value) <= 45:
+            raise ValueError("column_widths requires 1..45 widths")
+        self._set(column_widths=[pt(width) for width in value])
 
     def note_options(self, *, kind: str = "footnote") -> dict:
         """Return resolved native numbering and placement for this section."""
@@ -2105,8 +2131,9 @@ class Slides(_Collection["Slide"]):
     def __init__(self, owner):
         super().__init__(owner, lambda: [owner._call("slide_id", index) for index in range(owner.page_count)], Slide)
 
-    def add(self):
-        index = self._owner._call("add_slide", _change=True)
+    def add(self, *, layout: str = "blank") -> Slide:
+        """Add a slide using one supported native authored layout."""
+        index = self._owner._call("add_slide", layout, _change=True)
         return Slide(self._owner, self._owner._call("slide_id", index))
 
     def __delitem__(self, index):
@@ -2233,6 +2260,11 @@ class Shapes(_Collection["Shape | SlideTable"]):
 class Shape:
     def __init__(self, owner: Presentation, slide: int, identifier: int):
         self._owner, self._slide, self._id = owner, slide, identifier
+
+    @property
+    def placeholder(self) -> str | None:
+        """Native inherited placeholder role, or None for an ordinary shape."""
+        return self._owner._call("shape_placeholder", self._slide_number, self._id)
 
     @property
     def _slide_number(self):

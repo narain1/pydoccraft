@@ -204,3 +204,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Extend existing annotation kinds with native underline/strikeout/squiggly and preflight appearance work before regeneration.
 - [x] Verify native/property/pixel/ownership/rollback regressions in the complete locked installed-wheel corpus and record artifact evidence.
 - [ ] Retain broader DOC7/PDF6 source-property, form, reply and fidelity gaps as explicit remaining work.
+
+## Section geometry and authored slide layouts
+
+- [x] Extend section patches with native left gutter and optional explicit widths, preserving existing equal-column/reset conventions.
+- [x] Validate narrowest-column table/image geometry and native column/page flow without automatic scaling.
+- [x] Add four native authored slide layouts through existing add/shape operations, preserving inherited references and effective geometry.
+- [x] Complete the locked installed-wheel corpus for both slices and record artifact evidence.
+- [ ] Keep top/mirrored gutters, continued-table reflow, general slide copy/import and additional layout/theme fidelity open with upstream evidence.
