@@ -75,6 +75,10 @@ The recorded 2026-10-19 pre-release run used Linux AArch64, Rust 1.95, and CPyth
 
 This is a platform-specific baseline, not a release declaration. See `.kiro/specs/rust-document-engine/validation.md` for the full evidence and remaining checks.
 
+## Performance benchmarks
+
+The reproducible synthetic harness and latest recorded comparison are in [benchmarks.md](benchmarks.md). Benchmarks must use an installed release wheel, generate inputs before timing, verify outputs outside timed regions, pin the complete comparison environment, and distinguish matched operations from capability-only baselines. Raw timing output and generated documents belong outside the repository.
+
 ## CI behavior
 
 `.github/workflows/ci.yml` runs on pull requests and pushes to `main`. It installs Rust 1.95 and Python 3.11, checks formatting, runs locked Rust tests and Clippy, builds a release wheel, installs that wheel without consulting an index, and runs the Python suite.
