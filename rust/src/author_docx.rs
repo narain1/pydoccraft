@@ -778,7 +778,17 @@ impl EditableDocx {
     pub fn add_page_break(&mut self) -> PyResult<usize> {
         let mut candidate = self.copy()?;
         let id = candidate.add_paragraph("")?;
-        candidate.set_page_break_before(id, true)?;
+        // A paragraph's page_break_before is ignored at the start of a document/page.
+        // Use the upstream explicit break character so leading and consecutive breaks
+        // retain their blank pages; the DOCX writer emits w:br with type="page".
+        let text = wordcraft_doc::para::PAGE_BREAK.to_string();
+        let text_bytes = candidate.updated_text_bytes(0, text.len())?;
+        let mut document = candidate.document()?.clone();
+        document
+            .insert_text(&candidate.position(id, 0)?, &text, &CharProps::default())
+            .map_err(model_error)?;
+        candidate.commit(document)?;
+        candidate.text_bytes = text_bytes;
         *self = candidate;
         Ok(id)
     }
@@ -2363,8 +2373,8 @@ mod tests {
             .is_err());
         assert_eq!(document.revision().unwrap(), revision);
         let break_paragraph = document.add_page_break().unwrap();
-        assert!(document.page_break_before(break_paragraph).unwrap());
-        assert_eq!(document.paragraph_text(break_paragraph).unwrap(), "");
+        assert!(!document.page_break_before(break_paragraph).unwrap());
+        assert_eq!(document.paragraph_text(break_paragraph).unwrap(), "\u{000c}");
         document.add_paragraph("Second page").unwrap();
         let third = document.add_paragraph("Third page").unwrap();
         document.set_page_break_before(third, true).unwrap();
@@ -2389,6 +2399,53 @@ mod tests {
                 .blocks
                 .iter()
                 .any(|block| block.text.contains(expected)));
+        }
+    }
+    #[test]
+    fn explicit_page_breaks_preserve_initial_and_consecutive_blank_pages() {
+        for (before, breaks, expected_pages) in
+            [(false, 1, 2), (false, 2, 3), (true, 1, 2), (true, 2, 3)]
+        {
+            let mut document = EditableDocx::new();
+            if before {
+                document.add_paragraph("Before").unwrap();
+            }
+            let mut break_ids = Vec::new();
+            for _ in 0..breaks {
+                break_ids.push(document.add_page_break().unwrap());
+            }
+            document.add_paragraph("After").unwrap();
+            let bytes = document.to_bytes().unwrap();
+            let reopened = wordcraft_docx::read(&bytes).unwrap();
+            for id in break_ids {
+                assert_eq!(
+                    reopened.para(StoryRef::Body, &Path::top(id)).unwrap().text,
+                    wordcraft_doc::para::PAGE_BREAK.to_string()
+                );
+            }
+            let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+            let extracted = crate::pdf::extract(&pdf, None).unwrap();
+            assert_eq!(
+                extracted.pages.len(),
+                expected_pages,
+                "before={before}, breaks={breaks}"
+            );
+            for (index, page) in extracted.pages.iter().enumerate() {
+                let text = page
+                    .blocks
+                    .iter()
+                    .map(|block| block.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                assert_eq!(text.contains("After"), index == expected_pages - 1);
+                assert_eq!(text.contains("Before"), before && index == 0);
+                if (!before || index > 0) && index < expected_pages - 1 {
+                    assert!(
+                        text.trim().is_empty(),
+                        "expected blank page {index}: {text}"
+                    );
+                }
+            }
         }
     }
 }

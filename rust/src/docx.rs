@@ -467,7 +467,10 @@ impl<'a> Adapter<'a> {
             let page = &mut self.pages[page_number];
             page.links.extend(block.links.clone());
             page.images.extend(block.images.clone());
-            if !block.text.is_empty() || !block.images.is_empty() {
+            if !block.text.is_empty()
+                || !block.images.is_empty()
+                || block.metadata.contains_key("story_refs")
+            {
                 page.blocks.push(block);
             }
         }
