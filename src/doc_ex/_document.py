@@ -28,9 +28,9 @@ def _search_query(text: str) -> str:
         raise TypeError("search text must be a string")
     # Use base str operations: a subclass must not run callbacks during ownership
     # validation or conceal its actual size with overridden encode/len methods.
-    text = str.__str__(text)
-    if len(text) > 4096:
+    if str.__len__(text) > 4096:
         raise UnsafeArchiveError("PDF search query exceeds 4096 UTF-8 bytes")
+    text = str.__str__(text)
     try:
         size = len(text.encode("utf-8"))
     except UnicodeEncodeError as error:
