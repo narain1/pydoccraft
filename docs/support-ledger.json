@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "audited_commit": "17482eb76c264e5c4303b34cf8d7d1b62287e656",
+  "audited_commit": "789ea8ce3222aab47315549f6b66ae5850cf6ec9",
   "references": {
     "pdfcraft": {
       "revision": "645016addcfb9078c557f0189559ab47cdcee057",
@@ -48,6 +48,20 @@
       "kind": "artifact",
       "source_commit": "17482eb76c264e5c4303b34cf8d7d1b62287e656",
       "date": "2026-10-20"
+    },
+    "direction-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#2026-10-20-native-paragraph-direction-and-run-language",
+      "wheel_sha256": "6f4f6d5ac0fae778490b20edd13dd224eafca5e221af27ad5938155e9f45db71",
+      "kind": "artifact",
+      "source_commit": "59ed29c65e73952a325fb59053a2e325d536b1b5",
+      "date": "2026-10-20"
+    },
+    "ellipse-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#2026-10-20-geometric-annotation-vocabulary-review-and-replacement-artifact",
+      "wheel_sha256": "c668514ce02ec8cd94e7056aa21970e7331eacb7e20bd17763a79b377086cf31",
+      "kind": "artifact",
+      "source_commit": "8949ec6c5c920fb4cea5244c2d75706647fde601",
+      "date": "2026-10-20"
     }
   },
   "test_sources": {
@@ -59,7 +73,9 @@
     "tests/test_render_clipping.py": "367107aecedb72184ee304cd673dc0d2498c1041e9f85d459ab0be14d6ff914a",
     "tests/test_slide_layouts.py": "365028483efdb274afb6b4efc4b3ca8e51a169c879e47f2263b2a435271562f2",
     "tests/test_story_content.py": "c2432ede7ebf0ff0d3b3b5c6cef0729d77e30018f0eb0b576bcd8cd3324e4203",
-    "tests/test_line_numbers.py": "b12daf4001b8134b9ae99d981c33c70615c51e3b4301575f2dfc4ea3dc568fdf"
+    "tests/test_line_numbers.py": "b12daf4001b8134b9ae99d981c33c70615c51e3b4301575f2dfc4ea3dc568fdf",
+    "tests/test_direction_language.py": "bc11d3b9f6c0e66e5b8d3337f1308ba3811cff0a6f477e1d035efe6a2a546a38",
+    "tests/test_pdf_geometric_annotations.py": "ee2f44cf291b930a314ecdb5bc61da0e34f710ccc6604dcf23f23de0b4ce9145"
   },
   "profiles": [
     {
@@ -1002,6 +1018,287 @@
       }
     },
     {
+      "id": "word.direction-language",
+      "format": "docx",
+      "scope": "Owned paragraph bidi direction and bounded literal run-language metadata; no full shaping, font fallback or language-processing conformance claim.",
+      "public_members": [
+        "Paragraph.format(direction=...)",
+        "TextRange.format(language=...)",
+        "Style.format(...)",
+        "Styles.format_defaults(...)"
+      ],
+      "adapter_sources": {
+        "rust/src/author_docx.rs": [
+          "format_paragraph",
+          "char_snapshot",
+          "para_snapshot"
+        ],
+        "src/doc_ex/_authoring.py": [
+          "CharacterFormatting",
+          "ParagraphFormatting"
+        ]
+      },
+      "native_sources": {
+        "properties": {
+          "reference": "wordcraft",
+          "path": "crates/doc/src/props.rs",
+          "symbols": [
+            "CharProps",
+            "ParaProps"
+          ]
+        },
+        "write": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/write/mod.rs",
+          "symbols": [
+            "write"
+          ]
+        },
+        "layout": {
+          "reference": "wordcraft",
+          "path": "crates/layout/src/lib.rs",
+          "symbols": [
+            "layout"
+          ]
+        },
+        "render": {
+          "reference": "wordcraft",
+          "path": "crates/render/src/lib.rs",
+          "symbols": [
+            "RenderOptions",
+            "render_page"
+          ]
+        },
+        "pdf": {
+          "reference": "wordcraft",
+          "path": "crates/pdf/src/lib.rs",
+          "symbols": [
+            "export",
+            "export_layout"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic mixed Persian/Latin/digit paragraphs and Unicode source ranges, using bundled native fonts. Visible colored extents test native PNG/PDF agreement; Hebrew/emoji/combining range preservation alone does not prove glyph coverage.",
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "Owned direct/effective formatting snapshots distinguish explicit LTR/RTL and inherited reset. No imported run-language inventory is implied.",
+          "artifact": "direction-2026-10-20",
+          "tests": [
+            "tests/test_direction_language.py::DirectionLanguageTests.test_direction_inheritance_reset_and_visible_native_pdf_alignment",
+            "tests/test_direction_language.py::DirectionLanguageTests.test_language_character_style_clear_unicode_and_owned_ranges"
+          ],
+          "native": [
+            "properties"
+          ]
+        },
+        "create": {
+          "status": "partial",
+          "scope": "Existing formatting methods write native direction and 1..63-byte ASCII language tags in body, nested cells, headers, footnotes and endnotes.",
+          "artifact": "direction-2026-10-20",
+          "tests": [
+            "tests/test_direction_language.py::DirectionLanguageTests.test_body_nested_cell_header_footer_and_note_scope_roundtrip",
+            "tests/test_direction_language.py::DirectionLanguageTests.test_table_direction_and_conditional_language_leave_column_order"
+          ],
+          "native": [
+            "properties",
+            "write"
+          ]
+        },
+        "edit_authored": {
+          "status": "partial",
+          "scope": "Direct/style/default inheritance and clearing, copies and atomic invalid patches; conditional table paragraph direction remains unavailable.",
+          "artifact": "direction-2026-10-20",
+          "tests": [
+            "tests/test_direction_language.py::DirectionLanguageTests.test_direction_inheritance_reset_and_visible_native_pdf_alignment",
+            "tests/test_direction_language.py::DirectionLanguageTests.test_language_character_style_clear_unicode_and_owned_ranges",
+            "tests/test_direction_language.py::DirectionLanguageTests.test_invalid_tags_directions_and_callback_changes_are_atomic"
+          ],
+          "native": [
+            "properties",
+            "write"
+          ]
+        },
+        "edit_imported": {
+          "status": "unsupported",
+          "scope": "Arbitrary imported DOCX editing is not exposed by the current lifecycle."
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Authored language/direction serialization, source Unicode, scope and copy independence. Unknown source markup and broad multilingual fidelity are unassessed.",
+          "artifact": "direction-2026-10-20",
+          "tests": [
+            "tests/test_direction_language.py::DirectionLanguageTests.test_language_character_style_clear_unicode_and_owned_ranges",
+            "tests/test_direction_language.py::DirectionLanguageTests.test_body_nested_cell_header_footer_and_note_scope_roundtrip"
+          ],
+          "native": [
+            "properties",
+            "write"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "Native logical-start alignment and tested mixed-script colored extents, with LTR override and reset. No arbitrary font/script coverage guarantee.",
+          "artifact": "direction-2026-10-20",
+          "tests": [
+            "tests/test_direction_language.py::DirectionLanguageTests.test_direction_inheritance_reset_and_visible_native_pdf_alignment"
+          ],
+          "native": [
+            "layout",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "partial",
+          "scope": "Native PDF retains tested visible geometry within two pixels at 144 DPI and text across auxiliary scopes; source language metadata is not claimed as PDF tagging.",
+          "artifact": "direction-2026-10-20",
+          "tests": [
+            "tests/test_direction_language.py::DirectionLanguageTests.test_direction_inheritance_reset_and_visible_native_pdf_alignment",
+            "tests/test_direction_language.py::DirectionLanguageTests.test_body_nested_cell_header_footer_and_note_scope_roundtrip"
+          ],
+          "native": [
+            "layout",
+            "pdf"
+          ]
+        }
+      }
+    },
+    {
+      "id": "pdf.geometric-comments",
+      "format": "pdf",
+      "scope": "Rectangle/ellipse annotation outlines with fixed solid opaque two-user-unit stroke and at least three-unit dimensions; distinct from drawing page content or secure redaction.",
+      "public_members": [
+        "page.annotations.add(\"rectangle\" | \"ellipse\", ...)",
+        "annotation.box",
+        "annotation.color",
+        "annotation.update(...)"
+      ],
+      "adapter_sources": {
+        "rust/src/author_pdf.rs": [
+          "add_annotation",
+          "geometric_dict_peak",
+          "validate_geometric_rect"
+        ],
+        "src/doc_ex/_authoring.py": [
+          "Annotations",
+          "Annotation"
+        ]
+      },
+      "native_sources": {
+        "annot": {
+          "reference": "pdfcraft",
+          "path": "crates/annot/src/lib.rs",
+          "symbols": [
+            "Shape",
+            "add_annotation",
+            "summaries",
+            "set_rect",
+            "set_style"
+          ]
+        },
+        "render": {
+          "reference": "pdfcraft",
+          "path": "crates/render/src/raster.rs",
+          "symbols": [
+            "PageRenderer",
+            "RenderRequest"
+          ]
+        },
+        "cos": {
+          "reference": "pdfcraft",
+          "path": "crates/cos/src/document.rs",
+          "symbols": [
+            "Document"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic native shapes and minimal imported annotation fixtures; actual outline pixels, empty centers, saved PNG equality, rotations and CropBox/UserUnit. A separate direct-native tiny-oval regression motivates the conservative minimum.",
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "Existing annotation handles report ellipse/rectangle, geometry and metadata. Global inventory/initial inspection allocations remain an upstream gap.",
+          "artifact": "ellipse-2026-10-20",
+          "tests": [
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_visible_shapes_resize_recolor_reopen_copy_delete",
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_rotated_crop_userunit_and_page_organization"
+          ],
+          "native": [
+            "annot"
+          ]
+        },
+        "create": {
+          "status": "partial",
+          "scope": "Native fixed-profile outline comments reuse add and comment metadata; text is not a visible FreeText appearance.",
+          "artifact": "ellipse-2026-10-20",
+          "tests": [
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_visible_shapes_resize_recolor_reopen_copy_delete",
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_three_user_unit_minimum_is_visible_at_fixture_dpi"
+          ],
+          "native": [
+            "annot"
+          ]
+        },
+        "edit_authored": {
+          "status": "partial",
+          "scope": "Native move/resize/recolor, metadata, compound updates, deletion and callback/stale ownership checks.",
+          "artifact": "ellipse-2026-10-20",
+          "tests": [
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_visible_shapes_resize_recolor_reopen_copy_delete",
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_argument_callbacks_cannot_retarget_annotation_or_page",
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_stale_or_closed_handles_fail_before_argument_callbacks"
+          ],
+          "native": [
+            "annot"
+          ]
+        },
+        "edit_imported": {
+          "status": "partial",
+          "scope": "Only canonical bounded solid unfilled geometry/metadata dictionaries. Unsupported styles/extensions fail atomically; foreign appearance bytes are not decoded by target validation.",
+          "artifact": "ellipse-2026-10-20",
+          "tests": [
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_visible_shapes_resize_recolor_reopen_copy_delete",
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_imported_profile_rejections_preserve_foreign_appearance"
+          ],
+          "native": [
+            "annot",
+            "cos"
+          ]
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Copies, saved/reopened shapes and existing page text/vector content retain tested values/pixels. Geometry/style edits regenerate standard appearances and do not promise custom-appearance preservation.",
+          "artifact": "ellipse-2026-10-20",
+          "tests": [
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_visible_shapes_resize_recolor_reopen_copy_delete",
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_rotated_crop_userunit_and_page_organization",
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_imported_profile_rejections_preserve_foreign_appearance"
+          ],
+          "native": [
+            "annot",
+            "cos"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "Real colored outlines and empty centers at tested DPI, including all rotations/CropBox/UserUnit and native minimum-size controls. No arbitrary-low-DPI visibility guarantee.",
+          "artifact": "ellipse-2026-10-20",
+          "tests": [
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_visible_shapes_resize_recolor_reopen_copy_delete",
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_rotated_crop_userunit_and_page_organization",
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_three_user_unit_minimum_is_visible_at_fixture_dpi"
+          ],
+          "native": [
+            "annot",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "not_applicable",
+          "scope": "This is same-format PDF annotation authoring. PDF serialization/reopen is covered under preserve; no new conversion pair is introduced."
+        }
+      }
+    },
+    {
       "id": "pdf.vertical-redaction",
       "format": "pdf",
       "scope": "Secure removal of vertical-writing text beneath a redaction mark; no public package redaction API currently.",
@@ -1249,8 +1546,10 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "TXT6": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "word.direction-language"
+      ],
+      "remaining": "Unassessed: acceptance scope beyond linked profiles, including native fidelity and diagnostic limitations."
     },
     "TXT7": {
       "profiles": [],
@@ -1580,9 +1879,10 @@
     },
     "PDF6": {
       "profiles": [
-        "pdf.owned-fields"
+        "pdf.owned-fields",
+        "pdf.geometric-comments"
       ],
-      "remaining": "Unassessed: acceptance scope beyond linked profiles."
+      "remaining": "Unassessed: acceptance scope beyond linked profiles, including native fidelity and diagnostic limitations."
     },
     "PDF7": {
       "profiles": [

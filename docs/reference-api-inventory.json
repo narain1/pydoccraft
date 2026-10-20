@@ -283,13 +283,15 @@
         "LAY5",
         "API4"
       ],
-      "local_surface": "Paragraph.format and TextRange.format; keep/spacing/borders through common patches",
-      "remaining": "Complex-script/language/typography conformance requires fixtures; do not create one wrapper per XML property. Native vertical/border styles have explicit supported subset.",
+      "local_surface": "Paragraph/TextRange/Style formatting and shared defaults; direction and language reuse native properties",
+      "remaining": "Bounded direction/language evidence covers selected mixed-script layout. Broader complex-script/CJK typography, font controls and diagnostics remain open; no wrapper per XML property.",
       "upstream_candidates": [
         "U02",
         "U04"
       ],
-      "profiles": [],
+      "profiles": [
+        "word.direction-language"
+      ],
       "disposition": "implemented_subset"
     },
     {
@@ -1845,12 +1847,14 @@
         "REV1",
         "REV6"
       ],
-      "local_surface": "Owned note/highlight/link/markup annotation subset and typed properties",
-      "remaining": "Do not call PDF annotations equivalent to tracked DOCX review. Broader appearances/quads/replies/rotation require native fixtures.",
+      "local_surface": "Existing note/markup/link and bounded rectangle/ellipse annotation handles and typed properties",
+      "remaining": "Fixed-profile geometric comments do not establish opacity/fill/reply or arbitrary appearance support. Caller-bounded native inventories remain upstream work; PDF annotations are distinct from tracked DOCX review.",
       "upstream_candidates": [
         "U10"
       ],
-      "profiles": [],
+      "profiles": [
+        "pdf.geometric-comments"
+      ],
       "disposition": "implemented_subset"
     },
     {
@@ -2005,5 +2009,5 @@
       "disposition": "reference_comparison"
     }
   ],
-  "audited_commit": "17482eb76c264e5c4303b34cf8d7d1b62287e656"
+  "audited_commit": "789ea8ce3222aab47315549f6b66ae5850cf6ec9"
 }

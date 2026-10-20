@@ -427,3 +427,9 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 2. Imported mutation SHALL validate a bounded canonical target dictionary before native props/appearance work, rejecting unsupported styles/insets/actions/replies/extensions without decoding foreign appearance streams. Metadata-only edits SHALL retain the normal appearance; geometry/color edits SHALL explicitly regenerate native standard appearance. Deletion SHALL remain available for rejected edit profiles.
 3. Generated appearances SHALL have conservative preflight allowance and actual staged raw-byte accounting, including superseded intermediate streams. Target mutation bounds SHALL not be represented as bounds on preexisting global summaries or initial native inspection. Existing input/item caps SHALL remain.
 4. Facade annotation add/add_link/update SHALL preserve initial closed/stale checks and recheck after callback-capable normalization before dispatch. Tests SHALL verify actual pixels, original content, rotation/CropBox/UserUnit, canonical/rejected imports, minimum size, budgets/copies/stale handles and callback rollback.
+
+
+## 56. Direction and geometric-comment evidence joins
+
+1. The existing operation ledger SHALL include distinct DOCX direction/language and PDF geometric-comment profiles, with exact historical artifacts, test fingerprints and native public symbols. TXT6/PDF6 SHALL retain their existing owners and unchecked broader scope.
+2. Direction metadata/source preservation SHALL remain distinct from broad glyph/shaping or PDF-tagging guarantees. Geometric same-format save evidence SHALL remain under preservation, not a new conversion claim; custom appearances, opacity/fill and earlier inventory allocation limits SHALL stay explicit.

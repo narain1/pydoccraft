@@ -642,6 +642,12 @@ Review found that word-only source matching accepted descriptions such as “wri
 
 - Root integration reran the probe and all 351 installed-wheel Python tests (zero skips/failures/errors) using the unchanged ellipse artifact, with byte matching. Roadmap/support/reference checks pass. This validates the added development evidence alongside the existing runtime; native tests and wheel sizes remain the preceding artifact's 255-test/build evidence.
 
+
+## 2026-10-20 direction and geometric-comment operation evidence
+
+- Two new bounded profiles extend the ledger to eleven profiles and 77 cells, preserving all 139 coverage owners/checks and 44 reference families/195 representative members. Historical direction and reviewed ellipse artifacts are separately named; two fingerprinted test files and native public-property/annotation/writer/render sources were reviewed. No runtime/dependency or public API change.
+- Offline roadmap, support and cached-source reference checks pass. The corpus passes all 351 installed-wheel Python tests with zero skips/failures/errors and exact byte matching against the unchanged ellipse wheel (`c668514ce02ec8cd94e7056aa21970e7331eacb7e20bd17763a79b377086cf31`; 17,436,840 bytes; extension 40,437,672). The preceding 255 native-test/build evidence remains scoped to that artifact; no new native build is claimed. Full parity remains open.
+
 ## 2026-10-20 PDF display-label assembly evidence
 
 - Documentation and an import-safe original synthetic fixture clarify preexisting native label semantics without changing runtime behavior or adding a label API. The probe ran against the reviewed ellipse artifact in `/opt/ellipseannotationtest` (wheel SHA-256 `c668514ce02ec8cd94e7056aa21970e7331eacb7e20bd17763a79b377086cf31`).
