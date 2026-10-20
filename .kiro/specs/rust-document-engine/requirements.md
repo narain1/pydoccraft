@@ -201,3 +201,9 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 2. Linked-style replacement/clearing SHALL update both ends atomically and reject an occupied target without disconnecting unrelated styles. Native serialization SHALL preserve relationships; the API SHALL NOT claim automatic editor Enter behavior.
 3. Existing Styles SHALL expose direct document defaults and bounded character/paragraph formatting patches. Native resolution SHALL preserve omission/clear/false semantics and named/direct overrides; conditional/table-only/default-style-kind operations outside the supported profile SHALL fail explicitly. Clearing default font size SHALL fail atomically until native absent-size resolution matches DOCX readback; explicit sizes and named-style clearing remain supported. Undefined built-in linked companions SHALL be reported explicitly and permit safe clearing/replacement.
 4. Default changes SHALL validate affected native table geometry and effective tab limits, invalidate derived snapshots and preserve the prior document on failure. Native DOCX roundtrip, PNG/PDF appearance, copies, stale/closed ownership and invalid references SHALL be tested.
+
+## 22. PDF drawing resource preservation
+
+1. Drawing text, paths, images or backgrounds SHALL preserve existing effective page Font, XObject and ExtGState bindings, including inherited resources.
+2. A native resource collision SHALL fail explicitly before committing the staged document or changing counters/cached output. Native resource inspection and bounded unchanged-value checks SHALL be used; the adapter SHALL NOT rewrite PDF resource names/operators.
+3. Tests SHALL demonstrate pinned native collisions and verify adapter rollback, unchanged original rendered regions, normal repeated drawing and resource-budget failures. Dependencies SHALL retain the pinned revision and permissive graph.

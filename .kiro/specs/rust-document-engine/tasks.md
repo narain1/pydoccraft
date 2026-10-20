@@ -158,3 +158,9 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add direct document defaults and bounded patches through Styles, preserving native resolution and validating affected geometry/tabs.
 - [x] Verify native DOCX roundtrip, visible inherited/default overrides, atomic failures and installed-wheel corpus; record artifact evidence (143 Rust, 157 installed-wheel Python tests).
 - [ ] Retain upstream automatic Enter-style/default-kind fallback gaps and remaining theme/import criteria without adding editor machinery.
+
+## PDF drawing resource preservation
+
+- [x] Guard all drawing entry points against incompatible existing resource replacement, including inherited bindings.
+- [x] Verify native collision reproductions, atomic rollback, unchanged original pixels and bounded matching checks.
+- [x] Promote the already-locked model crate, review regenerated license inventories and record locked installed-wheel validation.
