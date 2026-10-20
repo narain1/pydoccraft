@@ -169,7 +169,7 @@ Unchecked items below remain incomplete even when an initial slice is implemente
 ### LAY — Sections, pagination and auxiliary stories (P1)
 
 - [ ] **LAY1: Page setup.** Set paper presets/custom dimensions, orientation, margins and gutter per section; use upstream layout. Test mixed portrait/landscape documents and invalid sizes.
-- [ ] **LAY2: Section breaks.** Add next-page, continuous, odd-page and even-page breaks as supported. Test intentional blank pages and page-count changes after editing.
+- [x] **LAY2: Section breaks.** Add next-page, continuous, odd-page and even-page breaks as supported. Test intentional blank pages and page-count changes after editing.
 - [ ] **LAY3: Headers and footers.** Create/edit/remove content with first-page and even/odd variants, linkage to previous sections and offset from page edges. Test inheritance and independently linked headers/footers.
 - [ ] **LAY4: Columns.** Add equal/unequal columns, gaps and separator lines. Ensure upstream lays out text in the right order and respects column breaks; do not simulate columns with spaces.
 - [ ] **LAY5: Flow controls.** Support keep-with-next, keep-lines-together, widow/orphan controls and page-break-before. Test headings followed by tables and long paragraphs without promising Word-identical pagination.
@@ -203,12 +203,12 @@ Unchecked items below remain incomplete even when an initial slice is implemente
 
 ### FORM — Content controls and templates (P1; advanced controls P2)
 
-- [ ] **FORM1: Literal template recipe.** Use TXT7/TXT8 replacement over explicit story scopes for caller-chosen placeholders. Demonstrate missing/unused-value checks in Python and preserve runs/anchors; do not invent a template language.
+- [x] **FORM1: Literal template recipe.** Use TXT7/TXT8 replacement over explicit story scopes for caller-chosen placeholders. Demonstrate missing/unused-value checks in Python and preserve runs/anchors; do not invent a template language.
 - [ ] **FORM2: Repeating content recipe.** Loop over input rows/blocks and reuse DOC5 safe copy/insert primitives with reference remapping. Document empty-input behavior and input limits; no separate repeating-region engine.
 - [ ] **FORM3: Basic content controls.** Expose rich/plain text, image, checkbox, date and choice controls where supported. Keep names/tags, IDs, values and placeholder display separate; validate values before mutation.
 - [ ] **FORM4: Repeating/locked controls (P2).** Audit repeating-section controls, supported locking and placeholder rules. State that editing restrictions are not encryption or access security.
 - [ ] **FORM5: Structured bindings (P2).** Map named data to supported content controls and custom XML through upstream APIs. No arbitrary code evaluation, external data retrieval or unbounded XPath engine in the adapter.
-- [ ] **FORM6: Batch generation recipe.** Use a Python loop over independent editable copies and explicit save operations, with caller-owned failure handling. Test no state leakage between copies; do not add a batch API.
+- [x] **FORM6: Batch generation recipe.** Use a Python loop over independent editable copies and explicit save operations, with caller-owned failure handling. Test no state leakage between copies; do not add a batch API.
 
 ### REV — Comments, revisions and review (P2; basic comments can ship in P1)
 
@@ -235,7 +235,7 @@ Unchecked items below remain incomplete even when an initial slice is implemente
 - [ ] **PDF1: Page authoring.** Create fixed-size pages, set boxes/rotation and insert/remove/reorder pages through PdfCraft. Reopen and verify geometry, rendered orientation and page count.
 - [ ] **PDF2: Text and images.** Draw/searchable text, text boxes and embedded images with explicit positioning, fonts, colors and clipping. Validate Unicode/shaping and overflow behavior through upstream public APIs.
 - [ ] **PDF3: Vector graphics and backgrounds.** Add basic paths/shapes, strokes/fills and underlays/overlays/watermarks. Preserve text extraction and layering; use PdfCraft drawing primitives rather than writing PDF operators.
-- [ ] **PDF4: Flowed reports and tables.** Use the WordCraft report-to-PDF path for semantic flowing content, or a verified PdfCraft layout API for positioned tables. Document which path applies; do not introduce a Python pagination/table layout engine.
+- [x] **PDF4: Flowed reports and tables.** Use the WordCraft report-to-PDF path for semantic flowing content, or a verified PdfCraft layout API for positioned tables. Document which path applies; do not introduce a Python pagination/table layout engine.
 - [ ] **PDF5: Links, outlines and metadata.** Create/edit URI/internal links, bookmarks and supported metadata. Verify destinations survive assembly, deletion and rotation.
 - [ ] **PDF6: Annotations and forms (P2).** Inventory comments/highlights and form field read/create/fill/flatten support. Separate PDF form fields from DOCX content controls and reject unsupported field/appearance types.
 - [ ] **PDF7: Real redaction (P2).** Expose only verified upstream removal of content, not a painted rectangle. Test text/image/object recoverability after saving; keep the feature unavailable until its deletion guarantees are demonstrated.

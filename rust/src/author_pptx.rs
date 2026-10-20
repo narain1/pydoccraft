@@ -1,10 +1,12 @@
 //! Bounded authoring of new presentations through DeckCraft's public model/writer.
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 use std::sync::Arc;
 
 use deckcraft_model::style::PictureFill;
-use deckcraft_model::text::{Action, Anchor, AutoFit, Hyperlink, RunProps, Strike, TextBody};
+use deckcraft_model::text::{
+    Action, Align, Anchor, AutoFit, Hyperlink, RunProps, Strike, TextBody,
+};
 use deckcraft_model::{
     Background, ColorBase, ColorRef, Fill, Geom, LayoutType, Line, Presentation, Rgba, Shape,
     ShapeId, ShapeKind, Size, SlideId, Table, Theme, Xfrm,
@@ -24,6 +26,8 @@ const MAX_PARAGRAPHS: usize = 100_000;
 const MAX_RUNS: usize = 100_000;
 const MAX_PROPERTIES: usize = 16 * 1024 * 1024;
 const MAX_PATCH: usize = 16 * 1024;
+const MAX_CELLS: usize = 100_000;
+const MIN_GRID: f64 = 0.05;
 
 type TextFormat = (
     Option<f64>,
@@ -43,9 +47,56 @@ pub struct EditablePptx {
     media_bytes: usize,
     shapes: usize,
     revision: u64,
+    table_generations: HashMap<u32, u64>,
 }
 
 impl EditablePptx {
+    fn table(&self, slide: usize, id: u32) -> PyResult<&Table> {
+        match &self.shape(slide, id)?.kind {
+            ShapeKind::Table(table) => Ok(table),
+            _ => Err(PyValueError::new_err("shape is not a table")),
+        }
+    }
+
+    fn mutate_table(
+        &mut self,
+        slide: usize,
+        id: u32,
+        structural: bool,
+        operation: impl FnOnce(&mut Table) -> PyResult<()>,
+    ) -> PyResult<()> {
+        self.table(slide, id)?;
+        let generation = if structural {
+            self.table_generation(slide, id)?
+                .checked_add(1)
+                .ok_or_else(|| {
+                    EngineError::ResourceLimit("table generation limit reached".into())
+                })?
+        } else {
+            0
+        };
+        self.mutate(|document| {
+            let shape = shape_mut(document, slide, id)?;
+            let ShapeKind::Table(table) = &mut shape.kind else {
+                return Err(PyValueError::new_err("shape is not a table"));
+            };
+            operation(table)?;
+            validate_table_grid(table)?;
+            let (width, height) = (table.width(), table.height());
+            let transform = shape
+                .xfrm
+                .as_mut()
+                .ok_or_else(|| PyValueError::new_err("table has no explicit geometry"))?;
+            transform.w = width;
+            transform.h = height;
+            Ok(())
+        })?;
+        if structural {
+            self.table_generations.insert(id, generation);
+        }
+        self.refresh_budgets()
+    }
+
     fn document(&self) -> PyResult<&Presentation> {
         self.presentation
             .as_ref()
@@ -162,6 +213,15 @@ impl EditablePptx {
 
     fn refresh_budgets(&mut self) -> PyResult<()> {
         let document = self.document()?;
+        let mut live_tables = HashSet::new();
+        for slide in &document.slides {
+            visit_shapes(&slide.shapes, &mut |shape| {
+                if matches!(shape.kind, ShapeKind::Table(_)) {
+                    live_tables.insert(shape.id.0);
+                }
+                Ok(())
+            })?;
+        }
         let shapes = document.slides.iter().map(|slide| slide.shapes.len()).sum();
         let media_bytes = document.media.iter().map(|media| media.data.len()).sum();
         let text_bytes = document
@@ -192,6 +252,8 @@ impl EditablePptx {
         self.shapes = shapes;
         self.media_bytes = media_bytes;
         self.text_bytes = text_bytes;
+        self.table_generations
+            .retain(|id, _| live_tables.contains(id));
         Ok(())
     }
 }
@@ -213,6 +275,7 @@ impl EditablePptx {
             media_bytes: 0,
             shapes: 0,
             revision: 0,
+            table_generations: HashMap::new(),
         })
     }
 
@@ -228,6 +291,7 @@ impl EditablePptx {
 
     pub fn close(&mut self) {
         self.presentation = None;
+        self.table_generations.clear();
     }
 
     pub fn slide_count(&self) -> PyResult<usize> {
@@ -789,6 +853,8 @@ impl EditablePptx {
         Ok(self.revision)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (slide, id, start, end, revision, allow_mixed=false))]
     pub fn range_link(
         &self,
         slide: usize,
@@ -796,6 +862,7 @@ impl EditablePptx {
         start: usize,
         end: usize,
         revision: u64,
+        allow_mixed: bool,
     ) -> PyResult<LinkValue> {
         self.check_revision(revision)?;
         let body = self.text_body(slide, id)?;
@@ -814,6 +881,9 @@ impl EditablePptx {
                 let next = offset + run.char_len();
                 if offset < to && next > from {
                     if found.is_some_and(|value| value != &run.props.link) {
+                        if allow_mixed {
+                            return Ok(None);
+                        }
                         return Err(PyValueError::new_err(
                             "range contains mixed hyperlink targets or tooltips",
                         ));
@@ -942,6 +1012,7 @@ impl EditablePptx {
                 for row in &mut table.rows {
                     row.height *= y_scale;
                 }
+                validate_table_grid(table)?;
             }
             let transform = shape
                 .xfrm
@@ -961,8 +1032,360 @@ impl EditablePptx {
         Ok(table
             .rows
             .iter()
-            .map(|row| row.cells.iter().map(|cell| cell.text.text()).collect())
+            .map(|row| {
+                row.cells
+                    .iter()
+                    .map(|cell| {
+                        if cell.is_covered() {
+                            String::new()
+                        } else {
+                            cell.text.text()
+                        }
+                    })
+                    .collect()
+            })
             .collect())
+    }
+
+    pub fn table_generation(&self, slide: usize, id: u32) -> PyResult<u64> {
+        self.table(slide, id)?;
+        Ok(*self.table_generations.get(&id).unwrap_or(&0))
+    }
+
+    pub fn column_widths(&self, slide: usize, id: u32) -> PyResult<Vec<f64>> {
+        Ok(self.table(slide, id)?.cols.clone())
+    }
+
+    pub fn set_column_widths(&mut self, slide: usize, id: u32, widths: Vec<f64>) -> PyResult<()> {
+        if widths.len() != self.table(slide, id)?.n_cols() || widths.iter().any(|v| !grid_size(*v))
+        {
+            return Err(PyValueError::new_err(
+                "column widths require one finite 0.05..14400 point value per column",
+            ));
+        }
+        dimensions(widths.iter().sum(), self.table(slide, id)?.height())?;
+        self.mutate_table(slide, id, false, |table| {
+            table.cols = widths;
+            Ok(())
+        })
+    }
+
+    pub fn row_height(
+        &self,
+        slide: usize,
+        id: u32,
+        row: usize,
+    ) -> PyResult<(Option<f64>, &'static str)> {
+        let row = self
+            .table(slide, id)?
+            .rows
+            .get(row)
+            .ok_or_else(|| PyIndexError::new_err("table row index out of range"))?;
+        Ok((Some(row.height), "at_least"))
+    }
+
+    #[pyo3(signature = (slide, id, row, height=None, rule="auto"))]
+    pub fn set_row_height(
+        &mut self,
+        slide: usize,
+        id: u32,
+        row: usize,
+        height: Option<f64>,
+        rule: &str,
+    ) -> PyResult<()> {
+        self.row_height(slide, id, row)?;
+        let height = match (height, rule) {
+            (Some(v), "at_least") if grid_size(v) => v,
+            _ => return Err(PyValueError::new_err("PPTX row height requires (0.05..14400 points, at_least); exact and auto are unavailable")),
+        };
+        self.mutate_table(slide, id, false, |table| {
+            table.rows[row].height = height;
+            Ok(())
+        })
+    }
+
+    pub fn table_borders(&self, slide: usize, id: u32) -> PyResult<Option<(String, f64)>> {
+        let mut found: Option<Option<(String, f64)>> = None;
+        for cell in self
+            .table(slide, id)?
+            .rows
+            .iter()
+            .flat_map(|row| &row.cells)
+            .filter(|cell| !cell.is_covered())
+        {
+            for line in &cell.borders {
+                let line = line.as_ref().ok_or_else(|| EngineError::Unsupported("table borders inherit a style; resolved border inspection is unavailable upstream".into()))?;
+                let value = border_value(line)?;
+                if found.as_ref().is_some_and(|before| before != &value) {
+                    return Err(PyValueError::new_err("table borders are not uniform"));
+                }
+                found = Some(value);
+            }
+        }
+        Ok(found.flatten())
+    }
+
+    #[pyo3(signature = (slide, id, color="#000000", width=0.5))]
+    pub fn set_table_borders(
+        &mut self,
+        slide: usize,
+        id: u32,
+        color: &str,
+        width: f64,
+    ) -> PyResult<()> {
+        self.table(slide, id)?;
+        let color = parse_color(color)?;
+        if !width.is_finite() || !(0.25..=12.0).contains(&width) {
+            return Err(PyValueError::new_err(
+                "PPTX border width must be finite and 0.25..12 points",
+            ));
+        }
+        let line = Line::solid(color, width);
+        self.mutate_table(slide, id, false, |table| {
+            for cell in table.rows.iter_mut().flat_map(|row| &mut row.cells) {
+                cell.borders = std::array::from_fn(|_| Some(line.clone()));
+            }
+            Ok(())
+        })
+    }
+
+    pub fn clear_table_borders(&mut self, slide: usize, id: u32) -> PyResult<()> {
+        self.mutate_table(slide, id, false, |table| {
+            for cell in table.rows.iter_mut().flat_map(|row| &mut row.cells) {
+                cell.borders = std::array::from_fn(|_| Some(Line::none()));
+            }
+            Ok(())
+        })
+    }
+
+    pub fn cell_text(&self, slide: usize, id: u32, row: usize, col: usize) -> PyResult<String> {
+        Ok(table_cell(self.table(slide, id)?, row, col)?.text.text())
+    }
+
+    pub fn cell_margins(
+        &self,
+        slide: usize,
+        id: u32,
+        row: usize,
+        col: usize,
+    ) -> PyResult<(f64, f64, f64, f64)> {
+        let [left, right, top, bottom] = table_cell(self.table(slide, id)?, row, col)?
+            .margins
+            .unwrap_or([7.2, 7.2, 3.6, 3.6]);
+        Ok((top, right, bottom, left))
+    }
+
+    #[pyo3(signature = (slide, id, row, col, margins=None))]
+    pub fn set_cell_margins(
+        &mut self,
+        slide: usize,
+        id: u32,
+        row: usize,
+        col: usize,
+        margins: Option<(f64, f64, f64, f64)>,
+    ) -> PyResult<()> {
+        let table = self.table(slide, id)?;
+        let (row, col) = cell_anchor(table, row, col)?;
+        let value = if let Some((top, right, bottom, left)) = margins {
+            let width = table.cols[col..col + table.rows[row].cells[col].grid_span.max(1) as usize]
+                .iter()
+                .sum::<f64>();
+            if [top, right, bottom, left]
+                .iter()
+                .any(|v| !v.is_finite() || !(0.0..=MAX_SIDE).contains(v))
+                || left + right >= width
+                || top + bottom > MAX_SIDE
+            {
+                return Err(PyValueError::new_err("cell margins must be finite nonnegative points, leave positive text width and total at most 14400 points vertically"));
+            }
+            Some([left, right, top, bottom])
+        } else {
+            None
+        };
+        self.mutate_table(slide, id, false, |table| {
+            table.rows[row].cells[col].margins = value;
+            Ok(())
+        })
+    }
+
+    pub fn cell_alignment(
+        &self,
+        slide: usize,
+        id: u32,
+        row: usize,
+        col: usize,
+    ) -> PyResult<Option<&'static str>> {
+        let cell = table_cell(self.table(slide, id)?, row, col)?;
+        let mut found = None;
+        for paragraph in &cell.text.paragraphs {
+            if found.is_some_and(|value| value != paragraph.props.align) {
+                return Err(PyValueError::new_err(
+                    "cell paragraphs have mixed direct alignment",
+                ));
+            }
+            found = Some(paragraph.props.align);
+        }
+        Ok(found.flatten().map(|value| match value {
+            Align::Left => "left",
+            Align::Center => "center",
+            Align::Right => "right",
+            Align::Justify => "justify",
+            Align::JustLow => "justify_low",
+            Align::Distributed => "distributed",
+        }))
+    }
+
+    #[pyo3(signature = (slide, id, row, col, alignment=None))]
+    pub fn set_cell_alignment(
+        &mut self,
+        slide: usize,
+        id: u32,
+        row: usize,
+        col: usize,
+        alignment: Option<&str>,
+    ) -> PyResult<()> {
+        let (row, col) = cell_anchor(self.table(slide, id)?, row, col)?;
+        let value = match alignment {
+            None => None,
+            Some("left") => Some(Align::Left),
+            Some("center") => Some(Align::Center),
+            Some("right") => Some(Align::Right),
+            Some("justify") => Some(Align::Justify),
+            _ => {
+                return Err(PyValueError::new_err(
+                    "cell alignment must be left, center, right, justify or None",
+                ))
+            }
+        };
+        self.mutate_table(slide, id, false, |table| {
+            for paragraph in &mut table.rows[row].cells[col].text.paragraphs {
+                paragraph.props.align = value;
+            }
+            Ok(())
+        })
+    }
+
+    pub fn merge_cells(
+        &mut self,
+        slide: usize,
+        id: u32,
+        r0: usize,
+        c0: usize,
+        r1: usize,
+        c1: usize,
+    ) -> PyResult<()> {
+        let table = self.table(slide, id)?;
+        validate_merge(table, r0, c0, r1, c1)?;
+        self.mutate_table(slide, id, true, |table| {
+            if !table.merge(r0, c0, r1, c1) {
+                return Err(PyValueError::new_err(
+                    "upstream could not merge the requested rectangle",
+                ));
+            }
+            Ok(())
+        })
+    }
+
+    #[pyo3(signature = (slide, id, row, col, columns=None))]
+    pub fn split_cell(
+        &mut self,
+        slide: usize,
+        id: u32,
+        row: usize,
+        col: usize,
+        columns: Option<usize>,
+    ) -> PyResult<()> {
+        let table = self.table(slide, id)?;
+        let (row, col) = cell_anchor(table, row, col)?;
+        let cell = &table.rows[row].cells[col];
+        if cell.grid_span <= 1 && cell.row_span <= 1 {
+            return Err(PyValueError::new_err(
+                "PPTX split requires an existing merged cell",
+            ));
+        }
+        if columns.is_some_and(|columns| cell.row_span != 1 || columns != cell.grid_span as usize) {
+            return Err(PyValueError::new_err("PPTX explicit split columns must match an existing horizontal merge; omit columns to restore the merged grid"));
+        }
+        self.mutate_table(slide, id, true, |table| {
+            if !table.split(row, col) {
+                return Err(PyValueError::new_err(
+                    "upstream could not split the merged cell",
+                ));
+            }
+            Ok(())
+        })
+    }
+
+    pub fn insert_row(&mut self, slide: usize, id: u32, index: usize) -> PyResult<()> {
+        let table = self.table(slide, id)?;
+        if index > table.n_rows() {
+            return Err(PyIndexError::new_err(
+                "table insertion row index out of range",
+            ));
+        }
+        preflight_grid_insert(self.document()?, table, true)?;
+        let height = table.rows[index.saturating_sub(1)].height;
+        dimensions(table.width(), table.height() + height)?;
+        self.mutate_table(slide, id, true, |table| {
+            table.insert_row(index);
+            Ok(())
+        })
+    }
+
+    pub fn delete_row(&mut self, slide: usize, id: u32, index: usize) -> PyResult<()> {
+        let table = self.table(slide, id)?;
+        if index >= table.n_rows() {
+            return Err(PyIndexError::new_err("table row index out of range"));
+        }
+        if table.n_rows() == 1 {
+            return Err(PyValueError::new_err("cannot delete the final table row"));
+        }
+        self.mutate_table(slide, id, true, |table| {
+            if !table.delete_row(index) {
+                return Err(PyValueError::new_err(
+                    "upstream could not delete the table row",
+                ));
+            }
+            Ok(())
+        })
+    }
+
+    pub fn insert_column(&mut self, slide: usize, id: u32, index: usize) -> PyResult<()> {
+        let table = self.table(slide, id)?;
+        if index > table.n_cols() {
+            return Err(PyIndexError::new_err(
+                "table insertion column index out of range",
+            ));
+        }
+        preflight_grid_insert(self.document()?, table, false)?;
+        dimensions(
+            table.width() + table.cols[index.saturating_sub(1)],
+            table.height(),
+        )?;
+        self.mutate_table(slide, id, true, |table| {
+            table.insert_col(index);
+            Ok(())
+        })
+    }
+
+    pub fn delete_column(&mut self, slide: usize, id: u32, index: usize) -> PyResult<()> {
+        let table = self.table(slide, id)?;
+        if index >= table.n_cols() {
+            return Err(PyIndexError::new_err("table column index out of range"));
+        }
+        if table.n_cols() == 1 {
+            return Err(PyValueError::new_err(
+                "cannot delete the final table column",
+            ));
+        }
+        self.mutate_table(slide, id, true, |table| {
+            if !table.delete_col(index) {
+                return Err(PyValueError::new_err(
+                    "upstream could not delete the table column",
+                ));
+            }
+            Ok(())
+        })
     }
 
     pub fn set_cell_text(
@@ -973,29 +1396,32 @@ impl EditablePptx {
         col: usize,
         text: &str,
     ) -> PyResult<()> {
-        let ShapeKind::Table(table) = &self.shape(slide, id)?.kind else {
-            return Err(PyValueError::new_err("shape is not a table"));
-        };
-        let cell = table
-            .cell(row, col)
-            .ok_or_else(|| PyIndexError::new_err("table cell index out of range"))?;
-        let old = cell.text.text().len();
-        let paragraphs = cell.text.paragraphs.len();
+        let cell = table_cell(self.table(slide, id)?, row, col)?;
         text_value(text)?;
-        self.check_text_budget(text.len().saturating_sub(old))?;
-        self.check_paragraph_budget(paragraph_count(text), paragraphs)?;
+        let count = paragraph_count(text);
+        let props = deckcraft_model::edit::props_at(&cell.text, (0, 0));
+        let defaults = cell
+            .text
+            .paragraphs
+            .first()
+            .map_or(0, |p| props_cost(&p.def_props) + props_cost(&p.end_props));
+        let projected = ContentBudget {
+            text: text.len(),
+            paragraphs: count,
+            runs: count,
+            properties: count
+                .saturating_mul(defaults.saturating_add(props_cost(&props).saturating_mul(2))),
+            ..Default::default()
+        };
+        content_budget(self.document()?)?
+            .replacing(body_budget(&cell.text), projected)
+            .check()?;
         self.mutate(|document| {
-            let ShapeKind::Table(table) = &mut shape_mut(document, slide, id)?.kind else {
-                return Err(PyValueError::new_err("shape is not a table"));
-            };
-            let cell = table
-                .cell_mut(row, col)
-                .ok_or_else(|| PyIndexError::new_err("table cell index out of range"))?;
+            let cell = cell_mut(document, slide, id, row, col)?;
             replace_text(&mut cell.text, text);
             Ok(())
         })?;
-        self.text_bytes = self.text_bytes.saturating_sub(old) + text.len();
-        Ok(())
+        self.refresh_budgets()
     }
 
     pub fn cell_background(
@@ -1005,12 +1431,7 @@ impl EditablePptx {
         row: usize,
         col: usize,
     ) -> PyResult<Option<(u8, u8, u8)>> {
-        let ShapeKind::Table(table) = &self.shape(slide, id)?.kind else {
-            return Err(PyValueError::new_err("shape is not a table"));
-        };
-        let cell = table
-            .cell(row, col)
-            .ok_or_else(|| PyIndexError::new_err("table cell index out of range"))?;
+        let cell = table_cell(self.table(slide, id)?, row, col)?;
         Ok(match &cell.fill {
             Some(Fill::Solid {
                 color:
@@ -1047,12 +1468,7 @@ impl EditablePptx {
         row: usize,
         col: usize,
     ) -> PyResult<Option<&'static str>> {
-        let ShapeKind::Table(table) = &self.shape(slide, id)?.kind else {
-            return Err(PyValueError::new_err("shape is not a table"));
-        };
-        let cell = table
-            .cell(row, col)
-            .ok_or_else(|| PyIndexError::new_err("table cell index out of range"))?;
+        let cell = table_cell(self.table(slide, id)?, row, col)?;
         Ok(cell.anchor.map(|value| match value {
             Anchor::Top => "top",
             Anchor::Middle => "center",
@@ -1227,6 +1643,16 @@ impl EditablePptx {
         {
             return Err(PyValueError::new_err(
                 "table must be rectangular, nonempty, at most 1000 rows/columns and 100000 cells",
+            ));
+        }
+        let mut projected = content_budget(self.document()?)?;
+        projected.cells = projected
+            .cells
+            .saturating_add(rows.len().saturating_mul(columns));
+        projected.check()?;
+        if !grid_size(width / columns as f64) || !grid_size(height / rows.len() as f64) {
+            return Err(PyValueError::new_err(
+                "table grid dimensions must be at least 0.05 points",
             ));
         }
         let mut bytes = 0_usize;
@@ -1525,6 +1951,7 @@ fn range_has_text(
 }
 
 fn validate_uri(value: &str) -> PyResult<()> {
+    text_value(value)?;
     let valid = ["https://", "http://", "mailto:"].iter().any(|prefix| {
         value
             .get(..prefix.len())
@@ -1595,6 +2022,7 @@ struct ContentBudget {
     properties: usize,
     runs: usize,
     paragraphs: usize,
+    cells: usize,
 }
 
 impl ContentBudget {
@@ -1603,8 +2031,9 @@ impl ContentBudget {
             || self.properties > MAX_PROPERTIES
             || self.runs > MAX_RUNS
             || self.paragraphs > MAX_PARAGRAPHS
+            || self.cells > MAX_CELLS
         {
-            return Err(EngineError::ResourceLimit("presentation exceeds text (16 MiB), formatting/link properties (16 MiB), runs (100000) or paragraphs (100000) limit".into()).into());
+            return Err(EngineError::ResourceLimit("presentation exceeds text (16 MiB), formatting/link properties (16 MiB), runs (100000), paragraphs (100000) or table cells (100000) limit".into()).into());
         }
         Ok(self)
     }
@@ -1613,6 +2042,7 @@ impl ContentBudget {
         self.properties = self.properties.saturating_add(other.properties);
         self.runs = self.runs.saturating_add(other.runs);
         self.paragraphs = self.paragraphs.saturating_add(other.paragraphs);
+        self.cells = self.cells.saturating_add(other.cells);
     }
     fn replacing(self, old: Self, new: Self) -> Self {
         Self {
@@ -1626,6 +2056,10 @@ impl ContentBudget {
                 .paragraphs
                 .saturating_sub(old.paragraphs)
                 .saturating_add(new.paragraphs),
+            cells: self
+                .cells
+                .saturating_sub(old.cells)
+                .saturating_add(new.cells),
         }
     }
 }
@@ -1692,6 +2126,10 @@ fn content_budget(document: &Presentation) -> PyResult<ContentBudget> {
                 budget.add(body_budget(body));
             }
             if let ShapeKind::Table(table) = &shape.kind {
+                validate_table_grid(table)?;
+                budget.cells = budget
+                    .cells
+                    .saturating_add(table.n_rows().saturating_mul(table.n_cols()));
                 for cell in table.rows.iter().flat_map(|row| &row.cells) {
                     budget.add(body_budget(&cell.text));
                 }
@@ -1841,6 +2279,181 @@ fn preflight_format(
         .replacing(old, projected)
         .check()
         .map(|_| ())
+}
+
+fn grid_size(value: f64) -> bool {
+    value.is_finite() && (MIN_GRID..=MAX_SIDE).contains(&value)
+}
+
+fn validate_table_grid(table: &Table) -> PyResult<()> {
+    if table.n_rows() == 0
+        || table.n_cols() == 0
+        || table.n_rows() > 1000
+        || table.n_cols() > 1000
+        || table.n_rows().saturating_mul(table.n_cols()) > MAX_CELLS
+        || table
+            .rows
+            .iter()
+            .any(|row| row.cells.len() != table.n_cols())
+    {
+        return Err(EngineError::ResourceLimit(
+            "table must have a rectangular grid of 1..1000 rows/columns and at most 100000 cells"
+                .into(),
+        )
+        .into());
+    }
+    if table.cols.iter().any(|v| !grid_size(*v))
+        || table.rows.iter().any(|row| !grid_size(row.height))
+    {
+        return Err(PyValueError::new_err(
+            "table grid widths and minimum heights must be finite 0.05..14400 point values",
+        ));
+    }
+    for (r, row) in table.rows.iter().enumerate() {
+        for (c, cell) in row
+            .cells
+            .iter()
+            .enumerate()
+            .filter(|(_, cell)| !cell.is_covered())
+        {
+            let end_row = r.saturating_add(cell.row_span.max(1) as usize);
+            let end_col = c.saturating_add(cell.grid_span.max(1) as usize);
+            if end_row > table.n_rows() || end_col > table.n_cols() {
+                return Err(
+                    EngineError::Malformed("table merge extends outside its grid".into()).into(),
+                );
+            }
+            if let Some([left, right, top, bottom]) = cell.margins {
+                let width = table.cols[c..end_col].iter().sum::<f64>();
+                if [left, right, top, bottom]
+                    .iter()
+                    .any(|v| !v.is_finite() || !(0.0..=MAX_SIDE).contains(v))
+                    || left + right >= width
+                    || top + bottom > MAX_SIDE
+                {
+                    return Err(PyValueError::new_err(
+                        "table layout would overflow explicit cell margins",
+                    ));
+                }
+            }
+        }
+    }
+    dimensions(table.width(), table.height())
+}
+
+fn cell_anchor(table: &Table, row: usize, col: usize) -> PyResult<(usize, usize)> {
+    table
+        .cell(row, col)
+        .ok_or_else(|| PyIndexError::new_err("table cell index out of range"))?;
+    let (mut r, mut c) = (row, col);
+    let invalid = || EngineError::Malformed("table covered cell has no valid merge anchor".into());
+    while table.cell(r, c).ok_or_else(invalid)?.h_merge {
+        c = c.checked_sub(1).ok_or_else(invalid)?;
+    }
+    while table.cell(r, c).ok_or_else(invalid)?.v_merge {
+        r = r.checked_sub(1).ok_or_else(invalid)?;
+    }
+    let cell = table.cell(r, c).ok_or_else(invalid)?;
+    let end_row = r.saturating_add(cell.row_span.max(1) as usize);
+    let end_col = c.saturating_add(cell.grid_span.max(1) as usize);
+    if cell.is_covered()
+        || row >= end_row
+        || col >= end_col
+        || end_row > table.n_rows()
+        || end_col > table.n_cols()
+    {
+        return Err(invalid().into());
+    }
+    Ok((r, c))
+}
+
+fn table_cell(table: &Table, row: usize, col: usize) -> PyResult<&deckcraft_model::Cell> {
+    let (row, col) = cell_anchor(table, row, col)?;
+    table
+        .cell(row, col)
+        .ok_or_else(|| PyIndexError::new_err("table cell index out of range"))
+}
+
+fn validate_merge(table: &Table, r0: usize, c0: usize, r1: usize, c1: usize) -> PyResult<()> {
+    validate_table_grid(table)?;
+    if r0 > r1 || c0 > c1 || r1 >= table.n_rows() || c1 >= table.n_cols() || (r0 == r1 && c0 == c1)
+    {
+        return Err(PyValueError::new_err(
+            "merge requires an ordered rectangle of at least two cells within the grid",
+        ));
+    }
+    // Prevent upstream's intentional merge expansion: only wholly enclosed
+    // merges may intersect the requested rectangle. Native merge owns the edit.
+    for (r, row) in table.rows.iter().enumerate() {
+        for (c, cell) in row
+            .cells
+            .iter()
+            .enumerate()
+            .filter(|(_, cell)| !cell.is_covered())
+        {
+            let last_r = r.saturating_add(cell.row_span.max(1) as usize - 1);
+            let last_c = c.saturating_add(cell.grid_span.max(1) as usize - 1);
+            if last_r >= table.n_rows() || last_c >= table.n_cols() {
+                return Err(
+                    EngineError::Malformed("table merge extends outside its grid".into()).into(),
+                );
+            }
+            let intersects = r <= r1 && last_r >= r0 && c <= c1 && last_c >= c0;
+            if intersects && !(r >= r0 && c >= c0 && last_r <= r1 && last_c <= c1) {
+                return Err(PyValueError::new_err(
+                    "merge cannot cut or partially overlap an existing merged cell",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn preflight_grid_insert(document: &Presentation, table: &Table, row: bool) -> PyResult<()> {
+    let (rows, cols) = (
+        table.n_rows() + usize::from(row),
+        table.n_cols() + usize::from(!row),
+    );
+    if rows > 1000 || cols > 1000 || rows.saturating_mul(cols) > MAX_CELLS {
+        return Err(EngineError::ResourceLimit(
+            "insertion exceeds table row, column or cell limit".into(),
+        )
+        .into());
+    }
+    let added = if row { table.n_cols() } else { table.n_rows() };
+    let mut budget = content_budget(document)?;
+    budget.cells = budget.cells.saturating_add(added);
+    budget.paragraphs = budget.paragraphs.saturating_add(added);
+    budget.check().map(|_| ())
+}
+
+fn border_value(line: &Line) -> PyResult<Option<(String, f64)>> {
+    if matches!(&line.fill, Some(Fill::None)) {
+        return Ok(None);
+    }
+    if line.dash.is_some() || line.compound.is_some() || line.head.is_some() || line.tail.is_some()
+    {
+        return Err(EngineError::Unsupported(
+            "table border is not a uniform solid RGB line".into(),
+        )
+        .into());
+    }
+    match &line.fill {
+        Some(Fill::Solid {
+            color:
+                ColorRef {
+                    base: ColorBase::Rgb { rgb },
+                    mods,
+                },
+        }) if mods.is_empty() && rgb.a == 255 => Ok(Some((
+            format!("#{:02X}{:02X}{:02X}", rgb.r, rgb.g, rgb.b),
+            line.width.unwrap_or(1.0),
+        ))),
+        _ => Err(
+            EngineError::Unsupported("table border is not an explicit solid RGB line".into())
+                .into(),
+        ),
+    }
 }
 
 fn color_ref(color: (u8, u8, u8)) -> ColorRef {
@@ -2062,6 +2675,7 @@ fn cell_mut(
     let ShapeKind::Table(table) = &mut shape_mut(document, slide, id)?.kind else {
         return Err(PyValueError::new_err("shape is not a table"));
     };
+    let (row, col) = cell_anchor(table, row, col)?;
     table
         .cell_mut(row, col)
         .ok_or_else(|| PyIndexError::new_err("table cell index out of range"))
@@ -2766,10 +3380,10 @@ mod tests {
             .set_range_link(0, id, 7, 10, revision, Some(url), None, "Website")
             .unwrap();
         assert_eq!(
-            author.range_link(0, id, 7, 10, revision).unwrap(),
+            author.range_link(0, id, 7, 10, revision, false).unwrap(),
             Some((Some(url.into()), None, "Website".into()))
         );
-        assert!(author.range_link(0, id, 6, 10, revision).is_err());
+        assert!(author.range_link(0, id, 6, 10, revision, false).is_err());
         author
             .set_shape_link(0, id, None, Some(target), "Last page")
             .unwrap();
@@ -2843,6 +3457,8 @@ mod tests {
             "mailto:",
             "https://x/a b",
             "https://x/\n",
+            "https://x/\u{fffe}",
+            "https://x/\u{ffff}",
         ] {
             assert!(author
                 .set_range_link(0, id, 0, 2, revision, Some(url), None, "")
@@ -2880,13 +3496,61 @@ mod tests {
         let current = author
             .set_range_link(0, id, 0, 4, current, None, None, "")
             .unwrap();
-        assert_eq!(author.range_link(0, id, 0, 4, current).unwrap(), None);
+        assert_eq!(
+            author.range_link(0, id, 0, 4, current, false).unwrap(),
+            None
+        );
         let current = author
             .set_range_link(0, id, 5, 9, current, Some("https://example.com"), None, "")
             .unwrap();
         let (_, _, latest) = author.add_run_patch(0, id, " extra", "{}").unwrap();
         assert!(latest > current);
-        assert_eq!(author.range_link(0, id, 9, 15, latest).unwrap(), None);
+        assert_eq!(
+            author.range_link(0, id, 9, 15, latest, false).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn mixed_link_assignment_lookup_retains_range_and_revision_validation() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide().unwrap();
+        let id = author
+            .add_text(0, "AB", 20.0, 20.0, 500.0, 100.0, 18.0)
+            .unwrap();
+        let revision = author.revision().unwrap();
+        let revision = author
+            .set_range_link(0, id, 0, 1, revision, Some("https://a.example"), None, "A")
+            .unwrap();
+        let revision = author
+            .set_range_link(0, id, 1, 2, revision, Some("https://b.example"), None, "B")
+            .unwrap();
+        assert!(author.range_link(0, id, 0, 2, revision, false).is_err());
+        assert_eq!(
+            author.range_link(0, id, 0, 2, revision, true).unwrap(),
+            None
+        );
+        assert!(author.range_link(0, id, 0, 3, revision, true).is_err());
+        let current = author
+            .set_range_link(0, id, 0, 2, revision, Some("https://all.example"), None, "")
+            .unwrap();
+        assert!(author.range_link(0, id, 0, 2, revision, true).is_err());
+        assert_eq!(
+            author.range_link(0, id, 0, 2, current, false).unwrap(),
+            Some((Some("https://all.example".into()), None, "".into()))
+        );
+        let current = author
+            .set_range_link(0, id, 0, 1, current, None, None, "")
+            .unwrap();
+        assert_eq!(author.range_link(0, id, 0, 2, current, true).unwrap(), None);
+        let current = author
+            .set_range_link(0, id, 0, 2, current, None, None, "")
+            .unwrap();
+        assert_eq!(
+            author.range_link(0, id, 0, 2, current, false).unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -2993,5 +3657,337 @@ mod tests {
             .format_range_patch(0, id, 1, 2, revision, r#"{"italic":true}"#)
             .is_err());
         assert_eq!(author.revision().unwrap(), revision);
+    }
+
+    #[test]
+    fn table_layout_roundtrips_and_native_rows_expand_to_fit_content() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide().unwrap();
+        let long = "Line one\nLine two\nLine three";
+        let id = author
+            .add_table(
+                0,
+                vec![
+                    vec!["Heading".into(), "Value".into()],
+                    vec![long.into(), "Second".into()],
+                ],
+                20.0,
+                30.0,
+                400.0,
+                100.0,
+                18.0,
+            )
+            .unwrap();
+        let generation = author.table_generation(0, id).unwrap();
+        assert!(author.table_borders(0, id).is_err());
+        author.set_column_widths(0, id, vec![150.0, 250.0]).unwrap();
+        author
+            .set_row_height(0, id, 1, Some(8.0), "at_least")
+            .unwrap();
+        author
+            .set_cell_margins(0, id, 1, 0, Some((2.0, 3.0, 4.0, 5.0)))
+            .unwrap();
+        author
+            .set_cell_alignment(0, id, 1, 0, Some("center"))
+            .unwrap();
+        author
+            .set_cell_vertical_alignment(0, id, 1, 0, "center")
+            .unwrap();
+        author
+            .set_cell_background(0, id, 1, 0, (220, 230, 240))
+            .unwrap();
+        author.set_table_borders(0, id, "#123456", 0.5).unwrap();
+        assert_eq!(
+            author.table_borders(0, id).unwrap(),
+            Some(("#123456".into(), 0.5))
+        );
+        assert_eq!(
+            author.cell_margins(0, id, 1, 0).unwrap(),
+            (2.0, 3.0, 4.0, 5.0)
+        );
+        assert_eq!(
+            author.row_height(0, id, 1).unwrap(),
+            (Some(8.0), "at_least")
+        );
+        assert_eq!(author.shape_box(0, id).unwrap(), (20.0, 30.0, 400.0, 58.0));
+        assert_eq!(author.table_generation(0, id).unwrap(), generation);
+        let bytes = author.to_bytes().unwrap();
+        let reopened = deckcraft_pptx::import(&bytes).unwrap();
+        let ShapeKind::Table(table) = &reopened.slides[0].shapes[0].kind else {
+            panic!("missing table")
+        };
+        assert_eq!(table.cols, vec![150.0, 250.0]);
+        assert_eq!(table.rows[1].height, 8.0);
+        let cell = &table.rows[1].cells[0];
+        assert_eq!(cell.margins, Some([5.0, 3.0, 2.0, 4.0]));
+        assert!(cell
+            .text
+            .paragraphs
+            .iter()
+            .all(|p| p.props.align == Some(Align::Center)));
+        assert_eq!(cell.anchor, Some(Anchor::Middle));
+        assert!(cell.borders.iter().all(Option::is_some));
+        let placed = deckcraft_render::place_slide(&reopened, 0);
+        let long_cell = placed
+            .texts
+            .iter()
+            .find(|text| text.body.text() == long)
+            .unwrap();
+        assert!(long_cell.layout.inner.height() > 8.0);
+        let png = crate::pptx::render(&bytes, 0, 72.0).unwrap();
+        assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+        let pdf = crate::pptx::to_pdf(&bytes).unwrap();
+        let pdf = crate::pdf::extract(&pdf, None).unwrap();
+        let text = pdf.pages[0]
+            .blocks
+            .iter()
+            .map(|block| block.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Heading") && text.contains("Line one") && text.contains("Second"));
+        author.clear_table_borders(0, id).unwrap();
+        assert_eq!(author.table_borders(0, id).unwrap(), None);
+        author.set_cell_margins(0, id, 1, 0, None).unwrap();
+        assert_eq!(
+            author.cell_margins(0, id, 1, 0).unwrap(),
+            (3.6, 7.2, 3.6, 7.2)
+        );
+        author.set_cell_alignment(0, id, 1, 0, None).unwrap();
+        assert_eq!(author.cell_alignment(0, id, 1, 0).unwrap(), None);
+        let reopened = deckcraft_pptx::import(&author.to_bytes().unwrap()).unwrap();
+        let ShapeKind::Table(table) = &reopened.slides[0].shapes[0].kind else {
+            panic!("missing table")
+        };
+        assert!(table
+            .rows
+            .iter()
+            .flat_map(|r| &r.cells)
+            .flat_map(|c| &c.borders)
+            .all(|b| matches!(b.as_ref().and_then(|b| b.fill.as_ref()), Some(Fill::None))));
+    }
+
+    #[test]
+    fn table_merges_alias_covered_cells_and_split_preserves_text_once() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide().unwrap();
+        let id = author
+            .add_table(
+                0,
+                vec![
+                    vec!["A".into(), "B".into(), "C".into()],
+                    vec!["D".into(), "E".into(), "F".into()],
+                    vec!["G".into(), "H".into(), "I".into()],
+                ],
+                20.0,
+                20.0,
+                360.0,
+                180.0,
+                18.0,
+            )
+            .unwrap();
+        author.merge_cells(0, id, 0, 0, 1, 1).unwrap();
+        assert_eq!(author.table_generation(0, id).unwrap(), 1);
+        assert_eq!(author.cell_text(0, id, 1, 1).unwrap(), "A\nB\nD\nE");
+        assert_eq!(author.table_rows(0, id).unwrap()[1], vec!["", "", "F"]);
+        author.set_cell_background(0, id, 1, 1, (1, 2, 3)).unwrap();
+        author
+            .set_cell_vertical_alignment(0, id, 1, 1, "bottom")
+            .unwrap();
+        author
+            .set_cell_alignment(0, id, 1, 1, Some("right"))
+            .unwrap();
+        author
+            .set_cell_margins(0, id, 1, 1, Some((1.0, 2.0, 3.0, 4.0)))
+            .unwrap();
+        assert_eq!(
+            author.cell_background(0, id, 0, 0).unwrap(),
+            Some((1, 2, 3))
+        );
+        assert_eq!(
+            author.cell_vertical_alignment(0, id, 0, 0).unwrap(),
+            Some("bottom")
+        );
+        assert_eq!(author.cell_alignment(0, id, 0, 0).unwrap(), Some("right"));
+        assert_eq!(
+            author.cell_margins(0, id, 0, 0).unwrap(),
+            (1.0, 2.0, 3.0, 4.0)
+        );
+        assert_eq!(author.table_generation(0, id).unwrap(), 1);
+        let snapshot = author.document().unwrap().clone();
+        let revision = author.revision().unwrap();
+        assert!(author.merge_cells(0, id, 1, 1, 2, 2).is_err());
+        assert!(author.split_cell(0, id, 1, 1, Some(2)).is_err());
+        assert_eq!(author.document().unwrap(), &snapshot);
+        assert_eq!(author.revision().unwrap(), revision);
+        let extracted = crate::pptx::extract(&author.to_bytes().unwrap()).unwrap();
+        assert_eq!(extracted.pages[0].tables[0].rows[0][0], "A\nB\nD\nE");
+        assert!(extracted.pages[0].tables[0].cells[1][1].covered);
+        author.set_cell_text(0, id, 1, 1, "Merged").unwrap();
+        author.split_cell(0, id, 1, 1, None).unwrap();
+        assert_eq!(author.table_generation(0, id).unwrap(), 2);
+        assert_eq!(author.cell_text(0, id, 0, 0).unwrap(), "Merged");
+        assert_eq!(author.cell_text(0, id, 1, 1).unwrap(), "");
+        author.merge_cells(0, id, 2, 0, 2, 1).unwrap();
+        author.split_cell(0, id, 2, 1, Some(2)).unwrap();
+        assert_eq!(author.table_rows(0, id).unwrap()[2], vec!["G\nH", "", "I"]);
+        let reopened = deckcraft_pptx::import(&author.to_bytes().unwrap()).unwrap();
+        let ShapeKind::Table(table) = &reopened.slides[0].shapes[0].kind else {
+            panic!("missing table")
+        };
+        assert!(table
+            .rows
+            .iter()
+            .flat_map(|r| &r.cells)
+            .all(|c| !c.is_covered() && c.grid_span == 1 && c.row_span == 1));
+    }
+
+    #[test]
+    fn table_native_grid_edits_preserve_merge_anchors_and_generations() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide().unwrap();
+        author.add_slide().unwrap();
+        let source = author.slide_id(0).unwrap();
+        let id = author
+            .add_table(
+                0,
+                vec![vec!["A".into(), "B".into()], vec!["C".into(), "D".into()]],
+                20.0,
+                20.0,
+                200.0,
+                100.0,
+                18.0,
+            )
+            .unwrap();
+        author.merge_cells(0, id, 0, 0, 1, 1).unwrap();
+        author.insert_row(0, id, 1).unwrap();
+        author.insert_column(0, id, 1).unwrap();
+        assert_eq!(author.table(0, id).unwrap().rows[0].cells[0].row_span, 3);
+        assert_eq!(author.table(0, id).unwrap().rows[0].cells[0].grid_span, 3);
+        assert_eq!(author.shape_box(0, id).unwrap(), (20.0, 20.0, 300.0, 150.0));
+        author.delete_row(0, id, 0).unwrap();
+        author.delete_column(0, id, 0).unwrap();
+        assert_eq!(author.cell_text(0, id, 1, 1).unwrap(), "A\nB\nC\nD");
+        assert_eq!(author.shape_box(0, id).unwrap(), (20.0, 20.0, 200.0, 100.0));
+        assert_eq!(author.table_generation(0, id).unwrap(), 5);
+        author.move_slide(0, 1).unwrap();
+        assert_eq!(author.slide_index(source).unwrap(), 1);
+        assert_eq!(author.table_generation(1, id).unwrap(), 5);
+        let mut copy = author.copy().unwrap();
+        copy.insert_row(1, id, 2).unwrap();
+        assert_eq!(copy.table_generation(1, id).unwrap(), 6);
+        assert_eq!(author.table_generation(1, id).unwrap(), 5);
+        author.delete_shape(1, id).unwrap();
+        assert!(author.table_generation(1, id).is_err());
+        assert!(author.table_generations.is_empty());
+    }
+
+    #[test]
+    fn table_geometry_changes_and_rejected_edits_are_atomic() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide().unwrap();
+        let id = author
+            .add_table(
+                0,
+                vec![vec!["A".into(), "B".into()], vec!["C".into(), "D".into()]],
+                20.0,
+                20.0,
+                200.0,
+                100.0,
+                18.0,
+            )
+            .unwrap();
+        author.set_column_widths(0, id, vec![80.0, 120.0]).unwrap();
+        author
+            .set_shape_box(0, id, 40.0, 30.0, 400.0, 150.0)
+            .unwrap();
+        assert_eq!(author.column_widths(0, id).unwrap(), vec![160.0, 240.0]);
+        assert_eq!(
+            author.row_height(0, id, 0).unwrap(),
+            (Some(75.0), "at_least")
+        );
+        author
+            .set_cell_margins(0, id, 0, 0, Some((2.0, 50.0, 2.0, 50.0)))
+            .unwrap();
+        let before = author.document().unwrap().clone();
+        let revision = author.revision().unwrap();
+        for widths in [
+            vec![f64::NAN, 1.0],
+            vec![10.0],
+            vec![0.0, 10.0],
+            vec![8000.0, 8000.0],
+            vec![90.0, 120.0],
+        ] {
+            assert!(author.set_column_widths(0, id, widths).is_err());
+        }
+        assert!(author.set_row_height(0, id, 0, None, "auto").is_err());
+        assert!(author
+            .set_row_height(0, id, 0, Some(100.0), "exact")
+            .is_err());
+        assert!(author
+            .set_row_height(0, id, 0, Some(f64::INFINITY), "at_least")
+            .is_err());
+        assert!(author.set_shape_box(0, id, 0.0, 0.0, 100.0, 100.0).is_err());
+        assert!(author
+            .set_cell_margins(0, id, 0, 0, Some((0.0, 200.0, 0.0, 0.0)))
+            .is_err());
+        assert!(author.set_cell_alignment(0, id, 0, 0, Some("ctr")).is_err());
+        assert!(author.set_table_borders(0, id, "#123456", 0.1).is_err());
+        assert!(author.insert_row(0, id, 3).is_err());
+        assert!(author.insert_column(0, id, 3).is_err());
+        assert!(author.split_cell(0, id, 0, 0, None).is_err());
+        assert_eq!(author.document().unwrap(), &before);
+        assert_eq!(author.revision().unwrap(), revision);
+        assert_eq!(author.table_generation(0, id).unwrap(), 0);
+        author.delete_row(0, id, 1).unwrap();
+        author.delete_column(0, id, 1).unwrap();
+        let revision = author.revision().unwrap();
+        assert!(author.delete_row(0, id, 0).is_err());
+        assert!(author.delete_column(0, id, 0).is_err());
+        assert_eq!(author.revision().unwrap(), revision);
+    }
+
+    #[test]
+    fn table_insertions_preflight_aggregate_cells_even_without_paragraphs() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide().unwrap();
+        let mut ids = Vec::new();
+        for _ in 0..2 {
+            let mut table = Table::new(100, 500, 1000.0, 1.0);
+            for cell in table.rows.iter_mut().flat_map(|row| &mut row.cells) {
+                cell.text.paragraphs.clear();
+            }
+            let document = author.presentation.as_mut().unwrap();
+            ids.push(
+                insert_shape(
+                    document,
+                    0,
+                    Shape {
+                        xfrm: Some(Xfrm::new(0.0, 0.0, 1000.0, 100.0)),
+                        kind: ShapeKind::Table(table),
+                        ..Default::default()
+                    },
+                )
+                .unwrap(),
+            );
+        }
+        assert_eq!(
+            content_budget(author.document().unwrap()).unwrap().cells,
+            MAX_CELLS
+        );
+        let revision = author.revision().unwrap();
+        assert!(author.insert_row(0, ids[0], 1).is_err());
+        assert!(author.insert_column(0, ids[1], 1).is_err());
+        assert!(author
+            .add_table(0, vec![vec![String::new()]], 0.0, 0.0, 100.0, 50.0, 18.0)
+            .is_err());
+        assert_eq!(author.revision().unwrap(), revision);
+        assert_eq!(author.table_generation(0, ids[0]).unwrap(), 0);
+        assert_eq!(author.table(0, ids[0]).unwrap().n_rows(), 100);
+        assert_eq!(author.table(0, ids[1]).unwrap().n_cols(), 500);
     }
 }
