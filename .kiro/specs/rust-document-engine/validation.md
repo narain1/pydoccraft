@@ -1,5 +1,14 @@
 # Validation evidence
 
+## 2026-10-20 sections, slide tables and template recipes (unreleased)
+
+- Offline Linux x86_64, Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1. Formatting, 86 Rust tests, warnings-denied Clippy, locked release build and 107 installed-wheel Python tests passed; zero skips and exact installed artifact identity.
+- Native and Python tests verify per-section PNG/PDF dimensions/order, parity and blank sections, independent header/footer copies and absent-story isolation, section-owned width validation and atomic invalid geometry. PPTX coverage verifies native merge/split/grid edits, anchor migration, covered aliases, stale handles, stored box synchronization, minimum-row expansion, explicit border clearing, scalar/aggregate-cell limits and reopened/rendered/exported output. Cell margin ordering, direct alignment/reset, mixed values and nested-width protection are tested in DOCX.
+- The executable template/batch recipe verifies cross-run body/header replacement, preserved unrelated links, missing/unused/invalid-value rejection, explicit output saves and unchanged original template across independent DOCX/PDF outputs. Both reviewed PR21 link corrections are included and regression-tested.
+- Wheel: `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`, 16,789,517 bytes; native extension: 38,903,512 bytes. SHA-256: `efbcc3186ce956b1d2558abbd6416c506905ac42493ac831ea1a11cae8b162da`. Lockfile SHA-256: `07d283b629c33e1994e4bd2b9e3e8f16876ee5efda73c46428581e20869fcdf8`. All immutable upstream revisions, 263-package audited graph and attribution assets remain unchanged.
+- Next-column and mixed-size continuous DOCX transitions, linked stories, unequal columns, arbitrary source-template preservation, DOCX grid CRUD and inherited/mixed PPTX border resolution remain explicitly unavailable. Minimum PPTX rows may render beyond stored box height. Remaining unchecked roadmap items are not completed by this batch; this is not a release declaration.
+
+
 ## 2026-10-20 PR21 independent review corrections (unreleased)
 
 - Reviewed runtime head `00c7f237aed55ca51b7346ad7858625778208bbf` against merged main `76881093b7966b45389e9c4d811ecdb9c185aa47`. [CI run 39450961572](https://github.com/narain1/pydoccraft/actions/runs/39450961572) passed formatting, 76 Rust tests, warnings-denied Clippy, the locked 263-package license audit, the release build and 99 installed-wheel Python tests with zero skips.

@@ -90,3 +90,14 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Improve typed Python factory/collections/formatting discovery and keep canonical font_size/underline spelling across adapters.
 - [x] Verify 75 Rust tests, 97 installed-wheel Python tests, formatting, Clippy and the locked artifact with unchanged dependencies/attribution.
 - [ ] Complete table-style/theme/next-linked-style editing, multiple sections, full PPTX table semantics and remaining source-preservation/advanced criteria.
+
+## Sections, slide tables and template recipes (unreleased)
+
+- [x] Complete supported DOCX section-break profile (LAY2), including blank/parity pages and per-section PNG/PDF geometry.
+- [x] Add stable section properties, bounded equal columns and independent header/footer copies; retain explicit unsupported cases.
+- [x] Add native PPTX grid CRUD/merge/split, uniform borders, widths/minimum heights, covered-cell semantics and stale positional handles.
+- [x] Share direct cell alignment and resolved margins/reset across DOCX/PPTX, with nested-content width checks.
+- [x] Complete literal-template and independent batch recipes (FORM1/FORM6) over authored models; verify missing/unused/invalid values, cross-run replacement, links and source isolation.
+- [x] Record the existing native DOCX-to-PDF report/table path as PDF4's supported flow route.
+- [x] Verify 86 Rust tests, 107 installed-wheel tests, formatting, Clippy and locked artifact; dependencies/revisions remain unchanged.
+- [ ] Complete unequal columns, linked stories, source template preservation, DOCX grid CRUD, richer table formatting and other unchecked criteria.

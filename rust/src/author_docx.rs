@@ -14,6 +14,7 @@ use wordcraft_doc::props::{
     Border, BorderStyle, Borders, HeightRule, Highlight, LineSpacing, NumRef, Underline, VAlign,
     VMerge, VertAlign,
 };
+use wordcraft_doc::section::{SectionProps, SectionStart};
 use wordcraft_doc::styles::{Style, StyleSheet};
 use wordcraft_doc::{
     Align, Block, CharProps, Document, ListKind, ParaProps, Paragraph, PartKind, Path, Pos, Rgb,
@@ -34,6 +35,7 @@ const MAX_LISTS: usize = 10_000;
 const MAX_LINK_BYTES: usize = 16 * 1024 * 1024;
 const MAX_STYLES: usize = 1024;
 const MAX_FORMAT_PATCH_BYTES: usize = 16 * 1024;
+const MAX_SECTIONS: usize = 128;
 
 #[pyclass]
 pub struct EditableDocx {
@@ -139,6 +141,7 @@ impl EditableDocx {
             .enumerate()
             .filter_map(|(id, block)| {
                 (block.as_para().is_some()
+                    && self.locations.contains_key(&id)
                     && self.placeholder != Some(id)
                     && !self.images.contains(&id))
                 .then_some(id)
@@ -168,7 +171,7 @@ impl EditableDocx {
     pub fn add_table(&mut self, rows: Vec<Vec<String>>) -> PyResult<usize> {
         self.reserve_block()?;
         let (table, added_text, cells) =
-            self.make_table(rows, self.document()?.last_section.text_width())?;
+            self.make_table(rows, column_width(&self.document()?.last_section))?;
         let text_bytes = self.updated_text_bytes(0, added_text)?;
         let mut candidate = self.document()?.clone();
         if candidate.body.len() + 2 > MAX_BLOCKS {
@@ -528,6 +531,15 @@ impl EditableDocx {
         alt: &str,
     ) -> PyResult<usize> {
         let (paragraph, media) = self.make_image(data, width, height, alt)?;
+        let table = self.table(id)?;
+        let (anchor_row, cell) = cell_anchor(table, row, column)?;
+        let start = table.grid_col(anchor_row, cell);
+        let end = start + table.rows[anchor_row].cells[cell].span();
+        let margins = wordcraft_layout::cell_margins(self.document()?, table, anchor_row, cell);
+        validate_picture_width(
+            &paragraph,
+            table.grid[start..end].iter().sum::<f32>() - margins[1] - margins[3],
+        )?;
         self.add_cell_block(
             id,
             row,
@@ -629,6 +641,130 @@ impl EditableDocx {
         self.invalidate_descendants(story, &path);
         self.cell_count += columns - 1;
         Ok(())
+    }
+
+    pub fn cell_margins(
+        &self,
+        id: usize,
+        row: usize,
+        column: usize,
+    ) -> PyResult<(f64, f64, f64, f64)> {
+        let table = self.table(id)?;
+        let (row, cell) = cell_anchor(table, row, column)?;
+        let [top, left, bottom, right] =
+            wordcraft_layout::cell_margins(self.document()?, table, row, cell);
+        Ok((
+            f64::from(top),
+            f64::from(right),
+            f64::from(bottom),
+            f64::from(left),
+        ))
+    }
+
+    #[pyo3(signature = (id, row, column, margins=None))]
+    pub fn set_cell_margins(
+        &mut self,
+        id: usize,
+        row: usize,
+        column: usize,
+        margins: Option<(f64, f64, f64, f64)>,
+    ) -> PyResult<()> {
+        let (row, cell) = cell_anchor(self.table(id)?, row, column)?;
+        let margins = margins
+            .map(|(top, right, bottom, left)| {
+                if [top, right, bottom, left]
+                    .iter()
+                    .any(|n| !n.is_finite() || !(0.0..=1584.0).contains(n))
+                {
+                    return Err(PyValueError::new_err(
+                        "cell margins must be finite and between 0 and 1584 points",
+                    ));
+                }
+                Ok([top as f32, left as f32, bottom as f32, right as f32])
+            })
+            .transpose()?;
+        let mut candidate = self.document()?.clone();
+        self.table_mut(&mut candidate, id)?.rows[row].cells[cell]
+            .props
+            .margins = margins;
+        let (story, path) = self.location(id)?;
+        let table = candidate
+            .table(story, &path)
+            .ok_or_else(|| PyIndexError::new_err("table no longer exists"))?;
+        let margins = wordcraft_layout::cell_margins(&candidate, table, row, cell);
+        let start = table.grid_col(row, cell);
+        let end = start + table.rows[row].cells[cell].span();
+        let available = table.grid[start..end].iter().sum::<f32>() - margins[1] - margins[3];
+        if available <= 0.0 {
+            return Err(PyValueError::new_err(
+                "cell margins must leave positive content width",
+            ));
+        }
+        blocks_fit_width(&table.rows[row].cells[cell].blocks, available)?;
+        self.commit(candidate)
+    }
+
+    pub fn cell_alignment(
+        &self,
+        id: usize,
+        row: usize,
+        column: usize,
+    ) -> PyResult<Option<&'static str>> {
+        let table = self.table(id)?;
+        let (row, cell) = cell_anchor(table, row, column)?;
+        let mut alignment = None;
+        for paragraph in table.rows[row].cells[cell]
+            .blocks
+            .iter()
+            .filter_map(|block| block.as_para())
+        {
+            let value = paragraph.props.align;
+            if alignment.is_some_and(|previous| previous != value) {
+                return Err(PyValueError::new_err(
+                    "cell paragraphs have mixed direct alignment",
+                ));
+            }
+            alignment = Some(value);
+        }
+        Ok(alignment.flatten().map(|value| match value {
+            Align::Left => "left",
+            Align::Right => "right",
+            Align::Center => "center",
+            Align::Justify => "justify",
+            Align::Distribute => "distribute",
+        }))
+    }
+
+    #[pyo3(signature = (id, row, column, alignment=None))]
+    pub fn set_cell_alignment(
+        &mut self,
+        id: usize,
+        row: usize,
+        column: usize,
+        alignment: Option<&str>,
+    ) -> PyResult<()> {
+        let (row, cell) = cell_anchor(self.table(id)?, row, column)?;
+        let alignment = match alignment {
+            None => None,
+            Some("left") => Some(Align::Left),
+            Some("right") => Some(Align::Right),
+            Some("center") => Some(Align::Center),
+            Some("justify") => Some(Align::Justify),
+            Some("distribute") => Some(Align::Distribute),
+            _ => {
+                return Err(PyValueError::new_err(
+                    "cell alignment must be left, right, center, justify, distribute or None",
+                ))
+            }
+        };
+        let mut candidate = self.document()?.clone();
+        for block in &mut self.table_mut(&mut candidate, id)?.rows[row].cells[cell].blocks {
+            if let Block::Para(paragraph) = Arc::make_mut(block) {
+                paragraph.props.align = alignment;
+                paragraph.touch();
+            }
+        }
+        self.commit(candidate)
     }
 
     pub fn cell_background(
@@ -1367,13 +1503,206 @@ impl EditableDocx {
         Ok((start, start + text.chars().count(), self.revision))
     }
 
+    pub fn section_ids(&self) -> PyResult<Vec<usize>> {
+        Ok((0..self.document()?.sections().len()).collect())
+    }
+
+    pub fn section_props(&self, section: usize) -> PyResult<String> {
+        let props = self.section(section)?;
+        Ok(json!({
+            "start": section_start_name(props.start),
+            "page_size": [props.page_w, props.page_h],
+            "margins": [props.margin_top, props.margin_right, props.margin_bottom, props.margin_left],
+            "distances": [props.header, props.footer],
+            "columns": [props.columns.count, props.columns.space, props.columns.separator]
+        }).to_string())
+    }
+
+    pub fn set_section_props(&mut self, section: usize, patch: &str) -> PyResult<()> {
+        let mut props = self.section(section)?.clone();
+        if patch.len() > MAX_FORMAT_PATCH_BYTES {
+            return Err(limit("section patch exceeds 16 KiB"));
+        }
+        let value: Value = serde_json::from_str(patch)
+            .map_err(|_| PyValueError::new_err("section properties require a JSON object"))?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| PyValueError::new_err("section properties require a JSON object"))?;
+        for (key, value) in object {
+            match key.as_str() {
+                "start" => {
+                    props.start = parse_section_start(value.as_str().unwrap_or(""))?;
+                    if section == 0 && props.start != SectionStart::NextPage {
+                        return Err(PyValueError::new_err(
+                            "the first section must start with next_page",
+                        ));
+                    }
+                }
+                "page_size" => {
+                    let [width, height] = section_numbers::<2>(value, key)?;
+                    props.page_w = width;
+                    props.page_h = height;
+                    props.landscape = width > height;
+                }
+                "margins" => {
+                    let [top, right, bottom, left] = section_numbers::<4>(value, key)?;
+                    props.margin_top = top;
+                    props.margin_right = right;
+                    props.margin_bottom = bottom;
+                    props.margin_left = left;
+                }
+                "distances" => {
+                    let [header, footer] = section_numbers::<2>(value, key)?;
+                    props.header = header;
+                    props.footer = footer;
+                }
+                "columns" => {
+                    let values = value.as_array().filter(|v| v.len() == 3).ok_or_else(|| {
+                        PyValueError::new_err("columns must contain count, gap and separator")
+                    })?;
+                    let count = values[0]
+                        .as_u64()
+                        .filter(|n| (1..=45).contains(n))
+                        .ok_or_else(|| {
+                            PyValueError::new_err("column count must be an integer from 1 to 45")
+                        })?;
+                    let gap = values[1]
+                        .as_f64()
+                        .filter(|n| n.is_finite() && *n >= 0.0 && *n <= 1584.0)
+                        .ok_or_else(|| {
+                            PyValueError::new_err(
+                                "column gap must be finite and between 0 and 1584 points",
+                            )
+                        })?;
+                    let separator = values[2]
+                        .as_bool()
+                        .ok_or_else(|| PyValueError::new_err("column separator must be boolean"))?;
+                    props.columns.count = count as u32;
+                    props.columns.space = gap as f32;
+                    props.columns.separator = separator;
+                    props.columns.widths.clear();
+                }
+                _ => {
+                    return Err(PyValueError::new_err(format!(
+                        "unknown section property: {key}"
+                    )))
+                }
+            }
+        }
+        validate_section_geometry(&props)?;
+        let mut candidate = self.document()?.clone();
+        let end = candidate.sections()[section].0;
+        *candidate.section_mut(end) = props;
+        validate_section_content(&candidate, section)?;
+        self.commit(candidate)
+    }
+
+    #[pyo3(signature = (start="next_page"))]
+    pub fn add_section(&mut self, start: &str) -> PyResult<usize> {
+        let start = parse_section_start(start)?;
+        let section = self.document()?.sections().len();
+        if section >= MAX_SECTIONS {
+            return Err(limit("document exceeds 128 sections"));
+        }
+        if self.document()?.body.len() >= MAX_BLOCKS {
+            return Err(limit("document exceeds 100000 body blocks"));
+        }
+        // Stage model and locator maps together; allocation/validation failures publish nothing.
+        let mut staged = self.copy()?;
+        let mut candidate = self.document()?.clone();
+        let previous = candidate.last_section.clone();
+        let mut next = previous.clone();
+        next.start = start;
+        let mut copied = BTreeMap::new();
+        for (kind, refs) in [
+            (PartKind::Header, &mut next.headers),
+            (PartKind::Footer, &mut next.footers),
+        ] {
+            for slot in [&mut refs.default, &mut refs.first, &mut refs.even] {
+                let old = *slot;
+                let new = if let Some(id) = old.and_then(|id| copied.get(&id).copied()) {
+                    id
+                } else {
+                    let blocks = old
+                        .and_then(|id| candidate.parts.get(&id))
+                        .map(|part| part.blocks.clone())
+                        .unwrap_or_default();
+                    let (bytes, cells) = content_usage(&blocks);
+                    staged.text_bytes = staged.updated_text_bytes(0, bytes)?;
+                    staged.cell_count = staged.cell_count.saturating_add(cells);
+                    if staged.cell_count > MAX_CELLS {
+                        return Err(limit("document exceeds 100000 table cells"));
+                    }
+                    let id = candidate.try_add_part(kind, blocks).map_err(model_error)?;
+                    if let Some(old) = old {
+                        copied.insert(old, id);
+                        let old_part = candidate
+                            .parts
+                            .get(&old)
+                            .ok_or_else(|| PyValueError::new_err("missing section story"))?;
+                        let body = old_part.body;
+                        if let Some(part) = candidate.parts.get_mut(&id) {
+                            part.body = body;
+                        }
+                        let mut ids = Vec::new();
+                        for old_id in self.stories.get(&old).into_iter().flatten() {
+                            let (_, path) = self.location(*old_id)?;
+                            ids.push(staged.register_location(StoryRef::Part(id), path, false)?);
+                        }
+                        staged.stories.insert(id, ids);
+                        for (old_id, (story, path)) in &self.locations {
+                            if *story == StoryRef::Part(old) {
+                                staged.register_location(
+                                    StoryRef::Part(id),
+                                    path.clone(),
+                                    self.images.contains(old_id),
+                                )?;
+                            }
+                        }
+                        for (story, path) in &self.cell_placeholders {
+                            if *story == StoryRef::Part(old) {
+                                staged
+                                    .cell_placeholders
+                                    .insert((StoryRef::Part(id), path.clone()));
+                            }
+                        }
+                    } else {
+                        // An omitted reference links to the previous section in OOXML. An owned
+                        // empty part is required to keep future edits to that section independent.
+                        staged.stories.insert(id, Vec::new());
+                    }
+                    id
+                };
+                *slot = Some(new);
+            }
+        }
+        let end = candidate
+            .body
+            .len()
+            .checked_sub(1)
+            .ok_or_else(|| PyValueError::new_err("document body is empty"))?;
+        let paragraph = candidate
+            .para_mut(StoryRef::Body, &Path::top(end))
+            .map_err(model_error)?;
+        paragraph.section = Some(Box::new(previous));
+        candidate.last_section = next;
+        let placeholder = candidate.body.len();
+        candidate
+            .body
+            .push(wordcraft_doc::para_block(Paragraph::new()));
+        staged.placeholder = Some(placeholder);
+        staged.commit(candidate)?;
+        *self = staged;
+        Ok(section)
+    }
+
     pub fn page_size(&self) -> PyResult<(f64, f64)> {
-        let section = &self.document()?.last_section;
+        let section = self.section(0)?;
         Ok((f64::from(section.page_w), f64::from(section.page_h)))
     }
 
     pub fn margins(&self) -> PyResult<(f64, f64, f64, f64)> {
-        let section = &self.document()?.last_section;
+        let section = self.section(0)?;
         Ok((
             f64::from(section.margin_top),
             f64::from(section.margin_right),
@@ -1383,23 +1712,13 @@ impl EditableDocx {
     }
 
     pub fn set_margins(&mut self, top: f64, right: f64, bottom: f64, left: f64) -> PyResult<()> {
-        let section = &self.document()?.last_section;
-        if [top, right, bottom, left]
-            .iter()
-            .any(|value| !value.is_finite() || *value < 0.0)
-            || top + bottom + 18.0 > f64::from(section.page_h)
-            || left + right + f64::from(section.gutter) + 18.0 > f64::from(section.page_w)
-        {
-            return Err(PyValueError::new_err(
-                "margins must be finite, nonnegative and leave 18 points of content on each axis",
-            ));
+        if [top, right, bottom, left].iter().any(|n| !n.is_finite()) {
+            return Err(PyValueError::new_err("margins must be finite"));
         }
-        let mut candidate = self.document()?.clone();
-        candidate.last_section.margin_top = top as f32;
-        candidate.last_section.margin_right = right as f32;
-        candidate.last_section.margin_bottom = bottom as f32;
-        candidate.last_section.margin_left = left as f32;
-        self.commit(candidate)
+        self.set_section_props(
+            0,
+            &json!({"margins": [top, right, bottom, left]}).to_string(),
+        )
     }
 
     #[pyo3(signature = (data, width=None, height=None, alt=""))]
@@ -1412,6 +1731,7 @@ impl EditableDocx {
     ) -> PyResult<usize> {
         self.reserve_block()?;
         let (paragraph, media) = self.make_image(data, width, height, alt)?;
+        validate_picture_width(&paragraph, column_width(&self.document()?.last_section))?;
         let mut candidate = self.document()?.clone();
         if candidate.body.len() >= MAX_BLOCKS {
             return Err(limit("document exceeds 100000 blocks"));
@@ -1472,6 +1792,11 @@ impl EditableDocx {
     pub fn set_image_size(&mut self, id: usize, width: f64, height: f64) -> PyResult<()> {
         self.image(id)?;
         validate_image_size(width, height)?;
+        if width > f64::from(self.container_width(id)?) + 0.001 {
+            return Err(PyValueError::new_err(
+                "picture width exceeds its section or cell width",
+            ));
+        }
         let mut candidate = self.document()?.clone();
         let paragraph = self.paragraph_mut(&mut candidate, id)?;
         if let Some(InlineObject::Image { w, h, .. }) = paragraph.objects.first_mut() {
@@ -1504,22 +1829,10 @@ impl EditableDocx {
     }
 
     pub fn set_page_size(&mut self, width: f64, height: f64) -> PyResult<()> {
-        let section = &self.document()?.last_section;
-        if !width.is_finite()
-            || !height.is_finite()
-            || width > 1584.0
-            || height > 1584.0
-            || width < f64::from(section.margin_left + section.margin_right + section.gutter) + 18.0
-            || height < f64::from(section.margin_top + section.margin_bottom) + 18.0
-        {
-            return Err(PyValueError::new_err("page size must be finite, at most 1584 points per side and leave 18 points inside margins"));
+        if !width.is_finite() || !height.is_finite() {
+            return Err(PyValueError::new_err("page size must be finite"));
         }
-        let mut candidate = self.document()?.clone();
-        candidate.last_section.page_w = width as f32;
-        candidate.last_section.page_h = height as f32;
-        candidate.last_section.landscape = width > height;
-        self.commit(candidate)?;
-        Ok(())
+        self.set_section_props(0, &json!({"page_size": [width, height]}).to_string())
     }
 
     pub fn background(&self) -> PyResult<Option<String>> {
@@ -1540,12 +1853,12 @@ impl EditableDocx {
         Ok(())
     }
 
-    #[pyo3(signature = (kind, variant="default"))]
-    pub fn story_id(&self, kind: &str, variant: &str) -> PyResult<Option<u32>> {
-        let document = self.document()?;
+    #[pyo3(signature = (kind, variant="default", section=0))]
+    pub fn story_id(&self, kind: &str, variant: &str, section: usize) -> PyResult<Option<u32>> {
+        self.document()?;
         let refs = match kind {
-            "header" => document.last_section.headers,
-            "footer" => document.last_section.footers,
+            "header" => self.section(section)?.headers,
+            "footer" => self.section(section)?.footers,
             _ => return Err(PyValueError::new_err("story kind must be header or footer")),
         };
         match variant {
@@ -1558,12 +1871,12 @@ impl EditableDocx {
         }
     }
 
-    #[pyo3(signature = (kind, variant="default"))]
-    pub fn ensure_story(&mut self, kind: &str, variant: &str) -> PyResult<u32> {
+    #[pyo3(signature = (kind, variant="default", section=0))]
+    pub fn ensure_story(&mut self, kind: &str, variant: &str, section: usize) -> PyResult<u32> {
         let document = self.document()?;
         let (part_kind, refs) = match kind {
-            "header" => (PartKind::Header, document.last_section.headers),
-            "footer" => (PartKind::Footer, document.last_section.footers),
+            "header" => (PartKind::Header, self.section(section)?.headers),
+            "footer" => (PartKind::Footer, self.section(section)?.footers),
             _ => return Err(PyValueError::new_err("story kind must be header or footer")),
         };
         let existing = match variant {
@@ -1576,24 +1889,33 @@ impl EditableDocx {
                 ))
             }
         };
-        if let Some(id) = existing {
-            self.story_paragraph_ids(id)?;
-            return Ok(id);
-        }
         let mut candidate = document.clone();
-        let id = candidate
-            .try_add_part(part_kind, Vec::new())
-            .map_err(model_error)?;
-        let refs = if part_kind == PartKind::Header {
-            &mut candidate.last_section.headers
+        let id = if let Some(id) = existing {
+            self.story_paragraph_ids(id)?;
+            if variant == "default"
+                || (variant == "first" && self.section(section)?.title_page)
+                || (variant == "even" && document.settings.even_odd_headers)
+            {
+                return Ok(id);
+            }
+            id
         } else {
-            &mut candidate.last_section.footers
+            candidate
+                .try_add_part(part_kind, Vec::new())
+                .map_err(model_error)?
+        };
+        let end = candidate.sections()[section].0;
+        let properties = candidate.section_mut(end);
+        let refs = if part_kind == PartKind::Header {
+            &mut properties.headers
+        } else {
+            &mut properties.footers
         };
         match variant {
             "default" => refs.default = Some(id),
             "first" => {
                 refs.first = Some(id);
-                candidate.last_section.title_page = true;
+                candidate.section_mut(end).title_page = true;
             }
             "even" => {
                 refs.even = Some(id);
@@ -1602,7 +1924,7 @@ impl EditableDocx {
             _ => return Err(PyValueError::new_err("invalid story variant")),
         }
         self.commit(candidate)?;
-        self.stories.insert(id, Vec::new());
+        self.stories.entry(id).or_default();
         Ok(id)
     }
 
@@ -1660,6 +1982,14 @@ impl Default for EditableDocx {
 }
 
 impl EditableDocx {
+    fn section(&self, section: usize) -> PyResult<&SectionProps> {
+        self.document()?
+            .sections()
+            .get(section)
+            .map(|(_, props)| *props)
+            .ok_or_else(|| PyIndexError::new_err("section index out of bounds"))
+    }
+
     fn row(&self, id: usize, row: usize) -> PyResult<&wordcraft_doc::Row> {
         self.table(id)?
             .rows
@@ -1670,7 +2000,23 @@ impl EditableDocx {
     fn container_width(&self, id: usize) -> PyResult<f32> {
         let (story, path) = self.location(id)?;
         let Some((parent, row, cell)) = path.cell() else {
-            return Ok(self.document()?.last_section.text_width());
+            let document = self.document()?;
+            return match story {
+                StoryRef::Body => Ok(column_width(
+                    self.section(document.section_index_of(path.0[0] as usize))?,
+                )),
+                StoryRef::Part(id) => document
+                    .sections()
+                    .iter()
+                    .find_map(|(_, section)| {
+                        let h = section.headers;
+                        let f = section.footers;
+                        [h.default, h.first, h.even, f.default, f.first, f.even]
+                            .contains(&Some(id))
+                            .then(|| section.text_width())
+                    })
+                    .ok_or_else(|| PyIndexError::new_err("story has no owning section")),
+            };
         };
         let table = self
             .document()?
@@ -2725,6 +3071,129 @@ fn cell_plain_text(cell: &wordcraft_doc::Cell) -> String {
         .join("\n")
 }
 
+fn parse_section_start(start: &str) -> PyResult<SectionStart> {
+    match start {
+        "next_page" => Ok(SectionStart::NextPage),
+        "continuous" => Ok(SectionStart::Continuous),
+        "even_page" => Ok(SectionStart::EvenPage),
+        "odd_page" => Ok(SectionStart::OddPage),
+        _ => Err(PyValueError::new_err(
+            "section start must be next_page, continuous, even_page or odd_page",
+        )),
+    }
+}
+
+fn section_start_name(start: SectionStart) -> &'static str {
+    match start {
+        SectionStart::NextPage => "next_page",
+        SectionStart::Continuous => "continuous",
+        SectionStart::EvenPage => "even_page",
+        SectionStart::OddPage => "odd_page",
+        SectionStart::NextColumn => "next_column",
+    }
+}
+
+fn section_numbers<const N: usize>(value: &Value, key: &str) -> PyResult<[f32; N]> {
+    let array = value
+        .as_array()
+        .filter(|v| v.len() == N)
+        .ok_or_else(|| PyValueError::new_err(format!("{key} requires {N} numeric values")))?;
+    let mut result = [0.0; N];
+    for (target, value) in result.iter_mut().zip(array) {
+        let number = value
+            .as_f64()
+            .filter(|n| n.is_finite() && *n >= 0.0 && *n <= 1584.0)
+            .ok_or_else(|| {
+                PyValueError::new_err(format!(
+                    "{key} values must be finite and between 0 and 1584 points"
+                ))
+            })?;
+        *target = number as f32;
+    }
+    Ok(result)
+}
+
+fn column_width(section: &SectionProps) -> f32 {
+    (section.text_width() - section.columns.space * (section.columns.count - 1) as f32)
+        / section.columns.count as f32
+}
+
+fn validate_section_geometry(section: &SectionProps) -> PyResult<()> {
+    if section.page_w < section.margin_left + section.margin_right + section.gutter + 18.0
+        || section.page_h < section.margin_top + section.margin_bottom + 18.0
+        || section.header > section.page_h
+        || section.footer > section.page_h
+        || column_width(section) < 18.0
+    {
+        return Err(PyValueError::new_err("section geometry must leave 18 points per column and of body height; header/footer distances must fit the page"));
+    }
+    Ok(())
+}
+
+fn validate_picture_width(paragraph: &Paragraph, width: f32) -> PyResult<()> {
+    if paragraph
+        .objects
+        .iter()
+        .any(|object| matches!(object, InlineObject::Image { w, .. } if *w > width + 0.001))
+    {
+        return Err(PyValueError::new_err(
+            "picture width exceeds its section or cell width",
+        ));
+    }
+    Ok(())
+}
+
+fn blocks_fit_width(blocks: &[Arc<Block>], width: f32) -> PyResult<()> {
+    for block in blocks {
+        let exceeds = match block.as_ref() {
+            Block::Table(table) => table.total_width() > width + 0.001,
+            Block::Para(paragraph) => paragraph.objects.iter().any(
+                |object| matches!(object, InlineObject::Image { w, .. } if *w > width + 0.001),
+            ),
+        };
+        if exceeds {
+            return Err(PyValueError::new_err(
+                "section resize would overflow an existing table or image; resize the child first",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_section_content(document: &Document, section: usize) -> PyResult<()> {
+    let sections = document.sections();
+    // The pinned layout retains the current page box for continuous sections.
+    for pair in sections.windows(2) {
+        if pair[1].1.start == SectionStart::Continuous
+            && (pair[0].1.page_w != pair[1].1.page_w || pair[0].1.page_h != pair[1].1.page_h)
+        {
+            return Err(PyValueError::new_err(
+                "continuous sections must have the same page size as the preceding section",
+            ));
+        }
+    }
+    let (end, props) = sections[section];
+    let begin = if section == 0 {
+        0
+    } else {
+        sections[section - 1].0 + 1
+    };
+    blocks_fit_width(&document.body[begin..=end], column_width(props))?;
+    let h = props.headers;
+    let f = props.footers;
+    for id in [h.default, h.first, h.even, f.default, f.first, f.even]
+        .into_iter()
+        .flatten()
+    {
+        let part = document
+            .parts
+            .get(&id)
+            .ok_or_else(|| PyValueError::new_err("section references a missing story"))?;
+        blocks_fit_width(&part.blocks, props.text_width())?;
+    }
+    Ok(())
+}
+
 fn content_usage(blocks: &wordcraft_doc::Blocks) -> (usize, usize) {
     let mut pending = vec![blocks];
     let (mut bytes, mut cells) = (0, 0);
@@ -3108,9 +3577,12 @@ mod tests {
     fn header_footer_paragraphs_share_safe_formatting_and_copy_ownership() {
         let mut document = EditableDocx::new();
         let body = document.add_paragraph("Body").unwrap();
-        let header = document.ensure_story("header", "default").unwrap();
+        let header = document.ensure_story("header", "default", 0).unwrap();
         let revision = document.revision().unwrap();
-        assert_eq!(document.ensure_story("header", "default").unwrap(), header);
+        assert_eq!(
+            document.ensure_story("header", "default", 0).unwrap(),
+            header
+        );
         assert_eq!(document.revision().unwrap(), revision);
         let paragraph = document.story_add_paragraph(header, "Header λ").unwrap();
         assert!(paragraph >= MAX_BLOCKS);
@@ -3150,7 +3622,7 @@ mod tests {
         );
         let revision = document.revision().unwrap();
         assert!(document.story_add_paragraph(u32::MAX, "invalid").is_err());
-        assert!(document.ensure_story("header", "invalid").is_err());
+        assert!(document.ensure_story("header", "invalid", 0).is_err());
         assert_eq!(document.revision().unwrap(), revision);
         let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
         let id = reopened.last_section.headers.default.unwrap();
@@ -3183,7 +3655,7 @@ mod tests {
         }
         for variant in ["default", "first", "even"] {
             for kind in ["header", "footer"] {
-                let story = document.ensure_story(kind, variant).unwrap();
+                let story = document.ensure_story(kind, variant, 0).unwrap();
                 document
                     .story_add_paragraph(story, &format!("{variant} {kind}"))
                     .unwrap();
@@ -3546,7 +4018,7 @@ mod tests {
                 .bold,
             Some(true)
         );
-        let story = document.ensure_story("header", "default").unwrap();
+        let story = document.ensure_story("header", "default", 0).unwrap();
         let header = document.story_add_paragraph(story, "Header list").unwrap();
         document
             .set_paragraph_list(header, Some("numbered"), 0, false)
@@ -4227,5 +4699,340 @@ mod tests {
         assert!(document
             .format_style(&style, r#"{"strike":"triple"}"#)
             .is_err());
+    }
+    #[test]
+    fn sections_keep_ids_geometry_stories_and_native_page_sizes() {
+        let mut document = EditableDocx::new();
+        document.set_page_size(400.0, 500.0).unwrap();
+        let first = document.add_paragraph("First body").unwrap();
+        let header = document.ensure_story("header", "default", 0).unwrap();
+        let header_para = document
+            .story_add_paragraph(header, "Original header")
+            .unwrap();
+        document
+            .add_run_patch(header_para, " bold", r#"{"bold":true}"#)
+            .unwrap();
+        assert_eq!(document.add_section("next_page").unwrap(), 1);
+        let second = document.add_paragraph("Second body").unwrap();
+        document
+            .set_section_props(
+                1,
+                r#"{"page_size":[600,700],"margins":[40,50,60,70],"distances":[20,25]}"#,
+            )
+            .unwrap();
+        assert_eq!(document.section_ids().unwrap(), vec![0, 1]);
+        assert_eq!(document.paragraph_ids().unwrap(), vec![first, second]);
+        assert_eq!(document.page_size().unwrap(), (400.0, 500.0));
+        let cloned_header = document.story_id("header", "default", 1).unwrap().unwrap();
+        assert_ne!(header, cloned_header);
+        let cloned_para = document.story_paragraph_ids(cloned_header).unwrap()[0];
+        assert_ne!(header_para, cloned_para);
+        assert_eq!(
+            document.paragraph_text(cloned_para).unwrap(),
+            "Original header bold"
+        );
+        assert_eq!(
+            document
+                .paragraph(cloned_para)
+                .unwrap()
+                .runs
+                .last()
+                .unwrap()
+                .props
+                .bold,
+            Some(true)
+        );
+        document
+            .set_paragraph_text(header_para, "First header edited")
+            .unwrap();
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        assert_eq!(reopened.sections().len(), 2);
+        assert_eq!(reopened.sections()[0].1.page_w, 400.0);
+        assert_eq!(reopened.sections()[1].1.page_w, 600.0);
+        assert_eq!(reopened.last_section.header, 20.0);
+        assert_eq!(reopened.last_section.footer, 25.0);
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        let extracted = crate::pdf::extract(&pdf, None).unwrap();
+        assert_eq!(extracted.pages.len(), 2);
+        for (index, (width, height, body, head)) in [
+            (400.0, 500.0, "First body", "First header edited"),
+            (600.0, 700.0, "Second body", "Original header bold"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(extracted.pages[index].metadata["width"], json!(width));
+            assert_eq!(extracted.pages[index].metadata["height"], json!(height));
+            let text = extracted.pages[index]
+                .blocks
+                .iter()
+                .map(|b| b.text.as_str())
+                .collect::<String>();
+            assert!(text.contains(body), "{text}");
+            assert!(text.contains(head), "{text}");
+            let png = crate::docx::render(&bytes, index, 72.0, None).unwrap();
+            assert_eq!(validate_png(&png).unwrap(), (width as u32, height as u32));
+        }
+        let mut copied = document.copy().unwrap();
+        document.close();
+        assert!(document.section_props(0).is_err());
+        copied
+            .set_paragraph_text(cloned_para, "Copy owns header")
+            .unwrap();
+        assert_eq!(copied.paragraph_text(first).unwrap(), "First body");
+        assert_eq!(copied.section_ids().unwrap(), vec![0, 1]);
+    }
+
+    #[test]
+    fn absent_section_stories_remain_independent_and_variants_can_be_enabled() {
+        let mut document = EditableDocx::new();
+        document.add_paragraph("First").unwrap();
+        document.add_section("next_page").unwrap();
+        document.add_paragraph("Second").unwrap();
+        let empty = document.story_id("header", "default", 1).unwrap().unwrap();
+        assert!(document.story_paragraph_ids(empty).unwrap().is_empty());
+        let first = document.ensure_story("header", "default", 0).unwrap();
+        document
+            .story_add_paragraph(first, "Only first section")
+            .unwrap();
+        assert_ne!(first, empty);
+        let first_variant = document.ensure_story("header", "first", 1).unwrap();
+        document
+            .story_add_paragraph(first_variant, "Second first page")
+            .unwrap();
+        assert!(document.section(1).unwrap().title_page);
+        assert!(!document.section(0).unwrap().title_page);
+        document.ensure_story("footer", "even", 1).unwrap();
+        assert!(document.document().unwrap().settings.even_odd_headers);
+        let pdf = crate::docx::to_pdf(&document.to_bytes().unwrap(), None).unwrap();
+        let extracted = crate::pdf::extract(&pdf, None).unwrap();
+        assert_eq!(extracted.pages.len(), 2);
+        let text = extracted.pages[1]
+            .blocks
+            .iter()
+            .map(|b| b.text.as_str())
+            .collect::<String>();
+        assert!(text.contains("Second first page"));
+        assert!(!text.contains("Only first section"));
+        let before = document.revision().unwrap();
+        document.story_id("footer", "default", 0).unwrap();
+        assert_eq!(document.revision().unwrap(), before);
+    }
+
+    #[test]
+    fn section_breaks_preserve_empty_sections_and_body_handles() {
+        for (start, expected) in [
+            ("next_page", 2),
+            ("continuous", 1),
+            ("even_page", 2),
+            ("odd_page", 3),
+        ] {
+            let mut document = EditableDocx::new();
+            let id = document.add_paragraph("First").unwrap();
+            document.add_section(start).unwrap();
+            let second = document.add_paragraph("Last").unwrap();
+            document.set_paragraph_text(id, "First edited").unwrap();
+            assert_eq!(document.paragraph_ids().unwrap(), vec![id, second]);
+            let pdf = crate::docx::to_pdf(&document.to_bytes().unwrap(), None).unwrap();
+            assert_eq!(
+                crate::pdf::extract(&pdf, None).unwrap().pages.len(),
+                expected,
+                "{start}"
+            );
+        }
+        let mut document = EditableDocx::new();
+        document.add_section("next_page").unwrap();
+        document.add_section("next_page").unwrap();
+        assert!(document.paragraph_ids().unwrap().is_empty());
+        let id = document.add_paragraph("After two empty sections").unwrap();
+        assert_eq!(document.paragraph_ids().unwrap(), vec![id]);
+        let pdf = crate::docx::to_pdf(&document.to_bytes().unwrap(), None).unwrap();
+        assert_eq!(crate::pdf::extract(&pdf, None).unwrap().pages.len(), 3);
+        let table = document.add_table(vec![vec!["Cell".into()]]).unwrap();
+        document.add_section("next_page").unwrap();
+        assert_eq!(document.paragraph_ids().unwrap(), vec![id]);
+        assert_eq!(document.table_rows(table).unwrap(), vec![vec!["Cell"]]);
+    }
+
+    #[test]
+    fn section_geometry_columns_limits_and_invalid_mutations_are_atomic() {
+        let mut document = EditableDocx::new();
+        document.add_paragraph("First").unwrap();
+        document.add_section("continuous").unwrap();
+        document
+            .set_section_props(1, r#"{"columns":[2,24,true]}"#)
+            .unwrap();
+        let table = document
+            .add_table(vec![vec!["Left".into(), "Right".into()]])
+            .unwrap();
+        assert_eq!(
+            document.column_widths(table).unwrap().iter().sum::<f64>(),
+            222.0
+        );
+        document
+            .set_column_widths(table, vec![100.0, 100.0])
+            .unwrap();
+        let before = document.revision().unwrap();
+        let props = document.section_props(1).unwrap();
+        for patch in [
+            r#"{"columns":[0,24,false]}"#,
+            r#"{"columns":[2.5,24,false]}"#,
+            r#"{"columns":[45,50,false]}"#,
+            r#"{"columns":[2,400,false]}"#,
+            r#"{"columns":[2,-1,false]}"#,
+            r#"{"columns":[2,24,1]}"#,
+            r#"{"margins":[500,500,500,500]}"#,
+            r#"{"distances":[900,25]}"#,
+            r#"{"page_size":[400,500]}"#,
+            r#"{"start":"next_column"}"#,
+            r#"{"unknown":5}"#,
+        ] {
+            assert!(document.set_section_props(1, patch).is_err(), "{patch}");
+            assert_eq!(document.section_props(1).unwrap(), props);
+            assert_eq!(document.revision().unwrap(), before);
+        }
+        assert!(document.set_page_size(400.0, 500.0).is_err());
+        assert!(document
+            .set_column_widths(table, vec![200.0, 200.0])
+            .is_err());
+        assert!(document.section_props(2).is_err());
+        assert!(document.set_section_props(2, "{}").is_err());
+        assert!(document.ensure_story("header", "default", 2).is_err());
+        assert!(document.add_section("next_column").is_err());
+        let png = crate::rendering::encode_png(1, 1, &[255, 0, 0, 255], 72.0).unwrap();
+        assert!(document
+            .add_image(&png, Some(250.0), Some(10.0), "")
+            .is_err());
+        let image = document
+            .add_image(&png, Some(100.0), Some(10.0), "")
+            .unwrap();
+        document.add_section("next_page").unwrap();
+        document
+            .set_section_props(2, r#"{"columns":[1,36,false]}"#)
+            .unwrap();
+        assert!(document.set_image_size(image, 300.0, 10.0).is_err());
+        document.set_image_size(image, 200.0, 10.0).unwrap();
+        let reopened = wordcraft_docx::read(&document.to_bytes().unwrap()).unwrap();
+        assert_eq!(reopened.sections()[1].1.columns.count, 2);
+        assert_eq!(reopened.sections()[1].1.columns.space, 24.0);
+        assert!(reopened.sections()[1].1.columns.separator);
+        let mut limits = EditableDocx::new();
+        for _ in 1..MAX_SECTIONS {
+            limits.add_section("next_page").unwrap();
+        }
+        let before = limits.revision().unwrap();
+        assert!(limits.add_section("next_page").is_err());
+        assert_eq!(limits.section_ids().unwrap().len(), MAX_SECTIONS);
+        assert_eq!(limits.revision().unwrap(), before);
+    }
+    #[test]
+    fn cell_margins_and_alignment_reuse_native_context_and_preserve_nested_content() {
+        let mut document = EditableDocx::new();
+        let table = document
+            .add_table(vec![vec!["Main".into(), "Other".into()]])
+            .unwrap();
+        let first = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
+        let second = document
+            .cell_add_paragraph(table, 0, 0, "Second paragraph")
+            .unwrap();
+        let inner = document
+            .cell_add_table(table, 0, 0, vec![vec!["Nested".into()]])
+            .unwrap();
+        let nested = document.cell_paragraph_ids(inner, 0, 0).unwrap()[0];
+        document.set_paragraph_alignment(nested, "right").unwrap();
+        document.set_paragraph_alignment(second, "center").unwrap();
+        assert!(document.cell_alignment(table, 0, 0).is_err());
+        document
+            .set_cell_alignment(table, 0, 0, Some("center"))
+            .unwrap();
+        assert_eq!(
+            document.cell_alignment(table, 0, 0).unwrap(),
+            Some("center")
+        );
+        assert_eq!(document.paragraph_alignment(first).unwrap(), "center");
+        assert_eq!(document.paragraph_alignment(nested).unwrap(), "right");
+        document.set_cell_alignment(table, 0, 0, None).unwrap();
+        assert_eq!(document.cell_alignment(table, 0, 0).unwrap(), None);
+        assert_eq!(document.paragraph(first).unwrap().props.align, None);
+        let before = document.revision().unwrap();
+        assert!(document
+            .set_cell_margins(table, 0, 0, Some((2.0, 30.0, 4.0, 30.0)))
+            .is_err());
+        assert_eq!(document.revision().unwrap(), before);
+        document.set_column_widths(inner, vec![160.0]).unwrap();
+        document
+            .set_cell_margins(table, 0, 0, Some((2.0, 30.0, 4.0, 30.0)))
+            .unwrap();
+        assert_eq!(
+            document.cell_margins(table, 0, 0).unwrap(),
+            (2.0, 30.0, 4.0, 30.0)
+        );
+        document
+            .set_cell_margins(table, 0, 1, Some((3.0, 14.0, 5.0, 22.0)))
+            .unwrap();
+        document
+            .set_cell_alignment(table, 0, 1, Some("right"))
+            .unwrap();
+        let before = document.revision().unwrap();
+        for margins in [
+            (0.0, 200.0, 0.0, 200.0),
+            (f64::NAN, 0.0, 0.0, 0.0),
+            (-1.0, 0.0, 0.0, 0.0),
+        ] {
+            assert!(document
+                .set_cell_margins(table, 0, 1, Some(margins))
+                .is_err());
+        }
+        assert!(document
+            .set_cell_alignment(table, 0, 1, Some("invalid"))
+            .is_err());
+        assert_eq!(document.revision().unwrap(), before);
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        let native = reopened.table(StoryRef::Body, &Path::top(table)).unwrap();
+        assert_eq!(
+            native.rows[0].cells[1].props.margins,
+            Some([3.0, 22.0, 5.0, 14.0])
+        );
+        assert_eq!(
+            native.rows[0].cells[1].blocks[0]
+                .as_para()
+                .unwrap()
+                .props
+                .align,
+            Some(Align::Right)
+        );
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        let extracted = crate::pdf::extract(&pdf, None).unwrap();
+        assert_eq!(extracted.pages.len(), 1);
+        let text = extracted.pages[0]
+            .blocks
+            .iter()
+            .map(|b| b.text.as_str())
+            .collect::<String>();
+        assert!(text.contains("Nested"));
+        document.set_cell_margins(table, 0, 1, None).unwrap();
+        assert_eq!(
+            document.table(table).unwrap().rows[0].cells[1]
+                .props
+                .margins,
+            None
+        );
+        document.merge_cells(table, 0, 0, 0, 1).unwrap();
+        document
+            .set_cell_alignment(table, 0, 1, Some("justify"))
+            .unwrap();
+        assert_eq!(
+            document.cell_alignment(table, 0, 0).unwrap(),
+            Some("justify")
+        );
+        document
+            .set_cell_margins(table, 0, 1, Some((1.0, 2.0, 3.0, 4.0)))
+            .unwrap();
+        assert_eq!(
+            document.cell_margins(table, 0, 0).unwrap(),
+            (1.0, 2.0, 3.0, 4.0)
+        );
     }
 }

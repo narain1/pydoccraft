@@ -375,8 +375,8 @@ class WordDocument(EditableDocument):
         return _Collection(self, lambda: self._call("table_ids"), EditableTable)
 
     @property
-    def sections(self) -> _Collection[Section]:
-        return _Collection(self, lambda: [0], Section)
+    def sections(self) -> Sections:
+        return Sections(self)
 
     @property
     def images(self) -> _Collection[Picture]:
@@ -688,52 +688,109 @@ class _SlideTextRange(TextRange):
         self._revision = content._owner._call("set_range_link", *content._range_args, self._start, self._end, self._revision, info[0], info[1], value, _change=True)
 
 
+class Sections(_Collection["Section"]):
+    """Append-only document sections with stable identities."""
+    def __init__(self, owner: WordDocument):
+        super().__init__(owner, lambda: owner._call("section_ids"), Section)
+
+    def add(self, *, start: str = "next_page") -> Section:
+        """Append a section, copying its predecessor's setup and independent stories."""
+        return Section(self._owner, self._owner._call("add_section", start, _change=True))
+
+
 class Section:
     def __init__(self, owner: WordDocument, identifier: int):
-        self._owner = owner
+        self._owner, self._id = owner, identifier
+
+    def _props(self):
+        return json.loads(self._owner._call("section_props", self._id))
+
+    def _set(self, **values):
+        self._owner._call("set_section_props", self._id, json.dumps(values, allow_nan=False), _change=True)
+
+    @property
+    def start(self) -> str:
+        return self._props()["start"]
+
+    @start.setter
+    def start(self, value: str):
+        self._set(start=value)
 
     @property
     def page_size(self) -> tuple[float, float]:
-        return self._owner._call("page_size")
+        return tuple(self._props()["page_size"])
 
     @page_size.setter
     def page_size(self, value):
-        self._owner._call("set_page_size", *_size(value), _change=True)
+        self._set(page_size=_size(value))
 
     @property
-    def margins(self):
+    def margins(self) -> tuple[float, float, float, float]:
         """Top, right, bottom and left margins in points."""
-        return self._owner._call("margins")
+        return tuple(self._props()["margins"])
 
     @margins.setter
     def margins(self, value):
-        if isinstance(value, Real):
-            value = (value,) * 4
-        if not isinstance(value, (tuple, list)) or len(value) != 4:
-            raise TypeError("margins must be a number or (top, right, bottom, left) in points")
-        self._owner._call("set_margins", *map(pt, value), _change=True)
+        self._set(margins=_margins(value))
 
+    @property
+    def header_distance(self) -> float:
+        return self._props()["distances"][0]
+
+    @header_distance.setter
+    def header_distance(self, value):
+        self._set(distances=[pt(value), self.footer_distance])
+
+    @property
+    def footer_distance(self) -> float:
+        return self._props()["distances"][1]
+
+    @footer_distance.setter
+    def footer_distance(self, value):
+        self._set(distances=[self.header_distance, pt(value)])
+
+    @property
+    def columns(self) -> tuple[int, float, bool]:
+        """Equal column count, gap in points, and separator-line flag."""
+        return tuple(self._props()["columns"])
+
+    @columns.setter
+    def columns(self, value):
+        if not isinstance(value, (tuple, list)) or len(value) != 3:
+            raise TypeError("columns must be (count, gap, separator)")
+        count, gap, separator = value
+        if isinstance(count, bool) or not isinstance(separator, bool):
+            raise TypeError("column count must be an integer and separator a bool")
+        self._set(columns=[operator.index(count), pt(gap), separator])
 
     def header(self, variant: str = "default") -> EditableStory:
-        """Access the default, first-page or even-page header."""
+        """Access this section's default, first-page or even-page header."""
         if variant not in {"default", "first", "even"}:
             raise ValueError("header variant must be default, first or even")
-        return EditableStory(self._owner, "header", variant)
+        return EditableStory(self._owner, "header", variant, self._id)
 
     def footer(self, variant: str = "default") -> EditableStory:
-        """Access the default, first-page or even-page footer."""
+        """Access this section's default, first-page or even-page footer."""
         if variant not in {"default", "first", "even"}:
             raise ValueError("footer variant must be default, first or even")
-        return EditableStory(self._owner, "footer", variant)
+        return EditableStory(self._owner, "footer", variant, self._id)
+
+
+def _margins(value):
+    if isinstance(value, Real):
+        value = (value,) * 4
+    if not isinstance(value, (tuple, list)) or len(value) != 4:
+        raise TypeError("margins must be a number or (top, right, bottom, left) in points")
+    return tuple(map(pt, value))
 
 
 class EditableStory:
     """A header or footer that shares the normal paragraph API."""
-    def __init__(self, owner: WordDocument, kind: str, variant: str):
-        self._owner, self._kind, self._variant = owner, kind, variant
+    def __init__(self, owner: WordDocument, kind: str, variant: str, section: int = 0):
+        self._owner, self._kind, self._variant, self._section = owner, kind, variant, section
 
     def _identifier(self):
-        return self._owner._call("story_id", self._kind, self._variant)
+        return self._owner._call("story_id", self._kind, self._variant, self._section)
 
     @property
     def paragraphs(self) -> _Collection[Paragraph]:
@@ -745,7 +802,7 @@ class EditableStory:
     def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
         style = _style_reference(style, self._owner)
         def append(native):
-            story = native.ensure_story(self._kind, self._variant)
+            story = native.ensure_story(self._kind, self._variant, self._section)
             identifier = native.story_add_paragraph(story, text)
             if style is not None:
                 native.set_paragraph_style(identifier, style)
@@ -788,7 +845,7 @@ class EditableTable:
         """Return a text snapshot; use table[row, column].text to edit a cell."""
         return self._owner._call("table_rows", *self._args)
 
-    def __getitem__(self, key):
+    def __getitem__(self, key) -> EditableCell:
         if not isinstance(key, tuple) or len(key) != 2:
             raise TypeError("address a cell with table[row, column]")
         rows = self.rows
@@ -807,47 +864,101 @@ class EditableTable:
 
     @property
     def column_widths(self):
-        return self._owner._call("column_widths", self._word_id())
+        return self._owner._call("column_widths", *self._args)
 
     @column_widths.setter
     def column_widths(self, widths):
-        self._owner._call("set_column_widths", self._word_id(), [pt(width) for width in widths], _change=True)
+        values = []
+        for width in widths:
+            if len(values) >= 1000:
+                raise ValueError("table column widths exceed 1000 columns")
+            values.append(pt(width))
+        self._owner._call("set_column_widths", *self._args, values, _change=True)
 
     @property
     def borders(self):
-        return self._owner._call("table_borders", self._word_id())
+        return self._owner._call("table_borders", *self._args)
 
     @borders.setter
     def borders(self, value):
         if value is None:
-            self._owner._call("clear_table_borders", self._word_id(), _change=True)
+            self._owner._call("clear_table_borders", *self._args, _change=True)
         elif isinstance(value, (tuple, list)) and len(value) == 2:
-            self._owner._call("set_table_borders", self._word_id(), _hex_color(value[0]), pt(value[1]), _change=True)
+            self._owner._call("set_table_borders", *self._args, _hex_color(value[0]), pt(value[1]), _change=True)
         else:
             raise TypeError("borders must be (color, width) or None")
 
-    def row(self, index: int):
-        """Access native DOCX row layout properties without copying its cells."""
-        self._word_id()
+    def row(self, index: int) -> EditableRow:
+        """Access native row layout properties without copying its cells."""
         return EditableRow(self, _index(index, len(self.rows)))
 
     def merge(self, first: tuple[int, int], last: tuple[int, int]):
-        if self._slide is not None:
-            raise UnsupportedFormatError("PPTX cell merging is not yet available")
         start = self[first]
         end = self[last]
-        self._owner._call("merge_cells", self._id, start._row, start._column, end._row, end._column, _change=True)
+        self._owner._call("merge_cells", *self._args, start._row, start._column, end._row, end._column, _change=True)
         return self[first]
+
+
+    def _structure_generation(self):
+        return None if self._slide is None else self._owner._call("table_generation", *self._args)
+
+    def _slide_table(self):
+        if self._slide is None:
+            raise UnsupportedFormatError("table row/column insertion and deletion are currently PPTX-only")
+
+    def insert_row(self, index: int) -> EditableRow:
+        self._slide_table()
+        index = _insertion_index(index, len(self.rows))
+        self._owner._call("insert_row", *self._args, index, _change=True)
+        return EditableRow(self, index)
+
+    def delete_row(self, index: int) -> None:
+        self._slide_table()
+        index = _index(index, len(self.rows))
+        self._owner._call("delete_row", *self._args, index, _change=True)
+
+    def insert_column(self, index: int) -> list[EditableCell]:
+        self._slide_table()
+        rows = self.rows
+        index = _insertion_index(index, len(rows[0]))
+        self._owner._call("insert_column", *self._args, index, _change=True)
+        return [EditableCell(self, row, index) for row in range(len(rows))]
+
+    def delete_column(self, index: int) -> None:
+        self._slide_table()
+        index = _index(index, len(self.rows[0]))
+        self._owner._call("delete_column", *self._args, index, _change=True)
+
+
+def _insertion_index(index: int, length: int) -> int:
+    index = operator.index(index)
+    if index < 0:
+        index += length
+    if not 0 <= index <= length:
+        raise IndexError("insertion index out of range")
+    return index
 
 
 class EditableRow:
     def __init__(self, table: EditableTable, index: int):
         self._table, self._index = table, index
+        self._generation = table._structure_generation()
+
+    def _check(self):
+        self._table._owner._ensure_open()
+        if self._generation != self._table._structure_generation():
+            raise ValueError("row handle is stale after a table structure change")
+
+    @property
+    def _args(self):
+        self._check()
+        return (*self._table._args, self._index)
+
 
     @property
     def height(self):
         """(height in points or None, rule): auto, at_least or exact."""
-        return self._table._owner._call("row_height", self._table._word_id(), self._index)
+        return self._table._owner._call("row_height", *self._args)
 
     @height.setter
     def height(self, value):
@@ -857,42 +968,57 @@ class EditableRow:
             height, rule = None if value[0] is None else pt(value[0]), value[1]
         else:
             raise TypeError("height must be (points, rule) or None for automatic height")
-        self._table._owner._call("set_row_height", self._table._word_id(), self._index, height, rule, _change=True)
+        self._table._owner._call("set_row_height", *self._args, height, rule, _change=True)
 
     @property
     def repeat_header(self):
+        self._check()
         return self._table._owner._call("row_repeat_header", self._table._word_id(), self._index)
 
     @repeat_header.setter
     def repeat_header(self, value: bool):
+        self._check()
         self._table._owner._call("set_row_repeat_header", self._table._word_id(), self._index, value, _change=True)
 
     @property
     def allow_split(self):
+        self._check()
         return self._table._owner._call("row_allow_split", self._table._word_id(), self._index)
 
     @allow_split.setter
     def allow_split(self, value: bool):
+        self._check()
         self._table._owner._call("set_row_allow_split", self._table._word_id(), self._index, value, _change=True)
 
 
 class EditableCell:
     def __init__(self, table: EditableTable, row: int, column: int):
         self._table, self._row, self._column = table, row, column
+        self._generation = table._structure_generation()
+
+    def _check(self):
+        self._table._owner._ensure_open()
+        if self._generation != self._table._structure_generation():
+            raise ValueError("cell handle is stale after a table structure change")
+
+    @property
+    def _args(self):
+        self._check()
+        return (*self._table._args, self._row, self._column)
+
 
     @property
     def text(self) -> str:
         table = self._table
-        if table._slide is None:
-            return table._owner._call("cell_text", table._id, self._row, self._column)
-        return table.rows[self._row][self._column]
+        return table._owner._call("cell_text", *self._args)
 
     @text.setter
     def text(self, value: str):
         table = self._table
-        table._owner._call("set_cell_text", *table._args, self._row, self._column, value, _change=True)
+        table._owner._call("set_cell_text", *self._args, value, _change=True)
 
     def _content_args(self):
+        self._check()
         table = self._table
         if table._slide is not None:
             raise UnsupportedFormatError("rich PPTX cell content is not yet available")
@@ -935,32 +1061,52 @@ class EditableCell:
         identifier = owner._call("cell_add_image", *self._content_args(), data, None if width is None else pt(width), None if height is None else pt(height), alt, _change=True)
         return Picture(owner, identifier)
 
-    def split(self, *, columns: int = 2):
+    def split(self, *, columns: int | None = None) -> None:
+        """Split DOCX horizontally or restore a PPTX cell's existing merged grid."""
         table = self._table
-        if table._slide is not None:
-            raise UnsupportedFormatError("PPTX cell splitting is not yet available")
-        table._owner._call("split_cell", table._id, self._row, self._column, columns, _change=True)
+        self._check()
+        if table._slide is None and columns is None:
+            columns = 2
+        if columns is not None:
+            columns = operator.index(columns)
+        table._owner._call("split_cell", *self._args, columns, _change=True)
+
+    @property
+    def margins(self) -> tuple[float, float, float, float]:
+        return self._table._owner._call("cell_margins", *self._args)
+
+    @margins.setter
+    def margins(self, value):
+        self._table._owner._call("set_cell_margins", *self._args, None if value is None else _margins(value), _change=True)
+
+    @property
+    def alignment(self) -> str | None:
+        return self._table._owner._call("cell_alignment", *self._args)
+
+    @alignment.setter
+    def alignment(self, value: str | None):
+        self._table._owner._call("set_cell_alignment", *self._args, value, _change=True)
 
     @property
     def background(self):
         table = self._table
-        value = table._owner._call("cell_background", *table._args, self._row, self._column)
+        value = table._owner._call("cell_background", *self._args)
         return None if value is None else _hex_color(value)
 
     @background.setter
     def background(self, value):
         table = self._table
-        table._owner._call("set_cell_background", *table._args, self._row, self._column, _hex_color(value) if table._slide is None else _color(value), _change=True)
+        table._owner._call("set_cell_background", *self._args, _hex_color(value) if table._slide is None else _color(value), _change=True)
 
     @property
     def vertical_alignment(self):
         table = self._table
-        return table._owner._call("cell_vertical_alignment", *table._args, self._row, self._column)
+        return table._owner._call("cell_vertical_alignment", *self._args)
 
     @vertical_alignment.setter
     def vertical_alignment(self, value: str):
         table = self._table
-        table._owner._call("set_cell_vertical_alignment", *table._args, self._row, self._column, value, _change=True)
+        table._owner._call("set_cell_vertical_alignment", *self._args, value, _change=True)
 
 
 class PdfDocument(EditableDocument):
