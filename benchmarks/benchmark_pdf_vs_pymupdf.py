@@ -9,6 +9,7 @@ import json
 import statistics
 import struct
 import time
+from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable
@@ -46,8 +47,11 @@ def measure(function: Callable[[], object], validate: Callable[[object], tuple],
     return statistics.median(samples), min(samples), max(samples)
 
 
-def text_summary(value: str) -> tuple[int, int]:
-    return value.count("\f") + 1, len(value)
+def text_summary(value: str, expected_pages: int) -> tuple[int, int]:
+    pages = value.count("\f") + 1
+    if pages != expected_pages:
+        raise RuntimeError(f"text result has {pages} pages, expected {expected_pages}")
+    return pages, len(value)
 
 
 def png_summary(value: bytes) -> tuple[int, int]:
@@ -90,8 +94,18 @@ def run(directory: Path, warmups: int, repeats: int, dpi: int) -> list[Result]:
         with pymupdf.open(stream=data, filetype="pdf") as probe:
             pages = probe.page_count
 
-        add(results, identifier, pages, len(data), "all-page plain text", "pydoccraft", measure(lambda: pydoc_text(data), text_summary, warmups, repeats))
-        add(results, identifier, pages, len(data), "all-page plain text", "PyMuPDF", measure(lambda: pymupdf_text(data), text_summary, warmups, repeats))
+        ours_text = pydoc_text(data)
+        theirs_text = pymupdf_text(data)
+        ours_tokens = Counter(ours_text.split())
+        theirs_tokens = Counter(theirs_text.split())
+        overlap = sum((ours_tokens & theirs_tokens).values()) / max(
+            sum(ours_tokens.values()), sum(theirs_tokens.values()), 1
+        )
+        if overlap < 0.95:
+            raise RuntimeError("libraries returned less than 95% token overlap")
+        validate_text = lambda value, pages=pages: text_summary(value, pages)
+        add(results, identifier, pages, len(data), "all-page plain text", "pydoccraft", measure(lambda: pydoc_text(data), validate_text, warmups, repeats))
+        add(results, identifier, pages, len(data), "all-page plain text", "PyMuPDF", measure(lambda: pymupdf_text(data), validate_text, warmups, repeats))
         add(results, identifier, pages, len(data), "cold open + page-1 RGBA PNG", "pydoccraft", measure(lambda: pydoc_cold_render(data, dpi), png_summary, warmups, repeats))
         add(results, identifier, pages, len(data), "cold open + page-1 RGBA PNG", "PyMuPDF", measure(lambda: pymupdf_cold_render(data, dpi), png_summary, warmups, repeats))
 

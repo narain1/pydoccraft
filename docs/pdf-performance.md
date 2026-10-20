@@ -51,4 +51,4 @@ PYTHONPATH= /tmp/pydoccraft-pdf-benchmark/bin/python \
   --output /tmp/pydoccraft-pdf-results.json
 ```
 
-The benchmark validates text page counts and PNG dimensions after timing. Results vary by document structure, platform, power state, and thermal state. Use the same bytes and release wheels for both libraries; do not infer fidelity from timing alone.
+The benchmark validates text page counts, requires at least 95% multiset token overlap, and validates PNG dimensions after timing. The measured anonymous token overlaps were 96.47%, 100%, and 99.02%; timing does not establish reading-order or visual fidelity. Results vary by document structure, platform, power state, and thermal state. Use the same bytes and release wheels for both libraries; do not infer fidelity from timing alone.
