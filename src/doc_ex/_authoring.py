@@ -8,7 +8,7 @@ import reprlib
 import os
 import stat
 import tempfile
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from numbers import Real
 from pathlib import Path
 from typing import Any, BinaryIO, Generic, Literal, Self, SupportsIndex, TYPE_CHECKING, TypeVar, TypedDict, Unpack, overload
@@ -463,16 +463,21 @@ class EditableDocument:
 
     def save(self, destination: str | Path | BinaryIO) -> None:
         """Save the native format; path replacement is atomic, stream writes are not."""
+        self._save(destination, self.to_bytes)
+
+    def _save(self, destination: str | Path | BinaryIO, serialize: Callable[[], bytes]) -> None:
+        # One filesystem/stream implementation; format-specific options only select the
+        # serialization callback. It runs after destination normalization, as before.
         self._ensure_open()
         if hasattr(destination, "write"):
-            data = self.to_bytes()
+            data = serialize()
             if destination.write(data) != len(data):
                 raise OSError("destination did not accept the complete document")
             return
         path = Path(destination).expanduser()
         if path.suffix and path.suffix.lower() != "." + self._format:
             raise ValueError(f"save writes {self._format}; use convert() to change formats")
-        data = self.to_bytes()
+        data = serialize()
         previous_mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else None
         temporary = None
         try:
@@ -608,6 +613,11 @@ class WordDocument(EditableDocument):
                 raise ValueError("metadata update exceeds 256 KiB")
             chunks.append(chunk)
         self._call("update_metadata", "".join(chunks), _change=True)
+
+    @property
+    def bookmarks(self) -> _WordBookmarks:
+        """Named body ranges; lookup returns a fresh revision-bound TextRange."""
+        return _WordBookmarks(self)
 
     @property
     def notes(self) -> Notes:
@@ -1296,6 +1306,14 @@ class EditableStory:
             return [] if identifier is None else self._owner._call("story_image_ids", identifier)
         return Pictures(self._owner, identifiers)
 
+    def clear(self) -> None:
+        """Remove this owned header/footer's content, retaining its section settings."""
+        self._owner._ensure_open()
+        if isinstance(self, Note):
+            raise UnsupportedFormatError("clearing notes requires semantic note deletion support")
+        if self._owner._call("clear_story", self._kind, self._variant, self._section):
+            self._owner._invalidate()
+
     def add_table(self, rows: _Rows, *, columns: SupportsIndex | None = None) -> EditableTable:
         """Append a header/footer table from string rows or row/column counts."""
         self._check_rich_content()
@@ -1768,6 +1786,20 @@ class EditableCell:
 class PdfDocument(EditableDocument):
     _format = "pdf"
 
+    def to_bytes(self, *, object_streams: bool = True) -> bytes:
+        """Serialize PDF; false selects classic xref tables without object-stream packing."""
+        self._ensure_open()
+        if type(object_streams) is not bool:
+            raise TypeError("object_streams must be a bool")
+        return bytes(self._call("to_bytes", object_streams))
+
+    def save(self, destination: str | Path | BinaryIO, *, object_streams: bool = True) -> None:
+        """Save PDF with the selected object representation; path replacement is atomic."""
+        self._ensure_open()
+        if type(object_streams) is not bool:
+            raise TypeError("object_streams must be a bool")
+        self._save(destination, lambda: self.to_bytes(object_streams=object_streams))
+
     @property
     def fields(self) -> PdfFields:
         return PdfFields(self)
@@ -1946,6 +1978,32 @@ class PdfField:
             raise ValueError("field values must not exceed 4096 bytes")
         self._owner._call("set_field_value", self._name,
                           json.dumps(value, ensure_ascii=False, allow_nan=False), _change=True)
+
+
+class _WordBookmarks:
+    """DOCX whole-paragraph or endpoint targets; PDF bookmarks are outlines."""
+    def __init__(self, owner: WordDocument):
+        self._owner = owner
+
+    def __len__(self) -> int:
+        return len(self._owner._call("bookmark_names"))
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._owner._call("bookmark_names"))
+
+    def __getitem__(self, name: str) -> TextRange:
+        identifier, start, end, revision = self._owner._call("bookmark_range", name)
+        return TextRange(Paragraph(self._owner, identifier), start, end, revision)
+
+    def __setitem__(self, name: str, selection: TextRange) -> None:
+        self._owner._ensure_open()
+        if not isinstance(selection, TextRange) or selection._paragraph._owner is not self._owner:
+            raise ValueError("bookmark selection must be a TextRange from this document")
+        self._owner._call("set_bookmark", name, selection._paragraph._id,
+                          selection._start, selection._end, selection._revision, _change=True)
+
+    def __delitem__(self, name: str) -> None:
+        self._owner._call("delete_bookmark", name, _change=True)
 
 
 class Bookmarks(_Collection["Bookmark"]):
@@ -2252,6 +2310,16 @@ class PdfPage:
     def get_pixmap(self, dpi: float = 144, *, clip: tuple[float, float, float, float] | None = None) -> bytes:
         self._check()
         return self._owner.render_page(self._id, dpi, clip=clip)
+
+    def search_for(self, text: str) -> list[tuple[float, float, float, float]]:
+        """Find native PDF text geometry in the current read snapshot; see Page.search_for."""
+        self._check()
+        from ._document import _search_empty, _search_query
+        text = _search_query(text)
+        self._check()
+        if _search_empty(text):
+            return []
+        return self._owner._snapshot()[self._id].search_for(text)
 
     @overload
     def get_text(self, option: Literal["text", "markdown", "json"] = "text") -> str: ...

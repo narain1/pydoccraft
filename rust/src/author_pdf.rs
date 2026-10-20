@@ -163,15 +163,9 @@ impl EditablePdf {
         self.backgrounds.clear();
     }
 
-    pub fn to_bytes(&self) -> PyResult<Vec<u8>> {
-        self.owned_fields()?;
-        let output = pdfcraft_cos::write_full(self.document()?, &SaveOptions::default()).map_err(
-            |error| EngineError::Conversion(format!("PDF serialization failed: {error}")),
-        )?;
-        if output.len() > MAX_OUTPUT_BYTES {
-            return Err(EngineError::ResourceLimit("PDF output exceeds 256 MiB".into()).into());
-        }
-        Ok(output)
+    #[pyo3(name = "to_bytes", signature = (object_streams=true))]
+    pub fn to_bytes_with_options(&self, object_streams: bool) -> PyResult<Vec<u8>> {
+        self.serialize_with_limit(object_streams, MAX_OUTPUT_BYTES)
     }
 
     pub fn page_count(&self) -> PyResult<usize> {
@@ -1959,6 +1953,36 @@ impl<'a> TextInk<'a> {
 }
 
 impl EditablePdf {
+    // Keep default serialization for internal callers and existing native tests. The Python
+    // boundary exposes the same writer with one optional output-representation switch.
+    pub fn to_bytes(&self) -> PyResult<Vec<u8>> {
+        self.to_bytes_with_options(true)
+    }
+
+    fn serialize_with_limit(
+        &self,
+        object_streams: bool,
+        max_output_bytes: usize,
+    ) -> PyResult<Vec<u8>> {
+        self.owned_fields()?;
+        let options = SaveOptions {
+            object_streams,
+            ..SaveOptions::default()
+        };
+        let output = pdfcraft_cos::write_full(self.document()?, &options).map_err(|error| {
+            EngineError::Conversion(format!("PDF serialization failed: {error}"))
+        })?;
+        // The upstream writer returns a complete Vec. This bounds returned output, not its
+        // allocation peak; both native representations use the identical check.
+        if output.len() > max_output_bytes {
+            return Err(EngineError::ResourceLimit(format!(
+                "PDF output exceeds {max_output_bytes} bytes"
+            ))
+            .into());
+        }
+        Ok(output)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn add_text_font_layout(
         &mut self,
@@ -3321,6 +3345,161 @@ fn preserve_drawing_resources(before: &Document, after: &Document, page: usize) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn object_stream_output_modes_preserve_native_content_and_representation() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditablePdf::new(300.0, 400.0).unwrap();
+        document
+            .add_text(0, "Stable output", 20.0, 30.0, 12.0, (0, 0, 0))
+            .unwrap();
+        let image = crate::rendering::encode_png(2, 2, &[255, 0, 0, 255].repeat(4), 72.0).unwrap();
+        document
+            .add_image(0, &image, 20.0, 70.0, 30.0, 30.0, None, 0, false, false)
+            .unwrap();
+        document
+            .add_link(
+                0,
+                (20.0, 20.0, 150.0, 45.0),
+                Some("https://example.com"),
+                None,
+            )
+            .unwrap();
+        document.add_bookmark("First", 0, vec![], None).unwrap();
+        document
+            .update_metadata(r#"{"title":"Output modes","author":"Fixture"}"#)
+            .unwrap();
+        let baseline = document.to_bytes().unwrap();
+        let baseline_png = crate::pdf::render(&baseline, 0, 72.0, None).unwrap();
+        let before = (
+            document.items,
+            document.input_bytes,
+            document.metadata().unwrap(),
+            document.bookmarks().unwrap(),
+        );
+        for object_streams in [true, false] {
+            let bytes = document.to_bytes_with_options(object_streams).unwrap();
+            assert_eq!(
+                bytes,
+                document.to_bytes_with_options(object_streams).unwrap()
+            );
+            if object_streams {
+                assert_eq!(bytes, baseline);
+            }
+            let startxref = bytes
+                .windows(10)
+                .rposition(|v| v == b"startxref\n")
+                .unwrap()
+                + 10;
+            let offset = std::str::from_utf8(&bytes[startxref..])
+                .unwrap()
+                .lines()
+                .next()
+                .unwrap()
+                .parse::<usize>()
+                .unwrap();
+            assert_eq!(bytes[offset..].starts_with(b"xref\n"), !object_streams);
+            let native = Document::open(Arc::new(bytes.clone())).unwrap();
+            assert!(native.repair_log().is_empty());
+            let packed = native
+                .object_numbers()
+                .into_iter()
+                .filter(|&num| {
+                    native
+                        .try_get(num)
+                        .unwrap()
+                        .as_dict()
+                        .is_some_and(|d| d.name(b"Type") == Some(b"ObjStm"))
+                })
+                .count();
+            assert_eq!(packed > 0, object_streams);
+            let info = pdfcraft_render::inspect(Arc::new(bytes.clone()), None).unwrap();
+            assert_eq!(info.title.as_deref(), Some("Output modes"));
+            assert_eq!(info.links.len(), 1);
+            assert_eq!(info.outline.len(), 1);
+            let extracted = crate::pdf::extract(&bytes, None).unwrap();
+            assert!(extracted.pages[0]
+                .blocks
+                .iter()
+                .any(|b| b.text.contains("Stable output")));
+            assert_eq!(extracted.pages[0].images.len(), 1);
+            assert_eq!(
+                crate::pdf::render(&bytes, 0, 72.0, None).unwrap(),
+                baseline_png
+            );
+        }
+        assert_eq!(
+            (
+                document.items,
+                document.input_bytes,
+                document.metadata().unwrap(),
+                document.bookmarks().unwrap()
+            ),
+            before
+        );
+        assert_eq!(document.to_bytes().unwrap(), baseline);
+    }
+
+    #[test]
+    fn object_stream_output_cap_and_closed_checks_apply_to_both_modes() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditablePdf::new(100.0, 100.0).unwrap();
+        for object_streams in [true, false] {
+            let bytes = document.to_bytes_with_options(object_streams).unwrap();
+            assert_eq!(
+                document
+                    .serialize_with_limit(object_streams, bytes.len())
+                    .unwrap(),
+                bytes
+            );
+            let error = document
+                .serialize_with_limit(object_streams, bytes.len() - 1)
+                .unwrap_err();
+            assert!(error
+                .to_string()
+                .contains("resource_limit:PDF output exceeds"));
+            assert_eq!(
+                document.to_bytes_with_options(object_streams).unwrap(),
+                bytes
+            );
+        }
+        document.close();
+        for object_streams in [true, false] {
+            assert!(document.to_bytes_with_options(object_streams).is_err());
+        }
+    }
+
+    #[test]
+    fn object_stream_output_modes_preserve_owned_fields_and_copies() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditablePdf::new(300.0, 300.0).unwrap();
+        document
+            .add_field(0, "name", "text", (20.0, 20.0, 180.0, 30.0), vec![])
+            .unwrap();
+        document.set_field_value("name", r#""Alice""#).unwrap();
+        document
+            .add_field(0, "approved", "checkbox", (20.0, 80.0, 24.0, 24.0), vec![])
+            .unwrap();
+        document.set_field_value("approved", "true").unwrap();
+        let before = document.fields(None).unwrap();
+        let png = crate::pdf::render(&document.to_bytes().unwrap(), 0, 72.0, None).unwrap();
+        let copied = document.copy().unwrap();
+        for object_streams in [false, true] {
+            let bytes = document.to_bytes_with_options(object_streams).unwrap();
+            assert_eq!(bytes, copied.to_bytes_with_options(object_streams).unwrap());
+            let native = Document::open(Arc::new(bytes.clone())).unwrap();
+            assert!(native.repair_log().is_empty());
+            let fields = checked_owned_fields(&native).unwrap();
+            assert!(fields
+                .iter()
+                .any(|f| f.name == "name" && f.value == ["Alice"]));
+            assert!(fields
+                .iter()
+                .any(|f| f.name == "approved" && f.value == [f.export_of(0).unwrap()]));
+            assert_eq!(crate::pdf::render(&bytes, 0, 72.0, None).unwrap(), png);
+        }
+        assert_eq!(document.fields(None).unwrap(), before);
+    }
 
     fn font_reuse_source(prefixes: usize, padding: usize, inherited: bool) -> Document {
         use pdfcraft_cos::{Dict, Object};

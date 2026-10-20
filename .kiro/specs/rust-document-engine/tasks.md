@@ -370,6 +370,44 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [ ] Retain broader typography, imported annotations/appearance, upstream inventory and full parity audits as open work.
 
 
+## Owned DOCX bookmarks and internal links
+
+- [x] Reuse named mapping operations, TextRange and range.link with bounded native paired markers and all-story reference validation.
+- [x] Preserve generic semantic/media safeguards and exact own-pair deletion/relocation, fresh grid lookup, copies and stale-range behavior.
+- [x] Share native layout checks and prove conservative link-batch counting; retain native missing/auxiliary target, clipped hit-area, vertical-link and export-cap regressions.
+- [x] Complete locked full native/release/installed-wheel validation and record exact artifact evidence.
+- [ ] Retain interior targets pending upstream marker-transparent shaping, general cross-references, imported/multi-paragraph targets, tooltips, heading outlines and arbitrary transformed navigation as open work.
+
+
+## PDF object-stream output choice
+
+- [x] Reuse native SaveOptions.object_streams through existing PDF serialization methods with strict bool/default compatibility.
+- [x] Keep one atomic save implementation and verify both-mode representation, content, pixels, fields, ownership, callbacks and limit behavior.
+- [x] Complete the local locked native/release/clean-wheel corpus and record the new artifact.
+- [x] Integrate the reviewed bookmark shaping correction and verify the complete local corpus with exact safe-profile PNG assertions.
+- [ ] Pass independent review and corrected prerequisite/current-main CI before merge.
+- [ ] Retain optimization, version/conformance profiles, incremental writing and broader PDF8 preservation as open work.
+
+
+## Owned header/footer clearing
+
+- [x] Reuse native set_story with strict ownership and conditional no-op/cache behavior.
+- [x] Preserve section references/settings and invalidate only removed child handles; reclaim exact text/cell/media usage through existing commit guards.
+- [x] Verify focused rich-content, copy, no-op, rollback, semantic-anchor and boundary regressions in isolation.
+- [x] Complete integrated locked native/release/installed-wheel validation after the reviewed bookmark corrections.
+- [ ] Pass independent review and exact current-main CI before merge.
+- [ ] Retain general block movement/adoption, note removal, header linkage and broader DOC5/LAY3 parity as open work.
+
+
+## Bounded native PDF text search
+
+- [x] Reuse native matching/line geometry through existing read/editable page handles and retained sessions.
+- [x] Bound query, normalization, hit and geometry work with explicit errors and preserve owner/cache semantics.
+- [x] Verify focused native/public geometry, ActualText, ligature, column, Unicode, callback and exact-limit regressions in isolation.
+- [x] Complete integrated locked native/release/clean-wheel validation after prerequisite bookmark fixes (276 Rust / 379 Python).
+- [ ] Complete independent review and exact-head/current-main CI before manual merge.
+- [ ] Retain Office search geometry, normalized source offsets and broad E2 grounding parity as open work.
+
 ## PDF3 native drawing-style boundary audit
 
 - [x] Recheck pinned public/private placement and style-writing boundaries against existing drawing APIs; retain existing U10/PDF3 ownership.

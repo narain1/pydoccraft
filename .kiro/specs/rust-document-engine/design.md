@@ -349,3 +349,34 @@ The minimum three-user-unit dimensions retain at least one unit after native str
 ## 56. Direction and geometric-comment evidence joins
 
 The development ledger extends to eleven profiles and 77 operation cells. The direction profile cites its own 342-test artifact; the geometric-comment profile cites the reviewed ellipse artifact rather than the superseded oval spelling. Existing reference formatting/annotation families and TXT6/PDF6 join these profiles. The 44 reference families, 195 representative members and 139 criterion owners/checks remain unchanged. No runtime capability query, public method or backend dependency is added.
+
+
+## 57. Named ranges reuse existing text handles
+
+A small DOCX mapping delegates to four narrow native bookmark methods. Native para_paths/object_offsets locate validated BookmarkStart/End pairs; lookup reuses registered paragraph paths and returns an ordinary TextRange. Source-order iteration uses Document.bookmarks. End-first deletion and end-before-start insertion use public native operations. Same-paragraph relocation adjusts only the two removed own markers; it is not a general range-tracking layer. Existing semantic-anchor checks allow one exact validated pair deletion and preserve every other anchor.
+
+The central all-story scan validates paired names and all internal link targets. It records marker offsets once per paragraph, discounts only preceding bookmark-marker bytes and requires each marker at logical offset zero or the content end. This invariant applies to every staged commit and output, including later text edits. Targets therefore cover whole paragraphs or endpoint points; interior markers split native shaping segments and are rejected. Default marker properties remain unchanged: native Marker clusters have zero advance and are excluded from line-height/trailing-alignment metrics. The shared authored pagination pass activates when bookmarks exist; it uses native layout.caret and public page_display. In the admitted authored-inline-object profile, every exported link rectangle comes from at most one nonempty linked Glyphs batch, and wrapper recursion does not multiply those calls. The conservative batch count includes repeated auxiliary stories and external links, avoiding the native 10,000 rectangle cap without duplicating native coalescing. Warped/unknown graphics remain excluded.
+
+Source-linked vertical Placed::Lines require a separate check because their display has already lost link metadata. Linked Clip/Turned/Rotated/Figure contexts are rejected; Figure is an unaudited profile restriction, while clipped overflow and vertical disappearance have concrete native repros. All actual target carets must be on a physical page, with no fallback. Creation/movement/internal-link assignment validate staged geometry, while subsequent ordinary formatting edits are rechecked on output. Existing layout page/item limits, a 2,000,000 observed path/display-node bound and depth 32 remain distinct from native allocation guarantees.
+
+
+Bookmark lookup preflight charges public body-index lengths plus each indexed paragraph layout's line/cluster lengths before calling native caret, then charges destination-page scans and per-placement source-run checks. Native PDF export caches names to positions, not resolved carets; the same conservative per-name estimate is charged for every observed internal linked glyph batch. A shared 2,000,000-unit cumulative budget also covers the display walk. Native coalescing is not reproduced. Layout/display allocation and initial document-wide name inventory remain outside this observed-work estimate.
+
+
+## 58. One PDF writer with a representation switch
+
+The Python PDF overrides add one keyword and strict bool validation; the shared private save callback retains a single filesystem/stream implementation. Destination normalization still precedes serialization. Native PyO3 exports to_bytes with a defaulted object_streams bool while an internal Rust to_bytes wrapper preserves current callers. Both call the same private serialization helper, changing only SaveOptions.object_streams and checking the complete returned vector against the existing 256 MiB limit. A small private limit parameter permits actual boundary tests for both native output representations without allocating huge fixtures. No caller-controlled output path enters Rust.
+
+
+## 59. Clear a story without replacing its owner
+
+EditableStory.clear delegates to one native clear_story operation returning whether a mutation occurred. Missing/synthetic empty stories return false; the facade invalidates its cached read snapshot only on true. Native part-kind and actual section-reference checks precede the public Document.set_story call. The replacement retains a native empty paragraph as a synthetic insertion anchor, without exposing it as an authored child or changing section inheritance.
+
+Existing staged commit checks run before publishing location, picture, table-generation and placeholder cleanup. Only the selected story's children are invalidated, and stable IDs are not recycled. content_usage uses native object_offsets to subtract image-marker bytes only, matching established insertion accounting for fields/notes/bookmarks and correcting copied-story and cell/grid removal totals. No new resource graph, XML edit path or layout algorithm is added.
+
+
+## 60. Search through the retained PDF session
+
+A narrow private session method requests native text interpretation, checks content warnings and bounded glyph/index vectors, then delegates literal matching to PageText.find_opts_limited and geometry to line_rects. Native KMP runs in amortized O(source+query) time, but builds its source character buffer before honoring the result cap. The adapter therefore preflights UTF-8 source bytes, conservative lowercase scalar expansion and possible separators before calling it. Result ranges/line transitions are counted before geometry allocation; native rectangles remain unchanged.
+
+The Python facade only validates query/ownership and wraps owned tuples. Editable pages reuse their checked current read snapshot. Ordinary read documents reuse the retained native parser; manually constructed documents without a session use and close a temporary native session. No raster/text-result cache or equality to normalized table order is implied. ActualText and ligature boxes can cover more than the matched substring; native reading order can cross columns.

@@ -22,9 +22,15 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(word.copy(), WordDocument)
         paragraph = word.add_paragraph('Example')
         assert_type(paragraph, Paragraph)
+        word.bookmarks['example'] = paragraph[:]
+        assert_type(word.bookmarks['example'], TextRange)
+        assert_type(next(iter(word.bookmarks)), str)
+        del word.bookmarks['example']
         assert_type(paragraph.add_run(' extra', bold=True, language='en-GB'), TextRange)
         assert_type(paragraph.format(direction='rtl'), None)
         assert_type(paragraph[:].format(language=None), None)
+        assert_type(word.sections[0].header().clear(), None)
+        assert_type(word.sections[0].footer('even').clear(), None)
         assert_type(word.add_page_break(), Paragraph)
         assert_type(word.add_image(png, width=40), Picture)
         table = word.add_table([['Heading'], ['Value']])
@@ -41,6 +47,8 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
 
     with doc_ex.new('pdf') as pdf:
         assert_type(pdf, PdfDocument)
+        assert_type(pdf.to_bytes(object_streams=False), bytes)
+        assert_type(pdf.save('output.pdf', object_streams=True), None)
         assert_type(pdf.copy(pages=[0]), PdfDocument)
         page = pdf.pages.add(size=(200, 300))
         assert_type(page, PdfPage)
@@ -49,8 +57,9 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         bookmark = pdf.bookmarks.add('Title', 0)
         assert_type(bookmark, Bookmark)
         assert_type(pdf.bookmarks.move(0, 0), Bookmark)
-        assert_type(page.annotations.add('text', box=(10, 10, 20, 20)), Annotation)
+        assert_type(page.annotations.add('note', box=(10, 10, 20, 20)), Annotation)
         assert_type(page.annotations.add_link(box=[10, 10, 20, 20], uri='https://example.com'), Annotation)
+        assert_type(page.search_for('Example'), list[tuple[float, float, float, float]])
         assert_type(page.get_text(), str)
         assert_type(page.get_text('dict'), dict[str, Any])
         assert_type(page.get_text(mode), str | dict[str, Any])
@@ -72,6 +81,7 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
     with doc_ex.open(document_bytes, filetype='pdf') as extracted:
         assert_type(extracted, doc_ex.Document)
         assert_type(extracted.edit(), PdfDocument)
+        assert_type(extracted[0].search_for('Example'), list[tuple[float, float, float, float]])
         assert_type(extracted[0].get_text(), str)
         assert_type(extracted[0].get_text('text'), str)
         assert_type(extracted[0].get_text('json'), str)

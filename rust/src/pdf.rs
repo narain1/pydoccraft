@@ -139,6 +139,39 @@ impl PdfSession {
         )
     }
 
+    pub fn search_for(&self, page: usize, query: &str) -> Result<Vec<[f32; 4]>, EngineError> {
+        let mut guard = self
+            .renderer
+            .lock()
+            .map_err(|_| EngineError::Malformed("PDF search session is unavailable".into()))?;
+        let renderer = guard
+            .as_mut()
+            .ok_or_else(|| EngineError::Closed("PDF render session is closed".into()))?;
+        if page >= self.page_sizes.len() {
+            return Err(EngineError::PageIndex("page index is out of range".into()));
+        }
+        check_search_query(query)?;
+        if query.chars().all(char::is_whitespace) {
+            return Ok(Vec::new());
+        }
+        let rendered = renderer.render(RenderRequest {
+            page,
+            kind: RequestKind::Text,
+            scale: 1.0,
+            ..Default::default()
+        });
+        check_content_warnings(&rendered.warnings)?;
+        if let Some(error) = rendered.error {
+            return Err(EngineError::Malformed(format!(
+                "PDF search text extraction failed: {error}"
+            )));
+        }
+        let text = rendered.text.ok_or_else(|| {
+            EngineError::Malformed("PDF search text extraction returned no text".into())
+        })?;
+        search_text(&text, query)
+    }
+
     pub fn stats(&self) -> Result<pdfcraft_render::RenderStats, EngineError> {
         let renderer = self
             .renderer
@@ -157,6 +190,139 @@ impl PdfSession {
             .take();
         Ok(())
     }
+}
+
+const MAX_SEARCH_QUERY_BYTES: usize = 4096;
+const MAX_SEARCH_GLYPHS: usize = 1_000_000;
+const MAX_SEARCH_SOURCE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_SEARCH_WORK: usize = 1_000_000;
+const MAX_SEARCH_RESULTS: usize = 10_000;
+
+fn search_limit(message: &str) -> EngineError {
+    EngineError::ResourceLimit(format!("PDF search {message}"))
+}
+
+fn check_search_query(query: &str) -> Result<(), EngineError> {
+    if query.len() > MAX_SEARCH_QUERY_BYTES {
+        return Err(search_limit("query exceeds 4096 UTF-8 bytes"));
+    }
+    Ok(())
+}
+
+fn check_search_indexes(count: usize, lines: usize, spaces: usize) -> Result<(), EngineError> {
+    if count > MAX_SEARCH_GLYPHS {
+        return Err(search_limit("glyph count exceeds 1000000"));
+    }
+    if lines != count || spaces != count {
+        return Err(EngineError::Malformed(
+            "PDF search glyph indexes are inconsistent".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn check_search_text(text: &pdfcraft_render::PageText) -> Result<(), EngineError> {
+    let count = text.glyphs.len();
+    check_search_indexes(count, text.line_of.len(), text.space_before.len())?;
+    // Bound the whole UTF-8 scan before visiting any glyph characters. The original
+    // native text is already interpreted; this bounds subsequent search work only.
+    let mut bytes = 0usize;
+    for glyph in &text.glyphs {
+        bytes = bytes
+            .checked_add(glyph.text.len())
+            .ok_or_else(|| search_limit("source byte count overflow"))?;
+        if bytes > MAX_SEARCH_SOURCE_BYTES {
+            return Err(search_limit("source text exceeds 4 MiB"));
+        }
+    }
+    // Native KMP is linear in folded characters plus query length, but allocates
+    // its entire normalized character buffer before honoring the result limit.
+    // Native Turkish-I/sigma substitutions cannot exceed this lowercase bound.
+    // Include one possible inserted separator per glyph; UTF-8 folding can grow
+    // bytes even when scalar count is unchanged (at most four bytes per scalar).
+    let mut work = count.saturating_sub(1);
+    for glyph in &text.glyphs {
+        for c in glyph.text.chars() {
+            work = work
+                .checked_add(c.to_lowercase().count())
+                .ok_or_else(|| search_limit("normalization work overflow"))?;
+            if work > MAX_SEARCH_WORK {
+                return Err(search_limit("normalization exceeds 1000000 scalar slots"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn valid_search_rectangle(rect: &[f32; 4]) -> bool {
+    rect.iter().all(|value| value.is_finite()) && rect[0] <= rect[2] && rect[1] <= rect[3]
+}
+
+fn search_rectangles(
+    text: &pdfcraft_render::PageText,
+    hits: &[std::ops::Range<usize>],
+) -> Result<Vec<[f32; 4]>, EngineError> {
+    if hits.len() > MAX_SEARCH_RESULTS {
+        return Err(search_limit("matches exceed 10000"));
+    }
+    let mut work = 0usize;
+    let mut rectangles = 0usize;
+    // Preflight the full result before asking line_rects to allocate any geometry.
+    for hit in hits {
+        if hit.start >= hit.end || hit.end > text.glyphs.len() {
+            return Err(EngineError::Malformed(
+                "PDF search returned an invalid glyph range".into(),
+            ));
+        }
+        work = work
+            .checked_add(hit.len())
+            .ok_or_else(|| search_limit("geometry work overflow"))?;
+        if work > MAX_SEARCH_WORK {
+            return Err(search_limit("geometry exceeds 1000000 glyph visits"));
+        }
+        let mut previous = None;
+        for i in hit.clone() {
+            let line = text
+                .line_of
+                .get(i)
+                .ok_or_else(|| EngineError::Malformed("PDF search line index is missing".into()))?;
+            if previous != Some(line) {
+                rectangles += 1;
+                if rectangles > MAX_SEARCH_RESULTS {
+                    return Err(search_limit("rectangles exceed 10000"));
+                }
+            }
+            previous = Some(line);
+            if !valid_search_rectangle(&text.glyphs[i].rect) {
+                return Err(EngineError::Malformed(
+                    "PDF search glyph rectangle is non-finite or reversed".into(),
+                ));
+            }
+        }
+    }
+    let mut result = Vec::with_capacity(rectangles);
+    for hit in hits {
+        result.extend(text.line_rects(hit.clone()));
+    }
+    if result.len() != rectangles || result.iter().any(|rect| !valid_search_rectangle(rect)) {
+        return Err(EngineError::Malformed(
+            "PDF search rectangle projection is inconsistent".into(),
+        ));
+    }
+    Ok(result)
+}
+
+fn search_text(
+    text: &pdfcraft_render::PageText,
+    query: &str,
+) -> Result<Vec<[f32; 4]>, EngineError> {
+    check_search_query(query)?;
+    if query.chars().all(char::is_whitespace) {
+        return Ok(Vec::new());
+    }
+    check_search_text(text)?;
+    let hits = text.find_opts_limited(query, false, false, MAX_SEARCH_RESULTS + 1);
+    search_rectangles(text, &hits)
 }
 
 pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, EngineError> {
@@ -1191,5 +1357,385 @@ mod selective_open_tests {
             extract_text(&bytes, Some("user"), Some(&[2])),
             Err(EngineError::PageIndex(_))
         ));
+    }
+}
+
+// Original synthetic fixtures verify the pinned native search semantics.
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+    use pdfcraft_render::{PageText, TextGlyph};
+    use std::io::Cursor;
+
+    fn synthetic(lines: &[&[&str]]) -> PageText {
+        let mut page = PageText::default();
+        for (line, words) in lines.iter().enumerate() {
+            for (column, value) in words.iter().enumerate() {
+                let x = column as f32 * 10.0;
+                let y = line as f32 * 20.0;
+                page.glyphs.push(TextGlyph {
+                    text: (*value).into(),
+                    rect: [x, y, x + 10.0, y + 10.0],
+                    quad: [[x, y + 10.0], [x + 10.0, y + 10.0], [x + 10.0, y], [x, y]],
+                    direction: [1.0, 0.0],
+                });
+                page.line_of.push(line as u32);
+                page.space_before.push(false);
+            }
+        }
+        page
+    }
+
+    #[test]
+    fn search_normalization_and_ligature_ownership() {
+        let text = synthetic(&[&["Quick  brown"], &["fox", " STRAẞE İıI Σσς"]]);
+        assert_eq!(
+            text.find_opts_limited("QUICK\t brown\nfox", false, false, 10),
+            vec![0..2]
+        );
+        assert_eq!(
+            text.line_rects(0..2),
+            vec![[0.0, 0.0, 10.0, 10.0], [0.0, 20.0, 10.0, 30.0]]
+        );
+        assert_eq!(
+            text.find_opts_limited("straße", false, false, 10),
+            vec![2..3]
+        );
+        assert!(text
+            .find_opts_limited("strasse", false, false, 10)
+            .is_empty());
+        assert_eq!(
+            text.find_opts_limited("iii σσσ", false, false, 10),
+            vec![2..3]
+        );
+        assert!(text.find_opts_limited("", false, false, 10).is_empty());
+        assert!(text.find_opts_limited("\t\n ", false, false, 10).is_empty());
+        let text = synthetic(&[&["o", "ffi", "c", "e"]]);
+        assert_eq!(
+            text.find_opts_limited("f", false, false, 10),
+            vec![1..2, 1..2]
+        );
+        assert_eq!(text.find_opts_limited("ffi", false, false, 10), vec![1..2]);
+        assert_eq!(text.find_opts_limited("of", false, false, 10), vec![0..2]);
+        let text = synthetic(&[&["aaaaa"]]);
+        assert_eq!(
+            text.find_opts_limited("aa", false, false, 10),
+            vec![0..1, 0..1]
+        );
+        assert_eq!(text.find_opts_limited("a", false, false, 3).len(), 3);
+        eprintln!("search probe: normalized whitespace/case; no ss/ß expansion; ligature duplicate geometry; nonoverlapping hits verified");
+    }
+
+    #[test]
+    fn search_case_expansion_accounting_exhaustive_unicode() {
+        let mut expansion_scalars = 0;
+        let mut largest_native = 0;
+        for value in 0..=0x10ffff {
+            let Some(c) = char::from_u32(value) else {
+                continue;
+            };
+            let source = c.to_string();
+            let native = pdfcraft_render::text::fold_case(&source);
+            let lower_bound = c.to_lowercase().count();
+            assert!(native.chars().count() <= lower_bound, "U+{value:04X}");
+            largest_native = largest_native.max(native.chars().count());
+            if lower_bound > 1 {
+                expansion_scalars += 1;
+            }
+            // UTF-8 can grow even when the folded scalar count does not (e.g. U+023A).
+            assert!(native.len() <= 4 * lower_bound);
+        }
+        eprintln!("Unicode lowercase expanding scalars={expansion_scalars}, largest native fold scalar count={largest_native}");
+        assert_eq!(pdfcraft_render::text::fold_case("Ⱥ"), "ⱥ");
+        assert_eq!(pdfcraft_render::text::fold_case("İ"), "i");
+    }
+
+    // Original synthetic PDF fixture; the only handwritten serialization is test data.
+    fn fixture(content: &str, rotation: u16, cmap: &str) -> Vec<u8> {
+        let cmap = format!("/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def /CMapName /Probe def /CMapType 2 def 1 begincodespacerange <00> <FF> endcodespacerange {cmap} endcmap CMapName currentdict /CMap defineresource pop end end");
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_owned(),
+            format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /CropBox [20 30 220 330] /Rotate {rotation} /UserUnit 1.25 /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 6 0 R >>".to_owned(),
+            format!("<< /Length {} >>\nstream\n{content}\nendstream",content.len()),
+            format!("<< /Length {} >>\nstream\n{cmap}\nendstream",cmap.len()),
+        ];
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offsets = vec![0];
+        for (i, object) in objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = out.len();
+        out.extend_from_slice(
+            format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len()).as_bytes(),
+        );
+        for offset in offsets.into_iter().skip(1) {
+            out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(
+            format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+        );
+        out
+    }
+
+    fn text(bytes: &[u8]) -> Arc<PageText> {
+        let mut renderer = PageRenderer::new(Arc::new(bytes.to_vec()), RenderConfig::default());
+        let rendered = renderer.render(RenderRequest {
+            page: 0,
+            kind: RequestKind::Text,
+            scale: 1.0,
+            ..Default::default()
+        });
+        check_content_warnings(&rendered.warnings).unwrap();
+        assert!(rendered.error.is_none(), "{:?}", rendered.error);
+        rendered.text.unwrap()
+    }
+
+    fn raster(bytes: &[u8]) -> (usize, usize, Vec<u8>) {
+        let png = render(bytes, 0, 144.0, None).unwrap();
+        let mut reader = png::Decoder::new(Cursor::new(png)).read_info().unwrap();
+        let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+        let frame = reader.next_frame(&mut pixels).unwrap();
+        assert_eq!(frame.color_type, png::ColorType::Rgba);
+        pixels.truncate(frame.buffer_size());
+        (frame.width as usize, frame.height as usize, pixels)
+    }
+
+    #[test]
+    fn search_native_pdf_ligature_geometry_and_visible_pixels_all_rotations() {
+        for rotation in [0, 90, 180, 270] {
+            let bytes = fixture(
+                "BT /F1 20 Tf 1 0 0 1 60 260 Tm (oWce) Tj ET",
+                rotation,
+                "1 beginbfchar <57> <006600660069> endbfchar",
+            );
+            let control = fixture("BT /F1 20 Tf 1 0 0 1 60 260 Tm (oWce) Tj ET", rotation, "");
+            let native = text(&bytes);
+            assert_eq!(native.plain_text(), "office");
+            assert_eq!(
+                native.find_opts_limited("F", false, false, 10),
+                vec![1..2, 1..2]
+            );
+            let rects =
+                native.line_rects(native.find_opts_limited("ffi", false, false, 10)[0].clone());
+            assert_eq!(rects.len(), 1);
+            assert_eq!(rects, text(&control).line_rects(1..2));
+            let info = inspect(Arc::new(bytes.clone()), None).unwrap();
+            // Native glyph-em rectangle in PDF user units is [71.12,256,90.0,276].
+            // Compare public user-to-view projection, including crop origin, rotation and UserUnit.
+            let page = &info.pages[0];
+            let points = [[71.12, 256.0], [90.0, 256.0], [71.12, 276.0], [90.0, 276.0]];
+            let view: Vec<_> = points
+                .into_iter()
+                .map(|p| page.user_to_view(p[0], p[1]))
+                .collect();
+            let expected = [
+                view.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min),
+                view.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min),
+                view.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max),
+                view.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max),
+            ];
+            for (actual, want) in rects[0].into_iter().zip(expected) {
+                assert!(
+                    (actual - want).abs() < 0.03,
+                    "rotation {rotation}: {rects:?} expected {expected:?}"
+                );
+            }
+            let (width, height, pixels) = raster(&bytes);
+            assert_eq!(raster(&control), (width, height, pixels.clone()));
+            let r = rects[0];
+            let mut ink = 0;
+            for y in
+                (r[1] * 2.0).floor().max(0.0) as usize..((r[3] * 2.0).ceil() as usize).min(height)
+            {
+                for x in (r[0] * 2.0).floor().max(0.0) as usize
+                    ..((r[2] * 2.0).ceil() as usize).min(width)
+                {
+                    let p = &pixels[(y * width + x) * 4..(y * width + x) * 4 + 4];
+                    if p[0] < 100 && p[1] < 100 && p[2] < 100 && p[3] > 0 {
+                        ink += 1;
+                    }
+                }
+            }
+            assert!(
+                ink > 20,
+                "rotation {rotation}: {ink} visible pixels in {r:?}"
+            );
+            eprintln!("rotation={rotation} ffi rectangle={r:?}, visible dark pixels={ink}");
+        }
+    }
+
+    #[test]
+    fn search_clipped_and_invisible_text_is_still_searchable() {
+        let clipped = fixture(
+            "q 0 0 1 1 re W n BT /F1 20 Tf 1 0 0 1 60 260 Tm (Hidden) Tj ET Q",
+            0,
+            "",
+        );
+        let invisible = fixture("BT /F1 20 Tf 3 Tr 1 0 0 1 60 260 Tm (Hidden) Tj ET", 0, "");
+        let blank = fixture("", 0, "");
+        for bytes in [&clipped, &invisible] {
+            assert_eq!(
+                text(bytes).find_opts_limited("hidden", false, false, 10),
+                vec![0..6]
+            );
+            assert_eq!(raster(bytes), raster(&blank));
+        }
+    }
+    #[test]
+    fn search_real_multiline_native_order_and_empty_page() {
+        for rotation in [0, 90, 180, 270] {
+            let bytes = fixture(
+                "BT /F1 16 Tf 1 0 0 1 60 260 Tm (Quick  brown) Tj 0 -24 Td (fox) Tj ET",
+                rotation,
+                "",
+            );
+            let native = text(&bytes);
+            assert_eq!(native.plain_text(), "Quick  brown\nfox");
+            let hits = native.find_opts_limited("QUICK\tbrown\nfox", false, false, 10);
+            assert_eq!(hits.len(), 1);
+            let rects = native.line_rects(hits[0].clone());
+            assert_eq!(rects.len(), 2, "rotation {rotation}: {rects:?}");
+            eprintln!("multiline rotation={rotation}: {rects:?}");
+        }
+        let blank = text(&fixture("", 0, ""));
+        assert!(blank.find_opts_limited("any", false, false, 10).is_empty());
+    }
+    #[test]
+    fn search_preflights_query_source_indexes_and_normalized_work() {
+        assert!(check_search_query(&"a".repeat(MAX_SEARCH_QUERY_BYTES)).is_ok());
+        assert!(matches!(
+            check_search_query(&"a".repeat(MAX_SEARCH_QUERY_BYTES + 1)),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        assert!(check_search_query(&"α".repeat(MAX_SEARCH_QUERY_BYTES / 2)).is_ok());
+        assert!(check_search_query(&"α".repeat(MAX_SEARCH_QUERY_BYTES / 2 + 1)).is_err());
+        assert!(
+            check_search_indexes(MAX_SEARCH_GLYPHS, MAX_SEARCH_GLYPHS, MAX_SEARCH_GLYPHS).is_ok()
+        );
+        assert!(matches!(
+            check_search_indexes(MAX_SEARCH_GLYPHS + 1, 0, 0),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        assert!(matches!(
+            check_search_indexes(1, 0, 1),
+            Err(EngineError::Malformed(_))
+        ));
+        let text = synthetic(&[&[&"a".repeat(MAX_SEARCH_WORK)]]);
+        assert!(check_search_text(&text).is_ok());
+        assert_eq!(
+            search_text(&text, &format!("{}b", "a".repeat(4095))).unwrap(),
+            Vec::<[f32; 4]>::new()
+        );
+        let over = synthetic(&[&[&"a".repeat(MAX_SEARCH_WORK + 1)]]);
+        assert!(
+            matches!(check_search_text(&over),Err(EngineError::ResourceLimit(message)) if message.contains("normalization"))
+        );
+        // The byte scan must win over normalization failure once the raw cap is crossed.
+        for extra in [0, 1] {
+            let text = synthetic(&[&[&"a".repeat(MAX_SEARCH_SOURCE_BYTES + extra)]]);
+            let Err(EngineError::ResourceLimit(message)) = check_search_text(&text) else {
+                panic!("expected budget failure")
+            };
+            assert!(message.contains(if extra == 0 {
+                "normalization"
+            } else {
+                "source text"
+            }));
+        }
+        let mut malformed = synthetic(&[&["a"]]);
+        malformed.line_of.clear();
+        assert!(matches!(
+            search_text(&malformed, "a"),
+            Err(EngineError::Malformed(_))
+        ));
+        let separators = synthetic(&[&["a"], &["a"]]);
+        assert_eq!(search_text(&separators, "a a").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn search_result_rectangle_and_geometry_work_limits_do_not_truncate() {
+        let text = synthetic(&[&[&"a".repeat(MAX_SEARCH_RESULTS)]]);
+        assert_eq!(search_text(&text, "a").unwrap().len(), MAX_SEARCH_RESULTS);
+        let over = synthetic(&[&[&"a".repeat(MAX_SEARCH_RESULTS + 1)]]);
+        assert!(
+            matches!(search_text(&over,"a"),Err(EngineError::ResourceLimit(message)) if message.contains("matches"))
+        );
+        let values = vec!["a"; MAX_SEARCH_RESULTS + 1];
+        let mut text = synthetic(&[&values]);
+        text.line_of = (0..=MAX_SEARCH_RESULTS as u32).collect();
+        assert_eq!(
+            search_rectangles(&text, std::slice::from_ref(&(0..MAX_SEARCH_RESULTS)))
+                .unwrap()
+                .len(),
+            MAX_SEARCH_RESULTS
+        );
+        assert!(
+            matches!(search_rectangles(&text,std::slice::from_ref(&(0..MAX_SEARCH_RESULTS+1))),Err(EngineError::ResourceLimit(message)) if message.contains("rectangles"))
+        );
+        let values = vec!["a"; 1001];
+        let text = synthetic(&[&values]);
+        let mut hits = vec![0..1000; 1000];
+        assert_eq!(search_rectangles(&text, &hits).unwrap().len(), 1000);
+        hits[999] = 0..1001;
+        assert!(
+            matches!(search_rectangles(&text,&hits),Err(EngineError::ResourceLimit(message)) if message.contains("glyph visits"))
+        );
+        assert!(matches!(
+            search_rectangles(&text, std::slice::from_ref(&(0..1002))),
+            Err(EngineError::Malformed(_))
+        ));
+        let mut invalid = synthetic(&[&["a"]]);
+        for rect in [
+            [f32::INFINITY, 0.0, 10.0, 10.0],
+            [10.0, 0.0, 0.0, 10.0],
+            [0.0, 10.0, 10.0, 0.0],
+        ] {
+            invalid.glyphs[0].rect = rect;
+            assert!(matches!(
+                search_text(&invalid, "a"),
+                Err(EngineError::Malformed(_))
+            ));
+        }
+        invalid.glyphs[0].rect = [-30.0, -20.0, -10.0, -10.0];
+        assert_eq!(
+            search_text(&invalid, "a").unwrap(),
+            vec![invalid.glyphs[0].rect]
+        );
+    }
+
+    #[test]
+    fn search_session_preserves_parser_and_avoids_raster_or_blank_interpretation() {
+        let bytes = fixture("BT /F1 20 Tf 1 0 0 1 60 260 Tm (Search) Tj ET", 0, "");
+        let (session, _) = PdfSession::open(&bytes, None).unwrap();
+        let before = session.stats().unwrap();
+        assert!(session.search_for(0, "\t\n ").unwrap().is_empty());
+        assert!(matches!(
+            session.search_for(1, ""),
+            Err(EngineError::PageIndex(_))
+        ));
+        assert!(matches!(
+            session.search_for(0, &"x".repeat(4097)),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        assert_eq!(
+            session.stats().unwrap().render_requests,
+            before.render_requests
+        );
+        let first = session.search_for(0, "SEARCH").unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(session.search_for(0, "search").unwrap(), first);
+        let after = session.stats().unwrap();
+        assert_eq!(after.parser_builds, before.parser_builds);
+        assert_eq!(after.rasterizations, before.rasterizations);
+        assert_eq!(after.render_requests, before.render_requests + 2);
+        session.close().unwrap();
+        assert!(matches!(
+            session.search_for(0, ""),
+            Err(EngineError::Closed(_))
+        ));
+        assert_eq!(first.len(), 1);
     }
 }
