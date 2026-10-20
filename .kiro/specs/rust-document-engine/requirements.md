@@ -22,7 +22,7 @@
 3. THE SYSTEM SHALL expose `Page.number`, `get_text("text"|"markdown"|"dict"|"json")`, `get_links()`, `get_images(full=False)`, and `find_tables()`.
 4. WHEN a closed document is accessed, THE SYSTEM SHALL raise `DocumentClosedError`.
 5. WHEN unsupported or malformed input is supplied, THE SYSTEM SHALL raise a stable `DocExError` subclass rather than a raw native exception.
-6. WHEN `doc_ex.extract_text(source, pages=None)` is called, THE SYSTEM SHALL return form-feed-separated text in selected page order with negative-index support; PDF SHALL use a bounded upstream text-only path without constructing structured public models.
+6. WHEN `doc_ex.extract_text(source, pages=None)` is called, THE SYSTEM SHALL return form-feed-separated text in selected page order with negative-index support; PDF SHALL use an upstream text-only path without constructing structured public models. All formats SHALL bound explicit or all-page selection to 10,000 entries and UTF-8 output to 64 MiB including separators; Python and native iterable conversion SHALL stop at a 10,001st-item lookahead, and PDF SHALL preflight glyph text before plain-text assembly. These guarantees do not bound upstream parser/glyph-construction peak memory.
 
 ## 3. Structured extraction
 

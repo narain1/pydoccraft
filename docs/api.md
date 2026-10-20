@@ -43,7 +43,7 @@ text = doc_ex.extract_text("report.pdf")
 selected = doc_ex.extract_text("report.pdf", pages=[0, 4, -1])
 ```
 
-`extract_text(source, *, filetype=None, password=None, pages=None)` returns selected pages separated by form-feed (`\f`) characters. Page indexes preserve caller order, allow duplicates, and support normal negative indexing; invalid indexes raise `IndexError`.
+`extract_text(source, *, filetype=None, password=None, pages=None)` returns selected pages separated by form-feed (`\f`) characters. Page indexes preserve caller order, allow duplicates, and support normal negative indexing; invalid indexes raise `IndexError`. Selections are consumed only through a 10,001st-item lookahead and reject more than 10,000 entries; selecting all pages has the same cap. Each format enforces a 64 MiB UTF-8 output limit, including separators. PDF preflights the native glyph string before plain-text assembly; Office uses eager extraction. These are selection/output limits, not a streaming or peak-memory guarantee: upstream parsing and glyph construction happen before the output check.
 
 For PDF, this is a bounded native fast path: it uses PdfCraft text extraction but skips table/image traversal, media transfer, normalized JSON, and public model hydration. Output is capped at 64 MiB and selected-page requests are capped at 10,000 entries. DOCX and PPTX use the existing eager extraction model as a compatibility fallback. Use `open()` when links, tables, images, geometry, metadata, Markdown, or owned structured values are required.
 

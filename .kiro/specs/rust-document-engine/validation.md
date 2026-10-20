@@ -336,3 +336,8 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 - Anonymous repeated page-1 render medians versus the legacy one-shot native reopen were: 6.52 vs 59.69 ms (9.16×) for 391 pages, 23.62 vs 26.00 ms (1.10×) for 65 pages, and 71.89 vs 78.52 ms (1.09×) for 14 pages. Parser-build count remained one after repeated renders.
 - Scope remains partial: eager full-document extraction still dominates first-render latency; DOCX layout reuse, selected-page/text-only extraction, all-page/peak-RSS evidence, and upstream inspect/COS consolidation remain open.
 
+
+### Selective extraction review corrections
+
+- Review identified unbounded Python/PyO3 page collection, missing Office and all-page selection/output checks, oversized-index error inconsistency, and a PDF string allocation preceding the output check. Both boundaries now consume at most 10,001 inputs; ordinary and arbitrary-size invalid indexes use IndexError; all formats cap selected pages and UTF-8 output. PDF preflights glyph byte lengths and possible separators before the upstream string builder.
+- Focused regressions cover generator lookahead, direct native conversion, large signed indexes, duplicate non-ASCII Office output, all-page fallback caps, empty-page separators, UTF-8 chunk boundaries, native page-count limits and glyph-budget checks. Upstream text-device construction can still allocate before output preflight; P4 remains open for peak-memory/streaming guarantees. Full exact-head CI is required before merge.

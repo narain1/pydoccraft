@@ -49,12 +49,12 @@ Rendering and conversion dependencies are currently unconditional in the release
 
 ```python
 _core.extract(data: bytes, filetype: str, password: str | None) -> str
-_core.extract_text(data: bytes, pages: list[int] | None, password: str | None) -> str
+_core.extract_text(data: bytes, pages: Iterable[int] | None, password: str | None) -> str
 _core.convert(data: bytes, source_format: str, target_format: str, password: str | None) -> bytes
 _core.render(data: bytes, filetype: str, page: int, dpi: float, password: str | None) -> bytes
 ```
 
-JSON remains the narrow structured-extraction ABI. Images are base64 encoded only across this boundary. The additive PDF `extract_text` fast path returns bounded form-feed-separated text directly and deliberately omits structured values; DOCX/PPTX use the existing eager model fallback in Python. `render` returns PNG bytes. Python hydrates typed `Document`, `Page`, `Block`, `Table`, `Cell`, `Link`, and `Image` values.
+JSON remains the narrow structured-extraction ABI. Images are base64 encoded only across this boundary. The additive PDF `extract_text` fast path returns bounded form-feed-separated text directly and deliberately omits structured values; DOCX/PPTX use the existing eager model fallback in Python. Both the Python facade and native PyO3 boundary collect at most 10,000 requested indexes with one bounded lookahead; the all-pages path uses an index range with the same cap. Native glyph UTF-8 lengths plus an upper bound on separators are checked before upstream `plain_text`, and Office accumulation counts UTF-8 bytes incrementally before joining. Upstream glyph construction remains outside this output-budget guarantee; streaming/peak-memory acceptance stays open. `render` returns PNG bytes. Python hydrates typed `Document`, `Page`, `Block`, `Table`, `Cell`, `Link`, and `Image` values.
 
 ## Conversion matrix
 
