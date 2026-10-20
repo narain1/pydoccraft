@@ -336,8 +336,16 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 - Anonymous repeated page-1 render medians versus the legacy one-shot native reopen were: 6.52 vs 59.69 ms (9.16×) for 391 pages, 23.62 vs 26.00 ms (1.10×) for 65 pages, and 71.89 vs 78.52 ms (1.09×) for 14 pages. Parser-build count remained one after repeated renders.
 - Scope remains partial: eager full-document extraction still dominates first-render latency; DOCX layout reuse, selected-page/text-only extraction, all-page/peak-RSS evidence, and upstream inspect/COS consolidation remain open.
 
+### PDF session integration review
+
+- Exact review head `29cc3df5e43ef698ae7648fe73dd428620335f5b` passed CI 39465695584: 153 Rust tests, 172 installed-wheel Python tests, formatting, warnings-denied Clippy and the unchanged 264-package locked license audit. Existing full-raster limits, oversized-page small clips, blank pages and cross-format rendering passed alongside the new session tests.
+- Merging current main required retaining native clipping in the session path. A shared renderer helper now uses immutable inspected displayed dimensions and the existing pixel rounding, geometry, precision and output guards for both one-shot and retained rendering. Tests compare exact full/clipped PNG bytes at fractional DPI with CropBox/UserUnit and all rotations; parser-build count remains one.
+- A concurrent author merge added explicit-close expectations while dropping its close implementation. The reviewed correction releases the parser through Mutex<Option<PageRenderer>> and immutable PyO3 borrows, including poisoned-lock cleanup. Python captures a local handle, marks the document closed and detaches its handle before native close; retained handles report stable closed errors. Thread/lifetime tests pass, but this does not claim concurrent raster execution because current extension calls retain the GIL.
+- Historical private-corpus timings above remain author-reported; this integration review validates correctness and reuse counters, not those private performance measurements. No dependency or public API was added by the review corrections.
+
 
 ### Selective extraction review corrections
 
 - Review identified unbounded Python/PyO3 page collection, missing Office and all-page selection/output checks, oversized-index error inconsistency, and a PDF string allocation preceding the output check. Both boundaries now consume at most 10,001 inputs; ordinary and arbitrary-size invalid indexes use IndexError; all formats cap selected pages and UTF-8 output. PDF preflights glyph byte lengths and possible separators before the upstream string builder.
 - Focused regressions cover generator lookahead, direct native conversion, large signed indexes, duplicate non-ASCII Office output, all-page fallback caps, empty-page separators, UTF-8 chunk boundaries, native page-count limits and glyph-budget checks. Upstream text-device construction can still allocate before output preflight; P4 remains open for peak-memory/streaming guarantees. Full exact-head CI is required before merge.
+
