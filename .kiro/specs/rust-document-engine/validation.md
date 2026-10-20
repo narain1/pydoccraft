@@ -9,6 +9,13 @@
 - Wheel: `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`, 17,106,162 bytes; native extension: 39,642,184 bytes. SHA-256: `cb38f3a9471dbc0de577ef08fa98a10d4d20ba43f6bdf6453ab0c0f307c71740`. Lockfile SHA-256: `48265d3bcdda6a4ede5f8262680c7e7c324f5722eb889407c0608e0b89819f51`.
 - Only `pdfcraft-forms` was added at the existing immutable PdfCraft revision. Regenerated/reviewed inventory and wheel copy contain 264 normal/build packages, all permissive and no prohibited application crates; NOTICE updated. Other upstream revisions/assets unchanged. LAY7/PDF6 and other broad criteria remain open; semantic deletion/copy, imported forms, radio groups and broader appearances are not complete. This is not a release declaration.
 
+## 2026-10-20 PR23 independent review correction (unreleased)
+
+- Reviewed runtime head `d8ccb4345ccadce5a6c80835446be9f78b862b77` against merged main `bb9f21b40ef500433f04ba2a0061fc71ea682b51`. [CI run 39454556564](https://github.com/narain1/pydoccraft/actions/runs/39454556564) passed formatting, all 98 Rust tests, warnings-denied Clippy, the locked 263-package license audit, release build and 113 installed-wheel Python tests with zero skips.
+- Review corrected DOCX grid edits and column resizing that could leave plain-text cells narrower than their explicit horizontal margins. Delete/split/resize now reject that state before committing or invalidating handles. Native and Python regressions verify preserved geometry, generations, descendant access and successful edits after reducing margins. Independent PDF probes also verified new drawing placement after crop edits at every quarter-turn rotation.
+- CI platform: Linux x86_64, Rust 1.95.0 and Python 3.11.17. Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: 16,828,225 bytes; uncompressed extension: 39,002,432 bytes. Wheel SHA-256: `75178287de004f21aa0648f7056412bbd80f421ae291f26754ade71eba82cd59`. The harness verified installed package identity against that wheel.
+- Lockfile SHA-256 remains `07d283b629c33e1994e4bd2b9e3e8f16876ee5efda73c46428581e20869fcdf8`; upstream revisions, dependencies and attribution assets are unchanged. The correction does not complete remaining roadmap criteria or broaden format fidelity claims.
+
 ## 2026-10-20 DOCX grid and PDF geometry (unreleased)
 
 - Offline Linux x86_64, Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1: formatting, 97 Rust tests, warnings-denied Clippy, locked release build and 112 installed-wheel Python tests passed, with zero skips and matching installed artifact identity.
