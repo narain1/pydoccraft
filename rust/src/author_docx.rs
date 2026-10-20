@@ -5119,6 +5119,7 @@ fn validate_bookmark_links(document: &Document) -> PyResult<BTreeMap<String, Boo
             let paragraph = document
                 .para(story, &path)
                 .ok_or_else(|| PyValueError::new_err("native paragraph path no longer exists"))?;
+            let mut marker_offsets = Vec::new();
             for (offset, object) in paragraph
                 .object_offsets()
                 .into_iter()
@@ -5137,6 +5138,7 @@ fn validate_bookmark_links(document: &Document) -> PyResult<BTreeMap<String, Boo
                     _ => continue,
                 };
                 validate_bookmark_name(name)?;
+                marker_offsets.push(offset);
                 if story != StoryRef::Body {
                     return Err(EngineError::Unsupported("bookmark targets outside the body are not exported by the pinned native engine".into()).into());
                 }
@@ -5145,6 +5147,16 @@ fn validate_bookmark_links(document: &Document) -> PyResult<BTreeMap<String, Boo
                 }
                 if map.len() > MAX_BOOKMARKS {
                     return Err(limit("document exceeds 1000 bookmarks"));
+                }
+            }
+            // Native shaping ends a segment at every bookmark object. Only
+            // paragraph endpoints preserve the original text shaping. Discount
+            // other bookmark markers, but never image/note/field object bytes.
+            let content_bytes = paragraph.text.len() - marker_offsets.len() * 3;
+            for (index, offset) in marker_offsets.into_iter().enumerate() {
+                let content_offset = offset - index * 3;
+                if content_offset != 0 && content_offset != content_bytes {
+                    return Err(EngineError::Unsupported("bookmark targets require whole paragraphs or paragraph-endpoint points; interior markers change native text shaping".into()).into());
                 }
             }
             for (_, props) in paragraph.run_ranges() {
@@ -14252,18 +14264,78 @@ mod tests {
     }
 
     #[test]
+    fn bookmarks_endpoint_profile_preserves_native_shaping() {
+        for (text, direction) in [
+            ("office", "ltr"),
+            ("سلام", "rtl"),
+            ("Before Target 😀 after", "ltr"),
+        ] {
+            let mut document = EditableDocx::new();
+            let p = document.add_paragraph(text).unwrap();
+            document
+                .format_paragraph(p, &format!(r#"{{"direction":"{}"}}"#, direction))
+                .unwrap();
+            document
+                .format_range_patch(
+                    p,
+                    0,
+                    text.chars().count(),
+                    document.revision().unwrap(),
+                    r#"{"font_size":36}"#,
+                )
+                .unwrap();
+            let before = document.to_bytes().unwrap();
+            let png = crate::docx::render(&before, 0, 144.0, None).unwrap();
+            let revision = document.revision().unwrap();
+            assert!(document.set_bookmark("Unsafe", p, 1, 3, revision).is_err());
+            assert_eq!(document.revision().unwrap(), revision);
+            assert_eq!(document.to_bytes().unwrap(), before);
+            if direction == "rtl" {
+                let mut raw = document.document().unwrap().clone();
+                raw_bookmark(&mut raw, StoryRef::Body, Path::top(p), "Unsafe", 2, 6);
+                let raw_png =
+                    crate::docx::render(&wordcraft_docx::write(&raw).unwrap(), 0, 144.0, None)
+                        .unwrap();
+                assert_ne!(
+                    raw_png, png,
+                    "pinned native interior markers break Arabic joining"
+                );
+                assert!(validate_bookmark_links(&raw).is_err());
+            }
+            for (start, end) in [
+                (0, text.chars().count()),
+                (0, 0),
+                (text.chars().count(), text.chars().count()),
+            ] {
+                document
+                    .set_bookmark("Safe", p, start, end, document.revision().unwrap())
+                    .unwrap();
+                assert_eq!(
+                    crate::docx::render(&document.to_bytes().unwrap(), 0, 144.0, None).unwrap(),
+                    png
+                );
+                document.delete_bookmark("Safe").unwrap();
+                assert_eq!(
+                    crate::docx::render(&document.to_bytes().unwrap(), 0, 144.0, None).unwrap(),
+                    png
+                );
+            }
+        }
+    }
+
+    #[test]
     fn bookmarks_owned_ranges_move_delete_copy_and_semantic_protection() {
         let mut document = EditableDocx::new();
         let p = document.add_paragraph("Before Target 😀 after").unwrap();
         let link = document.add_paragraph("JumpLabel").unwrap();
         let before_png = crate::docx::render(&document.to_bytes().unwrap(), 0, 72.0, None).unwrap();
         document
-            .set_bookmark("Target", p, 7, 15, document.revision().unwrap())
+            .set_bookmark("Target", p, 0, 21, document.revision().unwrap())
             .unwrap();
         let (id, start, end, revision) = document.bookmark_range("Target").unwrap();
         assert_eq!(
             document.range_text(id, start, end, revision).unwrap(),
-            "Target 😀"
+            "Before Target 😀 after"
         );
         assert_eq!(
             before_png,
@@ -14278,10 +14350,10 @@ mod tests {
         assert_eq!(document.to_bytes().unwrap(), before);
         let mut copied = document.copy().unwrap();
         copied
-            .set_bookmark("Target", p, 0, 6, copied.revision().unwrap())
+            .set_bookmark("Target", p, 0, 0, copied.revision().unwrap())
             .unwrap();
         let (_, a, b, r) = copied.bookmark_range("Target").unwrap();
-        assert_eq!(copied.range_text(p, a, b, r).unwrap(), "Before");
+        assert_eq!(copied.range_text(p, a, b, r).unwrap(), "");
         assert!(document.range_text(id, start, end, revision).is_err());
         assert_eq!(document.bookmark_names().unwrap(), vec!["Target"]);
         let reopened = wordcraft_docx::read(&copied.to_bytes().unwrap()).unwrap();
@@ -14308,11 +14380,11 @@ mod tests {
         document.set_margins(30.0, 30.0, 30.0, 30.0).unwrap();
         let link = document.add_paragraph("JumpLabel").unwrap();
         let p = document.add_paragraph(&"Before\n".repeat(45)).unwrap();
-        let (from, to, _) = document
+        let (_, to, _) = document
             .add_run_patch(p, "Destination", r#"{"bold":true}"#)
             .unwrap();
         document
-            .set_bookmark("Late", p, from, to, document.revision().unwrap())
+            .set_bookmark("Late", p, to, to, document.revision().unwrap())
             .unwrap();
         document
             .set_range_link(link, 0, 9, document.revision().unwrap(), Some("#Late"))
@@ -14335,13 +14407,13 @@ mod tests {
             .unwrap();
         let cell = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
         document
-            .set_bookmark("Cell", cell, 0, 4, document.revision().unwrap())
+            .set_bookmark("Cell", cell, 0, 11, document.revision().unwrap())
             .unwrap();
         document.insert_row(table, 0).unwrap();
         assert!(document.paragraph_text(cell).is_err());
         let (fresh, a, b, r) = document.bookmark_range("Cell").unwrap();
         assert_ne!(fresh, cell);
-        assert_eq!(document.range_text(fresh, a, b, r).unwrap(), "Cell");
+        assert_eq!(document.range_text(fresh, a, b, r).unwrap(), "Cell target");
         document
             .set_range_link(link, 0, 9, r, Some("#Cell"))
             .unwrap();
@@ -14620,7 +14692,7 @@ mod tests {
             .set_bookmark(
                 "Late",
                 target,
-                text.len() - 6,
+                text.len(),
                 text.len(),
                 document.revision().unwrap(),
             )
