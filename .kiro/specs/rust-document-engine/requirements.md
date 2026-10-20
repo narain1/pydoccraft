@@ -289,7 +289,7 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 
 1. Existing paragraph metadata SHALL expose effective native numbering identity, level, parsed format/template and optional logical layout label without prefixing paragraph text or changing link offsets. Cleared numbering SHALL be absent; missing definitions SHALL remain null rather than guessed.
 2. Native style/table resolution and layout placements SHALL own numbering semantics. Labels SHALL attach to the segment containing the native label line; body, auxiliary stories and nested tables SHALL retain separate identities. Conflicting repeated labels SHALL be omitted, and empty numbered paragraphs SHALL remain represented.
-3. Definitions, observed paths, placements, individual strings and output metadata SHALL be bounded. Tests SHALL cover continuation/restart, all nine levels, styles, start overrides, breaks/wrapping, stories, symbol fonts, RTL logical labels and native reader normalization. Broader list authoring and exact automatic page slicing remain separately scoped.
+3. Definitions, observed paths, placements, individual strings, output metadata and adapter-native definition lookup work SHALL be bounded. Repeated and missing definition results SHALL be cached without replacing native resolution. Tests SHALL cover continuation/restart, all nine levels, styles, start overrides, breaks/wrapping, stories, symbol fonts, RTL logical labels and native reader normalization. Broader list authoring and exact automatic page slicing remain separately scoped.
 
 ## 36. PPTX fixed internal navigation extraction
 

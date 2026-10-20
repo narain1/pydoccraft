@@ -38,7 +38,7 @@ These values describe the parsed native model, not an untouched copy of source X
 
 `label` is native logical marker text, not a reconstruction of glyph order or capitalization. For example, an RTL label can have metadata `1.` while its PDF glyph order reads `.1`. A reported format or template does not claim full rendering fidelity for every imported numbering format; native format fallbacks remain upstream limitations.
 
-Extraction bounds numbering definitions, effective-level records and observed paths at 100,000, scans at most 1,000,000 native layout items, and rejects model template/label strings over 64 KiB. Aggregate template bytes, observed label bytes and conservatively accounted output metadata each have a 16 MiB budget. The output accounting allows for JSON escaping and the existing duplicated table projection. Exceeding a bound raises the existing resource-limit exception; partial metadata is not returned successfully.
+Extraction bounds numbering definitions, effective-level records and observed paths at 100,000, scans at most 1,000,000 native layout items, and rejects model template/label strings over 64 KiB. Aggregate template bytes, observed label bytes and conservatively accounted output metadata each have a 16 MiB budget. The output accounting allows for JSON escaping and the existing duplicated table projection. Native definition lookups are cached by instance and level, including missing references, with at most 100,000 cached results and a conservative 10,000,000-step cumulative scan budget. This bounds the adapter's definition lookup work; it does not bound the earlier native layout algorithm. Exceeding a bound raises the existing resource-limit exception; partial metadata is not returned successfully.
 
 ## Acceptance evidence
 
