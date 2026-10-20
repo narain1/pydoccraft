@@ -77,7 +77,7 @@ This is a platform-specific baseline, not a release declaration. See `.kiro/spec
 
 ## Performance benchmarks
 
-The canonical comparison is [PDF performance versus PyMuPDF](pdf-performance.md). It uses matched PDF text and rendering scenarios only. Historical broad capability baselines remain in [benchmarks.md](benchmarks.md) but are not used for performance claims against unrelated libraries.
+The canonical comparison is [PDF performance versus PyMuPDF](pdf-performance.md). It uses matched PDF text and rendering scenarios only. Historical broad capability baselines remain in [benchmarks.md](benchmarks.md) but are not used for performance claims against unrelated libraries. Benchmarks must use an installed release wheel, prepare inputs before timing, verify outputs outside timed regions, pin the comparison environment and distinguish matched operations from capability-only baselines. Raw timing output and generated documents belong outside the repository.
 
 ## CI behavior
 

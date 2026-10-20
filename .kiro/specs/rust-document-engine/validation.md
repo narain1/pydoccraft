@@ -423,9 +423,9 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 - This integrated artifact includes the independently identified PR39 markup-coordinate correction: finite but extreme imported quad coordinates now fail before native interpolation can emit infinity. All four markup kinds preserve bytes on failed recolor/text patches; deletion remains available.
 - Wheel: 17,324,430 bytes; uncompressed extension: 40,173,336 bytes; SHA-256 `173e785889b3888af2f52485c8c3b42dbffdb725f0e94e85a1f16d1d40c4d3dd`. Cargo.lock SHA-256 remains `fcfb4a174387cf25cceddadeba9e6be930ec790c840dca0bb5f169431a6c089c`. No dependency or attribution changes; the 264-package permissive graph and all four pinned upstream revisions remain unchanged.
 
-## 2026-10-20 PyMuPDF-only post-optimization benchmark
+## 2026-10-20 author-reported PyMuPDF-only post-optimization benchmark
 
-- Compared only pydoccraft and PyMuPDF 2.0 on three anonymous PDFs using Linux ARM64 CPython 3.13 release wheels.
+- The PR author compared only pydoccraft and PyMuPDF 2.0 on three anonymous PDFs using Linux ARM64 CPython 3.13 release wheels. Independent review does not have these private inputs and did not reproduce the timings; the report predates stronger matching-output checks.
 - Warm first-page RGBA rendering now favors pydoccraft by 2.86×, 1.84×, and 1.12× after parser-session reuse.
 - Cold open+render remains 45.75×, 4.49×, and 1.82× slower because pydoccraft eagerly builds the complete structured model before rendering; this is not a rasterizer-only comparison.
 - The selective all-page text path was 2.06×, 2.30×, and 1.22× slower than PyMuPDF after removing its redundant valid-document `inspect()` parse.
@@ -450,3 +450,10 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 - Review reproduced a callback-bearing coordinate or row iterator reordering slides during `add_text`, `add_shape` or `add_table`, inserting into the wrong slide. All three methods now normalize inputs before resolving the stable target slide. The regression verifies original target identity and the returned handle for numeric and row-generator callbacks.
 - The original frozen picture/selection package independently passed all 224 Python tests; its unchanged native package with the corrected facade passed all 225. Exact corrected head `da5814d52402f978622f4d7b036c9f54d4441339` passed CI 39473099033: formatting, 198 Rust tests, warnings-denied Clippy, 225 installed-wheel Python tests without skips and the unchanged 264-package license audit.
 - CI artifact: CPython 3.11.17 / Linux x86_64; wheel 17,334,217 bytes; uncompressed extension 40,201,024 bytes; wheel SHA-256 `248e087547542396f16a78162beba1c45c196645c787a42b4dc080228904d86c`. No dependencies or upstream revisions changed.
+
+### Single-parser text and benchmark independent review
+
+- The pinned renderer uses the same native PDF parser as inspection. Valid text extraction now avoids inspection's extra parse and structural metadata traversal; zero-page/failed parses still use inspection for stable error classification. The new native regression verifies missing/wrong/correct passwords, blank-page separators, selected ordering, empty selection, out-of-range selection and malformed input.
+- Benchmark review corrected input-file overwrite through direct paths or aliases, required text page counts to match the source and PNG dimensions to match across libraries, and guaranteed warm-document cleanup. Four dependency-free harness tests pass. Blank text remains valid; no extracted content is published, and native backend diagnostics are explicitly outside the CLI's exception-message suppression. Private timing claims are author-reported, not independently reproduced or a fidelity guarantee.
+- Exact combined head `cd0970887770b37481f18e031f4f17c2ca847569` passed CI 39473827086: formatting, 199 Rust tests, warnings-denied Clippy, 229 installed-wheel Python tests without skips and the unchanged 264-package locked license audit. Merging current main produces the identical tested tree.
+- CI artifact: CPython 3.11.17 / Linux x86_64; wheel 17,334,700 bytes; uncompressed extension 40,201,568 bytes; wheel SHA-256 `5fc1a091666dd7aed59ced9f8d51bedbea6cc332ca64241860e94ba2225e77f8`. No dependencies or upstream revisions changed.
