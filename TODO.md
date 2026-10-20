@@ -233,7 +233,7 @@ Unchecked items below remain incomplete even when an initial slice is implemente
 ### PDF — PDF creation and editing parity (P1 basics; advanced items P2)
 
 - [x] **PDF1: Page authoring.** Create fixed-size pages, set boxes/rotation and insert/remove/reorder pages through PdfCraft. Reopen and verify geometry, rendered orientation and page count.
-- [ ] **PDF2: Text and images.** Draw/searchable text, text boxes and embedded images with explicit positioning, fonts, colors and clipping. Validate Unicode/shaping and overflow behavior through upstream public APIs.
+- [ ] **PDF2: Text and images.** Bounded native text boxes/alignment and visual image crop/quarter-turns/flips are implemented. Automatic supplied-font wrapping and strict glyph-outline text clipping remain unsupported. Draw/searchable text, text boxes and embedded images with explicit positioning, fonts, colors and clipping. Validate Unicode/shaping and overflow behavior through upstream public APIs.
 - [ ] **PDF3: Vector graphics and backgrounds.** Add basic paths/shapes, strokes/fills and underlays/overlays/watermarks. Preserve text extraction and layering; use PdfCraft drawing primitives rather than writing PDF operators.
 - [x] **PDF4: Flowed reports and tables.** Use the WordCraft report-to-PDF path for semantic flowing content, or a verified PdfCraft layout API for positioned tables. Document which path applies; do not introduce a Python pagination/table layout engine.
 - [x] **PDF5: Links, outlines and metadata.** Create/edit URI/internal links, bookmarks and supported metadata. Verify destinations survive assembly, deletion and rotation.

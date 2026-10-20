@@ -1,5 +1,12 @@
 # Validation evidence
 
+## 2026-10-20 PDF text boxes and image transforms (unreleased)
+
+- Offline Linux x86_64, Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1: formatting, 159 Rust tests, warnings-denied Clippy, locked release build and 173 installed-wheel Python tests passed with zero skips and verified artifact identity. A test initially used a nonexistent Page.images property; it was corrected to the existing get_images API and the complete wheel suite rerun successfully.
+- Existing draw_text accepts point or box geometry. Native built-in wrapping/alignment, supplied-font explicit Unicode lines, logical metric fits, exact-height boundary/overflow rollback and conservative wrapping-work limits pass. No new public text-box object, custom wrapping engine or glyph-outline clipping is introduced. Automatic supplied-font wrapping/justification and strict text clipping remain unavailable; PDF2 stays open.
+- Existing add_image accepts native visual crop, quarter-turns and flips. Asymmetric fixtures verify all rotations/flips, both crop-side orders, composed transforms, outside-box pixels and retained embedded media. Rotated CropBox/UserUnit tests verify current-view placement for text and images. Both drawing paths retain staged resource-preservation checks.
+- Wheel: `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`, 17,220,113 bytes; native extension: 39,892,088 bytes. SHA-256: `86014f3579ad5c8dec1bcd6bb6cf119e6c554e0d5f55436aa424389708581f45`. Lockfile SHA-256: `f5a35e9549115b905196b81ceebfad1475f01571a5c6416e6e15e10da1bdc984`. Dependencies, all four upstream revisions and the reviewed 264-package permissive license graph are unchanged.
+
 ## 2026-10-20 DOCX pagination acceptance and overflow guard (unreleased)
 
 - Offline Linux x86_64, Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1: formatting, 153 Rust tests, warnings-denied Clippy, locked release build and 168 installed-wheel Python tests passed with zero skips and verified artifact identity.
