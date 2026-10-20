@@ -1,4 +1,5 @@
 mod author_docx;
+mod author_epub;
 mod author_pdf;
 mod author_pptx;
 #[path = "convert.rs"]
@@ -265,11 +266,11 @@ fn detect(data: &[u8]) -> PyResult<String> {
         return Ok("docx".into());
     }
     if data.starts_with(b"PK\x03\x04") {
-        if epub::is_epub(data)? {
-            return Ok("epub".into());
-        }
         if let Some(filetype) = ooxml::document_type(data)? {
             return Ok(filetype.into());
+        }
+        if epub::is_epub(data)? {
+            return Ok("epub".into());
         }
     }
     Err(EngineError::Unsupported("could not identify document format".into()).into())
@@ -292,6 +293,7 @@ fn normalize(filetype: &str) -> Result<&'static str, EngineError> {
 #[pymodule]
 fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<author_docx::EditableDocx>()?;
+    module.add_class::<author_epub::EditableEpub>()?;
     module.add_class::<author_pdf::EditablePdf>()?;
     module.add_class::<author_pptx::EditablePptx>()?;
     module.add_class::<NativePdfSession>()?;

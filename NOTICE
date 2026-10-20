@@ -34,7 +34,14 @@ Copyright 2026 NellowTCS and LexePub contributors.
 Licensed under the Apache License, Version 2.0.
 Source: https://github.com/NellowTCS/lexepub
 Crate: lexepub 0.1.2; crates.io checksum 6d35d0fae6dc461c3bd7055d8d12ffd9e50ec255f488041d006b8b975bdef596
-Used for in-memory EPUB container, package metadata, spine, and XHTML text extraction. CLI, C FFI, WASM, Embassy, and low-memory features are not enabled.
+Used for in-memory EPUB container, package metadata, spine, and XHTML extraction. CLI, C FFI, WASM, Embassy, and low-memory features are not enabled.
+
+rbook
+Copyright 2025-2026 Devin Sterling and rbook contributors.
+Licensed under the Apache License, Version 2.0.
+Source: https://github.com/DevinSterling/rbook
+Crate: rbook 0.7.12; crates.io package source corresponds to tag revision c62988a09e5043444392fe998d5103821f545991.
+Only the `write` feature is enabled. It provides in-memory EPUB package, manifest, spine, navigation, MIME and ZIP serialization; pydoccraft does not use its filesystem writer.
 
 Bundled and linked third-party material
 

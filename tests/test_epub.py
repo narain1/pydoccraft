@@ -7,9 +7,10 @@ import unittest
 import zipfile
 
 import doc_ex
+from fixtures import PNG, docx_fixture
 
 
-def epub_fixture(*, encrypted: bool = False) -> bytes:
+def epub_fixture(*, encrypted: bool = False, version: str = "3.0", chapter_one: str | None = None) -> bytes:
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w") as archive:
         archive.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
@@ -21,12 +22,13 @@ def epub_fixture(*, encrypted: bool = False) -> bytes:
             archive.writestr("META-INF/encryption.xml", "<encryption/>")
         archive.writestr(
             "OEBPS/content.opf",
-            '<?xml version="1.0"?><package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">urn:test:book</dc:identifier><dc:title>Native EPUB fixture</dc:title><dc:creator>Test Author</dc:creator><dc:language>en</dc:language><dc:publisher>pydoccraft tests</dc:publisher></metadata><manifest><item id="one" href="one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="two.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>',
+            f'<?xml version="1.0"?><package version="{version}" xmlns="http://www.idpf.org/2007/opf" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">urn:test:book</dc:identifier><dc:title>Native EPUB fixture</dc:title><dc:creator>Test Author</dc:creator><dc:language>en</dc:language><dc:publisher>pydoccraft tests</dc:publisher></metadata><manifest><item id="one" href="one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="two.xhtml" media-type="application/xhtml+xml"/><item id="image" href="image.png" media-type="image/png"/></manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>',
         )
         archive.writestr(
             "OEBPS/one.xhtml",
-            '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>One</title></head><body><h1>First chapter</h1><p>Alpha café.</p></body></html>',
+            chapter_one or '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>One</title></head><body><h1>First chapter</h1><p>Alpha café. <a href="https://example.com">Example</a></p><p><img src="image.png" alt="Red pixel" /></p></body></html>',
         )
+        archive.writestr("OEBPS/image.png", PNG)
         archive.writestr(
             "OEBPS/two.xhtml",
             '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Two</title></head><body><h1>Second chapter</h1><p>Beta naïve.</p></body></html>',
@@ -45,6 +47,12 @@ class EpubTests(unittest.TestCase):
             self.assertEqual(document.page_count, 2)
             self.assertIn("First chapter", document[0].get_text())
             self.assertIn("Second chapter", document[1].get_text())
+            self.assertEqual(document[0].blocks[0].kind, "heading")
+            self.assertEqual(document[0].blocks[0].level, 1)
+            self.assertEqual(document[0].get_links()[0].uri, "https://example.com")
+            self.assertEqual(document[0].get_links()[0].text, "Example")
+            self.assertEqual(document[0].get_images()[0].data, PNG)
+            self.assertEqual(document[0].get_images()[0].alt, "Red pixel")
             page = document[0]
         self.assertIn("Alpha café", page.get_text())
 
@@ -52,6 +60,98 @@ class EpubTests(unittest.TestCase):
             path = Path(directory) / "book.epub"
             path.write_bytes(data)
             self.assertEqual(doc_ex.open(path).page_count, 2)
+
+    def test_native_creation_roundtrips_metadata_structure_links_images_and_copy(self) -> None:
+        with doc_ex.new("epub") as book:
+            book.set_metadata(
+                title="Created book",
+                identifier="urn:test:created",
+                language="en",
+                authors=["Author One"],
+            )
+            chapter = book.add_chapter("Introduction")
+            chapter.add_heading("Welcome & hello", level=1)
+            chapter.add_paragraph("Created paragraph with café.")
+            chapter.add_link("Project", "https://example.com")
+            chapter.add_image(PNG, media_type="image/png", alt="Red pixel")
+            clone = book.copy()
+            clone.add_chapter("Appendix").add_paragraph("Only in copy")
+            data = book.to_bytes()
+            self.assertEqual(book.chapter_count, 1)
+            self.assertEqual(clone.chapter_count, 2)
+            clone.close()
+
+        with doc_ex.open(data, filetype="epub") as reopened:
+            self.assertEqual(reopened.metadata["title"], "Created book")
+            self.assertEqual(reopened.metadata["authors"], ["Author One"])
+            self.assertEqual(reopened.page_count, 1)
+            self.assertEqual(reopened[0].blocks[0].kind, "heading")
+            self.assertIn("Welcome & hello", reopened[0].get_text())
+            self.assertEqual(reopened[0].get_links()[0].uri, "https://example.com")
+            self.assertEqual(reopened[0].get_images()[0].data, PNG)
+
+        with doc_ex.new("epub") as invalid:
+            with self.assertRaises(ValueError):
+                invalid.to_bytes()
+            invalid.set_metadata(title="Book", identifier="urn:test", language="en")
+            with self.assertRaises(ValueError):
+                invalid.to_bytes()
+            chapter = invalid.add_chapter("One")
+            with self.assertRaises(ValueError):
+                chapter.add_heading("bad", level=7)
+            with self.assertRaises(doc_ex.UnsupportedFormatError):
+                chapter.add_link("unsafe", "javascript:alert(1)")
+            with self.assertRaises(doc_ex.UnsupportedFormatError):
+                chapter.add_image(PNG, media_type="image/unknown")
+
+    def test_epub2_detection_ooxml_collision_and_malformed_xhtml(self) -> None:
+        with doc_ex.open(epub_fixture(version="2.0"), filetype="ebook") as document:
+            self.assertTrue(str(document.metadata["epub_version"]).startswith("2"))
+            self.assertEqual(document.page_count, 2)
+
+        source = docx_fixture()
+        members = {}
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            for name in archive.namelist():
+                members[name] = archive.read(name)
+        members["mimetype"] = b"application/epub+zip"
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name, value in members.items():
+                archive.writestr(name, value)
+        self.assertEqual(doc_ex.open(output.getvalue()).metadata["format"], "docx")
+
+        malformed = '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>broken</body></html>'
+        with self.assertRaises(doc_ex.MalformedDocumentError):
+            doc_ex.open(epub_fixture(chapter_one=malformed))
+        with self.assertRaises(doc_ex.UnsupportedFormatError):
+            doc_ex.open(epub_fixture(), password="secret")
+
+        unsafe = io.BytesIO()
+        with zipfile.ZipFile(unsafe, "w") as archive:
+            archive.writestr("mimetype", "application/epub+zip")
+            archive.writestr("../escape", b"x")
+        with self.assertRaises(doc_ex.UnsafeArchiveError):
+            doc_ex.open(unsafe.getvalue())
+
+    def test_native_creation_save_stream_close_and_atomic_validation(self) -> None:
+        book = doc_ex.new("ebook")
+        book.set_metadata(title="Saved", identifier="urn:saved", authors=["A"])
+        book.add_chapter("One").add_paragraph("Saved content")
+        stream = io.BytesIO()
+        book.save(stream)
+        self.assertFalse(stream.closed)
+        self.assertIn("Saved content", doc_ex.open(stream.getvalue())[0].get_text())
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "saved.epub"
+            book.save(path)
+            self.assertEqual(doc_ex.open(path).metadata["title"], "Saved")
+            with self.assertRaises(ValueError):
+                book.save(Path(directory) / "wrong.pdf")
+        book.close()
+        book.close()
+        with self.assertRaises(doc_ex.DocumentClosedError):
+            _ = book.chapter_count
 
     def test_render_conversion_encryption_and_malformed_fail_explicitly(self) -> None:
         with doc_ex.open(epub_fixture()) as document:

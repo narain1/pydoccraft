@@ -159,6 +159,8 @@ Conversion is not pixel-perfect. Font substitution, unsupported PDF constructs, 
 
 ## EPUB (unreleased extraction scope)
 
-The EPUB feature branch detects EPUB 2/3 containers and maps each spine chapter to one compatibility `Page` in reading order. This is a chapter boundary, not physical pagination. The first native slice extracts plain chapter text and publication metadata through LexePub 0.1.2 after the shared archive safety preflight.
+The EPUB feature branch detects EPUB 2/3 containers and maps each spine chapter to one compatibility `Page` in reading order. This is a chapter boundary, not physical pagination. Native extraction preserves semantic headings, paragraphs, inline links, referenced image bytes/alt text and publication metadata through LexePub 0.1.2 after the shared archive safety preflight.
 
-Rendering, fixed-layout pagination, CSS fidelity, navigation links, images, media overlays, authoring, and conversion are intentionally unsupported. Encrypted or DRM-protected resources fail explicitly. See `.kiro/specs/epub-support/` for requirements and deferred work.
+The same branch adds `doc_ex.new("epub")` through rbook 0.7.12 for bounded semantic metadata, chapters, headings, paragraphs, inert links and in-memory images. Created bytes reopen through the independent extraction path.
+
+Rendering, fixed-layout pagination, CSS fidelity, scripts, media overlays, editing existing EPUB files and conversion are intentionally unsupported. Encrypted or DRM-protected resources fail explicitly. See `.kiro/specs/epub-support/` for requirements and deferred work.

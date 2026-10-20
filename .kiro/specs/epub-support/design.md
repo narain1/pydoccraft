@@ -26,6 +26,12 @@ Passwords are rejected because encrypted/DRM EPUB is unsupported. Rendering and 
 
 Run the shared ZIP preflight before upstream parsing. Require the EPUB mimetype marker and reject encryption metadata. Cap chapters at 10,000 and rely on the existing 64 MiB bounded JSON serializer. Treat upstream chapter-count mismatch as malformed/unsupported content rather than silently returning partial extraction.
 
+## Creation backend
+
+Use `rbook = 0.7.12` with default features disabled and only `write` enabled. It is Apache-2.0, accepts in-memory resources, generates the package/manifest/spine/navigation/mimetype/ZIP structure, and writes to `Vec<u8>`. A private `EditableEpub` stores only bounded semantic metadata, chapters, safe text fragments, inert links and image resources. Python owns path/stream I/O through the existing `EditableDocument` lifecycle.
+
+The adapter escapes text/attributes and supplies bounded semantic XHTML bodies to rbook. Callers cannot provide raw XHTML, OPF, CSS, scripts, archive paths or arbitrary resource names.
+
 ## Deferred work
 
-Navigation links, images, semantic XHTML blocks/headings, CSS, media overlays, fixed-layout rendering, conversion, and authoring require separate upstream/API audits and acceptance criteria.
+Navigation beyond extracted hyperlinks, CSS, media overlays, fixed-layout pagination/rendering, conversion, and editing existing EPUB files require separate acceptance criteria.

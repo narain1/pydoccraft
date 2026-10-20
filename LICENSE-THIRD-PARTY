@@ -32,6 +32,7 @@ The resolved graph was reviewed for license declarations and compatibility. GPL-
 | `cc` | `1.9.0` | MIT OR Apache-2.0 |
 | `cfb` | `0.15.0` | MIT |
 | `cfg-if` | `1.0.5` | MIT OR Apache-2.0 |
+| `cfg_aliases` | `0.2.2` | MIT |
 | `chacha20` | `0.10.2` | MIT OR Apache-2.0 |
 | `chrono` | `0.4.45` | MIT OR Apache-2.0 |
 | `cipher` | `0.5.2` | MIT OR Apache-2.0 |
@@ -69,7 +70,7 @@ The resolved graph was reviewed for license declarations and compatibility. GPL-
 | `derive_arbitrary` | `1.5.0` | MIT OR Apache-2.0 |
 | `digest` | `0.11.3` | MIT OR Apache-2.0 |
 | `diplomat` | `0.16.1` | MIT OR Apache-2.0 |
-| `diplomat-runtime` | `0.16.0` | MIT OR Apache-2.0 |
+| `diplomat-runtime` | `0.16.1` | MIT OR Apache-2.0 |
 | `diplomat_core` | `0.16.1` | MIT OR Apache-2.0 |
 | `displaydoc` | `0.2.7` | MIT OR Apache-2.0 |
 | `ecb` | `0.2.1` | MIT OR Apache-2.0 |
@@ -146,6 +147,7 @@ The resolved graph was reviewed for license declarations and compatibility. GPL-
 | `miniz_oxide` | `0.9.1` | MIT OR Zlib OR Apache-2.0 |
 | `moxcms` | `0.8.1` | BSD-3-Clause OR Apache-2.0 |
 | `multiversion_no_op` | `1.0.0` | Apache-2.0 OR MIT |
+| `nix` | `0.31.3` | MIT |
 | `nom` | `8.0.0` | MIT |
 | `num-traits` | `0.2.19` | MIT OR Apache-2.0 |
 | `once_cell` | `1.21.4` | MIT OR Apache-2.0 |
@@ -166,6 +168,7 @@ The resolved graph was reviewed for license declarations and compatibility. GPL-
 | `pdfcraft-organize` | `0.9.0` | MIT OR Apache-2.0 |
 | `pdfcraft-render` | `0.9.0` | MIT OR Apache-2.0 |
 | `peniko` | `0.6.1` | Apache-2.0 OR MIT |
+| `percent-encoding` | `2.3.2` | MIT OR Apache-2.0 |
 | `phf` | `0.13.1` | MIT |
 | `phf_generator` | `0.13.1` | MIT |
 | `phf_macros` | `0.13.1` | MIT |
@@ -186,6 +189,7 @@ The resolved graph was reviewed for license declarations and compatibility. GPL-
 | `pyo3-macros-backend` | `0.23.5` | MIT OR Apache-2.0 |
 | `quick-error` | `2.0.1` | MIT/Apache-2.0 |
 | `quick-xml` | `0.41.0` | MIT |
+| `quick-xml` | `0.42.0` | MIT |
 | `quote` | `1.0.47` | MIT OR Apache-2.0 |
 | `r-efi` | `5.3.0` | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
 | `r-efi` | `6.0.0` | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
@@ -194,6 +198,7 @@ The resolved graph was reviewed for license declarations and compatibility. GPL-
 | `rangemap` | `1.8.0` | MIT/Apache-2.0 |
 | `rayon` | `1.12.0` | MIT OR Apache-2.0 |
 | `rayon-core` | `1.13.0` | MIT OR Apache-2.0 |
+| `rbook` | `0.7.12` | Apache-2.0 |
 | `read-fonts` | `0.39.2` | MIT OR Apache-2.0 |
 | `read-fonts` | `0.41.0` | MIT OR Apache-2.0 |
 | `read-fonts` | `0.43.3` | MIT OR Apache-2.0 |
@@ -237,6 +242,7 @@ The resolved graph was reviewed for license declarations and compatibility. GPL-
 | `tl` | `0.7.8` | MIT |
 | `tokio` | `1.54.0` | MIT |
 | `ttf-parser` | `0.25.1` | MIT OR Apache-2.0 |
+| `typed-path` | `0.12.4` | MIT OR Apache-2.0 |
 | `typenum` | `1.20.1` | MIT OR Apache-2.0 |
 | `unicode-bidi` | `0.3.18` | MIT OR Apache-2.0 |
 | `unicode-bidi-mirroring` | `0.4.0` | MIT/Apache-2.0 |
@@ -292,6 +298,7 @@ The resolved graph was reviewed for license declarations and compatibility. GPL-
 | `zeroize` | `1.9.1` | Apache-2.0 OR MIT |
 | `zip` | `2.2.2` | MIT |
 | `zip` | `3.0.0` | MIT |
+| `zip` | `9.0.5` | MIT |
 | `zlib-rs` | `0.6.8` | Zlib |
 | `zmij` | `1.0.23` | MIT |
 | `zopfli` | `0.8.4` | Apache-2.0 |
