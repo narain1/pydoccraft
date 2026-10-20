@@ -164,13 +164,15 @@ Block(
 
 Known block kinds are `paragraph`, `heading`, `table`, `notes`, and `comment`.
 
+DOCX numbered paragraphs carry `metadata["numbering"]` with native `num_id`, nullable `abstract_id`, zero-based `level`, nullable OOXML `format` and parsed `template`. An optional `label` contains the logical native layout label when one unambiguous placement is available. Labels are separate from paragraph text and link offsets; repeated headers with differing labels omit `label`. See [numbering extraction](numbering-extraction.md) for source normalization and page/story limitations.
+
 ### `Link`
 
 ```python
 Link(uri, text="", bbox=None, page=None, metadata={})
 ```
 
-`metadata` can contain exact `start` and `end` character offsets for DOCX and PPTX links. PDF URI links currently have geometry but generally no recovered label.
+`metadata` can contain exact Unicode-character `start` and `end` offsets. PDF labels are recovered only when native geometry is unambiguous. Resolved PPTX slide links use `uri="#page=N"` with one-based N and zero-based `metadata["target_page"]`; `link.page` remains the source page. Hidden slides count in normal presentation order. Shape actions retain `metadata["shape"]=True` and do not invent text offsets.
 
 ### `Image`
 
