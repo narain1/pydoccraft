@@ -9,6 +9,7 @@ import json
 import statistics
 import struct
 import time
+from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable
@@ -114,6 +115,16 @@ def run(directory: Path, warmups: int, repeats: int, dpi: int, output: Path | No
             dimensions = png_summary(probe[0].get_pixmap(dpi=dpi, alpha=True).tobytes("png"))
         validate_text = lambda value: text_summary(value, pages)
         validate_png = lambda value: png_summary(value, dimensions)
+
+        ours_text = pydoc_text(data)
+        theirs_text = pymupdf_text(data)
+        ours_tokens = Counter(ours_text.split())
+        theirs_tokens = Counter(theirs_text.split())
+        overlap = sum((ours_tokens & theirs_tokens).values()) / max(
+            sum(ours_tokens.values()), sum(theirs_tokens.values()), 1
+        )
+        if overlap < 0.95:
+            raise RuntimeError("libraries returned less than 95% token overlap")
 
         add(results, identifier, pages, len(data), "all-page plain text", "pydoccraft", measure(lambda: pydoc_text(data), validate_text, warmups, repeats))
         add(results, identifier, pages, len(data), "all-page plain text", "PyMuPDF", measure(lambda: pymupdf_text(data), validate_text, warmups, repeats))
