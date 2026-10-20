@@ -146,6 +146,9 @@ On a Linux ARM64 release wheel built from the feature branch, repeated page-1 re
 
 This is parser-session reuse, not raster-result caching. It improves repeated renders but does not change the eager `open()` cost documented above. A smaller interim improvement is a bounded direct-render or selected-page extraction entry point that avoids mandatory whole-document normalization.
 
+An independent selective-text feature branch adds `extract_text(..., pages=...)` without changing eager `open()`. On anonymous Linux ARM64 release-wheel runs, all-page PDF text improved by 1.95×–4.95× over eager open, while selecting only page 1 improved by 19.91×–42.32×. The fast path uses PdfCraft text extraction but skips table/image traversal, media transfer, JSON, and public-model hydration. It retains ordered/duplicate selections, negative indexes, a 10,000-selection limit, and a 64 MiB output limit.
+
+
 ## API and performance rough edges
 
 ### 1. Rendering repeats document work
