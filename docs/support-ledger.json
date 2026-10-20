@@ -1,0 +1,1359 @@
+{
+  "schema_version": 1,
+  "audited_commit": "5236ab12c9e136a8abbc675331370e6fbfd3ac99",
+  "references": {
+    "pdfcraft": {
+      "revision": "645016addcfb9078c557f0189559ab47cdcee057",
+      "kind": "engine",
+      "repository": "https://github.com/storytold/pdfcraft"
+    },
+    "wordcraft": {
+      "revision": "f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22",
+      "kind": "engine",
+      "repository": "https://github.com/storytold/wordcraft"
+    },
+    "deckcraft": {
+      "revision": "22db9261f9d1a214c296fd390173130c45d76d66",
+      "kind": "engine",
+      "repository": "https://github.com/storytold/deckcraft"
+    },
+    "craft-libs": {
+      "revision": "c3487320b2d1de657b860b3c8abb44e1f2b32bd8",
+      "kind": "engine",
+      "repository": "https://github.com/storytold/craft-libs"
+    },
+    "openxml-sdk": {
+      "revision": "3139fdfd27414548a41555f7848d5728f6e71a42",
+      "version": "v3.5.1",
+      "kind": "external",
+      "source": "docs/authoring-api-design.md"
+    },
+    "cookbook-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#2026-10-20-executable-cookbook-and-api10-usability",
+      "wheel_sha256": "2dc178192188236205942e96991bc790cf35e31c2167bebeae1663ea2bb6f0ac",
+      "kind": "artifact",
+      "source_commit": "f713bb191781ae18226f25d2f98f8e08c7db5cf6",
+      "date": "2026-10-20"
+    }
+  },
+  "test_sources": {
+    "tests/test_docx_metadata.py": "4b39224ca5d51ccf8c80c62225ed3232aacc26b691efba5ac6164a6302966b21",
+    "tests/test_field_geometry.py": "3026e1e4f98c56c311f24c76aac8b19e42440a5a38bb6f8fb5da4bdb7e1173c8",
+    "tests/test_imported_properties.py": "5c9124db6f5b7e1d23e0986684bd904e71b7a2b8ff8404ab9c1fbcd1202c3954",
+    "tests/test_pdf_fields.py": "5298a96956cafac4e90911bbd3ec94a2f6149ef2d09a8c26c18bb506a09f4ea5",
+    "tests/test_pdf_outline_import.py": "50c265c647416f2b53b3bf4a7228b11ce09b3292810f5f1f30b66a2758ed1d64",
+    "tests/test_render_clipping.py": "367107aecedb72184ee304cd673dc0d2498c1041e9f85d459ab0be14d6ff914a",
+    "tests/test_slide_layouts.py": "365028483efdb274afb6b4efc4b3ca8e51a169c879e47f2263b2a435271562f2"
+  },
+  "profiles": [
+    {
+      "id": "pdf.region",
+      "format": "pdf",
+      "scope": "PNG rendering of a page-view rectangle; not content-stream clipping.",
+      "public_members": [
+        "open(...).render_page(..., clip=...)",
+        "open(...)[0].get_pixmap(..., clip=...)"
+      ],
+      "native_sources": {
+        "raster": {
+          "reference": "pdfcraft",
+          "path": "crates/render/src/raster.rs",
+          "symbols": [
+            "PageRenderer",
+            "RenderRequest"
+          ]
+        }
+      },
+      "operations": {
+        "read": {
+          "status": "not_applicable",
+          "scope": "This row evaluates region rendering, not document mutation, extraction or format conversion."
+        },
+        "create": {
+          "status": "not_applicable",
+          "scope": "This row evaluates region rendering, not document mutation, extraction or format conversion."
+        },
+        "edit_authored": {
+          "status": "not_applicable",
+          "scope": "This row evaluates region rendering, not document mutation, extraction or format conversion."
+        },
+        "edit_imported": {
+          "status": "not_applicable",
+          "scope": "This row evaluates region rendering, not document mutation, extraction or format conversion."
+        },
+        "preserve": {
+          "status": "not_applicable",
+          "scope": "This row evaluates region rendering, not document mutation, extraction or format conversion."
+        },
+        "render": {
+          "status": "verified",
+          "scope": "Display-space rectangles honor CropBox, rotations and UserUnit; finite/positive/intersection/resource checks. Tested tolerances are fixture-specific, not universal pixel identity.",
+          "tests": [
+            "tests/test_render_clipping.py::RenderClippingTests.test_pdf_clips_follow_crop_user_units_and_all_rotations",
+            "tests/test_render_clipping.py::RenderClippingTests.test_invalid_empty_and_oversized_clips_fail_explicitly"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "raster"
+          ]
+        },
+        "export": {
+          "status": "not_applicable",
+          "scope": "This row evaluates region rendering, not document mutation, extraction or format conversion."
+        }
+      },
+      "adapter_sources": {
+        "rust/src/pdf.rs": [
+          "render_region",
+          "RenderRequest"
+        ],
+        "rust/src/rendering.rs": [
+          "Clip"
+        ]
+      },
+      "fixture_provenance": "Synthetic small PDFs built in test_render_clipping.py with native authoring; explicit CropBox/Rotate/UserUnit dictionaries in the test exercise geometry. PNG samples are decoded by the local test helper, with narrow fixture-specific rounding tolerances. No third-party PDF corpus is implied."
+    },
+    {
+      "id": "word.properties",
+      "format": "docx",
+      "scope": "Strict scalar custom properties, separate from core/extended metadata.",
+      "public_members": [
+        "open(...).metadata[\"custom\"]",
+        "new(\"docx\").update_metadata(custom=...)"
+      ],
+      "native_sources": {
+        "model": {
+          "reference": "wordcraft",
+          "path": "crates/doc/src/lib.rs",
+          "symbols": [
+            "CustomProp",
+            "Document::custom_props"
+          ]
+        },
+        "read": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/lib.rs",
+          "symbols": [
+            "read_with_password"
+          ]
+        },
+        "write": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/write/mod.rs",
+          "symbols": [
+            "write"
+          ]
+        }
+      },
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "lpwstr, bool, i8 and finite r8 only; 1024 entries / 64 KiB value / 256 KiB raw aggregate. ASCII-ambiguous names all omitted. Native malformed-part drops and source caps prevent a complete source inventory.",
+          "tests": [
+            "tests/test_imported_properties.py::ImportedPropertyTests.test_authored_scalar_metadata_roundtrips_and_survives_close",
+            "tests/test_imported_properties.py::ImportedPropertyTests.test_native_malformed_part_and_source_entry_drops_remain_explicit_limitations"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "model",
+            "read"
+          ]
+        },
+        "create": {
+          "status": "verified",
+          "scope": "Four supported Python scalar types round-trip through native DOCX serialization.",
+          "tests": [
+            "tests/test_docx_metadata.py::DocxMetadataTests.test_core_and_scalar_custom_properties_serialize_without_changing_content"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "model",
+            "write",
+            "read"
+          ]
+        },
+        "edit_authored": {
+          "status": "verified",
+          "scope": "Owned metadata batches support update/clear and atomic rejection; this does not preserve arbitrary unsupported source variants.",
+          "tests": [
+            "tests/test_docx_metadata.py::DocxMetadataTests.test_core_and_scalar_custom_properties_serialize_without_changing_content",
+            "tests/test_docx_metadata.py::DocxMetadataTests.test_snapshots_copy_case_updates_and_clear_have_independent_ownership"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "model",
+            "write",
+            "read"
+          ]
+        },
+        "edit_imported": {
+          "status": "unsupported",
+          "scope": "Imported DOCX editing is not exposed by the current conservative edit profile."
+        },
+        "preserve": {
+          "status": "unassessed",
+          "scope": "Arbitrary source custom-property parts, unsupported variants and raw package identity are not covered by authored round-trip tests."
+        },
+        "render": {
+          "status": "not_applicable",
+          "scope": "Custom properties are nonvisible metadata."
+        },
+        "export": {
+          "status": "not_applicable",
+          "scope": "This row does not promise a PDF mapping for DOCX custom properties."
+        }
+      },
+      "adapter_sources": {
+        "rust/src/docx.rs": [
+          "custom_scalar",
+          "validate_custom_properties"
+        ],
+        "rust/src/author_docx.rs": [
+          "custom_metadata",
+          "update_metadata"
+        ]
+      },
+      "fixture_provenance": "Synthetic DOCX built by the public authoring API; test_imported_properties.py replaces the custom property ZIP part with explicit scalar, malformed, duplicate and oversized XML fixtures. Source patches are test-only, not a runtime parser/writer."
+    },
+    {
+      "id": "word.table-alternative-text",
+      "format": "docx",
+      "scope": "Native table caption/description projected as metadata; absent differs from empty.",
+      "public_members": [
+        "open(...)[0].find_tables()[0].metadata",
+        "new(\"docx\").add_table(...).format(title=..., description=...)"
+      ],
+      "native_sources": {
+        "model": {
+          "reference": "wordcraft",
+          "path": "crates/doc/src/props.rs",
+          "symbols": [
+            "TableProps::caption",
+            "TableProps::description"
+          ]
+        },
+        "read": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/lib.rs",
+          "symbols": [
+            "read_with_password"
+          ]
+        },
+        "write": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/write/mod.rs",
+          "symbols": [
+            "write"
+          ]
+        }
+      },
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "Retained native title/description is exposed at each table depth without adding visible text. Native reader caps each alternative text at 10000 characters.",
+          "tests": [
+            "tests/test_imported_properties.py::ImportedPropertyTests.test_table_titles_descriptions_are_owned_nonvisible_metadata_at_each_depth",
+            "tests/test_imported_properties.py::ImportedPropertyTests.test_native_table_alt_limit_exposes_only_retained_prefix"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "model",
+            "read"
+          ]
+        },
+        "create": {
+          "status": "verified",
+          "scope": "Authored title/description serialize and read back for the tested bounded profile.",
+          "tests": [
+            "tests/test_imported_properties.py::ImportedPropertyTests.test_table_titles_descriptions_are_owned_nonvisible_metadata_at_each_depth"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "model",
+            "write",
+            "read"
+          ]
+        },
+        "edit_authored": {
+          "status": "verified",
+          "scope": "Existing table.format sets title and description; no additional metadata manager.",
+          "tests": [
+            "tests/test_imported_properties.py::ImportedPropertyTests.test_table_titles_descriptions_are_owned_nonvisible_metadata_at_each_depth"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "model",
+            "write",
+            "read"
+          ]
+        },
+        "edit_imported": {
+          "status": "unsupported",
+          "scope": "Imported DOCX edit profile remains unavailable."
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Absent/empty and retained authored values survive serialization. Source values beyond the native cap are not preserved.",
+          "tests": [
+            "tests/test_imported_properties.py::ImportedPropertyTests.test_table_titles_descriptions_are_owned_nonvisible_metadata_at_each_depth",
+            "tests/test_imported_properties.py::ImportedPropertyTests.test_native_table_alt_limit_exposes_only_retained_prefix"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "model",
+            "write",
+            "read"
+          ]
+        },
+        "render": {
+          "status": "not_applicable",
+          "scope": "Alternative text is nonvisible metadata."
+        },
+        "export": {
+          "status": "unassessed",
+          "scope": "No evidence here establishes PDF accessibility tags or an alternate-text conversion mapping."
+        }
+      },
+      "adapter_sources": {
+        "rust/src/docx.rs": [
+          "caption",
+          "description"
+        ],
+        "rust/src/author_docx.rs": [
+          "caption",
+          "description"
+        ]
+      },
+      "fixture_provenance": "Synthetic authored outer/nested tables plus the local test_docx_stories.py story fixture; the native cap regression patches an authored tblCaption to 10001 Omega characters. Empty and absent values are asserted separately."
+    },
+    {
+      "id": "pdf.page-assembly",
+      "format": "pdf",
+      "scope": "Page insertion/selection and optional outline-preserving imports within the conservative editable source profile.",
+      "public_members": [
+        "new(\"pdf\").pages.insert(..., outline_title=...)",
+        "new(\"pdf\").copy(pages=...)"
+      ],
+      "native_sources": {
+        "organize": {
+          "reference": "pdfcraft",
+          "path": "crates/organize/src/import.rs",
+          "symbols": [
+            "insert_file_pages",
+            "FieldConflicts::Rename",
+            "extract_pages"
+          ]
+        },
+        "raster": {
+          "reference": "pdfcraft",
+          "path": "crates/render/src/raster.rs",
+          "symbols": [
+            "PageRenderer",
+            "RenderRequest"
+          ]
+        }
+      },
+      "operations": {
+        "read": {
+          "status": "verified",
+          "scope": "Resulting page order, selected text and supported links/outlines reopen as expected.",
+          "tests": [
+            "tests/test_pdf_outline_import.py::PdfOutlineImportTests.test_native_import_preserves_nested_outlines_and_destinations",
+            "tests/test_pdf_outline_import.py::PdfOutlineImportTests.test_subset_reorder_delete_preserve_links_and_rendered_content"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "organize"
+          ]
+        },
+        "create": {
+          "status": "verified",
+          "scope": "Assemble selected source pages and serialize a new PDF.",
+          "tests": [
+            "tests/test_pdf_outline_import.py::PdfOutlineImportTests.test_subset_reorder_delete_preserve_links_and_rendered_content"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "organize"
+          ]
+        },
+        "edit_authored": {
+          "status": "verified",
+          "scope": "Reorder/delete selected pages using native operations; outline and link assertions cover tested targets.",
+          "tests": [
+            "tests/test_pdf_outline_import.py::PdfOutlineImportTests.test_subset_reorder_delete_preserve_links_and_rendered_content"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "organize"
+          ]
+        },
+        "edit_imported": {
+          "status": "partial",
+          "scope": "Conservative readable source profile only; encrypted/imported AcroForm sources and incomplete outline inventories are explicitly rejected.",
+          "tests": [
+            "tests/test_pdf_outline_import.py::PdfOutlineImportTests.test_optional_outline_policy_and_failed_import_are_atomic"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "organize"
+          ]
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Tested page content, links and selected outline destinations survive. Optional outline import can omit destinations outside the selection; document-wide tags/metadata are not implied.",
+          "tests": [
+            "tests/test_pdf_outline_import.py::PdfOutlineImportTests.test_native_import_preserves_nested_outlines_and_destinations",
+            "tests/test_pdf_outline_import.py::PdfOutlineImportTests.test_subset_reorder_delete_preserve_links_and_rendered_content"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "organize"
+          ]
+        },
+        "render": {
+          "status": "verified",
+          "scope": "Tested imported/reordered page content renders after serialization.",
+          "tests": [
+            "tests/test_pdf_outline_import.py::PdfOutlineImportTests.test_subset_reorder_delete_preserve_links_and_rendered_content"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "raster"
+          ]
+        },
+        "export": {
+          "status": "not_applicable",
+          "scope": "Native PDF serialization is part of create/edit; this profile makes no PDF-to-DOCX conversion claim."
+        }
+      },
+      "adapter_sources": {
+        "rust/src/author_pdf.rs": [
+          "import_pages",
+          "insert_file_pages",
+          "extract_pages"
+        ]
+      },
+      "fixture_provenance": "Synthetic PDFs authored within test_pdf_outline_import.py with numbered text, nested bookmarks, internal and URI links; no external source assets. Tests explicitly select duplicate/out-of-order pages and reopen the serialized result."
+    },
+    {
+      "id": "pdf.owned-fields",
+      "format": "pdf",
+      "scope": "Owned single-widget text/checkbox/choice fields with fixed appearances; no radio/script/multiline profile.",
+      "public_members": [
+        "new(\"pdf\").pages[0].fields.add(...)",
+        "field.value",
+        "field.box",
+        "pdf.fields.flatten()"
+      ],
+      "native_sources": {
+        "author": {
+          "reference": "pdfcraft",
+          "path": "crates/forms/src/author.rs",
+          "symbols": [
+            "NewField",
+            "add_field",
+            "set_props",
+            "delete_field"
+          ]
+        },
+        "inspect": {
+          "reference": "pdfcraft",
+          "path": "crates/forms/src/lib.rs",
+          "symbols": [
+            "fields_with_adopted",
+            "set_value"
+          ]
+        },
+        "flatten": {
+          "reference": "pdfcraft",
+          "path": "crates/edit/src/flatten.rs",
+          "symbols": [
+            "flatten"
+          ]
+        },
+        "raster": {
+          "reference": "pdfcraft",
+          "path": "crates/render/src/raster.rs",
+          "symbols": [
+            "PageRenderer",
+            "RenderRequest"
+          ]
+        }
+      },
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "Owned field handles expose bounded values/options and current-view geometry. This is not imported AcroForm extraction.",
+          "tests": [
+            "tests/test_pdf_fields.py::PdfFieldTests.test_owned_forms_render_copy_and_flatten",
+            "tests/test_field_geometry.py::FieldGeometryTests.test_rotated_cropped_userunit_pages_use_display_coordinates"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "author",
+            "inspect",
+            "flatten"
+          ]
+        },
+        "create": {
+          "status": "verified",
+          "scope": "Create the supported text/checkbox/choice kinds with validated options and fixed-size appearance fit. The adapter separately caps the owned model at 1000 fields; these fixtures do not exhaust that limit.",
+          "tests": [
+            "tests/test_pdf_fields.py::PdfFieldTests.test_owned_forms_render_copy_and_flatten"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "author",
+            "inspect",
+            "flatten"
+          ]
+        },
+        "edit_authored": {
+          "status": "verified",
+          "scope": "Fill, resize/move, delete and flatten the supported owned profile atomically; preserve widget orientation when pages rotate.",
+          "tests": [
+            "tests/test_pdf_fields.py::PdfFieldTests.test_owned_forms_render_copy_and_flatten",
+            "tests/test_field_geometry.py::FieldGeometryTests.test_rotated_cropped_userunit_pages_use_display_coordinates"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "author",
+            "inspect",
+            "flatten"
+          ]
+        },
+        "edit_imported": {
+          "status": "unsupported",
+          "scope": "Current adapter rejects imported AcroForms. U10 documents the bounded-inventory constraint; complete enumeration call-path evidence is still required before migrating this to a blocked_upstream cell."
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Owned copies/page organization retain tested values/widgets. This does not establish arbitrary field-dictionary or imported form preservation.",
+          "tests": [
+            "tests/test_pdf_fields.py::PdfFieldTests.test_owned_forms_render_copy_and_flatten",
+            "tests/test_pdf_fields.py::PdfFieldTests.test_fields_follow_page_organization"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "author",
+            "inspect",
+            "flatten"
+          ]
+        },
+        "render": {
+          "status": "verified",
+          "scope": "Visible text/checkbox/choice appearances and tested flattening render as expected, including rotated/cropped/UserUnit geometry.",
+          "tests": [
+            "tests/test_pdf_fields.py::PdfFieldTests.test_owned_forms_render_copy_and_flatten",
+            "tests/test_field_geometry.py::FieldGeometryTests.test_rotated_cropped_userunit_pages_use_display_coordinates"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "raster"
+          ]
+        },
+        "export": {
+          "status": "unsupported",
+          "scope": "PDF-to-DOCX conversion rejects active forms; native PDF save and flatten are different operations."
+        }
+      },
+      "adapter_sources": {
+        "rust/src/author_pdf.rs": [
+          "checked_owned_fields",
+          "add_field",
+          "set_field_box",
+          "flatten_fields"
+        ]
+      },
+      "fixture_provenance": "Synthetic PDFs authored in test_pdf_fields.py and test_field_geometry.py; the latter uses local PDF geometry fixtures with rotation/CropBox/UserUnit. Assertions inspect actual PNG pixels, metadata, owned copy independence and flattening results."
+    },
+    {
+      "id": "slides.layouts",
+      "format": "pptx",
+      "scope": "Authored blank/title/title_and_content/two_content layouts and inherited placeholders.",
+      "public_members": [
+        "new(\"pptx\").slides.add(layout=...)",
+        "shape.placeholder",
+        "shape.box",
+        "shape.rotation"
+      ],
+      "native_sources": {
+        "defaults": {
+          "reference": "deckcraft",
+          "path": "crates/model/src/defaults.rs",
+          "symbols": [
+            "layout_of_kind",
+            "new_slide"
+          ]
+        },
+        "resolve": {
+          "reference": "deckcraft",
+          "path": "crates/model/src/resolve.rs",
+          "symbols": [
+            "Ctx::for_slide",
+            "xfrm"
+          ]
+        },
+        "serialize": {
+          "reference": "deckcraft",
+          "path": "crates/pptx/src/lib.rs",
+          "symbols": [
+            "import",
+            "export"
+          ]
+        },
+        "render": {
+          "reference": "deckcraft",
+          "path": "crates/render/src/lib.rs",
+          "symbols": [
+            "render_slide"
+          ]
+        },
+        "pdf": {
+          "reference": "deckcraft",
+          "path": "crates/pdf/src/lib.rs",
+          "symbols": [
+            "export"
+          ]
+        }
+      },
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "Extract rendered slide content and inspect roles on authored shape handles; no imported editable layout inventory.",
+          "tests": [
+            "tests/test_slide_layouts.py::SlideLayoutTests.test_layout_placeholders_render_and_preserve_inheritance_in_pptx_and_pdf"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "serialize"
+          ]
+        },
+        "create": {
+          "status": "verified",
+          "scope": "Four verified native default layouts allocate fresh identities and serialize.",
+          "tests": [
+            "tests/test_slide_layouts.py::SlideLayoutTests.test_layout_placeholders_render_and_preserve_inheritance_in_pptx_and_pdf",
+            "tests/test_slide_layouts.py::SlideLayoutTests.test_blank_compatibility_invalid_layout_atomicity_and_handle_identity"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "defaults",
+            "resolve",
+            "serialize"
+          ]
+        },
+        "edit_authored": {
+          "status": "partial",
+          "scope": "Placeholder text/box/rotation changes are supported; layout reassignment and arbitrary theme/master editing are not claimed.",
+          "tests": [
+            "tests/test_slide_layouts.py::SlideLayoutTests.test_explicit_geometry_changes_preserve_other_placeholders_and_master_parts"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "defaults",
+            "resolve",
+            "serialize"
+          ]
+        },
+        "edit_imported": {
+          "status": "unsupported",
+          "scope": "Imported PPTX editing is outside the current editable profile."
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Untouched authored placeholder transforms/master references remain inherited during tested neighboring edits. General source theme/package preservation is unassessed.",
+          "tests": [
+            "tests/test_slide_layouts.py::SlideLayoutTests.test_explicit_geometry_changes_preserve_other_placeholders_and_master_parts"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "defaults",
+            "resolve",
+            "serialize"
+          ]
+        },
+        "render": {
+          "status": "verified",
+          "scope": "Actual placeholder content renders for all four tested layouts.",
+          "tests": [
+            "tests/test_slide_layouts.py::SlideLayoutTests.test_layout_placeholders_render_and_preserve_inheritance_in_pptx_and_pdf",
+            "tests/test_slide_layouts.py::SlideLayoutTests.test_blank_compatibility_invalid_layout_atomicity_and_handle_identity"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "render"
+          ]
+        },
+        "export": {
+          "status": "verified",
+          "scope": "PPTX-to-PDF fixture content reopens and renders; no pixel-perfect Office equivalence is claimed.",
+          "tests": [
+            "tests/test_slide_layouts.py::SlideLayoutTests.test_layout_placeholders_render_and_preserve_inheritance_in_pptx_and_pdf"
+          ],
+          "artifact": "cookbook-2026-10-20",
+          "native": [
+            "pdf",
+            "serialize"
+          ]
+        }
+      },
+      "adapter_sources": {
+        "rust/src/author_pptx.rs": [
+          "add_slide",
+          "shape_placeholder"
+        ],
+        "rust/src/pptx.rs": [
+          "render_slide"
+        ]
+      },
+      "fixture_provenance": "Synthetic DeckCraft default layouts reached through public Python authoring; tests fill every placeholder and inspect the authored PPTX ZIP parts. They reopen PPTX and exported PDF and inspect actual label text/PNG pixels; this is not independent PowerPoint validation."
+    },
+    {
+      "id": "pdf.vertical-redaction",
+      "format": "pdf",
+      "scope": "Secure removal of vertical-writing text beneath a redaction mark; no public package redaction API currently.",
+      "public_members": [],
+      "native_sources": {
+        "constraint": {
+          "reference": "pdfcraft",
+          "path": "crates/redact/src/lib.rs",
+          "symbols": [
+            "RedactError::VerticalText",
+            "apply"
+          ]
+        },
+        "reproducer": {
+          "reference": "pdfcraft",
+          "path": "crates/redact/src/tests.rs",
+          "symbols": [
+            "vertical_writing_text_under_a_mark_fails_closed"
+          ]
+        }
+      },
+      "operations": {
+        "read": {
+          "status": "not_applicable",
+          "scope": "This profile concerns removal, not extraction of vertical text."
+        },
+        "create": {
+          "status": "unsupported",
+          "scope": "No current public redaction creation API."
+        },
+        "edit_authored": {
+          "status": "blocked_upstream",
+          "scope": "Native application explicitly fails closed for vertical-writing text; implementing the general removal guarantee requires upstream geometry work.",
+          "blocker": {
+            "id": "U10",
+            "register": "docs/upstream-roadmap.md",
+            "native": [
+              "constraint",
+              "reproducer"
+            ]
+          }
+        },
+        "edit_imported": {
+          "status": "blocked_upstream",
+          "scope": "Same vertical-writing removal limitation; presence of the native redaction crate does not establish this operation.",
+          "blocker": {
+            "id": "U10",
+            "register": "docs/upstream-roadmap.md",
+            "native": [
+              "constraint",
+              "reproducer"
+            ]
+          }
+        },
+        "preserve": {
+          "status": "unassessed",
+          "scope": "No package redaction operation or preservation corpus exists for this profile."
+        },
+        "render": {
+          "status": "not_applicable",
+          "scope": "An opaque overlay is not evidence that underlying content was removed."
+        },
+        "export": {
+          "status": "not_applicable",
+          "scope": "A format conversion is not a secure-redaction guarantee."
+        }
+      },
+      "adapter_sources": {},
+      "fixture_provenance": "No local package fixture because the operation is absent. Native source fixture crates/redact/src/tests.rs::vertical_writing_text_under_a_mark_fails_closed constructs the failure case; inspected at the pinned revision, not rerun by this ledger validation."
+    }
+  ],
+  "coverage": {
+    "R1": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "R2": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "R3": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "R4": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "C1": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "C2": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "C3": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "C4": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "C5": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "E1": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "E2": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "E3": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "E4": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "E5": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "E6": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "P1": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "P2": {
+      "profiles": [
+        "pdf.region"
+      ],
+      "remaining": "Unassessed: acceptance scope beyond linked profiles."
+    },
+    "P3": {
+      "profiles": [
+        "pdf.page-assembly"
+      ],
+      "remaining": "Unassessed: acceptance scope beyond linked profiles."
+    },
+    "P4": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "API1": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "API2": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "API3": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "API4": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "API5": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "API6": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "API7": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "API8": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "API9": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "API10": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "DOC1": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "DOC2": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "DOC3": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "DOC4": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "DOC5": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "DOC6": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "DOC7": {
+      "profiles": [
+        "word.properties"
+      ],
+      "remaining": "Unassessed: acceptance scope beyond linked profiles."
+    },
+    "DOC8": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "TXT1": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "TXT2": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "TXT3": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "TXT4": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "TXT5": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "TXT6": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "TXT7": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "TXT8": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "STY1": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "STY2": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "STY3": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "STY4": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "STY5": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "STY6": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "TBL1": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "TBL2": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "TBL3": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "TBL4": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "TBL5": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "TBL6": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "TBL7": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "TBL8": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "TBL9": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "TBL10": {
+      "profiles": [
+        "word.table-alternative-text"
+      ],
+      "remaining": "Unassessed: acceptance scope beyond linked profiles."
+    },
+    "TBL11": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "TBL12": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "BG1": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "BG2": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "BG3": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "BG4": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "BG5": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "BG6": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "BG7": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "BG8": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "LAY1": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "LAY2": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "LAY3": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "LAY4": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "LAY5": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "LAY6": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "LAY7": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "LAY8": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "LAY9": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "LAY10": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "MED1": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "MED2": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "MED3": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "MED4": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "MED5": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "MED6": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "MED7": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "MED8": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "REF1": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "REF2": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "REF3": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "REF4": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "REF5": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "REF6": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "REF7": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "REF8": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "FORM1": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "FORM2": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "FORM3": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "FORM4": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "FORM5": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "FORM6": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "REV1": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "REV2": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "REV3": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "REV4": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "REV5": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "REV6": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "PKG1": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "PKG2": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "PKG3": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "PKG4": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "PKG5": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "PKG6": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "PKG7": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "PKG8": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "PDF1": {
+      "profiles": [
+        "pdf.page-assembly"
+      ],
+      "remaining": "Unassessed: acceptance scope beyond linked profiles."
+    },
+    "PDF2": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "PDF3": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "PDF4": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "PDF5": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "PDF6": {
+      "profiles": [
+        "pdf.owned-fields"
+      ],
+      "remaining": "Unassessed: acceptance scope beyond linked profiles."
+    },
+    "PDF7": {
+      "profiles": [
+        "pdf.vertical-redaction"
+      ],
+      "remaining": "Unassessed: acceptance scope beyond linked profiles."
+    },
+    "PDF8": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "SLIDE1": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "SLIDE2": {
+      "profiles": [
+        "slides.layouts"
+      ],
+      "remaining": "Unassessed: acceptance scope beyond linked profiles."
+    },
+    "SLIDE3": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "SLIDE4": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "SLIDE5": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "SLIDE6": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "QA1": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "QA2": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "QA3": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "QA4": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "QA5": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "QA6": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "QA7": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    },
+    "QA8": {
+      "profiles": [],
+      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+    }
+  }
+}
