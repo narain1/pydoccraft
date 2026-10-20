@@ -141,3 +141,33 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Recover unambiguous multiline PDF labels with bounded native provenance, exact offsets and neighboring-link remapping.
 - [x] Validate installed-wheel conditional-style rendering/export, multiline links, full regression corpus and locked artifact; record evidence (128 Rust, 138 Python tests).
 - [ ] Complete remaining theme/next-linked style semantics and upstream table fidelity gaps without adding redundant API abstractions.
+
+## Native region rendering and DOCX tabs/breaks
+
+- [x] Add optional native clip rendering through existing PNG methods for PDF/DOCX/PPTX with geometry, limits and DPI tests.
+- [x] Add bounded DOCX paragraph/style tab stops and explicit line/page/column insertion through existing formatting/ranges; reject verified native decimal/bar failures.
+- [x] Verify native placement, inheritance/clear semantics, invalid-edit rollback, full corpus and installed-wheel artifact: 137 Rust and 153 Python tests.
+- [x] Promote already-locked kurbo 0.13.1 for the public WordCraft region transform; regenerate/review license inventories, unchanged at 264 packages, and retain all upstream revisions.
+- [ ] Complete upstream transparency/background, decimal/bar-tab and other fidelity gaps separately; no silent approximation.
+
+- [x] Complete LAY9 warmed-cache repagination acceptance and audit merged TBL3/TBL5/STY4/PDF5 coverage; retain documented scope and remaining pagination fixtures.
+
+## Style relationships and document defaults
+
+- [x] Add native next/linked relations through existing Style handles with reciprocal updates and distinct inheritance rules.
+- [x] Add direct document defaults and bounded patches through Styles, preserving native resolution and validating affected geometry/tabs.
+- [x] Verify native DOCX roundtrip, visible inherited/default overrides, atomic failures and installed-wheel corpus; record artifact evidence (143 Rust, 157 installed-wheel Python tests).
+- [ ] Retain upstream automatic Enter-style/default-kind fallback gaps and remaining theme/import criteria without adding editor machinery.
+
+## PDF drawing resource preservation
+
+- [x] Guard all drawing entry points against incompatible existing resource replacement, including inherited bindings.
+- [x] Verify native collision reproductions, atomic rollback, unchanged original pixels and bounded matching checks.
+- [x] Promote the already-locked model crate, review regenerated license inventories and record locked installed-wheel validation.
+
+## DOCX pagination acceptance and overflow
+
+- [x] Complete LAY5 actual-pagination acceptance and fitting/splittable cell continuation fixtures.
+- [x] Reject verified oversized unmerged unsplittable-row output through native placed-cell bounds before serialization.
+- [x] Validate recovery, later style/content/page changes, existing save destinations, intentional clipping, merges and full installed-wheel corpus; record artifact evidence.
+- [ ] Keep complete merged-row overflow and native allocation budgets tracked upstream; TBL6 remains open.

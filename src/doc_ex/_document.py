@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+from numbers import Real
 from typing import Any, Callable, Iterator
 
 from .errors import DocumentClosedError, MalformedDocumentError, UnsafeArchiveError
@@ -15,6 +17,19 @@ _MEDIA_EXTENSIONS = {
     "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
     "image/webp": "webp", "image/tiff": "tiff", "image/bmp": "bmp",
 }
+
+
+def _render_clip(value) -> tuple[float, float, float, float] | None:
+    if value is None:
+        return None
+    if not isinstance(value, (tuple, list)) or len(value) != 4:
+        raise TypeError("clip must be (x, y, width, height) in points")
+    if any(isinstance(item, bool) or not isinstance(item, Real) for item in value):
+        raise TypeError("clip coordinates must be real numbers")
+    result = tuple(float(item) for item in value)
+    if any(not math.isfinite(item) for item in result) or result[2] <= 0 or result[3] <= 0:
+        raise ValueError("clip must have finite coordinates and positive dimensions")
+    return result
 
 
 def _markdown_alt(text: str) -> str:
@@ -132,10 +147,10 @@ class Page:
         self.metadata = metadata or {}
         self._document: Document | None = None
 
-    def get_pixmap(self, dpi: float = 144) -> bytes:
+    def get_pixmap(self, dpi: float = 144, *, clip: tuple[float, float, float, float] | None = None) -> bytes:
         if self._document is None:
             raise ValueError("page is not attached to a document")
-        return self._document.render_page(self.number, dpi)
+        return self._document.render_page(self.number, dpi, clip=clip)
 
     def get_text(self, option: str = "text") -> str | dict[str, Any]:
         if option == "text":
@@ -247,13 +262,14 @@ class Page:
 
 
 class Document:
-    def __init__(self, pages: list[Page], metadata: dict[str, Any], source: bytes, filetype: str, password: str | None, *, stories: list[Story] | None = None) -> None:
+    def __init__(self, pages: list[Page], metadata: dict[str, Any], source: bytes, filetype: str, password: str | None, *, stories: list[Story] | None = None, _render_session=None) -> None:
         self._pages = pages
         self.metadata = metadata
         self.stories = list(stories or [])
         self._source = source
         self._filetype = filetype
         self._password = password
+        self._render_session = _render_session
         self._closed = False
         for page in self._pages:
             page._document = self
@@ -371,14 +387,19 @@ class Document:
         add_file("manifest.json", bytes(encoded))
         return files
 
-    def render_page(self, page: int, dpi: float = 144) -> bytes:
+    def render_page(self, page: int, dpi: float = 144, *, clip: tuple[float, float, float, float] | None = None) -> bytes:
         self._ensure_open()
         if page < 0:
             page += len(self._pages)
         if page < 0 or page >= len(self._pages):
             raise IndexError("page index out of range")
         from . import _core, _native
-        return bytes(_native(lambda: _core.render(self._source, self._filetype, page, dpi, self._password)))
+        region = _render_clip(clip)
+        session = self._render_session
+        if session is not None:
+            return bytes(_native(lambda: session.render(page, dpi, region)))
+        self._ensure_open()
+        return bytes(_native(lambda: _core.render(self._source, self._filetype, page, dpi, self._password, region)))
 
     def convert(self, output_format: str) -> bytes:
         self._ensure_open()
@@ -396,6 +417,7 @@ class Document:
         return PdfDocument(_native(lambda: _core.EditablePdf.from_bytes(self._source, self._password)))
 
     def close(self) -> None:
+        self._render_session = None
         self._closed = True
 
     def _ensure_open(self) -> None:

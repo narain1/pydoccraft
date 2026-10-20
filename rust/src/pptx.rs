@@ -171,6 +171,24 @@ fn diagnose_text(body: &TextBody, source: &Value, auxiliary: bool, diagnostics: 
 }
 
 pub fn render(data: &[u8], page: usize, dpi: f64) -> Result<Vec<u8>, EngineError> {
+    render_impl(data, page, dpi, None)
+}
+
+pub fn render_region(
+    data: &[u8],
+    page: usize,
+    dpi: f64,
+    clip: crate::rendering::Clip,
+) -> Result<Vec<u8>, EngineError> {
+    render_impl(data, page, dpi, Some(clip))
+}
+
+fn render_impl(
+    data: &[u8],
+    page: usize,
+    dpi: f64,
+    clip: Option<crate::rendering::Clip>,
+) -> Result<Vec<u8>, EngineError> {
     crate::rendering::validate_dpi(dpi)?;
     let presentation = read(data)?;
     if page >= presentation.slides.len() {
@@ -178,20 +196,48 @@ pub fn render(data: &[u8], page: usize, dpi: f64) -> Result<Vec<u8>, EngineError
             "page {page} does not exist"
         )));
     }
-    // Reject oversized requests before the upstream rasterizer allocates or clamps them.
-    crate::rendering::validate_size(
-        presentation.slide_size.width * dpi / 72.0,
-        presentation.slide_size.height * dpi / 72.0,
-        deckcraft_render::MAX_SIDE,
-    )?;
+    let scale = dpi / 72.0;
+    let size = [
+        presentation.slide_size.width,
+        presentation.slide_size.height,
+    ];
+    let region = clip
+        .map(|clip| {
+            crate::rendering::RasterRegion::new(
+                clip,
+                size,
+                scale,
+                [
+                    (size[0] * scale).round().max(1.0),
+                    (size[1] * scale).round().max(1.0),
+                ],
+                deckcraft_render::MAX_SIDE,
+            )
+        })
+        .transpose()?;
+    if region.is_none() {
+        // A clipped request bounds its output instead of allocating the full slide.
+        crate::rendering::validate_size(
+            size[0] * dpi / 72.0,
+            size[1] * dpi / 72.0,
+            deckcraft_render::MAX_SIDE,
+        )?;
+    }
     let image = deckcraft_render::render_slide(
         &presentation,
         page,
         &deckcraft_render::RenderOpts {
-            scale: dpi / 72.0,
+            scale,
+            offset: region.map_or((0.0, 0.0), |region| {
+                (-f64::from(region.x), -f64::from(region.y))
+            }),
+            size: region.map(|region| (region.width, region.height)),
             ..deckcraft_render::RenderOpts::default()
         },
     );
+    if let Some(region) = region {
+        region.validate_result(image.width, image.height)?;
+    }
     crate::rendering::validate_rgba(image.width, image.height, &image.pixels)?;
     let png = image.to_png_at(dpi);
     if png.is_empty() {
