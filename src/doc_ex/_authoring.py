@@ -974,6 +974,8 @@ class TextRange:
         63 bytes, not a complete BCP47 validator or font-selection guarantee.
         """
         paragraph = self._paragraph
+        if paragraph._owner._call("revision") != self._revision:
+            raise ValueError("text range is stale after a document mutation")
         self._revision = paragraph._owner._call("format_range_patch", *paragraph._range_args, self._start, self._end, self._revision, _format_patch(formatting, rgb_highlight=paragraph._owner._format == "pptx"), _change=True, **getattr(paragraph, "_range_kwargs", {}))
 
 
@@ -2559,7 +2561,9 @@ class Slide:
 
     @background.setter
     def background(self, color):
-        self._owner._call("background", self.number, _color(color), _change=True)
+        self.number  # Reject a deleted slide or closed owner before caller callbacks.
+        rgb = _color(color)
+        self._owner._call("background", self.number, rgb, _change=True)
 
     @property
     def shapes(self) -> Shapes:
@@ -2659,6 +2663,10 @@ class Shape:
     def __init__(self, owner: Presentation, slide: int, identifier: int):
         self._owner, self._slide, self._id = owner, slide, identifier
 
+    def _check(self):
+        # A cheap native lookup validates both the stable slide and shape IDs.
+        self._owner._call("shape_placeholder", self._slide_number, self._id)
+
     @property
     def placeholder(self) -> str | None:
         """Native inherited placeholder role, or None for an ordinary shape."""
@@ -2679,7 +2687,9 @@ class Shape:
         return _slice_range(self, key, _SlideTextRange)
 
     def add_run(self, text: str, **formatting: Unpack[CharacterFormatting]) -> _SlideTextRange:
-        start, end, revision = self._owner._call("add_run_patch", *self._range_args, text, _format_patch(formatting, rgb_highlight=True), _change=True)
+        self._check()
+        patch = _format_patch(formatting, rgb_highlight=True)
+        start, end, revision = self._owner._call("add_run_patch", *self._range_args, text, patch, _change=True)
         return _SlideTextRange(self, start, end, revision)
 
     def find(self, text: str) -> list[_SlideTextRange]:
@@ -2722,7 +2732,9 @@ class Shape:
 
     @rotation.setter
     def rotation(self, degrees):
-        self._owner._call("set_shape_rotation", self._slide_number, self._id, pt(degrees), _change=True)
+        self._check()
+        angle = pt(degrees)
+        self._owner._call("set_shape_rotation", self._slide_number, self._id, angle, _change=True)
 
     @property
     def fill(self):
@@ -2731,7 +2743,9 @@ class Shape:
 
     @fill.setter
     def fill(self, color):
-        self._owner._call("set_shape_fill", self._slide_number, self._id, None if color is None else _color(color), _change=True)
+        self._check()
+        rgb = None if color is None else _color(color)
+        self._owner._call("set_shape_fill", self._slide_number, self._id, rgb, _change=True)
 
     @property
     def stroke(self):
@@ -2754,9 +2768,11 @@ class Shape:
 
     @box.setter
     def box(self, value):
+        self._check()
         if not isinstance(value, (tuple, list)) or len(value) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
-        self._owner._call("set_shape_box", self._slide_number, self._id, *map(pt, value), _change=True)
+        coordinates = tuple(map(pt, value))
+        self._owner._call("set_shape_box", self._slide_number, self._id, *coordinates, _change=True)
 
     @property
     def text(self):
@@ -2773,7 +2789,9 @@ class Shape:
 
     @color.setter
     def color(self, value):
-        self._owner._call("set_text_format", self._slide_number, self._id, color=_color(value), _change=True)
+        self._check()
+        rgb = _color(value)
+        self._owner._call("set_text_format", self._slide_number, self._id, color=rgb, _change=True)
 
     @property
     def font_size(self):
@@ -2781,7 +2799,9 @@ class Shape:
 
     @font_size.setter
     def font_size(self, value):
-        self._owner._call("set_text_format", self._slide_number, self._id, size=pt(value), _change=True)
+        self._check()
+        size = pt(value)
+        self._owner._call("set_text_format", self._slide_number, self._id, size=size, _change=True)
 
     @property
     def bold(self):

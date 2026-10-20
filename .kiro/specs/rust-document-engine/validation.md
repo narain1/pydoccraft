@@ -758,6 +758,20 @@ Independent exact-head CI then exposed a substantive native shaping defect: addi
 - The corpus retains all-nine-level maximum-start LTR/RTL decoded label ink controls, source numbering identities, ordinary list compatibility, scope/geometry/budget refusal and recovery. This supersedes focused-only evidence for local acceptance. Independent review and exact-head/current-main CI remain required before manual merge; broader TXT5 custom definitions and cell/auxiliary placement remain open.
 
 
+## Stable presentation callback targets — focused evidence
+
+- Reproduction against the reviewed release confirms slide background callbacks can reorder slides and paint the other slide. Distinct global shape IDs prevent wrong-shape corruption, but six shape mutation routes incorrectly retain the earlier slide ordinal and reject a surviving target. The correction performs initial identity validation and resolves the stable slide ID after argument normalization.
+- Five new public groups and 31 related tests pass against a copied reviewed native extension and corrected facade. Fourteen same/different-position reorder controls verify exact stable IDs, PPTX bytes, source/PDF pixels and unchanged other slides, with additional early/late deletion, closure, errors, copies and appended-run revision/color/bold checks. Inherited checks also accept ordinary pictures and tables during geometry/reorder probes.
+- Separate range probes confirm native final revision checks already prevent formatting after callback text edits or slide reorders. Already-stale ranges still invoke a color callback before refusing; the two-line early revision guard now rejects that case without copying text or adding a native API. Four new cross-format range groups and 27 related tests pass against the matching copied release extension/facade. No Rust, dependency, pin or conversion-matrix change. Full wheel evidence and independent review remain pending.
+
+
+## Presentation/range callback ownership — complete local wheel
+
+- Runtime `a94a5ba` integrates the reviewed decimal-outline lazy matcher with the Python presentation/range correction. All 402 clean installed-wheel Python tests pass, zero skips/failures/errors, with exact installed-byte matching. Strict installed-package typing and roadmap/support/cached-reference checks pass. Rust remains identical to the 280-test decimal-outline runtime; its locked native/fmt/Clippy results and unchanged 264-package license audit remain applicable. Release packaging used the committed lockfile offline.
+- Linux x86_64 / CPython 3.11.2 wheel: 17,484,800 bytes; extension: 40,562,760; SHA-256 `56fec6ff5490415b8230dbf22dd391890061ca5e04fb8f9d7f65734cfb07290f`; lock SHA-256 `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. Evidence: `dist/pptx-shape-ownership/validation.json` and `/opt/pptxshapeownershiptest`. No upstream revision, dependency or conversion-matrix change.
+- This supersedes focused-only evidence for local acceptance. Independent review and exact-head/current-main CI remain required before manual merge. Stable slide/shape IDs and native range revision checks retain their distinct semantics; no broad parity criterion is newly completed.
+
+
 ## Decimal-outline raster comparison — independent CI correction
 
 Final-main CI runs `39503201911` and diagnostic-only `39504027755` exposed an overstrict aggregate ink-count assertion in the nine-level/max-start fixture. At LTR 144 DPI, source and PDF ink bounds were exactly `(145, 662, 150, 548)`, but thresholded counts were 5481 versus 5482. Full-image diagnostics found 140 changed pixels with maximum RGBA-channel difference 1: exactly one pixel at `(267, 248)` crossed from `(128,128,128,255)` to `(127,127,127,255)`. Independent repeated local probes also found deterministic one-channel differences while their aggregate counts happened to match. This is renderer coverage quantization, not evidence of a layout or shaping change.
