@@ -253,6 +253,8 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 2. Appearance work SHALL be bounded before native property inspection or regeneration. Direct native QuadPoints SHALL have bounded counts and finite geometry; newly generated appearance bytes SHALL count toward document mutation budgets. Deletion SHALL not rebuild an appearance merely to identify its subtype.
 3. Tests SHALL verify actual pixels across rotations/CropBox/UserUnit, preserved page text, cache invalidation, reopened metadata, stale handles and atomic budget/geometry failures. Broader PDF6 form/import/reply criteria SHALL remain open.
 
+4. Imported text-markup mutation SHALL reject quadrilateral coordinates outside ±1,000,000 PDF user units before native appearance evaluation, preventing nonfinite derived geometry; removal SHALL remain available without rebuilding the appearance.
+
 ## 30. Section binding space and unequal columns
 
 1. Existing section properties SHALL expose a left gutter and explicit column widths through native SectionProps/Columns. Column widths SHALL match the configured count, retain the shared gap/separator, and fit usable page width without clamping or scaling. Clearing widths or assigning the existing columns tuple SHALL restore equal columns.
