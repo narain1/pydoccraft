@@ -213,26 +213,32 @@ pub fn extract_text(
     pages: Option<&[isize]>,
 ) -> Result<String, EngineError> {
     let bytes = Arc::new(data.to_vec());
-    let info = inspect(bytes.clone(), password).map_err(open_error)?;
-    if info.pages.is_empty() {
-        return Err(EngineError::Malformed("PDF contains no pages".into()));
-    }
-    let selected_count = pages.map_or(info.pages.len(), <[isize]>::len);
-    check_selected_count(selected_count)?;
-    for &index in pages.unwrap_or_default() {
-        selected_page(index, info.pages.len())?;
-    }
     let mut renderer = PageRenderer::new(
-        bytes,
+        bytes.clone(),
         RenderConfig {
             password: password.map(Arc::from),
             ..Default::default()
         },
     );
+    let page_count = renderer.page_count();
+    if page_count == 0 {
+        let info = inspect(bytes, password).map_err(open_error)?;
+        if info.pages.is_empty() {
+            return Err(EngineError::Malformed("PDF contains no pages".into()));
+        }
+        return Err(EngineError::Malformed(
+            "PDF text renderer could not open the inspected document".into(),
+        ));
+    }
+    let selected_count = pages.map_or(page_count, <[isize]>::len);
+    check_selected_count(selected_count)?;
+    for &index in pages.unwrap_or_default() {
+        selected_page(index, page_count)?;
+    }
     let mut output = String::new();
     for position in 0..selected_count {
         let page = match pages {
-            Some(indices) => selected_page(indices[position], info.pages.len())?,
+            Some(indices) => selected_page(indices[position], page_count)?,
             None => position,
         };
         let rendered = renderer.render(RenderRequest {
@@ -1138,6 +1144,52 @@ mod clipping_tests {
         assert!(matches!(
             render_region(&bytes, 0, 288.0, None, (0.0, 0.0, 1024.25, 1.0)),
             Err(EngineError::ResourceLimit(_))
+        ));
+    }
+}
+
+#[cfg(test)]
+mod selective_open_tests {
+    use super::*;
+
+    #[test]
+    fn single_parser_text_preserves_blank_pages_and_password_error_categories() {
+        let mut document = pdfcraft_create::blank(200.0, 200.0, 2).unwrap();
+        document
+            .set_encryption(&pdfcraft_cos::NewEncryption {
+                algorithm: pdfcraft_cos::Algorithm::Aes256,
+                user_password: "user",
+                owner_password: "owner",
+                permissions: -4,
+                encrypt_metadata: true,
+                seed: [7; 32],
+            })
+            .unwrap();
+        let bytes =
+            pdfcraft_cos::write_full(&document, &pdfcraft_cos::SaveOptions::default()).unwrap();
+        for pages in [None, Some(&[][..])] {
+            assert!(matches!(
+                extract_text(&bytes, None, pages),
+                Err(EngineError::Encrypted)
+            ));
+            assert!(matches!(
+                extract_text(&bytes, Some("wrong"), pages),
+                Err(EngineError::Encrypted)
+            ));
+            assert!(matches!(
+                extract_text(b"%PDF-1.7\ninvalid", None, pages),
+                Err(EngineError::Malformed(_))
+            ));
+        }
+        assert_eq!(extract_text(&bytes, Some("user"), None).unwrap(), "\u{c}");
+        assert_eq!(
+            extract_text(&bytes, Some("owner"), Some(&[-1, 0, -1])).unwrap(),
+            "\u{c}\u{c}"
+        );
+        assert_eq!(extract_text(&bytes, Some("user"), Some(&[])).unwrap(), "");
+        assert!(matches!(
+            extract_text(&bytes, Some("user"), Some(&[2])),
+            Err(EngineError::PageIndex(_))
         ));
     }
 }
