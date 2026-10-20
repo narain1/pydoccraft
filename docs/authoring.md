@@ -33,7 +33,7 @@ Lengths are finite numbers in points (72 points per inch); `pt`, `mm`, `cm` and 
 
 Paragraph, table, image, page and slide collections support iteration, negative indexing and slices returning lists of handles. A table cell is addressed as `table[row, column]`. `table.rows` is a text snapshot, so editing that list does not mutate the document. Use `table[row, column].text`.
 
-Compound mutations validate before committing. Invalid styles, colors, geometry, text or media must leave the prior document usable. Native resource limits also apply to programmatic creation; a document's serializable model is not an unlimited storage container.
+DOCX and PPTX text accepts LF newlines and rejects carriage returns (CR/CRLF); normalize external text to LF before insertion. This prevents inconsistent writer/parser paragraph normalization. Compound mutations validate before committing. Invalid styles, colors, geometry, text or media must leave the prior document usable. Native resource limits also apply to programmatic creation; a document's serializable model is not an unlimited storage container.
 
 ## DOCX text and page layout
 

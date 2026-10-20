@@ -1263,6 +1263,11 @@ fn font_size(size: f64) -> PyResult<()> {
 }
 
 fn text_value(text: &str) -> PyResult<()> {
+    if text.contains('\r') {
+        return Err(PyValueError::new_err(
+            "text must use LF newlines; carriage returns are unavailable",
+        ));
+    }
     if text.chars().any(|character| matches!(character, '\u{0}'..='\u{8}' | '\u{b}'..='\u{c}' | '\u{e}'..='\u{1f}' | '\u{fffe}' | '\u{ffff}')) {
         return Err(PyValueError::new_err("text contains characters unavailable in XML 1.0"));
     }
@@ -1765,5 +1770,37 @@ mod tests {
             assert!(author.set_shape_text(0, id, invalid).is_err());
         }
         assert_eq!(author.shape_text(0, id).unwrap(), "Literal \u{fffc} text");
+    }
+
+    #[test]
+    fn rejects_carriage_returns_without_mutating_presentation() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditablePptx::new(720.0, 540.0).unwrap();
+        author.add_slide().unwrap();
+        let text_id = author
+            .add_text(0, "a\nb", 0.0, 0.0, 100.0, 80.0, 18.0)
+            .unwrap();
+        let table_id = author
+            .add_table(0, vec![vec!["cell".into()]], 0.0, 100.0, 100.0, 80.0, 18.0)
+            .unwrap();
+        let before = author.document().unwrap().clone();
+        for invalid in ["a\rb", "a\r\nb"] {
+            assert!(author
+                .add_text(0, invalid, 0.0, 0.0, 100.0, 80.0, 18.0)
+                .is_err());
+            assert!(author.set_shape_text(0, text_id, invalid).is_err());
+            assert!(author
+                .add_table(0, vec![vec![invalid.into()]], 0.0, 0.0, 100.0, 80.0, 18.0)
+                .is_err());
+            assert!(author.set_cell_text(0, table_id, 0, 0, invalid).is_err());
+            assert!(author.set_slide_notes(0, invalid).is_err());
+            assert!(author.set_slide_name(0, invalid).is_err());
+            assert_eq!(author.document().unwrap(), &before);
+        }
+        let reopened = deckcraft_pptx::import(&author.to_bytes().unwrap()).unwrap();
+        assert_eq!(
+            reopened.slides[0].shapes[0].text.as_ref().unwrap().text(),
+            "a\nb"
+        );
     }
 }
