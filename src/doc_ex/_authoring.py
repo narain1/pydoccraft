@@ -1231,6 +1231,51 @@ class EditableStory:
             return [] if identifier is None else self._owner._call("story_paragraph_ids", identifier)
         return _Collection(self._owner, identifiers, Paragraph)
 
+    def _check_rich_content(self):
+        self._owner._ensure_open()
+        if isinstance(self, Note):
+            raise UnsupportedFormatError("rich note content requires native note-container geometry support")
+
+    @property
+    def tables(self) -> _Collection[EditableTable]:
+        """Direct header/footer tables, sharing the normal table and cell API."""
+        self._check_rich_content()
+        def identifiers():
+            self._check_rich_content()
+            identifier = self._identifier()
+            return [] if identifier is None else self._owner._call("story_table_ids", identifier)
+        return _Collection(self._owner, identifiers, EditableTable)
+
+    @property
+    def images(self) -> Pictures:
+        """Direct inline pictures; nested cell pictures belong to cell.images."""
+        self._check_rich_content()
+        def identifiers():
+            self._check_rich_content()
+            identifier = self._identifier()
+            return [] if identifier is None else self._owner._call("story_image_ids", identifier)
+        return Pictures(self._owner, identifiers)
+
+    def add_table(self, rows: _Rows, *, columns: SupportsIndex | None = None) -> EditableTable:
+        """Append a header/footer table from string rows or row/column counts."""
+        self._check_rich_content()
+        values = _rows(rows, columns)
+        self._check_rich_content()
+        def append(native):
+            return native.story_add_table(self._ensure_identifier(native), values)
+        return EditableTable(self._owner, self._owner._atomic(append))
+
+    def add_image(self, source: _Source, *, width: float | None = None, height: float | None = None, alt: str = "") -> Picture:
+        """Append an inline PNG in points, preserving aspect when one dimension is omitted."""
+        from . import _read
+        self._check_rich_content()
+        width, height = None if width is None else pt(width), None if height is None else pt(height)
+        data, _ = _read(source, limit=16 * 1024 * 1024)
+        self._check_rich_content()
+        def append(native):
+            return native.story_add_image(self._ensure_identifier(native), data, width, height, alt)
+        return Picture(self._owner, self._owner._atomic(append))
+
     def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
         """Append a paragraph with an optional named style and return its editable handle."""
         style = _style_reference(style, self._owner)
