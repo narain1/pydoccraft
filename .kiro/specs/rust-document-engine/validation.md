@@ -809,6 +809,17 @@ Every new evidence cell cites the already completed runtime `a94a5ba65d332e5cc89
 Isolated documentation validation on the 1e28d49 source baseline passed 14 support-matrix tests, 5 reference-inventory tests, generated-file checks, all 17 cached reference-source hashes/member citations and the 139-ID roadmap checker. The 35 relevant existing behavioral tests passed again against `/opt/pptxshapeownershiptest` in 10.879 seconds, with tests loaded from the isolated snapshot and `doc_ex` from the installed wheel. No runtime/native source, dependency, pin or wheel changed; no Cargo build, new release certification or complete-corpus rerun is claimed by this evidence-only update.
 
 
+
+## DOCX shading and page-border source audit
+
+- Documentation-only audit against runtime `b3917b84379a356f2b7a00d36b757d5bf66d4550` and pinned WordCraft `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`. Exact model/reader/writer/layout references are recorded in the existing [upstream register](../../../docs/upstream-roadmap.md#redaction-and-table-fidelity-audit). No runtime, dependency, ownership ID or completion checkbox changes.
+- Existing `test_shading_inheritance.py` and `TableStyleTests.test_style_and_cell_fills_survive_native_render_and_pdf_export` already exercise direct/style solid fills, reset and separate page color with DOCX/PDF pixels. This audit reads that evidence; it does not rerun or expand it. Direct table/row-exception fill resolution, richer fill identity and explicit transparent cancellation remain native gaps under TBL7/BG7.
+- The page-border offset mismatch is source inspection only: layout measures from page edges, writer emits text-relative offsets and reader retains no offset mode. No page-border reproduction, cross-application comparison, PNG/PDF acceptance or new wheel/build is claimed. The next gate is the raw native asymmetric-margin fixture described in design; TBL7/BG7 and U02 remain open.
+- Documentation checks pass: roadmap ownership/DAG (139 IDs/14 workstreams), support evidence (11 profiles/139 joins), cached reference inventory (44 families), 14 support-ledger tests and five reference-inventory tests. These checks validate documentation structure only; no behavioral tests or Cargo commands were run for this audit.
+
+Root integration additionally validates the current 16-profile ledger and unchanged 139-ID/44-family joins; no runtime or behavioral evidence changes.
+
+
 ## Decimal-outline raster comparison — corrected CI artifact
 
 - Corrected final-main head `d5912b9aad74520b13a9753e6b6ee4b27c2caa3d` passes [CI 39504970072](https://github.com/narain1/pydoccraft/actions/runs/39504970072): all 280 locked Rust tests and 393 installed-wheel Python tests, zero failures/errors/skips, formatting, warnings-denied Clippy, strict typing and the unchanged 264-package audit. Independent corrected-test verification against the copied local release also passes all 393 tests (79.069s). PR71 was manually merged as `e402268f5bc33f756f34587594761c41308a2a1e`; auto-merge remains disabled.
