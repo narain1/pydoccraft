@@ -17,7 +17,7 @@ class PptxTextSafetyTests(unittest.TestCase):
                     lambda: slide.add_text(invalid, box=(10, 10, 200, 80)),
                     lambda: setattr(text, "text", invalid),
                     lambda: slide.add_table([[invalid]], box=(10, 100, 200, 80)),
-                    lambda: setattr(table.cell(0, 0), "text", invalid),
+                    lambda: setattr(table[0, 0], "text", invalid),
                     lambda: setattr(slide, "notes", invalid),
                     lambda: setattr(slide, "name", invalid),
                 )
@@ -25,7 +25,7 @@ class PptxTextSafetyTests(unittest.TestCase):
                     with self.subTest(text=repr(invalid)), self.assertRaisesRegex(ValueError, "LF newlines"):
                         change()
                     self.assertEqual(text.text, "a\nb")
-                    self.assertEqual(table.cell(0, 0).text, "cell")
+                    self.assertEqual(table[0, 0].text, "cell")
                     self.assertEqual(slide.notes, "first\nsecond")
                     self.assertEqual(len(slide.shapes), 2)
             with doc_ex.open(document.to_bytes()) as reopened:
