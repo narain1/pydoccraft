@@ -2,7 +2,9 @@
 
 This is the canonical performance comparison. It compares only pydoccraft and PyMuPDF on anonymous local PDF inputs. Lower elapsed time is better; filenames, paths, hashes, and extracted text are not recorded.
 
-## Post-optimization results
+## Author-reported post-optimization results
+
+These private-corpus timings were reported by the PR author; independent review does not have the source files and has not reproduced them. They predate the strengthened cross-library dimension and page-count checks below.
 
 Environment: Linux ARM64 release wheel, CPython 3.13, PyMuPDF 2.0, one warmup and five to seven measured iterations.
 
@@ -51,4 +53,4 @@ PYTHONPATH= /tmp/pydoccraft-pdf-benchmark/bin/python \
   --output /tmp/pydoccraft-pdf-results.json
 ```
 
-The benchmark validates text page counts and PNG dimensions after timing. Results vary by document structure, platform, power state, and thermal state. Use the same bytes and release wheels for both libraries; do not infer fidelity from timing alone.
+The benchmark validates text page counts against the input and requires nonzero matching PNG dimensions across both libraries after timing. Blank text remains valid. JSON output must use `.json` and cannot alias an input PDF. Exceptions raised through the CLI omit their document-dependent message; native libraries may still write their own diagnostics to stderr. Results vary by document structure, platform, power state, and thermal state. Use the same bytes and release wheels for both libraries; do not infer fidelity from timing alone.

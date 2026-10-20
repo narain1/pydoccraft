@@ -1147,3 +1147,49 @@ mod clipping_tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod selective_open_tests {
+    use super::*;
+
+    #[test]
+    fn single_parser_text_preserves_blank_pages_and_password_error_categories() {
+        let mut document = pdfcraft_create::blank(200.0, 200.0, 2).unwrap();
+        document
+            .set_encryption(&pdfcraft_cos::NewEncryption {
+                algorithm: pdfcraft_cos::Algorithm::Aes256,
+                user_password: "user",
+                owner_password: "owner",
+                permissions: -4,
+                encrypt_metadata: true,
+                seed: [7; 32],
+            })
+            .unwrap();
+        let bytes =
+            pdfcraft_cos::write_full(&document, &pdfcraft_cos::SaveOptions::default()).unwrap();
+        for pages in [None, Some(&[][..])] {
+            assert!(matches!(
+                extract_text(&bytes, None, pages),
+                Err(EngineError::Encrypted)
+            ));
+            assert!(matches!(
+                extract_text(&bytes, Some("wrong"), pages),
+                Err(EngineError::Encrypted)
+            ));
+            assert!(matches!(
+                extract_text(b"%PDF-1.7\ninvalid", None, pages),
+                Err(EngineError::Malformed(_))
+            ));
+        }
+        assert_eq!(extract_text(&bytes, Some("user"), None).unwrap(), "\u{c}");
+        assert_eq!(
+            extract_text(&bytes, Some("owner"), Some(&[-1, 0, -1])).unwrap(),
+            "\u{c}\u{c}"
+        );
+        assert_eq!(extract_text(&bytes, Some("user"), Some(&[])).unwrap(), "");
+        assert!(matches!(
+            extract_text(&bytes, Some("user"), Some(&[2])),
+            Err(EngineError::PageIndex(_))
+        ));
+    }
+}

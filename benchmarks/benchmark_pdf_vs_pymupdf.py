@@ -46,14 +46,20 @@ def measure(function: Callable[[], object], validate: Callable[[object], tuple],
     return statistics.median(samples), min(samples), max(samples)
 
 
-def text_summary(value: str) -> tuple[int, int]:
-    return value.count("\f") + 1, len(value)
+def text_summary(value: str, expected_pages: int) -> tuple[int, int]:
+    pages = value.count("\f") + 1
+    if pages != expected_pages:
+        raise RuntimeError("text result does not match the source page count")
+    return pages, len(value)
 
 
-def png_summary(value: bytes) -> tuple[int, int]:
+def png_summary(value: bytes, expected: tuple[int, int] | None = None) -> tuple[int, int]:
     if not value.startswith(b"\x89PNG\r\n\x1a\n") or len(value) < 24:
         raise RuntimeError("renderer did not return PNG")
-    return struct.unpack(">II", value[16:24])
+    dimensions = struct.unpack(">II", value[16:24])
+    if not all(dimensions) or (expected is not None and dimensions != expected):
+        raise RuntimeError("render dimensions do not match the comparison")
+    return dimensions
 
 
 def pydoc_text(data: bytes) -> str:
@@ -79,8 +85,21 @@ def add(results: list[Result], identifier: str, pages: int, size: int, scenario:
     results.append(Result(identifier, pages, round(size / 1048576, 2), scenario, library, *timing))
 
 
-def run(directory: Path, warmups: int, repeats: int, dpi: int) -> list[Result]:
-    paths = sorted(directory.glob("*.pdf"), key=lambda path: path.stat().st_size)
+def input_paths(directory: Path, output: Path | None = None) -> list[Path]:
+    paths = sorted((path for path in directory.iterdir()
+                    if path.is_file() and path.suffix.lower() == ".pdf"),
+                   key=lambda path: path.stat().st_size)
+    if output is not None:
+        if output.suffix.lower() != ".json":
+            raise ValueError("benchmark output must use .json")
+        if any(output.resolve() == path.resolve()
+               or (output.exists() and output.samefile(path)) for path in paths):
+            raise ValueError("benchmark output must not replace an input")
+    return paths
+
+
+def run(directory: Path, warmups: int, repeats: int, dpi: int, output: Path | None = None) -> list[Result]:
+    paths = input_paths(directory, output)
     if not paths:
         raise RuntimeError("no PDF inputs")
     results = []
@@ -89,20 +108,21 @@ def run(directory: Path, warmups: int, repeats: int, dpi: int) -> list[Result]:
         data = path.read_bytes()
         with pymupdf.open(stream=data, filetype="pdf") as probe:
             pages = probe.page_count
+            if pages < 1:
+                raise RuntimeError("PDF input contains no pages")
+            # Preflight outside timing. Both libraries must render the same pixel size.
+            dimensions = png_summary(probe[0].get_pixmap(dpi=dpi, alpha=True).tobytes("png"))
+        validate_text = lambda value: text_summary(value, pages)
+        validate_png = lambda value: png_summary(value, dimensions)
 
-        add(results, identifier, pages, len(data), "all-page plain text", "pydoccraft", measure(lambda: pydoc_text(data), text_summary, warmups, repeats))
-        add(results, identifier, pages, len(data), "all-page plain text", "PyMuPDF", measure(lambda: pymupdf_text(data), text_summary, warmups, repeats))
-        add(results, identifier, pages, len(data), "cold open + page-1 RGBA PNG", "pydoccraft", measure(lambda: pydoc_cold_render(data, dpi), png_summary, warmups, repeats))
-        add(results, identifier, pages, len(data), "cold open + page-1 RGBA PNG", "PyMuPDF", measure(lambda: pymupdf_cold_render(data, dpi), png_summary, warmups, repeats))
+        add(results, identifier, pages, len(data), "all-page plain text", "pydoccraft", measure(lambda: pydoc_text(data), validate_text, warmups, repeats))
+        add(results, identifier, pages, len(data), "all-page plain text", "PyMuPDF", measure(lambda: pymupdf_text(data), validate_text, warmups, repeats))
+        add(results, identifier, pages, len(data), "cold open + page-1 RGBA PNG", "pydoccraft", measure(lambda: pydoc_cold_render(data, dpi), validate_png, warmups, repeats))
+        add(results, identifier, pages, len(data), "cold open + page-1 RGBA PNG", "PyMuPDF", measure(lambda: pymupdf_cold_render(data, dpi), validate_png, warmups, repeats))
 
-        ours = doc_ex.open(data, filetype="pdf")
-        theirs = pymupdf.open(stream=data, filetype="pdf")
-        try:
-            add(results, identifier, pages, len(data), "warm page-1 RGBA PNG", "pydoccraft", measure(lambda: ours.render_page(0, dpi=dpi), png_summary, warmups, repeats))
-            add(results, identifier, pages, len(data), "warm page-1 RGBA PNG", "PyMuPDF", measure(lambda: theirs[0].get_pixmap(dpi=dpi, alpha=True).tobytes("png"), png_summary, warmups, repeats))
-        finally:
-            ours.close()
-            theirs.close()
+        with doc_ex.open(data, filetype="pdf") as ours, pymupdf.open(stream=data, filetype="pdf") as theirs:
+            add(results, identifier, pages, len(data), "warm page-1 RGBA PNG", "pydoccraft", measure(lambda: ours.render_page(0, dpi=dpi), validate_png, warmups, repeats))
+            add(results, identifier, pages, len(data), "warm page-1 RGBA PNG", "PyMuPDF", measure(lambda: theirs[0].get_pixmap(dpi=dpi, alpha=True).tobytes("png"), validate_png, warmups, repeats))
     return results
 
 
@@ -132,7 +152,7 @@ def main() -> int:
     if args.warmups < 0 or args.repeats < 1 or args.dpi < 1:
         parser.error("invalid benchmark counts or DPI")
     try:
-        results = run(args.directory, args.warmups, args.repeats, args.dpi)
+        results = run(args.directory, args.warmups, args.repeats, args.dpi, args.output)
         report = render(results, args.warmups, args.repeats, args.dpi)
         print(report)
         if args.output:
