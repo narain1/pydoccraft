@@ -153,7 +153,7 @@ Unchecked items below remain incomplete even when an initial slice is implemente
 - [x] **TBL9: Conditional table styles.** Support header/footer rows, first/last columns and row/column banding with documented style precedence. Test local cell overrides and removal of inherited formatting.
 - [ ] **TBL10: Captions and accessible structure.** Add table title/description, header designation and caption association where upstream exposes them. Preserve these separately from visible cell text and test round trips.
 - [x] **TBL11: Structured data recipes.** Demonstrate Python row comprehensions and explicit string/number/date formatting before `add_table`. Do not add dataframe adapters, formatter registries or automatic conversion of arbitrary objects to the core.
-- [ ] **TBL12: Table parity fixture pack.** Include an invoice, merged header, nested table, long repeating-header table, RTL table and image-containing cells. Assert semantic content once, inspect native renders, and reopen PDF exports.
+- [x] **TBL12: Table parity fixture pack.** Include an invoice, merged header, nested table, long repeating-header table, RTL table and image-containing cells. Assert semantic content once, inspect native renders, and reopen PDF exports.
 
 ### BG — Backgrounds, shading and watermarks (P1)
 
