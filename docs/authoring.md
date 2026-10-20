@@ -571,3 +571,14 @@ data = pdf.to_bytes(object_streams=False)
 ```
 
 This controls object packing only: image/content/font streams can remain compressed. It is not an optimizer, incremental save, PDF-version downgrade or PDF/A/PDF/UA profile, and it does not promise smaller files. The native writer can raise an older header version when object streams are enabled; disabling them does not remove newer source features. Both modes retain existing imported-document restrictions, owned-field checks and the same 256 MiB returned-output cap. The upstream writer allocates its complete byte vector before this cap, so it is not a peak-memory limit. Saving does not change model state or render caches; path replacement stays atomic and stream writes retain their documented short-write errors.
+
+
+### PDF text search geometry
+
+`page.search_for(text)` returns owned `(x0, y0, x1, y1)` tuples for native PDF text matches. It works on read pages and editable PDF pages through their current read snapshot. Coordinates use displayed page points with a top-left origin; rotation, CropBox and UserUnit are already applied. Multiline matches return one rectangle per native line, flattened in match order. The page must remain attached to a live owner, but returned tuples remain usable after closing it. DOCX/PPTX read pages raise UnsupportedFormatError; Office authored paragraph `find` remains a separate text-editing operation.
+
+Native matching is literal, case-insensitive, whitespace-normalized and nonoverlapping. Turkish I variants and Greek sigma variants fold together; this is not full Unicode casefold (`Straße` does not match `STRASSE`). Distinct occurrences inside a ligature can share the same rectangle, and a character inside an ActualText replacement can return the complete replacement box. Search follows native text reading order, which can cross column boundaries and differ from normalized table/Markdown order. It does not return offsets into `get_text()`.
+
+The rectangles describe glyph em/advance extents. Clipped, invisible and off-page text can match, including an existing OCR text layer; no OCR is run. Boxes are not clipped to the page or promised to tightly enclose visible ink. Regex, fuzzy matching and extra matching flags are not exposed.
+
+Queries are limited to 4,096 UTF-8 bytes. Later search work is bounded to one million glyphs and conservative normalized scalar slots, four MiB of source glyph text, one million matched glyph visits, and 10,000 matches/rectangles. Excess work fails explicitly instead of truncating. These bounds apply after native text interpretation and do not promise a total parser/process-memory ceiling. Empty/ASCII-whitespace queries avoid interpretation and an editable snapshot; other Unicode whitespace is handled natively. Repeated ordinary searches reuse the parsed session but reinterpret text, without rasterizing or changing document content.

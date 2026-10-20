@@ -59,6 +59,7 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(pdf.bookmarks.move(0, 0), Bookmark)
         assert_type(page.annotations.add('note', box=(10, 10, 20, 20)), Annotation)
         assert_type(page.annotations.add_link(box=[10, 10, 20, 20], uri='https://example.com'), Annotation)
+        assert_type(page.search_for('Example'), list[tuple[float, float, float, float]])
         assert_type(page.get_text(), str)
         assert_type(page.get_text('dict'), dict[str, Any])
         assert_type(page.get_text(mode), str | dict[str, Any])
@@ -80,6 +81,7 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
     with doc_ex.open(document_bytes, filetype='pdf') as extracted:
         assert_type(extracted, doc_ex.Document)
         assert_type(extracted.edit(), PdfDocument)
+        assert_type(extracted[0].search_for('Example'), list[tuple[float, float, float, float]])
         assert_type(extracted[0].get_text(), str)
         assert_type(extracted[0].get_text('text'), str)
         assert_type(extracted[0].get_text('json'), str)

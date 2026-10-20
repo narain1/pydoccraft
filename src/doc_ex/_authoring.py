@@ -2311,6 +2311,16 @@ class PdfPage:
         self._check()
         return self._owner.render_page(self._id, dpi, clip=clip)
 
+    def search_for(self, text: str) -> list[tuple[float, float, float, float]]:
+        """Find native PDF text geometry in the current read snapshot; see Page.search_for."""
+        self._check()
+        from ._document import _search_empty, _search_query
+        text = _search_query(text)
+        self._check()
+        if _search_empty(text):
+            return []
+        return self._owner._snapshot()[self._id].search_for(text)
+
     @overload
     def get_text(self, option: Literal["text", "markdown", "json"] = "text") -> str: ...
 

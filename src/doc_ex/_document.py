@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import operator
 from numbers import Real
 from typing import Any, Callable, Iterator, Literal, TYPE_CHECKING, overload
 
@@ -20,6 +21,29 @@ _MEDIA_EXTENSIONS = {
     "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
     "image/webp": "webp", "image/tiff": "tiff", "image/bmp": "bmp",
 }
+
+
+def _search_query(text: str) -> str:
+    if not isinstance(text, str):
+        raise TypeError("search text must be a string")
+    # Use base str operations: a subclass must not run callbacks during ownership
+    # validation or conceal its actual size with overridden encode/len methods.
+    text = str.__str__(text)
+    if len(text) > 4096:
+        raise UnsafeArchiveError("PDF search query exceeds 4096 UTF-8 bytes")
+    try:
+        size = len(text.encode("utf-8"))
+    except UnicodeEncodeError as error:
+        raise ValueError("search text must contain valid Unicode") from error
+    if size > 4096:
+        raise UnsafeArchiveError("PDF search query exceeds 4096 UTF-8 bytes")
+    return text
+
+
+def _search_empty(text: str) -> bool:
+    # Only the common ASCII no-render case is handled locally. Native matching
+    # owns all other Unicode whitespace/control semantics and receives the original.
+    return not text.strip(" \t\n\r\v\f")
 
 
 def _render_clip(value) -> tuple[float, float, float, float] | None:
@@ -154,6 +178,41 @@ class Page:
         if self._document is None:
             raise ValueError("page is not attached to a document")
         return self._document.render_page(self.number, dpi, clip=clip)
+
+    def search_for(self, text: str) -> list[tuple[float, float, float, float]]:
+        """Find PDF text as view-point (x0, y0, x1, y1) rectangles.
+
+        Native matching ignores case and normalizes whitespace. Multiline matches
+        return one box per line; ligature matches can share a box. Invisible and
+        clipped text is included. Boxes describe glyph em extents, not tight ink.
+        Native text order can cross columns and differ from normalized table text.
+        """
+        if self._document is None:
+            raise ValueError("page is not attached to a document")
+        owner = self._document
+        owner._ensure_open()
+        text = _search_query(text)
+        from .errors import UnsupportedFormatError
+        if owner._filetype != "pdf":
+            raise UnsupportedFormatError("text search geometry is available only for PDF")
+        number = operator.index(self.number)
+        owner._ensure_open()
+        if self._document is not owner:
+            raise ValueError("page ownership changed during search validation")
+        if number < 0 or number >= len(owner._pages):
+            raise IndexError("page index out of range")
+        if _search_empty(text):
+            return []
+        from . import _core, _native
+        session = owner._render_session
+        temporary = session is None
+        if temporary:
+            session, _ = _native(lambda: _core._open_pdf(owner._source, owner._password))
+        try:
+            return list(_native(lambda: session.search_for(number, text)))
+        finally:
+            if temporary:
+                _native(session.close)
 
     @overload
     def get_text(self, option: Literal["text", "markdown", "json"] = "text") -> str: ...
