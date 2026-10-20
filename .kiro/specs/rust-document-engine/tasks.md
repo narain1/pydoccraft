@@ -267,3 +267,9 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 
 - [x] Reuse bounded integer selection for PDF copy/import and reject callback-driven page organization before native dispatch.
 - [x] Verify limits, ownership, callback behavior and selected output in the complete installed-wheel corpus; record artifact evidence.
+
+## Executable usability cookbook
+
+- [x] Compose six runnable workflows using the existing public surface and explicit output directories/DPI.
+- [x] Audit naming, units, ownership and save/close conventions; distinguish current guides from historical proposals.
+- [x] Verify all actual functions/CLIs and reopened rendered outputs in the complete installed-wheel suite; record artifact evidence before completing API10.

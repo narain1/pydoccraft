@@ -100,6 +100,8 @@ Character keys are `bold`, `italic`, `font_size`, `font`, `color`, `underline`, 
 
 `paragraph.format` accepts `alignment`, `indent_left`, `indent_right`, `indent_first`, `space_before`, `space_after`, `line_spacing`, `keep_with_next`, `keep_together`, `widow_control`, `page_break_before`, and `background`. Lengths use points and line spacing is a multiplier. Table-cell spacing inspection includes native table-style inheritance. Paragraph-style `format` accepts both character and paragraph properties, with `background` meaning paragraph shading; character-style background means run shading. Style bases are changed through `based_on`, not a formatting `style` field. Patches are flat, allowlisted and bounded to 16 KiB.
 
+The [cookbook](cookbook.md) composes these APIs into six executable workflows without adding package-specific recipe objects.
+
 ## PDF pages and assembly
 
 ```python
@@ -210,7 +212,7 @@ Text-bearing shapes reuse `add_run(text, **formatting)`, `find(text)`, contiguou
 
 PPTX character patches support bold/italic, font_size, font, color, underline, strike, script and RGB `highlight`. Underline accepts the shared readable DOCX names plus `thick_dotted`, `thick_dash`, `long_dash`, `thick_long_dash`, `thick_dot_dash`, `thick_dot_dot_dash`, and `thick_wave`. Native XML spellings are not public API. Run background shading and named DOCX styles have no equivalent in this profile and fail explicitly. Rich PPTX table-cell ranges remain separate work.
 
-A shape or text range's `link` accepts an HTTP/HTTPS/mailto URL, a Slide from the same presentation, or `None`. `link_tooltip` requires an existing target. Reading a range with mixed targets/tooltips fails explicitly; assigning `link` replaces or clears the whole range. Reassignment retains a uniform tooltip and clears mixed tooltips. URLs containing characters the XML writer cannot preserve are rejected before mutation. URL and internal slide links survive native serialization and PDF export. Reordering follows stable native slide IDs; deleting a slide still referenced by surviving shapes, text, cells, notes or groups is rejected. PPTX extraction currently reports internal actions as an explicit omission diagnostic; this save/export support does not complete internal-link extraction parity.
+A shape or text range's `link` accepts an HTTP/HTTPS/mailto URL, a Slide from the same presentation, or `None`. `link_tooltip` requires an existing target. Reading a range with mixed targets/tooltips fails explicitly; assigning `link` replaces or clears the whole range. Reassignment retains a uniform tooltip and clears mixed tooltips. URLs containing characters the XML writer cannot preserve are rejected before mutation. URL and internal slide links survive native serialization and PDF export. Reordering follows stable native slide IDs; deleting a slide still referenced by surviving shapes, text, cells, notes or groups is rejected. PPTX extraction resolves native fixed slide targets to `#page=N` and zero-based `target_page` metadata. Context-dependent, executable and unresolved actions remain outside that fixed-target profile; native reader omissions are documented in the [format guide](formats.md#pptx).
 
 Text edits preflight run/paragraph fragmentation (100,000 each), visible text and duplicated string properties (16 MiB each), URL targets (8 KiB) and tooltips (4 KiB). Unsupported executable actions are never constructed. Whole-shape text and font setters also respect these limits. Existing output and format fidelity limits still apply.
 
