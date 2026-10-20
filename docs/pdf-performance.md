@@ -28,7 +28,7 @@ Warm rendering excludes document-open time for both libraries. Cold rendering in
 2. **Selective text API:** merged PR #34 added `doc_ex.extract_text()`, avoiding tables, images, normalized JSON, and Python object hydration when callers only need text.
 3. **Single-parse valid PDF text path:** this branch removes the redundant `inspect()` parse before `PageRenderer` in `extract_text()`. `inspect()` remains an error-only fallback so malformed/password errors retain their categories.
 
-Before the single-parse change, anonymous all-page pydoccraft text medians were 557.33, 82.04, and 21.04 ms. Afterward they were 505.63, 79.14, and 21.13 ms: approximately 1.10×, 1.04×, and 1.00×. The remaining all-page gap is inside page text interpretation rather than Python hydration.
+Before the single-parse change, anonymous all-page pydoccraft text medians were 557.33, 82.04, and 21.04 ms. Afterward they were 505.63, 79.14, and 21.13 ms: approximately 1.10×, 1.04×, and 1.00×. The remaining all-page work includes native PDF parsing and text interpretation; these timings do not isolate their individual costs.
 
 ## Remaining bottleneck
 
@@ -40,7 +40,7 @@ Full structured `doc_ex.open()` deliberately does more than plain-text extractio
 - link-label geometry mapping;
 - bounded JSON serialization and Python model hydration.
 
-The duplicate text and image walks dominate structured-open time. They cannot be safely replaced with a local PDF heuristic without changing table/image semantics. The next material optimization belongs upstream in PdfCraft: share an authoritative page interpretation/table candidate representation and let `reading_images` return early when effective resources contain no XObjects. Any PdfCraft revision update remains a dedicated change with full corpus, license, and wheel-size validation.
+The duplicate text and image walks are candidates for reducing structured-open time. They cannot be safely replaced with a local PDF heuristic without changing table/image semantics. The next material optimization belongs upstream in PdfCraft: share an authoritative page interpretation/table candidate representation and let `reading_images` return early when effective resources contain no XObjects. Any PdfCraft revision update remains a dedicated change with full corpus, license, and wheel-size validation.
 
 ## Reproduce
 
