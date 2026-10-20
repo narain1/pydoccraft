@@ -1,5 +1,7 @@
 # Python authoring API direction
 
+The [pinned reference-family inventory](reference-api-inventory.md) now groups 194 representative members into 44 families and links existing criteria and evidence profiles. It remains a bounded discovery crosswalk, not complete SDK or PyMuPDF conformance.
+
 Status: historical design direction. The implemented subset is documented in [the authoring guide](authoring.md); sketches below may include future operations. The [feature roadmap](../TODO.md) tracks implementation. Existing `doc_ex.open`, extraction, conversion, and PNG-returning rendering methods keep their contracts.
 
 The overlap review consolidates the feature checklist into [14 canonical workstreams](roadmap-workstreams.md). Feature breadth is not API breadth: a feature may be delivered through existing primitives, ordinary properties and a short Python recipe. Shared naming does not require a universal document hierarchy, dispatcher or generic options dictionary.

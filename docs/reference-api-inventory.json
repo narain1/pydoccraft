@@ -1,0 +1,2000 @@
+{
+  "schema_version": 1,
+  "purpose": "Reference family discovery only; not completeness or local runtime conformance evidence.",
+  "snapshots": [
+    {
+      "id": "ox",
+      "project": "dotnet/Open-XML-SDK",
+      "version": "v3.5.1",
+      "commit": "3139fdfd27414548a41555f7848d5728f6e71a42"
+    },
+    {
+      "id": "pm",
+      "project": "pymupdf/PyMuPDF",
+      "version": "2.0",
+      "commit": "b8904b27efa0c4e2258f0e46ab4498a6173ffa22"
+    }
+  ],
+  "sources": [
+    {
+      "key": "ox:src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs",
+      "url": "https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs",
+      "sha256": "aeaaa5e7435642f8ddc016aa66b413b478de8581be8ec22df4e2ec5bb72e4804",
+      "bytes": 30066,
+      "lines": 587
+    },
+    {
+      "key": "ox:src/DocumentFormat.OpenXml.Framework/Validation/OpenXmlValidator.cs",
+      "url": "https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/src/DocumentFormat.OpenXml.Framework/Validation/OpenXmlValidator.cs",
+      "sha256": "5023f4c77ee7dfe7bc542f5a33804ecc02e055ce52725e51a7fefb24da550776",
+      "bytes": 10838,
+      "lines": 224
+    },
+    {
+      "key": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+      "url": "https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+      "sha256": "b29e60a07afc3e0a4695eecca6c2a7a35070eb81f53a2f11033c6df6f946212b",
+      "bytes": 1852316,
+      "lines": 56249
+    },
+    {
+      "key": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_main.json",
+      "url": "https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_drawingml_2006_main.json",
+      "sha256": "e760b534c96ee02745d2a8084f1be362826da4470a85d0b0102a67c3b1678ab7",
+      "bytes": 809697,
+      "lines": 30390
+    },
+    {
+      "key": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_wordprocessingDrawing.json",
+      "url": "https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_drawingml_2006_wordprocessingDrawing.json",
+      "sha256": "935b017531de3f3ab650c99daf7cda2787f62ce7b0f6860277c2532ca00a7c93",
+      "bytes": 41283,
+      "lines": 1525
+    },
+    {
+      "key": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_chart.json",
+      "url": "https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_drawingml_2006_chart.json",
+      "sha256": "cc504f44275968b6c33386a2a21e34a112cac06865392f5a74483b2e80ed7c61",
+      "bytes": 391735,
+      "lines": 15378
+    },
+    {
+      "key": "ox:data/schemas/schemas_openxmlformats_org_presentationml_2006_main.json",
+      "url": "https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_presentationml_2006_main.json",
+      "sha256": "b1fef2102bb6d422f39f102110dfec4b1980dd4dcf8c0eee40600130c8aaa2b8",
+      "bytes": 420225,
+      "lines": 15692
+    },
+    {
+      "key": "pm:docs/document.rst",
+      "url": "https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/document.rst",
+      "sha256": "7487f4b47791d0bff6561686cafad9df9f50a36ad0c2061988ee5b8507df2f4a",
+      "bytes": 165206,
+      "lines": 2639
+    },
+    {
+      "key": "pm:docs/page.rst",
+      "url": "https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/page.rst",
+      "sha256": "71a007f014f180bd562fc47db4e977d96497cea05a6b125794198742326edb23",
+      "bytes": 142755,
+      "lines": 2587
+    },
+    {
+      "key": "pm:docs/shape.rst",
+      "url": "https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/shape.rst",
+      "sha256": "9c798a248732641dd7be232d279c86a688ae332c639a828cb14acd262a0c391b",
+      "bytes": 37632,
+      "lines": 698
+    },
+    {
+      "key": "pm:docs/story-class.rst",
+      "url": "https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/story-class.rst",
+      "sha256": "27e83c08ca962c618a1b0f8a44119479fc9dd8059bdaeea5f0c0ad69b33fa7b1",
+      "bytes": 19538,
+      "lines": 402
+    },
+    {
+      "key": "pm:docs/annot.rst",
+      "url": "https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst",
+      "sha256": "6c30f485239aaf63559ba95a704f90f4b8b1f8e57883d4aea60051fd8d551ca8",
+      "bytes": 31837,
+      "lines": 617
+    },
+    {
+      "key": "pm:docs/widget.rst",
+      "url": "https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst",
+      "sha256": "494e7618567d24a6d15cd35b6363b63533ff061f6796ae0ce61364d2969ea8ed",
+      "bytes": 16313,
+      "lines": 310
+    },
+    {
+      "key": "pm:docs/pymupdf-office/index.rst",
+      "url": "https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/pymupdf-office/index.rst",
+      "sha256": "0bf2fa4b12d92ad52ae0a7e632dc46d276f739717f6b9555c2fd38dcecc3bea7",
+      "bytes": 8978,
+      "lines": 283
+    },
+    {
+      "key": "ox:data/schemas/schemas_openxmlformats_org_officeDocument_2006_custom-properties.json",
+      "url": "https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_officeDocument_2006_custom-properties.json",
+      "sha256": "886433fa2ac586b31076ae4387d38a17ff1326d6c6c4d1b4e97377ebde236d4b",
+      "bytes": 9712,
+      "lines": 361
+    },
+    {
+      "key": "ox:data/schemas/schemas_openxmlformats_org_officeDocument_2006_extended-properties.json",
+      "url": "https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_officeDocument_2006_extended-properties.json",
+      "sha256": "1f4b02438ca1522235df5c037cc53b977216b6d372cf7ceb48bae4c78de3de49",
+      "bytes": 19771,
+      "lines": 775
+    },
+    {
+      "key": "ox:data/schemas/schemas_openxmlformats_org_officeDocument_2006_math.json",
+      "url": "https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_officeDocument_2006_math.json",
+      "sha256": "237395f1e5cee42e34ab12675251f5c01c212fe0dac5484aa36ffcbdfa58d892",
+      "bytes": 426117,
+      "lines": 11040
+    }
+  ],
+  "families": [
+    {
+      "id": "REF-OX-PACKAGE",
+      "title": "Package lifecycle and templates",
+      "reference_members": [
+        {
+          "name": "Create",
+          "source": "ox:src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs",
+          "line": 88
+        },
+        {
+          "name": "Open",
+          "source": "ox:src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs",
+          "line": 239
+        },
+        {
+          "name": "CreateFromTemplate",
+          "source": "ox:src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs",
+          "line": 181
+        },
+        {
+          "name": "ChangeDocumentType",
+          "source": "ox:src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs",
+          "line": 319
+        }
+      ],
+      "coverage": [
+        "API2",
+        "API3",
+        "API5",
+        "API6",
+        "DOC1",
+        "DOC2",
+        "DOC3",
+        "DOC4",
+        "DOC6",
+        "DOC8",
+        "C1",
+        "C2",
+        "C5",
+        "PKG1",
+        "PKG3"
+      ],
+      "local_surface": "new/open/save/to_bytes/copy/close; Document.edit succeeds for conservative PDF only",
+      "remaining": "OpenXML package editing does not establish Office layout/preservation. Source DOCX editing, template variants and cross-document composition remain gated.",
+      "upstream_candidates": [
+        "U01",
+        "U02"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-OX-TEXT",
+      "title": "Ordered body/rich text and editing",
+      "reference_members": [
+        {
+          "name": "Body",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 45920
+        },
+        {
+          "name": "Paragraph",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 13538
+        },
+        {
+          "name": "Run",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 9219
+        },
+        {
+          "name": "Text",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 3869
+        },
+        {
+          "name": "Break",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 3848
+        },
+        {
+          "name": "TabChar",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 4037
+        }
+      ],
+      "coverage": [
+        "DOC5",
+        "TXT1",
+        "TXT4",
+        "TXT7",
+        "TXT8",
+        "FORM1",
+        "FORM2",
+        "C5"
+      ],
+      "local_surface": "Paragraph.text/add_run/find/replace_text/slices; native explicit breaks; ordinary recipes",
+      "remaining": "Top-level insertion/deletion/move needs stable locator redesign; cross-document Fragment does not remap the complete resource/semantic graph. Decimal/bar tabs remain rejected.",
+      "upstream_candidates": [
+        "U02"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-OX-FORMATTING",
+      "title": "Character and paragraph properties",
+      "reference_members": [
+        {
+          "name": "RunProperties",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 6076
+        },
+        {
+          "name": "ParagraphProperties",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 47193
+        },
+        {
+          "name": "Languages",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 5842
+        },
+        {
+          "name": "TextDirection",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 3503
+        },
+        {
+          "name": "KeepNext",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 905
+        },
+        {
+          "name": "WidowControl",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 929
+        }
+      ],
+      "coverage": [
+        "TXT2",
+        "TXT3",
+        "TXT6",
+        "LAY5",
+        "API4"
+      ],
+      "local_surface": "Paragraph.format and TextRange.format; keep/spacing/borders through common patches",
+      "remaining": "Complex-script/language/typography conformance requires fixtures; do not create one wrapper per XML property. Native vertical/border styles have explicit supported subset.",
+      "upstream_candidates": [
+        "U02",
+        "U04"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-OX-STYLES",
+      "title": "Named styles and inheritance",
+      "reference_members": [
+        {
+          "name": "Style",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 42627
+        },
+        {
+          "name": "BasedOn",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 4821
+        },
+        {
+          "name": "NextParagraphStyle",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 4829
+        },
+        {
+          "name": "LinkedStyle",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 4837
+        },
+        {
+          "name": "DocDefaults",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 42509
+        }
+      ],
+      "coverage": [
+        "STY1",
+        "STY2",
+        "STY4",
+        "STY6",
+        "BG6"
+      ],
+      "local_surface": "styles.add/style.format/based_on/next/linked/defaults; recipes use existing handles",
+      "remaining": "Default font-size clear differs between model11pt and reader10pt; arbitrary default-style selection resolves via Normal; next-style-on-enter is editor-only; style import/remapping unassessed.",
+      "upstream_candidates": [
+        "U02"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-OX-NUMBERING",
+      "title": "Number definitions, levels and sequence starts",
+      "reference_members": [
+        {
+          "name": "Numbering",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 25935
+        },
+        {
+          "name": "AbstractNum",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 40587
+        },
+        {
+          "name": "Level",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 40333
+        },
+        {
+          "name": "NumberingInstance",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 40714
+        },
+        {
+          "name": "StartOverrideNumberingValue",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 3635
+        },
+        {
+          "name": "NumberingFormat",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 37248
+        }
+      ],
+      "coverage": [
+        "TXT5",
+        "E3"
+      ],
+      "local_surface": "Paragraph.set_list(kind,level,restart,start); extracted numbering metadata/native labels",
+      "remaining": "Full custom level formats/templates/picture bullets not authorable. Header/footer nondefault starts have native fidelity failure; source templates truncate64characters.",
+      "upstream_candidates": [
+        "U02"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-OX-TABLE-GRID",
+      "title": "Table topology, nested cells and rich content",
+      "reference_members": [
+        {
+          "name": "Table",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 14367
+        },
+        {
+          "name": "TableRow",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 14875
+        },
+        {
+          "name": "TableCell",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 16021
+        },
+        {
+          "name": "GridSpan",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 3571
+        },
+        {
+          "name": "VerticalMerge",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 20971
+        }
+      ],
+      "coverage": [
+        "TBL1",
+        "TBL2",
+        "TBL3",
+        "TBL4",
+        "E1",
+        "DOC5"
+      ],
+      "local_surface": "Existing table/cell/paragraph handles; grid CRUD; bounded merge/split; native rich-cell paths",
+      "remaining": "Unsafe vertical-merge mutations rejected; complete legal merge/split algebra is not established by model methods. No parallel cell text/style framework.",
+      "upstream_candidates": [
+        "U03"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-OX-TABLE-LAYOUT",
+      "title": "Table and row geometry/pagination",
+      "reference_members": [
+        {
+          "name": "TableWidth",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 20831
+        },
+        {
+          "name": "TableLayout",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 21879
+        },
+        {
+          "name": "TableGrid",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 37185
+        },
+        {
+          "name": "GridColumn",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 36081
+        },
+        {
+          "name": "TableRowHeight",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 21456
+        },
+        {
+          "name": "TableHeader",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 21162
+        },
+        {
+          "name": "CantSplit",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 21154
+        }
+      ],
+      "coverage": [
+        "TBL5",
+        "TBL6",
+        "LAY9"
+      ],
+      "local_surface": "column_widths/fit/row.height/repeat_header/allow_split; native page-bound overflow guards",
+      "remaining": "Non-splittable oversized rows can lose content natively; local serialization rejects. Measurement caps4000paragraphs; widths reuse starting column on continuation.",
+      "upstream_candidates": [
+        "U03"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-OX-TABLE-FORMATTING",
+      "title": "Table/cell borders, margins, shading and conditionals",
+      "reference_members": [
+        {
+          "name": "TableBorders",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 21761
+        },
+        {
+          "name": "TableCellBorders",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 20986
+        },
+        {
+          "name": "TableCellMargin",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 21298
+        },
+        {
+          "name": "TableCellSpacing",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 20823
+        },
+        {
+          "name": "TableLook",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 22061
+        },
+        {
+          "name": "TableStyleProperties",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 42349
+        },
+        {
+          "name": "Shading",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 2832
+        }
+      ],
+      "coverage": [
+        "TBL7",
+        "TBL8",
+        "TBL9",
+        "BG6",
+        "STY1"
+      ],
+      "local_surface": "Table.format/Cell.format and style.format(region=...); shared formatting values",
+      "remaining": "Cell spacing, patterned shading and full edge conflict resolution require upstream work; direct table fill differs from conditional/whole-style fill. Vertical double/wave/triple/dot-dash borders rejected.",
+      "upstream_candidates": [
+        "U03",
+        "U04"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-OX-TABLE-ACCESSIBILITY",
+      "title": "Table descriptions and visible caption association",
+      "reference_members": [
+        {
+          "name": "TableCaption",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 722
+        },
+        {
+          "name": "TableDescription",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 731
+        }
+      ],
+      "coverage": [
+        "TBL10",
+        "MED8",
+        "REF6"
+      ],
+      "local_surface": "Table.format(title=...,description=...); extracted table metadata",
+      "remaining": "Alternative text is implemented and distinct from visible captions, counters and PDF Table/TR/TH/TD tagging. Native source text caps10000characters.",
+      "upstream_candidates": [
+        "U02",
+        "U07"
+      ],
+      "profiles": [
+        "word.table-alternative-text"
+      ],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-OX-SECTIONS",
+      "title": "Page dimensions, margins, columns and section transitions",
+      "reference_members": [
+        {
+          "name": "SectionProperties",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 30477
+        },
+        {
+          "name": "PageSize",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 22378
+        },
+        {
+          "name": "PageMargin",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 22437
+        },
+        {
+          "name": "Columns",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 22833
+        },
+        {
+          "name": "Column",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 31461
+        },
+        {
+          "name": "SectionType",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 22358
+        }
+      ],
+      "coverage": [
+        "LAY1",
+        "LAY2",
+        "LAY4",
+        "LAY8"
+      ],
+      "local_surface": "Section page_size/margins/gutter/columns/column_widths/start; stable sections collection",
+      "remaining": "Per-column gap control, mirrored/top gutters and detailed layout inspection are not covered by current profile; avoid redundant orientation API.",
+      "upstream_candidates": [
+        "U04",
+        "U05"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-OX-STORIES",
+      "title": "Headers, footers and page-specific linkage",
+      "reference_members": [
+        {
+          "name": "HeaderReference",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 3800
+        },
+        {
+          "name": "FooterReference",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 3808
+        },
+        {
+          "name": "TitlePage",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 1225
+        },
+        {
+          "name": "EvenAndOddHeaders",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 2153
+        }
+      ],
+      "coverage": [
+        "LAY3",
+        "BG5"
+      ],
+      "local_surface": "Section.header/footer(default/first/even) reuse Paragraph/TextRange; section copies own independent parts",
+      "remaining": "Header/footer tables and pictures can reuse existing owned content handles with explicit synthetic-placeholder tracking and native geometry guards. Link-to-previous/unlink/clear remain separate acceptance requiring stable story IDs and field-scope checks.",
+      "upstream_candidates": [
+        "U02",
+        "U04"
+      ],
+      "profiles": [],
+      "disposition": "local_candidate"
+    },
+    {
+      "id": "REF-OX-PAGE-FIELDS",
+      "title": "Page/count fields and refresh semantics",
+      "reference_members": [
+        {
+          "name": "PageNumberType",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 22787
+        },
+        {
+          "name": "SimpleField",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 17739
+        },
+        {
+          "name": "FieldChar",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 4518
+        },
+        {
+          "name": "FieldCode",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 3885
+        },
+        {
+          "name": "UpdateFieldsOnOpen",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 2297
+        }
+      ],
+      "coverage": [
+        "LAY6",
+        "REF3",
+        "REF4"
+      ],
+      "local_surface": "Paragraph.add_field(page/page_count/section_page_count), Section.page_number_start",
+      "remaining": "Explicit Arabic supported. Continuous SECTIONPAGES/restarts are rejected; implicit numeral context differs across body/stories; no general field evaluator.",
+      "upstream_candidates": [
+        "U07"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-OX-NOTES",
+      "title": "Footnotes and endnotes",
+      "reference_members": [
+        {
+          "name": "FootnoteReference",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 4634
+        },
+        {
+          "name": "EndnoteReference",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 4642
+        },
+        {
+          "name": "FootnoteProperties",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 22196
+        },
+        {
+          "name": "EndnoteProperties",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 22277
+        }
+      ],
+      "coverage": [
+        "LAY7",
+        "E3",
+        "REF8"
+      ],
+      "local_surface": "Notes collection plus shared Paragraph handles; section note_options/configure_notes",
+      "remaining": "Full continuation/section placement and unsupported custom styles remain bounded by existing native acceptance. Endnote collector field scopes already guarded.",
+      "upstream_candidates": [
+        "U02",
+        "U07"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-OX-NAVIGATION",
+      "title": "Hyperlinks, bookmarks and cross-references",
+      "reference_members": [
+        {
+          "name": "Hyperlink",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 18420
+        },
+        {
+          "name": "BookmarkStart",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 283
+        },
+        {
+          "name": "BookmarkEnd",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 369
+        }
+      ],
+      "coverage": [
+        "REF1",
+        "REF2",
+        "REF8",
+        "E4"
+      ],
+      "local_surface": "TextRange.link covers supported external URLs; imported source anchor metadata; PDF/slide navigation separate native profiles",
+      "remaining": "DOCX bookmark CRUD/internal links is a candidate over existing native anchors; must preserve paired IDs/offsets and marker-edit guards. Cross-reference evaluation is separate.",
+      "upstream_candidates": [
+        "U02",
+        "U07"
+      ],
+      "profiles": [],
+      "disposition": "local_candidate"
+    },
+    {
+      "id": "REF-OX-REFERENCES",
+      "title": "TOC, captions, index and bibliography sources",
+      "reference_members": [
+        {
+          "name": "SimpleField",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 17739
+        },
+        {
+          "name": "FieldCode",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 3885
+        },
+        {
+          "name": "Caption",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 44976
+        },
+        {
+          "name": "Captions",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 51041
+        }
+      ],
+      "coverage": [
+        "REF5",
+        "REF6",
+        "REF7"
+      ],
+      "local_surface": "No general reference authoring engine; ordinary literal recipes do not satisfy evaluated references",
+      "remaining": "Schema nodes store instructions/data; deterministic evaluated results and layout synchronization require native field support and diagnostics.",
+      "upstream_candidates": [
+        "U07"
+      ],
+      "profiles": [],
+      "disposition": "upstream_or_unassessed"
+    },
+    {
+      "id": "REF-OX-BACKGROUNDS",
+      "title": "Page color, image backgrounds, borders and watermark composition",
+      "reference_members": [
+        {
+          "name": "DocumentBackground",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 45067
+        },
+        {
+          "name": "PageBorders",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 22610
+        },
+        {
+          "name": "Shading",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 2832
+        }
+      ],
+      "coverage": [
+        "BG1",
+        "BG2",
+        "BG3",
+        "BG4",
+        "BG5",
+        "BG6",
+        "BG7",
+        "BG8",
+        "PDF3",
+        "SLIDE4"
+      ],
+      "local_surface": "WordDocument.background/background_image; paragraph/cell shading; existing slide background/image",
+      "remaining": "DOCX frame stretch implemented. Tiling silently stretches in PDF above4096tiles/below1pt; watermark scale/alpha/rotation differs; page-border fidelity unassessed.",
+      "upstream_candidates": [
+        "U04"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-OX-IMAGE-PLACEMENT",
+      "title": "Inline/floating images and anchor positioning",
+      "reference_members": [
+        {
+          "name": "Inline",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_wordprocessingDrawing.json",
+          "line": 245
+        },
+        {
+          "name": "Anchor",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_wordprocessingDrawing.json",
+          "line": 391
+        },
+        {
+          "name": "HorizontalPosition",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_wordprocessingDrawing.json",
+          "line": 937
+        },
+        {
+          "name": "VerticalPosition",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_wordprocessingDrawing.json",
+          "line": 1009
+        },
+        {
+          "name": "WrapSquare",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_wordprocessingDrawing.json",
+          "line": 13
+        },
+        {
+          "name": "WrapTight",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_wordprocessingDrawing.json",
+          "line": 88
+        }
+      ],
+      "coverage": [
+        "MED1",
+        "MED2",
+        "MED3",
+        "MED8"
+      ],
+      "local_surface": "Owned Picture data/size/alt/crop/flips; related SlidePicture uses native placement",
+      "remaining": "DOCX rotation has native ink loss. Floating positioning/wrapping needs native geometry/copy/serialization proof; opacity not inferred from transform fields.",
+      "upstream_candidates": [
+        "U04"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-OX-DRAWING",
+      "title": "Drawing fills, shapes, text boxes and groups",
+      "reference_members": [
+        {
+          "name": "SolidFill",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_main.json",
+          "line": 2462
+        },
+        {
+          "name": "GradientFill",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_main.json",
+          "line": 2539
+        },
+        {
+          "name": "PatternFill",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_main.json",
+          "line": 2711
+        },
+        {
+          "name": "BlipFill",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_main.json",
+          "line": 2631
+        },
+        {
+          "name": "Transform2D",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_main.json",
+          "line": 13050
+        },
+        {
+          "name": "TransformGroup",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_main.json",
+          "line": 15859
+        }
+      ],
+      "coverage": [
+        "MED4",
+        "MED5",
+        "BG7",
+        "PDF3",
+        "SLIDE3"
+      ],
+      "local_surface": "Existing PDF path primitives and PPTX shapes/text/backgrounds; no duplicate shape-building framework",
+      "remaining": "DOCX arbitrary drawing/textbox/group editing unassessed; PDF underlay API lacks public placement option; render-transparent backdrop differs from authored fill.",
+      "upstream_candidates": [
+        "U04",
+        "U10",
+        "U11"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-OX-THEMES",
+      "title": "Theme colors, fonts and embedding references",
+      "reference_members": [
+        {
+          "name": "Theme",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_main.json",
+          "line": 9187
+        },
+        {
+          "name": "ColorScheme",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_main.json",
+          "line": 9943
+        },
+        {
+          "name": "FontScheme",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_main.json",
+          "line": 10078
+        },
+        {
+          "name": "MajorFont",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_main.json",
+          "line": 6218
+        },
+        {
+          "name": "MinorFont",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_main.json",
+          "line": 6277
+        }
+      ],
+      "coverage": [
+        "STY3",
+        "STY5",
+        "STY6",
+        "SLIDE2"
+      ],
+      "local_surface": "Explicit colors/font names and bounded PDF supplied fonts are implemented",
+      "remaining": "Native theme font availability is not established by Theme model; DeckCraft bundledCRAFT_FONTS empty; font assets require attribution/size audit.",
+      "upstream_candidates": [
+        "U02",
+        "U11"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-OX-CHARTS",
+      "title": "Charts and cached series data",
+      "reference_members": [
+        {
+          "name": "Chart",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_chart.json",
+          "line": 14195
+        },
+        {
+          "name": "BarChart",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_chart.json",
+          "line": 6583
+        },
+        {
+          "name": "LineChart",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_chart.json",
+          "line": 5859
+        },
+        {
+          "name": "PieChart",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_chart.json",
+          "line": 6354
+        },
+        {
+          "name": "SeriesText",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_drawingml_2006_chart.json",
+          "line": 1067
+        }
+      ],
+      "coverage": [
+        "MED6"
+      ],
+      "local_surface": "Extraction projections/diagnostics only; no chart-builder facade",
+      "remaining": "WordCraft unsupported-only chart placeholder or omitted mixed-series kinds need diagnostics; broader authoring/render/export semantics unassessed.",
+      "upstream_candidates": [
+        "U08"
+      ],
+      "profiles": [],
+      "disposition": "upstream_or_unassessed"
+    },
+    {
+      "id": "REF-OX-MATH",
+      "title": "Equations and structured math",
+      "reference_members": [
+        {
+          "name": "OfficeMath",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_officeDocument_2006_math.json",
+          "line": 1606
+        },
+        {
+          "name": "Fraction",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_officeDocument_2006_math.json",
+          "line": 630
+        },
+        {
+          "name": "Radical",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_officeDocument_2006_math.json",
+          "line": 962
+        },
+        {
+          "name": "Matrix",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_officeDocument_2006_math.json",
+          "line": 837
+        }
+      ],
+      "coverage": [
+        "MED7"
+      ],
+      "local_surface": "Existing imported equation projection; no equation API",
+      "remaining": "Presence of native math/diagram types does not prove editable shape/layout/export parity; separate bounded corpus needed.",
+      "upstream_candidates": [
+        "U08"
+      ],
+      "profiles": [],
+      "disposition": "upstream_or_unassessed"
+    },
+    {
+      "id": "REF-OX-CONTROLS",
+      "title": "Structured content controls and data bindings",
+      "reference_members": [
+        {
+          "name": "SdtBlock",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 13312
+        },
+        {
+          "name": "SdtRun",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 12682
+        },
+        {
+          "name": "SdtCell",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 16862
+        },
+        {
+          "name": "SdtProperties",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 33332
+        },
+        {
+          "name": "DataBinding",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 47908
+        },
+        {
+          "name": "Lock",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 47871
+        }
+      ],
+      "coverage": [
+        "FORM3",
+        "FORM4",
+        "FORM5",
+        "C5"
+      ],
+      "local_surface": "Existing literal replacement/batch recipe is independent of true controls",
+      "remaining": "Typed read/create/bind/lock semantics and repeating controls remain unassessed; no raw XML binding surface or local template engine.",
+      "upstream_candidates": [
+        "U07"
+      ],
+      "profiles": [],
+      "disposition": "upstream_or_unassessed"
+    },
+    {
+      "id": "REF-OX-REVIEW",
+      "title": "Comments and revision representation/resolution",
+      "reference_members": [
+        {
+          "name": "Comment",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 43463
+        },
+        {
+          "name": "CommentRangeStart",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 377
+        },
+        {
+          "name": "CommentRangeEnd",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 385
+        },
+        {
+          "name": "InsertedRun",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 9962
+        },
+        {
+          "name": "DeletedRun",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 10557
+        },
+        {
+          "name": "RunPropertiesChange",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 5964
+        }
+      ],
+      "coverage": [
+        "REV1",
+        "REV2",
+        "REV3",
+        "REV4",
+        "REV5",
+        "REV6",
+        "E3"
+      ],
+      "local_surface": "Imported bounded stories/anchors/diagnostics only; no review editor API",
+      "remaining": "Formatting revision resolution is located in excluded application engine; move/re-export pure library operation upstream. Comment anchor editing needs balanced-ID proof.",
+      "upstream_candidates": [
+        "U06"
+      ],
+      "profiles": [],
+      "disposition": "upstream_or_unassessed"
+    },
+    {
+      "id": "REF-OX-PROPERTIES",
+      "title": "Custom document property inventory",
+      "reference_members": [
+        {
+          "name": "Properties",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_officeDocument_2006_custom-properties.json",
+          "line": 6
+        },
+        {
+          "name": "CustomDocumentProperty",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_officeDocument_2006_custom-properties.json",
+          "line": 29
+        }
+      ],
+      "coverage": [
+        "DOC7"
+      ],
+      "local_surface": "WordDocument.metadata/update_metadata(custom=...); typed bounded scalar read inventory",
+      "remaining": "Unsupported variants and source cap/trim omissions are explicit; no arbitrary XML variant API.",
+      "upstream_candidates": [
+        "U02"
+      ],
+      "profiles": [
+        "word.properties"
+      ],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-OX-APP-PROPERTIES",
+      "title": "Extended application properties",
+      "reference_members": [
+        {
+          "name": "Application",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_officeDocument_2006_extended-properties.json",
+          "line": 412
+        },
+        {
+          "name": "Company",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_officeDocument_2006_extended-properties.json",
+          "line": 388
+        },
+        {
+          "name": "Manager",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_officeDocument_2006_extended-properties.json",
+          "line": 380
+        },
+        {
+          "name": "Template",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_officeDocument_2006_extended-properties.json",
+          "line": 372
+        }
+      ],
+      "coverage": [
+        "DOC7",
+        "DOC8"
+      ],
+      "local_surface": "No new parallel metadata collection",
+      "remaining": "Pinned WordCraft app_xml passthrough uses private kept-property policy, not a public editable model; language/app metadata remain DOC7 gaps.",
+      "upstream_candidates": [
+        "U02"
+      ],
+      "profiles": [],
+      "disposition": "upstream_or_unassessed"
+    },
+    {
+      "id": "REF-OX-SETTINGS",
+      "title": "Compatibility, layout and protection settings",
+      "reference_members": [
+        {
+          "name": "Settings",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 24561
+        },
+        {
+          "name": "Compatibility",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 50034
+        },
+        {
+          "name": "DefaultTabStop",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 49449
+        },
+        {
+          "name": "HyphenationZone",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 38880
+        },
+        {
+          "name": "MirrorMargins",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 2009
+        },
+        {
+          "name": "DocumentProtection",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 49239
+        }
+      ],
+      "coverage": [
+        "LAY10",
+        "PKG4",
+        "PKG5",
+        "PKG6"
+      ],
+      "local_surface": "Selected existing settings through typed section/style methods",
+      "remaining": "Do not infer encryption from DocumentProtection or permit macro/embedded program execution; exact setting-by-setting native behavior remains unassessed.",
+      "upstream_candidates": [
+        "U01",
+        "U02"
+      ],
+      "profiles": [],
+      "disposition": "upstream_or_unassessed"
+    },
+    {
+      "id": "REF-OX-PRESENTATION",
+      "title": "Slides, layouts, masters, notes and navigation",
+      "reference_members": [
+        {
+          "name": "Presentation",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_presentationml_2006_main.json",
+          "line": 989
+        },
+        {
+          "name": "Slide",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_presentationml_2006_main.json",
+          "line": 1348
+        },
+        {
+          "name": "SlideLayout",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_presentationml_2006_main.json",
+          "line": 1457
+        },
+        {
+          "name": "SlideMaster",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_presentationml_2006_main.json",
+          "line": 1606
+        },
+        {
+          "name": "NotesSlide",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_presentationml_2006_main.json",
+          "line": 1866
+        },
+        {
+          "name": "Background",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_presentationml_2006_main.json",
+          "line": 10189
+        }
+      ],
+      "coverage": [
+        "SLIDE1",
+        "SLIDE2",
+        "SLIDE3",
+        "SLIDE4",
+        "SLIDE5",
+        "SLIDE6"
+      ],
+      "local_surface": "Slides/layouts/typed shapes/text/tables/images/notes/internal links with stable IDs",
+      "remaining": "Whole-slide import/copy needs public graph re-ID/remapping; comments lose shape anchors/deep replies; PDF artwork rasterized; imported preservation unassessed.",
+      "upstream_candidates": [
+        "U11"
+      ],
+      "profiles": [
+        "slides.layouts"
+      ],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-OX-VALIDATION",
+      "title": "Package/schema validation boundary",
+      "reference_members": [
+        {
+          "name": "Validate",
+          "source": "ox:src/DocumentFormat.OpenXml.Framework/Validation/OpenXmlValidator.cs",
+          "line": 77
+        }
+      ],
+      "coverage": [
+        "PKG1",
+        "PKG2",
+        "PKG3",
+        "PKG7",
+        "PKG8",
+        "E5",
+        "QA3",
+        "QA5",
+        "QA6"
+      ],
+      "local_surface": "Local archive/resource boundary checks and detected omission diagnostics",
+      "remaining": "SDK validation is not an Office layout oracle. ArtCraft needs operation-scoped preservation reports; no SDK runtime dependency or raw-package API.",
+      "upstream_candidates": [
+        "U01",
+        "U11"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-PM-LIFECYCLE",
+      "title": "PDF opening, creating, saving and serialization",
+      "reference_members": [
+        {
+          "name": "__init__",
+          "source": "pm:docs/document.rst",
+          "line": 197
+        },
+        {
+          "name": "new_page",
+          "source": "pm:docs/document.rst",
+          "line": 109
+        },
+        {
+          "name": "save",
+          "source": "pm:docs/document.rst",
+          "line": 122
+        },
+        {
+          "name": "tobytes",
+          "source": "pm:docs/document.rst",
+          "line": 145
+        },
+        {
+          "name": "close",
+          "source": "pm:docs/document.rst",
+          "line": 55
+        }
+      ],
+      "coverage": [
+        "API2",
+        "API3",
+        "DOC1",
+        "DOC2",
+        "DOC3",
+        "DOC4",
+        "PDF1",
+        "PKG7"
+      ],
+      "local_surface": "new/open/edit/copy/save/to_bytes/close; PDF-only existing-source edit profile",
+      "remaining": "Incremental/encryption/repair/save profiles remain independent policy gaps; do not mirror numeric save flags.",
+      "upstream_candidates": [
+        "U10"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-PM-PAGE-ASSEMBLY",
+      "title": "Page subset, insertion, copying, ordering and deletion",
+      "reference_members": [
+        {
+          "name": "insert_pdf",
+          "source": "pm:docs/document.rst",
+          "line": 91
+        },
+        {
+          "name": "insert_file",
+          "source": "pm:docs/document.rst",
+          "line": 92
+        },
+        {
+          "name": "select",
+          "source": "pm:docs/document.rst",
+          "line": 126
+        },
+        {
+          "name": "copy_page",
+          "source": "pm:docs/document.rst",
+          "line": 57
+        },
+        {
+          "name": "move_page",
+          "source": "pm:docs/document.rst",
+          "line": 107
+        },
+        {
+          "name": "delete_pages",
+          "source": "pm:docs/document.rst",
+          "line": 60
+        }
+      ],
+      "coverage": [
+        "P3",
+        "PDF1",
+        "PDF5",
+        "DOC6"
+      ],
+      "local_surface": "PdfPages add/insert/move/delete and PdfDocument.copy(pages=...)",
+      "remaining": "Basic assembly is complete; unsupported document/form structures retain explicit guards. Generic DOCX composition is a different problem.",
+      "upstream_candidates": [
+        "U10"
+      ],
+      "profiles": [
+        "pdf.page-assembly"
+      ],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-PM-TEXT",
+      "title": "Positioned text and font authoring",
+      "reference_members": [
+        {
+          "name": "insert_text",
+          "source": "pm:docs/page.rst",
+          "line": 102
+        },
+        {
+          "name": "insert_textbox",
+          "source": "pm:docs/page.rst",
+          "line": 104
+        },
+        {
+          "name": "insert_htmlbox",
+          "source": "pm:docs/page.rst",
+          "line": 103
+        },
+        {
+          "name": "insert_font",
+          "source": "pm:docs/page.rst",
+          "line": 99
+        }
+      ],
+      "coverage": [
+        "PDF2",
+        "TXT2",
+        "STY5"
+      ],
+      "local_surface": "PdfPage.draw_text point/box; native supplied-font profile; no alternate text engine",
+      "remaining": "Native supplied-font wrapping/strict clipping and selected font reuse limits require upstream primitives or explicit bounded rejection.",
+      "upstream_candidates": [
+        "U10"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-PM-FLOW",
+      "title": "Flowed HTML/story reports and tables",
+      "reference_members": [
+        {
+          "name": "place",
+          "source": "pm:docs/story-class.rst",
+          "line": 17
+        },
+        {
+          "name": "draw",
+          "source": "pm:docs/story-class.rst",
+          "line": 18
+        },
+        {
+          "name": "write",
+          "source": "pm:docs/story-class.rst",
+          "line": 21
+        },
+        {
+          "name": "fit",
+          "source": "pm:docs/story-class.rst",
+          "line": 25
+        }
+      ],
+      "coverage": [
+        "PDF4",
+        "C4",
+        "TBL11",
+        "FORM6",
+        "API10"
+      ],
+      "local_surface": "DOCX paragraph/table report recipe then native PDF conversion",
+      "remaining": "Keep this a recipe using existing native layout. Do not introduce HTML/CSS or second report builder to imitate Story object hierarchy.",
+      "upstream_candidates": [],
+      "profiles": [],
+      "disposition": "recipe_existing"
+    },
+    {
+      "id": "REF-PM-IMAGE",
+      "title": "Image insertion, replacement and removal",
+      "reference_members": [
+        {
+          "name": "insert_image",
+          "source": "pm:docs/page.rst",
+          "line": 100
+        },
+        {
+          "name": "replace_image",
+          "source": "pm:docs/page.rst",
+          "line": 112
+        },
+        {
+          "name": "delete_image",
+          "source": "pm:docs/page.rst",
+          "line": 69
+        },
+        {
+          "name": "get_images",
+          "source": "pm:docs/page.rst",
+          "line": 89
+        }
+      ],
+      "coverage": [
+        "PDF2",
+        "MED1",
+        "MED3",
+        "BG4"
+      ],
+      "local_surface": "Existing owned Office picture operations and PDF add_image use native media APIs",
+      "remaining": "Source PDF image replacement/removal, arbitrary alpha/blends/underlays and non-PNG authored profiles require separate native acceptance.",
+      "upstream_candidates": [
+        "U10"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-PM-VECTOR",
+      "title": "Vector paths, fills and paint ordering",
+      "reference_members": [
+        {
+          "name": "draw_line",
+          "source": "pm:docs/shape.rst",
+          "line": 27
+        },
+        {
+          "name": "draw_rect",
+          "source": "pm:docs/shape.rst",
+          "line": 31
+        },
+        {
+          "name": "draw_bezier",
+          "source": "pm:docs/shape.rst",
+          "line": 24
+        },
+        {
+          "name": "finish",
+          "source": "pm:docs/shape.rst",
+          "line": 12
+        },
+        {
+          "name": "commit",
+          "source": "pm:docs/shape.rst",
+          "line": 12
+        }
+      ],
+      "coverage": [
+        "PDF3",
+        "MED4",
+        "BG7"
+      ],
+      "local_surface": "PdfPage.draw_path; typed PPTX shape properties",
+      "remaining": "Native public stamping forces overlay; private prepend support must be exposed upstream. Do not wrap every draw in an adapter-built Form/layer system.",
+      "upstream_candidates": [
+        "U10"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-PM-FORM-COMPOSITION",
+      "title": "Source PDF page-as-form/background composition",
+      "reference_members": [
+        {
+          "name": "show_pdf_page",
+          "source": "pm:docs/page.rst",
+          "line": 120
+        }
+      ],
+      "coverage": [
+        "PDF3",
+        "BG2",
+        "BG4",
+        "DOC6"
+      ],
+      "local_surface": "No facade for arbitrary source-page Form composition",
+      "remaining": "Native Form traversal silently caps4096visits/depth12; bounded aggregate decoding/UserUnit correctness and public overlay control needed.",
+      "upstream_candidates": [
+        "U10"
+      ],
+      "profiles": [],
+      "disposition": "upstream_or_unassessed"
+    },
+    {
+      "id": "REF-PM-RASTER",
+      "title": "DPI rasterization, clipping and alpha behavior",
+      "reference_members": [
+        {
+          "name": "get_pixmap",
+          "source": "pm:docs/page.rst",
+          "line": 92
+        }
+      ],
+      "coverage": [
+        "R1",
+        "R2",
+        "R3",
+        "R4",
+        "P1",
+        "P2",
+        "API9",
+        "QA4",
+        "QA7"
+      ],
+      "local_surface": "render_page/get_pixmap return encoded PNG; region clip; private retained native sessions",
+      "remaining": "Explicit output alpha/backdrop replacement is not proven; DeckCraft can return blank fallback after panic; do not add Pixmap wrapper.",
+      "upstream_candidates": [
+        "U09"
+      ],
+      "profiles": [
+        "pdf.region"
+      ],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-PM-EXTRACTION",
+      "title": "Text geometry, links, tables and source grounding",
+      "reference_members": [
+        {
+          "name": "get_text",
+          "source": "pm:docs/page.rst",
+          "line": 94
+        },
+        {
+          "name": "get_links",
+          "source": "pm:docs/page.rst",
+          "line": 91
+        },
+        {
+          "name": "find_tables",
+          "source": "pm:docs/page.rst",
+          "line": 83
+        },
+        {
+          "name": "search_for",
+          "source": "pm:docs/page.rst",
+          "line": 113
+        }
+      ],
+      "coverage": [
+        "E1",
+        "E2",
+        "E4",
+        "P4",
+        "LAY8",
+        "REF8"
+      ],
+      "local_surface": "Owned normalized blocks/cells/links and source metadata; eager open plus selected extract_text",
+      "remaining": "Native PDF table detector is pub(crate); need bounded public detector+consumed mask. Exact automatic Office line slices/geometry remain bounded provenance gaps.",
+      "upstream_candidates": [
+        "U05",
+        "U10"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-PM-MARKDOWN",
+      "title": "Markdown, chunking and structured extraction",
+      "reference_members": [
+        {
+          "name": "to_markdown",
+          "source": "pm:docs/document.rst",
+          "line": 143
+        },
+        {
+          "name": "to_chunks",
+          "source": "pm:docs/document.rst",
+          "line": 141
+        },
+        {
+          "name": "to_json",
+          "source": "pm:docs/document.rst",
+          "line": 142
+        },
+        {
+          "name": "to_text",
+          "source": "pm:docs/document.rst",
+          "line": 144
+        }
+      ],
+      "coverage": [
+        "E2",
+        "E5",
+        "E6",
+        "P4"
+      ],
+      "local_surface": "to_markdown/export_markdown and normalized owned values; no RAG chunk framework",
+      "remaining": "PyMuPDF2.0 already documents these APIs; packaging/licensing/Office semantic coverage can differ, not generic novelty. Chunk metadata is reference-only.",
+      "upstream_candidates": [],
+      "profiles": [],
+      "disposition": "reference_comparison"
+    },
+    {
+      "id": "REF-PM-NAVIGATION",
+      "title": "Links, outlines, metadata and page labels",
+      "reference_members": [
+        {
+          "name": "get_toc",
+          "source": "pm:docs/document.rst",
+          "line": 86
+        },
+        {
+          "name": "set_toc",
+          "source": "pm:docs/document.rst",
+          "line": 137
+        },
+        {
+          "name": "set_metadata",
+          "source": "pm:docs/document.rst",
+          "line": 130
+        },
+        {
+          "name": "set_page_labels",
+          "source": "pm:docs/document.rst",
+          "line": 133
+        }
+      ],
+      "coverage": [
+        "PDF5",
+        "DOC7",
+        "REF1",
+        "REF2",
+        "REF8"
+      ],
+      "local_surface": "Owned bookmarks/links/metadata and preserved imported labels; no combined reference engine",
+      "remaining": "Current named-destination/outline depth limits and unsupported document properties need explicit profiles; broader page label authoring is separate acceptance.",
+      "upstream_candidates": [
+        "U10"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-PM-ANNOTATIONS",
+      "title": "Annotation operations and appearances",
+      "reference_members": [
+        {
+          "name": "update",
+          "source": "pm:docs/annot.rst",
+          "line": 41
+        },
+        {
+          "name": "set_colors",
+          "source": "pm:docs/annot.rst",
+          "line": 30
+        },
+        {
+          "name": "set_opacity",
+          "source": "pm:docs/annot.rst",
+          "line": 35
+        },
+        {
+          "name": "set_border",
+          "source": "pm:docs/annot.rst",
+          "line": 28
+        }
+      ],
+      "coverage": [
+        "PDF6",
+        "REV1",
+        "REV6"
+      ],
+      "local_surface": "Owned note/highlight/link/markup annotation subset and typed properties",
+      "remaining": "Do not call PDF annotations equivalent to tracked DOCX review. Broader appearances/quads/replies/rotation require native fixtures.",
+      "upstream_candidates": [
+        "U10"
+      ],
+      "profiles": [],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-PM-FORMS",
+      "title": "Interactive widgets and field values",
+      "reference_members": [
+        {
+          "name": "field_name",
+          "source": "pm:docs/widget.rst",
+          "line": 92
+        },
+        {
+          "name": "field_value",
+          "source": "pm:docs/widget.rst",
+          "line": 104
+        },
+        {
+          "name": "field_type",
+          "source": "pm:docs/widget.rst",
+          "line": 114
+        },
+        {
+          "name": "rect",
+          "source": "pm:docs/widget.rst",
+          "line": 134
+        },
+        {
+          "name": "choice_values",
+          "source": "pm:docs/widget.rst",
+          "line": 88
+        },
+        {
+          "name": "update",
+          "source": "pm:docs/widget.rst",
+          "line": 58
+        }
+      ],
+      "coverage": [
+        "PDF6",
+        "FORM3",
+        "PKG5"
+      ],
+      "local_surface": "PdfFields/PdfField owned text/checkbox/choice profile with geometry/value updates",
+      "remaining": "Imported enumeration silently truncates/loses widgets/unknown kinds; require public fallible bounded inventory before safe general source-form editing. Script/signature behavior is excluded.",
+      "upstream_candidates": [
+        "U10"
+      ],
+      "profiles": [
+        "pdf.owned-fields"
+      ],
+      "disposition": "implemented_subset"
+    },
+    {
+      "id": "REF-PM-REDACTION",
+      "title": "Redaction markers versus irreversible content removal",
+      "reference_members": [
+        {
+          "name": "add_redact_annot",
+          "source": "pm:docs/page.rst",
+          "line": 54
+        },
+        {
+          "name": "apply_redactions",
+          "source": "pm:docs/page.rst",
+          "line": 64
+        }
+      ],
+      "coverage": [
+        "PDF7",
+        "REV6"
+      ],
+      "local_surface": "No secure redaction runtime API promised",
+      "remaining": "Native vertical writing unsupported; vector/shading residual semantics and aggregate bounds insufficient. Overlay rectangles never substitute for removal.",
+      "upstream_candidates": [
+        "U10"
+      ],
+      "profiles": [
+        "pdf.vertical-redaction"
+      ],
+      "disposition": "upstream_blocked"
+    },
+    {
+      "id": "REF-PM-OUTPUT-PROFILES",
+      "title": "Cleanup, encryption, incremental save and embedded files",
+      "reference_members": [
+        {
+          "name": "scrub",
+          "source": "pm:docs/document.rst",
+          "line": 124
+        },
+        {
+          "name": "saveIncr",
+          "source": "pm:docs/document.rst",
+          "line": 123
+        },
+        {
+          "name": "can_save_incrementally",
+          "source": "pm:docs/document.rst",
+          "line": 53
+        },
+        {
+          "name": "embfile_add",
+          "source": "pm:docs/document.rst",
+          "line": 61
+        },
+        {
+          "name": "embfile_get",
+          "source": "pm:docs/document.rst",
+          "line": 64
+        }
+      ],
+      "coverage": [
+        "PDF8",
+        "PKG1",
+        "PKG2",
+        "PKG5",
+        "PKG6",
+        "PKG7",
+        "PKG8",
+        "REV6"
+      ],
+      "local_surface": "Conservative PDF edit/save rejects unsupported preservation profiles",
+      "remaining": "Attachment API fixed1GiB decode limit and no suitable bounded writer; arbitrary encryption/active-content/PDF-A/UA profiles unassessed. No raw PDF object escape hatch.",
+      "upstream_candidates": [
+        "U10"
+      ],
+      "profiles": [],
+      "disposition": "upstream_or_unassessed"
+    },
+    {
+      "id": "REF-PM-OFFICE",
+      "title": "Separate Office product reference",
+      "reference_members": [
+        {
+          "name": "get_pixmap",
+          "source": "pm:docs/pymupdf-office/index.rst",
+          "line": 170
+        }
+      ],
+      "coverage": [
+        "R1",
+        "R2",
+        "C2",
+        "E1",
+        "E3",
+        "SLIDE1"
+      ],
+      "local_surface": "Existing Office render/extract uses permissive pinned native crates without runtime license service",
+      "remaining": "Office reference is separate commercial product; it already renders Office pages. This does not establish an editable DOCX authoring API or market uniqueness.",
+      "upstream_candidates": [],
+      "profiles": [],
+      "disposition": "reference_comparison"
+    }
+  ],
+  "audited_commit": "52d1d9d055413a9a076eab85ae3e90d2f13144c2"
+}

@@ -302,3 +302,8 @@ Private standard-library input aliases, typing.Self and literal overloads retain
 ## Bounded operation evidence ledger
 
 The development JSON records references, fingerprinted fixture sources, seven initial operation profiles and all 139 coverage joins. The stdlib generator derives criterion text, checkbox state, owner and role from the existing roadmap and renders one Markdown support matrix. It validates structural/reference drift without importing document engines or running conversions. Supported cells retain the historical cookbook artifact identity and explicit audit baseline; matching test hashes do not promote that evidence to changed native/facade code. Separate SDK/PyMuPDF member enumeration remains unfinished, and there is no public support-query object or dispatch framework.
+
+
+## Pinned reference-family discovery
+
+A separate comparison inventory describes 44 families with 194 representative members from 17 cited immutable source files. It stores source provenance and family-to-criterion/profile mappings, not tested operation statuses or duplicated ownership. A stdlib checker derives the readable guide and all-criterion reverse join, optionally verifies an explicitly supplied local source cache, and performs no network access. The support matrix links matching reference families after validating the inventory. Comparison-product names remain references; ArtCraft format crates alone own runtime behavior.
