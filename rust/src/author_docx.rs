@@ -3231,6 +3231,83 @@ impl EditableDocx {
         Ok(id)
     }
 
+    /// Clear only an independently owned header/footer. False preserves revisions/caches.
+    #[pyo3(signature = (kind, variant="default", section=0))]
+    pub fn clear_story(&mut self, kind: &str, variant: &str, section: usize) -> PyResult<bool> {
+        let Some(id) = self.story_id(kind, variant, section)? else {
+            return Ok(false);
+        };
+        self.story_paragraph_ids(id)?;
+        let document = self.document()?;
+        let part = document
+            .parts
+            .get(&id)
+            .ok_or_else(|| PyValueError::new_err("owned story part is missing"))?;
+        let expected = if kind == "header" {
+            PartKind::Header
+        } else {
+            PartKind::Footer
+        };
+        if part.kind != expected {
+            return Err(EngineError::Unsupported(
+                "clear requires an owned header/footer part".into(),
+            )
+            .into());
+        }
+        let references = document
+            .sections()
+            .iter()
+            .flat_map(|(_, section)| {
+                [
+                    section.headers.default,
+                    section.headers.first,
+                    section.headers.even,
+                    section.footers.default,
+                    section.footers.first,
+                    section.footers.even,
+                ]
+            })
+            .filter(|reference| *reference == Some(id))
+            .count();
+        if references != 1 {
+            return Err(EngineError::Unsupported(
+                "clearing shared header/footer parts requires explicit linkage ownership support"
+                    .into(),
+            )
+            .into());
+        }
+        if self.story_placeholders.get(&id) == Some(&0)
+            && (part.blocks.is_empty()
+                || (part.blocks.len() == 1 && *part.blocks[0] == Block::Para(Paragraph::new())))
+        {
+            return Ok(false);
+        }
+        let (removed_text, removed_cells) = content_usage(&part.blocks);
+        let text_bytes = self.updated_text_bytes(removed_text, 0)?;
+        let cell_count = self
+            .cell_count
+            .checked_sub(removed_cells)
+            .ok_or_else(|| limit("document cell accounting underflow"))?;
+        let mut candidate = document.clone();
+        candidate
+            .set_story(StoryRef::Part(id), Vec::new())
+            .map_err(model_error)?;
+        // Semantic/media/field validation completes before publishing any locator changes.
+        self.commit(candidate)?;
+        self.locations
+            .retain(|_, (story, _)| *story != StoryRef::Part(id));
+        self.images.retain(|id| self.locations.contains_key(id));
+        self.table_generations
+            .retain(|id, _| self.locations.contains_key(id));
+        self.cell_placeholders
+            .retain(|(story, _)| *story != StoryRef::Part(id));
+        self.stories.insert(id, Vec::new());
+        self.story_placeholders.insert(id, 0);
+        self.text_bytes = text_bytes;
+        self.cell_count = cell_count;
+        Ok(true)
+    }
+
     pub fn story_paragraph_ids(&self, story: u32) -> PyResult<Vec<usize>> {
         self.document()?;
         self.stories
@@ -7061,12 +7138,16 @@ fn content_usage(blocks: &wordcraft_doc::Blocks) -> (usize, usize) {
         for block in blocks {
             match block.as_ref() {
                 Block::Para(paragraph) => {
-                    bytes += paragraph
-                        .text
-                        .chars()
-                        .filter(|value| *value != wordcraft_doc::para::OBJ)
-                        .map(char::len_utf8)
-                        .sum::<usize>()
+                    // Image insertion does not charge its object marker. Fields, notes
+                    // and bookmark markers do; copies and removals retain those costs.
+                    let image_bytes = paragraph
+                        .object_offsets()
+                        .into_iter()
+                        .zip(&paragraph.objects)
+                        .filter(|(_, object)| matches!(object, InlineObject::Image { .. }))
+                        .count()
+                        * wordcraft_doc::para::OBJ.len_utf8();
+                    bytes += paragraph.text.len() - image_bytes
                 }
                 Block::Table(table) => {
                     for row in &table.rows {
@@ -14743,5 +14824,222 @@ mod tests {
         assert_eq!(document.revision().unwrap(), revision);
         document.delete_bookmark("Mark0").unwrap();
         assert_eq!(document.bookmark_names().unwrap().len(), MAX_BOOKMARKS - 1);
+    }
+    #[test]
+    fn story_clear_noops_authored_empty_and_alias_guards() {
+        let mut document = EditableDocx::new();
+        let body = document.add_paragraph("Body").unwrap();
+        let revision = document.revision().unwrap();
+        let bytes = document.to_bytes().unwrap();
+        assert!(!document.clear_story("header", "default", 0).unwrap());
+        assert_eq!(document.to_bytes().unwrap(), bytes);
+        assert_eq!(document.revision().unwrap(), revision);
+        let story = document.ensure_story("header", "default", 0).unwrap();
+        let revision = document.revision().unwrap();
+        assert!(!document.clear_story("header", "default", 0).unwrap());
+        assert_eq!(document.revision().unwrap(), revision);
+        let paragraph = document.story_add_paragraph(story, "").unwrap();
+        let old_next = document.next_story_block;
+        let revision = document.revision().unwrap();
+        assert!(document.clear_story("header", "default", 0).unwrap());
+        assert_eq!(document.revision().unwrap(), revision + 1);
+        assert!(document.paragraph_text(paragraph).is_err());
+        assert_eq!(document.next_story_block, old_next);
+        assert_eq!(
+            document.story_id("header", "default", 0).unwrap(),
+            Some(story)
+        );
+        let revision = document.revision().unwrap();
+        let bytes = document.to_bytes().unwrap();
+        assert!(!document.clear_story("header", "default", 0).unwrap());
+        assert_eq!(document.to_bytes().unwrap(), bytes);
+        assert_eq!(document.revision().unwrap(), revision);
+        let fresh = document.story_add_paragraph(story, "Fresh").unwrap();
+        assert!(fresh > paragraph);
+        assert_eq!(document.document().unwrap().parts[&story].blocks.len(), 1);
+        assert_eq!(document.paragraph_text(body).unwrap(), "Body");
+        document
+            .document
+            .as_mut()
+            .unwrap()
+            .last_section
+            .headers
+            .first = Some(story);
+        let bytes = wordcraft_docx::write(document.document().unwrap()).unwrap();
+        let revision = document.revision().unwrap();
+        assert!(document.clear_story("header", "default", 0).is_err());
+        assert_eq!(
+            wordcraft_docx::write(document.document().unwrap()).unwrap(),
+            bytes
+        );
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.paragraph_text(fresh).unwrap(), "Fresh");
+        for (kind, variant, section) in [
+            ("note", "default", 0),
+            ("header", "unknown", 0),
+            ("header", "default", 1),
+        ] {
+            assert!(document.clear_story(kind, variant, section).is_err());
+        }
+        document.close();
+        assert!(document.clear_story("header", "default", 0).is_err());
+        let mut inactive = EditableDocx::new();
+        let first = inactive.ensure_story("header", "first", 0).unwrap();
+        inactive.story_add_paragraph(first, "Hidden first").unwrap();
+        let even = inactive.ensure_story("footer", "even", 0).unwrap();
+        inactive.story_add_paragraph(even, "Hidden even").unwrap();
+        inactive.document.as_mut().unwrap().last_section.title_page = false;
+        inactive
+            .document
+            .as_mut()
+            .unwrap()
+            .settings
+            .even_odd_headers = false;
+        assert!(inactive.clear_story("header", "first", 0).unwrap());
+        assert!(inactive.clear_story("footer", "even", 0).unwrap());
+        assert!(!inactive.document().unwrap().last_section.title_page);
+        assert!(!inactive.document().unwrap().settings.even_odd_headers);
+        assert_eq!(
+            inactive.story_id("header", "first", 0).unwrap(),
+            Some(first)
+        );
+        assert_eq!(inactive.story_id("footer", "even", 0).unwrap(), Some(even));
+    }
+
+    #[test]
+    fn story_clear_rich_content_copies_and_exact_resource_reclamation() {
+        let mut document = EditableDocx::new();
+        let body = document.add_paragraph("Body").unwrap();
+        let png = media_png(2, 2, [255, 0, 0, 255]);
+        let unique = media_png(3, 2, [0, 0, 255, 255]);
+        document.set_background_image(Some(&png)).unwrap();
+        let header = document.ensure_story("header", "default", 0).unwrap();
+        let paragraph = document.story_add_paragraph(header, "Page ").unwrap();
+        document.add_paragraph_field(paragraph, "page").unwrap();
+        let table = document
+            .story_add_table(header, vec![vec!["Cell".into()]])
+            .unwrap();
+        let child = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
+        document.add_paragraph_field(child, "page_count").unwrap();
+        let picture = document
+            .story_add_image(header, &png, Some(12.0), None, "shared")
+            .unwrap();
+        document
+            .cell_add_image(table, 0, 0, &unique, Some(12.0), None, "unique")
+            .unwrap();
+        assert_eq!(document.text_bytes, "BodyPage Cell".len() + 6);
+        let section = document.add_section("next_page").unwrap();
+        let copied = document
+            .story_id("header", "default", section)
+            .unwrap()
+            .unwrap();
+        assert_ne!(copied, header);
+        assert_eq!(
+            document.text_bytes,
+            "Body".len() + 2 * ("Page Cell".len() + 6)
+        );
+        let copied_table = document.story_table_ids(copied).unwrap()[0];
+        let copied_child = document.cell_paragraph_ids(copied_table, 0, 0).unwrap()[0];
+        let props_before = document.section_props(0).unwrap();
+        let settings_before = document.document().unwrap().settings.clone();
+        assert!(document.clear_story("header", "default", 0).unwrap());
+        assert_eq!(document.text_bytes, "BodyPage Cell".len() + 6);
+        assert_eq!(document.cell_count, 1);
+        assert_eq!(document.document().unwrap().media.len(), 2);
+        for id in [paragraph, child] {
+            assert!(document.paragraph_text(id).is_err());
+        }
+        assert!(document.image_size(picture).is_err());
+        assert!(document.table_rows(table).is_err());
+        assert!(document.table_generation(table).is_err());
+        assert!(document
+            .paragraph_text(copied_child)
+            .unwrap()
+            .starts_with("Cell"));
+        assert_eq!(document.paragraph_text(body).unwrap(), "Body");
+        assert_eq!(document.section_props(0).unwrap(), props_before);
+        assert_eq!(document.document().unwrap().settings, settings_before);
+        assert!(document.clear_story("header", "default", section).unwrap());
+        assert_eq!(document.text_bytes, "Body".len());
+        assert_eq!(document.cell_count, 0);
+        assert_eq!(document.document().unwrap().media.len(), 1);
+        document.set_background_image(None).unwrap();
+        assert!(document.document().unwrap().media.is_empty());
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        let first = reopened.sections()[0].1.headers.default.unwrap();
+        let second = reopened.last_section.headers.default.unwrap();
+        assert_ne!(first, second);
+        assert_eq!(reopened.parts[&first].blocks.len(), 1);
+        assert_eq!(reopened.parts[&second].blocks.len(), 1);
+    }
+
+    #[test]
+    fn story_clear_protected_anchors_rollback_and_charged_field_boundaries() {
+        let mut document = EditableDocx::new();
+        let header = document.ensure_story("header", "default", 0).unwrap();
+        let paragraph = document.story_add_paragraph(header, "").unwrap();
+        document.add_paragraph_field(paragraph, "page").unwrap();
+        assert_eq!(document.text_bytes, 3);
+        document.text_bytes = MAX_DOCUMENT_TEXT_BYTES - 2;
+        let revision = document.revision().unwrap();
+        let bytes = document.to_bytes().unwrap();
+        assert!(
+            document.add_section("next_page").is_err(),
+            "a copied field consumes three bytes"
+        );
+        assert_eq!(document.to_bytes().unwrap(), bytes);
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.text_bytes, MAX_DOCUMENT_TEXT_BYTES - 2);
+        assert!(document.clear_story("header", "default", 0).unwrap());
+        assert_eq!(document.text_bytes, MAX_DOCUMENT_TEXT_BYTES - 5);
+        let fresh = document.story_add_paragraph(header, "abcde").unwrap();
+        assert_eq!(document.text_bytes, MAX_DOCUMENT_TEXT_BYTES);
+        assert!(document.add_run_patch(fresh, "x", "{}").is_err());
+
+        let mut document = EditableDocx::new();
+        let table = document
+            .add_table(vec![vec!["".into()], vec!["Keep".into()]])
+            .unwrap();
+        let cell = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
+        document.add_paragraph_field(cell, "page").unwrap();
+        assert_eq!(document.text_bytes, 7);
+        document.delete_row(table, 0).unwrap();
+        assert_eq!(document.text_bytes, 4);
+        let cell = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
+        document.add_paragraph_field(cell, "page").unwrap();
+        document.set_cell_text(table, 0, 0, "New").unwrap();
+        assert_eq!(document.text_bytes, 3);
+
+        let header = document.ensure_story("header", "default", 0).unwrap();
+        let paragraph = document.story_add_paragraph(header, "Protected").unwrap();
+        let path = document.location(paragraph).unwrap().1;
+        document
+            .document
+            .as_mut()
+            .unwrap()
+            .insert_object(
+                &Pos::new(StoryRef::Part(header), path, 0),
+                InlineObject::NoteRef {
+                    id: 7,
+                    kind: NoteKind::Footnote,
+                    custom: String::new(),
+                },
+                &CharProps::default(),
+            )
+            .unwrap();
+        document.text_bytes += 3;
+        let before = wordcraft_docx::write(document.document().unwrap()).unwrap();
+        let revision = document.revision().unwrap();
+        let locations = document.locations.clone();
+        let count = document.text_bytes;
+        assert!(document.clear_story("header", "default", 0).is_err());
+        assert_eq!(
+            wordcraft_docx::write(document.document().unwrap()).unwrap(),
+            before
+        );
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.locations, locations);
+        assert_eq!(document.text_bytes, count);
     }
 }

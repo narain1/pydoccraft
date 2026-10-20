@@ -366,3 +366,10 @@ Bookmark lookup preflight charges public body-index lengths plus each indexed pa
 ## 58. One PDF writer with a representation switch
 
 The Python PDF overrides add one keyword and strict bool validation; the shared private save callback retains a single filesystem/stream implementation. Destination normalization still precedes serialization. Native PyO3 exports to_bytes with a defaulted object_streams bool while an internal Rust to_bytes wrapper preserves current callers. Both call the same private serialization helper, changing only SaveOptions.object_streams and checking the complete returned vector against the existing 256 MiB limit. A small private limit parameter permits actual boundary tests for both native output representations without allocating huge fixtures. No caller-controlled output path enters Rust.
+
+
+## 59. Clear a story without replacing its owner
+
+EditableStory.clear delegates to one native clear_story operation returning whether a mutation occurred. Missing/synthetic empty stories return false; the facade invalidates its cached read snapshot only on true. Native part-kind and actual section-reference checks precede the public Document.set_story call. The replacement retains a native empty paragraph as a synthetic insertion anchor, without exposing it as an authored child or changing section inheritance.
+
+Existing staged commit checks run before publishing location, picture, table-generation and placeholder cleanup. Only the selected story's children are invalidated, and stable IDs are not recycled. content_usage uses native object_offsets to subtract image-marker bytes only, matching established insertion accounting for fields/notes/bookmarks and correcting copied-story and cell/grid removal totals. No new resource graph, XML edit path or layout algorithm is added.
