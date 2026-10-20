@@ -186,3 +186,30 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 3. Style/base changes SHALL validate all affected table geometry, including nested tables without registered Python handles, before committing. Existing section/grid/alignment validation SHALL use the same effective native geometry checks.
 4. PDF multiline link labels SHALL preserve native text order, exact Unicode offsets, spaces and newlines. Only unambiguous consecutive surviving paragraph spans SHALL be coalesced; neighboring links SHALL be remapped without changing plain text or duplicating table content.
 5. Overlapping, noncontiguous, empty or ambiguous labels SHALL remain explicitly unresolved. Link association work and intermediate indexes SHALL remain bounded; no custom column-reading or paragraph-layout algorithm SHALL be introduced.
+
+## 20. Native region rendering and DOCX tabs/breaks
+
+1. Existing PNG rendering methods SHALL accept an optional displayed-page `(x, y, width, height)` clip in points for PDF, DOCX and PPTX. Full-page behavior SHALL remain unchanged when omitted. Native region primitives SHALL render only the requested intersected raster; adapters SHALL NOT allocate the full-page raster to crop it afterward.
+2. Clip validation SHALL reject invalid/empty geometry and enforce quantized raster limits before rendering, preserve requested DPI metadata and verify returned dimensions. PDF rotation/CropBox/UserUnit and native edge rounding SHALL be covered. Unsupported transparency/background replacement SHALL remain explicit upstream gaps.
+3. DOCX paragraph and supported style formatting SHALL accept bounded tab stops with native alignment/leader semantics, inherited-stop clearing and direct/resolved snapshots. Writer precision and direct/effective stop limits SHALL be validated before commit; unsupported decimal/bar tabs SHALL fail explicitly.
+4. Paragraph break insertion SHALL reuse native line/page/column markers and existing revision-bound Unicode ranges. Page/column breaks SHALL be limited to verified top-level body contexts; all invalid locations/limits SHALL preserve state atomically. Reopened DOCX/PDF and actual page/column placement SHALL be tested.
+5. Region transforms MAY use the already-locked permissive geometry crate directly, with unchanged upstream revisions. Lockfile/license evidence SHALL be regenerated and reviewed even if the graph adds no package.
+
+## 21. Style relationships and document defaults
+
+1. Existing Style handles SHALL expose native next-paragraph and reciprocal paragraph/character link relationships with same-owner, kind and reference validation. Next-style self-reference/cycles SHALL remain distinct from prohibited base-style inheritance cycles.
+2. Linked-style replacement/clearing SHALL update both ends atomically and reject an occupied target without disconnecting unrelated styles. Native serialization SHALL preserve relationships; the API SHALL NOT claim automatic editor Enter behavior.
+3. Existing Styles SHALL expose direct document defaults and bounded character/paragraph formatting patches. Native resolution SHALL preserve omission/clear/false semantics and named/direct overrides; conditional/table-only/default-style-kind operations outside the supported profile SHALL fail explicitly. Clearing default font size SHALL fail atomically until native absent-size resolution matches DOCX readback; explicit sizes and named-style clearing remain supported. Undefined built-in linked companions SHALL be reported explicitly and permit safe clearing/replacement.
+4. Default changes SHALL validate affected native table geometry and effective tab limits, invalidate derived snapshots and preserve the prior document on failure. Native DOCX roundtrip, PNG/PDF appearance, copies, stale/closed ownership and invalid references SHALL be tested.
+
+## 22. PDF drawing resource preservation
+
+1. Drawing text, paths, images or backgrounds SHALL preserve existing effective page Font, XObject and ExtGState bindings, including inherited resources.
+2. A native resource collision SHALL fail explicitly before committing the staged document or changing counters/cached output. Native resource inspection and bounded unchanged-value checks SHALL be used; the adapter SHALL NOT rewrite PDF resource names/operators.
+3. Tests SHALL demonstrate pinned native collisions and verify adapter rollback, unchanged original rendered regions, normal repeated drawing and resource-budget failures. Dependencies SHALL retain the pinned revision and permissive graph.
+
+## 23. DOCX pagination controls and visible page bounds
+
+1. Flow-control acceptance SHALL verify headings followed by tables, keep-together paragraphs, both widow/orphan edges and page-break-before reset using native/PDF pagination, ordered exactly-once text and visible rendering.
+2. Table acceptance SHALL distinguish splitting cell paragraphs, moving fitting rows intact and oversized unsplittable rows. Serialization SHALL reject proven off-page geometry for unmerged non-splitting, exact-height and repeated-header rows before publishing output.
+3. Failed save/render/export SHALL preserve existing destination files and permit recovery by changing content, geometry or row splitting. Later font, margin and text changes SHALL be rechecked. Intentional exact-height clipping and vertically merged geometry SHALL remain distinct; incomplete upstream coverage SHALL stay documented.

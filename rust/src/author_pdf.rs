@@ -1100,6 +1100,7 @@ impl EditablePdf {
         };
         pdfcraft_edit::add_background(&mut edited, &[page], &background, true)
             .map_err(edit_error)?;
+        preserve_drawing_resources(self.document()?, &edited, page)?;
         self.document = Some(edited);
         self.backgrounds[page] = BackgroundState::Known(Some(color));
         self.items += 1;
@@ -1412,6 +1413,7 @@ impl EditablePdf {
         self.validate_input(cost)?;
         let mut edited = self.document()?.clone();
         pdfcraft_edit::stamp(&mut edited, page, "pydoccraft-path", content).map_err(edit_error)?;
+        preserve_drawing_resources(self.document()?, &edited, page)?;
         self.document = Some(edited);
         self.items += 1;
         self.input_bytes += cost;
@@ -1597,6 +1599,7 @@ impl EditablePdf {
         let cost = text.len() + font_bytes.len() + content.len();
         self.validate_input(cost)?;
         pdfcraft_edit::stamp(&mut edited, page, "pydoccraft-text", content).map_err(edit_error)?;
+        preserve_drawing_resources(self.document()?, &edited, page)?;
         self.document = Some(edited);
         self.items += 1;
         self.input_bytes += cost;
@@ -1669,6 +1672,7 @@ impl EditablePdf {
         }
         let mut edited = self.document()?.clone();
         pdfcraft_edit::add_content(&mut edited, page, &Content::Text(item)).map_err(edit_error)?;
+        preserve_drawing_resources(self.document()?, &edited, page)?;
         self.document = Some(edited);
         self.items += 1;
         self.input_bytes += text.len();
@@ -1733,6 +1737,7 @@ impl EditablePdf {
             &Content::Image(AddedImage::new(rect, image)),
         )
         .map_err(edit_error)?;
+        preserve_drawing_resources(self.document()?, &edited, page)?;
         self.document = Some(edited);
         self.items += 1;
         self.input_bytes += data.len();
@@ -2331,9 +2336,423 @@ fn organize_error(error: pdfcraft_organize::OrganizeError) -> EngineError {
     EngineError::Conversion(format!("PDF page organization failed: {error}"))
 }
 
+// Existing indirect resources retain their shared Arc in a staged Document clone.
+// Native replacements are only accepted when their small scalar dictionaries match;
+// never invoke Object's recursive equality on an untrusted graph or decode a stream.
+fn drawing_binding_unchanged(
+    before: &Document,
+    after: &Document,
+    old: &pdfcraft_cos::Object,
+    new: &pdfcraft_cos::Object,
+) -> bool {
+    use pdfcraft_cos::Object;
+    let old = before.resolve(old);
+    let new = after.resolve(new);
+    if Arc::ptr_eq(&old, &new) {
+        return true;
+    }
+    fn scalar_equal(old: &Object, new: &Object) -> bool {
+        match (old, new) {
+            (Object::Null, Object::Null) => true,
+            (Object::Bool(a), Object::Bool(b)) => a == b,
+            (Object::Int(a), Object::Int(b)) => a == b,
+            (Object::Real(a), Object::Real(b)) => a == b,
+            (Object::Int(a), Object::Real(b)) | (Object::Real(b), Object::Int(a)) => {
+                a.unsigned_abs() <= (1_u64 << 53)
+                    && b.is_finite()
+                    && b.fract() == 0.0
+                    && (*a as f64) == *b
+            }
+            (Object::Name(a), Object::Name(b)) => a.len() <= 256 && a == b,
+            (Object::String(a), Object::String(b)) => a.bytes.len() <= 256 && a == b,
+            _ => false,
+        }
+    }
+    match (&*old, &*new) {
+        (Object::Dict(a), Object::Dict(b)) => {
+            let count = a.iter().take(17).count();
+            count <= 16
+                && b.iter().take(17).count() == count
+                && a.iter().all(|(key, value)| {
+                    key.len() <= 256 && b.get(key).is_some_and(|other| scalar_equal(value, other))
+                })
+        }
+        (a, b) => scalar_equal(a, b),
+    }
+}
+
+// The pinned drawing writers use several fixed resource names. Refuse a staged
+// operation that would change an existing binding: rewriting names/operators here
+// would duplicate the upstream resource allocator. Native page traversal supplies
+// effective inherited resources, so parent dictionaries receive the same protection.
+fn preserve_drawing_resources(before: &Document, after: &Document, page: usize) -> PyResult<()> {
+    fn resources(document: &Document, page: usize) -> PyResult<pdfcraft_cos::Dict> {
+        let pages = pdfcraft_model::pages(document);
+        let page = pages.get(page).ok_or_else(|| {
+            EngineError::Malformed("drawing page disappeared during resource validation".into())
+        })?;
+        match page.dict.get(b"Resources") {
+            None => Ok(pdfcraft_cos::Dict::new()),
+            Some(value) => document.dict(value).ok_or_else(|| {
+                EngineError::Unsupported("drawing cannot preserve malformed page resources".into())
+                    .into()
+            }),
+        }
+    }
+    let original = resources(before, page)?;
+    let staged = resources(after, page)?;
+    let mut checked = 0usize;
+    for category in [b"Font".as_slice(), b"XObject", b"ExtGState"] {
+        let Some(value) = original.get(category) else {
+            continue;
+        };
+        let original_entries = before.dict(value).ok_or_else(|| {
+            EngineError::Unsupported("drawing cannot preserve malformed resource bindings".into())
+        })?;
+        let staged_entries = staged.get(category).and_then(|value| after.dict(value));
+        for (name, old) in original_entries.iter() {
+            checked += 1;
+            if checked > MAX_ITEMS {
+                return Err(EngineError::ResourceLimit(
+                    "drawing resource bindings exceed 10000".into(),
+                )
+                .into());
+            }
+            let preserved = staged_entries
+                .as_ref()
+                .and_then(|entries| entries.get(name))
+                .is_some_and(|new| drawing_binding_unchanged(before, after, old, new));
+            if !preserved {
+                return Err(EngineError::Unsupported(format!(
+                    "drawing cannot verify preservation of an existing PDF {} resource; collision-safe allocation is unavailable",
+                    String::from_utf8_lossy(category),
+                )).into());
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn resource_fixture(
+        resources: pdfcraft_cos::Dict,
+        content: &[u8],
+        inherited: bool,
+    ) -> Document {
+        use pdfcraft_cos::{Dict, Object, Stream};
+        let mut document = pdfcraft_create::blank(200.0, 200.0, 1).unwrap();
+        let page = pdfcraft_organize::pages(&document).unwrap()[0].obj;
+        let stream = document.add(Object::Stream(Stream::flate(Dict::new(), content)));
+        document
+            .update_dict(page, |dict| {
+                dict.set(b"Contents".to_vec(), Object::Ref(stream));
+            })
+            .unwrap();
+        let owner = if inherited {
+            document
+                .get(page)
+                .as_dict()
+                .unwrap()
+                .reference(b"Parent")
+                .unwrap()
+        } else {
+            page
+        };
+        document
+            .update_dict(page, |dict| {
+                dict.remove(b"Resources");
+            })
+            .unwrap();
+        document
+            .update_dict(owner, |dict| {
+                dict.set(b"Resources".to_vec(), Object::Dict(resources));
+            })
+            .unwrap();
+        document
+    }
+
+    fn collision_font_resources(name: &[u8]) -> pdfcraft_cos::Dict {
+        use pdfcraft_cos::{Dict, Object};
+        let mut font = Dict::new();
+        font.set(b"Type".to_vec(), Object::name("Font"));
+        font.set(b"Subtype".to_vec(), Object::name("Type1"));
+        font.set(b"BaseFont".to_vec(), Object::name("Courier"));
+        font.set(b"Encoding".to_vec(), Object::name("WinAnsiEncoding"));
+        let mut fonts = Dict::new();
+        fonts.set(name.to_vec(), Object::Dict(font));
+        let mut resources = Dict::new();
+        resources.set(b"Font".to_vec(), Object::Dict(fonts));
+        resources
+    }
+
+    fn resource_fixture_bytes(document: &Document) -> Vec<u8> {
+        pdfcraft_cos::write_full(document, &SaveOptions::default()).unwrap()
+    }
+
+    fn original_resource_pixels(document: &Document) -> Vec<u8> {
+        crate::pdf::render_region(
+            &resource_fixture_bytes(document),
+            0,
+            72.0,
+            None,
+            (0.0, 0.0, 200.0, 70.0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn drawing_resources_reject_fixed_font_collisions_inherited_and_direct() {
+        pyo3::prepare_freethreaded_python();
+        for inherited in [false, true] {
+            let source = resource_fixture(
+                collision_font_resources(b"PCHelv"),
+                b"BT /PCHelv 20 Tf 1 0 0 1 10 150 Tm (MMMM WWWW) Tj ET",
+                inherited,
+            );
+            let before = original_resource_pixels(&source);
+            let mut native = source.clone();
+            // An otherwise empty native stamp changes the preexisting text's font.
+            pdfcraft_edit::stamp(&mut native, 0, "repro", b"q Q\n".to_vec()).unwrap();
+            assert_ne!(original_resource_pixels(&native), before);
+            let source_bytes = resource_fixture_bytes(&source);
+            let mut editable = EditablePdf::from_bytes(&source_bytes, None).unwrap();
+            let saved = editable.to_bytes().unwrap();
+            let counts = (editable.items, editable.input_bytes);
+            let path = r#"[["move",10,100],["line",30,100]]"#;
+            let error = editable
+                .draw_path(0, path, Some((0, 0, 0)), None, 1.0, false)
+                .unwrap_err();
+            assert!(error
+                .to_string()
+                .contains("unsupported:drawing cannot verify preservation"));
+            assert_eq!(editable.to_bytes().unwrap(), saved);
+            assert!(editable.set_background(0, (255, 255, 255)).is_err());
+            assert_eq!(editable.to_bytes().unwrap(), saved);
+            assert!(editable
+                .add_text_with_font(
+                    0,
+                    "new",
+                    10.0,
+                    100.0,
+                    12.0,
+                    include_bytes!("../../tests/fixtures/fonts/Inter-Regular.ttf"),
+                    (0, 0, 0)
+                )
+                .is_err());
+            assert_eq!(editable.to_bytes().unwrap(), saved);
+            assert_eq!((editable.items, editable.input_bytes), counts);
+            // Methods whose native writer does not touch this binding remain available.
+            editable
+                .add_text(0, "new", 10.0, 100.0, 12.0, (0, 0, 0))
+                .unwrap();
+            let image = crate::rendering::encode_png(1, 1, &[255, 0, 0, 255], 72.0).unwrap();
+            editable
+                .add_image(0, &image, 10.0, 130.0, 20.0, 20.0)
+                .unwrap();
+            assert_eq!(
+                original_resource_pixels(editable.document().unwrap()),
+                before
+            );
+        }
+    }
+
+    #[test]
+    fn drawing_resources_reject_added_text_font_collision() {
+        pyo3::prepare_freethreaded_python();
+        let source = resource_fixture(
+            collision_font_resources(b"PCFHelvetica"),
+            b"BT /PCFHelvetica 20 Tf 1 0 0 1 10 150 Tm (MMMM WWWW) Tj ET",
+            false,
+        );
+        let item = AddedText {
+            rect: [10.0, 0.0, 190.0, 100.0],
+            text: "new".into(),
+            ..AddedText::default()
+        };
+        let mut native = source.clone();
+        pdfcraft_edit::add_content(&mut native, 0, &Content::Text(item)).unwrap();
+        assert_ne!(
+            original_resource_pixels(&native),
+            original_resource_pixels(&source)
+        );
+        let mut editable = EditablePdf::from_bytes(&resource_fixture_bytes(&source), None).unwrap();
+        let before = editable.to_bytes().unwrap();
+        assert!(editable
+            .add_text(0, "new", 10.0, 100.0, 12.0, (0, 0, 0))
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported:drawing cannot verify preservation"));
+        assert_eq!(editable.to_bytes().unwrap(), before);
+    }
+
+    #[test]
+    fn drawing_resources_reject_background_opacity_collision() {
+        pyo3::prepare_freethreaded_python();
+        use pdfcraft_cos::{Dict, Object};
+        let mut state = Dict::new();
+        state.set(b"Type".to_vec(), Object::name("ExtGState"));
+        state.set(b"ca".to_vec(), Object::Real(0.5));
+        state.set(b"CA".to_vec(), Object::Real(0.5));
+        let mut states = Dict::new();
+        states.set(b"PCGS100".to_vec(), Object::Dict(state));
+        let mut resources = Dict::new();
+        resources.set(b"ExtGState".to_vec(), Object::Dict(states));
+        let source = resource_fixture(
+            resources,
+            b"q /PCGS100 gs 1 0 0 rg 10 140 40 40 re f Q",
+            true,
+        );
+        let mut native = source.clone();
+        let background = pdfcraft_edit::Background {
+            color: [1.0; 3],
+            ..Default::default()
+        };
+        pdfcraft_edit::add_background(&mut native, &[0], &background, true).unwrap();
+        assert_ne!(
+            original_resource_pixels(&native),
+            original_resource_pixels(&source)
+        );
+        let mut editable = EditablePdf::from_bytes(&resource_fixture_bytes(&source), None).unwrap();
+        let before = editable.to_bytes().unwrap();
+        assert!(editable
+            .set_background(0, (255, 255, 255))
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported:drawing cannot verify preservation"));
+        assert_eq!(editable.to_bytes().unwrap(), before);
+        assert!(editable.background(0).is_err());
+    }
+
+    #[test]
+    fn drawing_resources_reject_image_name_collision() {
+        pyo3::prepare_freethreaded_python();
+        use pdfcraft_cos::{Dict, Object, Stream};
+        let red = crate::rendering::encode_png(1, 1, &[255, 0, 0, 255], 72.0).unwrap();
+        let blue = crate::rendering::encode_png(1, 1, &[0, 0, 255, 255], 72.0).unwrap();
+        let mut source = pdfcraft_create::blank(200.0, 200.0, 1).unwrap();
+        let (old_image, _) = pdfcraft_create::image_xobject(&mut source, "old.png", &red).unwrap();
+        let stream = source.add(Object::Stream(Stream::flate(Dict::new(), b"")));
+        let mut probe = source.clone();
+        let (future_image, _) =
+            pdfcraft_create::image_xobject(&mut probe, "new.png", &blue).unwrap();
+        let mut images = Dict::new();
+        let mut content = String::new();
+        // Cover subsequent object numbers too: saving/reopening can allocate an xref object.
+        for offset in 0..16 {
+            let name = format!("PCImg{}", future_image.num + offset);
+            images.set(name.as_bytes().to_vec(), Object::Ref(old_image));
+            content.push_str(&format!(
+                "q 8 0 0 40 {} 140 cm /{name} Do Q\n",
+                10 + offset * 10
+            ));
+        }
+        let mut resources = Dict::new();
+        resources.set(b"XObject".to_vec(), Object::Dict(images));
+        source.set(
+            stream,
+            Object::Stream(Stream::flate(Dict::new(), content.as_bytes())),
+        );
+        let page = pdfcraft_organize::pages(&source).unwrap()[0].obj;
+        source
+            .update_dict(page, |dict| {
+                dict.set(b"Resources".to_vec(), Object::Dict(resources));
+                dict.set(b"Contents".to_vec(), Object::Ref(stream));
+            })
+            .unwrap();
+        let mut editable = EditablePdf::from_bytes(&resource_fixture_bytes(&source), None).unwrap();
+        let before = editable.to_bytes().unwrap();
+        let original_pixels = original_resource_pixels(editable.document().unwrap());
+        let mut native = editable.document().unwrap().clone();
+        let (new_image, _) = pdfcraft_create::image_xobject(&mut native, "new.png", &blue).unwrap();
+        assert!((future_image.num..future_image.num + 16).contains(&new_image.num));
+        pdfcraft_edit::add_content(
+            &mut native,
+            0,
+            &Content::Image(AddedImage::new([10.0, 40.0, 30.0, 60.0], new_image)),
+        )
+        .unwrap();
+        assert_ne!(original_resource_pixels(&native), original_pixels);
+        assert!(editable
+            .add_image(0, &blue, 10.0, 140.0, 20.0, 20.0)
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported:drawing cannot verify preservation"));
+        assert_eq!(editable.to_bytes().unwrap(), before);
+        assert_eq!(
+            original_resource_pixels(editable.document().unwrap()),
+            original_pixels
+        );
+    }
+
+    #[test]
+    fn drawing_resources_allow_matching_bindings_and_bound_checks() {
+        pyo3::prepare_freethreaded_python();
+        use pdfcraft_cos::{Dict, Object};
+        // A reference number alone must not prove preservation when its object changes.
+        let mut source = pdfcraft_create::blank(200.0, 200.0, 1).unwrap();
+        let reference = source.add(Object::Int(1));
+        let mut changed = source.clone();
+        changed.set(reference, Object::Int(2));
+        assert!(!drawing_binding_unchanged(
+            &source,
+            &changed,
+            &Object::Ref(reference),
+            &Object::Ref(reference)
+        ));
+        assert!(!drawing_binding_unchanged(
+            &source,
+            &source,
+            &Object::Int((1_i64 << 53) + 1),
+            &Object::Real((1_u64 << 53) as f64),
+        ));
+        let complex = Object::Array(vec![Object::Int(1)]);
+        assert!(!drawing_binding_unchanged(
+            &source, &source, &complex, &complex
+        ));
+        let mut editable = EditablePdf::new(200.0, 200.0).unwrap();
+        editable.set_background(0, (255, 255, 255)).unwrap();
+        editable.set_background(0, (240, 240, 240)).unwrap();
+        editable
+            .add_text(0, "one", 10.0, 10.0, 12.0, (0, 0, 0))
+            .unwrap();
+        editable
+            .add_text(0, "two", 10.0, 40.0, 12.0, (0, 0, 0))
+            .unwrap();
+        editable
+            .draw_path(
+                0,
+                r#"[["move",10,100],["line",30,100]]"#,
+                Some((0, 0, 0)),
+                None,
+                1.0,
+                false,
+            )
+            .unwrap();
+        let bytes = editable.to_bytes().unwrap();
+        let mut imported = EditablePdf::from_bytes(&bytes, None).unwrap();
+        imported
+            .add_text(0, "three", 10.0, 140.0, 12.0, (0, 0, 0))
+            .unwrap();
+        imported.set_background(0, (250, 250, 250)).unwrap();
+        let mut fonts = Dict::new();
+        for i in 0..=MAX_ITEMS {
+            fonts.set(format!("F{i}").into_bytes(), Object::Dict(Dict::new()));
+        }
+        let mut resources = Dict::new();
+        resources.set(b"Font".to_vec(), Object::Dict(fonts));
+        let source = resource_fixture(resources, b"", false);
+        let mut editable = EditablePdf::from_bytes(&resource_fixture_bytes(&source), None).unwrap();
+        let before = editable.to_bytes().unwrap();
+        assert!(editable
+            .add_text(0, "new", 10.0, 100.0, 12.0, (0, 0, 0))
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit:drawing resource bindings"));
+        assert_eq!(editable.to_bytes().unwrap(), before);
+    }
 
     #[test]
     fn outline_import_maps_nested_omitted_and_duplicate_targets_with_links() {
