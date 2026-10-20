@@ -815,7 +815,7 @@ Full integrated locked tests, release wheel, installed-wheel corpus and independ
 - This supersedes focused-only lock evidence for local acceptance. All seven comment kinds retain tested appearances and pixels across transformed pages; native lock refusals preserve staged state. Inventory/initial-inspection limits, foreign profiles, links and reply-thread semantics remain outside this mutation profile. Independent review and exact-head/current-main CI remain required before manual merge; PDF6/U10 stay open.
 
 
-## Independent manual merge evidence through PR 70
+## Independent manual merge evidence through PR 72
 
 GitHub merge state was verified on 2026-10-20. Each change passed independent review, required fixes and fresh exact-head/current-main CI before manual merge; repository auto-merge remains disabled. These gates complete the corresponding delivery tasks, not broader roadmap criteria. Historical artifact sections above retain their original validation scope.
 
@@ -827,6 +827,8 @@ GitHub merge state was verified on 2026-10-20. Each change passed independent re
 | [68](https://github.com/narain1/pydoccraft/pull/68) | `b733c6ab41c44728920e97e6ba3b31e782b36aaa` | 276 / 379 |
 | [69](https://github.com/narain1/pydoccraft/pull/69) | `e59de48ce0c13c5ade87a626d25f7e2e74dc122a` | 276 / 379 |
 | [70](https://github.com/narain1/pydoccraft/pull/70) | `c99ba86f2c341c1229f6a24e5436cf98dae73c14` | 276 / 386 |
+| [71](https://github.com/narain1/pydoccraft/pull/71) | `e402268f5bc33f756f34587594761c41308a2a1e` | 280 / 393 |
+| [72](https://github.com/narain1/pydoccraft/pull/72) | `d0a8ec6de3e72f2472d411a7fe9577f638af8ad2` | 280 / 402 |
 
 Formatting, warnings-denied Clippy, strict installed-package typing and the unchanged 264-package runtime/build license audit passed in each final CI run. PR69 changes source-audit documentation/data only.
 
@@ -931,3 +933,5 @@ Reviewed new module fingerprints match their respective runtime commits: test_fi
 Reference joins reuse the existing notes/presentation/forms families. Only representative Widget.field_flags at cached immutable widget.rst line 110 is added, bringing the inventory to 198 members across 44 families; this does not imply arbitrary flags, multiwidget synchronization or security parity. New coverage joins reuse LAY7/E3 and SLIDE4; the prior BG5/story-clear connection remains intact.
 
 The isolated documentation snapshot passes 14 support-ledger plus 5 reference-inventory tests, exact generated-byte checks, the 139-ID/14-owner roadmap validator and cached immutable source/member checks. The three new property suites were rerun with tests loaded from the isolated snapshot and doc_ex from their exact installed artifact environments: 4 read-only tests in 0.213 s on 423, 6 note-conversion tests in 12.452 s on 419, and 3 background-reset tests in 0.106 s on 426, all passing. No Cargo, new wheel, dependency or source-pin change. Broader API1/API7/QA1/QA8 and format acceptance remain open; independent evidence review is still required.
+
+PR72 final head `9588c1c54de9d0dd819fa8e096bbd4120abf2a04` passed [current-main CI 39505927934](https://github.com/narain1/pydoccraft/actions/runs/39505927934) after integrating the independently reviewed outline raster expectation. The runtime and Cargo graph were unchanged by that integration; append-only validation history and the callback target-scope correction were retained.

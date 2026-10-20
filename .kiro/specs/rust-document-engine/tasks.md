@@ -433,7 +433,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Verify focused stable-ID/control-output, early/late invalidation, copy and appended-range regressions; retain native final checks.
 - [x] Complete early stale-range normalization guard and DOCX/PPTX shape/cell controls.
 - [x] Complete integrated clean-wheel validation (402 tests), strict typing and structural checks.
-- [ ] Complete independent review and exact-head/current-main CI before manual merge.
+- [x] Complete independent review and exact-head/current-main CI: 280 Rust / 402 Python tests; manually merged as d0a8ec6de3e72f2472d411a7fe9577f638af8ad2.
 
 
 ## Conditional table-border fidelity correction
