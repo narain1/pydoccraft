@@ -1981,7 +1981,7 @@ class PdfField:
 
 
 class _WordBookmarks:
-    """DOCX named ranges, distinct from PDF outline bookmarks."""
+    """DOCX whole-paragraph or endpoint targets; PDF bookmarks are outlines."""
     def __init__(self, owner: WordDocument):
         self._owner = owner
 

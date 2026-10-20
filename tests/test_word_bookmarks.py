@@ -23,8 +23,8 @@ class WordBookmarkTests(unittest.TestCase):
             paragraph.add_run(' after')
             before_text = paragraph.text
             before_png = document.render_page(0, dpi=72)
-            document.bookmarks['Target'] = paragraph.find('Target e\u0301 😀')[0]
-            self.assertEqual(document.bookmarks['Target'].text, 'Target e\u0301 😀')
+            document.bookmarks['Target'] = paragraph[:]
+            self.assertEqual(document.bookmarks['Target'].text, before_text)
             self.assertEqual(list(document.bookmarks), ['Target'])
             self.assertEqual(len(document.bookmarks), 1)
             self.assertEqual(document.render_page(0, dpi=72), before_png)
@@ -34,8 +34,8 @@ class WordBookmarkTests(unittest.TestCase):
             self.assertEqual(list(document.bookmarks), ['Point', 'Target'])
             with self.assertRaises(ValueError):
                 _ = old.text
-            document.bookmarks['Target'] = paragraph.find('Before')[0]
-            self.assertEqual(document.bookmarks['Target'].text, 'Before')
+            document.bookmarks['Target'] = paragraph[len(paragraph.text):]
+            self.assertEqual(document.bookmarks['Target'].text, '')
             with ZipFile(BytesIO(document.to_bytes())) as archive:
                 xml = ET.fromstring(archive.read('word/document.xml'))
                 starts = xml.findall('.//' + W + 'bookmarkStart')
@@ -59,28 +59,27 @@ class WordBookmarkTests(unittest.TestCase):
     def test_same_paragraph_relocation_and_fresh_self_assignment(self):
         with doc_ex.new('docx') as document:
             paragraph = document.add_paragraph('Before Middle After')
-            document.bookmarks['Moving'] = paragraph.find('Middle')[0]
-            for text in ('Before', 'After', 'Middle'):
-                document.bookmarks['Moving'] = paragraph.find(text)[0]
-                self.assertEqual(document.bookmarks['Moving'].text, text)
+            other = document.add_paragraph('Other paragraph')
+            for target in (paragraph, other, paragraph):
+                document.bookmarks['Moving'] = target[:]
+                self.assertEqual(document.bookmarks['Moving'].text, target.text.strip('\ufffc'))
                 document.bookmarks['Moving'] = document.bookmarks['Moving']
-                self.assertEqual(document.bookmarks['Moving'].text, text)
             selected = document.bookmarks['Moving']
             document.bookmarks['Moving'] = paragraph[selected._start - 1:selected._end]
-            self.assertEqual(document.bookmarks['Moving'].text, 'Middle')
+            self.assertEqual(document.bookmarks['Moving'].text, 'Before Middle After')
             selected = document.bookmarks['Moving']
             document.bookmarks['Moving'] = paragraph[selected._start:selected._end + 1]
-            self.assertEqual(document.bookmarks['Moving'].text, 'Middle')
+            self.assertEqual(document.bookmarks['Moving'].text, 'Before Middle After')
+            document.bookmarks['Moving'] = paragraph[len(paragraph.text):]
+            self.assertEqual(document.bookmarks['Moving'].text, '')
             document.bookmarks['Moving'] = paragraph[:]
             self.assertEqual(document.bookmarks['Moving'].text, 'Before Middle After')
-            document.bookmarks['Moving'] = paragraph.find('Middle')[0]
-            self.assertEqual(document.bookmarks['Moving'].text, 'Middle')
-            document.bookmarks['Other'] = paragraph.find('After')[0]
+            document.bookmarks['Other'] = paragraph[0:0]
             before = document.to_bytes()
             with self.assertRaises(UnsupportedFormatError):
                 document.bookmarks['Moving'] = paragraph[:]
             self.assertEqual(document.to_bytes(), before)
-            self.assertEqual(document.bookmarks['Moving'].text, 'Middle')
+            self.assertEqual(document.bookmarks['Moving'].text, 'Before Middle After')
             fields = document.add_paragraph('Page ')
             fields.add_field('page')
             before = document.to_bytes()
@@ -95,7 +94,7 @@ class WordBookmarkTests(unittest.TestCase):
             source.add_run('label', bold=True)
             target = document.add_paragraph('Before\n' * 40)
             target.add_run('Destination', color='red')
-            document.bookmarks['Destination'] = target.find('Destination')[0]
+            document.bookmarks['Destination'] = target[len(target.text):]
             source[:].link = '#Destination'
             header = document.sections[0].header().add_paragraph('HeaderLink')
             footer = document.sections[0].footer().add_paragraph('FooterLink')
@@ -125,8 +124,10 @@ class WordBookmarkTests(unittest.TestCase):
                     self.assertTrue(pdf.render_page(destination, dpi=72).startswith(b'\x89PNG'))
             self.assertNotEqual(destinations[0], destinations[1])
             with document.copy() as copied:
+                copied.bookmarks['Destination'] = copied.paragraphs[1][:]
                 copied.bookmarks['Destination'].text = 'Copy destination'
-                self.assertEqual(document.bookmarks['Destination'].text, 'Destination')
+                self.assertEqual(document.bookmarks['Destination'].text, '')
+                self.assertIn('Destination', target.text)
                 with doc_ex.open(copied.convert('pdf')) as pdf:
                     self.assertIn('Copy destination', pdf.to_markdown())
                     self.assertTrue(any(page.get_links() for page in pdf))
@@ -192,17 +193,17 @@ class WordBookmarkTests(unittest.TestCase):
             note = document.notes.add(body.find('Anchor')[0], 'Note')
             note.paragraphs[0].add_field('page_count')
             document.sections[0].header().add_image(png, width=20)
-            document.bookmarks['Anchor'] = body.find('Anchor')[0]
+            document.bookmarks['Anchor'] = body[0:0]
             nested = document.add_table([['']])[0, 0].add_table([['Target']])
             nested[0, 0].add_image(png, width=16)
-            document.bookmarks['Nested'] = nested[0, 0].paragraphs[0].find('Target')[0]
+            document.bookmarks['Nested'] = nested[0, 0].paragraphs[0][:]
             self.assertEqual(len(media_parts(document)), 1)
             before = document.render_page(0, dpi=72)
             picture.data = red_picture(4, 3)
             del document.images[0]
             document.background_image = None
             del document.bookmarks['Anchor']
-            document.bookmarks['Nested'] = body.find('Anchor')[0]
+            document.bookmarks['Nested'] = body[0:0]
             self.assertEqual(len(media_parts(document)), 1)
             self.assertNotEqual(document.render_page(0, dpi=72), before)
             with doc_ex.open(document.convert('pdf')) as pdf:
@@ -233,7 +234,7 @@ class WordBookmarkTests(unittest.TestCase):
             clipped = table[0, 0].paragraphs[0]
             before = document.to_bytes()
             with self.assertRaises(UnsupportedFormatError):
-                document.bookmarks['Clipped'] = clipped.find('Visible')[0]
+                document.bookmarks['Clipped'] = clipped[:]
             with self.assertRaises(UnsupportedFormatError):
                 clipped.find('Visible')[0].link = '#' + 'x' * 40
             self.assertEqual(document.to_bytes(), before)
@@ -292,7 +293,7 @@ class WordBookmarkTests(unittest.TestCase):
         with doc_ex.new('docx', size=(300, 300)) as document:
             document.sections[0].margins = 30
             target = document.add_paragraph('Before\n' * 700 + 'Target')
-            document.bookmarks['Late'] = target.find('Target')[0]
+            document.bookmarks['Late'] = target[len(target.text):]
             label = document.add_paragraph('Jump\n' * 30)
             selected = label[:]
             before = document.to_bytes()
@@ -302,3 +303,54 @@ class WordBookmarkTests(unittest.TestCase):
             self.assertIsNone(selected.link)
             label[:4].link = '#Late'
             self.assertTrue(document.to_bytes().startswith(b'PK'))
+
+    def test_endpoint_profile_preserves_shaping_and_later_edits_are_atomic(self):
+        for text, direction, start, end in (('Before Target 😀 after', 'ltr', 7, 15), ('office', 'ltr', 2, 3), ('سلام', 'rtl', 1, 3)):
+            with self.subTest(text=text), doc_ex.new('docx', size=(500, 200)) as document:
+                document.sections[0].margins = 20
+                paragraph = document.add_paragraph(text)
+                paragraph[:].format(font_size=36)
+                paragraph.format(direction=direction)
+                before_png = document.render_page(0, dpi=144)
+                before_bytes = document.to_bytes()
+                for selection in (paragraph[start:end], paragraph[1:1]):
+                    with self.assertRaisesRegex(UnsupportedFormatError, 'interior markers'):
+                        document.bookmarks['Unsafe'] = selection
+                    self.assertEqual(document.to_bytes(), before_bytes)
+                    self.assertEqual(selection.text, text[selection._start:selection._end])
+                for kind in ('whole', 'start', 'end'):
+                    selection = paragraph[:] if kind == 'whole' else paragraph[0:0] if kind == 'start' else paragraph[len(paragraph.text):]
+                    document.bookmarks['Safe'] = selection
+                    self.assertEqual(document.render_page(0, dpi=144), before_png)
+                    if kind == 'whole':
+                        for position in (0, len(paragraph.text)):
+                            before = document.to_bytes()
+                            selected = paragraph[position:position]
+                            with self.assertRaisesRegex(UnsupportedFormatError, 'interior markers'):
+                                selected.text = 'outside'
+                            self.assertEqual(document.to_bytes(), before)
+                            self.assertEqual(selected.text, '')
+                        document.bookmarks['Safe'].text = text
+                        paragraph.format(direction=direction)
+                    else:
+                        selected = document.bookmarks['Safe']
+                        before = document.to_bytes()
+                        with self.assertRaisesRegex(UnsupportedFormatError, 'interior markers'):
+                            selected.text = 'inside'
+                        self.assertEqual(document.to_bytes(), before)
+                        self.assertEqual(selected.text, '')
+                    del document.bookmarks['Safe']
+                    self.assertEqual(document.render_page(0, dpi=144), before_png)
+        for default_size, run_size in ((48, 6), (6, 48)):
+            with doc_ex.new('docx') as document:
+                document.styles.format_defaults(font_size=default_size)
+                paragraph = document.add_paragraph('office سلام 😀')
+                paragraph[:].format(font_size=run_size)
+                paragraph.add_run(' mixed', font_size=12)
+                before = document.render_page(0, dpi=144)
+                document.bookmarks['Safe'] = paragraph[:]
+                self.assertEqual(document.render_page(0, dpi=144), before)
+                document.bookmarks['Safe'] = paragraph[len(paragraph.text):]
+                self.assertEqual(document.render_page(0, dpi=144), before)
+                del document.bookmarks['Safe']
+                self.assertEqual(document.render_page(0, dpi=144), before)
