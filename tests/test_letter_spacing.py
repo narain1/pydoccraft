@@ -1,5 +1,7 @@
 """Native character spacing: owned formatting, native clusters, and output fidelity."""
 from io import BytesIO
+import base64
+import json
 import unittest
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
@@ -42,8 +44,27 @@ class LetterSpacingTests(unittest.TestCase):
                     offsets = [i for i in range(0, len(a), 4)
                                if a[i] > a[i + 1] or b[i] > b[i + 1]]
                     self.assertGreater(len(offsets), 100)
-                    self.assertLessEqual(max(abs(a[i + channel] - b[i + channel])
-                                             for i in offsets for channel in range(4)), 1)
+                    delta = max(abs(a[i + channel] - b[i + channel])
+                                for i in offsets for channel in range(4))
+                    if delta > 1:
+                        differences = sorted(
+                            (max(abs(a[i + channel] - b[i + channel]) for channel in range(4)),
+                             i // 4 % a_width, i // 4 // a_width,
+                             list(a[i:i + 4]), list(b[i:i + 4]))
+                            for i in offsets if a[i:i + 4] != b[i:i + 4])
+                        print("LETTER_SPACING_DIAGNOSTIC " + json.dumps({
+                            "page": page, "dpi": dpi, "max_delta": delta,
+                            "source_extent": colored_extent(source_png),
+                            "pdf_extent": colored_extent(pdf_png),
+                            "changed_chromatic_pixels": len(differences),
+                            "largest_differences": differences[-40:],
+                        }), flush=True)
+                        for name, payload in (("source_png", source_png), ("pdf_png", pdf_png),
+                                              ("source_docx", document.to_bytes()),
+                                              ("output_pdf", document.convert("pdf"))):
+                            print("LETTER_SPACING_ASSET " + name + " "
+                                  + base64.b64encode(payload).decode("ascii"), flush=True)
+                    self.assertLessEqual(delta, 1)
                 else:
                     self.assertLessEqual(max(abs(x - y) for x, y in zip(a, b)), 1)
 
