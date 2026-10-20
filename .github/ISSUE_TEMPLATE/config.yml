@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Usage questions and design discussions
+    url: https://github.com/narain1/pydoccraft/discussions
+    about: Ask for help or discuss broad ideas before opening an implementation issue.
+  - name: Report a security vulnerability
+    url: https://github.com/narain1/pydoccraft/security/advisories/new
+    about: Report vulnerabilities privately. Do not open a public issue.

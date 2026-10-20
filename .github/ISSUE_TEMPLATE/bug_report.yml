@@ -1,0 +1,61 @@
+name: Bug report
+description: Report a reproducible defect using a safe synthetic document
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not upload confidential, personal, proprietary, or potentially malicious documents. Report suspected vulnerabilities privately through the Security tab.
+  - type: input
+    id: version
+    attributes:
+      label: pydoccraft version
+      placeholder: "0.2.1"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Python version, operating system, and architecture
+      placeholder: "Python 3.12, Ubuntu 24.04, x86_64"
+    validations:
+      required: true
+  - type: dropdown
+    id: format
+    attributes:
+      label: Source format
+      options: [PDF, DOCX, PPTX, Not format-specific]
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Actual behavior
+      description: Include the complete error and operation without secrets or confidential content.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Prefer code that generates a synthetic input document.
+      render: python
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: This is not a security vulnerability.
+          required: true
+        - label: Any attached sample is synthetic and safe to publish.
+          required: true
