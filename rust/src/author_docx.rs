@@ -8136,8 +8136,11 @@ mod tests {
                 .map(|block| block.text.as_str())
                 .collect::<Vec<_>>()
                 .join("\n");
+            // PdfCraft infers the gap after a list marker as whitespace on some platforms.
+            // Assert the exact counter and following content independently of that gap.
+            let compact = text.split_whitespace().collect::<String>();
             assert!(
-                text.contains(&format!("{rendered} Auxiliary list")),
+                compact.contains(&format!("{rendered}Auxiliarylist")),
                 "{text:?}"
             );
         }
