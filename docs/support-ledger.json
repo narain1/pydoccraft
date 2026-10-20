@@ -69,6 +69,13 @@
       "kind": "artifact",
       "source_commit": "a94a5ba65d332e5cc897cb19fd368d771b911d0b",
       "date": "2026-10-20"
+    },
+    "outline-raster-ci-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#decimal-outline-raster-comparison--corrected-ci-artifact",
+      "wheel_sha256": "016327f2fbb8f0a55634dfb3ed9e700e6be92e4a548358a1e23e03801a6b3816",
+      "kind": "artifact",
+      "source_commit": "d5912b9aad74520b13a9753e6b6ee4b27c2caa3d",
+      "date": "2026-10-20"
     }
   },
   "test_sources": {
@@ -87,7 +94,7 @@
     "tests/test_story_clear.py": "0f0946902c79f8516fc963104402f7cf31d77ab621e51bd82a7e7d0c188b239e",
     "tests/test_pdf_output_options.py": "f840e55128bc8a4bd000e73ee0cb9d38e6b96746823e1153e8525f65e2848bb4",
     "tests/test_pdf_search.py": "58fef2f3633a8578ceff0f2c5494f19c5cc8980bc6a3a6d1c154cf8134b4df29",
-    "tests/test_decimal_outline.py": "b03eefe5b3da5c3b5d236394ae2e204dfa4061cb8b2c044c9a32efa91bc070e4"
+    "tests/test_decimal_outline.py": "e3d3c62c93b4290ad8d9176cf13d160219ceeecd97828301f25ff40d7f53f533"
   },
   "profiles": [
     {
@@ -1860,7 +1867,7 @@
         "read": {
           "status": "partial",
           "scope": "Reopened authored fixtures expose native numbering IDs, templates and evaluated labels, separately from source text. This narrow E3 evidence does not certify auxiliary lists, arbitrary imported definitions or ambiguous label placement.",
-          "artifact": "ownership-2026-10-20",
+          "artifact": "outline-raster-ci-2026-10-20",
           "tests": [
             "tests/test_decimal_outline.py::DecimalOutlineTests.test_hierarchy_interleaved_kinds_start_restart_xml_and_pdf",
             "tests/test_decimal_outline.py::DecimalOutlineTests.test_all_nine_levels_maximum_start_have_visible_native_pdf_ink"
@@ -1874,7 +1881,7 @@
         "create": {
           "status": "verified",
           "scope": "Native Legal preset creates nine-level decimal outlines; full nine-effective-level identity separates ordinary numbered lists and preserves supplied start overrides. Top-level start 1..32767, levels 0..8, restart and continuation use native counters.",
-          "artifact": "ownership-2026-10-20",
+          "artifact": "outline-raster-ci-2026-10-20",
           "tests": [
             "tests/test_decimal_outline.py::DecimalOutlineTests.test_hierarchy_interleaved_kinds_start_restart_xml_and_pdf",
             "tests/test_decimal_outline.py::DecimalOutlineTests.test_all_nine_levels_maximum_start_have_visible_native_pdf_ink"
@@ -1887,7 +1894,7 @@
         "edit_authored": {
           "status": "verified",
           "scope": "Assignment/clear, restart and independent copies preserve existing sequence identity; cells, parts, multicolumn and adjacent-continuous scopes reject. Scope/matching/layout budgets, stale/callback ownership and later font/margin/indent overflow checks remain explicit.",
-          "artifact": "ownership-2026-10-20",
+          "artifact": "outline-raster-ci-2026-10-20",
           "tests": [
             "tests/test_decimal_outline.py::DecimalOutlineTests.test_copy_rtl_empty_items_warm_cache_and_range_lifetime",
             "tests/test_decimal_outline.py::DecimalOutlineTests.test_scope_and_section_transitions_reject_without_mutation",
@@ -1906,7 +1913,7 @@
         "preserve": {
           "status": "partial",
           "scope": "Owned same-format XML definitions, sequence IDs, labels and independent copies survive the tested mutations. Arbitrary custom templates/picture bullets and imported numbering are excluded.",
-          "artifact": "ownership-2026-10-20",
+          "artifact": "outline-raster-ci-2026-10-20",
           "tests": [
             "tests/test_decimal_outline.py::DecimalOutlineTests.test_hierarchy_interleaved_kinds_start_restart_xml_and_pdf",
             "tests/test_decimal_outline.py::DecimalOutlineTests.test_copy_rtl_empty_items_warm_cache_and_range_lifetime"
@@ -1918,8 +1925,8 @@
         },
         "render": {
           "status": "partial",
-          "scope": "All nine maximum-start levels show native source/PDF ink in fitting LTR/RTL fixtures at 72/144 DPI; invalid label/first-line logical bounds fail before output. This is not a universal exact font-ink containment guarantee.",
-          "artifact": "ownership-2026-10-20",
+          "scope": "All nine maximum-start levels show native source/PDF ink in fitting LTR/RTL fixtures at 72/144 DPI, with exact image dimensions and ink bounds and every RGBA channel differing by at most one quantization value. Invalid label/first-line logical bounds fail before output. This is not a universal exact font-ink containment guarantee.",
+          "artifact": "outline-raster-ci-2026-10-20",
           "tests": [
             "tests/test_decimal_outline.py::DecimalOutlineTests.test_all_nine_levels_maximum_start_have_visible_native_pdf_ink",
             "tests/test_decimal_outline.py::DecimalOutlineTests.test_geometry_assignment_and_later_output_fail_safely_then_recover"
@@ -1932,7 +1939,7 @@
         "export": {
           "status": "partial",
           "scope": "Native DOCX-to-PDF retains tested hierarchy labels and wrapped item content with one marker across pages; unsupported scopes or geometry fail. Broader list layout and custom styles remain open.",
-          "artifact": "ownership-2026-10-20",
+          "artifact": "outline-raster-ci-2026-10-20",
           "tests": [
             "tests/test_decimal_outline.py::DecimalOutlineTests.test_hierarchy_interleaved_kinds_start_restart_xml_and_pdf",
             "tests/test_decimal_outline.py::DecimalOutlineTests.test_wrapped_item_has_one_native_marker_across_pages",
