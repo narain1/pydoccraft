@@ -1651,6 +1651,7 @@ impl EditablePdf {
         }
         let (page_width, page_height) = self.sizes[page];
         let (width, height) = text_area(x, y, page_width, page_height, bounds)?;
+        validate_font_reuse_profile(self.document()?, page)?;
         pdfcraft_fonts::embedding::validate_document_input(font_bytes).map_err(|message| {
             EngineError::Unsupported(format!("font cannot be embedded: {message}"))
         })?;
@@ -2476,6 +2477,42 @@ fn organize_error(error: pdfcraft_organize::OrganizeError) -> EngineError {
     EngineError::Conversion(format!("PDF page organization failed: {error}"))
 }
 
+// PdfCraft searches only the first 256 PCFull-prefixed bindings for an existing
+// font program, before its bounded global-object fallback. Keep one slot available
+// for register_text_font so every subsequent row can reuse its program regardless
+// of document size. This is a conservative native capability limit, not a lookup
+// or font deduplication implementation in the adapter.
+fn validate_font_reuse_profile(document: &Document, page: usize) -> PyResult<()> {
+    let pages = pdfcraft_model::pages(document);
+    let page = pages
+        .get(page)
+        .ok_or_else(|| EngineError::Malformed("font page is missing".into()))?;
+    let Some(resources) = page.dict.get(b"Resources") else {
+        return Ok(());
+    };
+    let resources = document.resolve(resources);
+    let resources = resources.as_dict().ok_or_else(|| {
+        EngineError::Unsupported("supplied-font drawing requires valid page resources".into())
+    })?;
+    let Some(fonts) = resources.get(b"Font") else {
+        return Ok(());
+    };
+    let fonts = document.resolve(fonts);
+    let fonts = fonts.as_dict().ok_or_else(|| {
+        EngineError::Unsupported("supplied-font drawing requires valid font resources".into())
+    })?;
+    if fonts
+        .iter()
+        .filter(|(name, _)| name.starts_with(b"PCFull"))
+        .take(256)
+        .count()
+        >= 256
+    {
+        return Err(EngineError::Unsupported("supplied-font drawing cannot guarantee bounded font-program reuse with 256 or more PCFull resources".into()).into());
+    }
+    Ok(())
+}
+
 const MAX_TEXT_WRAP_WORK: usize = 16_000_000;
 
 fn text_wrap_work(text: &str) -> PyResult<usize> {
@@ -2620,6 +2657,166 @@ fn preserve_drawing_resources(before: &Document, after: &Document, page: usize) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn font_reuse_source(prefixes: usize, padding: usize, inherited: bool) -> Document {
+        use pdfcraft_cos::{Dict, Object};
+        let mut source = pdfcraft_create::blank(200.0, 200.0, 1).unwrap();
+        let standard = collision_font_resources(b"unused");
+        let standard = standard
+            .get(b"Font")
+            .unwrap()
+            .as_dict()
+            .unwrap()
+            .get(b"unused")
+            .unwrap()
+            .clone();
+        let standard = source.add(standard);
+        let mut fonts = Dict::new();
+        for index in 0..prefixes {
+            fonts.set(format!("PCFull{index}").into_bytes(), Object::Ref(standard));
+        }
+        let mut resources = Dict::new();
+        resources.set(b"Font".to_vec(), Object::Dict(fonts));
+        let page = pdfcraft_organize::pages(&source).unwrap()[0].obj;
+        let owner = if inherited {
+            source
+                .get(page)
+                .as_dict()
+                .unwrap()
+                .reference(b"Parent")
+                .unwrap()
+        } else {
+            page
+        };
+        source
+            .update_dict(page, |dict| {
+                dict.remove(b"Resources");
+            })
+            .unwrap();
+        source
+            .update_dict(owner, |dict| {
+                dict.set(b"Resources".to_vec(), Object::Dict(resources));
+            })
+            .unwrap();
+        let mut retained = Vec::new();
+        for index in 0..padding {
+            let mut dictionary = Dict::new();
+            dictionary.set(b"AuditId".to_vec(), Object::Int(index as i64));
+            retained.push(Object::Ref(source.add(Object::Dict(dictionary))));
+        }
+        // Reachable inert extension objects survive the native full-save garbage collection.
+        source
+            .update_dict(source.root().unwrap(), |dict| {
+                dict.set(b"AuditPadding".to_vec(), Object::Array(retained));
+            })
+            .unwrap();
+        source
+    }
+
+    fn full_font_program_count(document: &Document) -> usize {
+        document.scan_objects().filter(|(_,object)| matches!(&**object,pdfcraft_cos::Object::Stream(stream) if stream.dict.get(b"PCFullFont").is_some())).count()
+    }
+
+    #[test]
+    fn supplied_font_reuse_native_search_limits_are_reproducible() {
+        let font = include_bytes!("../../tests/fixtures/fonts/Inter-Regular.ttf");
+        for (prefixes, padding, expected) in [(255, 8200, 1), (256, 0, 1), (256, 8200, 3)] {
+            let source = font_reuse_source(prefixes, padding, false);
+            let mut document = EditablePdf::from_bytes(&resource_fixture_bytes(&source), None)
+                .unwrap()
+                .document
+                .unwrap();
+            pdfcraft_edit::text::register_text_font(&mut document, 0, font).unwrap();
+            let page = pdfcraft_model::pages(&document).remove(0);
+            let resources = document.dict(page.dict.get(b"Resources").unwrap()).unwrap();
+            let mut fonts = document.dict(resources.get(b"Font").unwrap()).unwrap();
+            let (_, family) = pdfcraft_fonts::embedding::names(font).unwrap();
+            for line in ["row one", "row two"] {
+                let shaped = pdfcraft_fonts::source_shaping::shape(font, line).unwrap();
+                let mappings = shaped
+                    .glyphs
+                    .iter()
+                    .map(|glyph| (glyph.text.clone(), glyph.id))
+                    .collect::<Vec<_>>();
+                pdfcraft_fonts::embedding::embed_mapping(
+                    &mut document,
+                    &mut fonts,
+                    font,
+                    &family,
+                    &mappings,
+                )
+                .unwrap();
+            }
+            assert_eq!(
+                full_font_program_count(&document),
+                expected,
+                "prefixes={prefixes}, padding={padding}"
+            );
+        }
+    }
+
+    #[test]
+    fn supplied_font_reuse_guard_is_atomic_for_inherited_and_direct_resources() {
+        pyo3::prepare_freethreaded_python();
+        let font = include_bytes!("../../tests/fixtures/fonts/Inter-Regular.ttf");
+        for inherited in [false, true] {
+            for boxed in [false, true] {
+                for prefixes in [255, 256] {
+                    let source = font_reuse_source(prefixes, 8200, inherited);
+                    let mut document =
+                        EditablePdf::from_bytes(&resource_fixture_bytes(&source), None).unwrap();
+                    let before = document.to_bytes().unwrap();
+                    let counters = (document.items, document.input_bytes);
+                    let result = if boxed {
+                        document.add_text_box(
+                            0,
+                            "row one\nrow two",
+                            (10.0, 10.0, 180.0, 60.0),
+                            12.0,
+                            (0, 0, 0),
+                            "center",
+                            Some(font),
+                        )
+                    } else {
+                        document.add_text_with_font(
+                            0,
+                            "row one\nrow two",
+                            10.0,
+                            10.0,
+                            12.0,
+                            font,
+                            (0, 0, 0),
+                        )
+                    };
+                    if prefixes == 256 {
+                        assert!(result.unwrap_err().to_string().contains("unsupported:supplied-font drawing cannot guarantee bounded font-program reuse"));
+                        assert_eq!(document.to_bytes().unwrap(), before);
+                        assert_eq!((document.items, document.input_bytes), counters);
+                        assert_eq!(full_font_program_count(document.document().unwrap()), 0);
+                    } else {
+                        result.unwrap();
+                        assert_eq!(full_font_program_count(document.document().unwrap()), 1);
+                    }
+                }
+            }
+        }
+        let mut ordinary = EditablePdf::new(200.0, 200.0).unwrap();
+        ordinary
+            .add_text_with_font(0, "one\ntwo", 10.0, 10.0, 12.0, font, (0, 0, 0))
+            .unwrap();
+        ordinary
+            .add_text_box(
+                0,
+                "three\nfour",
+                (10.0, 60.0, 180.0, 60.0),
+                12.0,
+                (0, 0, 0),
+                "right",
+                Some(font),
+            )
+            .unwrap();
+        assert_eq!(full_font_program_count(ordinary.document().unwrap()), 1);
+    }
 
     fn pdf2_raster(document: &EditablePdf) -> (usize, usize, Vec<u8>) {
         let raster = crate::pdf::render(&document.to_bytes().unwrap(), 0, 72.0, None).unwrap();
