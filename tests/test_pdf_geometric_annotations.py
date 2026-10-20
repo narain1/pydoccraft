@@ -35,7 +35,7 @@ def imported_shape(extra=b'', *, subtype='Square', color=b'[1 0 0]', border=b'<<
 
 class PdfGeometricAnnotationTests(unittest.TestCase):
     def test_visible_shapes_resize_recolor_reopen_copy_delete(self):
-        for kind in ('rectangle', 'oval'):
+        for kind in ('rectangle', 'ellipse'):
             with self.subTest(kind=kind), doc_ex.new('pdf', size=(240, 240)) as document:
                 page = document.pages[0]
                 page.draw_text('Preserved body', at=(20, 200))
@@ -78,7 +78,7 @@ class PdfGeometricAnnotationTests(unittest.TestCase):
             with self.subTest(rotation=rotation), doc_ex.open(geometry_pdf(rotation)) as source, source.edit() as document:
                 baseline = document.render_page(0, dpi=72)
                 page = document.pages[0]
-                for row, kind in enumerate(('rectangle', 'oval')):
+                for row, kind in enumerate(('rectangle', 'ellipse')):
                     mark = page.annotations.add(kind, box=(20, 20+row*90, 120, 60), color='green')
                     mark.box = (30, 25+row*90, 140, 65)
                     for actual, expected in zip(mark.box, (30, 25+row*90, 140, 65)):
@@ -95,7 +95,7 @@ class PdfGeometricAnnotationTests(unittest.TestCase):
                 del document.pages[0]
                 fresh = document.pages[0]
                 fresh.rotate(90)
-                self.assertEqual([item.kind for item in fresh.annotations], ['rectangle', 'oval'])
+                self.assertEqual([item.kind for item in fresh.annotations], ['rectangle', 'ellipse'])
                 turned = fresh.annotations[0]
                 turned.update(box=turned.box, color='blue')
                 self.assertEqual(turned.color, '#0000FF')
@@ -105,7 +105,7 @@ class PdfGeometricAnnotationTests(unittest.TestCase):
                 self.assertEqual(document.render_page(0, dpi=72), baseline)
 
     def test_invalid_geometry_and_actions_preserve_warm_render(self):
-        for kind in ('rectangle', 'oval'):
+        for kind in ('rectangle', 'ellipse'):
             with self.subTest(kind=kind), doc_ex.new('pdf', size=(200, 200)) as document:
                 page = document.pages[0]
                 mark = page.annotations.add(kind, box=(20, 20, 120, 60), text='Kept')
@@ -126,12 +126,12 @@ class PdfGeometricAnnotationTests(unittest.TestCase):
                 self.assertEqual(document.to_bytes(), before)
         with doc_ex.open(geometry_pdf(0)) as source, source.edit() as document:
             with self.assertRaises(ValueError):  # 2.5 view points == 2 user units.
-                document.pages[0].annotations.add('oval', box=(20, 20, 2.5, 30))
+                document.pages[0].annotations.add('ellipse', box=(20, 20, 2.5, 30))
 
     def test_three_user_unit_minimum_is_visible_at_fixture_dpi(self):
         for rotation in (0, 90, 180, 270):
             with self.subTest(rotation=rotation), doc_ex.open(geometry_pdf(rotation)) as source, source.edit() as document:
-                for row, kind in enumerate(('rectangle', 'oval')):
+                for row, kind in enumerate(('rectangle', 'ellipse')):
                     # Source UserUnit1.25:3 native units become3.75 current-view points.
                     mark = document.pages[0].annotations.add(kind, box=(20, 20+row*20, 3.75, 3.75), color='green')
                     self.assertAlmostEqual(mark.box[2], 3.75, places=3)
@@ -191,11 +191,11 @@ class PdfGeometricAnnotationTests(unittest.TestCase):
                 operations = [lambda: mark.update(box=box), lambda: mark.update(color=color),
                               lambda: mark.update(page=target), lambda: mark.update(box=object())]
                 if state != 'annotation_stale':
-                    operations.extend([lambda: annotations.add('oval', box=box),
-                                       lambda: annotations.add('oval', box=(20, 20, 120, 60), color=color),
+                    operations.extend([lambda: annotations.add('ellipse', box=box),
+                                       lambda: annotations.add('ellipse', box=(20, 20, 120, 60), color=color),
                                        lambda: annotations.add_link(box=box, uri='https://example.com'),
                                        lambda: annotations.add_link(box=(20, 20, 120, 60), page=target),
-                                       lambda: annotations.add('oval', box=object())])
+                                       lambda: annotations.add('ellipse', box=object())])
                 if state == 'closed':
                     document.close()
                     error = DocumentClosedError
@@ -214,7 +214,7 @@ class PdfGeometricAnnotationTests(unittest.TestCase):
         for operation in ('add', 'update', 'add_link'):
             with self.subTest(operation=operation), doc_ex.new('pdf', size=(200, 200)) as document:
                 second = document.pages.add(size=(200, 200))
-                second.annotations.add('oval', box=(20, 20, 120, 60), text='Second page')
+                second.annotations.add('ellipse', box=(20, 20, 120, 60), text='Second page')
                 page = document.pages[0]
                 mark = page.annotations.add('rectangle', box=(20, 20, 120, 60))
                 class ReorderingFloat(float):
@@ -224,7 +224,7 @@ class PdfGeometricAnnotationTests(unittest.TestCase):
                 box = (ReorderingFloat(), 20, 120, 60)
                 with self.assertRaisesRegex(ValueError, 'stale'):
                     if operation == 'add':
-                        page.annotations.add('oval', box=box)
+                        page.annotations.add('ellipse', box=box)
                     elif operation == 'update':
                         mark.update(box=box, text='Wrong target')
                     else:
@@ -234,7 +234,7 @@ class PdfGeometricAnnotationTests(unittest.TestCase):
                 self.assertEqual(len(document.pages[1].annotations), 1)
                 self.assertEqual(document.pages[1].annotations[0].text, '')
         document = doc_ex.new('pdf')
-        mark = document.pages[0].annotations.add('oval', box=(20, 20, 120, 60))
+        mark = document.pages[0].annotations.add('ellipse', box=(20, 20, 120, 60))
         class ClosingFloat(float):
             def __float__(self):
                 document.close()

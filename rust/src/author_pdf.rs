@@ -902,7 +902,7 @@ impl EditablePdf {
                     icon: pdfcraft_annot::NoteIcon::Note,
                 }
             }
-            "rectangle" | "oval" => {
+            "rectangle" | "ellipse" => {
                 let rect = self.geometry[page].view_rect_to_user(rect).map(f64::from);
                 validate_geometric_rect(rect)?;
                 if kind == "rectangle" {
@@ -922,7 +922,7 @@ impl EditablePdf {
             },
             _ => {
                 return Err(EngineError::Unsupported(format!(
-                    "annotation kind {kind}; supported kinds are note, highlight, underline, strikeout, squiggly, rectangle and oval"
+                    "annotation kind {kind}; supported kinds are note, highlight, underline, strikeout, squiggly, rectangle and ellipse"
                 ))
                 .into())
             }
@@ -969,7 +969,7 @@ impl EditablePdf {
         } else {
             0
         };
-        if matches!(kind, "rectangle" | "oval") && appearance_bytes > GEOMETRIC_APPEARANCE_WORK {
+        if matches!(kind, "rectangle" | "ellipse") && appearance_bytes > GEOMETRIC_APPEARANCE_WORK {
             return Err(EngineError::ResourceLimit(
                 "native geometric annotation appearance exceeded its bound".into(),
             )
@@ -995,7 +995,7 @@ impl EditablePdf {
                 "Text" => "note".to_string(),
                 "Highlight" => "highlight".to_string(),
                 "Square" => "rectangle".to_string(),
-                "Circle" => "oval".to_string(),
+                "Circle" => "ellipse".to_string(),
                 other => other.to_ascii_lowercase(),
             };
             values.push((annotation.index, json!({
@@ -2409,7 +2409,7 @@ fn validate_geometric_rect(rect: [f64; 4]) -> PyResult<()> {
         || rect[2] - rect[0] < 3.0
         || rect[3] - rect[1] < 3.0
     {
-        return Err(PyValueError::new_err("rectangle and oval dimensions must be at least 3 PDF user units, with coordinates within 1000000 units"));
+        return Err(PyValueError::new_err("rectangle and ellipse dimensions must be at least 3 PDF user units, with coordinates within 1000000 units"));
     }
     Ok(())
 }
@@ -2420,7 +2420,7 @@ fn geometric_dict_peak(document: &Document, dict: &pdfcraft_cos::Dict) -> PyResu
         return Ok(0);
     }
     let unsupported = || {
-        EngineError::Unsupported("editing rectangle/oval annotations requires canonical solid, unfilled, opaque 2-user-unit geometry and metadata".into())
+        EngineError::Unsupported("editing rectangle/ellipse annotations requires canonical solid, unfilled, opaque 2-user-unit geometry and metadata".into())
     };
     if dict.len() > 20 {
         return Err(EngineError::ResourceLimit(
@@ -5469,7 +5469,7 @@ mod tests {
             .unwrap();
         let bytes = resource_fixture_bytes(&source);
         for rotation in [0, 90, 180, 270] {
-            for kind in ["rectangle", "oval"] {
+            for kind in ["rectangle", "ellipse"] {
                 let mut document = EditablePdf::from_bytes(&bytes, None).unwrap();
                 document.rotate_page(0, rotation).unwrap();
                 document
@@ -5623,7 +5623,7 @@ mod tests {
             )
             .is_err());
         assert_eq!(imported.to_bytes().unwrap(), before);
-        for kind in ["rectangle", "oval"] {
+        for kind in ["rectangle", "ellipse"] {
             let mut document = EditablePdf::new(100.0, 100.0).unwrap();
             assert!(document
                 .add_annotation(0, kind, (20.0, 20.0, 22.01, 22.01), "", "", (255, 0, 0))
@@ -5642,7 +5642,7 @@ mod tests {
     fn geometric_annotation_profiles_and_budgets_reject_before_rebuild() {
         use pdfcraft_cos::{Dict, Object};
         pyo3::prepare_freethreaded_python();
-        for kind in ["rectangle", "oval"] {
+        for kind in ["rectangle", "ellipse"] {
             let mut document = EditablePdf::new(220.0, 220.0).unwrap();
             let before = document.to_bytes().unwrap();
             document.input_bytes = MAX_DOCUMENT_INPUT - GEOMETRIC_APPEARANCE_WORK + 1;

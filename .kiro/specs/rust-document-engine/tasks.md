@@ -348,7 +348,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 
 ## Bounded PDF geometric comments
 
-- [x] Reuse rectangle/oval native annotations, existing handles and native geometry/style mutation.
+- [x] Reuse rectangle/ellipse native annotations, existing handles and native geometry/style mutation.
 - [x] Bound canonical target dictionaries and generated appearances, charging compound intermediate streams; retain tiny-path native repro.
 - [x] Preserve initial closed/stale checks and add final post-normalization checks with callback regressions.
 - [x] Verify complete locked/native and clean installed-wheel corpus; record artifact evidence and separate existing inventory limitations.

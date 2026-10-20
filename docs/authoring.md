@@ -169,9 +169,9 @@ Without a supplied font, PDF text uses the upstream Helvetica/WinAnsi path and r
 
 ### PDF annotations
 
-`page.annotations` is an ordered collection. `add("note" | "highlight" | "rectangle" | "oval", box=..., text="", author="", color="#FFD200")` and `add_link(box=..., uri=... | page=...)` return checked annotation handles. A link needs exactly one target; page targets are zero-based. Handles expose `kind`, `box`, `text`, `author`, `color`, `uri` and `target_page`; `update(...)` applies a compound mutation atomically. `del page.annotations[index]` invalidates previously retrieved annotation handles on that page, including those retrieved through another page wrapper.
+`page.annotations` is an ordered collection. `add("note" | "highlight" | "rectangle" | "ellipse", box=..., text="", author="", color="#FFD200")` and `add_link(box=..., uri=... | page=...)` return checked annotation handles. A link needs exactly one target; page targets are zero-based. Handles expose `kind`, `box`, `text`, `author`, `color`, `uri` and `target_page`; `update(...)` applies a compound mutation atomically. `del page.annotations[index]` invalidates previously retrieved annotation handles on that page, including those retrieved through another page wrapper.
 
-Notes use the upstream fixed 20×20 PDF-user-unit icon size. Notes and highlights can be moved but not resized; links, rectangles and ovals can be resized. Unsupported type-specific edits fail before changing the document. Readback can include other native annotation kinds, but mutation is limited to the documented profile. A highlight or comment is not secure redaction. Extracted internal links use `#page=N` with a one-based fragment and zero-based `metadata.target_page`.
+Notes use the upstream fixed 20×20 PDF-user-unit icon size. Notes and highlights can be moved but not resized; links, rectangles and ellipses can be resized. Unsupported type-specific edits fail before changing the document. Readback can include other native annotation kinds, but mutation is limited to the documented profile. A highlight or comment is not secure redaction. Extracted internal links use `#page=N` with a one-based fragment and zero-based `metadata.target_page`.
 
 ### PDF paths, metadata and bookmarks
 
@@ -514,9 +514,9 @@ Custom values support strings, booleans, signed 64-bit integers and finite float
 
 Ordinary DOCX extraction exposes the supported core properties. Imported custom-property inventory, core language and extended/application property editing remain DOC7 gaps. Metadata editing uses native CoreProps/CustomProp and the normal document writer; it does not add arbitrary source DOCX editing.
 
-### PDF rectangle and oval comments
+### PDF rectangle and ellipse comments
 
-`page.annotations.add("rectangle" | "oval", box=..., text="", author="", color=...)` creates a native solid, unfilled, opaque outline. It reuses annotation handles, writable `box`, color/comment metadata, atomic `update(...)`, deletion and copies. Comment text is metadata, not visible FreeText. Page text/images remain unchanged. Coordinate boxes use current displayed-page points, including rotation, CropBox and UserUnit.
+`page.annotations.add("rectangle" | "ellipse", box=..., text="", author="", color=...)` creates a native solid, unfilled, opaque outline. It reuses annotation handles, writable `box`, color/comment metadata, atomic `update(...)`, deletion and copies. Comment text is metadata, not visible FreeText. Page text/images remain unchanged. Coordinate boxes use current displayed-page points, including rotation, CropBox and UserUnit.
 
 The native outline is two PDF user units wide; both shape dimensions must be at least three PDF user units. For UserUnit 2, the minimum displayed width/height is six points. Smaller paths can disappear in the pinned renderer, so they are rejected instead of silently enlarged. No arbitrary-low-DPI visibility guarantee is implied. Only this fixed stroke profile is supported; fill, opacity and decorative borders remain unavailable.
 

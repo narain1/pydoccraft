@@ -615,8 +615,9 @@ Review found that word-only source matching accepted descriptions such as “wri
 - Linux x86_64 wheel: 17,427,100 bytes; extension: 40,415,864; SHA-256 `6f4f6d5ac0fae778490b20edd13dd224eafca5e221af27ad5938155e9f45db71`; lock SHA-256 `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. All upstream pins and dependencies remain unchanged. Broader TXT6 complex-script/CJK font controls and missing-glyph/substitution diagnostics remain open.
 
 
-## 2026-10-20 standard PDF geometric annotations
+## 2026-10-20 standard PDF geometric annotations — initial artifact (superseded)
 
+- This initial artifact used the unmerged public spelling `oval`; final API review replaces it with `ellipse` to match existing shape APIs and Pillow. Replacement artifact evidence follows after validation. Native `Shape::Oval` remains unchanged.
 - Rectangle/oval comments reuse existing annotation creation/properties/update/deletion and native shape/set_rect/set_style behavior. The bounded profile has opaque unfilled two-user-unit outlines, canonical imported dictionary checks and dimensions at least three native user units. A direct-native regression preserves tiny-oval disappearance; actual minimum-size controls render visibly at the tested DPI/UserUnit.
 - Three native groups and seven new public workflows verify real outline/empty-center pixels, preservation of original page text/image pixels, saved PNG equality, all rotations with CropBox/UserUnit, native resizing, metadata/color, copies/deletion, rejected imports, minimum/work/input/item limits and compound appearance costs. Resize-plus-recolor charges both native streams, including its superseded intermediate appearance. No foreign appearance stream is decoded by the profile check.
 - Callback regression against the previous facade reproduced edits to replacement pages after page reordering. Normalization now occurs before the final identity check; root review also retained the initial checks so already-closed/stale handles never evaluate invalid or callback-capable arguments. Reordering, closure and deletion-stale tests pass without retargeted edits.
