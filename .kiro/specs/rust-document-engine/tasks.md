@@ -603,3 +603,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Validate three focused public groups and fifteen related field tests against an isolated copied installed package.
 - [x] Complete integrated installed-wheel validation: 458 Python tests, strict typing and byte-identical native extension from the 318-test artifact.
 - [ ] Complete independent review and exact-head/current-main CI before manual merge.
+
+
+## Owned DOCX body identity separation
+
+- [x] Audit every body allocation/enumeration/placeholder consumer, distinguish physical section/layout paths from editable IDs, and retain pinned native behavior.
+- [x] Reuse the existing checked monotonic registry allocator; stage body publication and bound temporary reverse views without introducing public body operations.
+- [x] Update classified native test paths without relaxing format/geometry/output assertions, and add focused native/public identity, section and rollback coverage.
+- [x] Complete three focused native groups, four new public workflows, 59 related public workflows, formatter/Clippy/debug build and strict copied-package consumer typing.
+- [ ] Complete integrated locked release/clean installed-wheel artifact, independent review and current-main CI.
+- [ ] Retain separately scoped body section/semantic deletion, cell/PPTX deletion and broader DOC5/TXT1 insertion/movement/adoption work. The historical spec78 identity-migration prerequisite is superseded by this internal change.

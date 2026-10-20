@@ -532,3 +532,12 @@ Text/choice set_value always emits a new AP, including identical/empty writes; t
 ## PDF field value normalization
 
 The existing value setter checks its handle first, uses str.__len__, str.__str__ and str.encode to validate the actual string with a 4,096-code-point precheck and exact 4,096-byte UTF-8 ceiling, then serializes the normalized scalar. A final _check precedes native dispatch. This mirrors tooltip normalization and prevents overridden encode from deleting/replacing a field before a stale handle writes by the same name. Bool/None dispatch and native staged validation remain unchanged; no native API or generic normalization framework is added.
+
+
+## 81. Owned DOCX body identity separation
+
+All editable block creators share the existing monotonic registry allocator, now named next_block_id. Body insertion still selects a native physical position from body_placeholder or body length, calls the same public native insertion/model operation, and records that location under an independently allocated ID. The prospective counter is checked before mutation and published with existing bookkeeping only after ordinary commit validation succeeds. Body identities are never cast into native u32 paths.
+
+Body collection enumeration builds a transient bounded position-to-ID BTreeMap from top-level Body locations and follows native block order, with a bounded picture-ID set for paragraph filtering. Duplicate/out-of-bounds locations and unregistered tables in malformed internal state fail explicitly; unregistered structural paragraphs stay hidden. body_placeholder remains a physical position, and paragraph filtering compares resolved story/path rather than numeric identity. The existing active 100,000-location budget remains distinct from the physical body limit and total serialized block count.
+
+Section endpoints, section ordinals, hidden section-marker paragraphs, native layout paths, numbering and field scopes remain untouched. Copy clones allocator/maps; picture removal changes classification without replacing the empty anchor's ID. Part/grid invalidation and normal global TextRange revisions are unchanged. The historical spec78 audit preceded this migration; its body-deletion restriction remains, but the identity prerequisite is now complete. Body section-boundary/semantic deletion policies still require a separate accepted change. Private repr/ID numbers change intentionally and do not promise positions or cross-document identity.
