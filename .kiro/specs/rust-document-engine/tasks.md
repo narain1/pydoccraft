@@ -485,3 +485,14 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reuse owned-fields and one orthogonal comment-lock profile with existing PDF6/reference joins and explicit imported limits.
 - [x] Validate the 17-profile/119-cell generated guides, cached immutable reference citations and existing offline drift checks.
 - [ ] Complete independent evidence review; keep broader PDF6/API1/API7/QA1/QA8 acceptance open.
+
+
+## Native owned-note conversion
+
+- [x] Probe public semantic conversion for stable IDs/paths/styles, source readback, native placement/counters and complete long-note continuation.
+- [x] Add Notes.convert through bounded native work and exact conversion-specific anchor validation, preserving no-op ranges/cache and ordinary commit guards.
+- [x] Retain raw native shared-reference-run color-loss evidence; reject unsafe mixed runs with custom-style/marker-only recovery controls.
+- [x] Run five focused native groups, all-targets Clippy/debug build and six new public workflows within a 64-test related regression suite in isolation.
+- [x] Complete integrated locked native/release/clean installed-wheel validation: 293 Rust / 419 Python tests, strict typing and unchanged license audit.
+- [ ] Complete independent review/current-main CI after resolving prerequisite PR71 raster discrepancy.
+- [ ] Retain semantic note deletion and arbitrary anchored-fragment remapping under existing LAY7/U02/U07 ownership.

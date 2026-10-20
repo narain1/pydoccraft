@@ -437,6 +437,15 @@ Native move/set_rect/set_style/set_info/delete check Locked; set_contents and se
 Five additional profiles reuse the existing seven-operation ledger schema and generated support/reference guides. Existing roadmap ownership remains the sole source of owners and checkboxes. The new profiles cite the already validated a94a5ba runtime artifact; their reviewed test-file digests match that runtime exactly. This documentation join does not build or certify a new wheel. Bookmark source inventory, broad imported preservation, advanced output profiles and auxiliary numbering remain explicitly outside the corresponding tested scopes.
 
 
+
+## 68. Note conversion through native semantic editing
+
+Notes.convert normalizes a short literal kind, calls the native conversion entry point and invalidates the cached snapshot only when the returned count is nonzero. Native preflight charges paragraph/object/run work through public paragraph paths within the existing authored nesting bound; the potentially quadratic converted-reference/run comparisons are charged before calling Document::convert_notes. Text scanning remains bounded by the existing live-text budget.
+
+The conversion-specific private commit allowance validates original part IDs/kinds and the exact expected semantic-anchor map before running the ordinary commit guards. Ordinary edits cannot use this allowance. No locator, ID, cell/media/text budget or section setting is rebuilt: native conversion changes part/reference kinds and standard note styles in place on the staged model.
+
+The native operation changes an entire containing run's standard reference style. Preflight uses public object offsets to permit changed standard-style runs only when their complete byte spans contain converted markers. Other shared content fails explicitly; custom styles remain unchanged. The raw native source/PNG/PDF regression records the upstream behavior, while public recovery uses existing style/range formatting. There is no local run split, counter evaluation or note placement algorithm.
+
 ## 69. Extend coherent profiles without duplicating certifications
 
 The existing pdf.owned-fields profile adds field.tooltip and public native FieldProps/Field references. Only read/edit_authored/preserve/render cells that gain tooltip evidence move to the exact tooltip artifact; creation keeps its historical citation. Existing creation/value/geometry tests and the new tooltip module are fingerprinted at that artifact, but saved output pixels do not establish imported field metadata inspection.

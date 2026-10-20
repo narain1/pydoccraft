@@ -523,6 +523,15 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 2. Artifact citations SHALL identify the exact validated runtime/wheel and reviewed test-file fingerprints. Authored bookmark lookup SHALL remain distinct from imported source inventory; same-format serialization SHALL be assessed as preservation rather than conversion. Search rectangles SHALL not imply visible-only matching, normalized source offsets or OCR. Narrow list-label evidence SHALL not certify auxiliary Office coverage.
 
 
+
+## 68. Native owned-note kind conversion
+
+1. Existing WordDocument.notes SHALL expose convert(kind="footnote" | "endnote") returning the number changed, delegating to public WordCraft Document::convert_notes. No swap mode, per-note conversion framework or local marker/counter algorithm SHALL be added. Destination section note options SHALL remain authoritative; part IDs, paragraph paths, content, custom styles and unrelated references SHALL be preserved.
+2. Input SHALL validate the owner before bounded literal string normalization without subclass callbacks. An empty/already-matching collection SHALL preserve native revision, ranges and cached rendering. Actual conversion SHALL stage once, retain stable handles and apply normal range/cache invalidation only after success.
+3. Preflight SHALL bound aggregate native paragraph/object/run comparison work, including the reference-count × run-count scan, to two million units under existing document budgets. The native style operation SHALL reject mixed-content standard-style runs if converting a marker could restyle ordinary text, other objects or unconverted markers; custom styles and runs containing only converted markers SHALL remain supported.
+4. The private conversion commit path SHALL require the exact full semantic-anchor multiset differing only in expected existing note kinds, unchanged part IDs and correct destination kinds. All existing field/navigation/media and output-geometry guards SHALL remain. Missing, duplicate, malformed or unrelated anchor changes and unsafe destination field scopes SHALL fail atomically.
+5. Tests SHALL cover raw native source/readback, standard/custom styles, body/nested references, actual PNG/PDF placement/counters and long-note continuation, shared-run failure/recovery, copies/stable handles/no-op ranges/cache, bounded inputs/work and rollback. Broad LAY7 semantic deletion and cross-container adoption SHALL remain open.
+
 ## 69. Scoped field-tooltip and comment-lock evidence
 
 1. The existing owned-field evidence profile SHALL incorporate tooltip read/edit/preservation/render assertions against the exact completed tooltip artifact, preserving its historical creation citation and unsupported imported/conversion scope. Evidence SHALL not claim imported tooltip inventory from saved-output rendering alone.
