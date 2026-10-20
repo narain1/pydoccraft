@@ -54,7 +54,8 @@ Names below are draft acceptance examples. Final signatures must pass the pinned
 ## Draft DOCX workflow
 
 ```python
-# PROPOSED — these authoring APIs are not implemented yet.
+# HISTORICAL SKETCH — mixes implemented and proposed members.
+# Use docs/cookbook.md for runnable examples with current signatures.
 from pathlib import Path
 import doc_ex
 
@@ -120,7 +121,7 @@ with doc_ex.new("pptx") as presentation:
     presentation.save("slides.pptx")
 ```
 
-Public positioned coordinates use top-left points; boxes are `(x, y, width, height)`. Existing extraction bounding boxes retain their documented contract. Fonts, text shaping, page drawing, and slide serialization must be upstream-backed. The pinned DeckCraft revision already exposes a public PPTX writer; Python authoring and per-feature preservation/rendering evidence remain future work. See the [pinned-source upstream audit](upstream-roadmap.md).
+Public positioned coordinates use top-left points; boxes are `(x, y, width, height)`. Existing extraction bounding boxes retain their documented contract. Fonts, text shaping, page drawing, and slide serialization must be upstream-backed. The pinned DeckCraft revision exposes the public PPTX writer used by the implemented authored profile. The [authoring guide](authoring.md) and [cookbook](cookbook.md) describe current methods; broader imported-document preservation remains open. See the [pinned-source upstream audit](upstream-roadmap.md).
 
 ## Small surface, composable workflows
 

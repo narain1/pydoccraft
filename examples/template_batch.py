@@ -41,15 +41,38 @@ def fill_letter(template, values):
         raise
 
 
-if __name__ == "__main__":
-    directory = Path("letters")
-    directory.mkdir(exist_ok=True)
+def write_letters(output_dir: str | Path, *, dpi: float = 96) -> list[dict[str, Path]]:
+    """Write two independent example letters as DOCX/PDF/PNG; return path maps.
+
+    This template is authored in memory. The recipe does not open arbitrary
+    existing DOCX files for editing or bind content controls.
+    """
+    directory = Path(output_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    outputs = []
     with make_template() as template:
         for index, values in enumerate([
             {"customer": "Acme", "company": "Example Ltd"},
             {"customer": "Mira", "company": "Example Ltd"},
         ], start=1):
+            paths = {kind: directory / f"letter-{index}.{kind}" for kind in ("docx", "pdf", "png")}
             # Failures are caller-owned; no partial document is returned by fill_letter.
             with fill_letter(template, values) as letter:
-                letter.save(directory / f"letter-{index}.docx")
-                (directory / f"letter-{index}.pdf").write_bytes(letter.convert("pdf"))
+                letter.save(paths["docx"])
+                paths["pdf"].write_bytes(letter.convert("pdf"))
+                paths["png"].write_bytes(letter.render_page(0, dpi=dpi))
+            outputs.append(paths)
+    return outputs
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("output_dir", type=Path)
+    parser.add_argument("--dpi", type=float, default=96)
+    args = parser.parse_args()
+    write_letters(args.output_dir, dpi=args.dpi)
+
+
+if __name__ == "__main__":
+    main()
