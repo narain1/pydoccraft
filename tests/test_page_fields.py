@@ -103,6 +103,59 @@ class PageFieldTests(unittest.TestCase):
             self.assertEqual(document.to_bytes(), before)
             self.assertEqual(len(document.sections), 1)
 
+    def test_intermediate_endnote_collectors_reject_unsafe_fields_and_later_edits(self):
+        for trigger in ('insert', 'placement', 'start'):
+            with self.subTest(trigger=trigger), doc_ex.new('docx', size=(360, 420)) as document:
+                document.sections[0].margins = 40
+                anchor = document.add_paragraph('First anchor')
+                note = document.notes.add(anchor.find('anchor')[0], kind='endnote')
+                collector = document.sections.add(start='next_page' if trigger == 'start' else 'continuous')
+                collector.configure_notes(kind='endnote', placement='document_end' if trigger == 'placement' else 'section_end')
+                document.add_paragraph('Collector begins')
+                document.add_page_break()
+                document.add_paragraph('Collector second page')
+                last = document.sections.add()
+                last.configure_notes(kind='endnote', placement='document_end')
+                document.add_paragraph('Final section')
+                paragraph = note.paragraphs[0]
+                paragraph.add_run('Deferred count=')
+                field = None if trigger == 'insert' else paragraph.add_field('section_page_count')
+                before, png = document.to_bytes(), document.render_page(0, dpi=72)
+                with self.assertRaises(UnsupportedFormatError):
+                    if trigger == 'insert':
+                        paragraph.add_field('section_page_count')
+                    elif trigger == 'placement':
+                        collector.configure_notes(kind='endnote', placement='section_end')
+                    else:
+                        collector.start = 'continuous'
+                self.assertEqual(document.to_bytes(), before)
+                self.assertEqual(document.render_page(0, dpi=72), png)
+                if field is not None:
+                    self.assertEqual(field.text, '\ufffc')
+
+    def test_earlier_safe_collector_takes_precedence_over_later_continuous_collector(self):
+        with doc_ex.new('docx', size=(360, 420)) as document:
+            document.sections[0].margins = 40
+            anchor = document.add_paragraph('First anchor')
+            note = document.notes.add(anchor.find('anchor')[0], kind='endnote')
+            safe = document.sections.add()
+            safe.configure_notes(kind='endnote', placement='section_end')
+            document.add_paragraph('Safe collector')
+            later = document.sections.add(start='continuous')
+            later.configure_notes(kind='endnote', placement='section_end')
+            document.add_paragraph('Later collector')
+            final = document.sections.add()
+            final.configure_notes(kind='endnote', placement='document_end')
+            document.add_paragraph('Final section')
+            note.paragraphs[0].add_run('Safe count=')
+            field = note.paragraphs[0].add_field('section_page_count')
+            self.assertIn('Safe count=1', pdf_pages(document)[1])
+            before = document.to_bytes()
+            with self.assertRaises(UnsupportedFormatError):
+                safe.configure_notes(kind='endnote', placement='document_end')
+            self.assertEqual(document.to_bytes(), before)
+            self.assertEqual(field.text, '\ufffc')
+
     def test_markers_ranges_failure_rollback_and_owner_lifetime(self):
         with doc_ex.new('docx') as document:
             paragraph = document.add_paragraph('e\u0301🦀 ')

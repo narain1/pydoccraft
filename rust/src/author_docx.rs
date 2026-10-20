@@ -3704,6 +3704,18 @@ fn page_field_count(document: &Document) -> PyResult<usize> {
             (props.start == SectionStart::Continuous).then_some(index)
         })
         .collect();
+    // A section-end collector flushes all pending endnotes referenced so far,
+    // including notes whose anchor section requested document-end placement.
+    // Project only ownership for the safety guard; native layout still computes
+    // all page counts, field values and actual note placement.
+    let mut collector = sections.len().saturating_sub(1);
+    let mut endnote_sections = vec![collector; sections.len()];
+    for (index, (_, props)) in sections.iter().enumerate().rev() {
+        if document.note_options(props, true).pos == NotePos::SectEnd {
+            collector = index;
+        }
+        endnote_sections[index] = collector;
+    }
     let mut continuous_parts = BTreeSet::new();
     for index in &continuous {
         let props = sections[*index].1;
@@ -3726,11 +3738,8 @@ fn page_field_count(document: &Document) -> PyResult<usize> {
             if let Some(paragraph) = document.para(StoryRef::Body, &path) {
                 for object in &paragraph.objects {
                     if let InlineObject::NoteRef { id, kind, .. } = object {
-                        let target = if *kind == NoteKind::Endnote
-                            && document.note_options(sections[section].1, true).pos
-                                == NotePos::DocEnd
-                        {
-                            sections.len() - 1
+                        let target = if *kind == NoteKind::Endnote {
+                            endnote_sections[section]
                         } else {
                             section
                         };
@@ -6433,6 +6442,80 @@ mod tests {
         assert!(document.add_paragraph_field(paragraph, "page").is_err());
         document.close();
         assert!(document.add_paragraph_field(paragraph, "page").is_err());
+    }
+
+    #[test]
+    fn upstream_intermediate_section_end_collects_earlier_deferred_endnotes() {
+        let mut document = EditableDocx::new();
+        document.set_page_size(360.0, 420.0).unwrap();
+        document.set_margins(40.0, 40.0, 40.0, 40.0).unwrap();
+        let anchor = document.add_paragraph("First anchor").unwrap();
+        let note = document
+            .add_note(
+                anchor,
+                6,
+                12,
+                document.revision().unwrap(),
+                "Deferred count=",
+                "endnote",
+            )
+            .unwrap();
+        let collector = document.add_section("continuous").unwrap();
+        document
+            .set_section_note_options(collector, "endnote", r#"{"placement":"section_end"}"#)
+            .unwrap();
+        document.add_paragraph("Collector begins").unwrap();
+        document.add_page_break().unwrap();
+        document.add_paragraph("Collector second page").unwrap();
+        let last = document.add_section("next_page").unwrap();
+        document
+            .set_section_note_options(last, "endnote", r#"{"placement":"document_end"}"#)
+            .unwrap();
+        document.add_paragraph("Final section").unwrap();
+        let paragraph = document.story_paragraph_ids(note).unwrap()[0];
+        let before = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        assert!(document
+            .add_paragraph_field(paragraph, "section_page_count")
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.to_bytes().unwrap(), before);
+        document.add_paragraph_field(paragraph, "page").unwrap();
+        // Bypass our authoring guard only in this raw native fidelity reproduction.
+        let mut native = document.document().unwrap().clone();
+        let p = document.paragraph_mut(&mut native, paragraph).unwrap();
+        let InlineObject::Field { instr, .. } = &mut p.objects[0] else {
+            panic!("missing field")
+        };
+        *instr = "SECTIONPAGES \\* Arabic".into();
+        p.touch();
+        let bytes = wordcraft_docx::write(&native).unwrap();
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        let output = crate::pdf::extract(&pdf, None).unwrap();
+        assert_eq!(output.pages.len(), 3);
+        let texts: Vec<String> = output
+            .pages
+            .iter()
+            .map(|page| {
+                page.blocks
+                    .iter()
+                    .map(|block| block.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect();
+        assert!(texts[0].contains("Collector begins"));
+        assert!(texts[1].contains("Collector second page"));
+        // The intermediate collector spans both pages, but native SECTIONPAGES is 1.
+        assert!(
+            texts[1]
+                .split_whitespace()
+                .collect::<String>()
+                .contains("Deferredcount=1"),
+            "{:?}",
+            texts
+        );
+        assert!(!texts[2].contains("Deferred"));
     }
 
     #[test]
