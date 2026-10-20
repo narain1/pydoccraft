@@ -353,3 +353,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Preserve initial closed/stale checks and add final post-normalization checks with callback regressions.
 - [x] Verify complete locked/native and clean installed-wheel corpus; record artifact evidence and separate existing inventory limitations.
 - [ ] Retain broader annotation/reply/form fidelity and caller-bounded upstream inventories as open work.
+
+
+## PDF inventory allocation upstream evidence
+
+- [x] Record exact pinned summary/initial-inspection allocation paths and deterministic import-safe synthetic input reproductions.
+- [x] Verify fixture offsets, native repeated-reference identity and probe argument bounds against an installed wheel without changing runtime behavior.
+- [ ] Add upstream fallible caller-bounded annotation inventories and strict initial inspection results, including preallocation/occurrence budgets and explicit incompleteness errors.
+- [ ] Verify native at-limit/+1 and fallback propagation before claiming bounded imported inventory; preserve the separate parser/decompression scope and broader PDF6 work.
