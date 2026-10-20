@@ -404,5 +404,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reuse native matching/line geometry through existing read/editable page handles and retained sessions.
 - [x] Bound query, normalization, hit and geometry work with explicit errors and preserve owner/cache semantics.
 - [x] Verify focused native/public geometry, ActualText, ligature, column, Unicode, callback and exact-limit regressions in isolation.
-- [ ] Complete integrated locked native/release/clean-wheel validation and independent review after prerequisite bookmark fixes.
+- [x] Complete integrated locked native/release/clean-wheel validation after prerequisite bookmark fixes (276 Rust / 379 Python).
+- [ ] Complete independent review and exact-head/current-main CI before manual merge.
 - [ ] Retain Office search geometry, normalized source offsets and broad E2 grounding parity as open work.
