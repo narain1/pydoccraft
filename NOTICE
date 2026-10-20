@@ -1,0 +1,24 @@
+doc-ex
+Copyright 2026 doc-ex contributors
+Licensed under the Apache License, Version 2.0.
+
+This product includes software developed by the ArtCraft Team and PdfCraft contributors:
+
+PdfCraft
+Copyright (c) 2026 ArtCraft Team and the PdfCraft contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option.
+Source: https://github.com/storytold/pdfcraft
+Pinned revision: 645016addcfb9078c557f0189559ab47cdcee057
+
+The linked PdfCraft rendering graph includes these upstream notices:
+
+Foxit standard-14 substitute fonts:
+Copyright 2014 PDFium Authors. All rights reserved.
+Original code copyright 2014 Foxit Software Inc.
+Redistributed under the BSD-3-Clause license.
+
+Adobe CMap resources:
+Copyright 1990-2023 Adobe. All rights reserved.
+Redistributed under the BSD-3-Clause license. Neither the name of Adobe nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+The PdfCraft name and ArtCraft names, wordmarks, and logos are trademarks of their respective owners. No trademark license is granted.

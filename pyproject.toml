@@ -1,0 +1,33 @@
+[build-system]
+requires = ["maturin==1.8.1"]
+build-backend = "maturin"
+
+[project]
+name = "doc-ex"
+version = "0.2.0"
+description = "Compact in-process PDF and OOXML document extraction"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+authors = [{name = "doc-ex contributors"}]
+dependencies = []
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Rust",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Repository = "https://github.com/narain1/doc-ex"
+Issues = "https://github.com/narain1/doc-ex/issues"
+
+[tool.maturin]
+    include = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md"]
+    module-name = "doc_ex._core"
+python-source = "src"
+features = ["extension-module"]
+strip = true
