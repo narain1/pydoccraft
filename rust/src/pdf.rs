@@ -49,11 +49,17 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
             ]),
             ..Default::default()
         };
-        if let Some(text) = rendered.text {
-            add_text(&text, &mut page);
+        if let Some(text) = &rendered.text {
+            add_text(text, &mut page);
         }
         add_table(&cos, page_info, number, &mut page)?;
-        add_links(&info.links, page_info, number, &mut page);
+        add_links(
+            &info.links,
+            page_info,
+            number,
+            rendered.text.as_deref(),
+            &mut page,
+        )?;
         add_images(&cos, page_info, number, &mut page)?;
         pages.push(page);
     }
@@ -266,25 +272,158 @@ fn add_links(
     links: &[pdfcraft_render::Link],
     info: &pdfcraft_render::PageInfo,
     number: usize,
+    text: Option<&pdfcraft_render::PageText>,
     page: &mut PagePayload,
-) {
+) -> Result<(), EngineError> {
+    let count = links
+        .iter()
+        .filter(|link| {
+            link.page == number
+                && matches!(link.target, LinkTarget::Uri(_) | LinkTarget::Page(_, _))
+        })
+        .count();
+    if text.is_some_and(|text| {
+        count.saturating_mul(text.glyphs.iter().fold(text.glyphs.len(), |total, glyph| {
+            total.saturating_add(glyph.text.len())
+        })) > 10_000_000
+    }) {
+        return Err(EngineError::ResourceLimit(
+            "PDF link label geometry exceeds the work budget".into(),
+        ));
+    }
+    // Candidate offsets refer to one surviving paragraph, never a text search match.
+    type Candidate = (usize, usize, usize, String);
+    let mut candidates: Vec<Option<Candidate>> = Vec::new();
+    let mut ambiguous = Vec::new();
+    let mut glyph_owner = vec![None; text.map_or(0, |text| text.glyphs.len())];
     for link in links.iter().filter(|link| link.page == number) {
-        if let LinkTarget::Uri(uri) = &link.target {
+        let (uri, target_page) = match &link.target {
+            LinkTarget::Uri(uri) => (uri.clone(), None),
+            LinkTarget::Page(target, _) => (format!("#page={}", target + 1), Some(*target)),
+            _ => continue,
+        };
+        {
             let a = info.user_to_view(link.rect[0], link.rect[1]);
             let b = info.user_to_view(link.rect[2], link.rect[3]);
+            let rect = [
+                a[0].min(b[0]),
+                a[1].min(b[1]),
+                a[0].max(b[0]),
+                a[1].max(b[1]),
+            ];
+            let index = candidates.len();
+            ambiguous.push(false);
+            let candidate = text.and_then(|text| {
+                if !rect.iter().all(|value| value.is_finite())
+                    || rect[0] >= rect[2]
+                    || rect[1] >= rect[3]
+                {
+                    return None;
+                }
+                let selected = text.glyphs_in(rect);
+                for &glyph in &selected {
+                    if text.glyphs[glyph].text.trim().is_empty() {
+                        continue;
+                    }
+                    if let Some(previous) = glyph_owner[glyph] {
+                        ambiguous[previous] = true;
+                        ambiguous[index] = true;
+                    } else {
+                        glyph_owner[glyph] = Some(index);
+                    }
+                }
+                link_label(text, &selected, &page.blocks)
+            });
             page.links.push(LinkPayload {
                 uri: uri.clone(),
-                bbox: Some([
-                    a[0].min(b[0]).into(),
-                    a[1].min(b[1]).into(),
-                    a[0].max(b[0]).into(),
-                    a[1].max(b[1]).into(),
-                ]),
+                bbox: Some(rect.map(f64::from)),
                 page: Some(number),
+                metadata: Map::from_iter([
+                    ("annotation_index".into(), json!(link.index)),
+                    (
+                        "target_kind".into(),
+                        json!(if target_page.is_some() { "page" } else { "uri" }),
+                    ),
+                    ("label_status".into(), json!("unresolved_geometry")),
+                ]),
                 ..Default::default()
             });
+            if let Some(target) = target_page {
+                if let Some(payload) = page.links.last_mut() {
+                    payload.metadata.insert("target_page".into(), json!(target));
+                }
+            }
+            candidates.push(candidate);
         }
     }
+    // Every supported annotation participates in overlap detection, even an unresolved multiline one.
+    // Shared glyphs never get an arbitrary destination selected from overlapping annotations.
+    for (index, candidate) in candidates.into_iter().enumerate() {
+        if let Some((block, start, end, label)) = candidate.filter(|_| !ambiguous[index]) {
+            let link = &mut page.links[index];
+            link.text = label;
+            link.metadata.insert("start".into(), json!(start));
+            link.metadata.insert("end".into(), json!(end));
+            link.metadata.insert("block".into(), json!(block));
+            link.metadata
+                .insert("label_status".into(), json!("resolved"));
+            page.blocks[block].links.push(link.clone());
+        }
+    }
+    Ok(())
+}
+
+fn link_label(
+    text: &pdfcraft_render::PageText,
+    selected: &[usize],
+    blocks: &[BlockPayload],
+) -> Option<(usize, usize, usize, String)> {
+    let first = selected
+        .iter()
+        .position(|index| !text.glyphs[*index].text.trim().is_empty())?;
+    let last = selected
+        .iter()
+        .rposition(|index| !text.glyphs[*index].text.trim().is_empty())?;
+    let selected = &selected[first..=last];
+    let start = *selected.first()?;
+    let end = selected.last()?.checked_add(1)?;
+    if selected.len() != end - start {
+        return None;
+    }
+    let (line_start, line_end) = text.line_at(start)?;
+    if end > line_end + 1 {
+        return None;
+    }
+    let line = text.text_of(line_start..line_end + 1);
+    let boxes = text.line_rects(line_start..line_end + 1);
+    let [bbox] = boxes.as_slice() else {
+        return None;
+    };
+    let bbox = bbox.map(f64::from);
+    let mut matches = blocks.iter().enumerate().filter(|(_, block)| {
+        block.kind == "paragraph" && block.text == line && block.bbox == Some(bbox)
+    });
+    let (block, _) = matches.next()?;
+    if matches.next().is_some() {
+        return None;
+    }
+    let label = text.text_of(start..end);
+    let offset = text
+        .text_of(line_start..start + 1)
+        .chars()
+        .count()
+        .checked_sub(text.glyphs[start].text.chars().count())?;
+    let limit = offset + label.chars().count();
+    if line
+        .chars()
+        .skip(offset)
+        .take(limit - offset)
+        .collect::<String>()
+        != label
+    {
+        return None;
+    }
+    Some((block, offset, limit, label))
 }
 
 fn add_images(

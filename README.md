@@ -43,9 +43,9 @@ Path("slides.pdf").write_bytes(doc_ex.convert("slides.pptx", "pdf"))
 | Convert to DOCX | Yes | — | No |
 | Password input | Yes | Yes | Encrypted PPTX unsupported |
 | OCR | No | — | — |
-| Create a new document from scratch | No | No | No |
+| Create a new document from scratch (unreleased branch) | Basic | Basic | Basic |
 
-PDF table detection is conservative. PDF links usually retain destination and geometry but not label text. DOCX computed pagination cannot split one automatically wrapped paragraph into exact normalized page slices. PPTX exposes URL links but not every PowerPoint action. Conversion uses upstream semantic exporters and is not pixel-perfect.
+PDF table detection is conservative. PDF links retain destinations and geometry; unambiguous single-line labels have exact character offsets. Ambiguous or multiline regions remain unresolved. DOCX computed pagination cannot split one automatically wrapped paragraph into exact normalized page slices. PPTX exposes URL links but not every PowerPoint action. Conversion uses upstream semantic exporters and is not pixel-perfect.
 
 ## Render a page at a chosen DPI
 
@@ -62,9 +62,9 @@ with doc_ex.open("report.docx") as document:  # also .pdf or .pptx
 
 Indexes are zero-based; negative indexes are supported. DPI defaults to 144 and must be finite and between 1 and 1200, subject to output-size limits. Both methods return PNG bytes. DOCX pagination follows WordCraft layout and may differ from Microsoft Word. See [rendering details](docs/formats.md#rendering).
 
-Creating a new DOCX or PDF from scratch is not exposed yet. See the [feature TODOs and PyMuPDF comparison](TODO.md) for authoring, rendering validation, and extraction improvements.
+The unreleased branch adds native authoring through `doc_ex.new("docx" | "pdf" | "pptx")`, including text, tables, images, backgrounds, explicit saving and independent copies. See [the authoring API](docs/authoring.md) for examples, the supported edit profile and current limits. Published 0.2.1 does not include these additions.
 
-The expanded roadmap also covers Open XML feature parity: table creation and formatting, backgrounds/watermarks, styles, sections, templates, review features, and safe editing. The [proposed Python authoring API](docs/authoring-api-design.md) uses Pillow-like objects and methods while keeping ArtCraft libraries as the only document backend. These authoring APIs are planned, not part of 0.2.1.
+The expanded [roadmap](TODO.md) covers Open XML feature parity, styles, sections, templates, review features and safe editing. The [design and reference crosswalk](docs/authoring-api-design.md) keeps ArtCraft libraries as the only document backend. Unchecked coverage remains incomplete even where an initial slice is implemented.
 
 The coverage checklist is consolidated into [14 connected workstreams](docs/roadmap-workstreams.md), with [upstream contribution candidates](docs/upstream-roadmap.md) distinguished from existing library support. Reports, watermarks, templates and batches should compose a small core API wherever possible.
 
@@ -73,6 +73,7 @@ Track the work in the [GitHub Roadmap project](https://github.com/users/narain1/
 ## Documentation
 
 - [Python API](docs/api.md)
+- [Native authoring (unreleased)](docs/authoring.md)
 - [Formats, rendering, and conversion](docs/formats.md)
 - [Safety and resource behavior](docs/safety.md)
 - [Dependencies, licensing, and attribution](docs/dependencies-and-licenses.md)

@@ -1332,6 +1332,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pdfcraft-organize"
+version = "0.9.0"
+source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
+dependencies = [
+ "pdfcraft-content",
+ "pdfcraft-cos",
+ "thiserror",
+]
+
+[[package]]
 name = "pdfcraft-render"
 version = "0.9.0"
 source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
@@ -1472,10 +1482,12 @@ dependencies = [
  "deckcraft-pdf",
  "deckcraft-pptx",
  "deckcraft-render",
+ "pdfcraft-annot",
  "pdfcraft-cos",
  "pdfcraft-create",
  "pdfcraft-edit",
  "pdfcraft-export",
+ "pdfcraft-organize",
  "pdfcraft-render",
  "png",
  "pyo3",

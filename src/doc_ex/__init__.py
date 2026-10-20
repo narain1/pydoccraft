@@ -16,9 +16,10 @@ from .errors import (
     UnsupportedFormatError,
 )
 from .models import Block, Cell, Image, Link, Table
+from ._authoring import EditableDocument, new, pt, mm, cm, inches
 
 __all__ = [
-    "open", "convert", "Document", "Page", "Block", "Cell", "Table", "Link", "Image",
+    "open", "convert", "new", "pt", "mm", "cm", "inches", "EditableDocument", "Document", "Page", "Block", "Cell", "Table", "Link", "Image",
     "DocExError", "DocumentClosedError", "MalformedDocumentError", "UnsafeArchiveError",
     "UnsupportedFormatError", "ToolExecutionError", "ToolNotFoundError",
 ]
@@ -85,6 +86,7 @@ def _native(operation):
             "resource_limit": UnsafeArchiveError,
             "encrypted": MalformedDocumentError,
             "conversion_failure": DocExError,
+            "closed": DocumentClosedError,
         }.get(category, DocExError)
         raise exception(message or str(error)) from None
 

@@ -47,6 +47,11 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --locked --all-targets -- -D warnings
 
+      - name: Audit locked license graph
+        run: |
+          cargo metadata --locked --format-version 1 > /tmp/cargo-metadata.json
+          python tools/audit_licenses.py /tmp/cargo-metadata.json
+
       - name: Build wheel
         run: maturin build --release --locked --out dist
 

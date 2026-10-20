@@ -144,6 +144,7 @@ The resolved graph was reviewed for license declarations and compatibility. GPL-
 | `pdfcraft-filters` | `0.9.0` | MIT OR Apache-2.0 |
 | `pdfcraft-fonts` | `0.9.0` | MIT OR Apache-2.0 |
 | `pdfcraft-model` | `0.9.0` | MIT OR Apache-2.0 |
+| `pdfcraft-organize` | `0.9.0` | MIT OR Apache-2.0 |
 | `pdfcraft-render` | `0.9.0` | MIT OR Apache-2.0 |
 | `peniko` | `0.6.1` | Apache-2.0 OR MIT |
 | `phf` | `0.13.1` | MIT |

@@ -190,6 +190,16 @@ class Document:
         from . import convert
         return convert(self._source, output_format, filetype=self._filetype, password=self._password)
 
+    def edit(self):
+        """Create an independent editable native PDF; unsupported preservation fails."""
+        self._ensure_open()
+        from . import _core, _native
+        from ._authoring import PdfDocument
+        from .errors import UnsupportedFormatError
+        if self._filetype != "pdf":
+            raise UnsupportedFormatError("editing existing Office files requires preservation diagnostics; create a new document with new()")
+        return PdfDocument(_native(lambda: _core.EditablePdf.from_bytes(self._source, self._password)))
+
     def close(self) -> None:
         self._closed = True
 

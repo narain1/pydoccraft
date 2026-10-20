@@ -1,5 +1,16 @@
 # Validation evidence
 
+## 2026-10-20 native authoring baseline (unreleased)
+
+- Built offline in the Rust 1.95.0 Debian container on Linux x86_64; Python 3.11.2, Maturin 1.8.1. All builds used `--locked`; upstream revisions remain unchanged from AGENTS.md.
+- `cargo fmt --all -- --check`, `cargo test --locked` (37 tests), and `cargo clippy --locked --all-targets -- -D warnings` passed.
+- Clean installed-wheel validation passed all 61 Python tests with no skips. Package files were verified against the wheel; DOCX/PDF/PPTX authored outputs and conversions were reopened. Tests cover failed-edit atomicity, native ownership/copies, stale handles, rich/nested cells, header/footer PDF text, page/slide organization, shape/background/media retention, PDF annotation CRUD, exact PDF link labels and rotated/cropped/UserUnit raster geometry.
+- Wheel: `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`; 16,382,442 bytes. Native extension: 37,941,224 bytes. Wheel SHA-256: `9e96852313dd58f2aeafba2f1da412b0c9f787f0bb55fa8a87c7c70e89487bdc`. Lockfile SHA-256: `1b2bcaa846d1ffe42cc844fce299750cf9c288e1aab00a3e8aafc40b7a14b3c9`.
+- Reviewed normal/build graph: 263 packages; only `pdfcraft-organize` is newly added to the graph. `pdfcraft-annot` was already transitive and is now direct. Both use the existing immutable PdfCraft revision. Regenerated/reviewed both license inventories and NOTICE; no prohibited application crate or non-permissive-only license was found. CI now checks the generated inventory.
+- The initial PPTX invalid-character test was corrected after source audit: U+FFFC is valid literal DeckCraft text, unlike WordCraft's object placeholder. A native save/reopen test verifies it; NUL/U+FFFE/U+FFFF remain rejected. Annotation geometry assertions allow upstream f32 rounding within 0.0001 point, with failed resize preserving geometry.
+- Supported scope and explicit limits are in `docs/authoring.md`. Existing source DOCX/PPTX edits are refused; source PDF edits refuse encrypted/form/signed/certified profiles. PDF text remains Helvetica/WinAnsi; Office image authoring currently accepts PNG. Annotation creation supports notes/highlights/links and does not implement redaction. Header/footer authoring/export is verified, but DOCX story extraction remains separate work. Advanced roadmap coverage is not marked complete by this baseline.
+
+
 ## 2026-10-20 PR preparation against updated main
 
 Rebased the completed roadmap foundation and feature commits onto `f0baff5` (community guidelines and package URL metadata). Repeated formatting, locked Rust tests (5 passed), Clippy, the locked release build, and all 36 Python tests in a new clean CPython 3.11 environment. Container networking remained disconnected. The runtime dependency graph and upstream revisions are unchanged.

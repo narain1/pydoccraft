@@ -22,8 +22,8 @@ Following the overlap/API review, these 139 IDs are a **coverage checklist**, no
 | Render a PDF page, DOCX layout page, or PPTX slide at a chosen DPI | Implemented for all three; returns PNG bytes | `Document.render_page`, `Page.get_pixmap`, three native render adapters |
 | Structured extraction and Markdown across those formats | Implemented with documented fidelity limitations | [Capability matrix](docs/formats.md) |
 | PDF → DOCX; DOCX → PDF; PPTX → PDF | Implemented conversions | `rust/src/convert.rs`, conversion reopen tests |
-| Create a new DOCX or PDF from user-supplied content | Missing public authoring API | `src/doc_ex/__init__.py`, `src/doc_ex/_document.py` |
-| Edit and save an existing document | Missing public mutation/save API | Extracted Python values are not a writable source-document model |
+| Create DOCX, PDF or PPTX from user-supplied content | Initial native profile implemented on unreleased branch | [Authoring API](docs/authoring.md), installed-wheel authoring tests |
+| Edit and save an existing document | Conservative PDF edit profile; Office source editing remains unsupported | `Document.edit()` passes original PDF bytes; authored models support explicit save/copy |
 
 The existing suite checks PNG signatures for all three formats, default/72 DPI, negative indexes, and invalid zero DPI. It does not establish visual fidelity, correct pixel dimensions at several DPIs, or consistent embedded DPI metadata. Historical installed-wheel results are in [validation.md](.kiro/specs/rust-document-engine/validation.md); this review did not rerun them.
 
@@ -72,6 +72,10 @@ DPI must be finite and in 1–1200; the default is 144. Indexes are zero-based a
 - [ ] **C4: Generate a report as editable DOCX and PDF.** Document a recipe using ordinary DOCX content primitives and existing `convert("pdf")`; do not introduce a report builder or second content schema. Preserve section order, table text exactly once, and links. Test both outputs and record layout differences.
 - [ ] **C5: Fill DOCX templates.** After C2, replace placeholders even when split across runs, and support repeating table rows while preserving surrounding formatting. Define missing-value and repeated-field behavior; never execute macros or fetch external relationships. Reopen/render fixtures before promising preservation of unsupported template features. Treat as a workflow opportunity, not proven market uniqueness.
 
+### Implemented authoring baseline (unreleased)
+
+The installed-wheel baseline now covers typed creation/save/copy for all three formats; DOCX paragraphs/ranges, nested table cells, PNG images, page/cell backgrounds, margins and header/footer variants; PDF page organization/import, text/images and note/highlight/link editing; PPTX slide/shape creation, stacking, metadata, notes, fills and PNG backgrounds. See [the exact surface and limitations](docs/authoring.md) and [validation evidence](.kiro/specs/rust-document-engine/validation.md). This is partial progress toward C2/C3, TXT/TBL/LAY/MED/PDF/SLIDE coverage, not completion of their broader criteria. Arbitrary source Office editing, full styles/lists/fields/review and advanced preservation remain open.
+
 ## P1 — Extraction fidelity and useful differentiation
 
 - [ ] **E1: Structural tables without ambiguous flattening.** Add optional recursive cell content and row/column span information while preserving the existing `Table.rows` view. DOCX currently flattens nested tables into cell text; PPTX carries merge metadata. Test nesting, merged cells, source order, and no duplicated text in plain text, Markdown, or conversion. For PDF detection, use a public upstream detector when available; do not build a new table engine.
@@ -90,7 +94,7 @@ DPI must be finite and in 1–1200; the default is 144. Indexes are zero-based a
 
 ## Expanded feature parity backlog
 
-Every item below is proposed and unchecked. Public ArtCraft support at the pinned revisions must be assessed before implementation. Each item needs separate evidence for applicable read/create/edit/preserve/render/export operations. A listed Open XML feature is not evidence that WordCraft already implements it. Source families are mapped in the [reference crosswalk](docs/authoring-api-design.md#open-xml-feature-crosswalk).
+Unchecked items below remain incomplete even when an initial slice is implemented. Public ArtCraft support at the pinned revisions must be assessed before implementation. Each item needs separate evidence for applicable read/create/edit/preserve/render/export operations. A listed Open XML feature is not evidence that WordCraft already implements it. Source families are mapped in the [reference crosswalk](docs/authoring-api-design.md#open-xml-feature-crosswalk).
 
 ### API — Python ergonomics and capability audit (P0)
 
@@ -109,8 +113,8 @@ Every item below is proposed and unchecked. Public ArtCraft support at the pinne
 
 - [ ] **DOC1: Create a valid blank DOCX.** `new("docx")` provides a usable first section and default styles using WordCraft. Save, reopen, extract, and render an empty document without needing Word or an external template.
 - [ ] **DOC2: Open for editing without changing extraction.** Add an explicit edit-copy operation using original source data and the upstream model. Verify that edits do not change the source file, original document object, or previously extracted values.
-- [ ] **DOC3: Save and serialize.** Support paths and binary streams plus `to_bytes()`, explicit format validation, and defined overwrite behavior. Native writers return bytes; Python owns filesystem writes. Path saves should avoid leaving a truncated destination on serialization failure.
-- [ ] **DOC4: Copy and close.** Deep copies own media/styles and survive source closure. Context-manager exit never implicitly saves. Document resource cleanup, reuse after save, and errors after closing editable handles.
+- [x] **DOC3: Save and serialize.** Support paths and binary streams plus `to_bytes()`, explicit format validation, and defined overwrite behavior. Native writers return bytes; Python owns filesystem writes. Path saves should avoid leaving a truncated destination on serialization failure.
+- [x] **DOC4: Copy and close.** Deep copies own media/styles and survive source closure. Context-manager exit never implicitly saves. Document resource cleanup, reuse after save, and errors after closing editable handles.
 - [ ] **DOC5: Insert, remove, move and duplicate content.** Support ordered block operations and copying between compatible document containers. Remap styles, numbering, bookmarks, notes and media IDs through upstream APIs; test collisions and ordering.
 - [ ] **DOC6: Compose documents.** Append selected sections/content from another DOCX with explicit policies for styles, headers, page setup and numbering. Preserve links and footnotes; reject combinations that the upstream writer cannot preserve.
 - [ ] **DOC7: Metadata and document properties.** Read/write title, author, subject, keywords, language, core/extended/custom properties and typed custom values. Define modification-time behavior and deterministic-output options; verify saved types and values.

@@ -21,7 +21,7 @@ Git dependencies use immutable `rev` values. Do not replace them with branches o
 
 The runtime does not link ArtCraft desktop applications or their CLI, MCP, automation, UI, updater, networking, OCR, JavaScript, printing, or signing packages. Lower-level rendering and font dependencies required by the selected crates remain part of the native graph.
 
-`pdfcraft-engine` is deliberately excluded because its un-gated dependency graph includes unrelated application capabilities. PDF→DOCX instead maps public PdfCraft extraction values into the smaller `pdfcraft-export` writer.
+`pdfcraft-engine` is deliberately excluded because its un-gated dependency graph includes unrelated application capabilities. PDF→DOCX instead maps public PdfCraft extraction values into the smaller `pdfcraft-export` writer. Native PDF authoring uses the pinned `pdfcraft-create`, `pdfcraft-edit`, `pdfcraft-organize` and `pdfcraft-annot` libraries. `tools/audit_licenses.py` checks normal/build dependency traversal, reviewed SPDX choices and prohibited application packages against locked Cargo metadata.
 
 ## Package license
 
@@ -36,7 +36,7 @@ Apache-2.0 redistribution requires preservation of applicable notices and identi
 
 ## Locked dependency inventory
 
-`THIRD_PARTY_LICENSES.md` is generated from the committed `Cargo.lock` and reviewed against the final normal/build graph. The current recorded audit covered 262 packages and found no undeclared or GPL-, AGPL-, or LGPL-only runtime dependency.
+`THIRD_PARTY_LICENSES.md` is generated from the committed `Cargo.lock` and reviewed against the final normal/build graph. The current recorded audit covered 263 packages and found no undeclared or GPL-, AGPL-, or LGPL-only runtime dependency.
 
 An SPDX `OR` expression is acceptable when at least one available license is allowed and the project complies with that choice. Bundled assets—such as fonts and CMaps—must be reviewed separately from crate metadata because asset licenses may not be represented by Cargo's package license field.
 

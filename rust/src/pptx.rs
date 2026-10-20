@@ -4,7 +4,8 @@ use deckcraft_model::{Comment, Presentation, Shape, ShapeKind};
 use serde_json::{json, Map, Value};
 
 use crate::model::{
-    BlockPayload, DocumentPayload, ImagePayload, LinkPayload, PagePayload, TablePayload,
+    BlockPayload, CellPayload, DocumentPayload, ImagePayload, LinkPayload, PagePayload,
+    TablePayload,
 };
 use crate::EngineError;
 
@@ -24,6 +25,7 @@ pub fn read(data: &[u8]) -> Result<Presentation, EngineError> {
 
 pub fn extract(data: &[u8]) -> Result<DocumentPayload, EngineError> {
     let presentation = read(data)?;
+    validate_tables(&presentation)?;
     let pages = presentation
         .slides
         .iter()
@@ -220,10 +222,10 @@ fn visit_shape(
             metadata.insert("column_widths".into(), json!(table.cols));
             let payload = TablePayload {
                 rows,
+                cells: table_cells(table, shape.id.0, page_number, page),
                 bbox,
                 page: Some(page_number),
                 metadata,
-                ..TablePayload::default()
             };
             page.tables.push(payload.clone());
             page.blocks.push(BlockPayload {
@@ -268,6 +270,129 @@ fn visit_shape(
         }
         _ => {}
     }
+}
+
+fn validate_tables(presentation: &Presentation) -> Result<(), EngineError> {
+    let mut total_cells = 0_usize;
+    let mut pending: Vec<_> = presentation
+        .slides
+        .iter()
+        .flat_map(|slide| slide.shapes.iter().map(|shape| (shape, 0_usize)))
+        .collect();
+    while let Some((shape, depth)) = pending.pop() {
+        match &shape.kind {
+            ShapeKind::Group { children, .. } => {
+                if depth >= 64 {
+                    return Err(EngineError::ResourceLimit(
+                        "PPTX group nesting exceeds 64 levels".into(),
+                    ));
+                }
+                pending.extend(children.iter().map(|child| (child, depth + 1)));
+            }
+            ShapeKind::Table(table) => {
+                validate_table(table, &mut total_cells)?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn validate_table(table: &deckcraft_model::Table, total: &mut usize) -> Result<(), EngineError> {
+    *total = table
+        .rows
+        .iter()
+        .fold(*total, |count, row| count.saturating_add(row.cells.len()));
+    if table.rows.len() > 1000
+        || table.cols.len() > 1000
+        || *total > 100_000
+        || table.rows.iter().any(|row| {
+            row.cells.len() > 1000
+                || row.cells.iter().enumerate().any(|(column, cell)| {
+                    column.saturating_add(cell.grid_span.max(1) as usize) > 1000
+                        || cell.row_span > 1000
+                })
+        })
+    {
+        return Err(EngineError::ResourceLimit(
+            "PPTX table exceeds 1000 rows/columns or presentation exceeds 100000 table cells"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
+fn table_cells(
+    table: &deckcraft_model::Table,
+    shape: u32,
+    page_number: usize,
+    page: &mut PagePayload,
+) -> Vec<Vec<CellPayload>> {
+    table
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(row_index, row)| {
+            row.cells
+                .iter()
+                .enumerate()
+                .map(|(column, cell)| {
+                    let blocks = cell
+                        .text
+                        .paragraphs
+                        .iter()
+                        .enumerate()
+                        .map(|(paragraph_index, paragraph)| {
+                            let (text, mut links) = paragraph_payload(paragraph, page_number, None);
+                            let path = json!([shape, row_index, column, paragraph_index]);
+                            for link in &mut links {
+                                link.metadata.insert("source_path".into(), path.clone());
+                                link.metadata.insert("shape_id".into(), json!(shape));
+                            }
+                            page.links.extend(links.clone());
+                            BlockPayload {
+                                kind: "paragraph".into(),
+                                text,
+                                links,
+                                metadata: Map::from_iter([
+                                    ("source_path".into(), path),
+                                    ("runs".into(), paragraph_runs(paragraph)),
+                                ]),
+                                ..BlockPayload::default()
+                            }
+                        })
+                        .collect();
+                    CellPayload {
+                        blocks,
+                        col_span: cell.grid_span.max(1) as usize,
+                        row_span: cell.row_span.max(1) as usize,
+                        covered: cell.is_covered(),
+                        metadata: Map::from_iter([
+                            ("grid_column".into(), json!(column)),
+                            ("horizontal_merge".into(), json!(cell.h_merge)),
+                            ("vertical_merge".into(), json!(cell.v_merge)),
+                        ]),
+                    }
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn paragraph_runs(paragraph: &deckcraft_model::text::Paragraph) -> Value {
+    let mut offset = 0_usize;
+    Value::Array(paragraph.runs.iter().map(|run| {
+        let text = if run.kind == RunKind::Break { "\n" } else { &run.text };
+        let end = offset + text.chars().count();
+        let value = json!({
+            "text": text, "start": offset, "end": end,
+            "kind": match run.kind { RunKind::Text => "text", RunKind::Break => "break", RunKind::Field { .. } => "field", RunKind::Math { .. } => "math" },
+            "bold": run.props.bold, "italic": run.props.italic,
+            "font": run.props.font, "font_size": run.props.size,
+        });
+        offset = end;
+        value
+    }).collect())
 }
 
 fn image_dimensions(data: &[u8]) -> Option<(u32, u32)> {
@@ -389,5 +514,89 @@ fn pptx_error(error: deckcraft_pptx::PptxError) -> EngineError {
         deckcraft_pptx::PptxError::Unsupported(message) => EngineError::Unsupported(message),
         deckcraft_pptx::PptxError::Write(message) => EngineError::Conversion(message),
         deckcraft_pptx::PptxError::Xml(message) => EngineError::Malformed(message),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use deckcraft_model::text::{Run, RunProps};
+    use deckcraft_model::{LayoutType, ShapeId, Size, Table, Theme, Xfrm};
+    use std::sync::Arc;
+
+    fn presentation(table: Table) -> Presentation {
+        let mut document = deckcraft_model::defaults::blank_presentation(
+            Size::new(720.0, 540.0),
+            Theme::default(),
+            false,
+        );
+        let layout =
+            deckcraft_model::defaults::layout_of_kind(&document, LayoutType::Blank).unwrap();
+        let mut slide = deckcraft_model::defaults::new_slide(&mut document, layout).unwrap();
+        slide.shapes.push(Shape {
+            id: ShapeId(document.alloc_id().unwrap()),
+            xfrm: Some(Xfrm::new(10.0, 10.0, 400.0, 200.0)),
+            kind: ShapeKind::Table(table),
+            ..Shape::default()
+        });
+        document.slides.push(Arc::new(slide));
+        document
+    }
+
+    fn linked_run(uri: &str) -> Run {
+        Run::with(
+            "Same",
+            RunProps {
+                bold: Some(true),
+                link: Some(Hyperlink {
+                    action: Action::Url { url: uri.into() },
+                    tooltip: String::new(),
+                    highlight_click: false,
+                    sound: None,
+                    stop_sound: false,
+                    zoom_return: None,
+                }),
+                ..RunProps::default()
+            },
+        )
+    }
+
+    #[test]
+    fn extracted_cells_keep_runs_merges_and_repeated_link_offsets() {
+        let mut table = Table::new(3, 2, 400.0, 60.0);
+        table.rows[0].cells[0].text.paragraphs[0].runs = vec![
+            Run::new("λ "),
+            linked_run("https://example.com/one"),
+            Run::new(" / "),
+            linked_run("https://example.com/two"),
+        ];
+        assert!(table.merge(1, 0, 2, 1));
+        let source = deckcraft_pptx::export(&presentation(table)).unwrap();
+        let payload = extract(&source).unwrap();
+        let page = &payload.pages[0];
+        let table = &page.tables[0];
+        assert_eq!(table.rows[0][0], "λ Same / Same");
+        let paragraph = &table.cells[0][0].blocks[0];
+        assert_eq!(paragraph.text, "λ Same / Same");
+        assert_eq!(paragraph.links.len(), 2);
+        assert_eq!(paragraph.links[0].metadata["start"], 2);
+        assert_eq!(paragraph.links[0].metadata["end"], 6);
+        assert_eq!(paragraph.links[1].metadata["start"], 9);
+        assert_eq!(paragraph.links[1].metadata["end"], 13);
+        assert_eq!(paragraph.metadata["runs"][1]["bold"], true);
+        assert_eq!(page.links.len(), 2);
+        assert_eq!(table.cells[1][0].col_span, 2);
+        assert_eq!(table.cells[1][0].row_span, 2);
+        assert!(table.cells[2][1].covered);
+    }
+
+    #[test]
+    fn rejects_unbounded_table_spans_before_payload_creation() {
+        let mut table = Table::new(1, 1, 100.0, 20.0);
+        table.rows[0].cells[0].grid_span = u32::MAX;
+        assert!(matches!(
+            validate_tables(&presentation(table)),
+            Err(EngineError::ResourceLimit(_))
+        ));
     }
 }
