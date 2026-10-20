@@ -832,6 +832,7 @@ GitHub merge state was verified on 2026-10-20. Each change passed independent re
 | [73](https://github.com/narain1/pydoccraft/pull/73) | `0a47b4b001c52b1fa21ab40829d502620022c37e` | 282 / 405 |
 | [74](https://github.com/narain1/pydoccraft/pull/74) | `57fcc94216e58d74b967b24cf2ced68f9f45b742` | 285 / 409 |
 | [75](https://github.com/narain1/pydoccraft/pull/75) | `c34ef0bc722963ed6f0213da9934f52c361167ba` | 285 / 409 |
+| [76](https://github.com/narain1/pydoccraft/pull/76) | `65d9535e87d502af92d1c252bc06c7e8ab76b7d9` | 285 / 409 |
 
 Formatting, warnings-denied Clippy, strict installed-package typing and the unchanged 264-package runtime/build license audit passed in each final CI run. PR69 changes source-audit documentation/data only.
 
@@ -1030,3 +1031,16 @@ The pinned public native scale/rounding helpers prove that an 8000.5 by 7999.5 p
 Rust 1.95 locked/offline formatting, two new native groups (0.03 seconds), warnings-denied all-targets Clippy and debug compilation pass. Two new public workflows pass against the isolated copied debug extension (0.080 seconds). Twenty-six related all-format rendering, geometry/clipping, retained sessions and PDF-box tests pass (32.641 seconds), including fractional DPI, blank pages, invalid DPI/index/lifetime cases and visible pixel controls. Full integrated release/clean installed-wheel validation and independent exact-head review remain required.
 
 Broad R4/U09 remains open: pinned DeckCraft's caught-panic path returns a correctly sized blank image through the selected public renderer, and no per-call fallible alternative was found. This correction does not certify parsing/layout/intermediate allocations, total process memory or hostile-input execution time. Existing 64-million-pixel output limits and clipped-region bounds remain unchanged.
+
+
+## PDF integer raster preallocation — complete local artifact
+
+Runtime `6c27539c9b0ffefaaf05ae1f62f5d422c567c829` passed **312 locked Rust tests and 446 clean installed-wheel Python tests**, zero failures/errors/skips. The Python corpus ran in 149.041 seconds on Linux x86_64 / Python 3.11.2 / Rust 1.95. Formatting, warnings-denied all-target Clippy, locked/offline release build, strict installed-package typing and the unchanged 264-package license audit pass. Installed facade/native bytes match the wheel. The corpus checks extraction, PNG rendering and reopened conversions across PDF, DOCX and PPTX.
+
+Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,520,699 bytes**; extension **40,620,200 bytes**; SHA-256 `2f65675cb156e74d163c950d718ba15a9a8aa29e818b37b3463b9e20be78d0e8`. Lock SHA-256 remains `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`; all upstream revisions, dependencies and attribution remain unchanged.
+
+The new boundary tests reject rounded oversized full-page rasters before native rendering and preserve valid tiny clipped requests. They do not allocate the oversized raster or certify total process memory. Broad R4/U09 remains open for the documented upstream fallible-rendering gap. Independent review and exact-head/current-main CI remain required before manual merge.
+
+PR87 independent source review and all 444 tests against its copied frozen package pass in 149.329 seconds, with strict typing, evidence checks and matching wheel hash. The canonical mark/style semantics and narrowly migrated four story-clear evidence cells were reviewed; final main integration/CI remains queued.
+
+PR76 final head `5f5503c05788db0f26588582737fac30e5b19420` passed [current-main CI 39509341862](https://github.com/narain1/pydoccraft/actions/runs/39509341862), including 285 Rust / 409 installed-wheel Python tests and all required checks. Independent review cleared its source-backed shading/border gap documentation, and it was manually merged as `65d9535e87d502af92d1c252bc06c7e8ab76b7d9`. Auto-merge remains disabled; broader TBL7/BG7 remains open.
