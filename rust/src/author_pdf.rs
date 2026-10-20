@@ -733,6 +733,73 @@ impl EditablePdf {
         Ok(())
     }
 
+    pub fn set_field_box(&mut self, name: &str, rect: (f64, f64, f64, f64)) -> PyResult<()> {
+        let mut expected = self.field_named(name)?;
+        let page = expected.widgets[0]
+            .page
+            .ok_or_else(|| EngineError::Unsupported("owned field has no page".into()))?;
+        let (x, y, width, height) = rect;
+        let view = self.annotation_rect(page, (x, y, x + width, y + height))?;
+        let unit = self.page_user_unit(page);
+        if width < 12.0 * unit || height < 24.0 * unit.max(1.0) {
+            return Err(PyValueError::new_err(
+                "form field box is too small for its fixed appearance",
+            ));
+        }
+        let user_rect = self.geometry[page].view_rect_to_user(view).map(f64::from);
+        expected.widgets[0].rect = user_rect;
+        validate_value_fit(&expected, "")?;
+        for value in expected
+            .value
+            .iter()
+            .chain(&expected.default)
+            .chain(expected.options.iter().map(|(_, display)| display))
+        {
+            validate_value_fit(&expected, value)?;
+        }
+        // Resource estimate only: the bounded native writer generates the appearance.
+        // Reserve before staging; charge its actual raw bytes after generation, without decoding.
+        let text_bytes = expected
+            .value
+            .iter()
+            .chain(&expected.default)
+            .map(String::len)
+            .sum::<usize>()
+            + expected
+                .options
+                .iter()
+                .map(|(a, b)| a.len() + b.len())
+                .sum::<usize>();
+        self.validate_input(64 * 1024 + 16 * text_bytes)?;
+        let mut edited = self.document()?.clone();
+        pdfcraft_forms::set_props(
+            &mut edited,
+            name,
+            &pdfcraft_forms::FieldProps {
+                rect: Some((0, user_rect)),
+                ..Default::default()
+            },
+        )
+        .map_err(form_error)?;
+        let fields = checked_owned_fields(&edited)?;
+        let actual = fields
+            .iter()
+            .find(|field| field.name == name)
+            .ok_or_else(|| EngineError::Conversion("resized field is missing".into()))?;
+        if actual != &expected {
+            return Err(EngineError::Conversion(
+                "field geometry update changed unrelated field properties".into(),
+            )
+            .into());
+        }
+        let cost = owned_field_appearance_bytes(&edited, actual)?.saturating_add(32);
+        self.validate_input(cost)?;
+        self.document = Some(edited);
+        self.input_bytes += cost;
+        self.items += 1;
+        Ok(())
+    }
+
     pub fn delete_field(&mut self, name: &str) -> PyResult<()> {
         self.field_named(name)?;
         let mut edited = self.document()?.clone();
@@ -2594,6 +2661,42 @@ fn validate_value_fit(field: &pdfcraft_forms::Field, text: &str) -> PyResult<()>
     )
 }
 
+// Only newly generated, owned single-widget appearances reach this helper. Never
+// traverse or decode arbitrary imported AP graphs; imports with forms stay unsupported.
+fn owned_field_appearance_bytes(
+    document: &Document,
+    field: &pdfcraft_forms::Field,
+) -> PyResult<usize> {
+    use pdfcraft_cos::Object;
+    let missing =
+        || EngineError::Conversion("native field appearance is missing or unsupported".into());
+    let widget = document.get(field.widgets[0].obj);
+    let ap = document.resolve(
+        widget
+            .as_dict()
+            .and_then(|d| d.get(b"AP"))
+            .ok_or_else(missing)?,
+    );
+    let normal = document.resolve(ap.as_dict().and_then(|d| d.get(b"N")).ok_or_else(missing)?);
+    match normal.as_ref() {
+        Object::Stream(stream) => Ok(stream.raw.len()),
+        Object::Dict(states)
+            if field.kind == pdfcraft_forms::FieldKind::CheckBox && states.len() <= 2 =>
+        {
+            let mut bytes = 0usize;
+            for (_, value) in states.iter() {
+                let appearance = document.resolve(value);
+                let Object::Stream(stream) = appearance.as_ref() else {
+                    return Err(missing().into());
+                };
+                bytes = bytes.saturating_add(stream.raw.len());
+            }
+            Ok(bytes)
+        }
+        _ => Err(missing().into()),
+    }
+}
+
 fn checked_owned_fields(document: &Document) -> PyResult<Vec<pdfcraft_forms::Field>> {
     use pdfcraft_forms::FieldKind;
     // This reader only sees our bounded, shallow, script-free trees. Imported forms never
@@ -4360,6 +4463,147 @@ mod tests {
             .add_field(0, "first", "checkbox", (10.0, 10.0, 30.0, 30.0), vec![])
             .unwrap();
         assert_eq!(document.flatten_fields().unwrap(), 1);
+    }
+
+    #[test]
+    fn field_geometry_preserves_identity_and_rejects_fit_and_budget_atomically() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditablePdf::new(300.0, 400.0).unwrap();
+        for (name, kind, options, value) in [
+            ("text", "text", vec![], r#""Customer""#),
+            ("check", "checkbox", vec![], "true"),
+            (
+                "choice",
+                "choice",
+                vec!["Canada".into(), "France".into()],
+                r#""France""#,
+            ),
+        ] {
+            document
+                .add_field(0, name, kind, (20.0, 20.0, 180.0, 30.0), options)
+                .unwrap();
+            document.set_field_value(name, value).unwrap();
+            let original = document.field_named(name).unwrap();
+            let input_before = document.input_bytes;
+            let items_before = document.items;
+            document
+                .set_field_box(name, (50.0, 100.0, 200.0, 40.0))
+                .unwrap();
+            let changed = document.field_named(name).unwrap();
+            assert_eq!(
+                document.input_bytes - input_before,
+                owned_field_appearance_bytes(document.document().unwrap(), &changed).unwrap() + 32
+            );
+            assert_eq!(document.items, items_before + 1);
+            assert_eq!(changed.obj, original.obj);
+            assert_eq!(changed.widgets[0].obj, original.widgets[0].obj);
+            assert_eq!(changed.value, original.value);
+            assert_eq!(changed.options, original.options);
+        }
+        let original = document.to_bytes().unwrap();
+        let items = document.items;
+        let input_bytes = document.input_bytes;
+        for rect in [
+            (0.0, 0.0, 12.0, 30.0),
+            (0.0, 0.0, 200.0, 4.0),
+            (-1.0, 0.0, 200.0, 30.0),
+            (0.0, 0.0, f64::NAN, 30.0),
+        ] {
+            assert!(document.set_field_box("text", rect).is_err());
+            assert_eq!(document.to_bytes().unwrap(), original);
+        }
+        document.input_bytes = MAX_DOCUMENT_INPUT - 100;
+        assert!(document
+            .set_field_box("text", (20.0, 200.0, 200.0, 40.0))
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit:PDF authoring item or input budget exceeded"));
+        document.input_bytes = input_bytes;
+        document.items = MAX_ITEMS;
+        assert!(document
+            .set_field_box("text", (20.0, 200.0, 200.0, 40.0))
+            .is_err());
+        document.items = items;
+        assert_eq!(document.to_bytes().unwrap(), original);
+    }
+
+    #[test]
+    fn field_geometry_after_page_rotation_keeps_widget_orientation() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditablePdf::new(300.0, 400.0).unwrap();
+        document
+            .add_field(0, "rotated", "text", (20.0, 20.0, 180.0, 30.0), vec![])
+            .unwrap();
+        document
+            .set_field_value("rotated", r#""Customer""#)
+            .unwrap();
+        let original = document.field_named("rotated").unwrap();
+        document.rotate_page(0, 90).unwrap();
+        let before = document.to_bytes().unwrap();
+        assert!(document
+            .set_field_box("rotated", (100.0, 60.0, 180.0, 40.0))
+            .is_err());
+        assert_eq!(document.to_bytes().unwrap(), before);
+        document
+            .set_field_box("rotated", (100.0, 60.0, 40.0, 180.0))
+            .unwrap();
+        let current = document.field_named("rotated").unwrap();
+        assert_eq!(current.widgets[0].rotation, original.widgets[0].rotation);
+        assert_eq!(current.widgets[0].obj, original.widgets[0].obj);
+        assert_eq!(current.value, original.value);
+    }
+
+    #[test]
+    fn moved_field_geometry_uses_rotated_cropped_userunit_view() {
+        use pdfcraft_cos::Object;
+        let mut source = pdfcraft_create::blank(300.0, 400.0, 1).unwrap();
+        let page = pdfcraft_organize::pages(&source).unwrap()[0].obj;
+        source
+            .update_dict(page, |d| {
+                d.set(
+                    b"MediaBox".to_vec(),
+                    Object::Array([10, 20, 310, 420].map(Object::Int).to_vec()),
+                );
+                d.set(
+                    b"CropBox".to_vec(),
+                    Object::Array([30, 40, 290, 400].map(Object::Int).to_vec()),
+                );
+                d.set(b"UserUnit".to_vec(), Object::Real(1.25));
+            })
+            .unwrap();
+        let bytes = pdfcraft_cos::write_full(&source, &SaveOptions::default()).unwrap();
+        for rotation in [0, 90, 180, 270] {
+            let mut document = EditablePdf::new(300.0, 400.0).unwrap();
+            document.import_pages(&bytes, None, None, 1, None).unwrap();
+            document.rotate_page(1, rotation).unwrap();
+            document
+                .add_field(1, "moved", "text", (20.0, 30.0, 180.0, 30.0), vec![])
+                .unwrap();
+            document.set_field_value("moved", r#""Moved""#).unwrap();
+            document
+                .set_field_box("moved", (80.0, 120.0, 200.0, 40.0))
+                .unwrap();
+            let info: Value = serde_json::from_str(&document.field_info("moved").unwrap()).unwrap();
+            let actual: Vec<f64> =
+                serde_json::from_value(info["widgets"][0]["box"].clone()).unwrap();
+            for (a, b) in actual.iter().zip([80.0, 120.0, 200.0, 40.0]) {
+                assert!((a - b).abs() < 0.001, "rotation {rotation}: {actual:?}");
+            }
+            document.flatten_fields().unwrap();
+            let output = document.to_bytes().unwrap();
+            let extracted = crate::pdf::extract(&output, None).unwrap();
+            let text = extracted.pages[1]
+                .blocks
+                .iter()
+                .find(|b| b.text.contains("Moved"))
+                .unwrap();
+            let bbox = text.bbox.unwrap();
+            assert!(
+                bbox[0] >= 80.0 && bbox[1] >= 120.0 && bbox[2] <= 280.0 && bbox[3] <= 160.0,
+                "rotation {rotation}: {bbox:?}"
+            );
+            crate::pdf::render(&output, 1, 72.0, None).unwrap();
+        }
     }
 
     #[test]

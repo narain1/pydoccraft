@@ -163,3 +163,9 @@ U11/E3/E5: resolved Action::Slide values now map locally through native slide id
 
 
 U02/TXT5: Num.start_overrides supports native top-level numbered-list starts locally. Native header/footer measurement can consume list counters before visible placement: a requested start of 11 renders as 12 in a header and 13 in a footer in a one-page fixture. Explicit starts in those story scopes are rejected; do not compensate with an adapter counter. A pure measurement/layout counter-state fix belongs upstream.
+
+U02/E3: the local extraction cache bounds repeated native numbering queries and caches unresolved references. The pinned native resolver/layout still linearly scans numbering definition vectors; an indexed native resolver and caller-visible layout work limits would address that cost at its owner without introducing a local numbering algorithm.
+
+U04/MED3: native Image.crop and Float.flip_h/flip_v support original-media-preserving DOCX picture edits. Inline layout clamps frame dimensions below one point, so authored insertion/resize now rejects that range instead of silently enlarging it. A 90-degree rotation fixture for a solid rectangular image shows missing edge strips in both WordCraft PNG and exported PDF; expose rotation only after the native transform/render path preserves the full rectangle. Keep the fix upstream rather than resampling source images locally.
+
+U10/PDF6: public forms::set_props with a widget rectangle and native appearance regeneration supports moving/resizing existing owned single-widget fields locally. Field/widget identity, values, choices and orientation stay native. Imported-field traversal limits and multi-widget radio-group identity remain distinct upstream/integration work; this geometry property does not imply arbitrary form editing.
