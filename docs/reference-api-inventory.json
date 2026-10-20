@@ -745,13 +745,15 @@
         "E3",
         "REF8"
       ],
-      "local_surface": "Notes collection plus shared Paragraph handles; section note_options/configure_notes",
-      "remaining": "Full continuation/section placement and unsupported custom styles remain bounded by existing native acceptance. Endnote collector field scopes already guarded.",
+      "local_surface": "Notes collection plus shared Paragraph handles; section note_options/configure_notes; notes.convert changes owned kind through the native semantic operation",
+      "remaining": "Semantic note deletion, fragment graph remapping, rich-note geometry and broader placement/restart fidelity remain open. Shared standard-style runs fail if native conversion would restyle unrelated content; custom-style identity is preserved. This edit is separate from existing DOCX-to-PDF export.",
       "upstream_candidates": [
         "U02",
         "U07"
       ],
-      "profiles": [],
+      "profiles": [
+        "word.note-kind-conversion"
+      ],
       "disposition": "implemented_subset"
     },
     {
@@ -1351,13 +1353,14 @@
         "SLIDE5",
         "SLIDE6"
       ],
-      "local_surface": "Slides/layouts/typed shapes/text/tables/images/notes/internal links with stable IDs",
-      "remaining": "Whole-slide import/copy needs public graph re-ID/remapping; comments lose shape anchors/deep replies; PDF artwork rasterized; imported preservation unassessed.",
+      "local_surface": "Slides/layouts/typed shapes/text/tables/images/notes/internal links with stable IDs; existing Slide.background=None removes an explicit owned override",
+      "remaining": "Whole-slide import/copy needs public graph re-ID/remapping; comments lose shape anchors/deep replies; PDF artwork rasterized; imported preservation unassessed. Reset getter reports direct state rather than effective inherited color; imported inherited-media graphs remain outside mutable authoring.",
       "upstream_candidates": [
         "U11"
       ],
       "profiles": [
-        "slides.layouts"
+        "slides.layouts",
+        "slides.background-reset"
       ],
       "disposition": "implemented_subset"
     },
@@ -1910,6 +1913,11 @@
           "name": "field_label",
           "source": "pm:docs/widget.rst",
           "line": 100
+        },
+        {
+          "name": "field_flags",
+          "source": "pm:docs/widget.rst",
+          "line": 110
         }
       ],
       "coverage": [
@@ -1917,8 +1925,8 @@
         "FORM3",
         "PKG5"
       ],
-      "local_surface": "PdfFields/PdfField owned text/checkbox/choice profile with geometry/value updates and bounded Unicode tooltip metadata",
-      "remaining": "Imported enumeration silently truncates/loses widgets/unknown kinds; require public fallible bounded inventory before safe general source-form editing. Script/signature behavior is excluded. The local tooltip is an empty string when absent; this is not a promise to match the reference field-label fallback or imported metadata behavior.",
+      "local_surface": "PdfFields/PdfField owned text/checkbox/choice profile with geometry/value updates and bounded Unicode tooltip metadata and strict read_only state",
+      "remaining": "Imported enumeration silently truncates/loses widgets/unknown kinds; require public fallible bounded inventory before safe general source-form editing. Script/signature behavior is excluded. The local tooltip is an empty string when absent; this is not a promise to match the reference field-label fallback or imported metadata behavior. Local read_only exposes only READ_ONLY and native filling refusal, including identical/clear assignments; it is not arbitrary flags, widget synchronization or security parity.",
       "upstream_candidates": [
         "U10"
       ],
@@ -2031,5 +2039,5 @@
       "disposition": "reference_comparison"
     }
   ],
-  "audited_commit": "a21fc5c80abe556ac03b471f1906a7ec6b6a3f16"
+  "audited_commit": "58c1eaa53f5b37bb167958d8d6a059c2c9603a7c"
 }

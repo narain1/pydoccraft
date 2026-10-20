@@ -510,3 +510,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete integrated release/clean installed-wheel validation: 299 Rust / 426 Python tests, strict typing and unchanged license audit.
 - [ ] Complete independent review and fresh current-main CI before manual merge.
 - [ ] Retain broader SLIDE4/master/theme/imported-media preservation work.
+
+
+## Field-state, note-kind and slide-reset evidence followup
+
+- [x] Audit exact 419/423/426 runtime assertions and module fingerprints; separate note-kind mutation, same-format persistence and format export.
+- [x] Extend owned-fields and add two scoped mutation profiles, reusing current criteria/reference families without changing feature completion or unrelated historical profiles.
+- [x] Validate 19-profile/133-cell generated guides, cached immutable sources and offline evidence drift checks; preserve independently corrected outline evidence.
+- [ ] Complete independent evidence review; broader feature/API/QA acceptance remains open.

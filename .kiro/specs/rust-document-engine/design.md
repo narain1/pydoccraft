@@ -465,3 +465,10 @@ The existing owned_field_appearance_peak and owned_field_appearance_bytes helper
 A narrow private clear_background(slide) stages Slide.background=None through the existing model mutation path. The facade accepts None on the existing background property; color assignment keeps existing coercion and initial/final identity checks. Getter behavior stays direct: no override yields None even when the native effective background is an inherited image or gradient. Native resolve::background owns layout/master/theme fallback, serialization omits p:bg, and native rendering/PDF export observes that same model.
 
 Only explicit-picture removal invokes existing authored media pruning and live-budget refresh; solid/absent reset cannot release media. Before that pruning, direct picture backgrounds in native master/layout fixtures are rejected rather than removed accidentally. This narrow safety check does not enable arbitrary imported asset graphs or add a generic reference walker. Successful repeated reset still follows normal revision/cache invalidation.
+
+
+## 73. Reuse operation profiles and distinguish semantic mutation from export
+
+Owned-field read/edit/preserve/render cells add read_only assertions and the exact 423 artifact; creation retains its earlier artifact and imported/format-export limits are unchanged. A new note-kind mutation profile uses the 419 artifact, with stable owned handles and explicit custom-style/native-placement limits. Its export cell refers to the separate document.convert("pdf") operation. A slide background-reset profile uses the 426 artifact and distinguishes explicit getter absence from native effective inheritance. Raw inherited-model controls do not establish arbitrary imported source editing.
+
+All profiles keep the existing seven-operation schema, 139 coverage joins, 14 owners and immutable reference families. The existing widget reference file supplies one additional representative field_flags member, with local READ_ONLY-only behavior explicit. Profile generation/checking validates links and drift, not semantics; exact historical test/runtime evidence remains necessary.
