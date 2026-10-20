@@ -241,7 +241,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 
 ## Picture transforms and owned field geometry
 
-- [ ] Add verified DOCX crop/flip properties and reject silent native sub-point image scaling.
-- [ ] Make existing owned PDF field boxes writable through native appearance regeneration and atomic geometry/fit checks.
-- [ ] Verify complete locked/native and installed-wheel read/render/export corpus and record artifact evidence.
+- [x] Add verified DOCX crop/flip properties and reject silent native sub-point image scaling.
+- [x] Make existing owned PDF field boxes writable through native appearance regeneration and atomic geometry/fit checks.
+- [x] Verify complete locked/native and installed-wheel read/render/export corpus and record artifact evidence.
 - [ ] Retain native DOCX rotation fidelity, floating-image/opacity and broader imported/multi-widget PDF form gaps.
