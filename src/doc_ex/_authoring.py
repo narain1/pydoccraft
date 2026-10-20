@@ -1092,6 +1092,36 @@ class Section:
         self._set(start=value)
 
     @property
+    def line_numbers(self) -> tuple[int, int, float, str] | None:
+        """(count_by, start, distance_pt, restart), or None; single columns only.
+
+        Restart is each_page, each_section or continuous. Distance zero uses
+        the native 18pt default; (1, 1, 0, "each_page") numbers every body line.
+        """
+        value = self._props()["line_numbers"]
+        return None if value is None else tuple(value)
+
+    @line_numbers.setter
+    def line_numbers(self, value: tuple[int, int, float, str] | None) -> None:
+        if value is None:
+            self._set(line_numbers=None)
+            return
+        if not isinstance(value, (tuple, list)) or len(value) != 4:
+            raise TypeError("line_numbers must be (count_by, start, distance, restart), or None")
+        count_by, start, distance, restart = value
+        if isinstance(count_by, bool) or isinstance(start, bool):
+            raise TypeError("line-number count_by and start must be integers, not booleans")
+        count_by, start = operator.index(count_by), operator.index(start)
+        if not 1 <= count_by <= 100 or not 1 <= start <= 32768:
+            raise ValueError("line-number count_by must be 1..100 and start must be 1..32768")
+        distance = pt(distance)
+        if not 0 <= distance <= 1584:
+            raise ValueError("line-number distance must be between 0 and 1584 points")
+        if restart not in ("each_page", "each_section", "continuous"):
+            raise ValueError("line-number restart must be each_page, each_section or continuous")
+        self._set(line_numbers=[count_by, start, distance, restart])
+
+    @property
     def page_number_start(self) -> int | None:
         """First displayed page number, or None to continue the prior section."""
         return self._props()["page_number_start"]

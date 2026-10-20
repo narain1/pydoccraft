@@ -15,7 +15,9 @@ use wordcraft_doc::props::{
     Border, BorderStyle, Borders, HeightRule, Highlight, LineSpacing, NumRef, TabAlign, TabLeader,
     TabStop, TextDirection, Underline, VAlign, VMerge, VertAlign, TAB_POS_EPS,
 };
-use wordcraft_doc::section::{NotePos, NoteRestart, NumFormat, SectionProps, SectionStart};
+use wordcraft_doc::section::{
+    LineNumberRestart, LineNumbering, NotePos, NoteRestart, NumFormat, SectionProps, SectionStart,
+};
 use wordcraft_doc::styles::{PartFormat, PartSet, Style, StyleSheet, TablePart};
 use wordcraft_doc::{
     Align, Block, CharProps, Document, ListKind, ParaProps, Paragraph, PartKind, Path, Pos, Rgb,
@@ -34,6 +36,7 @@ const MAX_MEDIA_BYTES: usize = 64 * 1024 * 1024;
 const MAX_IMAGE_PIXELS: u64 = 16_000_000;
 const MAX_LISTS: usize = 10_000;
 const MAX_PAGE_FIELDS: usize = 10_000;
+const MAX_LINE_NUMBER_WORK: usize = 100_000;
 
 /// Private boundary value: Python booleans must not become numbering starts.
 #[derive(Clone, Copy)]
@@ -206,6 +209,7 @@ impl EditableDocx {
     }
 
     pub fn to_bytes(&self) -> PyResult<Vec<u8>> {
+        validate_line_number_work(self.document()?)?;
         validate_unsplittable_page_bounds(self.document()?)?;
         validate_unequal_column_tables(self.document()?)?;
         let output = wordcraft_docx::write(self.document()?).map_err(|error| {
@@ -2403,6 +2407,7 @@ impl EditableDocx {
         Ok(json!({
             "start": section_start_name(props.start),
             "page_number_start": props.page_num_start,
+            "line_numbers": props.line_numbers.as_ref().map(|value| json!([value.count_by, value.start, value.distance, line_number_restart_name(value.restart)])),
             "page_size": [props.page_w, props.page_h],
             "margins": [props.margin_top, props.margin_right, props.margin_bottom, props.margin_left],
             "gutter": props.gutter,
@@ -2433,6 +2438,45 @@ impl EditableDocx {
                             "the first section must start with next_page",
                         ));
                     }
+                }
+                "line_numbers" => {
+                    props.line_numbers = if value.is_null() {
+                        None
+                    } else {
+                        let values = value.as_array().filter(|values| values.len() == 4).ok_or_else(|| PyValueError::new_err("line_numbers requires (count_by, start, distance, restart), or null"))?;
+                        let count_by = values[0]
+                            .as_u64()
+                            .filter(|value| (1..=100).contains(value))
+                            .ok_or_else(|| {
+                                PyValueError::new_err(
+                                    "line-number count_by must be an integer from 1 to 100",
+                                )
+                            })? as u32;
+                        let start = values[1]
+                            .as_u64()
+                            .filter(|value| (1..=32768).contains(value))
+                            .ok_or_else(|| {
+                                PyValueError::new_err(
+                                    "line-number start must be an integer from 1 to 32768",
+                                )
+                            })? as u32;
+                        let distance = values[2].as_f64().filter(|value| value.is_finite() && (0.0..=1584.0).contains(value))
+                            .ok_or_else(|| PyValueError::new_err("line-number distance must be finite and between 0 and 1584 points"))? as f32;
+                        let restart = match values[3].as_str() {
+                            Some("each_page") => LineNumberRestart::Page,
+                            Some("each_section") => LineNumberRestart::Section,
+                            Some("continuous") => LineNumberRestart::Continuous,
+                            _ => return Err(PyValueError::new_err(
+                                "line-number restart must be each_page, each_section or continuous",
+                            )),
+                        };
+                        Some(LineNumbering {
+                            count_by,
+                            start,
+                            distance,
+                            restart,
+                        })
+                    };
                 }
                 "page_number_start" => {
                     props.page_num_start = if value.is_null() {
@@ -3640,6 +3684,7 @@ impl EditableDocx {
             retain_authored_image_media(&mut document)?
         };
         page_field_count(&document)?;
+        validate_line_number_work(&document)?;
         validate_table_metadata_budget(&document)?;
         validate_document_tabs(&document)?;
         // Native generic range/table edits do not repair semantic references. Existing
@@ -4423,6 +4468,7 @@ fn validate_rich_story_page_bounds(
 /// Vertical merge anchors carry multi-row geometry and are deliberately outside
 /// this narrow check; exact-height clipping *inside* a page remains intentional.
 fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
+    validate_line_number_work(document)?;
     let mut pending = native_table_roots(document);
     let mut guarded = BTreeSet::new();
     let mut cells = 0usize;
@@ -4467,7 +4513,11 @@ fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
         }
     }
     let rich = rich_story_ids(document);
-    if guarded.is_empty() && rich.is_empty() {
+    let numbered = document
+        .sections()
+        .iter()
+        .any(|(_, section)| section.line_numbers.is_some());
+    if guarded.is_empty() && rich.is_empty() && !numbered {
         return Ok(());
     }
     let layout = wordcraft_layout::layout(
@@ -4477,6 +4527,9 @@ fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
     );
     if layout.pages.len() > MAX_LAYOUT_PAGES {
         return Err(limit("pagination validation exceeds 10000 pages"));
+    }
+    if numbered {
+        validate_line_number_bounds(&layout)?;
     }
     let mut items = 0usize;
     for page in &layout.pages {
@@ -4668,6 +4721,9 @@ fn validate_native_table_layout(
 }
 
 fn native_cell_widths(document: &Document) -> PyResult<BTreeMap<LayoutCellKey, f32>> {
+    // Mutations can measure candidate table geometry before commit. Guard the
+    // candidate itself before native pagination allocates line-number layouts.
+    validate_line_number_work(document)?;
     let layout = wordcraft_layout::layout(
         document,
         &mut wordcraft_layout::LayoutCache::new(),
@@ -6102,6 +6158,131 @@ fn column_width(section: &SectionProps) -> f32 {
         .fold(f32::INFINITY, f32::min)
 }
 
+fn line_number_restart_name(value: LineNumberRestart) -> &'static str {
+    match value {
+        LineNumberRestart::Page => "each_page",
+        LineNumberRestart::Section => "each_section",
+        LineNumberRestart::Continuous => "continuous",
+    }
+}
+
+/// Bound additional native line-number work before any pagination. This is not a
+/// memory estimate or a local line/counter evaluator. Pinned para.rs consumes
+/// clusters for ordinary lines, plus one empty final line. Its uppercase mapping
+/// can expand a source character; four units per UTF-8 byte conservatively covers
+/// that expansion. Fields and note references use shape_atomic (one cluster), and
+/// inline images use one object cluster. Beside-float filler lines are not numbered.
+/// Tables and auxiliary stories never enter the native top-level numbering path.
+fn validate_line_number_work(document: &Document) -> PyResult<()> {
+    let mut begin = 0usize;
+    let mut work = 0usize;
+    let mut seen_numbered = false;
+    let mut previous_each_page = false;
+    for (end, section) in document.sections() {
+        if let Some(numbers) = &section.line_numbers {
+            // The pinned paginator only resets a page counter when that page
+            // begins inside a numbered Page section. Re-enabling it later on a
+            // shared page can carry a counter from an older page. This is a
+            // conservative configuration guard, not pagination/counter recovery.
+            if section.start == SectionStart::Continuous
+                && numbers.restart == LineNumberRestart::Page
+                && seen_numbered
+                && !previous_each_page
+            {
+                return Err(EngineError::Unsupported("each_page line numbering cannot resume in a continuous section after an unnumbered or differently restarted section; use each_section, continuous, or a next_page section".into()).into());
+            }
+            if section.columns.count != 1 {
+                return Err(EngineError::Unsupported("line numbering requires a single-column section: native multi-column labels overlap in the left margin".into()).into());
+            }
+            if !(1..=100).contains(&numbers.count_by)
+                || !(1..=32768).contains(&numbers.start)
+                || !numbers.distance.is_finite()
+                || !(0.0..=1584.0).contains(&numbers.distance)
+            {
+                return Err(PyValueError::new_err(
+                    "line-number values exceed the supported native serialization bounds",
+                ));
+            }
+            let blocks = document.body.get(begin..=end).ok_or_else(|| {
+                PyValueError::new_err("invalid section bounds for line numbering")
+            })?;
+            for paragraph in blocks.iter().filter_map(|block| block.as_para()) {
+                // Include suppressed paragraphs conservatively; later style changes
+                // cannot invalidate the preflight, and no style/layout scan is needed.
+                work = work
+                    .saturating_add(paragraph.text.len().saturating_mul(4))
+                    .saturating_add(paragraph.objects.len())
+                    .saturating_add(1);
+                if work > MAX_LINE_NUMBER_WORK {
+                    return Err(limit("line-numbered body text exceeds the 100000-unit native label-work budget (four per UTF-8 byte, one per paragraph and inline object)"));
+                }
+            }
+        }
+        previous_each_page = section
+            .line_numbers
+            .as_ref()
+            .is_some_and(|numbers| numbers.restart == LineNumberRestart::Page);
+        seen_numbered |= section.line_numbers.is_some();
+        begin = end.saturating_add(1);
+    }
+    Ok(())
+}
+
+/// The pinned native label path uses DECOR_STORY with an empty source path;
+/// note separators use nonempty paragraph paths. Inspect actual placed logical
+/// extents rather than guessing label width from the nominal 60pt layout box.
+/// This does not claim font-ink clipping or rebuild any numbering/layout logic.
+fn validate_line_number_bounds(layout: &wordcraft_layout::DocLayout) -> PyResult<()> {
+    let mut items = 0usize;
+    let mut labels = 0usize;
+    for page in &layout.pages {
+        items = items.saturating_add(page.items.len());
+        if items > MAX_LAYOUT_ITEMS {
+            return Err(limit("line-number validation exceeds 2000000 placed items"));
+        }
+        for item in &page.items {
+            let wordcraft_layout::Placed::Lines {
+                story,
+                path,
+                para,
+                l0,
+                l1,
+                x,
+                y,
+                turn,
+            } = item
+            else {
+                continue;
+            };
+            if *story != wordcraft_layout::DECOR_STORY || !path.0.is_empty() {
+                continue;
+            }
+            labels += 1;
+            if labels > MAX_LINE_NUMBER_WORK {
+                return Err(limit("native line labels exceed the preflight work budget"));
+            }
+            if *turn != TextDirection::Horizontal || *l0 != 0 || *l1 != 1 || para.lines.len() != 1 {
+                return Err(EngineError::Unsupported("native line-number text wrapped or changed orientation; adjust document-default formatting".into()).into());
+            }
+            let line = &para.lines[0];
+            let left = *x + line.xs.iter().copied().fold(f32::INFINITY, f32::min);
+            let right = *x + line.xs.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let bottom = *y + line.height;
+            if ![left, right, *y, bottom, page.w, page.h]
+                .iter()
+                .all(|value| value.is_finite())
+                || left < -0.01
+                || right > page.w + 0.01
+                || *y < -0.01
+                || bottom > page.h + 0.01
+            {
+                return Err(EngineError::Unsupported("native line-number extent exceeds the physical page; reduce its distance or adjust margins/formatting".into()).into());
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_section_geometry(section: &SectionProps) -> PyResult<()> {
     let columns = &section.columns;
     let text_width = section.page_w - section.margin_left - section.margin_right - section.gutter;
@@ -6439,6 +6620,380 @@ fn range_offsets(text: &str, start: usize, end: usize) -> PyResult<(usize, usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_numbers_automatic_pages_and_unnumbered_column_transitions() {
+        let mut document = EditableDocx::new();
+        document.set_page_size(300.0, 260.0).unwrap();
+        document
+            .set_section_props(0, r#"{"line_numbers":[1,1,0,"continuous"]}"#)
+            .unwrap();
+        for index in 0..15 {
+            document
+                .add_paragraph(&format!("Paragraph{index}"))
+                .unwrap();
+        }
+        let pages = line_label_layout(document.document().unwrap());
+        assert!(pages.len() > 1);
+        assert_eq!(
+            pages
+                .iter()
+                .flatten()
+                .map(|label| label.0.parse::<u32>().unwrap())
+                .collect::<Vec<_>>(),
+            (1..=15).collect::<Vec<_>>()
+        );
+        assert!(pages
+            .iter()
+            .all(|page| page.windows(2).all(|pair| pair[0].2 < pair[1].2)));
+        for restart in ["each_section", "continuous"] {
+            let mut document = EditableDocx::new();
+            document
+                .set_section_props(0, r#"{"columns":[2,36,false]}"#)
+                .unwrap();
+            for index in 0..4 {
+                document.add_paragraph(&format!("Before{index}")).unwrap();
+            }
+            let numbered = document.add_section("continuous").unwrap();
+            document
+                .set_section_props(
+                    numbered,
+                    &json!({"columns":[1,36,false],"line_numbers":[1,1,0,restart]}).to_string(),
+                )
+                .unwrap();
+            document.add_paragraph("First numbered").unwrap();
+            document.add_paragraph("Second numbered").unwrap();
+            let unnumbered = document.add_section("continuous").unwrap();
+            document
+                .set_section_props(
+                    unnumbered,
+                    r#"{"line_numbers":null,"columns":[2,36,false]}"#,
+                )
+                .unwrap();
+            for index in 0..4 {
+                document.add_paragraph(&format!("Middle{index}")).unwrap();
+            }
+            let last = document.add_section("continuous").unwrap();
+            document
+                .set_section_props(
+                    last,
+                    &json!({"columns":[1,36,false],"line_numbers":[1,1,0,restart]}).to_string(),
+                )
+                .unwrap();
+            document.add_paragraph("Last numbered").unwrap();
+            let labels = line_label_layout(document.document().unwrap());
+            assert_eq!(
+                labels
+                    .iter()
+                    .flatten()
+                    .map(|label| label.0.as_str())
+                    .collect::<Vec<_>>(),
+                if restart == "continuous" {
+                    vec!["1", "2", "3"]
+                } else {
+                    vec!["1", "2", "1"]
+                }
+            );
+            document.to_bytes().unwrap();
+        }
+    }
+
+    #[test]
+    fn line_numbers_native_page_restart_lost_across_unnumbered_pages() {
+        let mut document = EditableDocx::new();
+        document.set_page_size(400.0, 350.0).unwrap();
+        document
+            .set_section_props(0, r#"{"line_numbers":[1,1,0,"each_page"]}"#)
+            .unwrap();
+        document.add_paragraph("First").unwrap();
+        let middle = document.add_section("next_page").unwrap();
+        document
+            .set_section_props(middle, r#"{"line_numbers":null,"columns":[2,36,false]}"#)
+            .unwrap();
+        for index in 0..24 {
+            document.add_paragraph(&format!("Middle{index}")).unwrap();
+        }
+        let last = document.add_section("continuous").unwrap();
+        document
+            .set_section_props(last, r#"{"columns":[1,36,false]}"#)
+            .unwrap();
+        document.add_paragraph("Last").unwrap();
+        let mut raw = document.document().unwrap().clone();
+        raw.last_section.line_numbers = Some(LineNumbering::default());
+        let labels = line_label_layout(&raw);
+        assert!(labels.len() >= 3);
+        assert_eq!(labels[0][0].0, "1");
+        assert_eq!(
+            labels.last().unwrap()[0].0,
+            "2",
+            "pinned native bug: each-page numbering carries the old page's counter"
+        );
+        assert!(validate_line_number_work(&raw).is_err());
+        let before = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        assert!(document
+            .set_section_props(last, r#"{"line_numbers":[1,1,0,"each_page"]}"#)
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.to_bytes().unwrap(), before);
+        document
+            .set_section_props(last, r#"{"line_numbers":[1,1,0,"each_section"]}"#)
+            .unwrap();
+        assert_eq!(
+            line_label_layout(document.document().unwrap())
+                .last()
+                .unwrap()[0]
+                .0,
+            "1"
+        );
+        document.to_bytes().unwrap();
+    }
+
+    fn line_label_layout(document: &Document) -> Vec<Vec<(String, f32, f32)>> {
+        let layout = wordcraft_layout::layout(
+            document,
+            &mut wordcraft_layout::LayoutCache::new(),
+            &wordcraft_layout::LayoutOptions::default(),
+        );
+        layout
+            .pages
+            .iter()
+            .map(|page| {
+                page.items
+                    .iter()
+                    .filter_map(|item| {
+                        let wordcraft_layout::Placed::Lines {
+                            story,
+                            path,
+                            para,
+                            x,
+                            y,
+                            ..
+                        } = item
+                        else {
+                            return None;
+                        };
+                        if *story != wordcraft_layout::DECOR_STORY || !path.0.is_empty() {
+                            return None;
+                        }
+                        let mut text = String::new();
+                        for cluster in &para.clusters {
+                            let face = &para.styles[cluster.style as usize].face;
+                            for glyph in &para.glyphs[cluster.g0 as usize..cluster.g1 as usize] {
+                                text.push(
+                                    ('0'..='9')
+                                        .find(|value| face.glyph_for(*value) == glyph.gid)
+                                        .expect("native label contains an ASCII digit"),
+                                );
+                            }
+                        }
+                        Some((text, *x, *y))
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn line_numbers_roundtrip_restarts_tables_suppression_and_pdf() {
+        let mut document = EditableDocx::new();
+        document
+            .set_section_props(0, r#"{"line_numbers":[1,1,0,"each_page"]}"#)
+            .unwrap();
+        document.add_paragraph("First").unwrap();
+        let suppressed = document.add_paragraph("Suppressed").unwrap();
+        let mut candidate = document.document().unwrap().clone();
+        candidate
+            .para_mut(StoryRef::Body, &Path::top(suppressed))
+            .unwrap()
+            .props
+            .suppress_line_numbers = Some(true);
+        document.commit(candidate).unwrap();
+        document.add_table(vec![vec!["Table text".into()]]).unwrap();
+        document.add_paragraph("Second").unwrap();
+        assert_eq!(
+            line_label_layout(document.document().unwrap())[0]
+                .iter()
+                .map(|x| x.0.as_str())
+                .collect::<Vec<_>>(),
+            ["1", "2"]
+        );
+        let bytes = document.to_bytes().unwrap();
+        let reopened = wordcraft_docx::read(&bytes).unwrap();
+        assert_eq!(
+            reopened.sections()[0].1.line_numbers,
+            document.document().unwrap().sections()[0].1.line_numbers
+        );
+        assert_eq!(
+            line_label_layout(&reopened),
+            line_label_layout(document.document().unwrap())
+        );
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        assert!(pdf.starts_with(b"%PDF"));
+        let png = crate::docx::render(&bytes, 0, 72.0, None).unwrap();
+        assert!(png.starts_with(b"\x89PNG"));
+        for restart in ["each_page", "each_section", "continuous"] {
+            let mut document = EditableDocx::new();
+            document
+                .set_section_props(0, &json!({"line_numbers":[1,7,12,restart]}).to_string())
+                .unwrap();
+            document.add_paragraph("First").unwrap();
+            document.add_section("next_page").unwrap();
+            document.add_paragraph("Second").unwrap();
+            let labels = line_label_layout(document.document().unwrap());
+            assert_eq!(labels[0][0].0, "7");
+            assert_eq!(
+                labels[1][0].0,
+                if restart == "continuous" { "8" } else { "7" }
+            );
+        }
+        let mut document = EditableDocx::new();
+        document
+            .set_section_props(0, r#"{"line_numbers":[2,5,0,"each_page"]}"#)
+            .unwrap();
+        for text in ["One", "Two", "Three"] {
+            document.add_paragraph(text).unwrap();
+        }
+        assert_eq!(
+            line_label_layout(document.document().unwrap())[0]
+                .iter()
+                .map(|x| x.0.as_str())
+                .collect::<Vec<_>>(),
+            ["6"]
+        );
+    }
+
+    #[test]
+    fn line_numbers_bounds_work_and_later_edits_fail_without_partial_commit() {
+        let mut document = EditableDocx::new();
+        let paragraph = document.add_paragraph("Budget").unwrap();
+        document
+            .set_section_props(0, r#"{"line_numbers":[100,32768,0,"each_section"]}"#)
+            .unwrap();
+        let bytes = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        for patch in [
+            r#"{"line_numbers":[true,1,0,"each_page"]}"#,
+            r#"{"line_numbers":[0,1,0,"each_page"]}"#,
+            r#"{"line_numbers":[101,1,0,"each_page"]}"#,
+            r#"{"line_numbers":[1,0,0,"each_page"]}"#,
+            r#"{"line_numbers":[1,32769,0,"each_page"]}"#,
+            r#"{"line_numbers":[1,1,-1,"each_page"]}"#,
+            r#"{"line_numbers":[1,1,1585,"each_page"]}"#,
+            r#"{"line_numbers":[1,1,0,"page"]}"#,
+            r#"{"columns":[2,36,false]}"#,
+        ] {
+            assert!(document.set_section_props(0, patch).is_err(), "{patch}");
+            assert_eq!(document.revision().unwrap(), revision);
+            assert_eq!(document.to_bytes().unwrap(), bytes);
+        }
+        assert!(document
+            .set_paragraph_text(paragraph, &"a".repeat(MAX_LINE_NUMBER_WORK / 4))
+            .is_err());
+        assert_eq!(document.paragraph_text(paragraph).unwrap(), "Budget");
+        assert_eq!(document.revision().unwrap(), revision);
+        document
+            .set_section_props(0, r#"{"line_numbers":null}"#)
+            .unwrap();
+        document
+            .set_paragraph_text(paragraph, &"a".repeat(MAX_LINE_NUMBER_WORK / 4))
+            .unwrap();
+        assert!(document
+            .set_section_props(0, r#"{"line_numbers":[1,1,0,"each_page"]}"#)
+            .is_err());
+        assert!(document
+            .document()
+            .unwrap()
+            .last_section
+            .line_numbers
+            .is_none());
+        let mut model = Document::new();
+        model.last_section.line_numbers = Some(LineNumbering::default());
+        model.body = vec![
+            Arc::new(Block::Para(Paragraph::with_text(
+                &"a".repeat(24999),
+                CharProps::default(),
+            ))),
+            Arc::new(Block::Para(Paragraph::default())),
+            Arc::new(Block::Para(Paragraph::default())),
+            Arc::new(Block::Para(Paragraph::default())),
+        ];
+        validate_line_number_work(&model).unwrap(); // 4*24999 + four paragraph units = 100000.
+        model.body.push(Arc::new(Block::Para(Paragraph::default())));
+        assert!(validate_line_number_work(&model).is_err());
+    }
+
+    #[test]
+    fn line_numbers_candidate_table_measurement_preflights_before_pagination() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditableDocx::new();
+        document.add_paragraph(&"x".repeat(25_000)).unwrap();
+        document.add_table(vec![vec!["cell".into()]]).unwrap();
+        let mut raw = document.document().unwrap().clone();
+        raw.last_section.line_numbers = Some(LineNumbering::default());
+        // Both production layout entry points reject the candidate independently
+        // of commit/to_bytes. Section mutation reaches the first via table checks.
+        assert!(native_cell_widths(&raw)
+            .unwrap_err()
+            .to_string()
+            .contains("label-work budget"));
+        assert!(validate_unsplittable_page_bounds(&raw)
+            .unwrap_err()
+            .to_string()
+            .contains("label-work budget"));
+        let before = document.to_bytes().unwrap();
+        let error = document
+            .set_section_props(0, r#"{"line_numbers":[1,1,0,"each_page"]}"#)
+            .unwrap_err();
+        assert!(error.to_string().contains("label-work budget"));
+        assert!(document
+            .document()
+            .unwrap()
+            .last_section
+            .line_numbers
+            .is_none());
+        assert_eq!(document.to_bytes().unwrap(), before);
+    }
+
+    #[test]
+    fn line_numbers_native_column_overlap_and_physical_page_guard() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditableDocx::new();
+        document.add_paragraph("Left").unwrap();
+        let split = document.add_paragraph("Left end").unwrap();
+        document.add_paragraph_break(split, "column").unwrap();
+        document.add_paragraph("Right").unwrap();
+        let mut model = document.document().unwrap().clone();
+        model.last_section.columns.count = 2;
+        model.last_section.line_numbers = Some(LineNumbering::default());
+        let labels = line_label_layout(&model);
+        assert!(
+            labels[0]
+                .iter()
+                .enumerate()
+                .any(|(i, a)| labels[0][i + 1..]
+                    .iter()
+                    .any(|b| (a.1 - b.1).abs() < 0.001 && (a.2 - b.2).abs() < 0.001)),
+            "native columns must reproduce overlapping line labels"
+        );
+        assert!(validate_line_number_work(&model).is_err());
+        document
+            .set_section_props(0, r#"{"line_numbers":[1,1,0,"each_page"]}"#)
+            .unwrap();
+        document.to_bytes().unwrap(); // Normal 72pt margins are valid.
+        document
+            .set_section_props(0, r#"{"line_numbers":[1,1,1000,"each_page"]}"#)
+            .unwrap();
+        assert!(document
+            .to_bytes()
+            .unwrap_err()
+            .to_string()
+            .contains("physical page"));
+        document
+            .set_section_props(0, r#"{"line_numbers":[1,1,0,"each_page"]}"#)
+            .unwrap();
+        document.to_bytes().unwrap();
+    }
 
     #[test]
     fn rich_stories_keep_append_order_locators_and_section_copy_independent() {
