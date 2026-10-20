@@ -586,6 +586,47 @@ impl EditablePptx {
         self.refresh_budgets()
     }
 
+    pub fn clear_background(&mut self, slide: usize) -> PyResult<()> {
+        self.check_slide(slide)?;
+        let document = self.document()?;
+        let picture = |background: &Option<Background>| {
+            matches!(
+                background,
+                Some(Background::Fill {
+                    fill: Fill::Picture(_)
+                })
+            )
+        };
+        if picture(&document.slides[slide].background)
+            && document.masters.iter().any(|master| {
+                picture(&master.background)
+                    || master
+                        .layouts
+                        .iter()
+                        .any(|layout| picture(&layout.background))
+            })
+        {
+            return Err(EngineError::Unsupported(
+                "removing a picture background with inherited picture assets requires native referenced-media accounting".into(),
+            ).into());
+        }
+        self.mutate(|document| {
+            let removed = Arc::make_mut(&mut document.slides[slide]).background.take();
+            // Only an explicit picture override can release owned media. Inherited
+            // layout/master backgrounds are resolved by the native engine unchanged.
+            if matches!(
+                removed,
+                Some(Background::Fill {
+                    fill: Fill::Picture(_)
+                })
+            ) {
+                prune_media(document);
+            }
+            Ok(())
+        })?;
+        self.refresh_budgets()
+    }
+
     pub fn background_image(&self, slide: usize) -> PyResult<Option<Vec<u8>>> {
         self.check_slide(slide)?;
         let document = self.document()?;
@@ -5222,5 +5263,189 @@ mod tests {
         assert_eq!(author.table_generation(0, ids[0]).unwrap(), 0);
         assert_eq!(author.table(0, ids[0]).unwrap().n_rows(), 100);
         assert_eq!(author.table(0, ids[1]).unwrap().n_cols(), 500);
+    }
+    #[test]
+    fn background_reset_inherits_native_master_layout_and_theme_with_pixels() {
+        pyo3::prepare_freethreaded_python();
+        for target in ["theme", "master", "layout", "gradient", "picture"] {
+            let mut author = EditablePptx::new(160.0, 160.0).unwrap();
+            author.add_slide("blank").unwrap();
+            let mut raw = author.document().unwrap().clone();
+            let layout_id = raw.slides[0].layout;
+            let inherited = match target {
+                "gradient" => Fill::Gradient(deckcraft_model::style::Gradient {
+                    stops: vec![
+                        deckcraft_model::style::GradientStop {
+                            pos: 0.0,
+                            color: color_ref((255, 0, 0)),
+                        },
+                        deckcraft_model::style::GradientStop {
+                            pos: 1.0,
+                            color: color_ref((0, 0, 255)),
+                        },
+                    ],
+                    shape: deckcraft_model::style::GradientShape::Linear {
+                        angle: 0.0,
+                        scaled: false,
+                    },
+                    rotate_with_shape: true,
+                    tile: [0.0; 4],
+                }),
+                "picture" => {
+                    let media = raw
+                        .add_media("inherited.png", "image/png", picture_quadrants())
+                        .unwrap();
+                    Fill::Picture(PictureFill {
+                        media,
+                        ..Default::default()
+                    })
+                }
+                _ => solid((12, 34, 56)),
+            };
+            if target != "theme" {
+                let master = Arc::make_mut(&mut raw.masters[0]);
+                if target == "master" {
+                    master.background = Some(Background::Fill { fill: inherited });
+                } else {
+                    master
+                        .layouts
+                        .iter_mut()
+                        .find(|layout| layout.id == layout_id)
+                        .unwrap()
+                        .background = Some(Background::Fill { fill: inherited });
+                }
+            }
+            author.presentation = Some(raw);
+            let baseline = crate::pptx::render(&author.to_bytes().unwrap(), 0, 72.0).unwrap();
+            let baseline_pdf = crate::pdf::render(
+                &crate::pptx::to_pdf(&author.to_bytes().unwrap()).unwrap(),
+                0,
+                72.0,
+                None,
+            )
+            .unwrap();
+            // Raw fixture injection retains inherited assets; ordinary public authoring
+            // has no imported master/layout picture graph.
+            Arc::make_mut(&mut author.presentation.as_mut().unwrap().slides[0]).background =
+                Some(Background::Fill {
+                    fill: solid((0, 255, 0)),
+                });
+            assert_eq!(author.slide_background(0).unwrap(), Some((0, 255, 0)));
+            assert_ne!(
+                crate::pptx::render(&author.to_bytes().unwrap(), 0, 72.0).unwrap(),
+                baseline
+            );
+            let before = author.document().unwrap().clone();
+            author.clear_background(0).unwrap();
+            assert_eq!(author.slide_background(0).unwrap(), None);
+            assert_eq!(author.background_image(0).unwrap(), None);
+            assert_eq!(author.document().unwrap().masters, before.masters);
+            assert_eq!(author.document().unwrap().media, before.media);
+            let bytes = author.to_bytes().unwrap();
+            let reopened = deckcraft_pptx::import(&bytes).unwrap();
+            assert_eq!(reopened.slides[0].background, None);
+            assert_eq!(crate::pptx::render(&bytes, 0, 72.0).unwrap(), baseline);
+            let pdf = crate::pptx::to_pdf(&bytes).unwrap();
+            assert_eq!(
+                crate::pdf::render(&pdf, 0, 72.0, None).unwrap(),
+                baseline_pdf,
+                "{target}"
+            );
+            let (width, pixels) = picture_pixels(&baseline);
+            let at = (20 * width + 20) * 4;
+            match target {
+                "theme" => assert_eq!(&pixels[at..at + 4], &[255, 255, 255, 255]),
+                "master" | "layout" => assert_eq!(&pixels[at..at + 4], &[12, 34, 56, 255]),
+                "picture" => assert_eq!(&pixels[at..at + 4], &[255, 0, 0, 255]),
+                "gradient" => {
+                    // Native interpolation at these fixture positions yielded
+                    // [250,0,62,255] and [60,0,250,255], not a linear byte blend.
+                    // Check actual gradient direction here; before/after PNG and
+                    // PDF pixels above must remain exactly identical.
+                    assert!(pixels[at] > pixels[at + 2]);
+                    assert_eq!((pixels[at + 1], pixels[at + 3]), (0, 255));
+                    let other = (20 * width + 140) * 4;
+                    assert!(pixels[other] < pixels[other + 2]);
+                    assert_eq!((pixels[other + 1], pixels[other + 3]), (0, 255));
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[test]
+    fn background_reset_reclaims_only_unreferenced_owned_media_and_rolls_back() {
+        pyo3::prepare_freethreaded_python();
+        let image = picture_quadrants();
+        let mut author = EditablePptx::new(160.0, 160.0).unwrap();
+        author.add_slide("blank").unwrap();
+        author.add_slide("blank").unwrap();
+        author.set_background_image(0, &image).unwrap();
+        author.set_background_image(1, &image).unwrap();
+        let picture = author
+            .add_image(0, &image, 20.0, 20.0, 40.0, 40.0, "shared")
+            .unwrap();
+        let copied = author.copy().unwrap();
+        author.clear_background(0).unwrap();
+        assert_eq!(author.picture_data(0, picture).unwrap(), image);
+        assert_eq!(author.background_image(1).unwrap(), Some(image.clone()));
+        assert_eq!(copied.background_image(0).unwrap(), Some(image.clone()));
+        assert_eq!(author.media_bytes, image.len());
+        author.clear_background(1).unwrap();
+        assert_eq!(author.media_bytes, image.len());
+        author.delete_shape(0, picture).unwrap();
+        assert_eq!(author.media_bytes, 0);
+        author.set_background_image(0, &image).unwrap();
+        author.clear_background(0).unwrap();
+        assert_eq!(author.media_bytes, 0);
+        assert!(author.document().unwrap().media.is_empty());
+        author.background(0, (255, 0, 0)).unwrap();
+        author.revision = u64::MAX;
+        let before = author.document().unwrap().clone();
+        assert!(author.clear_background(0).is_err());
+        assert_eq!(author.document().unwrap(), &before);
+        assert!(author.clear_background(2).is_err());
+        author.close();
+        assert!(author.clear_background(0).is_err());
+    }
+
+    #[test]
+    fn background_reset_rejects_picture_reclamation_with_inherited_picture_assets() {
+        pyo3::prepare_freethreaded_python();
+        for master_background in [false, true] {
+            let mut author = EditablePptx::new(160.0, 160.0).unwrap();
+            author.add_slide("blank").unwrap();
+            author
+                .set_background_image(0, &picture_quadrants())
+                .unwrap();
+            let mut raw = author.document().unwrap().clone();
+            let inherited = raw.slides[0].background.clone();
+            let layout_id = raw.slides[0].layout;
+            let master = Arc::make_mut(&mut raw.masters[0]);
+            if master_background {
+                master.background = inherited;
+            } else {
+                master
+                    .layouts
+                    .iter_mut()
+                    .find(|layout| layout.id == layout_id)
+                    .unwrap()
+                    .background = inherited;
+            }
+            author.presentation = Some(raw.clone());
+            let bytes = author.to_bytes().unwrap();
+            let revision = author.revision;
+            // Existing authored-only pruning does not understand inherited assets.
+            Arc::make_mut(&mut raw.slides[0]).background = None;
+            prune_media(&mut raw);
+            assert!(raw.media.is_empty());
+            assert!(author
+                .clear_background(0)
+                .unwrap_err()
+                .to_string()
+                .contains("referenced-media"));
+            assert_eq!(author.to_bytes().unwrap(), bytes);
+            assert_eq!(author.revision, revision);
+        }
     }
 }

@@ -81,6 +81,10 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(presentation, Presentation)
         assert_type(presentation.copy(), Presentation)
         slide = presentation.slides.add()
+        assert_type(slide.background, str | None)
+        slide.background = None
+        slide.background = "white"
+        assert_type(slide.background, str)  # Normal narrowing after a string assignment.
         assert_type(slide.add_text('Example', box=(10, 10, 100, 20)), Shape)
         assert_type(slide.add_shape('rectangle', box=(10, 40, 100, 20)), Shape)
         assert_type(slide.add_table(2, columns=2, box=(10, 70, 100, 60)), SlideTable)

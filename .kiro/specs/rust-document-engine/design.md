@@ -458,3 +458,10 @@ A separate pdf.comment-locks profile covers the flag property across seven comme
 field_payload adds Field::read_only(), and one private set_field_read_only method toggles only flags::READ_ONLY in the expected native Field before calling FieldProps.read_only/set_props. checked_owned_fields masks only that bit when checking the existing canonical zero or COMBO base flags. No generic public flags setter, imported reader or additional field kind is introduced.
 
 The existing owned_field_appearance_peak and owned_field_appearance_bytes helpers reserve/charge redraw work just as for tooltip and box changes. Complete Field equality verifies unrelated metadata/widgets/values/defaults/options. set_props permits changes to read-only fields and regenerates AP; native set_value independently refuses filling. Its existing conversion_failure mapping remains DocExError. The facade adds no override path and retains earlier value-validation errors. Widget Locked is separate and is not exposed by this property.
+
+
+## 71. Remove the existing slide background override
+
+A narrow private clear_background(slide) stages Slide.background=None through the existing model mutation path. The facade accepts None on the existing background property; color assignment keeps existing coercion and initial/final identity checks. Getter behavior stays direct: no override yields None even when the native effective background is an inherited image or gradient. Native resolve::background owns layout/master/theme fallback, serialization omits p:bg, and native rendering/PDF export observes that same model.
+
+Only explicit-picture removal invokes existing authored media pruning and live-budget refresh; solid/absent reset cannot release media. Before that pruning, direct picture backgrounds in native master/layout fixtures are rejected rather than removed accidentally. This narrow safety check does not enable arbitrary imported asset graphs or add a generic reference walker. Successful repeated reset still follows normal revision/cache invalidation.
