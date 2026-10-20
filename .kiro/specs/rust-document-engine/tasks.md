@@ -262,3 +262,8 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Project bounded strict custom properties and table title/description through existing metadata with factual omission diagnostics.
 - [x] Verify the complete locked/native and installed-wheel corpus and record artifact evidence.
 - [ ] Retain native nondecimal page-format/clamp and property-reader completeness limitations as upstream work.
+
+## Bounded PDF page selections
+
+- [x] Reuse bounded integer selection for PDF copy/import and reject callback-driven page organization before native dispatch.
+- [ ] Verify limits, ownership, callback behavior and selected output in the complete installed-wheel corpus; record artifact evidence.
