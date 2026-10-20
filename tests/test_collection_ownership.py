@@ -7,6 +7,38 @@ from doc_ex.errors import DocumentClosedError
 
 
 class CollectionOwnershipTests(unittest.TestCase):
+    def test_slide_creation_callbacks_keep_the_original_target_identity(self):
+        class MovingFloat(float):
+            def __float__(self):
+                callback, self.callback = self.callback, None
+                if callback is not None:
+                    callback()
+                return super().__float__()
+
+        for kind in ("text", "shape", "table", "rows"):
+            with self.subTest(kind=kind), doc_ex.new("pptx") as document:
+                target = document.slides.add()
+                other = document.slides.add()
+                x = MovingFloat(10)
+                x.callback = lambda: document.slides.move(target.number, 1)
+                box = (x, 10, 100, 50)
+                if kind == "text":
+                    created = target.add_text("Target text", box=box)
+                elif kind == "shape":
+                    created = target.add_shape("rectangle", box=box, fill="red")
+                elif kind == "table":
+                    created = target.add_table([["Target cell"]], box=box)
+                else:
+                    def rows():
+                        document.slides.move(target.number, 1)
+                        yield ["Target cell"]
+                    created = target.add_table(rows(), box=(10, 10, 100, 50))
+                self.assertEqual(target.number, 1)
+                self.assertEqual(len(target.shapes), 1)
+                self.assertEqual(len(other.shapes), 0)
+                self.assertEqual(created.box, (10, 10, 100, 50))
+                self.assertEqual(target.shapes[0].box, created.box)
+
     def test_pdf_iterators_do_not_rebind_positions_after_structure_changes(self):
         with doc_ex.new("pdf", size=(200, 200)) as document:
             document.pages.add(size=(250, 250))

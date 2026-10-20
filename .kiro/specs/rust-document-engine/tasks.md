@@ -217,3 +217,10 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 
 - [x] Generate all six TBL12 fixtures and check reopened source/export semantics, spans, logical order and actual visible colors on every page.
 - [x] Verify the fixture pack against the frozen installed section/layout wheel and publish its scope/limitations index.
+
+## Presentation pictures and text selection
+
+- [x] Add owned picture source/alt edits and native crop/flip properties through existing typed shape handles.
+- [x] Validate deduplicated live media accounting, transforms, shared backgrounds, ownership and atomic limits.
+- [x] Add shared contiguous Paragraph/Shape slicing returning existing range types without another native method.
+- [x] Run the complete locked installed-wheel suite and record source/PNG/PDF evidence for these slices.
