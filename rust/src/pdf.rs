@@ -1,6 +1,5 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    panic::{catch_unwind, AssertUnwindSafe},
     sync::{Arc, Mutex},
 };
 
@@ -208,11 +207,6 @@ fn check_plain_text_budget(
     Ok(())
 }
 
-fn guarded_page_count(operation: impl FnOnce() -> usize) -> Result<usize, EngineError> {
-    catch_unwind(AssertUnwindSafe(operation))
-        .map_err(|_| EngineError::Malformed("invalid PDF: the page tree could not be read".into()))
-}
-
 pub fn extract_text(
     data: &[u8],
     password: Option<&str>,
@@ -226,7 +220,7 @@ pub fn extract_text(
             ..Default::default()
         },
     );
-    let page_count = guarded_page_count(|| renderer.page_count())?;
+    let page_count = renderer.page_count();
     if page_count == 0 {
         let info = inspect(bytes, password).map_err(open_error)?;
         if info.pages.is_empty() {
@@ -962,14 +956,6 @@ mod link_tests {
             }
         }
         text
-    }
-
-    #[test]
-    fn selective_page_count_panics_become_stable_malformed_errors() {
-        assert!(matches!(
-            guarded_page_count(|| panic!("malformed lazy page tree")),
-            Err(EngineError::Malformed(message)) if message.contains("page tree")
-        ));
     }
 
     #[test]

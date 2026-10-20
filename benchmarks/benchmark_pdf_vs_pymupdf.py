@@ -54,6 +54,15 @@ def text_summary(value: str, expected_pages: int) -> tuple[int, int]:
     return pages, len(value)
 
 
+def text_overlap(ours: str, theirs: str, expected_pages: int) -> float:
+    # Equal empty content is valid, but never bypass the source page-count check.
+    text_summary(ours, expected_pages)
+    text_summary(theirs, expected_pages)
+    ours_tokens, theirs_tokens = Counter(ours.split()), Counter(theirs.split())
+    total = max(sum(ours_tokens.values()), sum(theirs_tokens.values()))
+    return sum((ours_tokens & theirs_tokens).values()) / total if total else 1.0
+
+
 def png_summary(value: bytes, expected: tuple[int, int] | None = None) -> tuple[int, int]:
     if not value.startswith(b"\x89PNG\r\n\x1a\n") or len(value) < 24:
         raise RuntimeError("renderer did not return PNG")
@@ -116,13 +125,7 @@ def run(directory: Path, warmups: int, repeats: int, dpi: int, output: Path | No
         validate_text = lambda value: text_summary(value, pages)
         validate_png = lambda value: png_summary(value, dimensions)
 
-        ours_text = pydoc_text(data)
-        theirs_text = pymupdf_text(data)
-        ours_tokens = Counter(ours_text.split())
-        theirs_tokens = Counter(theirs_text.split())
-        overlap = sum((ours_tokens & theirs_tokens).values()) / max(
-            sum(ours_tokens.values()), sum(theirs_tokens.values()), 1
-        )
+        overlap = text_overlap(pydoc_text(data), pymupdf_text(data), pages)
         if overlap < 0.95:
             raise RuntimeError("libraries returned less than 95% token overlap")
 
