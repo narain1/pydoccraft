@@ -783,6 +783,44 @@ impl EditablePdf {
         Ok(())
     }
 
+    pub fn set_field_read_only(&mut self, name: &str, read_only: bool) -> PyResult<()> {
+        let mut expected = self.field_named(name)?;
+        // Even this flag-only native property update regenerates appearances.
+        self.validate_input(owned_field_appearance_peak(&expected).saturating_add(32))?;
+        if read_only {
+            expected.flags |= pdfcraft_forms::flags::READ_ONLY;
+        } else {
+            expected.flags &= !pdfcraft_forms::flags::READ_ONLY;
+        }
+        let mut edited = self.document()?.clone();
+        pdfcraft_forms::set_props(
+            &mut edited,
+            name,
+            &pdfcraft_forms::FieldProps {
+                read_only: Some(read_only),
+                ..Default::default()
+            },
+        )
+        .map_err(form_error)?;
+        let fields = checked_owned_fields(&edited)?;
+        let actual = fields
+            .iter()
+            .find(|field| field.name == name)
+            .ok_or_else(|| EngineError::Conversion("read-only field is missing".into()))?;
+        if actual != &expected {
+            return Err(EngineError::Conversion(
+                "field read-only update changed unrelated field properties".into(),
+            )
+            .into());
+        }
+        let cost = owned_field_appearance_bytes(&edited, actual)?.saturating_add(32);
+        self.validate_input(cost)?;
+        self.document = Some(edited);
+        self.input_bytes += cost;
+        self.items += 1;
+        Ok(())
+    }
+
     pub fn set_field_tooltip(&mut self, name: &str, tooltip: &str) -> PyResult<()> {
         let mut expected = self.field_named(name)?;
         validate_annotation_text(tooltip, 4096, "field tooltip")?;
@@ -2383,7 +2421,7 @@ impl EditablePdf {
         };
         Ok(json!({
             "name": field.name, "kind":kind, "value":value,
-            "tooltip": field.tooltip.as_deref().unwrap_or(""),
+            "tooltip": field.tooltip.as_deref().unwrap_or(""), "read_only": field.read_only(),
             "options": field.options.iter().map(|(export, _)| export).collect::<Vec<_>>(),
             "widgets":[{"page":page,"box":[rect[0],rect[1],rect[2]-rect[0],rect[3]-rect[1]]}],
             "font_size":12,
@@ -3201,11 +3239,13 @@ fn checked_owned_fields(document: &Document) -> PyResult<Vec<pdfcraft_forms::Fie
             )
             .into());
         }
+        // Only READ_ONLY is additional to the existing canonical kind flags.
+        let base_flags = field.flags & !pdfcraft_forms::flags::READ_ONLY;
         match field.kind {
-            FieldKind::Text if field.flags == 0 && field.options.is_empty() => {}
-            FieldKind::CheckBox if field.flags == 0 && field.options.is_empty() => {}
+            FieldKind::Text if base_flags == 0 && field.options.is_empty() => {}
+            FieldKind::CheckBox if base_flags == 0 && field.options.is_empty() => {}
             FieldKind::Combo
-                if field.flags == pdfcraft_forms::flags::COMBO && !field.options.is_empty() => {}
+                if base_flags == pdfcraft_forms::flags::COMBO && !field.options.is_empty() => {}
             _ => {
                 return Err(EngineError::Unsupported(
                     "owned form contains an unsupported field kind or setting".into(),
@@ -4946,6 +4986,177 @@ mod tests {
                 .collect(),
             _ => panic!("owned appearance"),
         }
+    }
+
+    #[test]
+    fn field_read_only_preserves_metadata_appearance_and_native_fill_refusal() {
+        pyo3::prepare_freethreaded_python();
+        for (kind, options, initial, changed, cleared) in [
+            ("text", vec![], r#""Customer""#, r#""Other""#, r#""""#),
+            ("checkbox", vec![], "true", "false", "false"),
+            (
+                "choice",
+                vec!["Canada".into(), "France".into()],
+                r#""France""#,
+                r#""Canada""#,
+                "null",
+            ),
+        ] {
+            let mut document = EditablePdf::new(300.0, 300.0).unwrap();
+            document
+                .add_field(0, "field", kind, (20.0, 20.0, 180.0, 30.0), options)
+                .unwrap();
+            document.set_field_value("field", initial).unwrap();
+            document.set_field_tooltip("field", "Help — 顧客").unwrap();
+            let original = document.field_named("field").unwrap();
+            assert!(!original.read_only());
+            let appearance = tooltip_appearance_data(document.document().unwrap(), &original);
+            let pixels = crate::pdf::render(&document.to_bytes().unwrap(), 0, 144.0, None).unwrap();
+            let before_input = document.input_bytes;
+            document.set_field_read_only("field", true).unwrap();
+            let actual = document.field_named("field").unwrap();
+            let mut expected = original.clone();
+            expected.flags |= pdfcraft_forms::flags::READ_ONLY;
+            assert_eq!(actual, expected);
+            assert_eq!(
+                tooltip_appearance_data(document.document().unwrap(), &actual),
+                appearance
+            );
+            assert_eq!(
+                document.input_bytes - before_input,
+                owned_field_appearance_bytes(document.document().unwrap(), &actual).unwrap() + 32
+            );
+            let bytes = document.to_bytes().unwrap();
+            let parsed = Document::open(Arc::new(bytes.clone())).unwrap();
+            let read = pdfcraft_forms::fields(&parsed);
+            assert_eq!(read.len(), 1);
+            assert!(read[0].read_only());
+            assert_eq!(read[0].flags, expected.flags);
+            assert_eq!(read[0].value, original.value);
+            assert_eq!(read[0].tooltip, original.tooltip);
+            assert_eq!(read[0].options, original.options);
+            assert_eq!(crate::pdf::render(&bytes, 0, 144.0, None).unwrap(), pixels);
+            let counts = (document.input_bytes, document.items);
+            for value in [initial, changed, cleared] {
+                assert!(document
+                    .set_field_value("field", value)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("read-only"));
+                assert_eq!(document.to_bytes().unwrap(), bytes);
+                assert_eq!((document.input_bytes, document.items), counts);
+            }
+            // Native property updates are permitted; READ_ONLY is not widget Locked.
+            document.set_field_tooltip("field", "Changed help").unwrap();
+            document
+                .set_field_box("field", (30.0, 100.0, 190.0, 35.0))
+                .unwrap();
+            assert!(document.field_named("field").unwrap().read_only());
+            let mut copied = document.copy().unwrap();
+            copied.set_field_read_only("field", false).unwrap();
+            copied.set_field_value("field", changed).unwrap();
+            assert!(document.field_named("field").unwrap().read_only());
+            assert_eq!(document.field_named("field").unwrap().value, original.value);
+            let mut deleted = document.copy().unwrap();
+            deleted.delete_field("field").unwrap();
+            assert!(deleted.owned_fields().unwrap().is_empty());
+            let before_flatten =
+                crate::pdf::render(&document.to_bytes().unwrap(), 0, 144.0, None).unwrap();
+            assert_eq!(document.flatten_fields().unwrap(), 1);
+            assert_eq!(
+                crate::pdf::render(&document.to_bytes().unwrap(), 0, 144.0, None).unwrap(),
+                before_flatten
+            );
+            assert!(document.owned_fields().unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn field_read_only_limits_and_other_flags_reject_atomically() {
+        use pdfcraft_cos::Object;
+        pyo3::prepare_freethreaded_python();
+        for (kind, options) in [
+            ("text", vec![]),
+            ("checkbox", vec![]),
+            ("choice", vec!["A".into(), "B".into()]),
+        ] {
+            let mut document = EditablePdf::new(300.0, 300.0).unwrap();
+            document
+                .add_field(0, "field", kind, (20.0, 20.0, 180.0, 30.0), options)
+                .unwrap();
+            document.set_field_read_only("field", true).unwrap();
+            let original = document.field_named("field").unwrap();
+            for bit in [
+                pdfcraft_forms::flags::REQUIRED,
+                pdfcraft_forms::flags::MULTILINE,
+                pdfcraft_forms::flags::EDIT,
+                1 << 30,
+            ] {
+                let mut bad = document.copy().unwrap();
+                bad.document
+                    .as_mut()
+                    .unwrap()
+                    .update_dict(original.obj, |d| {
+                        d.set(b"Ff".to_vec(), Object::Int(i64::from(original.flags | bit)))
+                    })
+                    .unwrap();
+                assert!(checked_owned_fields(bad.document().unwrap()).is_err());
+                let before =
+                    pdfcraft_cos::write_full(bad.document().unwrap(), &SaveOptions::default())
+                        .unwrap();
+                assert!(bad.set_field_read_only("field", false).is_err());
+                assert_eq!(
+                    pdfcraft_cos::write_full(bad.document().unwrap(), &SaveOptions::default())
+                        .unwrap(),
+                    before
+                );
+            }
+            for (items, input) in [
+                (MAX_ITEMS, document.input_bytes),
+                (document.items, MAX_DOCUMENT_INPUT - 1),
+            ] {
+                let mut limited = document.copy().unwrap();
+                limited.items = items;
+                limited.input_bytes = input;
+                let before = limited.to_bytes().unwrap();
+                assert!(limited
+                    .set_field_read_only("field", false)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("resource_limit"));
+                assert_eq!(limited.to_bytes().unwrap(), before);
+                assert_eq!((limited.items, limited.input_bytes), (items, input));
+                assert!(limited.field_named("field").unwrap().read_only());
+            }
+        }
+    }
+
+    #[test]
+    fn field_read_only_survives_organization_and_does_not_enable_imported_forms() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditablePdf::new(300.0, 300.0).unwrap();
+        document.add_page(300.0, 300.0).unwrap();
+        document
+            .add_field(0, "field", "text", (20.0, 20.0, 180.0, 30.0), vec![])
+            .unwrap();
+        document.set_field_value("field", r#""Original""#).unwrap();
+        document.set_field_read_only("field", true).unwrap();
+        document.move_page(0, 1).unwrap();
+        assert_eq!(
+            document.field_named("field").unwrap().widgets[0].page,
+            Some(1)
+        );
+        document.rotate_page(1, 90).unwrap();
+        document.delete_page(0).unwrap();
+        let field = document.field_named("field").unwrap();
+        assert!(field.read_only());
+        assert_eq!(field.widgets[0].page, Some(0));
+        let bytes = document.to_bytes().unwrap();
+        assert!(EditablePdf::from_bytes(&bytes, None).is_err());
+        assert!(crate::pdf::render(&bytes, 0, 72.0, None).is_ok());
+        document.set_field_read_only("field", false).unwrap();
+        document.set_field_value("field", r#""Changed""#).unwrap();
+        assert_eq!(document.field_named("field").unwrap().value, ["Changed"]);
     }
 
     #[test]

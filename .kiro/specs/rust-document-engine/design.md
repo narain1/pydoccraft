@@ -451,3 +451,10 @@ The native operation changes an entire containing run's standard reference style
 The existing pdf.owned-fields profile adds field.tooltip and public native FieldProps/Field references. Only read/edit_authored/preserve/render cells that gain tooltip evidence move to the exact tooltip artifact; creation keeps its historical citation. Existing creation/value/geometry tests and the new tooltip module are fingerprinted at that artifact, but saved output pixels do not establish imported field metadata inspection.
 
 A separate pdf.comment-locks profile covers the flag property across seven comment kinds without certifying their creation/style APIs again. It reuses PDF6 and REF-PM-ANNOTATIONS, keeps bounded imported rectangle/reopened-native evidence explicit, and leaves creation/export not applicable. Cached immutable reference citations add Widget.field_label and Annot.set_flags while stating local default/subset differences. No capability-query framework, ownership database or new criterion is introduced.
+
+
+## 70. Reuse owned-field flag and appearance paths
+
+field_payload adds Field::read_only(), and one private set_field_read_only method toggles only flags::READ_ONLY in the expected native Field before calling FieldProps.read_only/set_props. checked_owned_fields masks only that bit when checking the existing canonical zero or COMBO base flags. No generic public flags setter, imported reader or additional field kind is introduced.
+
+The existing owned_field_appearance_peak and owned_field_appearance_bytes helpers reserve/charge redraw work just as for tooltip and box changes. Complete Field equality verifies unrelated metadata/widgets/values/defaults/options. set_props permits changes to read-only fields and regenerates AP; native set_value independently refuses filling. Its existing conversion_failure mapping remains DocExError. The facade adds no override path and retains earlier value-validation errors. Widget Locked is separate and is not exposed by this property.

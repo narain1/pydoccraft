@@ -66,6 +66,9 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         field = page.fields.add('customer', (10, 60, 160, 30))
         assert_type(field, PdfField)
         assert_type(field.tooltip, str)
+        assert_type(field.read_only, bool)
+        field.read_only = True
+        assert_type(field.read_only, bool)
         field.tooltip = 'Customer identifier'
         assert_type(field.tooltip, str)
         assert_type(page.annotations.add_link(box=[10, 10, 20, 20], uri='https://example.com'), Annotation)

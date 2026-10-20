@@ -1992,6 +1992,18 @@ class PdfField:
         self._owner._call("set_field_box", self._name, coordinates, _change=True)
 
     @property
+    def read_only(self) -> bool:
+        """Whether native filling is disabled, including assignments through value."""
+        return self._info()["read_only"]
+
+    @read_only.setter
+    def read_only(self, value: bool) -> None:
+        self._check()
+        if type(value) is not bool:
+            raise TypeError("field read_only must be a bool")
+        self._owner._call("set_field_read_only", self._name, value, _change=True)
+
+    @property
     def tooltip(self) -> str:
         """Owned field help text; an empty string clears it without changing its value."""
         return self._info()["tooltip"]
