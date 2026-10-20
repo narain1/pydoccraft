@@ -815,7 +815,7 @@ Full integrated locked tests, release wheel, installed-wheel corpus and independ
 - This supersedes focused-only lock evidence for local acceptance. All seven comment kinds retain tested appearances and pixels across transformed pages; native lock refusals preserve staged state. Inventory/initial-inspection limits, foreign profiles, links and reply-thread semantics remain outside this mutation profile. Independent review and exact-head/current-main CI remain required before manual merge; PDF6/U10 stay open.
 
 
-## Independent manual merge evidence through PR 69
+## Independent manual merge evidence through PR 70
 
 GitHub merge state was verified on 2026-10-20. Each change passed independent review, required fixes and fresh exact-head/current-main CI before manual merge; repository auto-merge remains disabled. These gates complete the corresponding delivery tasks, not broader roadmap criteria. Historical artifact sections above retain their original validation scope.
 
@@ -826,6 +826,7 @@ GitHub merge state was verified on 2026-10-20. Each change passed independent re
 | [67](https://github.com/narain1/pydoccraft/pull/67) | `9accfa2a667c6521cf6501c3603ec0a0cb6c092d` | 268 / 369 |
 | [68](https://github.com/narain1/pydoccraft/pull/68) | `b733c6ab41c44728920e97e6ba3b31e782b36aaa` | 276 / 379 |
 | [69](https://github.com/narain1/pydoccraft/pull/69) | `e59de48ce0c13c5ade87a626d25f7e2e74dc122a` | 276 / 379 |
+| [70](https://github.com/narain1/pydoccraft/pull/70) | `c99ba86f2c341c1229f6a24e5436cf98dae73c14` | 276 / 386 |
 
 Formatting, warnings-denied Clippy, strict installed-package typing and the unchanged 264-package runtime/build license audit passed in each final CI run. PR69 changes source-audit documentation/data only.
 

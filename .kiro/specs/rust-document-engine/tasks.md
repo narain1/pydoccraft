@@ -414,7 +414,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reproduce page retargeting through numeric/color/stream/iterable callbacks and reuse existing page-generation checks in six mutation methods.
 - [x] Verify focused move/delete/close/error/copy routes, native boolean rejection and integer rotation compatibility against a copied installed extension.
 - [x] Complete clean installed-wheel validation (386 tests), strict typing and structural checks.
-- [ ] Complete independent review/current-main CI before manual merge.
+- [x] Complete independent review/current-main CI before manual merge.
 
 
 ## Native decimal-outline list option
