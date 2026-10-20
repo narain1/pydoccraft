@@ -2,7 +2,7 @@
 
 `pydoccraft` exposes an eager, PyMuPDF-style API. Opening a document reads the source into memory, invokes the native Rust engine, and returns Python objects that own their extracted text and image bytes.
 
-This page describes the existing API. The [proposed authoring API](authoring-api-design.md) and [feature backlog](../TODO.md) cover future Pillow-like creation/editing objects and Open XML feature parity; their examples are not executable against 0.2.1.
+This page describes the extraction API. The unreleased branch also has [native authoring](authoring.md) through `new`, typed content objects and explicit save/copy operations. The [design crosswalk](authoring-api-design.md) and [feature backlog](../TODO.md) describe broader parity work; unchecked items are not implemented promises.
 
 ## Open a document
 
@@ -87,6 +87,7 @@ with doc_ex.open("slides.pptx") as document:
 | `document.render_page(index, dpi=144)` | Rendered page/slide as PNG `bytes` |
 | `document.convert(output_format)` | Converted document `bytes` |
 | `document.close()` | Idempotently close the document |
+| `document.edit()` (unreleased) | Independent editable PDF; unsupported Office preservation profiles fail explicitly |
 
 Slices are not supported. An out-of-range page raises `IndexError`.
 

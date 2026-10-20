@@ -20,9 +20,9 @@ The original checklist above records the engine implementation. Track subsequent
 | P0 | R1 | PDF/DOCX/PPTX rendering at a requested DPI | Implemented; source and existing tests reviewed |
 | P0 | R3 | Consistent PNG metadata at requested DPI | Verified in unreleased installed wheel |
 | P0 | R2, R4 | Dimensions, visible output and limit validation | Partial; broader geometry corpus and upstream failure reporting remain |
-| P1 | C1–C5 | Authoring contract, DOCX/PDF creation, reports, templates | TODO |
-| P1 | E1–E6 | Structured tables, source locators, Office semantics, PDF links, diagnostics, Markdown assets | E1 DOCX recursive cells/spans verified; broader E1 and E2–E6 remain open |
-| P2 | P1–P4 | Parse/layout reuse, region rendering, PDF assembly, bounded extraction | TODO |
+| P1 | C1–C5 | Authoring contract, DOCX/PDF creation, reports, templates | Initial native creation/edit/save profile verified; broader criteria remain open |
+| P1 | E1–E6 | Structured tables, source locators, Office semantics, PDF links, diagnostics, Markdown assets | E1 DOCX/PPTX recursive cells/spans and unambiguous E4 PDF link offsets verified; broader E1 and E2–E6 remain open |
+| P2 | P1–P4 | Parse/layout reuse, region rendering, PDF assembly, bounded extraction | Basic native PDF assembly verified; complete preservation and performance criteria remain open |
 
 Completion criteria live with each roadmap item. Update requirements/design and record installed-wheel evidence in `validation.md` as features are implemented; existing rendering signature tests do not complete R2–R4.
 
@@ -50,3 +50,13 @@ Detailed checkboxes and dependencies live in [TODO.md](../../../TODO.md). Priori
 Use [W01–W14](../../../docs/roadmap-workstreams.md) as the planning issues, not one ticket per coverage checkbox. [roadmap-workstreams.json](../../../docs/roadmap-workstreams.json) maps all 139 IDs exactly once. Recipe/milestone/test IDs remain traceable under their owner and do not create additional API implementations.
 
 The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks library ownership and evidence separately. Build on already available public writers/models; contribute missing reusable format behavior upstream. Contributions are only marked here; upstream publication is a separate action.
+
+## Native authoring baseline (unreleased)
+
+- [x] Add typed Python creation, explicit native serialization, atomic path saves, binary-stream handling, independent copies and close semantics (DOC3/DOC4).
+- [x] Verify the initial DOCX paragraph/range/table/nested-cell/image/header/footer profile using WordCraft public model/writer APIs.
+- [x] Verify the initial PDF creation, conservative source-edit, page organization/import, annotation and link profile using PdfCraft public APIs.
+- [x] Verify the initial PPTX text/table/image/basic-shape/background/metadata/slide-organization profile using DeckCraft public models and writers.
+- [x] Audit 263 normal/build packages with the checked license-expression validator; add the pinned lower-level `pdfcraft-organize` crate and direct existing `pdfcraft-annot` dependency without upgrading upstream revisions.
+- [x] Run Rust formatting, 37 Rust tests, warnings-denied Clippy and 61 installed-wheel Python tests; record artifact evidence and limits in validation.md.
+- [ ] Complete the broader C2/C3 content/font requirements, arbitrary Office preservation, full styles/lists, fields, review and advanced objects. Initial profile tests do not complete those coverage IDs.

@@ -1,3 +1,6 @@
+mod author_docx;
+mod author_pdf;
+mod author_pptx;
 #[path = "convert.rs"]
 mod conversion;
 mod docx;
@@ -117,6 +120,9 @@ fn normalize(filetype: &str) -> Result<&'static str, EngineError> {
 
 #[pymodule]
 fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add_class::<author_docx::EditableDocx>()?;
+    module.add_class::<author_pdf::EditablePdf>()?;
+    module.add_class::<author_pptx::EditablePptx>()?;
     module.add(
         "DocExNativeError",
         module.py().get_type::<DocExNativeError>(),

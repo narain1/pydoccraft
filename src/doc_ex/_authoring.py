@@ -1,0 +1,1094 @@
+"""Small Python authoring facade over owned native document models."""
+from __future__ import annotations
+
+import json
+import math
+import operator
+import os
+import stat
+import tempfile
+from collections.abc import Sequence
+from numbers import Real
+from pathlib import Path
+from typing import BinaryIO
+
+from . import _core
+from .errors import DocumentClosedError, UnsupportedFormatError
+
+
+def pt(value: Real) -> float:
+    """Return a finite length in points (1/72 inch)."""
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise TypeError("length must be a number in points")
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError("length must be finite")
+    return result
+
+
+def inches(value: Real) -> float:
+    """Convert inches to points."""
+    return pt(pt(value) * 72)
+
+
+def mm(value: Real) -> float:
+    """Convert millimeters to points."""
+    return pt(pt(value) * 72 / 25.4)
+
+
+def cm(value: Real) -> float:
+    """Convert centimeters to points."""
+    return pt(pt(value) * 72 / 2.54)
+
+
+def _size(value) -> tuple[float, float]:
+    if isinstance(value, str):
+        sizes = {"a4": (mm(210), mm(297)), "letter": (612.0, 792.0), "legal": (612.0, 1008.0)}
+        try:
+            return sizes[value.lower()]
+        except KeyError:
+            raise ValueError("size must be A4, Letter, Legal or a (width, height) pair in points") from None
+    if not isinstance(value, (tuple, list)) or len(value) != 2:
+        raise TypeError("size must be a (width, height) pair in points")
+    width, height = map(pt, value)
+    if width <= 0 or height <= 0:
+        raise ValueError("page dimensions must be positive")
+    return width, height
+
+
+def _color(value) -> tuple[int, int, int]:
+    if isinstance(value, str):
+        colors = {"black": "000000", "white": "FFFFFF", "red": "FF0000", "green": "008000", "blue": "0000FF", "gray": "808080", "grey": "808080", "yellow": "FFFF00", "navy": "000080"}
+        value = colors.get(value.lower(), value.removeprefix("#"))
+        if len(value) != 6 or any(c not in "0123456789abcdefABCDEF" for c in value):
+            raise ValueError("color must be #RRGGBB, a supported color name or an RGB tuple")
+        return tuple(int(value[index:index + 2], 16) for index in (0, 2, 4))
+    if not isinstance(value, (tuple, list)) or len(value) != 3:
+        raise TypeError("color must be an RGB tuple; alpha is not supported by this operation")
+    if any(isinstance(c, bool) or not isinstance(c, int) or not 0 <= c <= 255 for c in value):
+        raise ValueError("RGB channels must be integers between 0 and 255")
+    return tuple(value)
+
+
+def _hex_color(value) -> str:
+    return "#" + "".join(f"{channel:02X}" for channel in _color(value))
+
+
+def _index(index, length: int) -> int:
+    index = operator.index(index)
+    if index < 0:
+        index += length
+    if not 0 <= index < length:
+        raise IndexError("index out of range")
+    return index
+
+
+def _rows(rows) -> list[list[str]]:
+    if isinstance(rows, (str, bytes)):
+        raise TypeError("table rows must be a sequence of rows of strings")
+    result = []
+    total = 0
+    for row in rows:
+        if len(result) >= 10000:
+            raise ValueError("table must not exceed 10000 rows")
+        if isinstance(row, (str, bytes)):
+            raise TypeError("each table row must be a sequence of strings")
+        cells = []
+        for cell in row:
+            if len(cells) >= 1000:
+                raise ValueError("table must not exceed 1000 columns")
+            if not isinstance(cell, str):
+                raise TypeError("table cells must be strings; format values before insertion")
+            cells.append(cell)
+            total += 1
+            if total > 100000:
+                raise ValueError("table must not exceed 100000 cells")
+        result.append(cells)
+    if not result or not result[0] or any(len(row) != len(result[0]) for row in result):
+        raise ValueError("table must have nonempty rectangular rows")
+    if len(result) * len(result[0]) > 100000:
+        raise ValueError("table must not exceed 100000 cells")
+    return result
+
+
+def new(filetype: str, *, size=None) -> EditableDocument:
+    """Create a native DOCX, PDF or PPTX document; dimensions use points."""
+    from . import _native
+    kind = filetype.lower().lstrip(".")
+    kind = {"word": "docx", "powerpoint": "pptx"}.get(kind, kind)
+    if kind == "docx":
+        native = _native(_core.EditableDocx)
+        if size is not None:
+            _native(lambda: native.set_page_size(*_size(size)))
+        return WordDocument(native)
+    if kind == "pdf":
+        return PdfDocument(_native(lambda: _core.EditablePdf(*_size("Letter" if size is None else size))))
+    if kind == "pptx":
+        return Presentation(_native(lambda: _core.EditablePptx(*_size((720, 540) if size is None else size))))
+    raise UnsupportedFormatError(f"Cannot create file type: {filetype}")
+
+
+class EditableDocument:
+    """Native document owner with explicit serialization, copying and lifetime."""
+    _format: str
+
+    def __init__(self, native):
+        self._native = native
+        self._closed = False
+        self._cached = None
+        self._page_generation = 0
+        self._annotation_generations = {}
+
+    def _ensure_open(self):
+        if self._closed:
+            raise DocumentClosedError("document is closed")
+
+    def _call(self, name, *args, _change=False, **kwargs):
+        from . import _native
+        self._ensure_open()
+        result = _native(lambda: getattr(self._native, name)(*args, **kwargs))
+        if _change:
+            self._invalidate()
+        return result
+
+    def _invalidate(self):
+        if self._cached is not None:
+            self._cached.close()
+            self._cached = None
+
+    def _atomic(self, operation):
+        from . import _native
+        staged = self._call("copy")
+        try:
+            result = _native(lambda: operation(staged))
+        except BaseException:
+            staged.close()
+            raise
+        self._native.close()
+        self._native = staged
+        self._invalidate()
+        return result
+
+    def _snapshot(self):
+        from . import open
+        self._ensure_open()
+        if self._cached is None:
+            self._cached = open(self.to_bytes(), filetype=self._format)
+        return self._cached
+
+    @property
+    def filetype(self) -> str:
+        return self._format
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    @property
+    def page_count(self) -> int:
+        return self._snapshot().page_count
+
+    def to_bytes(self) -> bytes:
+        """Serialize the native format through its upstream writer."""
+        return bytes(self._call("to_bytes"))
+
+    def save(self, destination: str | Path | BinaryIO) -> None:
+        """Save the native format; path replacement is atomic, stream writes are not."""
+        self._ensure_open()
+        if hasattr(destination, "write"):
+            data = self.to_bytes()
+            if destination.write(data) != len(data):
+                raise OSError("destination did not accept the complete document")
+            return
+        path = Path(destination).expanduser()
+        if path.suffix and path.suffix.lower() != "." + self._format:
+            raise ValueError(f"save writes {self._format}; use convert() to change formats")
+        data = self.to_bytes()
+        previous_mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else None
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="wb", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False) as output:
+                temporary = Path(output.name)
+                output.write(data)
+            if previous_mode is not None:
+                os.chmod(temporary, previous_mode)
+            os.replace(temporary, path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
+    def copy(self) -> EditableDocument:
+        """Return an independent native model; child handles retain their own owner."""
+        return type(self)(self._call("copy"))
+
+    def render_page(self, index: int, dpi: float = 144) -> bytes:
+        return self._snapshot().render_page(index, dpi=dpi)
+
+    def convert(self, output_format: str) -> bytes:
+        from . import convert
+        return convert(self.to_bytes(), output_format, filetype=self._format)
+
+    def to_markdown(self) -> str:
+        return self._snapshot().to_markdown()
+
+    def close(self) -> None:
+        if not self._closed:
+            self._native.close()
+            self._invalidate()
+            self._closed = True
+
+    def __enter__(self):
+        self._ensure_open()
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+    def __repr__(self):
+        return f"{type(self).__name__}(filetype={self._format!r}, closed={self.closed})"
+
+
+class _Collection(Sequence):
+    def __init__(self, owner, ids, factory):
+        self._owner, self._ids, self._factory = owner, ids, factory
+
+    def __len__(self):
+        self._owner._ensure_open()
+        return len(self._ids())
+
+    def __getitem__(self, index):
+        self._owner._ensure_open()
+        ids = self._ids()
+        if isinstance(index, slice):
+            return [self._factory(self._owner, identifier) for identifier in ids[index]]
+        return self._factory(self._owner, ids[_index(index, len(ids))])
+
+
+class WordDocument(EditableDocument):
+    _format = "docx"
+
+    @property
+    def paragraphs(self):
+        return _Collection(self, lambda: self._call("paragraph_ids"), Paragraph)
+
+    @property
+    def tables(self):
+        return _Collection(self, lambda: self._call("table_ids"), EditableTable)
+
+    @property
+    def sections(self):
+        return _Collection(self, lambda: [0], Section)
+
+    @property
+    def images(self):
+        return _Collection(self, lambda: self._call("image_ids"), Picture)
+
+    @property
+    def background(self) -> str | None:
+        return self._call("background")
+
+    @background.setter
+    def background(self, color):
+        self._call("set_background", None if color is None else _hex_color(color), _change=True)
+
+    def add_paragraph(self, text: str = "", *, style: str | None = None) -> Paragraph:
+        if style is None:
+            identifier = self._call("add_paragraph", text, _change=True)
+        else:
+            def append(native):
+                identifier = native.add_paragraph(text)
+                native.set_paragraph_style(identifier, style)
+                return identifier
+            identifier = self._atomic(append)
+        return Paragraph(self, identifier)
+
+    def add_table(self, rows) -> EditableTable:
+        return EditableTable(self, self._call("add_table", _rows(rows), _change=True))
+
+    def add_image(self, source, *, width=None, height=None, alt: str = ""):
+        from . import _read
+        data, _ = _read(source)
+        identifier = self._call("add_image", data, None if width is None else pt(width), None if height is None else pt(height), alt, _change=True)
+        return Picture(self, identifier)
+
+
+class Paragraph:
+    def __init__(self, owner: WordDocument, identifier: int):
+        self._owner, self._id = owner, identifier
+
+    @property
+    def text(self) -> str:
+        return self._owner._call("paragraph_text", self._id)
+
+    @text.setter
+    def text(self, value: str):
+        self._owner._call("set_paragraph_text", self._id, value, _change=True)
+
+    @property
+    def style(self) -> str:
+        return self._owner._call("paragraph_style", self._id)
+
+    @style.setter
+    def style(self, value: str):
+        self._owner._call("set_paragraph_style", self._id, value, _change=True)
+
+    @property
+    def alignment(self) -> str:
+        return self._owner._call("paragraph_alignment", self._id)
+
+    @alignment.setter
+    def alignment(self, value: str):
+        self._owner._call("set_paragraph_alignment", self._id, value, _change=True)
+
+    def add_run(self, text: str, *, bold: bool = False, italic: bool = False, size: float | None = None, font: str | None = None, color=None):
+        start, end, revision = self._owner._call("add_run", self._id, text, bold, italic, None if size is None else pt(size), font, None if color is None else _hex_color(color), _change=True)
+        return TextRange(self, start, end, revision)
+
+    def find(self, text: str) -> list[TextRange]:
+        """Find non-overlapping literal matches; later edits invalidate these ranges."""
+        if not isinstance(text, str) or not text:
+            raise ValueError("search text must be a nonempty string")
+        content = self.text
+        position = 0
+        result = []
+        while (start := content.find(text, position)) >= 0:
+            end = start + len(text)
+            actual, revision = self._owner._call("text_range", self._id, start, end)
+            if actual != text:
+                raise ValueError("paragraph changed during search")
+            result.append(TextRange(self, start, end, revision))
+            position = end
+        return result
+
+    def replace_text(self, old: str, new: str) -> int:
+        """Atomically replace literal matches, preserving surrounding run formatting."""
+        if not isinstance(old, str) or not old:
+            raise ValueError("search text must be a nonempty string")
+        def replace(native):
+            content = native.paragraph_text(self._id)
+            positions = []
+            offset = 0
+            while (start := content.find(old, offset)) >= 0:
+                positions.append(start)
+                offset = start + len(old)
+            for start in reversed(positions):
+                _, revision = native.text_range(self._id, start, start + len(old))
+                native.replace_range(self._id, start, start + len(old), revision, new)
+            return len(positions)
+        return self._owner._atomic(replace)
+
+    def __repr__(self):
+        return f"Paragraph(text={self.text!r})"
+
+
+class TextRange:
+    """A Unicode character range that fails explicitly after incompatible edits."""
+    def __init__(self, paragraph: Paragraph, start: int, end: int, revision: int):
+        self._paragraph = paragraph
+        self._start, self._end, self._revision = start, end, revision
+
+    @property
+    def text(self) -> str:
+        paragraph = self._paragraph
+        return paragraph._owner._call("range_text", paragraph._id, self._start, self._end, self._revision)
+
+    @text.setter
+    def text(self, value: str):
+        paragraph = self._paragraph
+        self._start, self._end, self._revision = paragraph._owner._call("replace_range", paragraph._id, self._start, self._end, self._revision, value, _change=True)
+
+    def format(self, *, bold: bool | None = None, italic: bool | None = None, size: float | None = None, font: str | None = None, color=None) -> None:
+        paragraph = self._paragraph
+        self._revision = paragraph._owner._call("format_range", paragraph._id, self._start, self._end, self._revision, bold, italic, None if size is None else pt(size), font, None if color is None else _hex_color(color), _change=True)
+
+
+class Section:
+    def __init__(self, owner: WordDocument, identifier: int):
+        self._owner = owner
+
+    @property
+    def page_size(self) -> tuple[float, float]:
+        return self._owner._call("page_size")
+
+    @page_size.setter
+    def page_size(self, value):
+        self._owner._call("set_page_size", *_size(value), _change=True)
+
+    @property
+    def margins(self):
+        """Top, right, bottom and left margins in points."""
+        return self._owner._call("margins")
+
+    @margins.setter
+    def margins(self, value):
+        if isinstance(value, Real):
+            value = (value,) * 4
+        if not isinstance(value, (tuple, list)) or len(value) != 4:
+            raise TypeError("margins must be a number or (top, right, bottom, left) in points")
+        self._owner._call("set_margins", *map(pt, value), _change=True)
+
+
+    def header(self, variant: str = "default"):
+        """Access the default, first-page or even-page header."""
+        if variant not in {"default", "first", "even"}:
+            raise ValueError("header variant must be default, first or even")
+        return Story(self._owner, "header", variant)
+
+    def footer(self, variant: str = "default"):
+        """Access the default, first-page or even-page footer."""
+        if variant not in {"default", "first", "even"}:
+            raise ValueError("footer variant must be default, first or even")
+        return Story(self._owner, "footer", variant)
+
+
+class Story:
+    """A header or footer that shares the normal paragraph API."""
+    def __init__(self, owner: WordDocument, kind: str, variant: str):
+        self._owner, self._kind, self._variant = owner, kind, variant
+
+    def _identifier(self):
+        return self._owner._call("ensure_story", self._kind, self._variant, _change=True)
+
+    @property
+    def paragraphs(self):
+        return _Collection(self._owner, lambda: self._owner._call("story_paragraph_ids", self._identifier()), Paragraph)
+
+    def add_paragraph(self, text: str = "", *, style: str | None = None):
+        def append(native):
+            story = native.ensure_story(self._kind, self._variant)
+            identifier = native.story_add_paragraph(story, text)
+            if style is not None:
+                native.set_paragraph_style(identifier, style)
+            return identifier
+        return Paragraph(self._owner, self._owner._atomic(append))
+
+
+class Picture:
+    def __init__(self, owner: WordDocument, identifier: int):
+        self._owner, self._id = owner, identifier
+
+    @property
+    def size(self):
+        return self._owner._call("image_size", self._id)
+
+    @size.setter
+    def size(self, value):
+        self._owner._call("set_image_size", self._id, *_size(value), _change=True)
+
+    @property
+    def alt(self):
+        return self._owner._call("image_alt", self._id)
+
+    @alt.setter
+    def alt(self, value: str):
+        self._owner._call("set_image_alt", self._id, value, _change=True)
+
+
+class EditableTable:
+    def __init__(self, owner: EditableDocument, identifier: int, slide: int | None = None):
+        self._owner, self._id = owner, identifier
+        self._slide = slide
+
+    @property
+    def _args(self):
+        return (self._id,) if self._slide is None else (self._owner._call("slide_index", self._slide), self._id)
+
+    @property
+    def rows(self) -> list[list[str]]:
+        """Return a text snapshot; use table[row, column].text to edit a cell."""
+        return self._owner._call("table_rows", *self._args)
+
+    def __getitem__(self, key):
+        if not isinstance(key, tuple) or len(key) != 2:
+            raise TypeError("address a cell with table[row, column]")
+        rows = self.rows
+        row = _index(key[0], len(rows))
+        column = _index(key[1], len(rows[row]))
+        return EditableCell(self, row, column)
+
+    def __repr__(self):
+        rows = self.rows
+        return f"EditableTable(rows={len(rows)}, columns={len(rows[0]) if rows else 0})"
+
+    def merge(self, first: tuple[int, int], last: tuple[int, int]):
+        if self._slide is not None:
+            raise UnsupportedFormatError("PPTX cell merging is not yet available")
+        start = self[first]
+        end = self[last]
+        self._owner._call("merge_cells", self._id, start._row, start._column, end._row, end._column, _change=True)
+        return self[first]
+
+
+class EditableCell:
+    def __init__(self, table: EditableTable, row: int, column: int):
+        self._table, self._row, self._column = table, row, column
+
+    @property
+    def text(self) -> str:
+        table = self._table
+        if table._slide is None:
+            return table._owner._call("cell_text", table._id, self._row, self._column)
+        return table.rows[self._row][self._column]
+
+    @text.setter
+    def text(self, value: str):
+        table = self._table
+        table._owner._call("set_cell_text", *table._args, self._row, self._column, value, _change=True)
+
+    def _content_args(self):
+        table = self._table
+        if table._slide is not None:
+            raise UnsupportedFormatError("rich PPTX cell content is not yet available")
+        return table._id, self._row, self._column
+
+    def _children(self, kind, factory):
+        owner = self._table._owner
+        return _Collection(owner, lambda: owner._call(f"cell_{kind}_ids", *self._content_args()), factory)
+
+    @property
+    def paragraphs(self):
+        return self._children("paragraph", Paragraph)
+
+    @property
+    def tables(self):
+        return self._children("table", EditableTable)
+
+    @property
+    def images(self):
+        return self._children("image", Picture)
+
+    def add_paragraph(self, text: str = "", *, style: str | None = None):
+        args = self._content_args()
+        def append(native):
+            identifier = native.cell_add_paragraph(*args, text)
+            if style is not None:
+                native.set_paragraph_style(identifier, style)
+            return identifier
+        return Paragraph(self._table._owner, self._table._owner._atomic(append))
+
+    def add_table(self, rows):
+        owner = self._table._owner
+        return EditableTable(owner, owner._call("cell_add_table", *self._content_args(), _rows(rows), _change=True))
+
+    def add_image(self, source, *, width=None, height=None, alt: str = ""):
+        from . import _read
+        data, _ = _read(source)
+        owner = self._table._owner
+        identifier = owner._call("cell_add_image", *self._content_args(), data, None if width is None else pt(width), None if height is None else pt(height), alt, _change=True)
+        return Picture(owner, identifier)
+
+    def split(self, *, columns: int = 2):
+        table = self._table
+        if table._slide is not None:
+            raise UnsupportedFormatError("PPTX cell splitting is not yet available")
+        table._owner._call("split_cell", table._id, self._row, self._column, columns, _change=True)
+
+    @property
+    def background(self):
+        table = self._table
+        value = table._owner._call("cell_background", *table._args, self._row, self._column)
+        return None if value is None else _hex_color(value)
+
+    @background.setter
+    def background(self, value):
+        table = self._table
+        table._owner._call("set_cell_background", *table._args, self._row, self._column, _hex_color(value) if table._slide is None else _color(value), _change=True)
+
+    @property
+    def vertical_alignment(self):
+        table = self._table
+        return table._owner._call("cell_vertical_alignment", *table._args, self._row, self._column)
+
+    @vertical_alignment.setter
+    def vertical_alignment(self, value: str):
+        table = self._table
+        table._owner._call("set_cell_vertical_alignment", *table._args, self._row, self._column, value, _change=True)
+
+
+class PdfDocument(EditableDocument):
+    _format = "pdf"
+
+    @property
+    def page_count(self):
+        return self._call("page_count")
+
+    @property
+    def pages(self):
+        return PdfPages(self)
+
+    def copy(self, *, pages=None):
+        if pages is None:
+            return super().copy()
+        indices = [_index(index, self.page_count) for index in pages]
+        return type(self)(self._call("subset", indices))
+
+
+class PdfPages(_Collection):
+    def __init__(self, owner):
+        super().__init__(owner, lambda: range(owner.page_count), PdfPage)
+
+    def add(self, *, size="Letter"):
+        identifier = self._owner._call("add_page", *_size(size), _change=True)
+        return PdfPage(self._owner, identifier)
+
+    def __delitem__(self, index):
+        self._owner._call("delete_page", _index(index, len(self)), _change=True)
+        self._owner._page_generation += 1
+
+    def move(self, index: int, destination: int):
+        self._owner._call("move_page", _index(index, len(self)), _index(destination, len(self)), _change=True)
+        self._owner._page_generation += 1
+
+    def insert(self, index: int, source, *, pages=None, password: str | None = None):
+        """Import selected pages using the upstream resource-remapping operation."""
+        from . import _read
+        index = operator.index(index)
+        if not 0 <= index <= len(self):
+            raise IndexError("insertion index must be between zero and page count")
+        if isinstance(source, EditableDocument):
+            if source.filetype != "pdf":
+                raise UnsupportedFormatError("page insertion requires a PDF source")
+            data = source.to_bytes()
+        elif hasattr(source, "_source"):
+            source._ensure_open()
+            if source._filetype != "pdf":
+                raise UnsupportedFormatError("page insertion requires a PDF source")
+            data = source._source
+            password = source._password if password is None else password
+        else:
+            data, _ = _read(source)
+        indices = None if pages is None else [operator.index(value) for value in pages]
+        count = self._owner._call("import_pages", data, password, indices, index, _change=True)
+        self._owner._page_generation += 1
+        return [PdfPage(self._owner, position) for position in range(index, index + count)]
+
+
+class PdfPage:
+    def __init__(self, owner: PdfDocument, identifier: int):
+        self._owner, self._id = owner, identifier
+        self._generation = owner._page_generation
+
+    def _check(self):
+        self._owner._ensure_open()
+        if self._generation != self._owner._page_generation:
+            raise ValueError("page handle is stale after page organization; retrieve it again")
+
+    @property
+    def number(self):
+        self._check()
+        return self._id
+
+    @property
+    def size(self):
+        self._check()
+        return self._owner._call("page_size", self._id)
+
+    @property
+    def background(self):
+        self._check()
+        value = self._owner._call("background", self._id)
+        return None if value is None else _hex_color(value)
+
+    @background.setter
+    def background(self, value):
+        self._check()
+        self._owner._call("set_background", self._id, _color(value), _change=True)
+
+    def rotate(self, degrees: int):
+        self._check()
+        self._owner._call("rotate_page", self._id, degrees, _change=True)
+        self._owner._page_generation += 1
+        self._generation = self._owner._page_generation
+
+    @property
+    def annotations(self):
+        self._check()
+        return Annotations(self)
+
+    def draw_text(self, text: str, *, at: tuple[float, float], font_size: float = 12):
+        self._check()
+        if not isinstance(at, (tuple, list)) or len(at) != 2:
+            raise TypeError("at must be an (x, y) pair in top-left points")
+        self._owner._call("add_text", self._id, text, pt(at[0]), pt(at[1]), pt(font_size), _change=True)
+
+    def add_image(self, source, *, box):
+        self._check()
+        from . import _read
+        if not isinstance(box, (tuple, list)) or len(box) != 4:
+            raise TypeError("box must be (x, y, width, height) in points")
+        data, _ = _read(source)
+        self._owner._call("add_image", self._id, data, *map(pt, box), _change=True)
+
+    def get_pixmap(self, dpi: float = 144) -> bytes:
+        self._check()
+        return self._owner.render_page(self._id, dpi)
+
+    def get_text(self, option: str = "text"):
+        self._check()
+        return self._owner._snapshot()[self._id].get_text(option)
+
+
+def _annotation_rect(box):
+    if not isinstance(box, (tuple, list)) or len(box) != 4:
+        raise TypeError("box must be (x, y, width, height) in points")
+    x, y, width, height = map(pt, box)
+    if width <= 0 or height <= 0:
+        raise ValueError("annotation dimensions must be positive")
+    return x, y, x + width, y + height
+
+
+class Annotations(_Collection):
+    def __init__(self, page: PdfPage):
+        self._page = page
+        def identifiers():
+            page._check()
+            return [value["index"] for value in json.loads(page._owner._call("annotations", page.number))]
+        super().__init__(page._owner, identifiers, lambda owner, identifier: Annotation(page, identifier))
+
+    def add(self, kind: str, *, box, text: str = "", author: str = "", color="#FFD200"):
+        self._page._check()
+        identifier = self._owner._call("add_annotation", self._page.number, kind, _annotation_rect(box), text, author, _color(color), _change=True)
+        return Annotation(self._page, identifier)
+
+    def add_link(self, *, box, uri: str | None = None, page: int | None = None):
+        self._page._check()
+        target = None if page is None else _index(page, self._owner.page_count)
+        identifier = self._owner._call("add_link", self._page.number, _annotation_rect(box), uri, target, _change=True)
+        return Annotation(self._page, identifier)
+
+    def __delitem__(self, index):
+        annotation = self[index]
+        page = self._page.number
+        self._owner._call("delete_annotation", page, annotation._id, _change=True)
+        self._owner._annotation_generations[page] = self._owner._annotation_generations.get(page, 0) + 1
+
+
+class Annotation:
+    """A checked PDF annotation handle; deletion invalidates page annotation handles."""
+    def __init__(self, page: PdfPage, identifier: int):
+        self._page, self._id = page, identifier
+        self._generation = page._owner._annotation_generations.get(page.number, 0)
+        self._page_generation = page._owner._page_generation
+
+    def _check(self):
+        page = self._page
+        page._check()
+        if page._owner._page_generation != self._page_generation:
+            raise ValueError("annotation handle is stale after page organization; retrieve it again")
+        if page._owner._annotation_generations.get(page.number, 0) != self._generation:
+            raise ValueError("annotation handle is stale after deletion; retrieve it again")
+
+    def _value(self):
+        self._check()
+        values = json.loads(self._page._owner._call("annotations", self._page.number))
+        for value in values:
+            if value["index"] == self._id:
+                return value
+        raise ValueError("annotation no longer exists")
+
+    def update(self, *, text: str | None = None, box=None, color=None, uri: str | None = None, page: int | None = None, author: str | None = None):
+        self._check()
+        self._page._owner._call("update_annotation", self._page.number, self._id,
+            text=text, rect=None if box is None else _annotation_rect(box),
+            color=None if color is None else _color(color), uri=uri,
+            target_page=None if page is None else _index(page, self._page._owner.page_count),
+            author=author, _change=True)
+
+    @property
+    def kind(self):
+        return self._value()["kind"]
+
+    @property
+    def box(self):
+        x0, y0, x1, y1 = self._value()["rect"]
+        return x0, y0, x1 - x0, y1 - y0
+
+    @box.setter
+    def box(self, value):
+        self.update(box=value)
+
+    @property
+    def text(self):
+        return self._value()["text"]
+
+    @text.setter
+    def text(self, value: str):
+        self.update(text=value)
+
+    @property
+    def author(self):
+        return self._value()["author"]
+
+    @author.setter
+    def author(self, value: str):
+        self.update(author=value)
+
+    @property
+    def color(self):
+        value = self._value()["color"]
+        return None if value is None else _hex_color(value)
+
+    @color.setter
+    def color(self, value):
+        self.update(color=value)
+
+    @property
+    def uri(self):
+        return self._value()["uri"]
+
+    @uri.setter
+    def uri(self, value: str):
+        self.update(uri=value)
+
+    @property
+    def target_page(self):
+        return self._value()["target_page"]
+
+    @target_page.setter
+    def target_page(self, value: int):
+        self.update(page=value)
+
+
+class Presentation(EditableDocument):
+    _format = "pptx"
+
+    @property
+    def page_count(self):
+        return self._call("slide_count")
+
+    @property
+    def slides(self):
+        return Slides(self)
+
+
+class Slides(_Collection):
+    def __init__(self, owner):
+        super().__init__(owner, lambda: [owner._call("slide_id", index) for index in range(owner.page_count)], Slide)
+
+    def add(self):
+        index = self._owner._call("add_slide", _change=True)
+        return Slide(self._owner, self._owner._call("slide_id", index))
+
+    def __delitem__(self, index):
+        self._owner._call("remove_slide", _index(index, len(self)), _change=True)
+
+    def move(self, index: int, destination: int):
+        self._owner._call("move_slide", _index(index, len(self)), _index(destination, len(self)), _change=True)
+
+
+class Slide:
+    def __init__(self, owner: Presentation, identifier: int):
+        self._owner, self._id = owner, identifier
+
+    @property
+    def number(self):
+        return self._owner._call("slide_index", self._id)
+
+    @property
+    def size(self):
+        self.number
+        return self._owner._call("slide_size")
+
+    @property
+    def name(self):
+        return self._owner._call("slide_name", self.number)
+
+    @name.setter
+    def name(self, value):
+        self._owner._call("set_slide_name", self.number, value, _change=True)
+
+    @property
+    def hidden(self):
+        return self._owner._call("slide_hidden", self.number)
+
+    @hidden.setter
+    def hidden(self, value):
+        self._owner._call("set_slide_hidden", self.number, value, _change=True)
+
+    @property
+    def notes(self):
+        return self._owner._call("slide_notes", self.number)
+
+    @notes.setter
+    def notes(self, value):
+        self._owner._call("set_slide_notes", self.number, value, _change=True)
+
+    @property
+    def background(self):
+        value = self._owner._call("slide_background", self.number)
+        return None if value is None else _hex_color(value)
+
+    @background.setter
+    def background(self, color):
+        self._owner._call("background", self.number, _color(color), _change=True)
+
+    @property
+    def shapes(self):
+        return Shapes(self)
+
+    @property
+    def background_image(self):
+        value = self._owner._call("background_image", self.number)
+        return None if value is None else bytes(value)
+
+    @background_image.setter
+    def background_image(self, source):
+        from . import _read
+        data, _ = _read(source)
+        self._owner._call("set_background_image", self.number, data, _change=True)
+
+    def add_shape(self, kind: str, *, box, fill=None, stroke=None, stroke_width: float = 1):
+        if not isinstance(box, (tuple, list)) or len(box) != 4:
+            raise TypeError("box must be (x, y, width, height) in points")
+        identifier = self._owner._call("add_shape", self.number, kind, *map(pt, box), None if fill is None else _color(fill), None if stroke is None else _color(stroke), pt(stroke_width), _change=True)
+        return Shape(self._owner, self._id, identifier)
+
+    def add_text(self, text: str, *, box, font_size: float = 18):
+        if not isinstance(box, (tuple, list)) or len(box) != 4:
+            raise TypeError("box must be (x, y, width, height) in points")
+        identifier = self._owner._call("add_text", self.number, text, *map(pt, box), pt(font_size), _change=True)
+        return Shape(self._owner, self._id, identifier)
+
+    def add_table(self, rows, *, box, font_size: float = 18):
+        if not isinstance(box, (tuple, list)) or len(box) != 4:
+            raise TypeError("box must be (x, y, width, height) in points")
+        identifier = self._owner._call("add_table", self.number, _rows(rows), *map(pt, box), pt(font_size), _change=True)
+        return SlideTable(self._owner, identifier, self._id)
+
+    def add_image(self, source, *, box, alt: str = ""):
+        from . import _read
+        if not isinstance(box, (tuple, list)) or len(box) != 4:
+            raise TypeError("box must be (x, y, width, height) in points")
+        data, _ = _read(source)
+        identifier = self._owner._call("add_image", self.number, data, *map(pt, box), alt, _change=True)
+        return Shape(self._owner, self._id, identifier)
+
+    def get_pixmap(self, dpi: float = 144) -> bytes:
+        return self._owner.render_page(self.number, dpi)
+
+    def get_text(self, option: str = "text"):
+        return self._owner._snapshot()[self.number].get_text(option)
+
+
+class Shapes(_Collection):
+    def __init__(self, slide: Slide):
+        self._slide_owner = slide
+        def factory(owner, pair):
+            identifier, kind = pair
+            if kind == "table":
+                return SlideTable(owner, identifier, slide._id)
+            return Shape(owner, slide._id, identifier)
+        super().__init__(slide._owner, lambda: slide._owner._call("shape_ids", slide.number), factory)
+
+    def __delitem__(self, index):
+        shape = self[index]
+        self._owner._call("delete_shape", self._slide_owner.number, shape._id, _change=True)
+
+    def move(self, index: int, destination: int):
+        shape = self[index]
+        destination = _index(destination, len(self))
+        self._owner._call("move_shape", self._slide_owner.number, shape._id, destination, _change=True)
+
+
+class Shape:
+    def __init__(self, owner: Presentation, slide: int, identifier: int):
+        self._owner, self._slide, self._id = owner, slide, identifier
+
+    @property
+    def _slide_number(self):
+        return self._owner._call("slide_index", self._slide)
+
+    @property
+    def rotation(self):
+        return self._owner._call("shape_rotation", self._slide_number, self._id)
+
+    @rotation.setter
+    def rotation(self, degrees):
+        self._owner._call("set_shape_rotation", self._slide_number, self._id, pt(degrees), _change=True)
+
+    @property
+    def fill(self):
+        value = self._owner._call("shape_fill", self._slide_number, self._id)
+        return None if value is None else _hex_color(value)
+
+    @fill.setter
+    def fill(self, color):
+        self._owner._call("set_shape_fill", self._slide_number, self._id, None if color is None else _color(color), _change=True)
+
+    @property
+    def stroke(self):
+        value = self._owner._call("shape_stroke", self._slide_number, self._id)
+        return None if value is None else (_hex_color(value[0]), value[1])
+
+    @stroke.setter
+    def stroke(self, value):
+        if value is None:
+            color, width = None, 1
+        elif isinstance(value, (tuple, list)) and len(value) == 2:
+            color, width = _color(value[0]), pt(value[1])
+        else:
+            raise TypeError("stroke must be (color, width) or None")
+        self._owner._call("set_shape_stroke", self._slide_number, self._id, color, width, _change=True)
+
+    @property
+    def box(self):
+        return self._owner._call("shape_box", self._slide_number, self._id)
+
+    @box.setter
+    def box(self, value):
+        if not isinstance(value, (tuple, list)) or len(value) != 4:
+            raise TypeError("box must be (x, y, width, height) in points")
+        self._owner._call("set_shape_box", self._slide_number, self._id, *map(pt, value), _change=True)
+
+    @property
+    def text(self):
+        return self._owner._call("shape_text", self._slide_number, self._id)
+
+    @text.setter
+    def text(self, value):
+        self._owner._call("set_shape_text", self._slide_number, self._id, value, _change=True)
+
+    @property
+    def color(self):
+        value = self._owner._call("text_format", self._slide_number, self._id)[1]
+        return None if value is None else _hex_color(value)
+
+    @color.setter
+    def color(self, value):
+        self._owner._call("set_text_format", self._slide_number, self._id, color=_color(value), _change=True)
+
+    @property
+    def font_size(self):
+        return self._owner._call("text_format", self._slide_number, self._id)[0]
+
+    @font_size.setter
+    def font_size(self, value):
+        self._owner._call("set_text_format", self._slide_number, self._id, size=pt(value), _change=True)
+
+    @property
+    def bold(self):
+        return self._owner._call("text_format", self._slide_number, self._id)[2]
+
+    @bold.setter
+    def bold(self, value: bool):
+        self._owner._call("set_text_format", self._slide_number, self._id, bold=value, _change=True)
+
+    @property
+    def italic(self):
+        return self._owner._call("text_format", self._slide_number, self._id)[3]
+
+    @italic.setter
+    def italic(self, value: bool):
+        self._owner._call("set_text_format", self._slide_number, self._id, italic=value, _change=True)
+
+    @property
+    def font(self):
+        return self._owner._call("text_format", self._slide_number, self._id)[4]
+
+    @font.setter
+    def font(self, value: str):
+        self._owner._call("set_text_format", self._slide_number, self._id, font=value, _change=True)
+
+
+class SlideTable(EditableTable, Shape):
+    """A placed semantic table with the same cell access as a DOCX table."""

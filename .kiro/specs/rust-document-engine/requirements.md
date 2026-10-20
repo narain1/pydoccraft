@@ -79,7 +79,7 @@ The API is implemented. The current implementation adds consistent PNG metadata 
 
 ## 8. Planned authoring and extraction improvements
 
-The [feature roadmap](../../../TODO.md) records prioritized TODOs and completion criteria, not additional capabilities of 0.2.1. C1–C5 cover creation of new DOCX/PDF documents and templates; E1–E6 cover extraction fidelity and provenance; P1–P4 cover performance and parity. No authoring API signature is committed until public upstream writer support at the pinned revisions has been checked. Legacy binary `.doc` creation is outside this scope.
+The [feature roadmap](../../../TODO.md) records prioritized TODOs and completion criteria, not additional capabilities of 0.2.1. C1–C5 cover creation of new DOCX/PDF documents and templates; E1–E6 cover extraction fidelity and provenance; P1–P4 cover performance and parity. Initial authoring signatures have been checked against public pinned upstream APIs; the implemented profile is documented in `docs/authoring.md`. Unchecked advanced coverage remains planned. Legacy binary `.doc` creation is outside this scope.
 
 The initial E1 extraction slice SHALL retain `Table.rows` unchanged while exposing DOCX cell blocks recursively with column/row spans and merge-continuation state. Text SHALL appear once in plain text and Markdown. HTML tables inside Markdown SHALL preserve hierarchy that pipe tables cannot express. These owned extraction values SHALL remain separate from future editable native objects.
 
@@ -110,3 +110,14 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 4. Format algorithms, reusable writer/layout behavior and shared semantic validation SHALL be proposed to the responsible upstream library when public support is missing. Python API naming, projection, Markdown and adapter boundary checks remain local.
 5. Upstream work SHALL distinguish verified source gaps, existing public support, and unassessed candidates, with pinned evidence. Public methods being present SHALL NOT imply full correctness. Linking application engines or copying their algorithms remains prohibited.
 6. The roadmap SHALL connect prerequisites at the required baseline without forcing PDF, PPTX, extraction or rendering to wait for complete DOCX parity. No contribution issue SHALL be opened in an upstream repository solely because it is marked as a local candidate.
+
+## 11. Initial native authoring profile (unreleased)
+
+1. `new("docx" | "pdf" | "pptx")` SHALL return an independent typed editable owner over the public pinned upstream native model. `save`, `to_bytes`, `copy`, explicit `close`, context management, PNG rendering and existing conversion pairs SHALL retain clear ownership and explicit errors.
+2. Path saves SHALL serialize before touching the destination and atomically replace through a same-directory temporary file. Stream saves SHALL detect short writes. Context exit SHALL NOT save implicitly.
+3. DOCX creation SHALL expose paragraphs/ranges, named default styles, tables, PNG pictures, solid page/cell fills, first-section size/margins and default/first/even header/footer paragraphs. Replacing paragraph or cell text SHALL intentionally replace that object's rich content; stale descendant/range handles SHALL fail rather than refer to unrelated content.
+4. PDF creation SHALL expose bounded pages, positioned searchable text, PNG/JPEG pictures, native page organization and independent page selection/import. The initial text path SHALL explicitly reject unsupported WinAnsi glyphs and overflow. Source PDF editing SHALL refuse encrypted, form and signed/certified preservation profiles until separately supported.
+5. PPTX creation SHALL expose typed text/table/image shapes, native slide backgrounds, names, notes and hidden state. Basic authored slide reorder/delete SHALL preserve remaining object identity and reject unsupported relationship profiles.
+6. New source-DOCX/PPTX editing SHALL remain an explicit unsupported operation until preservation diagnostics can prevent a lossy output. Creation from an owned new model does not imply arbitrary source-package preservation.
+7. Scalar lengths SHALL use finite points, with explicit `pt`, `mm`, `cm` and `inches` helpers. Positioned boxes SHALL use top-left `(x, y, width, height)`. Colors SHALL have a checked RGB representation; unsupported theme/alpha settings SHALL NOT be silently discarded.
+8. All features SHALL be tested by creating native output, reopening it, checking exact semantics and applicable PNG/PDF output through the installed wheel. New dependencies SHALL retain immutable upstream revisions and an audited permissive lockfile.

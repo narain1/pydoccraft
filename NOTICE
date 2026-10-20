@@ -9,6 +9,7 @@ Copyright (c) 2026 ArtCraft Team and the PdfCraft contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option.
 Source: https://github.com/storytold/pdfcraft
 Pinned revision: 645016addcfb9078c557f0189559ab47cdcee057
+The selected PdfCraft library crates include pdfcraft-organize for page insertion and organization, and pdfcraft-annot for annotations and links.
 
 WordCraft
 Copyright (c) 2026 ArtCraft Team and the WordCraft contributors.
