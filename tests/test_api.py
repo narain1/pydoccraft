@@ -177,6 +177,35 @@ class ApiTests(unittest.TestCase):
             "[same](https://one) and [same](https://two)",
         )
 
+    def test_selective_text_extraction_preserves_page_order_and_indexes(self) -> None:
+        data = pdf_fixture()
+        text = doc_ex.extract_text(data, filetype="pdf")
+        self.assertEqual(text.count("\f"), 1)
+        self.assertIn("Page one", text)
+        self.assertIn("Second page image", text)
+
+        selected = doc_ex.extract_text(data, filetype="pdf", pages=[-1, 0, -1])
+        parts = selected.split("\f")
+        self.assertEqual(len(parts), 3)
+        self.assertIn("Second page image", parts[0])
+        self.assertIn("Page one", parts[1])
+        self.assertEqual(parts[0], parts[2])
+        self.assertEqual(doc_ex.extract_text(data, filetype="pdf", pages=[]), "")
+        with self.assertRaises(IndexError):
+            doc_ex.extract_text(data, filetype="pdf", pages=[2])
+        with self.assertRaises(IndexError):
+            doc_ex.extract_text(data, filetype="pdf", pages=[-3])
+        with self.assertRaises(UnsafeArchiveError):
+            doc_ex.extract_text(data, filetype="pdf", pages=iter(range(10_001)))
+
+        office = doc_ex.extract_text(docx_fixture(), filetype="docx", pages=[-1, 0, -1])
+        office_parts = office.split("\f")
+        self.assertEqual(len(office_parts), 3)
+        self.assertIn("Second page", office_parts[0])
+        self.assertEqual(office_parts[0], office_parts[2])
+        slides = doc_ex.extract_text(pptx_fixture(), filetype="pptx", pages=[0, 0])
+        self.assertEqual(len(slides.split("\f")), 2)
+
     def test_conversion_reopen_no_table_duplication_and_empty_pages(self) -> None:
         docx = doc_ex.convert(pdf_fixture(), "docx", filetype="pdf")
         with doc_ex.open(docx) as converted:

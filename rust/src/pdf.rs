@@ -163,6 +163,110 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
     PdfSession::open(data, password).map(|(_, payload)| payload)
 }
 
+pub(crate) const MAX_SELECTED_PAGES: usize = 10_000;
+
+fn check_selected_count(count: usize) -> Result<(), EngineError> {
+    if count > MAX_SELECTED_PAGES {
+        return Err(EngineError::ResourceLimit(
+            "selected page count exceeds 10000".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn selected_page(index: isize, count: usize) -> Result<usize, EngineError> {
+    let page = if index < 0 {
+        count.checked_sub(index.unsigned_abs())
+    } else {
+        Some(index as usize)
+    };
+    page.filter(|page| *page < count)
+        .ok_or_else(|| EngineError::PageIndex("page index is out of range".into()))
+}
+
+fn check_plain_text_budget(
+    text: &pdfcraft_render::PageText,
+    remaining: usize,
+) -> Result<(), EngineError> {
+    // Native plain_text inserts at most one ASCII separator between glyphs.
+    // Preflight its upper bound before asking upstream to allocate the output string.
+    let mut bytes = text.glyphs.len().saturating_sub(1);
+    if bytes > remaining {
+        return Err(EngineError::ResourceLimit(
+            "selected text exceeds the 64 MiB output limit".into(),
+        ));
+    }
+    for glyph in &text.glyphs {
+        bytes = bytes
+            .checked_add(glyph.text.len())
+            .filter(|bytes| *bytes <= remaining)
+            .ok_or_else(|| {
+                EngineError::ResourceLimit("selected text exceeds the 64 MiB output limit".into())
+            })?;
+    }
+    Ok(())
+}
+
+pub fn extract_text(
+    data: &[u8],
+    password: Option<&str>,
+    pages: Option<&[isize]>,
+) -> Result<String, EngineError> {
+    let bytes = Arc::new(data.to_vec());
+    let info = inspect(bytes.clone(), password).map_err(open_error)?;
+    if info.pages.is_empty() {
+        return Err(EngineError::Malformed("PDF contains no pages".into()));
+    }
+    let selected_count = pages.map_or(info.pages.len(), <[isize]>::len);
+    check_selected_count(selected_count)?;
+    for &index in pages.unwrap_or_default() {
+        selected_page(index, info.pages.len())?;
+    }
+    let mut renderer = PageRenderer::new(
+        bytes,
+        RenderConfig {
+            password: password.map(Arc::from),
+            ..Default::default()
+        },
+    );
+    let mut output = String::new();
+    for position in 0..selected_count {
+        let page = match pages {
+            Some(indices) => selected_page(indices[position], info.pages.len())?,
+            None => position,
+        };
+        let rendered = renderer.render(RenderRequest {
+            page,
+            kind: RequestKind::Text,
+            scale: 1.0,
+            ..Default::default()
+        });
+        check_content_warnings(&rendered.warnings)?;
+        if let Some(error) = rendered.error {
+            return Err(EngineError::Malformed(format!(
+                "PDF text extraction failed: {error}"
+            )));
+        }
+        let text = rendered
+            .text
+            .ok_or_else(|| EngineError::Malformed("PDF page has no text result".into()))?;
+        let separator = usize::from(position > 0);
+        let remaining = crate::limits::MAX_PAYLOAD_SIZE
+            .checked_sub(output.len())
+            .and_then(|remaining| remaining.checked_sub(separator))
+            .ok_or_else(|| {
+                EngineError::ResourceLimit("selected text exceeds the 64 MiB output limit".into())
+            })?;
+        check_plain_text_budget(&text, remaining)?;
+        let text = text.plain_text();
+        if position > 0 {
+            output.push('\u{c}');
+        }
+        output.push_str(text.trim_end());
+    }
+    Ok(output)
+}
+
 pub fn render(
     data: &[u8],
     page: usize,
@@ -846,6 +950,33 @@ mod link_tests {
             }
         }
         text
+    }
+
+    #[test]
+    fn selective_plain_text_budget_preflights_utf8_glyphs_and_separators() {
+        let text = native_text(&[&["α"], &["😀"], &["z"]]);
+        assert!(check_plain_text_budget(&text, 9).is_ok());
+        assert_eq!(text.plain_text().len(), 9);
+        assert!(check_plain_text_budget(&text, 8).is_err());
+        let expanded = "α".repeat(2048);
+        let text = native_text(&[&[expanded.as_str()]]);
+        assert!(check_plain_text_budget(&text, 8).is_err());
+        assert!(check_plain_text_budget(&pdfcraft_render::PageText::default(), 0).is_ok());
+    }
+
+    #[test]
+    fn selective_page_counts_and_negative_indexes_are_bounded() {
+        assert!(check_selected_count(MAX_SELECTED_PAGES).is_ok());
+        assert!(check_selected_count(MAX_SELECTED_PAGES + 1).is_err());
+        assert!(check_selected_count(usize::MAX).is_err());
+        assert_eq!(selected_page(-1, 3).unwrap(), 2);
+        assert_eq!(selected_page(-3, 3).unwrap(), 0);
+        for index in [-4, 3, isize::MIN, isize::MAX] {
+            assert!(matches!(
+                selected_page(index, 3),
+                Err(EngineError::PageIndex(_))
+            ));
+        }
     }
 
     fn page_info() -> pdfcraft_render::PageInfo {
