@@ -10,3 +10,5 @@ target/
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
+.test_files/
+semantic-review/
