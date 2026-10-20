@@ -4,7 +4,7 @@
 
 This comparison groups related reference members under existing Python handles and formatting properties. It is not an exhaustive member inventory, implementation test, or format-conformance claim. Open XML schema/model APIs do not establish pagination or rendering. Reference products are not runtime dependencies.
 
-Audited local surface: `789ea8ce3222aab47315549f6b66ae5850cf6ec9`. The inventory contains 44 families and 195 representative members from 17 pinned source files. Later implementation changes require review.
+Audited local surface: `1e28d49b0f9c87403e66b78c23749e6fdb350b81`. The inventory contains 44 families and 195 representative members from 17 pinned source files. Later implementation changes require review.
 
 - [dotnet/Open-XML-SDK v3.5.1](https://github.com/dotnet/Open-XML-SDK/tree/3139fdfd27414548a41555f7848d5728f6e71a42) — `3139fdfd27414548a41555f7848d5728f6e71a42`
 - [pymupdf/PyMuPDF 2.0](https://github.com/pymupdf/PyMuPDF/tree/b8904b27efa0c4e2258f0e46ab4498a6173ffa22) — `b8904b27efa0c4e2258f0e46ab4498a6173ffa22`
@@ -81,11 +81,13 @@ Number definitions, levels and sequence starts.
 
 **Criteria / owners:** TXT5 (W04), E3 (W09)
 
-**Audited local surface:** Paragraph.set_list(kind,level,restart,start); extracted numbering metadata/native labels.
+**Audited local surface:** Paragraph.set_list(kind,level,restart,start) includes native nine-level decimal_outline in checked top-level body scope; extracted definitions and evaluated labels are tested separately.
 
-**Disposition:** `implemented_subset`. **Remaining:** Full custom level formats/templates/picture bullets not authorable. Header/footer nondefault starts have native fidelity failure; source templates truncate64characters.
+**Disposition:** `implemented_subset`. **Remaining:** Custom definitions/picture bullets, auxiliary/cell/multicolumn outline placement and broader counters remain open; source templates retain native 64-character truncation limits.
 
 **Upstream candidates:** [U02](upstream-roadmap.md)
+
+**Evidence profiles:** [word.decimal-outline](support-matrix.md#worddecimal-outline)
 
 ## REF-OX-TABLE-GRID
 
@@ -167,13 +169,13 @@ Headers, footers and page-specific linkage.
 
 **Criteria / owners:** LAY3 (W06), BG5 (W13)
 
-**Audited local surface:** Section.header/footer(default/first/even) reuse paragraphs, tables, rich cells and pictures; copies own independent parts and deleted pictures retain paragraph anchors..
+**Audited local surface:** Section.header/footer(default/first/even) reuse paragraphs/tables/pictures and owned clear(); copies retain independent parts, while missing/repeated clear is a true no-op.
 
-**Disposition:** `implemented_subset`. **Remaining:** Link-to-previous/unlink/clear and arbitrary block movement remain open. Inactive variants may lack measured cell geometry; oversized physical frames fail explicitly. Rich notes are separate.
+**Disposition:** `implemented_subset`. **Remaining:** Link-to-previous/unlink and arbitrary block movement remain open. Inactive variants may lack measured cell geometry; rich notes are separate.
 
 **Upstream candidates:** [U02](upstream-roadmap.md), [U04](upstream-roadmap.md)
 
-**Evidence profiles:** [word.rich-stories](support-matrix.md#wordrich-stories)
+**Evidence profiles:** [word.rich-stories](support-matrix.md#wordrich-stories), [word.story-clear](support-matrix.md#wordstory-clear)
 
 ## REF-OX-PAGE-FIELDS
 
@@ -213,11 +215,13 @@ Hyperlinks, bookmarks and cross-references.
 
 **Criteria / owners:** REF1 (W07), REF2 (W07), REF8 (W07), E4 (W09)
 
-**Audited local surface:** TextRange.link covers supported external URLs; imported source anchor metadata; PDF/slide navigation separate native profiles.
+**Audited local surface:** TextRange.link supports external URLs and internal links; whole-paragraph/endpoint body bookmark mapping reuses existing ranges, with checked horizontal nested-cell targets and tested PDF destinations.
 
-**Disposition:** `local_candidate`. **Remaining:** DOCX bookmark CRUD/internal links is a candidate over existing native anchors; must preserve paired IDs/offsets and marker-edit guards. Cross-reference evaluation is separate.
+**Disposition:** `implemented_subset`. **Remaining:** Interior/cross-paragraph/imported targets, non-body bookmark targets and general cross-reference evaluation remain unsupported or unassessed.
 
 **Upstream candidates:** [U02](upstream-roadmap.md), [U07](upstream-roadmap.md)
+
+**Evidence profiles:** [word.bookmark-navigation](support-matrix.md#wordbookmark-navigation)
 
 ## REF-OX-REFERENCES
 
@@ -427,11 +431,13 @@ PDF opening, creating, saving and serialization.
 
 **Criteria / owners:** API2 (W01), API3 (W01), DOC1 (W03), DOC2 (W03), DOC3 (W03), DOC4 (W03), PDF1 (W10), PKG7 (W03)
 
-**Audited local surface:** new/open/edit/copy/save/to_bytes/close; PDF-only existing-source edit profile.
+**Audited local surface:** new/open/edit/copy/save/to_bytes/close; PDF-only conservative source editing; object_streams selects native full-writer representation on serialization.
 
-**Disposition:** `implemented_subset`. **Remaining:** Incremental/encryption/repair/save profiles remain independent policy gaps; do not mirror numeric save flags.
+**Disposition:** `implemented_subset`. **Remaining:** Incremental/encryption/repair and broader preservation profiles remain independent gaps; representation selection does not expand imported editing.
 
 **Upstream candidates:** [U10](upstream-roadmap.md)
+
+**Evidence profiles:** [pdf.object-stream-output](support-matrix.md#pdfobject-stream-output)
 
 ## REF-PM-PAGE-ASSEMBLY
 
@@ -543,11 +549,13 @@ Text geometry, links, tables and source grounding.
 
 **Criteria / owners:** E1 (W09), E2 (W09), E4 (W09), P4 (W02), LAY8 (W06), REF8 (W07)
 
-**Audited local surface:** Owned normalized blocks/cells/links and source metadata; eager open plus selected extract_text.
+**Audited local surface:** Owned normalized blocks/cells/links and source metadata; eager open, selected extract_text and retained native PDF Page.search_for with bounded ordered rectangles.
 
-**Disposition:** `implemented_subset`. **Remaining:** Native PDF table detector is pub(crate); need bounded public detector+consumed mask. Exact automatic Office line slices/geometry remain bounded provenance gaps.
+**Disposition:** `implemented_subset`. **Remaining:** Native PDF table detector remains private. Exact Office line slices and broader provenance are open; search is not OCR, regex, visible-only matching or normalized-offset reconstruction.
 
 **Upstream candidates:** [U05](upstream-roadmap.md), [U10](upstream-roadmap.md)
+
+**Evidence profiles:** [pdf.native-search](support-matrix.md#pdfnative-search)
 
 ## REF-PM-MARKDOWN
 
@@ -633,11 +641,13 @@ Cleanup, encryption, incremental save and embedded files.
 
 **Criteria / owners:** PDF8 (W10), PKG1 (W03), PKG2 (W03), PKG5 (W03), PKG6 (W03), PKG7 (W03), PKG8 (W03), REV6 (W13)
 
-**Audited local surface:** Conservative PDF edit/save rejects unsupported preservation profiles.
+**Audited local surface:** PDF save/to_bytes select object streams or classic cross-reference full output; neither is a new conversion pair or archival profile.
 
-**Disposition:** `upstream_or_unassessed`. **Remaining:** Page FileAttachment creation is public; document EmbeddedFiles mutation remains private. Native strict caller-limited full-chain decoding exists; bounded complete attachment inventory, unambiguous identity and integrated bounded extraction remain upstream work. Arbitrary encryption/active-content/PDF-A/UA profiles are unassessed. No raw PDF object escape hatch.
+**Disposition:** `implemented_subset`. **Remaining:** General cleanup/compression and incremental/encrypted output remain unassessed. Page FileAttachment creation is public; document EmbeddedFiles mutation remains private. Native strict caller-limited full-chain decoding exists; bounded complete attachment inventory, unambiguous identity and integrated bounded extraction remain upstream work. Arbitrary encryption/active-content/PDF-A/UA profiles are unassessed. No raw PDF object escape hatch.
 
 **Upstream candidates:** [U10](upstream-roadmap.md)
+
+**Evidence profiles:** [pdf.object-stream-output](support-matrix.md#pdfobject-stream-output)
 
 ## REF-PM-OFFICE
 

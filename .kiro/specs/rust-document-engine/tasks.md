@@ -319,7 +319,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Preserve synthetic anchors, authored empty paragraphs, deleted-picture anchors and independent section/document copies.
 - [x] Share native placed-frame validation and disable editor-only story dimming for document PNG output.
 - [x] Verify the complete locked/native and clean installed-wheel corpus and record artifact evidence.
-- [ ] Retain header/footer linkage, clearing/general movement, rich notes and unmeasured inactive-variant geometry as broader open work.
+- [ ] Retain header/footer linkage, general movement, rich notes and unmeasured inactive-variant geometry as broader open work; owned clear is tracked separately below.
 
 
 ## Bounded native line numbering
@@ -460,3 +460,10 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete integrated locked native/release/installed-wheel validation (285 Rust / 409 Python).
 - [ ] Complete independent manual review/current-main CI.
 - [ ] Retain owned radio groups, imported forms and reply identity/appearance/lifecycle as separate existing PDF6/U10 gaps.
+
+
+## Incremental navigation, lifecycle and output evidence
+
+- [x] Add five scoped profiles with reviewed fingerprints and the exact complete a94a5ba artifact; preserve the seven-operation distinction and unsupported redaction evidence.
+- [x] Connect existing roadmap/reference families and remove stale claims that owned clear, bookmarks or native search are absent; do not close broader criteria or duplicate ownership.
+- [x] Validate generated guides, offline evidence checks and focused tests against the existing installed wheel; record the documentation-only result without claiming a new release artifact.
