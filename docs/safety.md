@@ -89,3 +89,10 @@ Applications should treat all extraction failures as file-local. Do not retry ma
 All public native detect/extract/render/convert entry points reject inputs over 128 MiB. Python path and binary-stream reads stop at that limit; bytearray/memoryview inputs are checked by byte size before copying. Caller-owned streams are not closed. The native JSON writer stops at 64 MiB during serialization, including escaped/UTF-8 bytes, instead of allocating the whole oversized result first. Allocation failure maps to a resource-limit error.
 
 This is not a streaming document parser or a total process-memory guarantee: upstream parsing/layout and owned models have separate limits and allocations. DOCX auxiliary traversal bounds parts, blocks/objects, text, referenced media and nested grids. Source examples in diagnostic notices are bounded independently from total occurrence counts. All existing archive and raster guards remain in force.
+
+
+## Owned PDF form appearance history
+
+The existing authoring input/generated-byte and mutation budgets include both appearance generations during owned text/checkbox/choice creation and every subsequent generated appearance. Repeated unchanged/empty text or choice values consume generated-byte and mutation budgets; canonical checkbox values reuse existing appearances and consume input/mutation budgets. The adapter measures known newly generated raw AP streams without decoding foreign appearances or scanning the document object store. Copies retain the counters, and deletion does not refund native-retained obsolete streams.
+
+These limits bound appearance-generation work/count and retained raw appearance bytes within the supported owned profile. They do not bound all PDF objects or total process memory, including native field inventories, clones, compression or serialized output allocation. Imported AcroForms, scripts and multiple widgets remain outside this profile.
