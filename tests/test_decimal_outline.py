@@ -203,7 +203,12 @@ class DecimalOutlineTests(unittest.TestCase):
                             self.assertGreater(len(points), 100)
                             extents.append((len(points), min(x for x, _ in points), max(x for x, _ in points),
                                             min(y for _, y in points), max(y for _, y in points)))
-                        self.assertEqual(extents[0], extents[1])
+                        self.assertEqual(len(source), len(exported))
+                        self.assertEqual(extents[0][1:], extents[1][1:])
+                        # Native source/PDF rasterizers can quantize grayscale coverage
+                        # one channel value apart (CI observed 128 versus 127). Compare
+                        # every channel instead of counts across that hard threshold.
+                        self.assertLessEqual(max(abs(a - b) for a, b in zip(source, exported)), 1)
                         if direction == "ltr":
                             self.assertLess(extents[0][1], 100 * dpi / 72)
                         else:
