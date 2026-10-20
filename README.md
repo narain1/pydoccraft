@@ -66,6 +66,13 @@ python -m unittest discover -s tests -v
 
 Release validation must install the built wheel into a clean environment and run the suite against that installed package. Tests generate their own fixtures and require no external document tools.
 
+## Community
+
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing changes.
+- Ask usage questions through [GitHub Discussions](https://github.com/narain1/pydoccraft/discussions) and report reproducible defects through [GitHub Issues](https://github.com/narain1/pydoccraft/issues).
+- Report vulnerabilities privately according to [SECURITY.md](SECURITY.md); never attach malicious or confidential documents to public issues.
+- Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md), with project decisions described in [GOVERNANCE.md](GOVERNANCE.md) and support expectations in [SUPPORT.md](SUPPORT.md).
+
 ## License
 
 `pydoccraft` is licensed under Apache-2.0. Distributions include [`LICENSE`](LICENSE), [`NOTICE`](NOTICE), and the wheel-compatible [`LICENSE-THIRD-PARTY`](LICENSE-THIRD-PARTY) copy of the audited [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md) inventory. Upstream dependency names identify their source and are not `pydoccraft` branding.

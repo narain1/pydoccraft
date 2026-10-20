@@ -23,7 +23,10 @@ classifiers = [
 
 [project.urls]
 Repository = "https://github.com/narain1/pydoccraft"
+Documentation = "https://github.com/narain1/pydoccraft/tree/main/docs"
 Issues = "https://github.com/narain1/pydoccraft/issues"
+Changelog = "https://github.com/narain1/pydoccraft/releases"
+Security = "https://github.com/narain1/pydoccraft/security/policy"
 
 [tool.maturin]
 include = [

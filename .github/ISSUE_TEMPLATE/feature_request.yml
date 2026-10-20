@@ -1,0 +1,40 @@
+name: Feature request
+description: Propose a focused API, format, safety, or compatibility improvement
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user need is not currently met?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the public behavior rather than an upstream reimplementation.
+    validations:
+      required: true
+  - type: dropdown
+    id: format
+    attributes:
+      label: Relevant format
+      options: [PDF, DOCX, PPTX, Cross-format, Not format-specific]
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and compatibility impact
+      description: Include workarounds, API compatibility, footprint, safety, and fidelity considerations.
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Project constraints
+      options:
+        - label: This can run in-process without external executables or runtime downloads.
+          required: true
+        - label: This does not require prohibited UI, CLI, networking, OCR-model, JavaScript, print, or signing components.
+          required: true
