@@ -703,6 +703,7 @@ impl<'a> Adapter<'a> {
     fn paragraph_segments(&self, paragraph: &Paragraph, pages: &[usize]) -> Vec<Segment> {
         let mut segments = vec![Segment::default()];
         let mut segment_index = 0;
+        let mut objects = paragraph.objects.iter();
         for (offset, character) in paragraph.text.char_indices() {
             if character == '\u{000c}' {
                 segments.push(Segment::default());
@@ -711,7 +712,7 @@ impl<'a> Adapter<'a> {
             }
             let props = paragraph.props_of_char(offset);
             if character == OBJ {
-                if let Some(object) = paragraph.object_at(offset) {
+                if let Some(object) = objects.next() {
                     match object {
                         InlineObject::CommentStart { id } | InlineObject::CommentEnd { id } => {
                             segments[segment_index]
@@ -719,7 +720,7 @@ impl<'a> Adapter<'a> {
                                 .push((*id, pages.get(segment_index).copied().unwrap_or(0)));
                         }
                         _ => {
-                            let text_offset = segments[segment_index].text.chars().count();
+                            let text_offset = segments[segment_index].char_count;
                             if let InlineObject::NoteRef { id, kind, custom } = object {
                                 segments[segment_index].story_refs.push(json!({"part_id": id, "kind": match kind { wordcraft_doc::para::NoteKind::Footnote => "footnote", wordcraft_doc::para::NoteKind::Endnote => "endnote" }, "offset": text_offset, "custom_mark": custom}));
                             }
@@ -828,12 +829,14 @@ impl<'a> Adapter<'a> {
 #[derive(Default)]
 struct Segment {
     text: String,
+    char_count: usize,
     links: Vec<LinkPayload>,
     images: Vec<ImagePayload>,
     comments: Vec<(u32, usize)>,
     story_refs: Vec<Value>,
     linked_uri: Option<String>,
     linked_start: usize,
+    linked_byte_start: usize,
 }
 
 impl Segment {
@@ -859,25 +862,22 @@ impl Segment {
         if self.linked_uri.as_deref() != link {
             self.finish_link();
             self.linked_uri = link.map(str::to_owned);
-            self.linked_start = self.text.chars().count();
+            self.linked_start = self.char_count;
+            self.linked_byte_start = self.text.len();
         }
         self.text.push(character);
+        self.char_count += 1;
     }
 
     fn finish_link(&mut self) {
         let Some(uri) = self.linked_uri.take() else {
             return;
         };
-        let end = self.text.chars().count();
+        let end = self.char_count;
         if end <= self.linked_start {
             return;
         }
-        let text = self
-            .text
-            .chars()
-            .skip(self.linked_start)
-            .take(end - self.linked_start)
-            .collect();
+        let text = self.text[self.linked_byte_start..].to_owned();
         self.links.push(LinkPayload {
             uri,
             text,
@@ -913,9 +913,10 @@ fn media_type(name: &str) -> &'static str {
 
 fn visible_text(paragraph: &Paragraph) -> String {
     let mut output = String::new();
-    for (offset, character) in paragraph.text.char_indices() {
+    let mut objects = paragraph.objects.iter();
+    for character in paragraph.text.chars() {
         if character == OBJ {
-            if let Some(object) = paragraph.object_at(offset) {
+            if let Some(object) = objects.next() {
                 output.push_str(object.plain_text());
             }
         } else {
@@ -939,5 +940,75 @@ fn docx_error(error: wordcraft_docx::DocxError) -> EngineError {
         | wordcraft_docx::DocxError::MissingPart(message)
         | wordcraft_docx::DocxError::Xml(message)
         | wordcraft_docx::DocxError::Encryption(message) => EngineError::Malformed(message),
+    }
+}
+
+#[cfg(test)]
+mod offset_tests {
+    use super::*;
+
+    #[test]
+    fn long_unicode_prefix_many_anchors_and_object_text_keep_exact_offsets() {
+        let prefix = "λ🙂ab".repeat(32768);
+        let prefix_chars = 4 * 32768;
+        let mut text = prefix.clone();
+        text.extend(std::iter::repeat_n(OBJ, 1003));
+        let mut paragraph = Paragraph::with_text(&prefix, Default::default());
+        // with_text intentionally strips structural markers; construct this public
+        // model fixture directly to avoid quadratic insert_object setup work.
+        paragraph.text = text;
+        paragraph.runs[0].len = paragraph.text.len();
+        paragraph.objects = (0..1000)
+            .map(|id| InlineObject::NoteRef {
+                id,
+                kind: wordcraft_doc::para::NoteKind::Footnote,
+                custom: String::new(),
+            })
+            .collect();
+        paragraph.objects.push(InlineObject::Equation {
+            linear: "é🙂".into(),
+            display: false,
+            math: Default::default(),
+        });
+        paragraph.objects.push(InlineObject::NoteRef {
+            id: 1000,
+            kind: wordcraft_doc::para::NoteKind::Endnote,
+            custom: String::new(),
+        });
+        // The last marker deliberately has no object: it must not panic or invent a reference.
+        let document = Document::new();
+        let layout = DocLayout::default();
+        let adapter = Adapter::new(&document, &layout);
+        let segments = adapter.paragraph_segments(&paragraph, &[0]);
+        assert_eq!(segments.len(), 1);
+        let segment = &segments[0];
+        assert_eq!(segment.char_count, prefix_chars + 2);
+        assert_eq!(segment.story_refs.len(), 1001);
+        assert_eq!(segment.story_refs[0]["offset"], prefix_chars);
+        assert_eq!(segment.story_refs[999]["offset"], prefix_chars);
+        assert_eq!(segment.story_refs[1000]["offset"], prefix_chars + 2);
+        assert_eq!(segment.text, format!("{prefix}é🙂"));
+        assert_eq!(visible_text(&paragraph), segment.text);
+    }
+
+    #[test]
+    fn unicode_link_labels_use_byte_boundaries_and_character_offsets() {
+        let mut segment = Segment::default();
+        segment.push_text(&"λ🙂ab".repeat(32768), None);
+        let mut offset = 4 * 32768;
+        for index in 0..1000 {
+            segment.push_text("é🙂", Some("https://example.com"));
+            segment.push_char(' ', None);
+            let link = &segment.links[index];
+            assert_eq!(link.text, "é🙂");
+            assert_eq!(link.metadata["start"], offset);
+            assert_eq!(link.metadata["end"], offset + 2);
+            offset += 3;
+        }
+        segment.push_text("終", Some("https://example.org"));
+        segment.finish_links();
+        assert_eq!(segment.links.last().unwrap().text, "終");
+        assert_eq!(segment.links.last().unwrap().metadata["start"], offset);
+        assert_eq!(segment.char_count, offset + 1);
     }
 }
