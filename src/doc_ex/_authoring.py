@@ -530,6 +530,63 @@ class WordDocument(EditableDocument):
     _format = "docx"
 
     @property
+    def metadata(self) -> dict:
+        """Owned core properties and a nested mapping of typed custom properties."""
+        return json.loads(self._call("metadata"))
+
+    def update_metadata(self, **values) -> None:
+        """Patch supported properties; None clears a field or custom entry."""
+        allowed = {"title", "author", "subject", "keywords", "description", "category",
+                   "last_modified_by", "created", "modified", "revision", "custom"}
+        if values.keys() - allowed:
+            raise ValueError("unsupported DOCX metadata key")
+
+        def bounded_string(value, limit):
+            if len(value) > limit or len(value.encode("utf-8")) > limit:
+                raise ValueError(f"metadata string exceeds {limit} UTF-8 bytes")
+
+        for key, value in values.items():
+            if value is None:
+                continue
+            if key == "revision":
+                if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 0xFFFFFFFF:
+                    raise ValueError("revision requires an unsigned 32-bit integer or None")
+            elif key == "custom":
+                if not isinstance(value, dict):
+                    raise TypeError("custom properties require a dictionary or None")
+                if len(value) > 1024:
+                    raise ValueError("custom properties exceed 1024 entries")
+                for name, item in value.items():
+                    if not isinstance(name, str):
+                        raise TypeError("custom property names must be strings")
+                    bounded_string(name, 255)
+                    if isinstance(item, str):
+                        bounded_string(item, 65536)
+                    elif item is None or isinstance(item, bool):
+                        pass
+                    elif isinstance(item, int):
+                        if not -(1 << 63) <= item < (1 << 63):
+                            raise ValueError("custom integers require signed 64-bit values")
+                    elif isinstance(item, float):
+                        if not math.isfinite(item):
+                            raise ValueError("custom floating-point values must be finite")
+                    else:
+                        raise TypeError("custom values require str, bool, int, float or None")
+            else:
+                if not isinstance(value, str):
+                    raise TypeError("core metadata values require strings or None")
+                bounded_string(value, 65536)
+        # Each scalar is bounded before encoding; stop before building an oversized patch.
+        chunks, used = [], 0
+        encoder = json.JSONEncoder(ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+        for chunk in encoder.iterencode(values):
+            used += len(chunk.encode("utf-8"))
+            if used > 256 * 1024:
+                raise ValueError("metadata update exceeds 256 KiB")
+            chunks.append(chunk)
+        self._call("update_metadata", "".join(chunks), _change=True)
+
+    @property
     def notes(self) -> Notes:
         return Notes(self)
 
