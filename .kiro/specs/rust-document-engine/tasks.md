@@ -151,3 +151,10 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [ ] Complete upstream transparency/background, decimal/bar-tab and other fidelity gaps separately; no silent approximation.
 
 - [x] Complete LAY9 warmed-cache repagination acceptance and audit merged TBL3/TBL5/STY4/PDF5 coverage; retain documented scope and remaining pagination fixtures.
+
+## Style relationships and document defaults
+
+- [x] Add native next/linked relations through existing Style handles with reciprocal updates and distinct inheritance rules.
+- [x] Add direct document defaults and bounded patches through Styles, preserving native resolution and validating affected geometry/tabs.
+- [x] Verify native DOCX roundtrip, visible inherited/default overrides, atomic failures and installed-wheel corpus; record artifact evidence (143 Rust, 157 installed-wheel Python tests).
+- [ ] Retain upstream automatic Enter-style/default-kind fallback gaps and remaining theme/import criteria without adding editor machinery.
