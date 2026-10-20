@@ -203,26 +203,12 @@ class DecimalOutlineTests(unittest.TestCase):
                             self.assertGreater(len(points), 100)
                             extents.append((len(points), min(x for x, _ in points), max(x for x, _ in points),
                                             min(y for _, y in points), max(y for _, y in points)))
-                        diagnostic = None
-                        if extents[0] != extents[1]:
-                            changed = []
-                            mask_changes = []
-                            maximum_delta = 0
-                            for index in range(0, len(source), 4):
-                                left, right = source[index:index + 4], exported[index:index + 4]
-                                if left == right:
-                                    continue
-                                point = (index // 4 % width, index // 4 // width)
-                                changed.append(point)
-                                maximum_delta = max(maximum_delta, *(abs(a - b) for a, b in zip(left, right)))
-                                if (max(left[:3]) < 128 and left[3] > 0) != (max(right[:3]) < 128 and right[3] > 0):
-                                    mask_changes.append((point, tuple(left), tuple(right)))
-                            diagnostic = {"dpi": dpi, "changed_pixels": len(changed),
-                                          "maximum_channel_delta": maximum_delta,
-                                          "changed_bounds": (min(x for x, _ in changed), max(x for x, _ in changed),
-                                                             min(y for _, y in changed), max(y for _, y in changed)),
-                                          "mask_changes": len(mask_changes), "mask_samples": mask_changes[:20]}
-                        self.assertEqual(extents[0], extents[1], diagnostic)
+                        self.assertEqual(len(source), len(exported))
+                        self.assertEqual(extents[0][1:], extents[1][1:])
+                        # Native source/PDF rasterizers can quantize grayscale coverage
+                        # one channel value apart (CI observed 128 versus 127). Compare
+                        # every channel instead of counts across that hard threshold.
+                        self.assertLessEqual(max(abs(a - b) for a, b in zip(source, exported)), 1)
                         if direction == "ltr":
                             self.assertLess(extents[0][1], 100 * dpi / 72)
                         else:
