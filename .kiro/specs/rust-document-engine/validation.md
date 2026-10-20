@@ -726,6 +726,13 @@ Independent exact-head CI then exposed a substantive native shaping defect: addi
 - Native ListKind::Legal remains responsible for all numbering and layout. No dependency, pin, license or conversion-matrix change. Complete integrated locked native/release/installed-wheel validation and independent review remain pending. TXT5 remains partial.
 
 
+## Native decimal outlines — complete local artifact
+
+- Runtime `bea5ea9` includes lazy matching of only referenced Legal numbering IDs, avoiding repeated full-definition matching for unused restart definitions. All 280 locked Rust tests and 393 clean installed-wheel Python tests pass, zero skips/failures/errors, with exact installed-byte matching. Formatting, all-targets warnings-denied Clippy, strict installed-package typing, roadmap/support/cached-reference checks and the unchanged 264-package license audit pass.
+- Linux x86_64 / CPython 3.11.2 wheel: 17,484,671 bytes; extension: 40,562,760; SHA-256 `12279825f40795d8ff4147c9af19ab3825e799384c997d3f10c7cc27569e0b02`; lock SHA-256 `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. Evidence: `dist/docx-decimal-outline/validation.json` and `/opt/docxdecimaloutlinetest`. No upstream revision, dependency or conversion-matrix change.
+- The corpus retains all-nine-level maximum-start LTR/RTL decoded label ink controls, source numbering identities, ordinary list compatibility, scope/geometry/budget refusal and recovery. This supersedes focused-only evidence for local acceptance. Independent review and exact-head/current-main CI remain required before manual merge; broader TXT5 custom definitions and cell/auxiliary placement remain open.
+
+
 ## Stable presentation callback targets — focused evidence
 
 - Reproduction against the reviewed release confirms slide background callbacks can reorder slides and paint the other slide. Distinct global shape IDs prevent wrong-shape corruption, but six shape mutation routes incorrectly retain the earlier slide ordinal and reject a surviving target. The correction performs initial identity validation and resolves the stable slide ID after argument normalization.

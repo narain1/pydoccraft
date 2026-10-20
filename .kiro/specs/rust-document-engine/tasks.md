@@ -422,7 +422,8 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reuse Legal numbering through existing paragraph list methods with full-level identity, starts/restarts and bounded continuation lookup.
 - [x] Gate top-level body/section scope and reuse shared native layout for bounded logical label geometry, malformed geometry and later output refusal/recovery.
 - [x] Verify isolated native/public hierarchy, nine-level maximum-start LTR/RTL ink, source/PDF output, copy/wrapping/callback and compatibility regressions.
-- [ ] Complete integrated locked native/release/installed-wheel validation and independent manual review/current-main CI.
+- [x] Complete integrated locked native/release/installed-wheel validation (280 Rust / 393 Python).
+- [ ] Complete independent manual review/current-main CI.
 - [ ] Keep broader custom list definitions, cell/auxiliary outline placement and TXT5 completion open.
 
 

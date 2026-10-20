@@ -6919,16 +6919,15 @@ fn outline_targets(document: &Document) -> PyResult<BTreeMap<usize, usize>> {
     if document.numbering.nums.len() > MAX_LISTS || document.numbering.abstracts.len() > MAX_LISTS {
         return Err(limit("document exceeds 10000 native list definitions"));
     }
-    let mut numbers = BTreeSet::new();
+    let numbers: BTreeSet<_> = document
+        .numbering
+        .nums
+        .iter()
+        .filter(|number| abstracts.contains(&number.abstract_id))
+        .map(|number| number.id)
+        .collect();
     let mut matching = 0;
-    for number in &document.numbering.nums {
-        if abstracts.contains(&number.abstract_id)
-            && supported_list_kind(document, number.id, &definitions, &mut matching)?
-                == Some("decimal_outline")
-        {
-            numbers.insert(number.id);
-        }
-    }
+    let mut matched = BTreeMap::new();
     if numbers.is_empty() {
         return Ok(BTreeMap::new());
     }
@@ -6956,6 +6955,18 @@ fn outline_targets(document: &Document) -> PyResult<BTreeMap<usize, usize>> {
                 continue;
             };
             if !numbers.contains(&reference.num) {
+                continue;
+            }
+            if let std::collections::btree_map::Entry::Vacant(entry) = matched.entry(reference.num)
+            {
+                entry.insert(supported_list_kind(
+                    document,
+                    reference.num,
+                    &definitions,
+                    &mut matching,
+                )?);
+            }
+            if matched[&reference.num] != Some("decimal_outline") {
                 continue;
             }
             if section.columns.count != 1
@@ -15596,6 +15607,19 @@ mod tests {
         assert_eq!(
             supported_list_kind(&overridden, num, &list_definitions(), &mut 0).unwrap(),
             None
+        );
+        let mut unused = native.clone();
+        let original = unused.numbering.nums[0].clone();
+        unused.numbering.nums = (1..=MAX_LISTS as u32)
+            .map(|id| wordcraft_doc::numbering::Num {
+                id,
+                ..original.clone()
+            })
+            .collect();
+        assert_eq!(
+            outline_targets(&unused).unwrap().len(),
+            1,
+            "unused restart IDs must not incur full matching work"
         );
         let mut altered = native.clone();
         altered.numbering.abstracts[0].levels[8].text = "%9)".into();
