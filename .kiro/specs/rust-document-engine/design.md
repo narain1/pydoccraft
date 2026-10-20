@@ -417,3 +417,8 @@ Pinned region_borders converts conditional edges into cell left/right values and
 field_payload adds the existing native Field.tooltip string, and one narrow set_field_tooltip operation sets FieldProps.tooltip on a cloned document. Empty input removes native TU. Full expected-field equality checks that value/default/options/flags/widget geometry and identity remain unchanged, then existing owned-field appearance inspection charges regenerated raw bytes. The conservative appearance reservation helper is shared with widget-box updates; tooltip metadata has its own bounded input charge and participates in the existing aggregate live text budget.
 
 The facade uses base str length/conversion/encoding operations and retains initial/final structural checks. No generic form-property patch language, new field container, imported-form reader or metadata renderer is introduced. Native metadata updates can allocate replacement appearances even when pixels remain identical; this is not a constant-allocation operation or secure removal promise.
+
+
+## Incremental navigation, lifecycle and output evidence
+
+Five additional profiles reuse the existing seven-operation ledger schema and generated support/reference guides. Existing roadmap ownership remains the sole source of owners and checkboxes. The new profiles cite the already validated a94a5ba runtime artifact; their reviewed test-file digests match that runtime exactly. This documentation join does not build or certify a new wheel. Bookmark source inventory, broad imported preservation, advanced output profiles and auxiliary numbering remain explicitly outside the corresponding tested scopes.
