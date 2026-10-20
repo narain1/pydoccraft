@@ -753,18 +753,7 @@ impl EditablePdf {
         }
         // Resource estimate only: the bounded native writer generates the appearance.
         // Reserve before staging; charge its actual raw bytes after generation, without decoding.
-        let text_bytes = expected
-            .value
-            .iter()
-            .chain(&expected.default)
-            .map(String::len)
-            .sum::<usize>()
-            + expected
-                .options
-                .iter()
-                .map(|(a, b)| a.len() + b.len())
-                .sum::<usize>();
-        self.validate_input(64 * 1024 + 16 * text_bytes)?;
+        self.validate_input(owned_field_appearance_peak(&expected))?;
         let mut edited = self.document()?.clone();
         pdfcraft_forms::set_props(
             &mut edited,
@@ -787,6 +776,44 @@ impl EditablePdf {
             .into());
         }
         let cost = owned_field_appearance_bytes(&edited, actual)?.saturating_add(32);
+        self.validate_input(cost)?;
+        self.document = Some(edited);
+        self.input_bytes += cost;
+        self.items += 1;
+        Ok(())
+    }
+
+    pub fn set_field_tooltip(&mut self, name: &str, tooltip: &str) -> PyResult<()> {
+        let mut expected = self.field_named(name)?;
+        validate_annotation_text(tooltip, 4096, "field tooltip")?;
+        // The native metadata setter also regenerates the owned appearance.
+        let metadata_cost = tooltip.len().saturating_mul(2).saturating_add(32);
+        self.validate_input(owned_field_appearance_peak(&expected).saturating_add(metadata_cost))?;
+        expected.tooltip = (!tooltip.is_empty()).then(|| tooltip.to_owned());
+        let mut edited = self.document()?.clone();
+        pdfcraft_forms::set_props(
+            &mut edited,
+            name,
+            &pdfcraft_forms::FieldProps {
+                tooltip: Some(tooltip.to_owned()),
+                ..Default::default()
+            },
+        )
+        .map_err(form_error)?;
+        let fields = checked_owned_fields(&edited)?;
+        let actual = fields
+            .iter()
+            .find(|field| field.name == name)
+            .ok_or_else(|| {
+                EngineError::Conversion("field is missing after its tooltip update".into())
+            })?;
+        if actual != &expected {
+            return Err(EngineError::Conversion(
+                "field tooltip update changed unrelated field properties".into(),
+            )
+            .into());
+        }
+        let cost = owned_field_appearance_bytes(&edited, actual)?.saturating_add(metadata_cost);
         self.validate_input(cost)?;
         self.document = Some(edited);
         self.input_bytes += cost;
@@ -2314,6 +2341,7 @@ impl EditablePdf {
         };
         Ok(json!({
             "name": field.name, "kind":kind, "value":value,
+            "tooltip": field.tooltip.as_deref().unwrap_or(""),
             "options": field.options.iter().map(|(export, _)| export).collect::<Vec<_>>(),
             "widgets":[{"page":page,"box":[rect[0],rect[1],rect[2]-rect[0],rect[3]-rect[1]]}],
             "font_size":12,
@@ -2868,6 +2896,22 @@ fn validate_value_fit(field: &pdfcraft_forms::Field, text: &str) -> PyResult<()>
     )
 }
 
+// Conservative peak reservation for the existing bounded, fixed-size owned appearance writer.
+fn owned_field_appearance_peak(field: &pdfcraft_forms::Field) -> usize {
+    let text_bytes = field
+        .value
+        .iter()
+        .chain(&field.default)
+        .map(String::len)
+        .sum::<usize>()
+        + field
+            .options
+            .iter()
+            .map(|(export, display)| export.len() + display.len())
+            .sum::<usize>();
+    64 * 1024 + 16 * text_bytes
+}
+
 // Only newly generated, owned single-widget appearances reach this helper. Never
 // traverse or decode arbitrary imported AP graphs; imports with forms stay unsupported.
 fn owned_field_appearance_bytes(
@@ -2948,6 +2992,10 @@ fn checked_owned_fields(document: &Document) -> PyResult<Vec<pdfcraft_forms::Fie
             }
         }
         bytes = bytes.saturating_add(field.name.len());
+        if let Some(tooltip) = &field.tooltip {
+            validate_annotation_text(tooltip, 4096, "field tooltip")?;
+            bytes = bytes.saturating_add(tooltip.len());
+        }
         let mut options = std::collections::HashSet::new();
         for (export, display) in &field.options {
             validate_field_text(display)?;
@@ -4652,6 +4700,215 @@ mod tests {
         assert_eq!(destination.page_count().unwrap(), 1);
         assert_eq!(destination.input_bytes, 0);
         assert_eq!(destination.items, 0);
+    }
+
+    fn tooltip_appearance_data(
+        document: &Document,
+        field: &pdfcraft_forms::Field,
+    ) -> Vec<(Vec<u8>, Vec<u8>)> {
+        use pdfcraft_cos::Object;
+        let widget = document.get(field.widgets[0].obj);
+        let ap = document.resolve(widget.as_dict().unwrap().get(b"AP").unwrap());
+        let normal = document.resolve(ap.as_dict().unwrap().get(b"N").unwrap());
+        match normal.as_ref() {
+            Object::Stream(stream) => vec![(vec![], stream.raw.to_vec())],
+            Object::Dict(states) => states
+                .iter()
+                .map(|(name, value)| {
+                    let value = document.resolve(value);
+                    let Object::Stream(stream) = value.as_ref() else {
+                        panic!("owned state appearance")
+                    };
+                    (name.clone(), stream.raw.to_vec())
+                })
+                .collect(),
+            _ => panic!("owned appearance"),
+        }
+    }
+
+    #[test]
+    fn field_tooltip_native_roundtrip_preserves_every_owned_kind_and_appearance() {
+        pyo3::prepare_freethreaded_python();
+        for (kind, options, value) in [
+            ("text", vec![], r#""Customer""#),
+            ("checkbox", vec![], "true"),
+            (
+                "choice",
+                vec!["Canada".into(), "France".into()],
+                r#""France""#,
+            ),
+        ] {
+            let mut document = EditablePdf::new(300.0, 300.0).unwrap();
+            document
+                .add_field(0, "field", kind, (20.0, 20.0, 180.0, 30.0), options)
+                .unwrap();
+            document.set_field_value("field", value).unwrap();
+            let original = document.field_named("field").unwrap();
+            let appearance = tooltip_appearance_data(document.document().unwrap(), &original);
+            let original_png =
+                crate::pdf::render(&document.to_bytes().unwrap(), 0, 144.0, None).unwrap();
+            let tooltip = "  Customer — 顧客\nHelp Ω  ";
+            let before_input = document.input_bytes;
+            document.set_field_tooltip("field", tooltip).unwrap();
+            let actual = document.field_named("field").unwrap();
+            let mut expected = original.clone();
+            expected.tooltip = Some(tooltip.into());
+            assert_eq!(actual, expected);
+            assert_eq!(
+                tooltip_appearance_data(document.document().unwrap(), &actual),
+                appearance
+            );
+            assert_eq!(
+                document.input_bytes - before_input,
+                owned_field_appearance_bytes(document.document().unwrap(), &actual).unwrap()
+                    + tooltip.len() * 2
+                    + 32
+            );
+            let saved = document.to_bytes().unwrap();
+            let parsed = Document::open(Arc::new(saved.clone())).unwrap();
+            let read = pdfcraft_forms::fields(&parsed);
+            assert_eq!(read.len(), 1);
+            assert_eq!(read[0].tooltip.as_deref(), Some(tooltip));
+            assert_eq!(read[0].value, original.value);
+            assert_eq!(read[0].flags, original.flags);
+            assert_eq!(read[0].options, original.options);
+            assert_eq!(
+                crate::pdf::render(&saved, 0, 144.0, None).unwrap(),
+                original_png
+            );
+            let mut copied = document.copy().unwrap();
+            copied.set_field_tooltip("field", "Copy").unwrap();
+            assert_eq!(
+                document.field_named("field").unwrap().tooltip.as_deref(),
+                Some(tooltip)
+            );
+            copied
+                .set_field_box("field", (40.0, 100.0, 200.0, 40.0))
+                .unwrap();
+            copied.set_field_value("field", value).unwrap();
+            assert_eq!(
+                copied.field_named("field").unwrap().tooltip.as_deref(),
+                Some("Copy")
+            );
+            document.set_field_tooltip("field", "").unwrap();
+            assert_eq!(document.field_named("field").unwrap(), original);
+            let field_object = document.document().unwrap().get(original.obj);
+            assert!(!field_object.as_dict().unwrap().contains(b"TU"));
+            assert_eq!(
+                crate::pdf::render(&document.to_bytes().unwrap(), 0, 144.0, None).unwrap(),
+                original_png
+            );
+            document.flatten_fields().unwrap();
+            assert_eq!(
+                crate::pdf::render(&document.to_bytes().unwrap(), 0, 144.0, None).unwrap(),
+                original_png
+            );
+        }
+    }
+
+    #[test]
+    fn field_tooltip_limits_and_mutation_budgets_are_atomic() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditablePdf::new(300.0, 300.0).unwrap();
+        document
+            .add_field(0, "field", "text", (20.0, 20.0, 180.0, 30.0), vec![])
+            .unwrap();
+        let limit = "é".repeat(2048);
+        document.set_field_tooltip("field", &limit).unwrap();
+        assert_eq!(
+            document.field_named("field").unwrap().tooltip.as_deref(),
+            Some(limit.as_str())
+        );
+        let before = document.to_bytes().unwrap();
+        let items = document.items;
+        let input = document.input_bytes;
+        for bad in [format!("{limit}x"), "bad\0tooltip".into()] {
+            assert!(document.set_field_tooltip("field", &bad).is_err());
+            assert_eq!(document.to_bytes().unwrap(), before);
+            assert_eq!((document.items, document.input_bytes), (items, input));
+        }
+        document.input_bytes = MAX_DOCUMENT_INPUT - 1;
+        assert!(document
+            .set_field_tooltip("field", "Change")
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit:"));
+        assert_eq!(document.to_bytes().unwrap(), before);
+        assert_eq!(document.input_bytes, MAX_DOCUMENT_INPUT - 1);
+        document.input_bytes = input;
+        document.items = MAX_ITEMS;
+        assert!(document
+            .set_field_tooltip("field", "Change")
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit:"));
+        assert_eq!(document.to_bytes().unwrap(), before);
+        assert_eq!(document.items, MAX_ITEMS);
+    }
+
+    #[test]
+    fn field_tooltip_aggregate_live_text_exact_limit_and_plus_one() {
+        use pdfcraft_cos::{Object, PdfString};
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditablePdf::new(300.0, 300.0).unwrap();
+        document
+            .add_field(0, "seed", "checkbox", (20.0, 20.0, 30.0, 30.0), vec![])
+            .unwrap();
+        let seed = document.field_named("seed").unwrap();
+        // Synthetic bounded owned graph: clone the native single-widget dictionary,
+        // share its existing native appearances, and give every field a distinct name.
+        // No imported form reaches the runtime's owned-only traversal.
+        let native = document.document.as_mut().unwrap();
+        let template = native.get(seed.obj).as_dict().unwrap().clone();
+        let page = pdfcraft_organize::pages(native).unwrap()[0].obj;
+        let root = native.root().unwrap();
+        let acroform = native
+            .get(root)
+            .as_dict()
+            .unwrap()
+            .reference(b"AcroForm")
+            .unwrap();
+        let mut remaining = MAX_FIELD_TEXT - MAX_FIELDS * 120;
+        let mut fields = Vec::new();
+        let mut last_name = String::new();
+        for index in 0..MAX_FIELDS {
+            let mut field = template.clone();
+            let name = format!("{index:04}{}", "n".repeat(116));
+            field.set(b"T".to_vec(), PdfString::text(&name));
+            let length = remaining.min(4096);
+            if length != 0 {
+                field.set(b"TU".to_vec(), PdfString::text(&"x".repeat(length)));
+            }
+            remaining -= length;
+            fields.push(Object::Ref(native.add(Object::Dict(field))));
+            last_name = name;
+        }
+        assert_eq!(remaining, 0);
+        native
+            .update_dict(acroform, |d| {
+                d.set(b"Fields".to_vec(), Object::Array(fields.clone()))
+            })
+            .unwrap();
+        native
+            .update_dict(page, |d| d.set(b"Annots".to_vec(), Object::Array(fields)))
+            .unwrap();
+        assert_eq!(checked_owned_fields(native).unwrap().len(), MAX_FIELDS);
+        let before = document.to_bytes().unwrap();
+        let (items, input) = (document.items, document.input_bytes);
+        let error = document.set_field_tooltip(&last_name, "x").unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("aggregate form text exceeds 4 MiB"));
+        assert_eq!(document.to_bytes().unwrap(), before);
+        assert_eq!((document.items, document.input_bytes), (items, input));
+        document
+            .set_field_tooltip(&format!("0000{}", "n".repeat(116)), "")
+            .unwrap();
+        document.set_field_tooltip(&last_name, "x").unwrap();
+        assert_eq!(
+            document.field_named(&last_name).unwrap().tooltip.as_deref(),
+            Some("x")
+        );
     }
 
     #[test]

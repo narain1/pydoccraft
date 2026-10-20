@@ -443,3 +443,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Retain raw-native source/readback/placed-rule/PNG/PDF repros and focused public atomicity/inheritance/cache/copy checks.
 - [ ] Complete integrated locked native/release/installed-wheel validation and independent manual review/current-main CI.
 - [ ] Keep native conditional-edge selection, patterned shading and full shared-edge conflict resolution under existing U02/TBL7.
+
+
+## Owned PDF field tooltip metadata
+
+- [x] Reuse native FieldProps.tooltip and existing field handles/payloads with strict bounded Unicode strings and empty clearing.
+- [x] Stage complete expected-field comparison and charge regenerated appearances plus tooltip bytes under existing budgets.
+- [x] Verify focused native/public roundtrip, all kinds/transformed pages, pixels/copy/resize/value/flatten and atomic limit/lifetime controls.
+- [ ] Complete integrated locked native/release/installed-wheel validation and independent manual review/current-main CI.
+- [ ] Retain owned radio groups, imported forms and reply identity/appearance/lifecycle as separate existing PDF6/U10 gaps.

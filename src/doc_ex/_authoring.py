@@ -1973,6 +1973,30 @@ class PdfField:
         self._owner._call("set_field_box", self._name, coordinates, _change=True)
 
     @property
+    def tooltip(self) -> str:
+        """Owned field help text; an empty string clears it without changing its value."""
+        return self._info()["tooltip"]
+
+    @tooltip.setter
+    def tooltip(self, value: str) -> None:
+        self._check()
+        if not isinstance(value, str):
+            raise TypeError("field tooltip must be a string")
+        if str.__len__(value) > 4096:
+            raise ValueError("field tooltip must not exceed 4096 UTF-8 bytes")
+        text = str.__str__(value)
+        try:
+            encoded = str.encode(text, "utf-8")
+        except UnicodeEncodeError:
+            raise ValueError("field tooltip must contain valid Unicode") from None
+        if len(encoded) > 4096:
+            raise ValueError("field tooltip must not exceed 4096 UTF-8 bytes")
+        if "\0" in text:
+            raise ValueError("field tooltip must not contain NUL")
+        self._check()
+        self._owner._call("set_field_tooltip", self._name, text, _change=True)
+
+    @property
     def value(self) -> str | bool | None:
         return self._info()["value"]
 

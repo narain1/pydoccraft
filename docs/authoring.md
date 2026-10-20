@@ -592,3 +592,10 @@ PDF page handles become stale after page organization. Drawing and page geometry
 
 
 Presentation slide and shape handles retain stable identities across reordering. Callback-capable argument normalization resolves the current slide position again before changing the target; a deleted shape/slide or closed presentation fails explicitly. Caller callback changes remain effective even when they invalidate the requested operation.
+
+
+### Owned PDF field help text
+
+`field.tooltip` reads or sets Unicode help metadata on an owned text, checkbox or choice field. It defaults to `""`; assigning `""` clears it, while `None` is invalid. Whitespace and newlines are preserved. Tooltips do not change painted field values or add text to the page, and visible output remains unchanged within the tested owned profile.
+
+Tooltips are limited to 4,096 UTF-8 bytes and reject NUL or malformed Unicode. They count toward the existing four MiB aggregate field-text budget. Native metadata updates regenerate the field appearance, so existing mutation and output limits still apply. Copies retain independent metadata; ordinary field structural invalidation rules remain. This does not enable imported forms, radio groups, arbitrary widget editing or viewer-independent tooltip display.
