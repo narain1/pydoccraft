@@ -16,7 +16,7 @@ use crate::EngineError;
 
 pub struct PdfSession {
     renderer: Mutex<PageRenderer>,
-    page_count: usize,
+    page_sizes: Vec<[f32; 2]>,
 }
 
 impl PdfSession {
@@ -108,18 +108,33 @@ impl PdfSession {
         Ok((
             Self {
                 renderer: Mutex::new(renderer),
-                page_count,
+                page_sizes: info
+                    .pages
+                    .iter()
+                    .map(|page| [page.width, page.height])
+                    .collect(),
             },
             payload,
         ))
     }
 
-    pub fn render(&self, page: usize, dpi: f64) -> Result<Vec<u8>, EngineError> {
+    pub fn render(
+        &self,
+        page: usize,
+        dpi: f64,
+        clip: Option<crate::rendering::Clip>,
+    ) -> Result<Vec<u8>, EngineError> {
         let mut renderer = self
             .renderer
             .lock()
             .map_err(|_| EngineError::Malformed("PDF render session is unavailable".into()))?;
-        render_with(&mut renderer, self.page_count, page, dpi)
+        render_with(
+            &mut renderer,
+            self.page_sizes.get(page).copied(),
+            page,
+            dpi,
+            clip,
+        )
     }
 
     pub fn stats(&self) -> Result<pdfcraft_render::RenderStats, EngineError> {
@@ -140,14 +155,29 @@ pub fn render(
     dpi: f64,
     password: Option<&str>,
 ) -> Result<Vec<u8>, EngineError> {
+    render_impl(data, page, dpi, password, None)
+}
+
+pub fn render_region(
+    data: &[u8],
+    page: usize,
+    dpi: f64,
+    password: Option<&str>,
+    clip: crate::rendering::Clip,
+) -> Result<Vec<u8>, EngineError> {
+    render_impl(data, page, dpi, password, Some(clip))
+}
+
+fn render_impl(
+    data: &[u8],
+    page: usize,
+    dpi: f64,
+    password: Option<&str>,
+    clip: Option<crate::rendering::Clip>,
+) -> Result<Vec<u8>, EngineError> {
     crate::rendering::validate_dpi(dpi)?;
     let bytes = Arc::new(data.to_vec());
     let info = inspect(bytes.clone(), password).map_err(open_error)?;
-    if page >= info.pages.len() {
-        return Err(EngineError::Unsupported(format!(
-            "page {page} does not exist"
-        )));
-    }
     let mut renderer = PageRenderer::new(
         bytes,
         RenderConfig {
@@ -156,25 +186,59 @@ pub fn render(
             ..Default::default()
         },
     );
-    render_with(&mut renderer, info.pages.len(), page, dpi)
+    render_with(
+        &mut renderer,
+        info.pages.get(page).map(|page| [page.width, page.height]),
+        page,
+        dpi,
+        clip,
+    )
 }
 
 fn render_with(
     renderer: &mut PageRenderer,
-    page_count: usize,
+    size: Option<[f32; 2]>,
     page: usize,
     dpi: f64,
+    clip: Option<crate::rendering::Clip>,
 ) -> Result<Vec<u8>, EngineError> {
     crate::rendering::validate_dpi(dpi)?;
-    if page >= page_count {
-        return Err(EngineError::Unsupported(format!(
-            "page {page} does not exist"
-        )));
-    }
+    let size =
+        size.ok_or_else(|| EngineError::Unsupported(format!("page {page} does not exist")))?;
+    let scale = (dpi / 72.0) as f32;
+    let region = clip
+        .map(|clip| {
+            let region = crate::rendering::RasterRegion::new(
+                clip,
+                [f64::from(size[0]), f64::from(size[1])],
+                f64::from(scale),
+                [
+                    f64::from(pdfcraft_render::device_pixels(size[0], scale)),
+                    f64::from(pdfcraft_render::device_pixels(size[1], scale)),
+                ],
+                4096,
+            )?;
+            // Tile offsets become f32 in the native renderer; do not silently round large integers.
+            if u64::from(region.x) + u64::from(region.width) > (1 << 24)
+                || u64::from(region.y) + u64::from(region.height) > (1 << 24)
+            {
+                return Err(EngineError::ResourceLimit(
+                    "PDF clip coordinates exceed exact native pixel precision".into(),
+                ));
+            }
+            Ok(region)
+        })
+        .transpose()?;
     let rendered = renderer.render(RenderRequest {
         page,
         kind: RequestKind::Pixels,
-        scale: (dpi / 72.0) as f32,
+        scale,
+        tile: region.map(|region| pdfcraft_render::Tile {
+            x: region.x,
+            y: region.y,
+            w: region.width,
+            h: region.height,
+        }),
         ..Default::default()
     });
     check_content_warnings(&rendered.warnings)?;
@@ -182,6 +246,9 @@ fn render_with(
         return Err(EngineError::ResourceLimit(format!(
             "PDF rendering failed: {e}"
         )));
+    }
+    if let Some(region) = region {
+        region.validate_result(rendered.width, rendered.height)?;
     }
     crate::rendering::encode_png(rendered.width, rendered.height, rendered.rgba.as_ref(), dpi)
 }
@@ -902,5 +969,30 @@ mod link_tests {
         ));
         assert!(page.links.is_empty());
         assert!(page.blocks.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod clipping_tests {
+    use super::*;
+
+    #[test]
+    fn native_region_renders_huge_pages_without_reducing_scale() {
+        let document = pdfcraft_create::blank(14400.0, 14400.0, 1).unwrap();
+        let bytes =
+            pdfcraft_cos::write_full(&document, &pdfcraft_cos::SaveOptions::default()).unwrap();
+        assert!(matches!(
+            render(&bytes, 0, 288.0, None),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        let png = render_region(&bytes, 0, 288.0, None, (100.0, 100.0, 8.0, 8.0)).unwrap();
+        let reader = png::Decoder::new(std::io::Cursor::new(png))
+            .read_info()
+            .unwrap();
+        assert_eq!((reader.info().width, reader.info().height), (32, 32));
+        assert!(matches!(
+            render_region(&bytes, 0, 288.0, None, (0.0, 0.0, 1024.25, 1.0)),
+            Err(EngineError::ResourceLimit(_))
+        ));
     }
 }

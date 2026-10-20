@@ -85,7 +85,7 @@ with doc_ex.open("slides.pptx") as document:
 | `document[index]` | `Page`; negative indexes are supported |
 | `document.load_page(index)` | `Page` |
 | `document.to_markdown()` | Markdown for all non-empty pages |
-| `document.render_page(index, dpi=144)` | Rendered page/slide as PNG `bytes` |
+| `document.render_page(index, dpi=144, *, clip=None)` | Rendered page/slide or selected region as PNG `bytes` |
 | `document.convert(output_format)` | Converted document `bytes` |
 | `document.close()` | Idempotently close the document |
 | `document.edit()` (unreleased) | Independent editable PDF; unsupported Office preservation profiles fail explicitly |
@@ -126,6 +126,7 @@ tables = page.find_tables()
 
 ```python
 png = page.get_pixmap(dpi=144)
+detail = page.get_pixmap(dpi=300, clip=(36, 36, 144, 72))
 ```
 
 The result is encoded PNG bytes, not a PyMuPDF `Pixmap` object. DPI must be finite and between 1 and 1200. PNG physical-resolution metadata records the requested DPI, rounded to integer pixels per meter. Rendering behavior and limits are described in [Formats and fidelity](formats.md) and [Safety](safety.md).

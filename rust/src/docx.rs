@@ -39,6 +39,26 @@ pub fn render(
     dpi: f64,
     password: Option<&str>,
 ) -> Result<Vec<u8>, EngineError> {
+    render_impl(data, page, dpi, password, None)
+}
+
+pub fn render_region(
+    data: &[u8],
+    page: usize,
+    dpi: f64,
+    password: Option<&str>,
+    clip: crate::rendering::Clip,
+) -> Result<Vec<u8>, EngineError> {
+    render_impl(data, page, dpi, password, Some(clip))
+}
+
+fn render_impl(
+    data: &[u8],
+    page: usize,
+    dpi: f64,
+    password: Option<&str>,
+    clip: Option<crate::rendering::Clip>,
+) -> Result<Vec<u8>, EngineError> {
     crate::rendering::validate_dpi(dpi)?;
     let document = read(data, password)?;
     let layout = wordcraft_layout::layout(
@@ -51,18 +71,48 @@ pub fn render(
         .get(page)
         .ok_or_else(|| EngineError::Unsupported(format!("page {page} does not exist")))?;
     let scale = (dpi / 72.0) as f32;
-    // Reject oversized requests before the upstream rasterizer allocates or clamps them.
-    crate::rendering::validate_size(
-        f64::from(page.w * scale),
-        f64::from(page.h * scale),
-        wordcraft_render::MAX_SIDE,
-    )?;
-    let rendered = wordcraft_render::render_page(
-        &document,
-        page,
-        scale,
-        &wordcraft_render::RenderOptions::default(),
-    );
+    let rendered = if let Some(clip) = clip {
+        let region = crate::rendering::RasterRegion::new(
+            clip,
+            [f64::from(page.w), f64::from(page.h)],
+            f64::from(scale),
+            [
+                f64::from((page.w * scale).ceil().max(1.0)),
+                f64::from((page.h.min(1e6) * scale).ceil().max(1.0)),
+            ],
+            wordcraft_render::MAX_SIDE,
+        )?;
+        let rendered = wordcraft_render::render_region(
+            &document,
+            page,
+            region.width,
+            region.height,
+            kurbo::Affine::new([
+                f64::from(scale),
+                0.0,
+                0.0,
+                f64::from(scale),
+                -f64::from(region.x),
+                -f64::from(region.y),
+            ]),
+            &wordcraft_render::RenderOptions::default(),
+        );
+        region.validate_result(rendered.width, rendered.height)?;
+        rendered
+    } else {
+        // Reject oversized requests before the upstream rasterizer allocates or clamps them.
+        crate::rendering::validate_size(
+            f64::from(page.w * scale),
+            f64::from(page.h * scale),
+            wordcraft_render::MAX_SIDE,
+        )?;
+        wordcraft_render::render_page(
+            &document,
+            page,
+            scale,
+            &wordcraft_render::RenderOptions::default(),
+        )
+    };
     crate::rendering::encode_png(rendered.width, rendered.height, &rendered.pixels, dpi)
 }
 
@@ -387,11 +437,15 @@ impl<'a> Adapter<'a> {
                     } else {
                         Vec::new()
                     };
-                    for (segment_index, mut segment) in self
-                        .paragraph_segments(paragraph, &pages)
-                        .into_iter()
-                        .enumerate()
-                    {
+                    let segments = self.paragraph_segments(paragraph, &pages);
+                    let segment_pages = page_number.map(|fallback| {
+                        self.paragraph_segment_pages(
+                            &path,
+                            &segments,
+                            pages.first().copied().unwrap_or(fallback),
+                        )
+                    });
+                    for (segment_index, mut segment) in segments.into_iter().enumerate() {
                         segment.set_source(&path.0, segment_index);
                         let mut payload = BlockPayload::paragraph(segment.text);
                         payload.style = paragraph.props.style.clone();
@@ -416,13 +470,7 @@ impl<'a> Adapter<'a> {
                                 .metadata
                                 .insert("story_refs".into(), json!(segment.story_refs));
                         }
-                        let page = page_number.and_then(|fallback| {
-                            pages
-                                .get(segment_index)
-                                .copied()
-                                .or_else(|| pages.last().copied())
-                                .or(Some(fallback))
-                        });
+                        let page = segment_pages.as_ref().map(|pages| pages[segment_index]);
                         for link in &mut payload.links {
                             link.page = page;
                         }
@@ -526,13 +574,9 @@ impl<'a> Adapter<'a> {
     fn add_paragraph(&mut self, paragraph: &Paragraph, path: &Path) {
         let page_indexes = self.paragraph_pages(path);
         let segments = self.paragraph_segments(paragraph, &page_indexes);
+        let segment_pages = self.paragraph_segment_pages(path, &segments, page_indexes[0]);
         for (segment_index, segment) in segments.into_iter().enumerate() {
-            let page_number = page_indexes
-                .get(segment_index)
-                .copied()
-                .or_else(|| page_indexes.last().copied())
-                .unwrap_or(0)
-                .min(self.pages.len() - 1);
+            let page_number = segment_pages[segment_index].min(self.pages.len() - 1);
             for (id, _) in &segment.comments {
                 self.comment_pages.entry(*id).or_insert(page_number);
             }
@@ -672,19 +716,14 @@ impl<'a> Adapter<'a> {
             path.push(index as u32);
             match block.as_ref() {
                 Block::Para(paragraph) => {
-                    let page_indexes = self.paragraph_pages(&Path(path.clone()));
-                    for (segment_index, mut segment) in self
-                        .paragraph_segments(paragraph, &page_indexes)
-                        .into_iter()
-                        .enumerate()
-                    {
+                    let native_path = Path(path.clone());
+                    let page_indexes = self.paragraph_pages(&native_path);
+                    let segments = self.paragraph_segments(paragraph, &page_indexes);
+                    let segment_pages =
+                        self.paragraph_segment_pages(&native_path, &segments, page_indexes[0]);
+                    for (segment_index, mut segment) in segments.into_iter().enumerate() {
                         segment.set_source(&path, segment_index);
-                        let page_number = page_indexes
-                            .get(segment_index)
-                            .copied()
-                            .or_else(|| page_indexes.last().copied())
-                            .unwrap_or(0)
-                            .min(self.pages.len() - 1);
+                        let page_number = segment_pages[segment_index].min(self.pages.len() - 1);
                         for (id, _) in segment.comments {
                             self.comment_pages.entry(id).or_insert(page_number);
                         }
@@ -726,6 +765,47 @@ impl<'a> Adapter<'a> {
             pages.push(0);
         }
         pages
+    }
+
+    fn paragraph_segment_pages(
+        &self,
+        path: &Path,
+        segments: &[Segment],
+        fallback: usize,
+    ) -> Vec<usize> {
+        let mut pages = vec![None; segments.len()];
+        // Native placed lines retain source byte ranges, including column/page breaks.
+        // Locate explicit segment starts directly; do not count columns or infer pagination.
+        // Binary-search segment starts per piece rather than rescanning every line per break.
+        if let Some(positions) = self.layout.index.get(&(StoryRef::Body, path.clone())) {
+            for (page, item) in positions {
+                let Some(wordcraft_layout::Placed::Lines { para, l0, l1, .. }) = self
+                    .layout
+                    .pages
+                    .get(*page)
+                    .and_then(|page| page.items.get(*item))
+                else {
+                    continue;
+                };
+                let Some(first) = para.lines.get(*l0) else {
+                    continue;
+                };
+                let Some(last) = l1.checked_sub(1).and_then(|index| para.lines.get(index)) else {
+                    continue;
+                };
+                let begin = segments.partition_point(|segment| segment.byte_start < first.start);
+                let end = segments.partition_point(|segment| segment.byte_start < last.stop);
+                if begin < end {
+                    for target in &mut pages[begin..end] {
+                        target.get_or_insert(*page);
+                    }
+                }
+            }
+        }
+        pages
+            .into_iter()
+            .map(|page| page.unwrap_or(fallback))
+            .collect()
     }
 
     fn table_page(&self, table: &Table, path: &Path) -> usize {
@@ -784,7 +864,7 @@ impl<'a> Adapter<'a> {
         for block in blocks {
             match block.as_ref() {
                 Block::Para(paragraph) => {
-                    let text = visible_text(paragraph).replace('\u{000c}', "\n");
+                    let text = visible_text(paragraph).replace(['\u{000c}', '\u{000e}'], "\n");
                     if !text.is_empty() {
                         values.push(text);
                     }
@@ -809,8 +889,11 @@ impl<'a> Adapter<'a> {
         let mut objects = paragraph.objects.iter();
         let mut runs = paragraph.run_ranges().peekable();
         for (offset, character) in paragraph.text.char_indices() {
-            if character == '\u{000c}' {
-                segments.push(Segment::default());
+            if matches!(character, '\u{000c}' | '\u{000e}') {
+                segments.push(Segment {
+                    byte_start: offset + character.len_utf8(),
+                    ..Segment::default()
+                });
                 segment_index += 1;
                 continue;
             }
@@ -935,6 +1018,7 @@ impl<'a> Adapter<'a> {
 
 #[derive(Default)]
 struct Segment {
+    byte_start: usize,
     text: String,
     char_count: usize,
     links: Vec<LinkPayload>,

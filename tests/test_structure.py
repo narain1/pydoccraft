@@ -168,6 +168,51 @@ class StructureTests(unittest.TestCase):
         self.assertEqual(document.to_markdown().count("images/shared.png"), 2)
         self.assertIn("images/shared.png", second.get_text("markdown"))
 
+    def test_cell_break_segments_share_owned_and_inventory_asset_pages(self) -> None:
+        # Source packages may contain cell page/column breaks even though the
+        # authoring profile deliberately rejects inserting them. We assert the
+        # two extraction views agree, not that WordCraft implements Word's cell
+        # break pagination rules.
+        with zipfile.ZipFile(io.BytesIO(docx_fixture())) as archive:
+            members = {name: archive.read(name) for name in archive.namelist()}
+        namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        root = ElementTree.fromstring(members["word/document.xml"])
+        drawing = ElementTree.tostring(root.find(".//w:drawing", namespace), encoding="unicode")
+        contents = '<w:r><w:t>' + 'filler ' * 700 + '</w:t></w:r>'
+        labels = ["AfterColumn", "AfterPage", "AfterSecondColumn"]
+        for kind, label in zip(("column", "page", "column"), labels):
+            contents += (f'<w:r><w:br w:type="{kind}"/></w:r>'
+                         f'<w:hyperlink r:id="link"><w:r><w:t>{label}</w:t></w:r></w:hyperlink>')
+        contents += '<w:r>' + drawing + '</w:r>'
+        body = '<w:tbl><w:tblGrid><w:gridCol w:w="5600"/></w:tblGrid><w:tr><w:tc><w:p>' + contents + '</w:p></w:tc></w:tr></w:tbl>'
+        body += '<w:sectPr><w:pgSz w:w="8000" w:h="6000"/><w:pgMar w:top="600" w:bottom="600" w:left="600" w:right="600"/><w:cols w:num="2" w:space="400"/></w:sectPr>'
+        with zipfile.ZipFile(io.BytesIO(structure_fixture(body))) as archive:
+            members["word/document.xml"] = archive.read("word/document.xml")
+            relationships = archive.read("word/_rels/document.xml.rels").decode()
+        # Retain the source fixture's image relationship as well as our links.
+        old_relationships = ElementTree.fromstring(members["word/_rels/document.xml.rels"])
+        image_relation = next(node for node in old_relationships if node.get("Type", "").endswith("/image"))
+        relationships = relationships.replace('</Relationships>', ElementTree.tostring(image_relation, encoding="unicode") + '</Relationships>')
+        members["word/_rels/document.xml.rels"] = relationships.encode()
+        with doc_ex.open(package(members)) as document:
+            self.assertGreater(document.page_count, 2)
+            table = next(table for page in document for table in page.find_tables())
+            blocks = table.cells[0][0].blocks
+            owned_links = [link for block in blocks for link in block.links]
+            inventory_links = [link for page in document for link in page.get_links()]
+            self.assertEqual([link.text for link in owned_links], labels)
+            self.assertEqual([(link.text, link.page, link.metadata) for link in owned_links],
+                             [(link.text, link.page, link.metadata) for link in inventory_links])
+            owned_images = [image for block in blocks for image in block.images]
+            inventory_images = [image for page in document for image in page.get_images()]
+            self.assertEqual(len(owned_images), 1)
+            self.assertEqual([(image.name, image.page, image.metadata) for image in owned_images],
+                             [(image.name, image.page, image.metadata) for image in inventory_images])
+            markdown = document.to_markdown()
+            for label in labels:
+                self.assertEqual(markdown.count(label), 1)
+            self.assertEqual(markdown.count(owned_images[0].name), 1)
+
     def test_excessive_docx_grid_is_rejected_before_markdown_allocation(self) -> None:
         body = '<w:tbl><w:tr><w:trPr><w:gridBefore w:val="4294967295"/></w:trPr><w:tc>' + paragraph("Text") + '</w:tc></w:tr></w:tbl>'
         with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "grid exceeds 63"):
