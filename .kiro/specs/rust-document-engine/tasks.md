@@ -231,3 +231,10 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Project resolved PPTX internal slide targets through existing links and omission diagnostics, retaining text/table/group provenance.
 - [x] Validate both slices in the complete locked installed-wheel corpus and record artifact evidence.
 - [ ] Retain broader E3/TXT5 list authoring, native reader preservation and pre-import slide-count gaps until their acceptance cases are complete.
+
+## List starting values and source presentation limits
+
+- [ ] Extend existing native list membership with independent starting values and explicit header/footer fidelity errors.
+- [ ] Reject excessive source slide references before native import, covering alternate content without another OOXML resolver.
+- [ ] Validate native/read/render/export, malformed/bounded input and full installed-wheel regressions; record artifact and reviewed dependency evidence.
+- [ ] Retain custom-level numbering, header/footer counter fidelity and general upstream allocation/reporting gaps.

@@ -16,7 +16,7 @@ pub fn read(data: &[u8]) -> Result<Presentation, EngineError> {
     if deckcraft_pptx::is_encrypted(data) {
         return Err(EngineError::Encrypted);
     }
-    crate::ooxml::preflight(data)?;
+    crate::ooxml::preflight_pptx(data)?;
     let presentation = deckcraft_pptx::import(data).map_err(pptx_error)?;
     if presentation.slides.is_empty() {
         return Err(EngineError::Malformed(

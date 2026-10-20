@@ -791,9 +791,17 @@ class Paragraph:
         """The direct list kind/level, or None for an ordinary paragraph."""
         return self._owner._call("paragraph_list", self._id)
 
-    def set_list(self, kind: str | None = None, *, level: int = 0, restart: bool = False):
-        """Set bullet/numbered list membership; None removes it."""
-        self._owner._call("set_paragraph_list", self._id, kind, operator.index(level), restart, _change=True)
+    def set_list(self, kind: str | None = None, *, level: int = 0, restart: bool = False,
+                 start: int | None = None):
+        """Set list membership; start creates a new top-level numbered sequence."""
+        level = operator.index(level)
+        if start is not None:
+            if isinstance(start, bool):
+                raise TypeError("list start must be an integer, not a boolean")
+            start = operator.index(start)
+            if not 1 <= start <= 32767:
+                raise ValueError("list start must be between 1 and 32767")
+        self._owner._call("set_paragraph_list", self._id, kind, level, restart, start, _change=True)
 
     @property
     def page_break_before(self):
