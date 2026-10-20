@@ -379,3 +379,17 @@ EPUB 2/3 extraction and append-only EPUB 3 creation are authorized through the d
 1. Existing factory/context/copy chains SHALL retain their concrete successful owner types. Common creation, cell merge, page import, bookmark and annotation methods SHALL describe their returned handles. Page, editable PDF page and slide get_text overloads SHALL distinguish string modes from dictionary output, retaining a union for dynamic mode strings. Runtime arguments, defaults, exports and native behavior SHALL remain unchanged.
 2. Existing Paragraph, EditableTable and Style representations SHALL use bounded stored identity and owner closed state without resolving native content, copying text or suppressing unexpected errors. Private paragraph subclasses without a DOCX identifier SHALL remain representable after invalidation and closure.
 3. A pinned development-only static consumer SHALL verify representative public chains against the installed wheel, including table indexing and PPTX cell paragraphs. Runtime tests SHALL verify large/stale/closed representations. This selected consumer gate SHALL NOT claim full-package strict typing or completion of broader API3 discoverability.
+
+
+## 49. Bounded operation evidence ledger
+
+1. One development ledger SHALL associate bounded format profiles with explicit read/create/edit-authored/edit-imported/preserve/render/export statuses. Supported cells SHALL cite scope, exact test selectors, fixture provenance, native public symbols at pinned revisions and a named historical artifact. Upstream-blocked cells SHALL cite a concrete upstream register entry and native constraint; unsupported and unassessed SHALL remain distinct.
+2. Every existing roadmap ID SHALL join to profiles or an explicit remaining audit statement. Ownership, role and acceptance checkboxes SHALL come from existing roadmap files, without duplicating a capability database or treating a checked criterion as support for all operations. Recipes/gates without an audited profile SHALL remain unassessed rather than receiving invented format verdicts.
+3. An offline standard-library checker SHALL validate coverage joins, references, native pins, evidence fingerprints, selector existence, artifact-section hashes and exact generated output. It SHALL NOT infer semantic correctness, refresh historical evidence, add runtime capability APIs or claim complete Open XML/PyMuPDF parity. The initial seven-profile inventory SHALL retain broader API1/API7/QA1/QA8 work as open.
+
+
+## 50. Pinned reference-family discovery
+
+1. A development inventory SHALL group representative Open XML SDK and PyMuPDF members into existing feature families, with immutable source URLs, digests, line references and explicit local/remaining scope. It SHALL distinguish reference capabilities from tested local behavior, separate core and Office products, and avoid uniqueness or exhaustive-parity claims.
+2. Family mappings SHALL reference existing roadmap IDs, upstream candidates and evidence profiles. Owner and reverse criterion joins SHALL be derived from existing data rather than maintained twice. No reference SDK/application/runtime dependency or corresponding public class-per-member hierarchy SHALL be introduced.
+3. Offline checks SHALL reject unknown/duplicate mappings, floating or mismatched snapshot URLs, invalid source extents and stale generated output. Optional explicit cached-source validation SHALL check exact hashes and member lines without downloads. Full member dispositions and behavioral parity SHALL remain open.

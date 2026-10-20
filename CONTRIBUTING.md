@@ -73,3 +73,10 @@ Maintainers may ask for a smaller change or an upstream contribution when behavi
 ## Contribution license
 
 Unless explicitly stated otherwise, contributions intentionally submitted to this repository are provided under Apache License 2.0, consistent with section 5 of that license. Do not submit material you do not have the right to contribute.
+
+
+## Roadmap evidence
+
+Keep ownership/dependencies in `docs/roadmap-workstreams.json`, acceptance criteria in `TODO.md`, and bounded operation evidence in `docs/support-ledger.json`. The [generated matrix](docs/support-matrix.md) joins those sources. Run `python tools/support_matrix.py` to check references and generated consistency, or add `--write` to regenerate after reviewed edits. A changed fixture digest requires reviewing its assertions and artifact scope; the checker cannot establish document correctness or promote historical results to current implementation evidence.
+
+Keep comparison-family mappings in `docs/reference-api-inventory.json`, separate from tested operation statuses. Run `python tools/reference_inventory.py` (or `--write`) for its generated guide. To recheck downloaded primary-source bytes and cited member lines without network access, provide `--source-root` with the cache organized as `<snapshot-id>/<repository-path>`. The committed inventory records pinned URLs and hashes, not downloaded comparison libraries.
