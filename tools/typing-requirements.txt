@@ -1,0 +1,5 @@
+# Development-only consumer validation; never a package runtime requirement.
+mypy==1.18.2
+mypy-extensions==1.1.0
+pathspec==1.1.1
+typing-extensions==4.16.0

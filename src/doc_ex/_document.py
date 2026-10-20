@@ -4,10 +4,13 @@ import hashlib
 import json
 import math
 from numbers import Real
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Literal, TYPE_CHECKING, overload
 
 from .errors import DocumentClosedError, MalformedDocumentError, UnsafeArchiveError
 from .models import Block, Image, Link, Story, Table
+
+if TYPE_CHECKING:
+    from ._authoring import PdfDocument
 
 
 _MAX_EXPORT_BYTES = 128 * 1024 * 1024
@@ -152,7 +155,17 @@ class Page:
             raise ValueError("page is not attached to a document")
         return self._document.render_page(self.number, dpi, clip=clip)
 
+    @overload
+    def get_text(self, option: Literal["text", "markdown", "json"] = "text") -> str: ...
+
+    @overload
+    def get_text(self, option: Literal["dict"]) -> dict[str, Any]: ...
+
+    @overload
+    def get_text(self, option: str) -> str | dict[str, Any]: ...
+
     def get_text(self, option: str = "text") -> str | dict[str, Any]:
+        """Return text, Markdown or JSON as a string; dict returns normalized content data."""
         if option == "text":
             parts: list[str] = []
             for block in self.blocks:
@@ -406,7 +419,7 @@ class Document:
         from . import convert
         return convert(self._source, output_format, filetype=self._filetype, password=self._password)
 
-    def edit(self):
+    def edit(self) -> PdfDocument:
         """Create an independent editable native PDF; unsupported preservation fails."""
         self._ensure_open()
         from . import _core, _native

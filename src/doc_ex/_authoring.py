@@ -4,16 +4,26 @@ from __future__ import annotations
 import json
 import math
 import operator
+import reprlib
 import os
 import stat
 import tempfile
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from numbers import Real
 from pathlib import Path
-from typing import BinaryIO, Generic, Literal, TypeVar, TypedDict, Unpack, overload
+from typing import Any, BinaryIO, Generic, Literal, Self, SupportsIndex, TYPE_CHECKING, TypeVar, TypedDict, Unpack, overload
 
 from . import _core
 from .errors import DocumentClosedError, UnsupportedFormatError
+
+if TYPE_CHECKING:
+    from ._document import Document
+
+_Source = str | os.PathLike[str] | bytes | bytearray | memoryview | BinaryIO
+_Size = str | tuple[float, float] | list[float]
+_Box = tuple[float, float, float, float] | list[float]
+_Color = str | tuple[int, int, int] | list[int]
+_Rows = SupportsIndex | Iterable[Iterable[str]]
 
 
 
@@ -354,19 +364,19 @@ def _rows(rows, columns: int | None = None) -> list[list[str]]:
 
 
 @overload
-def new(filetype: Literal["docx", "word"], *, size=None) -> WordDocument: ...
+def new(filetype: Literal["docx", "word"], *, size: _Size | None = None) -> WordDocument: ...
 
 @overload
-def new(filetype: Literal["pdf"], *, size=None) -> PdfDocument: ...
+def new(filetype: Literal["pdf"], *, size: _Size | None = None) -> PdfDocument: ...
 
 @overload
-def new(filetype: Literal["pptx", "powerpoint"], *, size=None) -> Presentation: ...
+def new(filetype: Literal["pptx", "powerpoint"], *, size: _Size | None = None) -> Presentation: ...
 
 @overload
-def new(filetype: str, *, size=None) -> EditableDocument: ...
+def new(filetype: str, *, size: _Size | None = None) -> EditableDocument: ...
 
 
-def new(filetype: str, *, size=None) -> EditableDocument:
+def new(filetype: str, *, size: _Size | None = None) -> EditableDocument:
     """Create a native DOCX, PDF or PPTX document; dimensions use points."""
     from . import _native
     kind = filetype.lower().lstrip(".")
@@ -474,7 +484,7 @@ class EditableDocument:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
 
-    def copy(self) -> EditableDocument:
+    def copy(self) -> Self:
         """Return an independent native model; child handles retain their own owner."""
         return type(self)(self._call("copy"))
 
@@ -494,11 +504,11 @@ class EditableDocument:
             self._invalidate()
             self._closed = True
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         self._ensure_open()
         return self
 
-    def __exit__(self, *_):
+    def __exit__(self, *_: object) -> None:
         self.close()
 
     def __repr__(self):
@@ -512,7 +522,7 @@ class _Collection(Sequence[_Item], Generic[_Item]):
     def __init__(self, owner, ids, factory):
         self._owner, self._ids, self._factory = owner, ids, factory
 
-    def __len__(self):
+    def __len__(self) -> int:
         self._owner._ensure_open()
         return len(self._ids())
 
@@ -646,6 +656,7 @@ class WordDocument(EditableDocument):
         self._call("set_background_image", data, _change=True)
 
     def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
+        """Append a paragraph with an optional named style and return its editable handle."""
         style = _style_reference(style, self)
         if style is None:
             identifier = self._call("add_paragraph", text, _change=True)
@@ -657,14 +668,16 @@ class WordDocument(EditableDocument):
             identifier = self._atomic(append)
         return Paragraph(self, identifier)
 
-    def add_page_break(self):
+    def add_page_break(self) -> Paragraph:
         """Start a new layout page with an explicit native paragraph break."""
         return Paragraph(self, self._call("add_page_break", _change=True))
 
-    def add_table(self, rows, *, columns: int | None = None) -> EditableTable:
+    def add_table(self, rows: _Rows, *, columns: SupportsIndex | None = None) -> EditableTable:
+        """Append a table from string rows, or row count plus columns; return its handle."""
         return EditableTable(self, self._call("add_table", _rows(rows, columns), _change=True))
 
-    def add_image(self, source, *, width=None, height=None, alt: str = ""):
+    def add_image(self, source: _Source, *, width: float | None = None, height: float | None = None, alt: str = "") -> Picture:
+        """Append an inline PNG and return its handle; size is in points, aspect preserved if one dimension is omitted."""
         from . import _read
         data, _ = _read(source)
         identifier = self._call("add_image", data, None if width is None else pt(width), None if height is None else pt(height), alt, _change=True)
@@ -781,8 +794,8 @@ class Style:
             raise ValueError("region must be a supported table-style region name or None")
         self._owner._call("format_style", self._id, _style_format_patch(formatting), region, _change=True)
 
-    def __repr__(self):
-        return f"Style(id={self.id!r}, name={self.name!r}, kind={self.kind!r})"
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}(id={reprlib.repr(self._id)}, closed={self._owner.closed})"
 
 
 class Paragraph:
@@ -868,6 +881,7 @@ class Paragraph:
         self._owner._call("format_paragraph", self._id, _format_patch(formatting), _change=True)
 
     def add_run(self, text: str, **formatting: Unpack[CharacterFormatting]) -> TextRange:
+        """Append formatted characters and return their revision-bound range; omitted properties inherit."""
         start, end, revision = self._owner._call("add_run_patch", self._id, text, _format_patch(formatting), _change=True)
         return TextRange(self, start, end, revision)
 
@@ -899,8 +913,11 @@ class Paragraph:
         """Atomically replace literal matches, preserving surrounding formatting."""
         return _replace_text(self, old, new)
 
-    def __repr__(self):
-        return f"Paragraph(text={self.text!r})"
+    def __repr__(self) -> str:
+        # Identity only: native reads can fail on stale/closed handles or copy large text.
+        identifier = self.__dict__.get("_id")
+        identity = "" if identifier is None else f"id={identifier!r}, "
+        return f"{type(self).__name__}({identity}closed={self._owner.closed})"
 
 
 class TextRange:
@@ -1215,6 +1232,7 @@ class EditableStory:
         return _Collection(self._owner, identifiers, Paragraph)
 
     def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
+        """Append a paragraph with an optional named style and return its editable handle."""
         style = _style_reference(style, self._owner)
         def append(native):
             story = self._ensure_identifier(native)
@@ -1372,9 +1390,8 @@ class EditableTable:
             return [EditableCell(self, row, column) for column in range(len(rows[row]))[column_key]]
         return EditableCell(self, row, _index(column_key, len(rows[row])))
 
-    def __repr__(self):
-        rows = self.rows
-        return f"EditableTable(rows={len(rows)}, columns={len(rows[0]) if rows else 0})"
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}(id={self._id!r}, closed={self._owner.closed})"
 
     def _word_id(self):
         if self._slide is not None:
@@ -1426,7 +1443,8 @@ class EditableTable:
         """Access native row layout properties without copying its cells."""
         return EditableRow(self, _index(index, len(self.rows)))
 
-    def merge(self, first: tuple[int, int], last: tuple[int, int]):
+    def merge(self, first: tuple[int, int], last: tuple[int, int]) -> EditableCell:
+        """Merge an inclusive rectangular range and return its anchor cell."""
         start = self[first]
         end = self[last]
         self._owner._call("merge_cells", *self._args, start._row, start._column, end._row, end._column, _change=True)
@@ -1574,6 +1592,7 @@ class EditableCell:
         return Pictures(owner, lambda: owner._call("cell_image_ids", *self._content_args()))
 
     def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
+        """Append a cell paragraph; named styles are available only in DOCX."""
         if self._table._slide is not None:
             self._check()
             if style is not None:
@@ -1589,11 +1608,13 @@ class EditableCell:
             return identifier
         return Paragraph(self._table._owner, self._table._owner._atomic(append))
 
-    def add_table(self, rows, *, columns: int | None = None):
+    def add_table(self, rows: _Rows, *, columns: SupportsIndex | None = None) -> EditableTable:
+        """Append a nested DOCX table from string rows or row/column counts."""
         owner = self._table._owner
         return EditableTable(owner, owner._call("cell_add_table", *self._content_args(), _rows(rows, columns), _change=True))
 
-    def add_image(self, source, *, width=None, height=None, alt: str = ""):
+    def add_image(self, source: _Source, *, width: float | None = None, height: float | None = None, alt: str = "") -> Picture:
+        """Append an inline PNG and return its handle; size is in points, aspect preserved if one dimension is omitted."""
         from . import _read
         data, _ = _read(source)
         owner = self._table._owner
@@ -1694,7 +1715,8 @@ class PdfDocument(EditableDocument):
     def pages(self) -> PdfPages:
         return PdfPages(self)
 
-    def copy(self, *, pages=None):
+    def copy(self, *, pages: Iterable[SupportsIndex] | None = None) -> Self:
+        """Copy independently, optionally selecting ordered pages with duplicates and negative indexes."""
         if pages is None:
             return super().copy()
         from . import _selected_pages
@@ -1720,7 +1742,7 @@ class PdfFields:
     def _items(self):
         return json.loads(self._owner._call("fields", self._page_number()))
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._items())
 
     def __iter__(self) -> Iterator[PdfField]:
@@ -1855,7 +1877,8 @@ class Bookmarks(_Collection["Bookmark"]):
         if self._parent is not None:
             self._parent._check()
 
-    def add(self, title: str, page: int, *, index: int | None = None):
+    def add(self, title: str, page: int, *, index: int | None = None) -> Bookmark:
+        """Insert an outline entry targeting a zero-based page and return its handle."""
         self._check()
         page = _index(page, self._owner.page_count)
         if index is not None:
@@ -1875,7 +1898,8 @@ class Bookmarks(_Collection["Bookmark"]):
         if self._parent is not None:
             self._parent._generation = self._owner._bookmark_generation
 
-    def move(self, index: int, destination: int, *, to=None):
+    def move(self, index: int, destination: int, *, to: Bookmarks | None = None) -> Bookmark:
+        """Move an entry within this document and return a fresh handle."""
         bookmark = self[index]
         target = self if to is None else to
         if not isinstance(target, Bookmarks) or target._owner is not self._owner:
@@ -1950,7 +1974,8 @@ class PdfPages(_Collection["PdfPage"]):
     def __init__(self, owner):
         super().__init__(owner, lambda: range(owner.page_count), PdfPage)
 
-    def add(self, *, size="Letter"):
+    def add(self, *, size: _Size = "Letter") -> PdfPage:
+        """Append a blank page; dimensions use points or a named paper size."""
         identifier = self._owner._call("add_page", *_size(size), _change=True)
         return PdfPage(self._owner, identifier)
 
@@ -1958,12 +1983,12 @@ class PdfPages(_Collection["PdfPage"]):
         self._owner._call("delete_page", _index(index, len(self)), _change=True)
         self._owner._page_generation += 1
 
-    def move(self, index: int, destination: int):
+    def move(self, index: int, destination: int) -> None:
         self._owner._call("move_page", _index(index, len(self)), _index(destination, len(self)), _change=True)
         self._owner._page_generation += 1
 
-    def insert(self, index: int, source, *, pages=None, password: str | None = None, outline_title: str | None = None):
-        """Import selected pages using the upstream resource-remapping operation."""
+    def insert(self, index: int, source: _Source | EditableDocument | Document, *, pages: Iterable[SupportsIndex] | None = None, password: str | None = None, outline_title: str | None = None) -> list[PdfPage]:
+        """Import ordered PDF pages and return fresh handles; organization invalidates prior page handles."""
         from . import _read, _selected_pages
         self._owner._ensure_open()
         generation, page_count = self._owner._page_generation, self._owner.page_count
@@ -2143,7 +2168,17 @@ class PdfPage:
         self._check()
         return self._owner.render_page(self._id, dpi, clip=clip)
 
-    def get_text(self, option: str = "text"):
+    @overload
+    def get_text(self, option: Literal["text", "markdown", "json"] = "text") -> str: ...
+
+    @overload
+    def get_text(self, option: Literal["dict"]) -> dict[str, Any]: ...
+
+    @overload
+    def get_text(self, option: str) -> str | dict[str, Any]: ...
+
+    def get_text(self, option: str = "text") -> str | dict[str, Any]:
+        """Extract text, Markdown, JSON, or an owned dict from the current native snapshot."""
         self._check()
         return self._owner._snapshot()[self._id].get_text(option)
 
@@ -2165,12 +2200,14 @@ class Annotations(_Collection["Annotation"]):
             return [value["index"] for value in json.loads(page._owner._call("annotations", page.number))]
         super().__init__(page._owner, identifiers, lambda owner, identifier: Annotation(page, identifier))
 
-    def add(self, kind: str, *, box, text: str = "", author: str = "", color="#FFD200"):
+    def add(self, kind: str, *, box: _Box, text: str = "", author: str = "", color: _Color = "#FFD200") -> Annotation:
+        """Add a supported annotation in a top-left (x, y, width, height) point box."""
         self._page._check()
         identifier = self._owner._call("add_annotation", self._page.number, kind, _annotation_rect(box), text, author, _color(color), _change=True)
         return Annotation(self._page, identifier)
 
-    def add_link(self, *, box, uri: str | None = None, page: int | None = None):
+    def add_link(self, *, box: _Box, uri: str | None = None, page: int | None = None) -> Annotation:
+        """Add a URL or zero-based page link in a top-left point box."""
         self._page._check()
         target = None if page is None else _index(page, self._owner.page_count)
         identifier = self._owner._call("add_link", self._page.number, _annotation_rect(box), uri, target, _change=True)
@@ -2293,7 +2330,7 @@ class Slides(_Collection["Slide"]):
     def __delitem__(self, index):
         self._owner._call("remove_slide", _index(index, len(self)), _change=True)
 
-    def move(self, index: int, destination: int):
+    def move(self, index: int, destination: int) -> None:
         self._owner._call("move_slide", _index(index, len(self)), _index(destination, len(self)), _change=True)
 
 
@@ -2358,7 +2395,8 @@ class Slide:
         data, _ = _read(source)
         self._owner._call("set_background_image", self.number, data, _change=True)
 
-    def add_shape(self, kind: str, *, box, fill=None, stroke=None, stroke_width: float = 1):
+    def add_shape(self, kind: str, *, box: _Box, fill: _Color | None = None, stroke: _Color | None = None, stroke_width: float = 1) -> Shape:
+        """Add a supported shape and return its handle; box is top-left x/y/width/height in points."""
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
         coordinates = tuple(map(pt, box))
@@ -2368,7 +2406,8 @@ class Slide:
         identifier = self._owner._call("add_shape", self.number, kind, *coordinates, fill, stroke, stroke_width, _change=True)
         return Shape(self._owner, self._id, identifier)
 
-    def add_text(self, text: str, *, box, font_size: float = 18):
+    def add_text(self, text: str, *, box: _Box, font_size: float = 18) -> Shape:
+        """Add a text shape in a top-left point box and return its editable handle."""
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
         coordinates = tuple(map(pt, box))
@@ -2376,7 +2415,8 @@ class Slide:
         identifier = self._owner._call("add_text", self.number, text, *coordinates, font_size, _change=True)
         return Shape(self._owner, self._id, identifier)
 
-    def add_table(self, rows, *, columns: int | None = None, box, font_size: float = 18):
+    def add_table(self, rows: _Rows, *, columns: SupportsIndex | None = None, box: _Box, font_size: float = 18) -> SlideTable:
+        """Add string rows or a counted grid in a top-left point box; return its table handle."""
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
         rows = _rows(rows, columns)
@@ -2385,7 +2425,8 @@ class Slide:
         identifier = self._owner._call("add_table", self.number, rows, *coordinates, font_size, _change=True)
         return SlideTable(self._owner, identifier, self._id)
 
-    def add_image(self, source, *, box, alt: str = "") -> SlidePicture:
+    def add_image(self, source: _Source, *, box: _Box, alt: str = "") -> SlidePicture:
+        """Add a PNG in a top-left point box and return its picture handle."""
         from . import _read
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
@@ -2397,7 +2438,17 @@ class Slide:
     def get_pixmap(self, dpi: float = 144, *, clip: tuple[float, float, float, float] | None = None) -> bytes:
         return self._owner.render_page(self.number, dpi, clip=clip)
 
-    def get_text(self, option: str = "text"):
+    @overload
+    def get_text(self, option: Literal["text", "markdown", "json"] = "text") -> str: ...
+
+    @overload
+    def get_text(self, option: Literal["dict"]) -> dict[str, Any]: ...
+
+    @overload
+    def get_text(self, option: str) -> str | dict[str, Any]: ...
+
+    def get_text(self, option: str = "text") -> str | dict[str, Any]:
+        """Extract text, Markdown, JSON, or an owned dict from the current native snapshot."""
         return self._owner._snapshot()[self.number].get_text(option)
 
 
@@ -2417,7 +2468,7 @@ class Shapes(_Collection["Shape | SlideTable"]):
         shape = self[index]
         self._owner._call("delete_shape", self._slide_owner.number, shape._id, _change=True)
 
-    def move(self, index: int, destination: int):
+    def move(self, index: int, destination: int) -> None:
         shape = self[index]
         destination = _index(destination, len(self))
         self._owner._call("move_shape", self._slide_owner.number, shape._id, destination, _change=True)
