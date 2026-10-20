@@ -391,3 +391,8 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 - Focused regressions cover generator lookahead, direct native conversion, large signed indexes, duplicate non-ASCII Office output, all-page fallback caps, empty-page separators, UTF-8 chunk boundaries, native page-count limits and glyph-budget checks. Upstream text-device construction can still allocate before output preflight; P4 remains open for peak-memory/streaming guarantees. Reviewed runtime head `57efdc8e6872bfad09275b07d2646ccf0a90d356` passed CI 39466407602: 155 Rust tests, 178 installed-wheel Python tests (no skips), formatting, warnings-denied Clippy and the unchanged 264-package locked license audit. The later main merge changed no files.
 
 - CI artifact: CPython 3.11.17 / Linux x86_64, wheel 17,224,825 bytes, native extension 39,902,544 bytes, wheel SHA-256 `60935ab53de271b8727d5dc5bfbd5328eb9f2d6ac94a848e4fbfe58d9e752544`. Upstream revisions and runtime dependency graph remain unchanged. Historical private-corpus timing claims remain author-reported.
+
+### Paragraph border integration review
+
+- Exact runtime head `bca6a47e7b39d596d37f97b5c9e48ad7ab4e0928` passed CI 39467518674: formatting, 172 Rust tests, warnings-denied Clippy, 187 installed-wheel Python tests (no skips), and 264-package license audit. Independent review also ran all 176 Python tests against the original frozen feature wheel. The later main merge added only PDF review evidence.
+- CPython 3.11.17 / Linux x86_64 artifact: wheel 17,290,310 bytes; native extension 40,109,520 bytes; wheel SHA-256 `020b291f27eac331d8a5260f836d8dfe310af45ddec012050d17223e810a13fd`. No dependencies changed in the border feature; integrated dependency and upstream revisions match reviewed main.
