@@ -169,9 +169,9 @@ Without a supplied font, PDF text uses the upstream Helvetica/WinAnsi path and r
 
 ### PDF annotations
 
-`page.annotations` is an ordered collection. `add("note" | "highlight", box=..., text="", author="", color="#FFD200")` and `add_link(box=..., uri=... | page=...)` return checked annotation handles. A link needs exactly one target; page targets are zero-based. Handles expose `kind`, `box`, `text`, `author`, `color`, `uri` and `target_page`; `update(...)` applies a compound mutation atomically. `del page.annotations[index]` invalidates previously retrieved annotation handles on that page, including those retrieved through another page wrapper.
+`page.annotations` is an ordered collection. `add("note" | "highlight" | "rectangle" | "oval", box=..., text="", author="", color="#FFD200")` and `add_link(box=..., uri=... | page=...)` return checked annotation handles. A link needs exactly one target; page targets are zero-based. Handles expose `kind`, `box`, `text`, `author`, `color`, `uri` and `target_page`; `update(...)` applies a compound mutation atomically. `del page.annotations[index]` invalidates previously retrieved annotation handles on that page, including those retrieved through another page wrapper.
 
-Notes use the upstream fixed 20×20 PDF-user-unit icon size. Notes and highlights can be moved but not resized; links can be resized. Unsupported type-specific edits fail before changing the document. Readback can include other native annotation kinds, but mutation is limited to the documented profile. A highlight or comment is not secure redaction. Extracted internal links use `#page=N` with a one-based fragment and zero-based `metadata.target_page`.
+Notes use the upstream fixed 20×20 PDF-user-unit icon size. Notes and highlights can be moved but not resized; links, rectangles and ovals can be resized. Unsupported type-specific edits fail before changing the document. Readback can include other native annotation kinds, but mutation is limited to the documented profile. A highlight or comment is not secure redaction. Extracted internal links use `#page=N` with a one-based fragment and zero-based `metadata.target_page`.
 
 ### PDF paths, metadata and bookmarks
 
@@ -513,6 +513,16 @@ Core keys are `title`, `author`, `subject`, `keywords`, `description`, `category
 Custom values support strings, booleans, signed 64-bit integers and finite floats, preserving their native types. A custom dictionary patches entries: omitted names stay unchanged, per-entry `None` removes one, and `custom=None` clears all. Names use native ASCII case-insensitive identity while retaining their original spelling; ambiguous batch names fail. Custom string whitespace is preserved. Nested objects, arbitrary XML, vectors and custom date wrappers are unavailable. Names are 1–255 UTF-8 bytes with no control characters or surrounding whitespace; values are limited to 64 KiB, with at most 1,024 properties. Incoming JSON, stored core values and stored custom values each have a 256 KiB serialized budget. Compound updates fail atomically, retaining existing ranges and cached output on rejection.
 
 Ordinary DOCX extraction exposes the supported core properties. Imported custom-property inventory, core language and extended/application property editing remain DOC7 gaps. Metadata editing uses native CoreProps/CustomProp and the normal document writer; it does not add arbitrary source DOCX editing.
+
+### PDF rectangle and oval comments
+
+`page.annotations.add("rectangle" | "oval", box=..., text="", author="", color=...)` creates a native solid, unfilled, opaque outline. It reuses annotation handles, writable `box`, color/comment metadata, atomic `update(...)`, deletion and copies. Comment text is metadata, not visible FreeText. Page text/images remain unchanged. Coordinate boxes use current displayed-page points, including rotation, CropBox and UserUnit.
+
+The native outline is two PDF user units wide; both shape dimensions must be at least three PDF user units. For UserUnit 2, the minimum displayed width/height is six points. Smaller paths can disappear in the pinned renderer, so they are rejected instead of silently enlarged. No arbitrary-low-DPI visibility guarantee is implied. Only this fixed stroke profile is supported; fill, opacity and decorative borders remain unavailable.
+
+Imported shape editing requires a bounded canonical dictionary: direct four-number rectangle and RGB color, a solid two-unit border, optional opaque alpha and native printable flags, bounded plain metadata, and at most an indirect normal appearance stream with no rollover/down states. Insets, cloud/dash/measurement styling, replies/actions, complex or unknown extensions fail explicitly before native target appearance rebuilding. Metadata-only edits retain the appearance; geometry/color edits regenerate the standard native appearance and do not preserve arbitrary custom artwork. Deletion remains available when editing is rejected.
+
+Generated appearance work is preflighted and actual staged stream bytes are charged, including both streams when a compound resize/recolor creates an intermediate appearance. These checks bound the target mutation; existing global imported annotation summaries/initial inspection can allocate before their output caps and need a separate upstream bounded-inventory API. The [upstream register](upstream-roadmap.md#bounded-pdf-annotation-inventory) records that limitation. Initial closed/stale checks and final checks after argument normalization prevent callback-driven edits from targeting another page.
 
 ### PDF text-markup annotations
 
