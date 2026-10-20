@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 
 use base64::Engine;
@@ -130,10 +130,20 @@ struct Adapter<'a> {
     comment_pages: HashMap<u32, usize>,
     numbering: HashMap<(StoryRef, Path), NumberingObservation>,
     numbering_bytes: Cell<usize>,
+    numbering_definitions: RefCell<HashMap<(u32, u8), NumberingDefinition<'a>>>,
+    numbering_lookup_work: Cell<usize>,
+    numbering_lookup_cost: usize,
 }
 
 const MAX_NUMBERING_BYTES: usize = 16 * 1024 * 1024;
 const MAX_NUMBERING_STRING: usize = 64 * 1024;
+const MAX_NUMBERING_LOOKUP_WORK: usize = 10_000_000;
+
+#[derive(Clone, Copy)]
+struct NumberingDefinition<'a> {
+    abstract_id: Option<u32>,
+    level: Option<&'a wordcraft_doc::numbering::Level>,
+}
 
 fn numbering_limit() -> EngineError {
     EngineError::ResourceLimit(
@@ -467,6 +477,39 @@ fn validate_table_depth(blocks: &Blocks) -> Result<(), EngineError> {
 }
 
 impl<'a> Adapter<'a> {
+    fn numbering_definition(&self, reference: NumRef) -> Option<NumberingDefinition<'a>> {
+        let key = (reference.num, reference.level);
+        if let Some(value) = self.numbering_definitions.borrow().get(&key) {
+            return Some(*value);
+        }
+        let work = self
+            .numbering_lookup_work
+            .get()
+            .saturating_add(self.numbering_lookup_cost);
+        self.numbering_lookup_work.set(work);
+        if work > MAX_NUMBERING_LOOKUP_WORK || self.numbering_definitions.borrow().len() >= 100_000
+        {
+            self.numbering_lookup_work
+                .set(MAX_NUMBERING_LOOKUP_WORK + 1);
+            return None;
+        }
+        // Keep resolution native, including first-match IDs and level overrides. Cache misses
+        // and unresolved references too; otherwise repeated invalid references rescan all definitions.
+        let value = NumberingDefinition {
+            abstract_id: self
+                .document
+                .numbering
+                .num(reference.num)
+                .map(|num| num.abstract_id),
+            level: self
+                .document
+                .numbering
+                .level(reference.num, reference.level),
+        };
+        self.numbering_definitions.borrow_mut().insert(key, value);
+        Some(value)
+    }
+
     fn segment_numbering(
         &self,
         paragraph: &Paragraph,
@@ -494,11 +537,13 @@ impl<'a> Adapter<'a> {
         let Some(reference) = reference else {
             return vec![None; segments.len()];
         };
-        let number = self.document.numbering.num(reference.num);
-        let level = self
-            .document
-            .numbering
-            .level(reference.num, reference.level);
+        if self.numbering_bytes.get() > MAX_NUMBERING_BYTES {
+            return vec![None; segments.len()];
+        }
+        let Some(definition) = self.numbering_definition(reference) else {
+            return vec![None; segments.len()];
+        };
+        let level = definition.level;
         let label = observation
             .and_then(|value| value.label.as_ref())
             .map(|(offset, text)| {
@@ -529,7 +574,7 @@ impl<'a> Adapter<'a> {
                 }
                 let mut value = json!({
                     "num_id": reference.num,
-                    "abstract_id": number.map(|number| number.abstract_id),
+                    "abstract_id": definition.abstract_id,
                     "level": reference.level,
                     "format": level.map(|level| level.format.ooxml()),
                     "template": level.map(|level| level.text.as_str()),
@@ -737,6 +782,26 @@ impl<'a> Adapter<'a> {
             comment_pages: HashMap::new(),
             numbering: numbering_observations(layout)?,
             numbering_bytes: Cell::new(0),
+            numbering_definitions: RefCell::new(HashMap::new()),
+            numbering_lookup_work: Cell::new(0),
+            // num() once plus level()'s two num() scans, an abstract scan and a level-override
+            // scan. This is conservative for the pinned native API, not a local resolver.
+            numbering_lookup_cost: document
+                .numbering
+                .nums
+                .len()
+                .saturating_mul(3)
+                .saturating_add(document.numbering.abstracts.len())
+                .saturating_add(
+                    document
+                        .numbering
+                        .nums
+                        .iter()
+                        .map(|num| num.level_overrides.len())
+                        .max()
+                        .unwrap_or(0),
+                )
+                .max(1),
         })
     }
 
@@ -766,7 +831,9 @@ impl<'a> Adapter<'a> {
         );
         let stories = self.stories();
         metadata.insert("diagnostics".into(), extraction_diagnostics(self.document));
-        if self.numbering_bytes.get() > MAX_NUMBERING_BYTES {
+        if self.numbering_bytes.get() > MAX_NUMBERING_BYTES
+            || self.numbering_lookup_work.get() > MAX_NUMBERING_LOOKUP_WORK
+        {
             return Err(numbering_limit());
         }
         Ok(DocumentPayload {
@@ -1449,6 +1516,63 @@ mod numbering_tests {
         assert!(!adapter.pages[0].blocks[2]
             .metadata
             .contains_key("numbering"));
+    }
+
+    #[test]
+    fn repeated_definition_queries_are_cached_and_distinct_query_work_is_bounded() {
+        let mut document = Document::new();
+        document.numbering.try_add_list(ListKind::Numbered).unwrap();
+        let original = document.numbering.nums[0].clone();
+        for id in 2..=2000 {
+            let mut number = original.clone();
+            number.id = id;
+            document.numbering.nums.push(number);
+        }
+        let layout = DocLayout::default();
+        let mut adapter = Adapter::new(&document, &layout).unwrap();
+        let block = numbered("Repeated", 2000, 0);
+        let Block::Para(paragraph) = block.as_ref() else {
+            unreachable!()
+        };
+        for index in 0..2000 {
+            adapter.add_paragraph(paragraph, &Path::top(index));
+        }
+        assert_eq!(
+            adapter.numbering_lookup_work.get(),
+            adapter.numbering_lookup_cost
+        );
+        let missing = NumRef {
+            num: 9999,
+            level: 0,
+        };
+        for _ in 0..2000 {
+            let value = adapter.numbering_definition(missing).unwrap();
+            assert!(value.abstract_id.is_none() && value.level.is_none());
+        }
+        assert_eq!(
+            adapter.numbering_lookup_work.get(),
+            2 * adapter.numbering_lookup_cost
+        );
+        let payload = adapter.finish().unwrap();
+        assert_eq!(payload.pages[0].blocks.len(), 2000);
+        assert!(payload.pages[0]
+            .blocks
+            .iter()
+            .all(|block| block.metadata["numbering"]["num_id"] == 2000
+                && block.metadata["numbering"]["format"] == "decimal"));
+
+        let mut adapter = Adapter::new(&document, &layout).unwrap();
+        for id in 1..=2000 {
+            let block = numbered("Distinct", id, 0);
+            let Block::Para(paragraph) = block.as_ref() else {
+                unreachable!()
+            };
+            adapter.add_paragraph(paragraph, &Path::top(id - 1));
+        }
+        assert!(matches!(
+            adapter.finish(),
+            Err(EngineError::ResourceLimit(_))
+        ));
     }
 
     #[test]
