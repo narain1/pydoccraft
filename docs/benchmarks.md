@@ -115,6 +115,25 @@ pydoccraft extracted 68,999 PDF text characters and PyMuPDF extracted 69,024. In
 
 `benchmarks/requirements-lock.txt` records the complete Python environment, including transitive packages.
 
+## Root-cause stage profile
+
+A separate diagnostic run decomposed the anonymous PDF path. These timings are medians of five iterations and are not additional public-API comparisons; `_core` calls are private implementation probes.
+
+| ID | Pages | Detect | Native full extraction | JSON decode | Python hydration | Public open | Direct native page-1 render | Public open + render | PyMuPDF open + render |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| PDF-1 | 391 | <0.01 ms | 1,281.93 ms | 23.01 ms | 7.56 ms | 1,307.87 ms | 70.63 ms | 1,381.57 ms | 21.78 ms |
+| PDF-2 | 65 | <0.01 ms | 193.95 ms | 7.02 ms | 4.16 ms | 202.44 ms | 26.67 ms | 229.85 ms | 42.89 ms |
+| PDF-3 | 14 | <0.01 ms | 76.41 ms | 17.42 ms | 11.29 ms | 104.78 ms | 70.30 ms | 174.73 ms | 90.26 ms |
+
+The evidence identifies four costs:
+
+1. **Whole-document extraction is the primary bottleneck.** Native extraction accounts for approximately 98%, 96%, and 73% of public open latency in these three cases. `doc_ex.open()` renders text and traverses tables, links, and images for every page even when the caller only wants page count or a first-page image.
+2. **Public render performs two independent pipelines.** `open()` first performs full extraction; `render_page()` then sends the retained bytes through a fresh native inspect and `PageRenderer`. Public first-page time closely tracks `public open + direct native render`.
+3. **The renderer itself is not uniformly slow.** The private direct-native probe was 1.61× faster than PyMuPDF's public open/render path on PDF-2 and 1.28× faster on PDF-3, while PyMuPDF was 3.24× faster on PDF-1. The 59.83× public-path gap therefore cannot be attributed to rasterization alone.
+4. **JSON and Python hydration are secondary but visible.** They add roughly 12–29 ms here and become proportionally significant for the 13.24 MiB/14-page document. Image-heavy inputs may add base64 expansion and decoding beyond what this stage profile isolates.
+
+The highest-value feature improvement is a bounded private native document session: inspect/open once, preserve reusable parse/render state, extract pages or text profiles on demand, and drop native state deterministically on `close()`. Existing hydrated values must remain owned, and all resource limits and stable errors must remain intact. A smaller interim improvement is a bounded direct-render or selected-page extraction entry point that avoids mandatory whole-document normalization.
+
 ## API and performance rough edges
 
 ### 1. Rendering repeats document work

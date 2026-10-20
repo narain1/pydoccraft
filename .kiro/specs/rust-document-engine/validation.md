@@ -271,3 +271,12 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 - Ran the published-wheel benchmark in a fresh Linux x86_64/CPython 3.13.13 environment with the complete pinned comparator lock; `pip check` passed. A small smoke run and the full default 25-page/25-slide/20,000-cell corpus both completed all 12 scenarios. The full run used two warmups and seven measured iterations; conversions reopened with text and both renderers returned PNG. This independently validates the harness, not the historical macOS timings.
 - Corrected post-save OOXML core timestamps: openpyxl overwrites `modified` during serialization, so ZIP timestamp normalization alone did not yield stable XLSX bytes. A regression injects different writer clocks and verifies identical normalized bytes and exact reopened cell values. Historical recorded hashes remain labeled as pre-correction evidence.
 - Rejected `.md` JSON output paths before generation to prevent the companion Markdown report from overwriting JSON. Both focused benchmark-only regression tests passed; this tooling remains outside runtime dependencies and the normal installed-wheel suite.
+
+### Anonymous PDF stage profile
+
+- Five-iteration medians isolated detection, native extraction, JSON decode, Python hydration, direct native render, and public open+render on the three local PDFs.
+- Detection was below 0.01 ms. Native eager extraction consumed approximately 98%, 96%, and 73% of public open latency for the 391-, 65-, and 14-page inputs.
+- Public open medians were 1,307.87 ms, 202.44 ms, and 104.78 ms; direct native first-page render medians were 70.63 ms, 26.67 ms, and 70.30 ms. Public open+render was approximately their sum because rendering reopens the source independently.
+- Direct native rendering was 1.61× and 1.28× faster than PyMuPDF's public open+render path on the 65- and 14-page PDFs, but PyMuPDF was 3.24× faster on the 391-page PDF. The major public-path regression is therefore eager extraction plus duplicate open state, not uniformly slow rasterization.
+- JSON decode plus Python hydration added 11.18–28.71 ms. Media-heavy inputs can add separate base64/ownership costs.
+- The prioritized feature improvement remains W02/P1: a bounded private native parse/render session, followed by bounded selected-page/text-only extraction under W09/P4.
