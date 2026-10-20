@@ -234,7 +234,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 
 ## List starting values and source presentation limits
 
-- [ ] Extend existing native list membership with independent starting values and explicit header/footer fidelity errors.
-- [ ] Reject excessive source slide references before native import, covering alternate content without another OOXML resolver.
-- [ ] Validate native/read/render/export, malformed/bounded input and full installed-wheel regressions; record artifact and reviewed dependency evidence.
+- [x] Extend existing native list membership with independent starting values and explicit header/footer fidelity errors.
+- [x] Reject excessive source slide references before native import, covering alternate content without another OOXML resolver.
+- [x] Validate native/read/render/export, malformed/bounded input and full installed-wheel regressions; record artifact and reviewed dependency evidence.
 - [ ] Retain custom-level numbering, header/footer counter fidelity and general upstream allocation/reporting gaps.
