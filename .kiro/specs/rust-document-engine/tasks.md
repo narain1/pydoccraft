@@ -611,5 +611,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reuse the existing checked monotonic registry allocator; stage body publication and bound temporary reverse views without introducing public body operations.
 - [x] Update classified native test paths without relaxing format/geometry/output assertions, and add focused native/public identity, section and rollback coverage.
 - [x] Complete three focused native groups, four new public workflows, 59 related public workflows, formatter/Clippy/debug build and strict copied-package consumer typing.
-- [ ] Complete integrated locked release/clean installed-wheel artifact, independent review and current-main CI.
+- [x] Complete the integrated local artifact and independent review: 321 recorded native tests and 462 clean installed-wheel tests; all 462 tests independently rerun with matching wheel bytes, typing and the locked license audit.
+- [ ] Complete final exact-head/current-main CI and manual merge.
 - [ ] Retain separately scoped body section/semantic deletion, cell/PPTX deletion and broader DOC5/TXT1 insertion/movement/adoption work. The historical spec78 identity-migration prerequisite is superseded by this internal change.
