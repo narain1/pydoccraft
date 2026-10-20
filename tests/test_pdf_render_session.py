@@ -63,6 +63,10 @@ class PdfRenderSessionTests(unittest.TestCase):
             self.assertTrue(all(future.result() in (None, expected) for future in futures))
         document.close()
         self.assertIsNone(document._render_session)
+        with self.assertRaises(DocumentClosedError):
+            _native(session._stats)
+        with self.assertRaises(DocumentClosedError):
+            _native(lambda: session.render(0, 72, (0, 0, 30, 30)))
         self.assertIn('Page one', page.get_text())
         with self.assertRaises(DocumentClosedError):
             page.get_pixmap(72, clip=(0, 0, 30, 30))

@@ -23,6 +23,8 @@ create_exception!(_core, DocExNativeError, PyException);
 pub enum EngineError {
     #[error("invalid_argument:{0}")]
     InvalidArgument(String),
+    #[error("closed:{0}")]
+    Closed(String),
     #[error("unsupported:{0}")]
     Unsupported(String),
     #[error("malformed:{0}")]
@@ -61,6 +63,10 @@ impl NativePdfSession {
             rendering::validate_clip(clip)?;
         }
         self.inner.render(page, dpi, clip).map_err(Into::into)
+    }
+
+    fn close(&self) -> PyResult<()> {
+        self.inner.close().map_err(Into::into)
     }
 
     fn _stats(&self) -> PyResult<(u64, u64, u64)> {

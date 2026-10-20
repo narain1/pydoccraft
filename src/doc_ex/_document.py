@@ -417,8 +417,12 @@ class Document:
         return PdfDocument(_native(lambda: _core.EditablePdf.from_bytes(self._source, self._password)))
 
     def close(self) -> None:
-        self._render_session = None
         self._closed = True
+        session = self._render_session
+        self._render_session = None
+        if session is not None:
+            from . import _native
+            _native(session.close)
 
     def _ensure_open(self) -> None:
         if self._closed:
