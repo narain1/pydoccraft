@@ -285,3 +285,11 @@ The pre-existing manifest referenced the PdfCraft application engine while the l
 - Direct native rendering was 1.61× and 1.28× faster than PyMuPDF's public open+render path on the 65- and 14-page PDFs, but PyMuPDF was 3.24× faster on the 391-page PDF. The major public-path regression is therefore eager extraction plus duplicate open state, not uniformly slow rasterization.
 - JSON decode plus Python hydration added 11.18–28.71 ms. Media-heavy inputs can add separate base64/ownership costs.
 - The prioritized feature improvement remains W02/P1: a bounded private native parse/render session, followed by bounded selected-page/text-only extraction under W09/P4.
+
+## PDF parser-session reuse feature branch
+
+- Added a private native PDF session that retains the PdfCraft `PageRenderer` used during eager extraction and routes subsequent `Document.render_page` / `Page.get_pixmap` calls through the same parsed document.
+- Public `doc_ex.open`, eager owned values, PNG bytes, negative indexes, errors, conversion/edit source bytes, and idempotent close remain compatible. `close()` releases the private session while previously extracted values remain usable.
+- Rust 1.95 validation passed: 128 tests and Clippy with warnings denied. The installed Linux ARM64 CPython 3.13 wheel passed 139 Python tests, including parser-build-count, repeated render, close, DPI, and output regressions.
+- Anonymous repeated page-1 render medians versus the legacy one-shot native reopen were: 6.52 vs 59.69 ms (9.16×) for 391 pages, 23.62 vs 26.00 ms (1.10×) for 65 pages, and 71.89 vs 78.52 ms (1.09×) for 14 pages. Parser-build count remained one after repeated renders.
+- Scope remains partial: eager full-document extraction still dominates first-render latency; DOCX layout reuse, selected-page/text-only extraction, all-page/peak-RSS evidence, and upstream inspect/COS consolidation remain open.

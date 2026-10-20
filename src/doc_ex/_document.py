@@ -247,13 +247,14 @@ class Page:
 
 
 class Document:
-    def __init__(self, pages: list[Page], metadata: dict[str, Any], source: bytes, filetype: str, password: str | None, *, stories: list[Story] | None = None) -> None:
+    def __init__(self, pages: list[Page], metadata: dict[str, Any], source: bytes, filetype: str, password: str | None, *, stories: list[Story] | None = None, _render_session=None) -> None:
         self._pages = pages
         self.metadata = metadata
         self.stories = list(stories or [])
         self._source = source
         self._filetype = filetype
         self._password = password
+        self._render_session = _render_session
         self._closed = False
         for page in self._pages:
             page._document = self
@@ -378,6 +379,8 @@ class Document:
         if page < 0 or page >= len(self._pages):
             raise IndexError("page index out of range")
         from . import _core, _native
+        if self._render_session is not None:
+            return bytes(_native(lambda: self._render_session.render(page, dpi)))
         return bytes(_native(lambda: _core.render(self._source, self._filetype, page, dpi, self._password)))
 
     def convert(self, output_format: str) -> bytes:
@@ -396,6 +399,7 @@ class Document:
         return PdfDocument(_native(lambda: _core.EditablePdf.from_bytes(self._source, self._password)))
 
     def close(self) -> None:
+        self._render_session = None
         self._closed = True
 
     def _ensure_open(self) -> None:
