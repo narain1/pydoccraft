@@ -2899,6 +2899,39 @@ impl EditableDocx {
             .map(|color| format!("#{:02X}{:02X}{:02X}", color.0, color.1, color.2)))
     }
 
+    pub fn background_image(&self) -> PyResult<Option<Vec<u8>>> {
+        let document = self.document()?;
+        document
+            .settings
+            .page_picture
+            .as_ref()
+            .map(|picture| {
+                document
+                    .media
+                    .get(&picture.media)
+                    .map(|bytes| bytes.as_ref().clone())
+                    .ok_or_else(|| {
+                        PyValueError::new_err("background image references missing native media")
+                    })
+            })
+            .transpose()
+    }
+
+    #[pyo3(signature = (data=None))]
+    pub fn set_background_image(&mut self, data: Option<&[u8]>) -> PyResult<()> {
+        self.document()?;
+        if let Some(data) = data {
+            validate_png(data)?;
+        }
+        let mut candidate = self.document()?.clone();
+        candidate.settings.page_picture = data.map(|bytes| wordcraft_doc::PagePicture {
+            media: candidate.add_media(bytes.to_vec(), "png"),
+            fill_type: "frame".into(),
+            title: String::new(),
+        });
+        self.commit(candidate)
+    }
+
     #[pyo3(signature = (color=None))]
     pub fn set_background(&mut self, color: Option<&str>) -> PyResult<()> {
         self.document()?;
@@ -3420,7 +3453,7 @@ impl EditableDocx {
         document.table_mut(story, &path).map_err(model_error)
     }
     fn commit(&mut self, mut document: Document) -> PyResult<()> {
-        let media_bytes = if document.media.is_empty() {
+        let media_bytes = if document.media.is_empty() && document.settings.page_picture.is_none() {
             0
         } else {
             retain_authored_image_media(&mut document)?
@@ -3797,13 +3830,17 @@ fn attach_image_media(
 /// Reference accounting for this owner's authored image/note/page-field profile. Native
 /// paths traverse nested tables; we do not reconstruct an OOXML resource graph.
 fn retain_authored_image_media(document: &mut Document) -> PyResult<usize> {
-    if document.settings.page_picture.is_some() {
-        return Err(EngineError::Unsupported(
-            "media cleanup for page pictures is outside the authored image profile".into(),
-        )
-        .into());
-    }
     let mut used = BTreeSet::new();
+    // A document-wide background is one resource reference, not an inline
+    // placement per rendered page. Shared inline/background bytes count once.
+    if let Some(picture) = &document.settings.page_picture {
+        if !document.media.contains_key(&picture.media) {
+            return Err(PyValueError::new_err(
+                "background image references missing native media",
+            ));
+        }
+        used.insert(picture.media.clone());
+    }
     let mut references = 0usize;
     for story in
         std::iter::once(StoryRef::Body).chain(document.parts.keys().map(|id| StoryRef::Part(*id)))
@@ -6348,6 +6385,96 @@ mod tests {
             72.0,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn page_background_roundtrip_preserves_color_media_and_copy() {
+        let red = media_png(2, 2, [255, 0, 0, 255]);
+        let blue = media_png(2, 2, [0, 0, 255, 255]);
+        let mut document = EditableDocx::new();
+        document.set_page_size(240.0, 320.0).unwrap();
+        document.set_background(Some("#00FF00")).unwrap();
+        let paragraph = document.add_paragraph("Page ").unwrap();
+        document.add_paragraph_field(paragraph, "page").unwrap();
+        document.set_background_image(Some(&red)).unwrap();
+        let copy = document.copy().unwrap();
+        let original = document.to_bytes().unwrap();
+        let read = wordcraft_docx::read(&original).unwrap();
+        let background = read.settings.page_picture.as_ref().unwrap();
+        assert_eq!(background.fill_type, "frame");
+        assert!(background.title.is_empty());
+        assert_eq!(read.media[&background.media].as_slice(), red);
+        assert_eq!(read.settings.page_color, Some(Rgb(0, 255, 0)));
+        assert!(border_pixels(crate::docx::render(&original, 0, 72.0, None).unwrap(), 0) > 10_000);
+        let pdf = crate::docx::to_pdf(&original, None).unwrap();
+        assert!(border_pixels(crate::pdf::render(&pdf, 0, 72.0, None).unwrap(), 0) > 10_000);
+        document.set_background_image(Some(&blue)).unwrap();
+        assert_eq!(document.background_image().unwrap(), Some(blue));
+        assert_eq!(copy.background_image().unwrap(), Some(red));
+        let before = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        assert!(document.set_background_image(Some(b"invalid PNG")).is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.to_bytes().unwrap(), before);
+        document.set_background_image(None).unwrap();
+        assert!(document.background_image().unwrap().is_none());
+        assert!(document.document().unwrap().media.is_empty());
+        assert_eq!(document.background().unwrap().as_deref(), Some("#00FF00"));
+        let cleared = document.to_bytes().unwrap();
+        assert!(border_pixels(crate::docx::render(&cleared, 0, 72.0, None).unwrap(), 1) > 10_000);
+        document.close();
+        assert!(document.background_image().is_err());
+        assert!(document.set_background_image(None).is_err());
+    }
+
+    #[test]
+    fn page_background_resource_accounting_is_shared_bounded_and_transactional() {
+        let red = media_png(2, 2, [255, 0, 0, 255]);
+        let blue = media_png(2, 2, [0, 0, 255, 255]);
+        let mut document = EditableDocx::new();
+        let image = document.add_image(&red, None, None, "Shared").unwrap();
+        document.set_background_image(Some(&red)).unwrap();
+        assert_eq!(document.media_bytes, red.len());
+        assert_eq!(document.document().unwrap().media.len(), 1);
+        document.set_background_image(Some(&blue)).unwrap();
+        assert_eq!(document.media_bytes, red.len() + blue.len());
+        document.remove_image(image).unwrap();
+        assert_eq!(document.media_bytes, blue.len());
+        assert_eq!(document.document().unwrap().media.len(), 1);
+        let before = document.to_bytes().unwrap();
+        let revision = document.revision().unwrap();
+        let mut missing = document.document().unwrap().clone();
+        missing.media.clear();
+        assert!(document.commit(missing).is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.to_bytes().unwrap(), before);
+
+        // Synthetic encoded byte lengths exercise aggregate accounting without
+        // decoding or generating huge PNGs; the live owner remains a valid PNG.
+        let mut candidate = document.document().unwrap().clone();
+        let key = candidate
+            .settings
+            .page_picture
+            .as_ref()
+            .unwrap()
+            .media
+            .clone();
+        candidate
+            .media
+            .insert(key.clone(), Arc::new(vec![0; MAX_MEDIA_BYTES]));
+        assert_eq!(
+            retain_authored_image_media(&mut candidate).unwrap(),
+            MAX_MEDIA_BYTES
+        );
+        candidate
+            .media
+            .insert(key, Arc::new(vec![0; MAX_MEDIA_BYTES + 1]));
+        assert!(retain_authored_image_media(&mut candidate).is_err());
+        candidate.settings.page_picture = None;
+        assert_eq!(retain_authored_image_media(&mut candidate).unwrap(), 0);
+        assert!(candidate.media.is_empty());
+        document.set_background_image(None).unwrap();
+        assert_eq!(document.media_bytes, 0);
     }
 
     #[test]

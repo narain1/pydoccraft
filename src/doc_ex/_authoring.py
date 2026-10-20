@@ -629,6 +629,22 @@ class WordDocument(EditableDocument):
     def background(self, color):
         self._call("set_background", None if color is None else _hex_color(color), _change=True)
 
+    @property
+    def background_image(self) -> bytes | None:
+        """Owned PNG bytes stretched over every page, above the background color."""
+        value = self._call("background_image")
+        return None if value is None else bytes(value)
+
+    @background_image.setter
+    def background_image(self, source) -> None:
+        """Set a stretched PNG, or clear only the image with None."""
+        self._ensure_open()
+        from . import _read
+        data = None if source is None else _read(source, limit=16 * 1024 * 1024)[0]
+        # Reading caller-owned streams may close or edit the owner. _call checks
+        # lifetime again and applies this document-wide property to current state.
+        self._call("set_background_image", data, _change=True)
+
     def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
         style = _style_reference(style, self)
         if style is None:

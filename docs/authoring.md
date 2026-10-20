@@ -102,6 +102,22 @@ Character keys are `bold`, `italic`, `font_size`, `font`, `color`, `underline`, 
 
 The [cookbook](cookbook.md) composes these APIs into six executable workflows without adding package-specific recipe objects.
 
+## DOCX image backgrounds
+
+`document.background_image = png_bytes_or_source` uses a native stretched PNG over every DOCX page, including differently sized sections. The getter returns owned original PNG bytes; `None` clears only the image. `document.background` remains an independent color beneath it: transparent PNG pixels reveal that color, and changing the color preserves the image. This fill stretches to the page rectangle and can change the image's aspect ratio. It does not provide fit/crop modes, tiling, offsets, arbitrary opacity or section-local placement.
+
+The background shares native media deduplication with body and nested/story images. Replacing or clearing it retains any resources still used by those images; inline `document.images` collections do not include the background. Input is bounded to 16 MiB, 8,192 pixels per side, 16 million decoded pixels and a 64 MiB decode buffer, with a separate 64 MiB aggregate referenced encoded-media budget. Original bytes and independent copies remain valid after closing the owner. Native PNG/PDF output retains color/transparency and supports existing DPI/clipping calls.
+
+```python
+with doc_ex.new("docx") as report:
+    report.background = "#FAFAF7"
+    report.background_image = "page-art.png"
+    report.add_paragraph("Quarterly report")
+    report.save("report.docx")
+```
+
+Native tiling and text watermark rendering have reproduced PNG/PDF differences; see the [upstream findings](upstream-roadmap.md#docx-background-and-watermark-fidelity). They remain outside this profile.
+
 ## PDF pages and assembly
 
 ```python

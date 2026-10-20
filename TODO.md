@@ -158,7 +158,7 @@ Unchecked items below remain incomplete even when an initial slice is implemente
 ### BG — Backgrounds, shading and watermarks (P1)
 
 - [x] **BG1: Solid document background.** Add DOCX page color using the upstream native background model. Test stored color, native PNG and exported PDF; expose limitations if viewers/exporters treat it differently.
-- [ ] **BG2: Background image recipe.** Reuse MED2/MED3 image placement with explicit fit, anchor, layer, offset and opacity. Preserve aspect ratio by default and verify clipping/layer order; do not introduce another image API.
+- [ ] **BG2: Background image recipe.** Native DOCX stretched PNG backgrounds now reuse the existing presentation background_image vocabulary with shared media accounting and independent color/transparency. Aspect-preserving fit, positioning and tiling remain open. Reuse MED2/MED3 image placement with explicit fit, anchor, layer, offset and opacity. Preserve aspect ratio by default and verify clipping/layer order; do not introduce another image API.
 - [ ] **BG3: Text watermark recipe.** Reuse MED4 positioned text/shapes and LAY3 header/section scope, with font, color, rotation and opacity properties. Verify body content remains intact; no dedicated watermark method family.
 - [ ] **BG4: Image watermark recipe.** Reuse MED1–MED3 picture placement for logos/stamps with size, opacity, layering and anchors. Test asset deduplication and placement rather than building a separate watermark subsystem.
 - [ ] **BG5: Section and first-page behavior.** Define supported scope using section/header anchors, including first/even/odd pages. Do not treat a computed DOCX page number as a permanent editable object; test repagination after insertion.
