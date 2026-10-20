@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import json
 import operator
+from collections.abc import Iterable
+from itertools import islice
 from pathlib import Path
 from typing import BinaryIO
 
@@ -29,6 +31,8 @@ __version__ = "0.2.1"
 
 
 _MAX_INPUT_BYTES = 128 * 1024 * 1024
+_MAX_TEXT_OUTPUT_BYTES = 64 * 1024 * 1024
+_MAX_TEXT_PAGES = 10_000
 
 
 def _read(source, *, limit: int | None = None) -> tuple[bytes, str]:
@@ -95,17 +99,33 @@ def extract_text(
     *,
     filetype: str | None = None,
     password: str | None = None,
-    pages=None,
+    pages: Iterable[int] | None = None,
 ) -> str:
-    """Extract selected pages as form-feed-separated text without building public models."""
+    """Extract form-feed-separated text; PDF avoids building structured public models."""
     data, suffix = _read(source)
     kind = _kind(data, suffix, filetype)
-    indices = None if pages is None else [operator.index(page) for page in pages]
+    if pages is None:
+        indices = None
+    else:
+        indices = [operator.index(page) for page in islice(iter(pages), _MAX_TEXT_PAGES + 1)]
+        if len(indices) > _MAX_TEXT_PAGES:
+            raise UnsafeArchiveError("selected page count exceeds 10000")
     if kind == "pdf":
         return _native(lambda: _core.extract_text(data, indices, password))
     with open(data, filetype=kind, password=password) as document:
-        selected = range(document.page_count) if indices is None else indices
-        return "\f".join(document[index].get_text("text") for index in selected)
+        if indices is None:
+            if document.page_count > _MAX_TEXT_PAGES:
+                raise UnsafeArchiveError("selected page count exceeds 10000")
+            indices = list(range(document.page_count))
+        parts = []
+        size = 0
+        for index in indices:
+            text = document[index].get_text("text")
+            size += len(text.encode("utf-8")) + int(bool(parts))
+            if size > _MAX_TEXT_OUTPUT_BYTES:
+                raise UnsafeArchiveError("selected text exceeds the 64 MiB output limit")
+            parts.append(text)
+        return "\f".join(parts)
 
 
 def convert(source: str | Path | bytes | bytearray | memoryview | BinaryIO, output_format: str, *, filetype: str | None = None, password: str | None = None) -> bytes:

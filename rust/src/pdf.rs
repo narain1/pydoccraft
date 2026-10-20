@@ -126,7 +126,14 @@ pub fn extract_text(
                 })
                 .collect::<Result<Vec<_>, _>>()?
         }
-        None => (0..info.pages.len()).collect(),
+        None => {
+            if info.pages.len() > 10_000 {
+                return Err(EngineError::ResourceLimit(
+                    "selected page count exceeds 10000".into(),
+                ));
+            }
+            (0..info.pages.len()).collect()
+        }
     };
     let mut renderer = PageRenderer::new(
         bytes,

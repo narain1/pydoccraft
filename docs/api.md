@@ -45,7 +45,7 @@ selected = doc_ex.extract_text("report.pdf", pages=[0, 4, -1])
 
 `extract_text(source, *, filetype=None, password=None, pages=None)` returns selected pages separated by form-feed (`\f`) characters. Page indexes preserve caller order, allow duplicates, and support normal negative indexing; invalid indexes raise `IndexError`.
 
-For PDF, this is a bounded native fast path: it uses PdfCraft text extraction but skips table/image traversal, media transfer, normalized JSON, and public model hydration. Output is capped at 64 MiB and selected-page requests are capped at 10,000 entries. DOCX and PPTX use the existing eager extraction model as a compatibility fallback. Use `open()` when links, tables, images, geometry, metadata, Markdown, or owned structured values are required.
+For PDF, this is a bounded native fast path: it returns PdfCraft's raw reading-order plain text and skips table/image traversal, media transfer, normalized JSON, and public model hydration. Raw PDF whitespace and table separators can therefore differ from `Page.get_text("text")`, which uses the structured normalized model. DOCX and PPTX use the existing eager extraction model as a compatibility fallback. Every format caps explicit/all-page selections at 10,000 entries and UTF-8 output at 64 MiB. Use `open()` when links, tables, images, geometry, metadata, Markdown, or owned structured values are required.
 
 ## Convert a document
 
