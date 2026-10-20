@@ -5303,6 +5303,38 @@ fn bookmark_lookup_work(
     Ok(*work - initial)
 }
 
+// The pinned native vertical-text display drops link metadata, so a draw-only
+// count cannot detect it. Repeated placements must also pay for source-run scans.
+fn validate_bookmark_source_links(
+    document: &Document,
+    page: &wordcraft_layout::Page,
+    work: &mut usize,
+) -> PyResult<()> {
+    charge_bookmark_work(
+        work,
+        page.items
+            .len()
+            .saturating_add(page.header.len())
+            .saturating_add(page.footer.len()),
+    )?;
+    for item in page.items.iter().chain(&page.header).chain(&page.footer) {
+        if let wordcraft_layout::Placed::Lines {
+            story, path, turn, ..
+        } = item
+        {
+            if *turn != TextDirection::Horizontal {
+                if let Some(paragraph) = document.para(*story, path) {
+                    charge_bookmark_work(work, paragraph.runs.len())?;
+                    if paragraph.runs.iter().any(|run| run.props.link.is_some()) {
+                        return Err(EngineError::Unsupported("internal navigation cannot preserve links in turned table text at this native revision".into()).into());
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_bookmark_layout(
     document: &Document,
     layout: &wordcraft_layout::DocLayout,
@@ -5374,22 +5406,7 @@ fn validate_bookmark_layout(
         ..Default::default()
     };
     for page in &layout.pages {
-        // The pinned native vertical-text display drops link metadata, so a
-        // draw-only count cannot detect those missing annotations.
-        for item in page.items.iter().chain(&page.header).chain(&page.footer) {
-            if let wordcraft_layout::Placed::Lines {
-                story, path, turn, ..
-            } = item
-            {
-                if *turn != TextDirection::Horizontal
-                    && document
-                        .para(*story, path)
-                        .is_some_and(|p| p.runs.iter().any(|run| run.props.link.is_some()))
-                {
-                    return Err(EngineError::Unsupported("internal navigation cannot preserve links in turned table text at this native revision".into()).into());
-                }
-            }
-        }
+        validate_bookmark_source_links(document, page, &mut work)?;
         validate_bookmark_draws(
             &wordcraft_layout::display::page_display(document, page, &options),
             &target_work,
@@ -14637,6 +14654,29 @@ mod tests {
             .set_range_link(label, 0, 4, revision, Some("#Late"))
             .unwrap();
         assert!(document.to_bytes().is_ok());
+
+        let mut plain = EditableDocx::new();
+        plain.add_paragraph("Unlinked").unwrap();
+        let native = plain.document().unwrap();
+        let mut layout =
+            wordcraft_layout::layout(native, &mut Default::default(), &Default::default());
+        let page = &mut layout.pages[0];
+        for item in &mut page.items {
+            if let wordcraft_layout::Placed::Lines { turn, .. } = item {
+                *turn = TextDirection::Down;
+            }
+        }
+        let mut cost = 0;
+        validate_bookmark_source_links(native, page, &mut cost).unwrap();
+        assert!(
+            cost > page.items.len(),
+            "turned placements must charge their source run lists"
+        );
+        let mut exact = MAX_BOOKMARK_WORK - cost;
+        validate_bookmark_source_links(native, page, &mut exact).unwrap();
+        assert_eq!(exact, MAX_BOOKMARK_WORK);
+        let mut over = MAX_BOOKMARK_WORK - cost + 1;
+        assert!(validate_bookmark_source_links(native, page, &mut over).is_err());
     }
 
     #[test]
