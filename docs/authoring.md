@@ -257,7 +257,7 @@ with doc_ex.new("docx") as document:
     document.save("table.docx")
 ```
 
-Table keys are `alignment` (`left`, `center`, `right`), `indent`, `width`, `width_percent`, `layout` (`fixed`, `autofit`), `rtl`, `title`, `description` and `borders`. Width is in points; percentage is in 0.02-percent increments through 100. Setting one non-null width preference clears the other; supplying both non-null fails. Title/description are alternative-text metadata, not visible numbered captions, and are limited to 10,000 characters each with an aggregate budget. They do not establish accessible table structure in exported PDF.
+Table keys are `style`, `look`, `alignment` (`left`, `center`, `right`), `indent`, `width`, `width_percent`, `layout` (`fixed`, `autofit`), `rtl`, `title`, `description` and `borders`. Width is in points; percentage is in 0.02-percent increments through 100. Setting one non-null width preference clears the other; supplying both non-null fails. Title/description are alternative-text metadata, not visible numbered captions, and are limited to 10,000 characters each with an aggregate budget. They do not establish accessible table structure in exported PDF.
 
 Cell keys are `background`, `margins`, `alignment`, `vertical_alignment`, `text_direction` (`horizontal`, `down`, `up`), `no_wrap` and `borders`. Paragraph alignment remains distinct from vertical alignment. Margin tuples retain top/right/bottom/left ordering. Snapshots distinguish inherited nullable properties from direct settings; boolean native layout switches remain explicit. Mixed paragraph alignment raises the same explicit error as the cell alignment getter.
 
@@ -270,3 +270,25 @@ Border mappings address `top`, `right`, `bottom`, `left`, and table-only `inside
 `target.pages.insert(index, source, pages=None, outline_title=None)` retains its existing page/link import behavior by default. Supply `outline_title="Appendix"` to copy native source outlines beneath that container. A source without outlines adds no container. Duplicate selected source pages map destinations to the first imported instance. Omitted targets become destinationless outline entries or link annotations; links are not silently reassigned to an unrelated page.
 
 Outline imports reject incomplete/deep/oversized source trees, unsupported external/chained actions and unrepresentable bookmark properties. The extra container level counts toward the depth limit; titles are bounded to 4,096 UTF-8 bytes and must be nonblank without NUL. Sources with forms/encryption remain unsupported; already-owned destination fields are preserved. Page import invalidates page/annotation/bookmark handles as before. Subset copies still do not preserve outlines and remain separate work.
+
+### Conditional DOCX table styles
+
+```python
+with doc_ex.new("docx") as document:
+    style = document.styles.add("Revenue table", kind="table")
+    style.format(margins=6, background="white", row_band_size=1)
+    style.format(region="first_row", background="navy", color="white", bold=True)
+    style.format(region="odd_rows", background="#EAF0F8")
+    table = document.add_table([["Region", "Revenue"], ["West", "$100"]])
+    table.format(style=style, look={"header_row": True, "banded_rows": True})
+    table.row(0).repeat_header = True
+    document.save("styled-table.docx")
+```
+
+Table styles reuse `document.styles`, same-kind `based_on` inheritance and `Style.format()`. A table accepts a same-document style handle, ID or name; `style=None` clears its assignment. Style edits and assignment validate affected native table layout, including nested content, before publication. Failed changes preserve the model and existing handles.
+
+Omit `region` (or use `whole_table`) for whole-table defaults. Conditional regions are `first_row`, `last_row`, `first_column`, `last_column`, `odd_rows`, `even_rows`, `odd_columns`, `even_columns`, `top_left`, `top_right`, `bottom_left` and `bottom_right`. Native precedence applies whole-table defaults, column bands, row bands, edge columns, edge rows and corners, followed by direct cell formatting. Corner names describe logical cells; RTL reverses their displayed horizontal positions. Row band size is 1–1,000; column bands currently have width one.
+
+All regions accept supported character properties, cell `background`, paragraph `alignment`, `vertical_alignment` and the existing six-side border mapping. Whole-table defaults additionally accept supported paragraph properties, `margins` and `row_band_size`. Conditional paragraph spacing/indentation/keep properties are unsupported. `None` clears a direct override and `False` explicitly disables boolean formatting. Table-style backgrounds are cell fills, distinct from run shading.
+
+`style.formatting` and `style.resolved_formatting` include whole-table properties and a `regions` mapping. Resolution follows the native base-style chain; a region snapshot is not a final cell appearance after all intersecting conditions and direct overrides. `table.formatting` adds the canonical style ID and six concrete `look` flags. Look keys are `header_row`, `total_row`, `first_column`, `last_column`, `banded_rows` and `banded_columns`; omitted flags stay unchanged and `look=None` resets native defaults. Header styling is independent of `row.repeat_header`, which controls pagination. Pinned upstream border-conflict and patterned-fill limitations still apply.

@@ -1,5 +1,14 @@
 # Validation evidence
 
+## 2026-10-20 conditional table styles and multiline PDF links (unreleased)
+
+- Offline Linux x86_64, Rust 1.95.0, CPython 3.11.2 and Maturin 1.8.1: formatting, 128 Rust tests, warnings-denied Clippy, locked release build and 138 installed-wheel Python tests passed with zero skips and verified artifact identity.
+- STY1/TBL9 evidence covers all 13 native table-style regions, same-kind inheritance, IDs/names, explicit false/clear, border suppression, band sizes, native precedence, RTL/merged cells, direct overrides, look flags separate from repeating headers, owned copies and invalid/stale/closed usage. Native DOCX reopening, colored PNG/PDF output and exactly-once table text are verified. Effective geometry checks cover base/assignment/margin changes and unregistered nested tables, with atomic rollback.
+- E4 evidence covers repeated/Unicode/ligature labels, native inserted spaces/newlines, partial multiline endpoints, adjacent links and disjoint labels sharing a boundary line. Coalescing retains identical plain text and exact Markdown offsets. Overlap, skipped glyphs, ambiguous duplicate identities, inferred table cells and empty rectangles remain explicitly unresolved; work-budget failures are tested. This does not claim inferred column order or quadpoint grouping.
+- Incorporated the PR25 review corrections for alignment activating indentation, section geometry shrinking percentage tables and structural parent edits squeezing nested tables. Native and Python regressions check unchanged bytes/handles after rejection. The landscape rendering fixture uses 24-point text with unchanged visible-pixel thresholds to avoid dependence on small-font antialiasing.
+- Wheel: `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`, 17,185,256 bytes; native extension: 39,814,360 bytes. SHA-256: `fefbc1a8507e7e72860674393ee61a6b72c272e3397902cb3f9ac717087d5cac`. Lockfile SHA-256: `48265d3bcdda6a4ede5f8262680c7e7c324f5722eb889407c0608e0b89819f51`. All pinned revisions, dependencies and attribution assets remain unchanged; the locked license audit passed for 264 permissive normal/build packages.
+- Remaining conditional paragraph-property, wider column-band, patterned-fill and shared-edge border gaps are marked upstream. Theme/next-linked styles, broader source preservation and other unchecked criteria remain open. This is not a release declaration.
+
 ## 2026-10-20 PR25 independent review correction (unreleased)
 
 - Reviewed runtime head `13fb855d1afe9aadcca238c2d76abdbaecbde13e` against merged main `7a1559ca775c16e52927159cd1fec315bba085e8`. [CI run 39459140907](https://github.com/narain1/pydoccraft/actions/runs/39459140907) passed formatting, all 118 Rust tests, warnings-denied Clippy, the locked 264-package license audit, release build and all 131 installed-wheel Python tests with zero skips.
