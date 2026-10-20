@@ -423,7 +423,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Gate top-level body/section scope and reuse shared native layout for bounded logical label geometry, malformed geometry and later output refusal/recovery.
 - [x] Verify isolated native/public hierarchy, nine-level maximum-start LTR/RTL ink, source/PDF output, copy/wrapping/callback and compatibility regressions.
 - [x] Complete integrated locked native/release/installed-wheel validation (280 Rust / 393 Python).
-- [ ] Complete independent manual review/current-main CI.
+- [x] Complete independent manual review/current-main CI: corrected 280 Rust / 393 Python head passed; PR71 manually merged as e402268f5bc33f756f34587594761c41308a2a1e.
 - [ ] Keep broader custom list definitions, cell/auxiliary outline placement and TXT5 completion open.
 
 
