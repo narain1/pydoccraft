@@ -1110,3 +1110,10 @@ Small native controls measure actual retained appearance streams and exact cumul
 PR90 independent source review and all 454 tests against its copied frozen package pass in 159.536 seconds, with strict typing, evidence checks and matching wheel hash. Review confirmed native sentinel/style behavior, preserved nested locators and publication after ordinary guards. Final main integration/CI remains queued.
 
 PR78 final head `a2fec8ab021fcaddf77e33a4766e0d95316b9deb` passed [current-main CI 39511382470](https://github.com/narain1/pydoccraft/actions/runs/39511382470): 288 Rust / 413 installed-wheel Python tests and all required checks. Independent review retained the exact tooltip/lock artifacts and corrected historical outline profile. It was manually merged as `f6ffa2c87d92943f36c4fdb57f3f7700fa912ede`; auto-merge remains disabled.
+
+
+### PDF field value normalization — focused isolated validation
+
+Source-only Python correction; no Rust/dependency changes or new native build. The installed `/opt/storyparagraphdeletetest` release reproducer used a str subclass whose encode deleted `same` and created another field named `same` at a different box. The old stale assignment succeeded and changed that replacement's value to `STALE WRITE`. The corrected setter bypasses overridden len/str/encode, validates actual Unicode and UTF-8 size, serializes first, and repeats the existing identity check before dispatch.
+
+Three new public groups in `test_pdf_field_value_ownership.py` pass with an isolated copied installed package; fifteen related field/tooltip/read-only/add-ownership tests also pass (18 total, 0.334 seconds). Assertions cover exact café text, independent copy/source/PNG equality, uninvoked callbacks, actual oversized strings despite subclasses, surrogate/NUL/native-glyph failures, stale/closed precedence, unchanged replacement source/pixels/cache, and ordinary choice None/checkbox bool behavior. This is focused evidence, not a rebuilt release or broad callback certification.

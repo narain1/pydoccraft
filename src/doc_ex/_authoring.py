@@ -2061,10 +2061,19 @@ class PdfField:
         self._check()
         if value is not None and not isinstance(value, (str, bool)):
             raise TypeError("field values must be text, a checkbox bool or None for a choice")
-        if isinstance(value, str) and (len(value) > 4096 or len(value.encode("utf-8")) > 4096):
-            raise ValueError("field values must not exceed 4096 bytes")
-        self._owner._call("set_field_value", self._name,
-                          json.dumps(value, ensure_ascii=False, allow_nan=False), _change=True)
+        if isinstance(value, str):
+            if str.__len__(value) > 4096:
+                raise ValueError("field values must not exceed 4096 UTF-8 bytes")
+            value = str.__str__(value)
+            try:
+                encoded = str.encode(value, "utf-8")
+            except UnicodeEncodeError:
+                raise ValueError("field values must contain valid Unicode") from None
+            if len(encoded) > 4096:
+                raise ValueError("field values must not exceed 4096 UTF-8 bytes")
+        payload = json.dumps(value, ensure_ascii=False, allow_nan=False)
+        self._check()
+        self._owner._call("set_field_value", self._name, payload, _change=True)
 
 
 class _WordBookmarks:
