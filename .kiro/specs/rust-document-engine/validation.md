@@ -1091,6 +1091,26 @@ PR88 independent source review and all 446 tests against its copied frozen packa
 
 PR77 final head `a9f69bf84596ca7e6ffaa0dbb48866ac0cbac053` passed [current-main CI 39510345858](https://github.com/narain1/pydoccraft/actions/runs/39510345858): 288 Rust / 413 installed-wheel Python tests and all required checks. After independent review it was manually merged as `7d77625313b99fcc3e09f216b891389b7b870cda`. Auto-merge remains disabled; broader PDF6 stays open.
 
+
+## Owned auxiliary paragraph deletion — isolated implementation evidence
+
+Spec78 implementation is an additive delta from frozen Note.clear source; documentation starts from 6c27539, preserving its complete 310 Rust / 444 Python artifact and scoped story-clear evidence. Complete integrated deletion release validation is pending. Three new focused native groups passed in 0.08 seconds, followed by formatting, locked all-targets Clippy and a copied debug extension build. Five new public workflows passed in 12.502 seconds; the combined 41-test story deletion/clear/content, note conversion, range-ownership and bookmark regression suite passed in 62.622 seconds. Pinned mypy 1.18.2 strict consumer passed using the copied package and actual collection-deletion syntax.
+
+Native checks preserve shifted nested paragraph/table handles and grid generations, retain/reuse required trailing paragraphs, preserve note anchors/canonical empty-note styles, reclaim exact field/text charges and reject malformed/excessive paths, shared aliases, raw section properties and protected note anchors atomically. Public tests assert native/PDF content removal and surviving colored picture pixels, source sentinel XML, shifted cell-placeholder reuse, copies, both note kinds and native own marks, negative/invalid indexes, captured iterators and index callbacks that shift/clear/close the owner. Body/cell/PPTX scope errors preserve bytes/ranges/cache; outgoing field/link removal retains bookmark targets.
+
+New deletion pixel fixtures cover default header/footer variants; unchanged related story tests retain first/even/copy checks. These checks are not general native fidelity or imported-editing claims. No existing test module or historical ledger fingerprint changes in this slice; evidence joining can follow the full artifact separately. Native mandatory paragraphs are retained, not silently discarded. No dependencies, pins, license files or local standards/semantic-remapping algorithms changed. Broader DOC5/TXT1 remains open.
+
+
+## Owned auxiliary paragraph deletion — complete local artifact
+
+Runtime `b30033041b49ec05d6a4cad9507335f3c2c6848e` passed **315 locked Rust tests and 454 clean installed-wheel Python tests**, zero failures/errors/skips. The Python corpus ran in 153.601 seconds on Linux x86_64 / Python 3.11.2 / Rust 1.95. Formatting, warnings-denied all-target Clippy, locked/offline release build, strict installed-package typing and the unchanged 264-package license audit pass. Installed facade/native bytes match the wheel. The complete corpus verifies extraction, PNG rendering and reopened conversions across all three formats, including new deletion, sentinel, nested-identity and callback workflows.
+
+Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,529,441 bytes**; extension **40,641,480 bytes**; SHA-256 `c565220cd72a75b15b8649e0e4cfa8866ebe837770473eb640920dcc7b5d9cb4`. Lock SHA-256 remains `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`; upstream revisions, dependencies and attribution remain unchanged.
+
+The native model owns block removal and required trailing paragraphs; only bounded adapter locators move. Source review confirmed surviving nested handles and table generations, normal semantic guards and stable selection through index callbacks. Body/cell/PPTX deletion, section-boundary deletion and semantic note deletion remain unsupported. No historical behavioral test fingerprint is changed. Independent complete-package review and exact-head/current-main CI remain required; broader DOC5/TXT1 stays partial.
+
+PR89 independent source review and all 449 tests against its copied frozen package pass in 151.559 seconds, with strict typing, evidence checks and exact wheel hash. The reviewer separately confirmed native extension identity with PR88. Final main integration/CI remains queued.
+
 ## Character-spacing mixed-scope fixture — independent CI correction
 
 Current-main CI39517446150 at `76d40ef83f9a257a1b4604ab3bc6ce97587d22d6` passed 302 native tests but failed one of432 installed-wheel tests: the mixed header/footer, note and nested-cell fixture had a chromatic channel difference64 instead of the required maximum1. The same failure was independently reproduced with Liberation Sans: two pixels at(105,124) and(106,124) lie where the `Scope2` descender intersects the nested table's bottom rule. Source/PDF red bounds and counts were identical; the other19 changed chromatic pixels differed by at most1. Setting all character spacing to zero retained the64-level difference; removing only native table/cell borders removed every difference above1. A separate default-font control reproduced the same interaction at a fractional72.3-point top margin. These controls establish a preexisting native structural-stroke/compositing difference, not a spacing-induced glyph-position change.

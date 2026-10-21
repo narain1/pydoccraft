@@ -604,3 +604,11 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 
 1. Existing page.fields.add SHALL retain its initial owner/page lifetime check, normalize callback-capable options and box coordinates, then validate the original page again immediately before native creation. It SHALL NOT reuse a page ordinal captured before caller callbacks.
 2. Callback page reorder/deletion or owner closure SHALL reject the outer creation without changes beyond callback effects. Callback exceptions SHALL propagate without an outer field or cache mutation. Independent document copies SHALL not invalidate a live target. This correction SHALL not introduce radio support, a new public API or a blanket callback guarantee for unrelated operations.
+
+
+## 78. Owned auxiliary paragraph deletion
+
+1. Existing header/footer/Note paragraph collections SHALL support integer-index deletion through native Document.remove_block. Negative indexes SHALL follow normal Python behavior. No new public manager, deletion alias, slice/batch operation, insertion/movement or adoption API SHALL be introduced. Body/cell/PPTX paragraph deletion SHALL remain explicitly unsupported.
+2. Deletion SHALL retain surviving owned identities, table generations and native semantic references while invalidating only the removed paragraph handle; TextRanges SHALL retain normal global revision semantics. Required native empty/trailing paragraphs SHALL remain in the model as hidden reusable placeholders, with canonical note style/own-mark behavior when the last note paragraph is removed.
+3. Model/resource/locator changes SHALL be staged before publication. Existing normal semantic-anchor/media/field/navigation guards SHALL remain without deletion exemptions. Independent part ownership, section-boundary exclusion, bounded locator shapes/counts and initial/final callback lifetime checks SHALL be enforced. Snapshot selection SHALL never silently retarget after callback mutation.
+4. Tests SHALL verify source/PDF text/ink and native sentinel order, surviving nested table/cell/picture handles, note reference/style/counter behavior, exact resource charges, copies/iterators/callbacks and atomic invalid/unsupported edits. General DOC5/TXT1 parity and body identity migration SHALL remain open.

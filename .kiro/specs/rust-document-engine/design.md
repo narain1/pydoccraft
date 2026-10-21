@@ -511,3 +511,12 @@ The existing one-shot and retained PDF paths share the same full-page preflight,
 ## PDF field creation callback ownership
 
 PdfFields.add keeps its initial _page_number validation before touching caller inputs. It materializes the existing bounded options sequence and point coordinates, then resolves the same page handle again before native add_field. Page organization increments the owner's existing generation, so a callback cannot retarget the outer operation to another page at the old ordinal. Native staging/name/kind/field limits and normal cache/generation updates remain unchanged. Copying a document during normalization leaves the original target live.
+
+
+## 78. Owned auxiliary paragraph deletion
+
+A private typed paragraph collection adds __delitem__ while reusing existing factories/handles. It checks owner, snapshots IDs, converts the integer index, checks owner again, normalizes the index and calls private native remove_paragraph by stable ID. An index callback may shift earlier siblings without changing selection; clearing/replacing the selected paragraph leaves a stale ID that fails. PPTX and slice deletion fail explicitly.
+
+Native removal accepts only a direct owned header/footer/note Paragraph. Header/footer parts must have one explicit section reference; unexpected paragraph.section properties are rejected. Body/cell deletion is not emulated with blank text. A staged model calls public remove_block; the returned block supplies exact existing content_usage charges. The native mandatory empty/trailing paragraph is retained and tracked as synthetic, with canonical note style if the note becomes empty.
+
+Only adapter positions move: later root path components in the same Part decrease by one, including nested children and cell placeholders. Existing 100,000 location/cell limits and the authored 16-level/49-component path profile bound bookkeeping. Surviving native IDs/styles/numbering/media references and table generations are unchanged. Deleted handle removal, ordered story IDs and placeholder positions are staged before normal commit; publication occurs only on success. Existing range/cache invalidation and media reclamation remain unchanged. Body ID==position assumptions require separate migration before broader support.
