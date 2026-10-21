@@ -973,5 +973,8 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Run actionlint and execute the actual workflow guard for accepted and refused inputs.
 - [x] Complete independent guard, publication-gating, privilege and unchanged matrix review.
 - [ ] Complete current-main CI before manual merge.
-- [ ] Dispatch the matrix against reviewed source, inspect every platform/Python corpus and fix failures before treating cross-platform validation as complete.
+- [x] Dispatch initial immutable baseline39580637011 without publication; preserve actual Windows/macOS failures.
+- [x] Independently review UTF-8/LF/actual-mode portability corrections and deliberately migrate only the affected save-test fingerprint.
+- [ ] Execute corrected portability tests on Windows; diagnose native font/raster/pagination differences with unchanged assertions.
+- [ ] Inspect every platform/Python corpus and fix failures before treating cross-platform validation as complete.
 - [ ] Retain final versioned release validation; this infrastructure change does not complete QA7 or authorize a premature release.

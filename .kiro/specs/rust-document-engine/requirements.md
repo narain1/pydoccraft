@@ -853,3 +853,5 @@ Existing paragraph, table and row properties must retain concrete successful res
 ## 120. Validate release wheels before publishing
 
 The existing release matrix SHALL support an explicit validation-only dispatch against an exact immutable commit SHA. It SHALL run the same Python 3.11–3.13 Linux, macOS and Windows wheel builds and installed-wheel corpus, retain artifacts and validation evidence, and create neither a GitHub release nor a PyPI publication. Validation-only mode SHALL reject branch names, abbreviated or mismatched commits and simultaneous publication requests. Default tagged and manual release behavior SHALL retain version matching and all existing validation dependencies.
+
+Validation fixtures SHALL read repository UTF-8 explicitly and retain identical LF text bytes across platform checkouts. Save-permission evidence SHALL assert exact POSIX permissions where supported and preservation of the actual platform mode after both failed and successful replacement. Existing rendering and pagination assertions SHALL not be relaxed to make a platform gate pass.
