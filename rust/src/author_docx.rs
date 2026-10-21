@@ -29,6 +29,8 @@ use crate::{DocExNativeError, EngineError};
 #[path = "author_docx_comments.rs"]
 mod comments;
 use comments::CommentInventory;
+#[path = "author_docx_valign.rs"]
+mod valign;
 
 const MAX_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_DOCUMENT_TEXT_BYTES: usize = 16 * 1024 * 1024;
@@ -2654,6 +2656,7 @@ impl EditableDocx {
         let props = self.section(section)?;
         Ok(json!({
             "start": section_start_name(props.start),
+            "vertical_alignment": valign::name(props.valign),
             "page_number_start": props.page_num_start,
             "line_numbers": props.line_numbers.as_ref().map(|value| json!([value.count_by, value.start, value.distance, line_number_restart_name(value.restart)])),
             "page_size": [props.page_w, props.page_h],
@@ -2679,6 +2682,9 @@ impl EditableDocx {
             .ok_or_else(|| PyValueError::new_err("section properties require a JSON object"))?;
         for (key, value) in object {
             match key.as_str() {
+                "vertical_alignment" => {
+                    props.valign = valign::parse(value)?;
+                }
                 "start" => {
                     props.start = parse_section_start(value.as_str().unwrap_or(""))?;
                     if section == 0 && props.start != SectionStart::NextPage {
@@ -5179,6 +5185,7 @@ impl EditableDocx {
     ) -> PyResult<()> {
         let comments = comments::inventory(&document)?;
         comments::registry(self, &comments)?;
+        valign::profile(&document)?;
         if let Some(removal) = removed_comment {
             if removed_bookmark.is_some() || converted_notes.is_some() {
                 return Err(PyValueError::new_err(
@@ -6166,6 +6173,7 @@ fn validate_unsplittable_page_bounds_with_comments(
     document: &Document,
     comments: &CommentInventory,
 ) -> PyResult<()> {
+    let aligned = valign::profile(document)?;
     validate_line_number_work(document)?;
     let outlines = outline_targets(document)?;
     let floating = floating_picture_paths(document)?;
@@ -6226,6 +6234,7 @@ fn validate_unsplittable_page_bounds_with_comments(
         && outlines.is_empty()
         && metadata_fields.is_empty()
         && floating.is_empty()
+        && !aligned
     {
         return Ok(());
     }
@@ -6256,6 +6265,9 @@ fn validate_unsplittable_page_bounds_with_comments(
                 "native pagination produced invalid page geometry".into(),
             )
             .into());
+        }
+        if aligned {
+            valign::page_bounds(page)?;
         }
         validate_rich_story_page_bounds(page, &rich)?;
         if !floating.is_empty() {
@@ -22170,3 +22182,7 @@ mod table_move_scope_proof;
 #[cfg(test)]
 #[path = "author_docx_table_move_tests.rs"]
 mod table_move_tests;
+
+#[cfg(test)]
+#[path = "section_vertical_alignment_proof.rs"]
+mod section_vertical_alignment_proof;

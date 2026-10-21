@@ -800,3 +800,20 @@ Body text, supported tables, inline header/footer content and supported margin/p
 The setter stages the native candidate and reuses existing bounded geometry checks before committing. An outside margin too narrow for a line-number label, or a floating picture shifted outside its physical page, raises `UnsupportedFormatError` atomically; prior bytes, revision, ranges and render cache remain usable. Existing output guards still apply after later content/layout mutations. Single-column line numbers and ordinary equal-column flow have combined acceptance; multi-column line numbering retains its existing explicit rejection. Successful assignments, including assigning the current value, follow the existing document-setting convention: they advance the revision and invalidate previous text ranges/render cache. Copies remain independent.
 
 This owned horizontal-page profile adds no settings manager, section-specific mirror override, booklet printing, binding-direction switch, top gutter, imported editing or web-layout behavior. It does not expand the page-border, continuous-section, field or floating-artwork profiles. LAY10 remains open for its other settings.
+
+### DOCX page-body vertical alignment
+
+`section.vertical_alignment` is `"top"` by default. Set it to `"center"`, `"bottom"` or `"justify"` to use native page-body placement; `"top"` restores ordinary flow. Center and bottom position the body group within available vertical space. Justify distributes gaps between native blocks and leaves a single block at the top. This is distinct from paragraph horizontal alignment and cell vertical alignment. Appended sections inherit the property, and copies remain independent.
+
+```python
+with doc_ex.new("docx") as document:
+    document.add_paragraph("A short title page")
+    document.sections[0].vertical_alignment = "center"
+    document.save("title.docx")
+```
+
+While any section is non-top, every section must use one column and a next-page start. Cells must use horizontal text; up/down cell text, notes, active even/odd header/footer selection and floating pictures are unavailable in that profile. These rules also apply to later edits; restore **all** sections to top before adding an excluded feature. Inactive even-story placeholders created by section copying are harmless. Ordinary body and nested tables, default/first headers and footers, inline pictures and page color/PNG backgrounds remain available.
+
+The pinned native engine can shift page-anchored pictures and uneven columns incorrectly, and note serialization changes the available alignment space. These limits are explicit errors in owned non-top documents, not local layout corrections. Imported reading/rendering retains the upstream behavior. See [the recorded native limits](upstream-roadmap.md#section-vertical-alignment).
+
+Source-profile failures preserve document bytes, handles, revision and cached output. Successful typography/content edits can still produce invalid vertical geometry; ordinary serialization, save, rendering and PDF conversion then raise `UnsupportedFormatError`. Reduce the content/formatting, enlarge the page or restore top. The property does not promise pixel-perfect roundtrips or complete layout-settings support.

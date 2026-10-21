@@ -893,3 +893,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 
 - [x] Verify the immutable maturin action declares and uses its toolchain input for both container and host builds; explicitly select CI Rust 1.95.0 in both release steps.
 - [ ] Independently review the workflow-only change, run required current-main CI and merge manually; validate all nine platform/Python wheels at the eventual release gate. No new tag or release is authorized by this task alone.
+
+## Section vertical alignment (spec111)
+
+- [x] Audit native model/read/write/layout/PDF and run three raw groups; retain desired-geometry failures and precise note/readback drift separately from accepted note-free controls.
+- [x] Add one typed Section property, strict native enum parsing, central candidate/output profile checks and vertical-only existing-layout bounds.
+- [x] Pass five native adapter groups, unchanged raw replay, four public workflows, strict consumer, formatting and Clippy; verify solid/PNG backgrounds explicitly.
+- [x] Resolve the reviewed rotated-cell coordinate gap with central horizontal section/cell admission and defensive output refusal; pass corrected independent four-workflow replay and documentation/site checks.
+- [ ] Complete final frozen documentation review, integrated full native/installed-wheel corpus and current-head CI before merge.
+- [ ] Retain broader LAY10 settings and excluded native compositions under existing U02; do not mark the roadmap criterion complete.

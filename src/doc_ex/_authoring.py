@@ -1388,6 +1388,20 @@ class Section:
         self._set(start=value)
 
     @property
+    def vertical_alignment(self) -> Literal["top", "center", "bottom", "justify"]:
+        """Native page-body alignment; non-top requires the documented simple profile."""
+        return self._props()["vertical_alignment"]
+
+    @vertical_alignment.setter
+    def vertical_alignment(self, value: Literal["top", "center", "bottom", "justify"]) -> None:
+        self._owner._ensure_open()
+        if type(value) is not str:
+            raise TypeError("vertical_alignment must be a string")
+        if value not in ("top", "center", "bottom", "justify"):
+            raise ValueError("vertical_alignment must be top, center, bottom or justify")
+        self._set(vertical_alignment=value)
+
+    @property
     def line_numbers(self) -> tuple[int, int, float, str] | None:
         """(count_by, start, distance_pt, restart), or None; single columns only.
 

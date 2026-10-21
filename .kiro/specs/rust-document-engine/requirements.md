@@ -804,3 +804,10 @@ Acceptance covers false/true/reset and independent copies; closed/type/revision/
 ## 113. Release compiler selection
 
 Every Linux, macOS and Windows release-wheel build must explicitly select the same Rust 1.95.0 toolchain used by required CI. Keep the existing nine-wheel matrix, immutable actions, locked dependency graph and release/publish gates. Selecting a compiler is build configuration, not permission to publish an unfinished feature set.
+
+## 111. Bounded owned DOCX section vertical alignment
+
+1. Existing `Section.vertical_alignment` SHALL accept exactly `top`, `center`, `bottom` or `justify`, defaulting to native Top and delegating placement/readback/PDF behavior to public native PageVAlign. No new settings manager, coordinate compensation, nullable reset or parse aliases SHALL be introduced.
+2. If any section is non-top, the exact staged document SHALL require horizontal single-column NextPage sections, horizontal cells, no notes, no active even/odd header/footer mode and no floating objects in any story or nested group. Inactive even-story placeholders created by section copying SHALL remain valid. Ordinary body/nested tables, default/first stories, inline pictures and verified color/PNG backgrounds SHALL remain composable. Restoring all sections to Top SHALL recover the existing profile.
+3. The source restriction SHALL apply centrally to later mutations and ordinary output, after bounded source inventory, with bounded independent work accounting. Non-top output SHALL reuse the existing layout pass to reject nonfinite or out-of-body vertical geometry, including after typography changes. Horizontal signed advances SHALL retain their existing behavior; commit-time source validity SHALL not promise later output geometry.
+4. Validation SHALL preserve the native column, float, even-header and note-readback failures as diagnostics; positively verify note-free source/readback geometry, native PNG/PDF, field values, backgrounds, strict values, copy/section inheritance, cache/revision/registry rollback and Top recovery. Broader LAY10 SHALL remain pending.

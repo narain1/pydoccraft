@@ -21,6 +21,8 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(word, WordDocument)
         assert_type(word.copy(), WordDocument)
         assert_type(word.mirror_margins, bool)
+        assert_type(word.sections[0].vertical_alignment, Literal["top", "center", "bottom", "justify"])
+        word.sections[0].vertical_alignment = "center"
         word.mirror_margins = True
         word.mirror_margins = False
         assert_type(word.notes.convert(kind="endnote"), int)
