@@ -1205,4 +1205,5 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reproduce the defect with standalone builtin-font PDF data; preserve failed old native/public expectations.
 - [x] Review and implement conservative discarded-row admission before any page mutation, retaining the exact existing replacement predicate.
 - [x] Complete focused native/public and independent source/artifact verification, including unchanged tab proofs in both diagnostic font environments.
-- [ ] Complete parent-integrated full artifact, fresh current-head CI and manual review/merge; preserve earlier 146/148 artifacts as historical sources.
+- [x] Complete corrected parent-integrated469-native/586-installed artifact, strict typing and independent source/artifact review; preserve earlier failures and146/148 artifacts as historical sources.
+- [ ] Complete fresh current-head CI, actual-main synchronization and manual review/merge.
