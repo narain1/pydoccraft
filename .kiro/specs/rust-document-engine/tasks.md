@@ -900,7 +900,8 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add one typed Section property, strict native enum parsing, central candidate/output profile checks and vertical-only existing-layout bounds.
 - [x] Pass five native adapter groups, unchanged raw replay, four public workflows, strict consumer, formatting and Clippy; verify solid/PNG backgrounds explicitly.
 - [x] Resolve the reviewed rotated-cell coordinate gap with central horizontal section/cell admission and defensive output refusal; pass corrected independent four-workflow replay and documentation/site checks.
-- [ ] Complete final frozen documentation review, integrated full native/installed-wheel corpus and current-head CI before merge.
+- [x] Complete frozen documentation/source review and integrated425-native/two547-test clean installed-wheel corpora.
+- [ ] Complete final exact-head CI and manual merge.
 - [ ] Retain broader LAY10 settings and excluded native compositions under existing U02; do not mark the roadmap criterion complete.
 
 
@@ -911,7 +912,8 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Pass five native adapter groups, all 26 selected style regressions, formatting/all-target Clippy/debug build, five copied-package public workflows,14 historical style/note workflows and strict consumer typing with three intended negative key diagnostics.
 - [x] Complete independent frozen source and five-workflow replay review (2.250s).
 - [x] Complete synchronized documentation review.
-- [ ] Complete integrated full native/release/installed-wheel corpus, exact-head CI and manual merge.
+- [x] Complete integrated425-native/release and two547-test clean installed-wheel corpora with independent artifact review.
+- [ ] Complete final exact-head CI and manual merge.
 - [ ] Keep STY6 open for style import, collision policy and general cleanup; no batch prune or automatic restyling.
 
 
