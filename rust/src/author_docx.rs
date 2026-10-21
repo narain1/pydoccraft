@@ -1437,7 +1437,7 @@ impl EditableDocx {
         let values = format_patch(patch)?;
         if values.get("font_size").is_some_and(Value::is_null) {
             return Err(EngineError::Unsupported(
-                "clearing document-default font_size is unavailable: pinned upstream native resolution uses 11pt but DOCX reopening substitutes 10pt; set an explicit font_size".into(),
+                "clearing document-default font_size remains unavailable pending owned reset support; set an explicit font_size".into(),
             ).into());
         }
         let (mut character, mut paragraph) = (Map::new(), Map::new());
@@ -12406,9 +12406,9 @@ mod tests {
     }
 
     #[test]
-    fn upstream_omitted_default_font_size_resolves_inconsistently() {
-        // Reproducer for the upstream blocker; the public default patch rejects
-        // this mutation until native resolution and reader defaults agree.
+    fn upstream_omitted_default_font_size_preserves_native_resolution() {
+        // The dedicated native upgrade fixes the recorded reader inconsistency.
+        // The public default patch still rejects None until owned reset admission.
         let mut document = Document::new();
         document.styles.default_chr.size = None;
         assert_eq!(
@@ -12436,13 +12436,13 @@ mod tests {
         );
         let reopened = wordcraft_docx::read(&bytes).unwrap();
         assert!(reopened.styles.default_para_present);
-        assert_eq!(reopened.styles.default_chr.size, Some(10.0));
+        assert_eq!(reopened.styles.default_chr.size, None);
         assert_eq!(
             reopened
                 .styles
                 .resolve_char(None, &CharProps::default())
                 .size,
-            10.0
+            11.0
         );
     }
 
