@@ -4,7 +4,7 @@
 
 This initial inventory records 20 bounded profiles, not complete format parity. All roadmap IDs remain visible below. Statuses cite historical installed-wheel evidence; validation of this file is not a new test run or a completion decision.
 
-Ledger source-audit baseline: `c0b1caf64ac487caa9c9d21c513fd8972768c24a`. Historical tests do not certify this source revision. Native adapter/facade changes need their own behavioral review and release validation; matching fixture hashes are only a drift check.
+Ledger source-audit baseline: `3504e4622aa13615d8da82a8d388f561d41ace2b`. Historical tests do not certify this source revision. Native adapter/facade changes need their own behavioral review and release validation; matching fixture hashes are only a drift check.
 
 Operations: **read** normalized content; **create** native-format serialization; **edit authored/imported** distinguish model provenance; **preserve** only named unchanged content; **render** PNG; **export** conversion to a named different format. Saving is not conversion.
 

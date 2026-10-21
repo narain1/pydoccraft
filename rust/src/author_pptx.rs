@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use deckcraft_model::style::PictureFill;
 use deckcraft_model::text::{
-    Action, Align, Anchor, AutoFit, Hyperlink, RunProps, Strike, TextBody,
+    Action, Align, Anchor, AutoFit, Hyperlink, ParaProps, RunProps, Spacing, Strike, TextBody,
 };
 use deckcraft_model::{
     Background, ColorBase, ColorRef, Fill, Geom, LayoutType, Line, Presentation, Rgba, Shape,
@@ -1749,6 +1749,53 @@ impl EditablePptx {
             }))
     }
 
+    pub fn cell_paragraph_formatting(
+        &self,
+        slide: usize,
+        id: u32,
+        cell: CellTarget,
+    ) -> PyResult<String> {
+        let props = &self.target_body(slide, id, Some(cell))?.paragraphs[cell.2].props;
+        let scalar = |value: Option<Spacing>, percent: bool| -> PyResult<Option<f64>> {
+            match value {
+                None => Ok(None),
+                Some(Spacing::Pct(value)) if percent => Ok(Some(value)),
+                Some(Spacing::Pts(value)) if !percent => Ok(Some(value)),
+                _ => Err(EngineError::Unsupported(
+                    "PPTX paragraph spacing uses an unsupported native unit".into(),
+                )
+                .into()),
+            }
+        };
+        Ok(serde_json::json!({
+            "alignment": self.cell_paragraph_alignment(slide, id, cell)?,
+            "indent_left": props.margin_left,
+            "indent_right": props.margin_right,
+            "indent_first": props.indent,
+            "space_before": scalar(props.space_before, false)?,
+            "space_after": scalar(props.space_after, false)?,
+            "line_spacing": scalar(props.line_spacing, true)?,
+        })
+        .to_string())
+    }
+
+    pub fn format_cell_paragraph(
+        &mut self,
+        slide: usize,
+        id: u32,
+        cell: CellTarget,
+        patch: &str,
+        revision: u64,
+    ) -> PyResult<()> {
+        self.check_revision(revision)?;
+        let original = &self.target_body(slide, id, Some(cell))?.paragraphs[cell.2].props;
+        let props = cell_paragraph_patch(original, patch)?;
+        self.mutate(|document| {
+            target_body_mut(document, slide, id, Some(cell))?.paragraphs[cell.2].props = props;
+            Ok(())
+        })
+    }
+
     #[pyo3(signature = (slide, id, cell, alignment=None))]
     pub fn set_cell_paragraph_alignment(
         &mut self,
@@ -2253,6 +2300,81 @@ impl EditablePptx {
             Ok(())
         })
     }
+}
+
+// DrawingML point/percentage properties stay native model values. The reader
+// caps percentages at 100; normal-height multipliers below 1 are excluded because
+// overlapping glyphs can be lost by normalized PDF text extraction.
+fn cell_paragraph_patch(original: &ParaProps, source: &str) -> PyResult<ParaProps> {
+    if source.len() > MAX_PATCH {
+        return Err(EngineError::ResourceLimit("format patch exceeds 16 KiB".into()).into());
+    }
+    let value: serde_json::Value = serde_json::from_str(source)
+        .map_err(|_| PyValueError::new_err("format patch must be a JSON object"))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| PyValueError::new_err("format patch must be a flat object"))?;
+    let mut props = original.clone();
+    for (key, value) in object {
+        if key == "alignment" {
+            props.align = match value {
+                serde_json::Value::Null => None,
+                serde_json::Value::String(value) => Some(match value.as_str() {
+                    "left" => Align::Left,
+                    "center" => Align::Center,
+                    "right" => Align::Right,
+                    "justify" => Align::Justify,
+                    _ => {
+                        return Err(PyValueError::new_err(
+                            "alignment must be left, center, right, justify or None",
+                        ))
+                    }
+                }),
+                _ => {
+                    return Err(PyValueError::new_err(
+                        "alignment must be left, center, right, justify or None",
+                    ))
+                }
+            };
+            continue;
+        }
+        let (min, max) = match key.as_str() {
+            "indent_left" | "indent_right" => (0.0, 4032.0),
+            "indent_first" => (-4032.0, 4032.0),
+            "space_before" | "space_after" => (0.0, 1584.0),
+            "line_spacing" => (1.0, 100.0),
+            _ => {
+                return Err(EngineError::Unsupported(format!(
+                    "PPTX cell paragraph formatting property {key} is unavailable"
+                ))
+                .into())
+            }
+        };
+        let scalar = if value.is_null() {
+            None
+        } else {
+            let invalid = || {
+                PyValueError::new_err(format!(
+                    "{key} must be finite and between {min} and {max}, or None"
+                ))
+            };
+            let value = value.as_f64().ok_or_else(invalid)?;
+            if !value.is_finite() || !(min..=max).contains(&value) {
+                return Err(invalid());
+            }
+            Some(value)
+        };
+        match key.as_str() {
+            "indent_left" => props.margin_left = scalar,
+            "indent_right" => props.margin_right = scalar,
+            "indent_first" => props.indent = scalar,
+            "space_before" => props.space_before = scalar.map(Spacing::Pts),
+            "space_after" => props.space_after = scalar.map(Spacing::Pts),
+            "line_spacing" => props.line_spacing = scalar.map(Spacing::Pct),
+            _ => unreachable!(),
+        }
+    }
+    Ok(props)
 }
 
 enum FormatChange {
@@ -5864,3 +5986,7 @@ mod cell_delete_proof;
 #[cfg(test)]
 #[path = "pptx_cell_move_proof.rs"]
 mod cell_move_proof;
+
+#[cfg(test)]
+#[path = "pptx_cell_format_proof.rs"]
+mod cell_format_proof;

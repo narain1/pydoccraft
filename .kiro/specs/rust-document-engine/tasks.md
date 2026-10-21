@@ -975,7 +975,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Preserve the existing two public raster-limit workflows and record their successful baseline behavior; add one linked-native guard/recovery test with exact-source safety precondition.
 - [x] Complete focused/full437-native, formatting, Clippy and locked release build.
 - [x] Complete clean installed556 workflows, independent artifact/corpus/typing/reopen checks, measured sizes and final source-ledger/documentation validation.
-- [ ] Complete current-head CI and manual merge; retain broad U09/R4 limits and separate release gates.
+- [x] Complete current-head CI and manual merge through PR124, required CI39580088971 and documentation CI39580088936; retain broad U09/R4 limits and separate release gates.
 
 
 ## Same-cell owned PPTX paragraph movement (spec118)
@@ -985,7 +985,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Implement and validate existing collection dispatch, canonical/generation/no-op/callback guards and atomic boundary controls.
 - [x] Complete focused native/public, unchanged deletion regressions, strict typing and independent source/copied-artifact review.
 - [x] Complete integrated 443-native/release, two clean 560-test installed-wheel corpora and independent exact-artifact gates.
-- [ ] Complete current-head CI and manual merge.
+- [x] Complete current-head CI and manual merge through PR125, required CI39583701211 and documentation CI39583701226.
 - [ ] Keep broader DOC5/TXT1/SLIDE3 adoption, duplication and shape-content work open; no version release before overall completion gates.
 
 
@@ -994,7 +994,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Compare seven stale family summaries with existing source, guides and accepted corpus modules.
 - [x] Correct bounded operation descriptions and regenerate the existing reference page without promoting feature status.
 - [x] Complete independent documentation and exact inventory-delta review.
-- [ ] Complete current-main CI/manual merge.
+- [x] Complete current-main CI/manual merge through PR125, required CI39583701211 and documentation CI39583701226.
 - [ ] Keep exhaustive member dispositions and broad API1/QA1 acceptance open.
 
 
@@ -1006,4 +1006,15 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Upgrade all11 direct/13 resolved PdfCraft pins only; audit264 permissive packages and23 existing citations across11 files, including unchanged raster allocation correction.
 - [x] Add one linked native identity/order/save/reopen/visible-output regression and retain existing allocation safety precondition and unchanged public tests.
 - [x] Complete locked444-native, fmt, Clippy, release build, two clean installed560 corpora, independent exact-artifact replay, typing and size gates.
-- [ ] Complete current-head CI and independent manual merge. Python underlays, resource collisions and broader PDF3/U10 remain open.
+- [x] Complete current-head CI and independent manual merge through PR126, required CI39586980360 and documentation CI39586980370. Python underlays, resource collisions and broader PDF3/U10 remain separately tracked.
+
+
+## Direct PPTX cell paragraph spacing and indentation (spec121)
+
+- [x] Audit pinned public model/writer/reader/layout APIs and obtain raw-only scope review.
+- [x] Preserve first low-DPI decoration failure and zero/tight-overlap extraction failure; use native layout and actual PDF operators to distinguish export preservation from normalized extraction loss.
+- [x] Approve normal-height multiplier 1..100/None and the native point-bound domains without new layout algorithms or dependencies.
+- [x] Complete final raw/adapter native controls, four public workflows, precise historical fixture migrations and strict seven-key snapshot replay typing; independently replay the four public workflows.
+- [x] Complete combined 119/121 full 449-native/release and two clean 564-test installed-wheel corpora, attribution/size and independent source/artifact review.
+- [x] Complete synchronized documentation and final independent review, retaining all historical evidence and scoped upstream findings.
+- [ ] Complete current-head CI and manual merge. Keep broader TXT1/SLIDE3 and overall release gates open.

@@ -10,7 +10,7 @@ from typing import Any, Literal, assert_type
 
 import doc_ex
 from doc_ex._authoring import (
-    Annotation, Bookmark, Comment, Comments, EditableCell, EditableTable, Paragraph, PdfDocument, PdfField,
+    Annotation, Bookmark, Comment, Comments, EditableCell, EditableTable, Paragraph, ParagraphFormatting, PdfDocument, PdfField,
     PdfPage, Picture, Presentation, Shape, SlidePicture, SlideTable, TextRange,
     WordDocument, _WordShape,
 )
@@ -173,6 +173,20 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(cell_paragraph.add_run(' rich', bold=True), TextRange)
         assert_type(cell_paragraph.add_run(' spaced', letter_spacing=0.3), TextRange)
         assert_type(cell_paragraph[:].format(letter_spacing=None), None)
+        assert_type(cell_paragraph.format(indent_left=12, indent_right=None, indent_first=-6,
+                                         space_before=4, space_after=8, line_spacing=1.5), None)
+        assert_type(cell_paragraph.formatting["line_spacing"], float | None)
+        cell_snapshot = cell_paragraph.formatting
+        cell_patch: ParagraphFormatting = {
+            "alignment": cell_snapshot["alignment"],
+            "indent_left": cell_snapshot["indent_left"],
+            "indent_right": cell_snapshot["indent_right"],
+            "indent_first": cell_snapshot["indent_first"],
+            "space_before": cell_snapshot["space_before"],
+            "space_after": cell_snapshot["space_after"],
+            "line_spacing": cell_snapshot["line_spacing"],
+        }
+        assert_type(cell_paragraph.format(**cell_patch), None)
         assert_type(slide.add_text('Spaced', box=(10, 300, 200, 40))[:].format(letter_spacing=0), None)
         assert_type(slide.get_text('markdown'), str)
         assert_type(slide.get_text('dict'), dict[str, Any])
