@@ -40,11 +40,11 @@ serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.138"
 skrifa = "=0.44.0"
 thiserror = "=2.0.21"
-wordcraft-doc = { git = "https://github.com/narain1/wordcraft", rev = "5312722fb1cefed837f00227e3afe919a6451b54" }
-wordcraft-docx = { git = "https://github.com/narain1/wordcraft", rev = "5312722fb1cefed837f00227e3afe919a6451b54" }
-wordcraft-layout = { git = "https://github.com/narain1/wordcraft", rev = "5312722fb1cefed837f00227e3afe919a6451b54" }
-wordcraft-pdf = { git = "https://github.com/narain1/wordcraft", rev = "5312722fb1cefed837f00227e3afe919a6451b54" }
-wordcraft-render = { git = "https://github.com/narain1/wordcraft", rev = "5312722fb1cefed837f00227e3afe919a6451b54" }
+wordcraft-doc = { git = "https://github.com/narain1/wordcraft", rev = "517637db3caa0dffd1ad5e4e66c9bdd86e908742" }
+wordcraft-docx = { git = "https://github.com/narain1/wordcraft", rev = "517637db3caa0dffd1ad5e4e66c9bdd86e908742" }
+wordcraft-layout = { git = "https://github.com/narain1/wordcraft", rev = "517637db3caa0dffd1ad5e4e66c9bdd86e908742" }
+wordcraft-pdf = { git = "https://github.com/narain1/wordcraft", rev = "517637db3caa0dffd1ad5e4e66c9bdd86e908742" }
+wordcraft-render = { git = "https://github.com/narain1/wordcraft", rev = "517637db3caa0dffd1ad5e4e66c9bdd86e908742" }
 zip = { version = "=2.2.2", default-features = false, features = ["deflate"] }
 
 [patch.crates-io]

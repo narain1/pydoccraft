@@ -24,7 +24,7 @@ Keep all crates from each repository on one revision:
 | Project | Revision | Purpose |
 |---|---|---|
 | PdfCraft (reviewed contribution fork) | `516caea956c0aaf15f2bd1f35a15e07c73a9ead6` | PDF inspection, text, links, images, rendering, DOCX export |
-| WordCraft | `5312722fb1cefed837f00227e3afe919a6451b54` | DOCX model, layout, rendering, PDF export |
+| WordCraft | `517637db3caa0dffd1ad5e4e66c9bdd86e908742` | DOCX model, layout, rendering, PDF export |
 | DeckCraft (reviewed contribution fork) | `c9c7fff189c808bf7266d0b888c3636a1880080d` | PPTX model, fallible rendering, PDF export |
 | craft-libs | `c3487320b2d1de657b860b3c8abb44e1f2b32bd8` | Shared PDF backend required by WordCraft/DeckCraft |
 
