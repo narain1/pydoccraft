@@ -1329,3 +1329,36 @@ Python source `27bad86261208417134f2e5c90fc484b7985cabc` passed **481 clean inst
 The locked offline release command repackaged the unchanged native extension. Its SHA-256 `be2b58b28488270129fbcecccc19747f3ab2b3f258801a42b911c9c179df947f` is byte-identical to the recorded 339-native-test paragraph-movement artifact. That artifact's native formatting, Clippy and 264-package license checks apply; no fresh native test run is claimed for these annotation-only changes. Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl` is **17,556,002 bytes**, extension **40,721,992 bytes**, wheel SHA-256 `05696c4b4b3c270b428be7fcf775a844633af284244799545d730645c278d9c3`. Lock SHA-256 remains `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`; pins, dependencies and attribution are unchanged.
 
 Sixty-nine existing signatures describe native tuple/scalar/collection and nullable returns without adding an API family or changing accepted runtime values. Existing behavioral modules and historical support evidence remain unchanged. Roadmap, support-ledger and pinned-reference checks pass. Final current-main CI/manual merge remains required; dynamic metadata/formatting mappings, other properties and broader API3/IDE coverage remain open.
+
+## GitHub Pages documentation site — reviewed manual merge
+
+PR95 final head `d9a6cbb914ec8a1bd4172bbcb58d0acbfe0ac8ae` passed required [CI39547460948](https://github.com/narain1/pydoccraft/actions/runs/39547460948): 321 native tests, 462 installed-wheel tests in207.055 seconds, formatting, Clippy, strict typing and the unchanged264-package license audit. Its [documentation build39547460927](https://github.com/narain1/pydoccraft/actions/runs/39547460927) passed; deployment was correctly skipped for the pull request. Independent source review and a clean build checked28 pages and1,642 local links/assets/fragments; negative checks rejected missing files/fragments, duplicate IDs and output-root traversal.
+
+Root visual review used Chromium140 with1440×1000 and390×844 viewports on the home page, authoring guide and roadmap. All six requests returned200 with no JavaScript errors or horizontal overflow; desktop/mobile homepage screenshots were inspected. The reviewed exact head was manually merged as `5583f2946534041267f71691a732f5c0d96c6bcd` after current-main checks, with repository auto-merge disabled. Public deployment/reachability remains separately verified after merge; the site follows main and does not declare the roadmap or a package release complete.
+
+## Owned PDF radio groups — final manual merge gate
+
+PR94 final head `0a0b225e12708d3d49c0bf7543d459b0c730cd49` passed required [current-main CI39548202131](https://github.com/narain1/pydoccraft/actions/runs/39548202131) and documentation CI39548202076 after the independent exact-artifact review recorded above. The final installed-wheel run passed all467 tests in388.512 seconds, with zero failures/errors/skips, on CPython3.11.17/Linux x86_64/glibc2.39. Wheel SHA-256 `11e5840634a7a95c9e7d2b515b064b355220fb181145a42fd5a17812a37b6efb`,17,535,375 bytes; extension40,677,744 bytes. Lock and upstream revisions are unchanged.
+
+The reviewed exact head was manually merged as `8979a6deb151742e18175cdebe843382ba3ac611`; repository auto-merge remains disabled. This completes the owned same-page radio-group delivery gate, while imported forms and broader PDF6 remain partial.
+
+
+## Owned body paragraph deletion — final manual merge gate
+
+PR96 final head `eb13c92b784d7df29749ce5c064b0405f2b1afdf` passed required [current-main CI39549509766](https://github.com/narain1/pydoccraft/actions/runs/39549509766) and documentation CI39549509781 after the independent exact-artifact review recorded above. The final run passed330 native tests in169.05 seconds and472 installed-wheel tests in347.071 seconds, with zero failures/errors/skips, plus formatting, Clippy, strict typing and the264-package license audit. On CPython3.11.17/Linux x86_64/glibc2.39, the wheel is17,538,600 bytes, extension40,685,872 bytes, SHA-256 `c4930f0423d4ada1e3c43e0828abade59a7399057b9208ada183effd006420f9`. Lock and pinned upstream revisions remain unchanged.
+
+The reviewed exact head was manually merged as `3989bea9c7ce8b9c6bca6fd0cc2aab10f84d31fc`. Repository auto-merge remains disabled. This closes ordinary owned body-paragraph deletion; section-boundary/semantic deletion, cell/PPTX deletion and broader DOC5/TXT1 remain partial.
+
+
+## Native annotation opacity — final manual merge gate
+
+PR97 final head `497559528cae172d23db07c23edb8ae92bdde4d3` passed required [current-main CI39550636008](https://github.com/narain1/pydoccraft/actions/runs/39550636008) and documentation CI39550636033 after the independent exact-artifact review recorded above. The final run passed333 native tests in191.77 seconds and476 installed-wheel tests in398.263 seconds, with zero failures/errors/skips, plus formatting, Clippy, strict typing and the264-package license audit. On CPython3.11.17/Linux x86_64/glibc2.39, the wheel is17,539,834 bytes, extension40,689,200 bytes, SHA-256 `80b6d99d496277dd2015ebb91c7bcea36b310a45d242852d76d1846427165638`. Lock and pinned upstream revisions remain unchanged.
+
+The reviewed exact head was manually merged as `ddef9b89e1a0b7311550191a6db4c53ad099a93f`. Repository auto-merge remains disabled. This closes the bounded comment-opacity delivery gate; imported inventory, reply semantics, encryption and broader PDF6/PDF8 remain partial.
+
+
+## Owned paragraph movement — final manual merge gate
+
+PR99 final head `ce0dd3a934c0df0da8e7732264c5735dd904db18` passed required [current-main CI39551991262](https://github.com/narain1/pydoccraft/actions/runs/39551991262) and documentation CI39551991265 after the independent exact-artifact review recorded above. The final run passed339 native tests in195.23 seconds and481 installed-wheel tests in420.181 seconds, with zero failures/errors/skips, plus formatting, Clippy, strict typing and the264-package license audit. On CPython3.11.17/Linux x86_64/glibc2.39, the wheel is17,556,088 bytes, extension40,724,848 bytes, SHA-256 `edbac3e7a0d6292ff838c688e287e8cd3fd7824adf633f19d17bbca178b99f17`. Lock and pinned upstream revisions remain unchanged.
+
+The reviewed exact head was manually merged as `49404df545cb5471dcc74e8d04dc90068ca718e6`. Repository auto-merge remains disabled. This closes the ordinary same-container direct paragraph movement delivery gate; cell/cross-container/semantic movement, imported preservation and broader DOC5/TXT1 remain partial.
