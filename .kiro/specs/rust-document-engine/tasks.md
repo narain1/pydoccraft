@@ -922,5 +922,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Review native successful result signatures and retain iterable widths, tuple/list forms and nullable resets; preserve runtime unsupported-format checks.
 - [x] Annotate 17 existing signatures and independently prove annotation-erased AST identity with the prior facade.
 - [x] Pass the strict installed consumer, ten intentional negative typing diagnostics and four unchanged DOCX/PPTX layout workflows against an explicitly repacked wheel with identical tested native bytes.
-- [ ] Complete independent artifact/static/probe review, final installed corpus, synchronized documentation and exact-head CI before manual merge.
+- [x] Complete independent artifact/static/probe/documentation review and final547-test installed corpus against the explicit Python-only repack.
+- [ ] Complete final exact-head/current-main CI and manual merge.
 - [ ] Keep broader API3 discoverability and IDE coverage open.
