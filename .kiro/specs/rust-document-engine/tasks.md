@@ -1167,7 +1167,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Integrate after the independently reviewed native contribution139 and dedicated upgrade140 local acceptance.
 - [x] Pass native and installed focused controls, then explicitly record the sole reviewed metadata-test fingerprint migration without relabeling historical evidence.
 - [x] Pass full locked native/installed corpus, independent source/artifact/focused review, license/size checks and synchronized bounded documentation.
-- [ ] Complete fresh current-main CI and manual merge. Keep extended-property and broader DOC7 work open.
+- [x] Complete fresh current-main CI and manual merge. Keep extended-property and broader DOC7 work open. Completed through PR133, required CI39615420262 and documentation CI39615420264.
 
 
 ## 134. PPTX cell paragraph direction investigation
@@ -1186,7 +1186,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete independent source/accounting and exact copied-package focused review.
 - [x] Complete synchronized documentation review, including held134 evidence.
 - [x] Complete final full native/release/installed corpus and independent exact-artifact/source/focused verification.
-- [ ] Complete required current-head CI and manual PR review/merge. No release or broad TXT4/SLIDE3 completion is implied.
+- [x] Complete required current-head CI and manual PR review/merge. No release or broad TXT4/SLIDE3 completion is implied. Completed through PR133, required CI39615420262 and documentation CI39615420264.
 
 
 ## Stable property setter typing (spec142)
@@ -1197,7 +1197,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Pass all 37 existing authoring, section geometry, background, table formatting and style-default workflows against the copied-package candidate.
 - [x] Complete independent source, AST, strict positive/negative and nullable-reset review.
 - [x] Complete combined installed-artifact validation and independent artifact review.
-- [ ] Complete current-main CI and manual merge; keep API3 open.
+- [x] Complete current-main CI and manual merge; keep API3 open. Completed through PR133, required CI39615420262 and documentation CI39615420264.
 
 
 ## Typed retained extended properties and dedicated upgrade (spec143/146)
@@ -1217,4 +1217,4 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Review and implement conservative discarded-row admission before any page mutation, retaining the exact existing replacement predicate.
 - [x] Complete focused native/public and independent source/artifact verification, including unchanged tab proofs in both diagnostic font environments.
 - [x] Complete corrected parent-integrated469-native/586-installed artifact, strict typing and independent source/artifact review; preserve earlier failures and146/148 artifacts as historical sources.
-- [ ] Complete fresh current-head CI, actual-main synchronization and manual review/merge.
+- [x] Complete fresh current-head CI, actual-main synchronization and manual review/merge. Completed through PR133, required CI39615420262 and documentation CI39615420264.
