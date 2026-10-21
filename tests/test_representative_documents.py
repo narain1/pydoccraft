@@ -26,10 +26,18 @@ class RepresentativeDocumentTests(unittest.TestCase):
             xppm, yppm, unit = struct.unpack(">IIB", chunks[b"pHYs"])
             self.assertEqual((yppm, unit), (xppm, 1))
             self.assertAlmostEqual(xppm * .0254, dpi, delta=.013)
-            _, pixels = rgba_pixels(chunks)
+            width, pixels = rgba_pixels(chunks)
             self.assertGreater(pixels.count(b"\xf0\xf4\xf8\xff"), 100)
             if table:
                 self.assertGreater(pixels.count(b"\xdd\xee\xff\xff"), 100)
+                for region in ((20, 30, 340, 55), (20, 440, 340, 465)):
+                    # These are bounds within the full PNG, not a render clip.
+                    x0, y0, x1, y1 = (round(value * dpi / 72) for value in region)
+                    dark = sum(max(pixels[(y * width + x) * 4:(y * width + x) * 4 + 3]) < 128
+                               and pixels[(y * width + x) * 4 + 3] == 255
+                               for y in range(y0, y1) for x in range(x0, x1))
+                    self.assertGreater(dark, 10,
+                                       ("missing visible header/footer text", region, dpi))
             # Large solid blue headings are positive visible-text controls.
             self.assertGreater(pixels.count(b"\x00\x00\x80\xff"), 20)
 
@@ -95,6 +103,9 @@ class RepresentativeDocumentTests(unittest.TestCase):
                 self.assertEqual(source[0].get_text().count(target), 1)
                 self.assertEqual(source[0].find_tables()[0].rows,
                                  [["Decision", "Owner"], ["Release readiness", "Mira Chen"]])
+                for kind, label in (("header", "EXAMPLE STUDIO"),
+                                    ("footer", "Prepared for discussion")):
+                    self.assertEqual([s.get_text().strip() for s in source.stories if s.kind == kind], [label])
                 self.check_renders(source, (360, 500), table=True)
             with doc_ex.open(document.convert("pdf")) as exported, doc_ex.open(plain_pdf) as clean:
                 text = exported[0].get_text()
