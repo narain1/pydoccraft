@@ -942,3 +942,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete final locked native/fmt/Clippy/release, clean installed corpus, independent exact artifact, typing, license/size and current source-ledger checks.
 - [ ] Complete exact-head/current-main CI and manual merge.
 - [ ] Retain broad R4/U09 limits and other native entry points; no version/tag/release before overall completion gates.
+
+
+## Native WordCraft PDF shape stroke upgrade (spec116)
+
+- [x] Review and publish the five-file native contribution with exact parent/diff identity; preserve baseline failures and package-scoped evidence without claiming upstream acceptance.
+- [x] Preserve original shape matrix and additional ratio/refusal diagnostics; retain a conservative future profile without creating a new API here.
+- [x] Update every WordCraft source together and add one native plus one public imported-document regression using the original generated fixture and explicit provenance.
+- [x] Complete final428-native/full550-installed independent artifact, fmt/Clippy/typing/license/size and current source/ledger/documentation checks.
+- [ ] Complete exact-head/current-main CI and manual merge.
+- [ ] Keep shape authoring and broader MED4/U04 work separate; no version/tag/release before overall completion gates.

@@ -25,7 +25,7 @@ flowchart LR
 Every upstream repository is pinned to an immutable commit:
 
 - PdfCraft v0.9.0: `645016addcfb9078c557f0189559ab47cdcee057`
-- WordCraft v0.8.0: `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`
+- WordCraft v0.8.0, reviewed contribution fork `narain1/wordcraft`: `f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef` (direct upstream parent `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`)
 - DeckCraft v0.8.0, reviewed contribution fork `narain1/deckcraft`: `dd4fd70b6347dd2ce782e33f030a2b6c0abb0106` (direct upstream parent `22db9261f9d1a214c296fd390173130c45d76d66`)
 - Craft PDF backend patches use the immutable `craft-libs` revision required by WordCraft/DeckCraft.
 
@@ -756,3 +756,12 @@ Use the explicitly identified DeckCraft contribution fork for all ten selected t
 The adapter replaces only its existing production render call with try_render_slide and maps its error to private EngineError::Rendering. Existing `_native` explicitly maps rendering_failure to DocExError. PDF export retains conversion_failure. DPI/index/size/region/RGBA/PNG metadata checks, retained-session ownership and request counters remain in their original order. Actual nested callbacks reach the production full/clip/session/PNG and PDF paths; no injectable API or private encoder abstraction is added.
 
 Current support citations update only the DeckCraft repository/revision and selected renderer symbols after native-file audit. Historical artifact references, fixture hashes, operation statuses and scope statements remain historical evidence. Package tests exercise reachable Busy; caught Panicked and thread isolation are separately proven by the native contribution tests. No claim covers process aborts, universal allocation limits or other renderer entry points.
+
+
+## 116. Native PDF shape stroke correction
+
+All nine selected WordCraft crates use one reviewed immutable contribution-fork revision. The native change sets round cap/join values on PDF Draw::Shape to match existing raster stroke defaults; paths, effects, layout, serialization and other drawing operations are unchanged. Existing local imports/rendering/conversion select the corrected library without an adapter, shape facade or geometry algorithm change.
+
+A small committed synthetic DOCX comes from the frozen native-writer fixture, with recipe and hash provenance. Native and Python integration tests exercise actual imported rendering and PDF conversion at72/144/300DPI, positively sample an interior rounded corner and negatively sample the old miter-only corner. Source/readback geometry and raster equality, file/bytes/retained/one-shot paths and PDF reopen are explicit. Earlier native/raw coverage masks retain broader sampled evidence and actual excluded failures. This dependency upgrade does not admit shape authoring or effects, interpret imported input as safely editable, or silently impose a new imported-shape profile.
+
+Only current WordCraft repository/revision/audited checkpoint changes in the support ledger. Eleven cited native files are audited; ten are byte-identical and the PDF library is the reviewed correction. Historical fixtures, artifacts, scope and statuses remain unchanged. DeckCraft, PdfCraft and craft-libs pins and all package versions/edges are fixed.

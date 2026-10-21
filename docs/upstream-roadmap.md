@@ -28,7 +28,7 @@ The [W12 source audit](content-readiness.md#advanced-office-audit) narrows U08: 
 
 ### WordCraft
 
-Revision: `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`.
+Current reviewed contribution fork: [`narain1/wordcraft` at `f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef`](https://github.com/narain1/wordcraft/commit/f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef), directly based on upstream `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`. The original source audit below retains its historical links; spec116 records the selected native PDF correction.
 
 - The [DOCX library](https://github.com/storytold/wordcraft/blob/f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22/crates/docx/src/lib.rs) exposes writing APIs. New DOCX creation is local facade/integration work, not a request to invent a writer. Unknown-markup handling still needs preservation tests.
 - [Writer normalization](https://github.com/storytold/wordcraft/blob/f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22/crates/docx/src/write/mod.rs#L135) balances orphan field markers. Explicit skipped/repaired-content reporting is a candidate; comprehensive diagnostics availability has not been audited.
@@ -506,3 +506,12 @@ The reviewed [fork contribution](https://github.com/narain1/deckcraft/commit/dd4
 Native evidence separately covers actual callback panic, Busy reentry, thread attribution and recovery; original/prototype output comparisons retain 18 exact image/extent records and six exact successful PDFs. A nested production-path diagnostic confirms that renderer-only baseline PDF export returned successful PDFs during Busy, while the combined contribution returns the explicit error. These bounded controls do not certify arbitrary input or all rendering paths. The original full renderer glyph test failure and dependency lint findings remain documented in validation; they were not repaired or waived by this contribution.
 
 The package selects the fallible PNG call with existing DocExError mapping and retains conversion_failure for PDF. Existing preallocation, region, session and output checks remain. Stronger intermediate allocation/work bounds, process-abort handling and other native entry points remain U09/R4 work; no whole-app dependency, global-counter heuristic or local renderer is introduced.
+
+
+### Native PDF shape caps and joins (spec116; U04/MED4)
+
+The reviewed [WordCraft contribution fork](https://github.com/narain1/wordcraft/commit/f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef) sets round caps and joins in PDF Draw::Shape, matching the existing raster Stroke defaults. Its exact parent is original upstream f2e15cf; it is a fork contribution, not an upstream acceptance claim. Draw::Path, effects, text, borders, layout, OOXML and assets are unchanged. Existing imported DOCX PNG/PDF paths use the correction without a new facade or local rendering workaround.
+
+The fixed native/PDF coverage gate improves from40/54 to54/54 admitted observations at160×100 with0.25/2/100pt strokes. Additional Rectangle/Ellipse1×1 stroke1 and40×20 stroke20 plus extreme aspect controls pass32/32 sampled positives. Stroke100 on1×1/40×20 Ellipses fails all12 excluded observations; the original200pt readback clamp and large Ellipse failure remain documented. Extreme4280pt pages support paired72DPI output, while existing PDF144 and native300 side limits reject explicitly. These discrete controls support a conservative future outline<=min(width,height) and<=100 profile, not universal parameter-domain fidelity.
+
+The dedicated package regression uses the original native-generated imported Rectangle100 DOCX and actual positive/negative corner samples. Its old-pin PDF failure is preserved; the new pin passes source/readback/native/PDF paths. Unrelated native raster/freeform/text controls remain unchanged. Native package ordinary dependency Clippy still has a reproduced pre-existing doc/math_linear.rs559 finding; narrower package-only acceptance is separate from the package integration's full gates. Owned shape creation, arbitrary paths/effects, richer textboxes and general drawing fidelity remain MED4/U04 work.
