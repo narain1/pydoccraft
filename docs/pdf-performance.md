@@ -54,3 +54,6 @@ PYTHONPATH= /tmp/pydoccraft-pdf-benchmark/bin/python \
 ```
 
 The benchmark validates text page counts against the input, requires at least 95% multiset token overlap, and requires nonzero matching PNG dimensions across both libraries after timing. The benchmark author reported anonymous token overlaps of 96.47%, 100%, and 99.02%; these private-input measurements have not been independently reproduced. Timing does not establish reading-order or visual fidelity. Blank text remains valid. JSON output must use `.json` and cannot alias an input PDF. Exceptions raised through the CLI omit their document-dependent message; native libraries may still write their own diagnostics to stderr. Results vary by document structure, platform, power state, and thermal state. Use the same bytes and release wheels for both libraries.
+
+
+A separate [reproducible render-session study](render-session-performance.md) compares the same pydoccraft build with and without its retained parser on synthetic PDFs, including process memory and every-page byte parity. It includes a slightly slower cached case and makes no cross-library claim; it does not independently reproduce the private PyMuPDF comparison above.

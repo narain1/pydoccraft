@@ -22,7 +22,7 @@ The original checklist above records the engine implementation. Track subsequent
 | P0 | R2, R4 | Dimensions, visible output and limit validation | Partial; broader geometry corpus and upstream failure reporting remain |
 | P1 | C1–C5 | Authoring contract, DOCX/PDF creation, reports, templates | Initial native creation/edit/save profile verified; broader criteria remain open |
 | P1 | E1–E6 | Structured tables, source locators, Office semantics, PDF links, diagnostics, Markdown assets | E1 DOCX/PPTX recursive cells/spans and unambiguous E4 PDF link offsets verified; E6 portable media export is verified; broader E1 and E2–E5 remain open |
-| P2 | P1–P4 | Parse/layout reuse, region rendering, PDF assembly, bounded extraction | Basic native PDF assembly verified; complete preservation and performance criteria remain open |
+| P2 | P1–P4 | Parse/layout reuse, region rendering, PDF assembly, bounded extraction | Basic native PDF assembly and bounded parse/layout reuse verified; complete preservation and broader performance criteria remain open |
 
 Completion criteria live with each roadmap item. Update requirements/design and record installed-wheel evidence in `validation.md` as features are implemented; existing rendering signature tests do not complete R2–R4.
 
@@ -684,7 +684,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Record exact source/tool/wheel identities, timings, memory ranges and limitations; independent benchmark source review found no blocker.
 - [x] Complete independent verification of all 36 samples, source/tool/artifact hashes, page digests, counters, table medians/ratios and memory ranges.
 - [ ] Complete required current-main CI and manual merge for Office benchmark evidence.
-- [ ] Keep P1's independently reproducible PDF memory/full-document counterpart and broader real-input/platform QA7 evidence open.
+- [x] Supply the independently reproducible PDF memory/full-document counterpart in spec92; retain broader real-input/platform QA7 work.
 
 
 ## Native title and author fields
@@ -706,3 +706,14 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete integrated locked full native/release/installed-wheel corpus and independent artifact review: 349 native and 490 installed Python tests.
 - [ ] Complete final exact-head/current-main CI and manual merge for picture placement.
 - [ ] Keep full MED2/BG2–BG5, front/contours/nested scope, opacity/rotation and independent layering/overlap controls open.
+
+
+## Cross-format render-session evidence
+
+- [x] Extend the shared development benchmark to PDF while preserving the old Office CLI/counter field; add optional native PDF fixture export and reopened counts.
+- [x] Verify two-page native report/deck PDF smoke parity and legacy Office counter compatibility.
+- [x] Complete30 sequential fresh-process PDF samples across five inputs/two modes/three repetitions, checking source identity, all-page byte parity and exact retained renderer counters.
+- [x] Independently verify all samples, timings, memory ranges and hashes; retain the slower small-PDF case and separate eager-extraction counter limits.
+- [x] Combine spec91/spec92 evidence to close bounded P1 reuse, retaining QA7 real-input/platform and P4 allocation work.
+- [x] Complete final documentation/source checks and independent final evidence review: 19 documentation tests and a 29-page/1,716-link site.
+- [ ] Complete required exact-head/current-main CI and manual merge.

@@ -437,7 +437,7 @@ Owners, roles and checkboxes below come from existing roadmap files. A checked c
 | E4: Exact PDF hyperlink labels. | W09 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | E5: Extraction/conversion diagnostics. | W03 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | E6: Portable Markdown plus media. | W09 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
-| P1: Reuse parse/layout work across renders. | W02 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
+| P1: Reuse parse/layout work across renders. | W02 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | P2: Render selected regions and previews. | W02 / implementation | open | [pdf.region](#pdfregion) | Unassessed: acceptance scope beyond linked profiles. |
 | P3: PDF assembly. | W10 / implementation | checked | [pdf.page-assembly](#pdfpage-assembly) | Unassessed: acceptance scope beyond linked profiles. |
 | P4: Bounded large-document processing. | W02 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |

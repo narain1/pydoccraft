@@ -39,6 +39,7 @@ def main():
     parser.add_argument("--pages", type=int, default=20)
     parser.add_argument("--image-pixels", type=int, default=64)
     parser.add_argument("--unique-images", action="store_true")
+    parser.add_argument("--pdf", action="store_true", help="also export and reopen both native PDF outputs")
     parser.add_argument("--image-points", type=int,
                         help="displayed square size; defaults to DOCX24/PPTX60")
     args = parser.parse_args()
@@ -85,8 +86,16 @@ def main():
         document.save(args.output / "slides.pptx")
     manifest = {"pages_requested": args.pages, "image_pixels": args.image_pixels,
                 "unique_images": args.unique_images, "image_points": args.image_points,
-                "package_version": doc_ex.__version__, "inputs": {}}
-    for name in ("report.docx", "slides.pptx"):
+                "package_version": doc_ex.__version__, "pdf_exports": args.pdf, "inputs": {}}
+    names = ["report.docx", "slides.pptx"]
+    if args.pdf:
+        for name in tuple(names):
+            path = args.output / name
+            with doc_ex.open(path) as document:
+                target = path.with_suffix(".pdf")
+                target.write_bytes(document.convert("pdf"))
+            names.append(target.name)
+    for name in names:
         path = args.output / name
         with path.open("rb") as stream:
             digest = hashlib.file_digest(stream, "sha256").hexdigest()
