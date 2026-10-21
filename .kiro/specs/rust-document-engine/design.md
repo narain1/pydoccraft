@@ -506,3 +506,8 @@ The bool result controls Python cache invalidation; false does not create a revi
 ## 77. PDF integer raster preallocation boundary
 
 The existing one-shot and retained PDF paths share the same full-page preflight, including after a smaller cached render. At 72 DPI, an 8000.5 by 7999.5 point native view has a continuous f32 area of 64,000,000 but rounds to 8001 by 8000 device pixels (64,008,000). The adapter rejects that request before native output allocation rather than relying on the later PNG buffer check. It calls public native rounding, not a duplicate raster-sizing algorithm. Region rendering retains its existing quantization, tile-side and offset checks; small clips from a large page remain supported. Parser/layout/intermediate/encoder memory is not bounded by this one-buffer limit, and DeckCraft's caught-panic blank-image fallback remains U09/R4.
+
+
+## PDF field creation callback ownership
+
+PdfFields.add keeps its initial _page_number validation before touching caller inputs. It materializes the existing bounded options sequence and point coordinates, then resolves the same page handle again before native add_field. Page organization increments the owner's existing generation, so a callback cannot retarget the outer operation to another page at the old ordinal. Native staging/name/kind/field limits and normal cache/generation updates remain unchanged. Copying a document during normalization leaves the original target live.

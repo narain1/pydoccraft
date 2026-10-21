@@ -598,3 +598,9 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 1. Full-page PDF rendering SHALL validate native rounded integer output dimensions against the existing side and 64-million-pixel limits before requesting a native raster. Existing native oversize rejection SHALL remain enabled; no new API or raster-sizing algorithm SHALL be introduced.
 2. One-shot, retained-session and cached-small-render paths SHALL share this guard, using inspected native CropBox/rotation/UserUnit display dimensions. Existing clipped-region behavior SHALL remain separate so a small valid region of a large page remains renderable.
 3. Tests SHALL demonstrate the continuous-area versus rounded-pixel boundary arithmetically, rejection before native request counters advance, all four rotations and offset CropBox/UserUnit, and small valid full/region controls without allocating the oversized raster. Existing all-format invalid DPI/index/lifetime checks SHALL remain. This correction SHALL NOT complete broad R4 or U09's upstream failure-reporting work.
+
+
+## 80. PDF field creation callback ownership
+
+1. Existing page.fields.add SHALL retain its initial owner/page lifetime check, normalize callback-capable options and box coordinates, then validate the original page again immediately before native creation. It SHALL NOT reuse a page ordinal captured before caller callbacks.
+2. Callback page reorder/deletion or owner closure SHALL reject the outer creation without changes beyond callback effects. Callback exceptions SHALL propagate without an outer field or cache mutation. Independent document copies SHALL not invalidate a live target. This correction SHALL not introduce radio support, a new public API or a blanket callback guarantee for unrelated operations.
