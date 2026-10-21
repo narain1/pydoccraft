@@ -1052,7 +1052,7 @@ class Styles(_Collection["Style"]):
         return json.loads(self._owner._call("default_formatting"))
 
     def format_defaults(self, **formatting: Unpack[_StyleProperties]) -> None:
-        """Update defaults; None clears properties except unsupported font-size reset."""
+        """Update defaults; None removes the direct property and restores native inheritance."""
         self._owner._call("format_defaults", _style_format_patch(formatting), _change=True)
 
 

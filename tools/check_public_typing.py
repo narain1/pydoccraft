@@ -53,6 +53,7 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(paragraph.add_run(" spaced", letter_spacing=0.3), TextRange)
         assert_type(paragraph[:].format(letter_spacing=None), None)
         assert_type(word.styles.format_defaults(letter_spacing=0), None)
+        assert_type(word.styles.format_defaults(font_size=None), None)
         comment_paragraph = word.add_paragraph("Comment target")
         assert_type(word.comments, Comments)
         comment = word.comments.add(comment_paragraph[:], "Review", author="Ada")
