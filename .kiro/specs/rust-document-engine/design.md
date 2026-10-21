@@ -188,7 +188,7 @@ Style information adds canonical next/linked IDs; the facade returns the same ow
 
 Document defaults reuse native default_chr/default_para and the existing character/paragraph patch parsers. Paragraph edits mark the native default paragraph part present for serialization. A flat direct snapshot follows the existing formatting vocabulary, with paragraph shading owning the background key. Native style/context resolution and shared affected-table/tab validation gate commit. No separate defaults owner, style-selection engine or property-inheritance implementation is introduced.
 
-The selected reader now preserves an omitted default font size and the native resolver’s existing 11pt fallback (spec127/131). This changes imported parsed-but-unsized styles from the former 10pt fallback. Default-size reset remains rejected before mutation pending separate owned-reset admission (spec132). Other supported clears have effective-formatting readback coverage. Built-in heading links can reference absent companions: the facade reports that unsupported relation, while native clearing/replacement repairs the source without touching unrelated styles.
+The selected reader now preserves an omitted default font size and the native resolver’s existing 11pt fallback (spec127/131). This changes imported parsed-but-unsized styles from the former 10pt fallback. The separate spec132 adapter admits default-size reset through the existing native clear operation, retaining the ordinary staged validation and commit path. Other supported clears have effective-formatting readback coverage. Built-in heading links can reference absent companions: the facade reports that unsupported relation, while native clearing/replacement repairs the source without touching unrelated styles.
 
 ## PDF drawing resource preservation
 
@@ -864,4 +864,35 @@ Existing formatting selects Source Sans3 for the measured decimal-outline, pagin
 
 Five direct and nine resolved Word crates select the reviewed 5312722 contribution. Its sole native runtime change removes the reader’s injection of Some(10) when parsed docDefaults omits ordinary size. Effective ordinary size continues to use the existing 11pt resolver fallback; absent complex-script size inherits ordinary size before that fallback, while explicit complex-script values remain independent. Missing ZIP styles parts retain initialized 12pt defaults. The shared Flat OPC and Word2003 converter paths are verified in the native contribution; Word2003 conversion emits a styles part, so its implicit case follows parsed-but-unsized 11pt behavior. None of these values is claimed as a universal standards or Word application default.
 
-The package adds no formatting algorithm, new method, input format or reset admission. Existing default-size None refusal remains atomic with the same exception class and a truthful pending-admission explanation. One native diagnostic deliberately changes from preserving the old mismatch to preserving native None/effective 11 after serialization. One original synthetic imported fixture checks explicit/missing-style controls and source/PDF glyph output through the unchanged public API. Historical contribution and package artifacts remain distinct.
+The package adds no formatting algorithm, new method, input format or reset admission. At that dedicated upgrade-only gate, the default-size None refusal remained atomic with the same exception class and a truthful pending-admission explanation. One native diagnostic deliberately changes from preserving the old mismatch to preserving native None/effective 11 after serialization. One original synthetic imported fixture checks explicit/missing-style controls and source/PDF glyph output through the unchanged public API. Historical contribution and package artifacts remain distinct.
+## 130. Native cell break insertion and a one-to-one readable projection
+
+The cell paragraph override validates its owner/target, captures revision and uses builtin str normalization to avoid executing string-subclass hooks. The private native cell_add_break entrypoint revalidates revision and target, rejects unsupported kinds, inventories source content before cloning inherited properties, clears click/hover navigation, and charges one text byte, one run and property cost. Public DeckCraft edit::insert inserts literal VT at the paragraph end; its returned caret and unchanged paragraph count are checked before the existing staged mutation is published. No generation changes accompany this content edit.
+
+Only the cell branch of shape_text/text_range and the cell_text/table_rows projections replace VT with LF. range_text delegates to the same path. This preserves character offsets used by selection/find/replace without changing native content, general shape/notes reads, input validators or extraction normalization. A returned break range can delete or replace the structural marker using ordinary text; generic raw newline insertion remains unavailable. Cell.text conflates paragraph separators and break markers by design and is not a structural round-trip API.
+
+The unchanged original spec124 raw proof is retained byte-for-byte after its separately accepted spec128 native PDF correction. The feature adds three adapter groups and four public workflows, reuses the existing strict typing consumer, and intentionally changes only one historical Unsupported fixture from default line to still-unsupported page. Other negatives and historical support fingerprints remain unchanged. Exact/MAX tests construct actual text, run and property model states; they do not claim huge-document layout acceptance.
+
+
+## Owned default-size inheritance (spec132)
+
+The dedicated131 pin already preserves native absence. The adapter now removes only the special null refusal in `EditableDocx::format_defaults`; existing `CharPatch` parsing and application set `CharProps.size=None`. The normal document clone, tab/table validation and ordinary commit remain unchanged. No Python/Rust default-size constant or new input type is introduced. Existing `_StyleProperties` already permits None; the current method docstring and typed consumer reflect the admitted operation.
+
+Clearing explicit10pt produces directNone and inherited11pt when no other ordinary size applies. It does not recreate initialized12pt defaults. Explicit paragraph/character/direct and complex-script values remain independent, and source/readback comparisons verify the writer omits ordinary `<w:sz>` rather than materializing a value. Existing same-value setters still advance revision and invalidate cached snapshots; callers retain owned previously returned values and independent copies. The document-wide formatter retains existing ordinary normalization callback edits, while closure causes the outer native call to refuse.
+
+New fixtures identify body/header/cell inherited glyphs and fixed/direct overrides with five separate colors. DOCX headers remain separate extracted stories and are not duplicated in body text; PDF extraction includes their painted text. The native Hyperlink style supplies its own color, so the body carrier uses a color-only direct override while retaining inherited size. These are fixture controls, not changes to source normalization or styling behavior. Existing table checks are retained, but this slice does not add a general clipping detector or assert that arbitrary large indentation must be rejected.
+## 135. Unit-helper annotations
+
+The four existing helper parameter annotations become Real | float. This retains custom/native Real subclasses while expressing Python's ordinary int-to-float numeric typing relationship. SupportsFloat would falsely admit objects rejected by the actual Real guard, so it is not used. Runtime boolean/nonfinite/Decimal/float-only-object checks remain unchanged.
+
+
+## PDF method typing (spec136)
+
+Reuse private source/box/color aliases on the existing PDF methods; point inputs retain tuple/list forms and integer rotation inputs describe the existing index protocol. A private four-key nullable metadata patch schema distinguishes writable inputs from the nonnullable metadata snapshot. Method implementation bodies, native calls and runtime checks remain identical. Heterogeneous raw path-command typing is outside this slice.
+
+
+## Style inheritance acceptance audit (spec138)
+
+The acceptance audit adds clause-to-fixture/native-resolution links to the existing documentation. It reuses the existing TODO ownership and generated support matrix; no runtime manager, new profile, duplicated completion ledger or implementation change is introduced.
+
+TXT1 reuses existing paragraph collections and revision-bound ranges. Its audit records ordinary ordered editing and source-text preservation without introducing a second run/ordered-content abstraction or changing protected-anchor guards.

@@ -138,7 +138,7 @@ class SlideCellParagraphTests(unittest.TestCase):
                           lambda: paragraph.page_break_before, lambda: setattr(paragraph, "page_break_before", True),
                           lambda: paragraph.spacing, lambda: setattr(paragraph, "spacing", (0, 0, 1)),
                           lambda: paragraph.resolved_formatting, lambda: paragraph.add_field("page"),
-                          lambda: paragraph.add_break(), lambda: paragraph.format(keep_with_next=True),
+                          lambda: paragraph.add_break("page"), lambda: paragraph.format(keep_with_next=True),
                           lambda: cell.add_paragraph("No", style="Normal"),
                           lambda: len(cell.tables), lambda: len(cell.images)]
             for operation in operations:

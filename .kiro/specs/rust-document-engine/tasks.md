@@ -1100,4 +1100,51 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Preserve the identical installed old-wheel failure after explicit and missing-styles controls pass.
 - [x] Complete full 453-native/fmt/Clippy/release, two clean 570-installed corpora, typing and exact artifact/source/attribution/size gates.
 - [x] Complete final synchronized evidence and independent source/artifact/documentation review.
-- [ ] Complete current-head CI/manual merge. No owned None reset or STY2/U02 completion is claimed.
+- [x] Complete current-head CI/manual merge through PR130, required CI39602725245 and documentation CI39602726203. Owned None reset and broader acceptance remain separate feature gates.
+## Owned PPTX cell line breaks (spec130)
+
+- [x] Review exact cell-only getter/find/replace/setter projection and reuse public native insertion after the separate spec128 correction.
+- [x] Preserve the original desired raw2 proof and implement narrow native/facade behavior without pin, dependency or generic validator changes.
+- [x] Pass five focused native groups, fmt/Clippy/debug, four new public workflows and strict typing; verify one historical page-refusal migration preserves other negatives.
+- [x] Complete 27 related and four independent focused public review and exact source freeze.
+- [x] Complete synchronized documentation review, distinguishing bounded source inventory from generated-cost preflight.
+- [x] Complete combined spec131/spec130 full 458 native, fmt/Clippy/release, clean 574-test installed corpus, independent exact-artifact 185-file/source/typing and four changed plus one inherited workflow review, attribution and size checks.
+- [x] Complete final combined documentation review, including the historical upgrade-only versus current adapter distinction.
+- [ ] Complete current-head CI and manual review/merge. Keep broader TXT1/TXT4/SLIDE3 open.
+
+
+## Owned default-size reset (spec132)
+
+- [x] Review source/native correction and the existing parser/application path; retain dedicated131 dependency acceptance and no-new-method scope.
+- [x] Implement only the obsolete refusal removal/docstring change; deliberately migrate two old null-refusal assertions and expand the existing supported-clear loop after fingerprint audit.
+- [x] Pass two new native groups, all nine default-filter groups, fmt/strict Clippy/debug and seven new/related public workflows including unchanged131 imported regression.
+- [x] Pass strict typing and independent final two-workflow copied-package/source review; retain every failed fixture premise and unchanged runtime/threshold evidence.
+- [x] Complete synchronized focused documentation and independent review.
+- [x] Complete combined460 native and final579 installed-artifact/source/attribution validation, with independent changed-workflow, typing and exact-artifact review.
+- [ ] Complete current-head CI/manual merge; separate acceptance audits govern broader roadmap criteria.
+## Unit converter input typing (spec135)
+
+- [x] Reproduce strict rejection of ordinary int/float calls despite existing runtime support.
+- [x] Change only four input annotations and extend the strict consumer; verify annotation-erased whole-facade AST equality.
+- [x] Pass copied-package int/float/Fraction/Real consumers, three intended negative diagnostics and44 runtime conversion/refusal cases.
+- [x] Complete independent source/focused review and final combined579 installed-artifact validation.
+- [ ] Complete current-head CI/manual merge; retain broader API3 open.
+
+
+## Typed PDF drawing and metadata inputs (spec136)
+
+- [x] Audit existing runtime source/geometry/color/index/metadata contracts and preserve implementation bodies.
+- [x] Verify strict supported-source and tuple/list input consumers, metadata snapshot replay, precise None returns and nine invalid-call diagnostics.
+- [x] Verify whole-facade implementation AST identity and all15 existing underlay/text-box/drawing-ownership workflows against the copied-package candidate.
+- [x] Complete independent final source/AST/strict-consumer/negative-control review.
+- [x] Complete final combined579 installed-artifact validation, preserving the original460-native artifact and separately verified annotation-only repack.
+- [ ] Complete current-main CI and manual merge; keep broader API3 and raw path-command typing open.
+
+
+## Style and ordinary-text acceptance audit (spec138)
+
+- [x] Compare original ece6c85 STY2 clauses with existing style/default/cycle fixtures and reviewed132 reset controls.
+- [x] Complete independent original-clause/source/fixture review; preserve explicit missing-companion and neighboring-feature limitations.
+- [x] Independently reconcile original TXT1 clauses and existing whitespace/Unicode/order/nonduplication fixtures with neighboring ownership.
+- [x] Verify final combined 579-test installed-artifact gate, mark only STY2/TXT1 and regenerate derived roadmap documentation (54 checked/85 open).
+- [ ] Complete current-main CI and independent manual merge.

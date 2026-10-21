@@ -1435,11 +1435,6 @@ impl EditableDocx {
     pub fn format_defaults(&mut self, patch: &str) -> PyResult<()> {
         let document = self.document()?;
         let values = format_patch(patch)?;
-        if values.get("font_size").is_some_and(Value::is_null) {
-            return Err(EngineError::Unsupported(
-                "clearing document-default font_size remains unavailable pending owned reset support; set an explicit font_size".into(),
-            ).into());
-        }
         let (mut character, mut paragraph) = (Map::new(), Map::new());
         for (key, value) in values {
             if is_paragraph_key(&key) {
@@ -12386,10 +12381,14 @@ mod tests {
             .unwrap();
         assert_eq!(document.default_formatting().unwrap(), before);
         let revision = document.revision().unwrap();
-        assert!(document
+        document
             .format_defaults(r#"{"font_size":null,"bold":true}"#)
-            .is_err());
-        assert_eq!(document.revision().unwrap(), revision);
+            .unwrap();
+        assert_eq!(document.revision().unwrap(), revision + 1);
+        let reset: Value = serde_json::from_str(&document.default_formatting().unwrap()).unwrap();
+        assert!(reset["font_size"].is_null());
+        assert_eq!(reset["bold"], true);
+        document.format_defaults(&before).unwrap();
         assert_eq!(document.default_formatting().unwrap(), before);
         document
             .format_defaults(r#"{"bold":null,"space_after":null,"background":null,"tabs":null}"#)
@@ -12408,7 +12407,7 @@ mod tests {
     #[test]
     fn upstream_omitted_default_font_size_preserves_native_resolution() {
         // The dedicated native upgrade fixes the recorded reader inconsistency.
-        // The public default patch still rejects None until owned reset admission.
+        // The owned default patch uses this same native clear/readback policy.
         let mut document = Document::new();
         document.styles.default_chr.size = None;
         assert_eq!(
@@ -12451,12 +12450,7 @@ mod tests {
         let mut original = EditableDocx::new();
         original.format_defaults(r##"{"font":"Aptos","font_size":18,"bold":true,"italic":true,"color":"#123456","underline":"double","strike":"double","script":"superscript","highlight":"yellow","alignment":"center","indent_left":12,"indent_right":6,"indent_first":-2,"space_before":4,"space_after":6,"line_spacing":1.5,"keep_with_next":true,"keep_together":true,"widow_control":false,"page_break_before":true,"background":"#EEEEEE","tabs":[{"position":72}]}"##).unwrap();
         let keys = serde_json::from_str::<Value>(&original.default_formatting().unwrap()).unwrap();
-        for key in keys
-            .as_object()
-            .unwrap()
-            .keys()
-            .filter(|key| key.as_str() != "font_size")
-        {
+        for key in keys.as_object().unwrap().keys() {
             let mut document = original.copy().unwrap();
             document
                 .format_defaults(&json!({key:Value::Null}).to_string())
@@ -22314,3 +22308,7 @@ mod section_vertical_alignment_proof;
 #[cfg(test)]
 #[path = "docx_unused_style_proof.rs"]
 mod unused_style_proof;
+
+#[cfg(test)]
+#[path = "docx_default_size_reset_tests.rs"]
+mod default_size_reset_tests;

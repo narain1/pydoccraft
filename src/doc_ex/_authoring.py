@@ -141,6 +141,13 @@ class _PdfMetadata(TypedDict, total=False):
     keywords: str
 
 
+class _PdfMetadataPatch(TypedDict, total=False):
+    title: str | None
+    author: str | None
+    subject: str | None
+    keywords: str | None
+
+
 class _WordCoreMetadata(_PdfMetadata, total=False):
     description: str
     category: str
@@ -433,7 +440,7 @@ def _style_guard(owner, revision, *references) -> None:
         raise ValueError("style operation is stale after a document mutation")
 
 
-def pt(value: Real) -> float:
+def pt(value: Real | float) -> float:
     """Return a finite length in points (1/72 inch)."""
     if isinstance(value, bool) or not isinstance(value, Real):
         raise TypeError("length must be a number in points")
@@ -443,17 +450,17 @@ def pt(value: Real) -> float:
     return result
 
 
-def inches(value: Real) -> float:
+def inches(value: Real | float) -> float:
     """Convert inches to points."""
     return pt(pt(value) * 72)
 
 
-def mm(value: Real) -> float:
+def mm(value: Real | float) -> float:
     """Convert millimeters to points."""
     return pt(pt(value) * 72 / 25.4)
 
 
-def cm(value: Real) -> float:
+def cm(value: Real | float) -> float:
     """Convert centimeters to points."""
     return pt(pt(value) * 72 / 2.54)
 
@@ -1052,7 +1059,7 @@ class Styles(_Collection["Style"]):
         return json.loads(self._owner._call("default_formatting"))
 
     def format_defaults(self, **formatting: Unpack[_StyleProperties]) -> None:
-        """Update defaults; None clears properties except unsupported font-size reset."""
+        """Update defaults; None removes the direct property and restores native inheritance."""
         self._owner._call("format_defaults", _style_format_patch(formatting), _change=True)
 
 
@@ -2484,7 +2491,7 @@ class PdfDocument(EditableDocument):
         """A snapshot of supported document-info fields."""
         return json.loads(self._call("metadata"))
 
-    def update_metadata(self, **values):
+    def update_metadata(self, **values: Unpack[_PdfMetadataPatch]) -> None:
         """Update title/author/subject/keywords; None or empty strings clear fields."""
         if values.keys() - {"title", "author", "subject", "keywords"}:
             raise ValueError("metadata keys must be title, author, subject or keywords")
@@ -3002,7 +3009,7 @@ class PdfPage:
         self._check()
         self._owner._call("set_background", self._id, rgb, _change=True)
 
-    def rotate(self, degrees: int):
+    def rotate(self, degrees: SupportsIndex) -> None:
         self._check()
         degrees = operator.index(degrees)
         self._check()
@@ -3020,10 +3027,11 @@ class PdfPage:
         self._check()
         return Annotations(self)
 
-    def draw_text(self, text: str, *, at: tuple[float, float] | None = None,
-                  box: tuple[float, float, float, float] | None = None,
-                  font_size: float = 12, font=None, color="black", align: str = "left",
-                  behind: bool = False):
+    def draw_text(self, text: str, *, at: tuple[float, float] | list[float] | None = None,
+                  box: _Box | None = None,
+                  font_size: float = 12, font: _Source | None = None,
+                  color: _Color = "black", align: str = "left",
+                  behind: bool = False) -> None:
         """Draw searchable text at a point or inside a bounded top-left box.
 
         Built-in fonts wrap within boxes; supplied fonts require explicit lines.
@@ -3090,8 +3098,9 @@ class PdfPage:
         self._check()
         self._owner._call("draw_path", self._id, payload, stroke_rgb, fill_rgb, stroke_width, close, _change=True)
 
-    def add_image(self, source, *, box, crop=None, rotation: int = 0,
-                  flip_h: bool = False, flip_v: bool = False, behind: bool = False):
+    def add_image(self, source: _Source, *, box: _Box, crop: _Box | None = None,
+                  rotation: SupportsIndex = 0, flip_h: bool = False,
+                  flip_v: bool = False, behind: bool = False) -> None:
         """Place an image with optional visual crop, quarter-turn and flips.
 
         Crop is (left, top, right, bottom), each a fraction from 0 to 0.45.
@@ -3814,4 +3823,13 @@ class _SlideCellParagraph(Paragraph):
     resolved_formatting = property(_unsupported)
     set_list = _unsupported
     add_field = _unsupported
-    add_break = _unsupported
+    def add_break(self, kind: str = "line") -> TextRange:
+        """Append a line break; the returned range reads one LF character."""
+        self._owner._call("cell_paragraph_alignment", *self._range_args, self._target)
+        revision = self._owner._call("revision")
+        if not isinstance(kind, str):
+            raise TypeError("break kind must be a string")
+        kind = str.__str__(kind)
+        start, end, revision = self._owner._call("cell_add_break", *self._range_args,
+                                               self._target, kind, revision, _change=True)
+        return _SlideTextRange(self, start, end, revision)

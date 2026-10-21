@@ -938,3 +938,32 @@ Geometry and raster goldens SHALL name their font input explicitly rather than a
 2. Document imported parsed-but-unsized styles changing from 10pt to the existing 11pt resolver fallback as an intentional compatibility change, not an OOXML-mandated default. Native shared-reader evidence SHALL cover ZIP DOCX, Flat OPC and Word2003 XML without exposing new local XML formats.
 3. Migrate only the existing native mismatch diagnostic to the corrected invariant. Add one installed imported-DOCX regression with an identical old-wheel failure, explicit 10/11/12 and missing-styles12 controls, actual glyph ink at 72/144/300DPI, text/link preservation and PDF reopening.
 4. Complete dedicated locked native, installed, independent, typing, attribution, citation and artifact gates. Preserve the public default-size None refusal and exception class; only correct its obsolete explanation. Owned reset admission remains separate spec132; STY2/U02 remain open.
+## 130. Owned PPTX cell line breaks through existing paragraph ranges
+
+1. Existing owned cell Paragraph.add_break("line") SHALL append a native break and return the existing revision-bound TextRange. It SHALL not create a paragraph implicitly, add a new family, change pins, or enable page/column breaks, general shape-paragraph collections or imported editing.
+2. Exactly the owned cell paragraph/range, whole-cell and table-row read paths SHALL project native VT to one LF character. Preserve Unicode character positions and native stored markers. Existing find/replace SHALL select that LF; generic paragraph/range/run input SHALL continue rejecting raw LF/VT. Document the flattened whole-cell view without a structural setter round-trip promise.
+3. Validate canonical cells, generations and revisions before edits. Validate bounded source before cloning inherited properties; charge the generated character/run/property cost before copying the body and inserting. Clear inherited navigation while retaining character appearance. Preserve live paragraph/grid handles, stale old ranges, atomic failures, independent copies and existing finite-cell overflow behavior.
+4. Verify raw native caret/model/serialization and actual source/readback/PNG/PDF text/link/image controls; exact and excess text/run/property/revision limits; empty/trailing/consecutive and merged cells; lifecycle and strict kind handling. Keep broader TXT1/TXT4/SLIDE3 acceptance open.
+
+
+## 132. Owned ordinary default font-size reset
+
+1. Existing `WordDocument.styles.format_defaults(font_size=None)` SHALL remove only the direct ordinary native size property, using the existing native patch implementation after the dedicated131 correction. Add no method, manager, fallback constant, writer materialization or dependency change.
+2. Distinguish inherited11pt fallback from initialized12pt defaults and missing-styles imported12pt behavior. Preserve explicit style/direct/complex-script overrides, other default properties, source text/links/media, owned identities and independent copies. Serialization SHALL omit the ordinary default size and native readback SHALL preserve absence.
+3. Keep existing patch parsing, tab/table/candidate validation, reference/resource/revision checks, staged commit, same-value revision and cache invalidation semantics. Invalid combined patches and revision exhaustion SHALL preserve source/counters/IDs/caches; preserve existing document-wide normalization callback semantics without retargeting a closed owner.
+4. Deliberately migrate only obsolete null-refusal expectations and include ordinary size in the existing supported-clear readback loop. Verify independent per-carrier body/header/cell glyph ink, fixed/direct overrides, actual DOCX/PDF output at72/144/300DPI and source/reopen/control equality. No general clipping, font-catalog portability or broad STY2/U02 completion is inferred.
+## 135. Ordinary numeric unit-converter inputs
+
+Keep exported pt/mm/cm/inches usable with ordinary integers/floats and existing Real values in strict consumers. Preserve the exact runtime Real/finite/bool guards and avoid admitting arbitrary __float__ objects through annotations. No runtime behavior, public name, dependency or native code changes.
+
+
+## PDF method typing (spec136)
+
+Existing PDF metadata updates, page rotation, text drawing and image placement must describe their supported inputs and None return values to strict Python consumers. Preserve all runtime validation, defaults, source ownership and error behavior. Type hints do not replace value, size, lifecycle or boolean validation. No new public operation is required.
+
+
+## Style inheritance acceptance audit (spec138)
+
+Judge STY2 against its original base/next/linked/default/effective/cycle/reset clauses. Keep imported editing, theme identity, font contexts and style import under their existing owners. Acceptance requires the reviewed default-size-reset behavior and final installed-artifact validation; source review alone is insufficient.
+
+The same audit compares original TXT1 ordinary paragraph/run editing and exact-text clauses. Cross-container structural adoption, imported editing and semantic-anchor deletion remain with DOC5/DOC2 and their existing semantic owners; they must not become duplicate blockers for ordinary text editing.

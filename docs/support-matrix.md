@@ -4,7 +4,7 @@
 
 This initial inventory records 21 bounded profiles, not complete format parity. All roadmap IDs remain visible below. Statuses cite historical installed-wheel evidence; validation of this file is not a new test run or a completion decision.
 
-Ledger source-audit baseline: `54a33ecb3f1830336eb33df0ec282cd1cec544bd`. Historical tests do not certify this source revision. Native adapter/facade changes need their own behavioral review and release validation; matching fixture hashes are only a drift check.
+Ledger source-audit baseline: `282f48995412deba6283cdeaf9a49174ceaf8daf`. Historical tests do not certify this source revision. Native adapter/facade changes need their own behavioral review and release validation; matching fixture hashes are only a drift check.
 
 Operations: **read** normalized content; **create** native-format serialization; **edit authored/imported** distinguish model provenance; **preserve** only named unchanged content; **render** PNG; **export** conversion to a named different format. Saving is not conversion.
 
@@ -499,7 +499,7 @@ Owners, roles and checkboxes below come from existing roadmap files. A checked c
 | DOC6: Compose documents. | W04 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | DOC7: Metadata and document properties. | W03 / implementation | open | [word.properties](#wordproperties) | Unassessed: acceptance scope beyond linked profiles. |
 | DOC8: Templates and document variants. | W03 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
-| TXT1: Paragraph/run CRUD. | W04 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
+| TXT1: Paragraph/run CRUD. | W04 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | TXT2: Character formatting. | W04 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | TXT3: Paragraph formatting. | W04 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | TXT4: Tabs and breaks. | W04 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
@@ -508,7 +508,7 @@ Owners, roles and checkboxes below come from existing roadmap files. A checked c
 | TXT7: Find and replace. | W07 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | TXT8: Rich-text ranges. | W07 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | STY1: Named styles. | W04 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
-| STY2: Style inheritance. | W04 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
+| STY2: Style inheritance. | W04 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | STY3: Theme colors and fonts. | W04 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | STY4: Reusable style recipes. | W13 / recipe | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | STY5: Font inputs and embedding. | W04 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |

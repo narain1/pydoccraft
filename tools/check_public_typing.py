@@ -6,6 +6,8 @@ Run mypy==1.18.2 against an installed package with:
 Only imported package diagnostics are suppressed; this consumer is checked strictly.
 The private class imports supply expected identities, not extra public exports.
 """
+from fractions import Fraction
+from numbers import Real
 from typing import Any, Literal, assert_type
 
 import doc_ex
@@ -53,6 +55,7 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(paragraph.add_run(" spaced", letter_spacing=0.3), TextRange)
         assert_type(paragraph[:].format(letter_spacing=None), None)
         assert_type(word.styles.format_defaults(letter_spacing=0), None)
+        assert_type(word.styles.format_defaults(font_size=None), None)
         comment_paragraph = word.add_paragraph("Comment target")
         assert_type(word.comments, Comments)
         comment = word.comments.add(comment_paragraph[:], "Review", author="Ada")
@@ -152,9 +155,12 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(field.tooltip, str)
         assert_type(page.annotations.add_link(box=[10, 10, 20, 20], uri='https://example.com'), Annotation)
         assert_type(page.search_for('Example'), list[tuple[float, float, float, float]])
-        page.draw_text('Underlay', at=(10, 10), behind=True)
-        page.draw_text('Box underlay', box=(10, 30, 100, 30), behind=True)
-        page.add_image(png, box=(10, 70, 40, 40), behind=True)
+        assert_type(page.rotate(90), None)
+        assert_type(pdf.update_metadata(title='Draft', author=None), None)
+        assert_type(pdf.update_metadata(**pdf.metadata), None)
+        assert_type(page.draw_text('Underlay', at=(10, 10), behind=True), None)
+        assert_type(page.draw_text('Box underlay', box=[10, 30, 100, 30], color=[20, 30, 40], behind=True), None)
+        assert_type(page.add_image(png, box=(10, 70, 40, 40), crop=[0, 0, 0, 0], behind=True), None)
         assert_type(page.get_text(), str)
         assert_type(page.get_text('dict'), dict[str, Any])
         assert_type(page.get_text(mode), str | dict[str, Any])
@@ -174,6 +180,7 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         cell_paragraph = slide.add_table([['Cell']], box=(10, 210, 200, 80))[0, 0].paragraphs[0]
         assert_type(cell_paragraph, Paragraph)
         assert_type(cell_paragraph.add_run(' rich', bold=True), TextRange)
+        assert_type(cell_paragraph.add_break(), TextRange)
         assert_type(cell_paragraph.add_run(' spaced', letter_spacing=0.3), TextRange)
         assert_type(cell_paragraph[:].format(letter_spacing=None), None)
         assert_type(cell_paragraph.format(indent_left=12, indent_right=None, indent_first=-6,
@@ -414,3 +421,11 @@ def verify_layout_values(word: WordDocument, deck: Presentation) -> None:
     assert_type(slide_table.borders, tuple[str, float] | None)
     assert_type(slide_table.row(0).height, tuple[float | None, str])
     slide_table.row(0).height = [30, "at_least"]
+
+
+def verify_unit_converters(real: Real) -> None:
+    for converter in (doc_ex.pt, doc_ex.mm, doc_ex.cm, doc_ex.inches):
+        assert_type(converter(1), float)
+        assert_type(converter(1.5), float)
+        assert_type(converter(Fraction(1, 2)), float)
+        assert_type(converter(real), float)
