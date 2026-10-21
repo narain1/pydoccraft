@@ -692,5 +692,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Execute two raw native all-story evaluation, empty/nonempty cache and atomic-width proofs before adapter implementation.
 - [x] Extend existing add_field with title/author, every-commit expansion limits and bounded native placement preflight; retain the existing API surface and numeric-field behavior.
 - [x] Verify four new native groups, 28 related field groups, 13 copied-package public workflows, fmt/Clippy/debug build, strict typing and 19 support/reference documentation tests; record artifact scope.
-- [ ] Complete integrated locked release/corpus, independent review and exact-head CI before manual merge.
+- [x] Complete integrated locked release/corpus, strict typing, license audit and independent artifact review: 343 native and 484 installed Python tests.
+- [ ] Complete final exact-head/current-main CI and manual merge for title/author fields.
 - [ ] Keep general REF3 field kinds, REF4 refresh and imported preservation open.
