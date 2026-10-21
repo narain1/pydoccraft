@@ -237,10 +237,12 @@ impl Provenance {
                             .all(|v| v.is_finite())
                         || line.height < 0.0
                         || !line.xs.iter().all(|v| v.is_finite())
+                        // Native condensed tracking can produce signed visual advances.
+                        // Keep finite endpoints; x_spans owns positive-span selection.
                         || !line
                             .vis
                             .iter()
-                            .all(|v| v.x.is_finite() && v.w.is_finite() && v.w >= 0.0)
+                            .all(|v| v.x.is_finite() && v.w.is_finite() && (v.x + v.w).is_finite())
                         || !clusters.iter().all(|c| {
                             c.start <= c.end
                                 && c.end <= value.text.len()
@@ -395,6 +397,127 @@ mod tests {
     }
 
     #[test]
+    fn provenance_preserves_native_signed_advances_for_condensed_rtl_text() {
+        pyo3::prepare_freethreaded_python();
+        let text = "سلام Word";
+        for spacing in [0, 2, -1] {
+            let mut author = crate::author_docx::EditableDocx::new();
+            author
+                .set_section_props(0, r#"{"page_size":[400,250],"margins":[30,30,30,30]}"#)
+                .unwrap();
+            author
+                .format_defaults(r##"{"color":"#FF0000","font_size":24}"##)
+                .unwrap();
+            let id = author.add_paragraph(text).unwrap();
+            author
+                .format_paragraph(id, r#"{"direction":"rtl"}"#)
+                .unwrap();
+            author
+                .format_range_patch(
+                    id,
+                    0,
+                    text.chars().count(),
+                    author.revision().unwrap(),
+                    &json!({"letter_spacing": spacing}).to_string(),
+                )
+                .unwrap();
+            let doc = wordcraft_docx::read(&author.to_bytes().unwrap()).unwrap();
+            let layout =
+                wordcraft_layout::layout(&doc, &mut LayoutCache::new(), &LayoutOptions::default());
+            let mut negative = 0;
+            let mut expected = Vec::new();
+            for (page_index, page) in layout.pages.iter().enumerate() {
+                for item in &page.items {
+                    let Placed::Lines {
+                        story: StoryRef::Body,
+                        path,
+                        para,
+                        l0,
+                        l1,
+                        x,
+                        y,
+                        turn,
+                    } = item
+                    else {
+                        continue;
+                    };
+                    assert_eq!(path, &Path(vec![0]));
+                    let first_top = para.lines[*l0].top;
+                    for index in *l0..*l1 {
+                        let line = &para.lines[index];
+                        negative += line.vis.iter().filter(|v| v.w < 0.0).count();
+                        assert!(line.vis.iter().all(|v| v.x.is_finite()
+                            && v.w.is_finite()
+                            && (v.x + v.w).is_finite()));
+                        let spans = para.x_spans(index, line.start, line.stop);
+                        assert!(!spans.is_empty());
+                        let rects: Vec<_> = spans
+                            .into_iter()
+                            .filter(|(a, b)| b > a)
+                            .map(|(a, b)| {
+                                let mut rect = page.body;
+                                rect.x = a;
+                                rect.y = line.top - first_top;
+                                rect.w = b - a;
+                                rect.h = line.height;
+                                let rect = wordcraft_layout::turn_rect(*turn, *x, *y, rect);
+                                json!([rect.x, rect.y, rect.right(), rect.bottom()])
+                            })
+                            .collect();
+                        expected.push(json!({"page": page_index, "source_range": [line.start, line.stop], "rects": rects}));
+                    }
+                }
+            }
+            assert_eq!(
+                negative > 0,
+                spacing < 0,
+                "native signed advance for spacing {spacing}"
+            );
+            let projection = Provenance::new(&doc, &layout).unwrap();
+            assert_eq!(
+                projection.layouts[&Path(vec![0])][0]
+                    .as_ref()
+                    .unwrap()
+                    .value["lines"],
+                json!(expected)
+            );
+            // Compare the collector independently with the native document selection API,
+            // not only the x_spans/turn_rect assembly above.
+            let actual: Vec<_> = projection.layouts[&Path(vec![0])][0]
+                .as_ref()
+                .unwrap()
+                .value["lines"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|line| {
+                    line["rects"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(move |rect| json!([line["page"], rect]))
+                })
+                .collect();
+            let native: Vec<_> = layout
+                .selection_rects(
+                    &doc,
+                    &wordcraft_doc::Pos::new(StoryRef::Body, Path(vec![0]), 0),
+                    &wordcraft_doc::Pos::new(StoryRef::Body, Path(vec![0]), text.len()),
+                    0,
+                )
+                .into_iter()
+                .filter(|(_, rect)| rect.w > 0.0)
+                .map(|(page, rect)| json!([page, [rect.x, rect.y, rect.right(), rect.bottom()]]))
+                .collect();
+            assert_eq!(
+                actual, native,
+                "native document selection for spacing {spacing}"
+            );
+            projection.finish().unwrap();
+        }
+    }
+
+    #[test]
     fn provenance_budgets_accept_exact_and_reject_plus_one_before_native_allocation() {
         let (doc, layout) = fixture();
         let proof = Provenance::new(&doc, &layout).unwrap();
@@ -454,7 +577,7 @@ mod tests {
     #[test]
     fn provenance_rejects_invalid_ranges_and_nonfinite_values_before_native_filtering() {
         let (doc, original) = fixture();
-        for kind in 0..10 {
+        for kind in 0..13 {
             let mut layout = original.clone();
             if kind == 9 {
                 layout.pages[0].h = f32::NAN;
@@ -477,7 +600,16 @@ mod tests {
                     5 => para.lines[0].vis[0].x = f32::INFINITY,
                     6 => para.lines[0].height = -1.0,
                     7 => *x = f32::INFINITY,
-                    _ => para.lines[0].c1 = usize::MAX,
+                    8 => para.lines[0].c1 = usize::MAX,
+                    10 => para.lines[0].vis[0].w = f32::NEG_INFINITY,
+                    11 => {
+                        para.lines[0].vis[0].x = f32::MAX;
+                        para.lines[0].vis[0].w = f32::MAX;
+                    }
+                    _ => {
+                        para.lines[0].vis[0].x = -f32::MAX;
+                        para.lines[0].vis[0].w = -f32::MAX;
+                    }
                 }
             }
             assert!(
