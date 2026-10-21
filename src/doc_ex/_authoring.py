@@ -569,6 +569,26 @@ class _Paragraphs(_Collection["Paragraph"]):
         identifier = identifiers[_index(selected, len(identifiers))]
         self._owner._call("remove_paragraph", identifier, _change=True)
 
+    def move(self, index: int, destination: int) -> None:
+        """Move a direct owned DOCX paragraph to its final index in the same section."""
+        self._owner._ensure_open()
+        if not isinstance(self._owner, WordDocument):
+            raise UnsupportedFormatError("PPTX paragraph movement is not supported")
+        revision = self._owner._call("revision")
+        identifiers = self._ids()
+        selected = operator.index(index)
+        self._owner._ensure_open()
+        if self._owner._call("revision") != revision:
+            raise ValueError("paragraph selection is stale after a document mutation")
+        target = operator.index(destination)
+        self._owner._ensure_open()
+        if self._owner._call("revision") != revision:
+            raise ValueError("paragraph selection is stale after a document mutation")
+        identifier = identifiers[_index(selected, len(identifiers))]
+        target_id = identifiers[_index(target, len(identifiers))]
+        if self._owner._call("move_paragraph", identifier, target_id, revision):
+            self._owner._invalidate()
+
 
 class WordDocument(EditableDocument):
     _format = "docx"

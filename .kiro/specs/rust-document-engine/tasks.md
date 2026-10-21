@@ -650,5 +650,16 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete three focused native groups plus six related native groups, 19 copied-package public tests (four new plus 15 related), formatter/Clippy/debug build and strict consumer typing.
 - [x] Migrate only the geometric-comment and lock evidence affected by intentional fractional-CA fixture changes to the exact new integrated artifact.
 - [x] Complete locked full native/release/installed corpus and independent artifact review: 333 native and 476 installed Python tests.
-- [ ] Complete final exact-head/current-main CI and manual merge for annotation opacity.
+- [x] Complete final exact-head/current-main CI and manual merge for annotation opacity: PR97, run39550636008.
 - [ ] Retain broader PDF6 imported-inventory/reply and PDF8 encryption/profile work.
+
+
+## Owned paragraph movement
+
+- [x] Audit public native removal/insertion and execute raw table-tail/singleton/section-destination proofs before implementation.
+- [x] Reuse the existing paragraph collection move spelling and native staged transaction, bounded stable-ID/root-path updates, section/semantic guards and callback revision checks.
+- [x] Add six native groups and five public workflows for native padding, identity, rollback, output, auxiliary stories, no-ops, copies, iteration and callbacks; retain all existing tests unchanged.
+- [x] Complete six focused native groups, fmt/Clippy/debug build, five new plus 25 related copied-package workflows, final media/field checks and strict consumer typing; record exact local results below.
+- [x] Complete integrated locked release/installed-wheel corpus and independent review: 339 native and 481 installed Python tests.
+- [ ] Complete final exact-head/current-main CI and manual merge for paragraph movement.
+- [ ] Keep anchored/cross-section/cross-container/cell/PPTX movement, imported preservation and broader DOC5/TXT1 parity open.
