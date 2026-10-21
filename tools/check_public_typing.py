@@ -330,6 +330,8 @@ def verify_formatting_snapshots(word: WordDocument, paragraph: Paragraph) -> Non
     assert_type(defaults["direction"], str | None)
     direct = paragraph.formatting
     assert_type(direct["alignment"], str | None)
+    assert_type(direct.get("direction"), Literal["ltr", "rtl"] | None)
+    paragraph.format(**direct)
     # A Paragraph can be a PPTX cell paragraph with alignment alone.
     assert_type(direct.get("indent_left"), float | None)
     tabs = direct.get("tabs")
@@ -339,6 +341,8 @@ def verify_formatting_snapshots(word: WordDocument, paragraph: Paragraph) -> Non
         assert_type(tabs[0]["leader"], str)
     resolved = paragraph.resolved_formatting  # Successful results are DOCX only.
     assert_type(resolved["alignment"], str)
+    assert_type(resolved["direction"], Literal["ltr", "rtl"])
+    paragraph.format(**resolved)
     assert_type(resolved["indent_left"], float)
     assert_type(resolved["keep_with_next"], bool)
     assert_type(resolved["tabs"][0]["position"], float)

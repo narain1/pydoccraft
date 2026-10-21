@@ -61,8 +61,8 @@ class PictureFormatting(TypedDict, total=False):
 
 class ParagraphFormatting(TypedDict, total=False):
     direction: Literal["ltr", "rtl"] | None
-    borders: dict[str, BorderFormatting | None] | None
-    tabs: list[TabStop] | None
+    borders: dict[str, BorderFormatting | None] | dict[str, _BorderSnapshot | None] | None
+    tabs: list[TabStop] | list[_TabSnapshot] | None
     alignment: str | None
     indent_left: float | None
     indent_right: float | None
@@ -197,7 +197,7 @@ class _ParagraphAlignmentSnapshot(TypedDict):
 class _ParagraphSnapshot(_ParagraphAlignmentSnapshot, total=False):
     borders: dict[str, _BorderSnapshot | None] | None
     tabs: list[_TabSnapshot] | None
-    direction: str | None
+    direction: Literal["ltr", "rtl"] | None
     indent_left: float | None
     indent_right: float | None
     indent_first: float | None
@@ -214,7 +214,7 @@ class _ResolvedParagraphSnapshot(TypedDict):
     borders: dict[str, _BorderSnapshot | None] | None
     tabs: list[_TabSnapshot]
     alignment: str
-    direction: str
+    direction: Literal["ltr", "rtl"]
     indent_left: float
     indent_right: float
     indent_first: float
