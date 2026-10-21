@@ -6,7 +6,7 @@ Run mypy==1.18.2 against an installed package with:
 Only imported package diagnostics are suppressed; this consumer is checked strictly.
 The private class imports supply expected identities, not extra public exports.
 """
-from typing import Any, assert_type
+from typing import Any, Literal, assert_type
 
 import doc_ex
 from doc_ex._authoring import (
@@ -43,7 +43,10 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(word.add_image(png, width=40), Picture)
         picture = word.add_image(png, width=40)
         assert_type(picture.format(wrap="behind", anchor="page", position=(20, 30), distance=2), None)
-        assert_type(picture.formatting, dict[Any, Any])
+        assert_type(picture.formatting["wrap"], Literal["inline", "square", "top_bottom", "behind"])
+        assert_type(picture.formatting["anchor"], Literal["page", "margin", "paragraph"])
+        assert_type(picture.formatting["position"], tuple[float, float])
+        assert_type(picture.formatting["distance"], tuple[float, float, float, float])
         table = word.add_table([['Heading'], ['Value']])
         assert_type(table, EditableTable)
         assert_type(table[0, 0], EditableCell)
@@ -201,3 +204,49 @@ def verify_properties(word: WordDocument, pdf: PdfDocument, presentation: Presen
     assert_type(slide_picture.alt, str)
     slide_picture.data = png
     slide_picture.crop = [0, .1, 0, .1]
+
+
+def verify_snapshots(word: WordDocument, pdf: PdfDocument, picture: Picture,
+                     table: EditableTable, cell: EditableCell) -> None:
+    assert_type(picture.format(**picture.formatting), None)
+    assert_type(table.format(**table.formatting), None)
+    assert_type(cell.format(**cell.formatting), None)
+    # Metadata keys are absent when unset; custom is always a non-null mapping.
+    assert_type(word.metadata["title"], str)
+    assert_type(word.metadata.get("title"), str | None)
+    assert_type(word.metadata.get("revision"), int | None)
+    assert_type(word.metadata["custom"], dict[str, str | bool | int | float])
+    assert_type(word.metadata["custom"]["value"], str | bool | int | float)
+    assert_type(pdf.metadata["author"], str)
+    assert_type(pdf.metadata.get("subject"), str | None)
+    assert_type(picture.formatting["position"], tuple[float, float])
+    assert_type(picture.formatting["distance"], tuple[float, float, float, float])
+    assert_type(table.formatting["alignment"], str | None)
+    assert_type(table.formatting["indent"], float | None)
+    assert_type(table.formatting["width"], float | None)
+    assert_type(table.formatting["width_percent"], float | None)
+    assert_type(table.formatting["layout"], Literal["fixed", "autofit"])
+    assert_type(table.formatting["rtl"], bool)
+    assert_type(table.formatting["title"], str | None)
+    assert_type(table.formatting["description"], str | None)
+    assert_type(table.formatting["style"], str | None)
+    assert_type(table.formatting["look"]["header_row"], bool)
+    borders = table.formatting["borders"]
+    if borders is not None:
+        line = borders["top"]
+        if line is not None:
+            assert_type(line["style"], str)
+            assert_type(line["color"], str | None)
+            assert_type(line["width"], float)
+    assert_type(cell.formatting["background"], str | None)
+    assert_type(cell.formatting["margins"], list[float] | None)
+    assert_type(cell.formatting["alignment"], str | None)
+    assert_type(cell.formatting["vertical_alignment"], str | None)
+    assert_type(cell.formatting["text_direction"], str | None)
+    assert_type(cell.formatting["no_wrap"], bool)
+    cell_borders = cell.formatting["borders"]
+    if cell_borders is not None:
+        bottom = cell_borders["bottom"]
+        if bottom is not None:
+            assert_type(bottom["color"], str | None)
+            assert_type(bottom["width"], float)

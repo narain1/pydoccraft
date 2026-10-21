@@ -744,3 +744,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Audit pinned public model and private editor copying/remapping; record basic-validation and owned-generation identity distinction.
 - [x] Specify same-deck native copy prerequisite and concrete reference/media/layout/limits fixture plan without expanding the API.
 - [ ] Obtain and verify a public bounded native copy operation before implementing owned slide duplication; keep cross-presentation import separate and SLIDE1 open.
+
+
+## Native-backed snapshot output types
+
+- [x] Inventory exact native keys, omission/nullability and list/tuple shapes for five existing metadata/formatting getters; identify polymorphic snapshots separately.
+- [x] Add private output TypedDict declarations and strict consumer assertions without changing accepted runtime inputs, public exports or method bodies/defaults; correct only existing cell-list/border-replay annotations.
+- [x] Verify positive mypy, ten intended negative diagnostics, old-facade sensitivity, runtime snapshot/key introspection and annotation/type-declaration-erased AST equality; complete independent source/static review.
+- [ ] Complete exact installed candidate static/full-corpus and required CI/manual merge using unchanged native bytes.
+- [ ] Keep polymorphic paragraph/style/default snapshots and broader API3 discoverability open.

@@ -120,17 +120,75 @@ class TableFormatting(TypedDict, total=False):
     rtl: bool
     title: str | None
     description: str | None
-    borders: dict[str, BorderFormatting | None] | None
+    borders: dict[str, BorderFormatting | None] | dict[str, _BorderSnapshot | None] | None
 
 
 class CellFormatting(TypedDict, total=False):
     background: str | tuple[int, int, int] | None
-    margins: float | tuple[float, float, float, float] | None
+    margins: float | tuple[float, float, float, float] | list[float] | None
     alignment: str | None
     vertical_alignment: str | None
     text_direction: str | None
     no_wrap: bool
-    borders: dict[str, BorderFormatting | None] | None
+    borders: dict[str, BorderFormatting | None] | dict[str, _BorderSnapshot | None] | None
+
+
+# Snapshots describe returned values; input patches retain their existing contracts.
+class _PdfMetadata(TypedDict, total=False):
+    title: str
+    author: str
+    subject: str
+    keywords: str
+
+
+class _WordCoreMetadata(_PdfMetadata, total=False):
+    description: str
+    category: str
+    last_modified_by: str
+    created: str
+    modified: str
+    revision: int
+
+
+class _WordMetadata(_WordCoreMetadata):
+    custom: dict[str, str | bool | int | float]
+
+
+class _PictureSnapshot(TypedDict):
+    wrap: Literal["inline", "square", "top_bottom", "behind"]
+    anchor: Literal["page", "margin", "paragraph"]
+    position: tuple[float, float]
+    distance: tuple[float, float, float, float]
+
+
+class _BorderSnapshot(TypedDict):
+    style: str
+    color: str | None
+    width: float
+
+
+class _TableSnapshot(TypedDict):
+    alignment: str | None
+    indent: float | None
+    width: float | None
+    width_percent: float | None
+    layout: Literal["fixed", "autofit"]
+    rtl: bool
+    title: str | None
+    description: str | None
+    borders: dict[str, _BorderSnapshot | None] | None
+    style: str | None
+    look: TableLook
+
+
+class _CellSnapshot(TypedDict):
+    background: str | None
+    margins: list[float] | None
+    alignment: str | None
+    vertical_alignment: str | None
+    text_direction: str | None
+    no_wrap: bool
+    borders: dict[str, _BorderSnapshot | None] | None
 
 
 def _table_format_patch(values, *, cell: bool = False) -> str:
@@ -601,7 +659,7 @@ class WordDocument(EditableDocument):
     _format = "docx"
 
     @property
-    def metadata(self) -> dict:
+    def metadata(self) -> _WordMetadata:
         """Owned core properties and a nested mapping of typed custom properties."""
         return json.loads(self._call("metadata"))
 
@@ -1472,7 +1530,7 @@ class Picture:
         self._owner, self._id = owner, identifier
 
     @property
-    def formatting(self) -> dict:
+    def formatting(self) -> _PictureSnapshot:
         """Owned placement snapshot; lengths are points and distance is top/right/bottom/left."""
         result = json.loads(self._owner._call("image_formatting", self._id))
         result["position"] = tuple(result["position"])
@@ -1630,7 +1688,7 @@ class EditableTable:
         return self._id
 
     @property
-    def formatting(self) -> dict:
+    def formatting(self) -> _TableSnapshot:
         """A snapshot of direct native table formatting."""
         return json.loads(self._owner._call("table_formatting", self._word_id()))
 
@@ -1863,7 +1921,7 @@ class EditableCell:
         table._owner._call("split_cell", *self._args, columns, _change=True)
 
     @property
-    def formatting(self) -> dict:
+    def formatting(self) -> _CellSnapshot:
         """A snapshot of direct native cell formatting."""
         self._check()
         return json.loads(self._table._owner._call("cell_formatting", self._table._word_id(), self._row, self._column))
@@ -1933,7 +1991,7 @@ class PdfDocument(EditableDocument):
         return PdfFields(self)
 
     @property
-    def metadata(self):
+    def metadata(self) -> _PdfMetadata:
         """A snapshot of supported document-info fields."""
         return json.loads(self._call("metadata"))
 

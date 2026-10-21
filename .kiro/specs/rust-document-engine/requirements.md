@@ -711,3 +711,8 @@ Existing public cell/table formatting SHALL have a combined matrix covering asym
 ### 96. Owned PPTX slide duplication prerequisite
 
 Keep SLIDE1 duplication/import open until a public lower-level native operation can allocate fresh identities and preserve or explicitly reject all semantic references. Existing slide append/move and whole-document copy remain the available composition operations. Native per-slide shape uniqueness is insufficient for the owned adapter's globally keyed table generations. No local copy/remapping algorithm or editor-engine dependency is permitted.
+
+
+## 95. Native-backed snapshot output types
+
+Existing WordDocument/PdfDocument.metadata and DOCX Picture/EditableTable/EditableCell.formatting getters SHALL expose verified output mapping types. Absent metadata keys SHALL differ from present nullable direct formatting values; Word custom SHALL remain a required non-null scalar mapping. Returned lists, tuples, nested borders and literal enums SHALL retain actual native/Python shapes. Private TypedDict declarations MAY describe these shapes, reusing accurate existing types; no public export, manager, accepted runtime input or method body/default SHALL change. Input annotations MAY be corrected only for already-accepted cell margin lists and table/cell snapshot-border dictionaries so typed snapshot replay remains valid; runtime state/combination guards SHALL remain intact. Strict positive/negative consumer checks, successful type-hint introspection and an annotation/type-declaration-erased AST comparison SHALL validate the change. Polymorphic paragraph/style/default snapshots and broader API3 SHALL remain open.
