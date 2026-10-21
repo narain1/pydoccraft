@@ -1229,6 +1229,17 @@ The following delivery gates are complete after independent frozen-source/packag
 Every final run also passed formatting, warnings-denied Clippy, strict installed-package typing and the unchanged 264-package audit. Each includes the independently reviewed DOCX spacing fixture correction. Earlier local artifacts, including the recorded 462-test identity artifact, retain their original test-file scope. Main integration changes no identity-refactor runtime or dependency bytes; final exact-head/current-main CI for PR93 remains pending.
 
 
+## Native PDF comment opacity — focused integration evidence
+
+Pinned source confirms set_style writes CA and redraws AP-local GS0 with CA/ca, retaining Highlight Multiply. This change reuses existing comment property/update methods and expands only finite fractional CA in the accepted canonical target profile. The two historical rejection fixtures in test_annotation_lock.py and test_pdf_geometric_annotations.py now reject CA1.5 rather than CA0.5; that is an intentional supported-contract change, not weakened rejection of malformed/out-of-range or foreign metadata. Existing native accounting assertions deliberately add the new 512-byte-per-AP resource allowance; they retain exact stream-byte accounting. The new native fixtures prove opacity followed by repeated color-only writes, fractional resize-only, two generations during fractional compound resize/style, and at-limit/+1 rollback. Their old full-artifact evidence remains historical; scoped evidence migration and integrated full validation are pending. No encryption API or dependency change is included.
+
+
+Focused isolated validation on Linux/Python3.11.2/Rust1.95: three new native groups passed in 0.05 s, three existing geometric groups in 1.93 s and three existing lock groups in 1.33 s. Formatter, locked offline Clippy/debug build and strict consumer typing passed. A copied package with the final debug extension passed all 19 selected Python workflows (four new opacity plus 15 related lock/geometric/markup tests) in 36.476 s. New public fixtures prove all seven kinds on white/colored backgrounds, 72/144-DPI PNGs, object-stream/classic saves and reopen, copy independence, finite values and canonical imported scalar restrictions, locked compound rollback and float-callback lifetime checks. These are focused development results; the full locked release wheel corpus, exact artifact scope migration and final CI/manual merge remain pending. Cargo.lock, pins and dependencies are unchanged.
+
+
+Integration review also found one pre-existing markup accounting assertion still expecting only stream bytes after recoloring. Its expected value now explicitly includes the same 512-byte resource allowance; no runtime behavior changed in that correction. The corrected assertion awaits the integrated full native run. A root run that reused a different worktree's cached native binary was discarded; native package rebuilds must establish the expected source-specific test count before recording complete artifact evidence.
+
+
 ## GitHub Pages documentation site — local build validation
 
 The documentation-only change renders the existing Markdown guides plus a landing page into 28 static HTML pages using hash-pinned, build-only Python-Markdown 3.7. `tools/build_site.py` does not import the package or invoke Cargo. No runtime dependency, lockfile, feature status, upstream revision or package version changes.
@@ -1278,6 +1289,15 @@ PR95 was independently reviewed and manually merged as `5583f2946534041267f71691
 
 Public [github.io entrypoint](https://narain1.github.io/pydoccraft/) redirects through the existing account-level domain to https://blog.narain.dev/pydoccraft/. Root verified deployed home, authoring and roadmap in Chromium140 at1440×1000 and390×844: six200responses, no script errors/document overflow; API page and stylesheet also returned200. Homepage and authoring screenshots were visually reviewed. Pages uses main-only Actions deployment; no other repository or domain settings changed. This completes the website delivery, not broadQA8/full parity or a package release.
 
+
+## Native annotation opacity — artifact evidence
+
+Runtime `5ec49683832754faa5d1f5200108995077b2500b` passed **333 locked Rust tests and 476 clean installed-wheel Python tests**, with zero failures, errors or skips. Native tests took 46.32 seconds and the Python corpus 168.527 seconds on Linux x86_64 / Python 3.11.2 / Rust 1.95. Formatting, warnings-denied all-target Clippy, locked offline release build, strict installed-package typing and the unchanged 264-package license audit pass. Installed package bytes match the wheel; all-format extraction, PNG rendering and reopened conversions pass.
+
+Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,539,342 bytes**; extension **40,686,344 bytes**; SHA-256 `d33da01deced89b8e954ea0c64ab0da1d90cd0b9f949ccb0587e41382ff266cc`. Lock SHA-256 remains `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. Dependencies, upstream revisions and attribution are unchanged.
+
+Two reviewed negative fixtures now reject invalid CA1.5 rather than newly supported CA0.5. Only six geometric-comment and five lock operation cells move to this artifact; historical references and unrelated module fingerprints remain intact. The new opacity test module extends the existing property profile, with imported rectangle versus native seven-kind scope explicit. Attenuation and zero-opacity invisibility are tested at 72 DPI; saved/reopened PNG equality is also tested at 144 DPI. Locked compound text/opacity edits retain bytes and cache. Native appearance-stream bytes and a 512-byte resource allowance per redraw are charged, including intermediate compound edits and subsequent color-only edits. Custom appearances may be replaced; arbitrary imported artwork preservation and encryption are not claimed. Independent source review and all 476 installed tests against the copied exact package passed in 164.632 seconds, with matching wheel bytes and zero failures, errors or skips. Final current-main CI/manual merge remains required; broader PDF6 remains partial.
+
 ## GitHub Pages documentation site — reviewed manual merge
 
 PR95 final head `d9a6cbb914ec8a1bd4172bbcb58d0acbfe0ac8ae` passed required [CI39547460948](https://github.com/narain1/pydoccraft/actions/runs/39547460948): 321 native tests, 462 installed-wheel tests in207.055 seconds, formatting, Clippy, strict typing and the unchanged264-package license audit. Its [documentation build39547460927](https://github.com/narain1/pydoccraft/actions/runs/39547460927) passed; deployment was correctly skipped for the pull request. Independent source review and a clean build checked28 pages and1,642 local links/assets/fragments; negative checks rejected missing files/fragments, duplicate IDs and output-root traversal.
@@ -1289,3 +1309,10 @@ Root visual review used Chromium140 with1440×1000 and390×844 viewports on the 
 PR94 final head `0a0b225e12708d3d49c0bf7543d459b0c730cd49` passed required [current-main CI39548202131](https://github.com/narain1/pydoccraft/actions/runs/39548202131) and documentation CI39548202076 after the independent exact-artifact review recorded above. The final installed-wheel run passed all467 tests in388.512 seconds, with zero failures/errors/skips, on CPython3.11.17/Linux x86_64/glibc2.39. Wheel SHA-256 `11e5840634a7a95c9e7d2b515b064b355220fb181145a42fd5a17812a37b6efb`,17,535,375 bytes; extension40,677,744 bytes. Lock and upstream revisions are unchanged.
 
 The reviewed exact head was manually merged as `8979a6deb151742e18175cdebe843382ba3ac611`; repository auto-merge remains disabled. This completes the owned same-page radio-group delivery gate, while imported forms and broader PDF6 remain partial.
+
+
+## Owned body paragraph deletion — final manual merge gate
+
+PR96 final head `eb13c92b784d7df29749ce5c064b0405f2b1afdf` passed required [current-main CI39549509766](https://github.com/narain1/pydoccraft/actions/runs/39549509766) and documentation CI39549509781 after the independent exact-artifact review recorded above. The final run passed330 native tests in169.05 seconds and472 installed-wheel tests in347.071 seconds, with zero failures/errors/skips, plus formatting, Clippy, strict typing and the264-package license audit. On CPython3.11.17/Linux x86_64/glibc2.39, the wheel is17,538,600 bytes, extension40,685,872 bytes, SHA-256 `c4930f0423d4ada1e3c43e0828abade59a7399057b9208ada183effd006420f9`. Lock and pinned upstream revisions remain unchanged.
+
+The reviewed exact head was manually merged as `3989bea9c7ce8b9c6bca6fd0cc2aab10f84d31fc`. Repository auto-merge remains disabled. This closes ordinary owned body-paragraph deletion; section-boundary/semantic deletion, cell/PPTX deletion and broader DOC5/TXT1 remain partial.

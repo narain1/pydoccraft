@@ -142,7 +142,7 @@ class PdfGeometricAnnotationTests(unittest.TestCase):
     def test_imported_profile_rejections_preserve_foreign_appearance(self):
         cases = [(dict(extra=b'/RD [1 1 1 1]'), UnsupportedFormatError),
                  (dict(extra=b'/IC [0 1 0]'), UnsupportedFormatError),
-                 (dict(extra=b'/CA 0.5'), UnsupportedFormatError),
+                 (dict(extra=b'/CA 1.5'), UnsupportedFormatError),
                  (dict(extra=b'/BE << /S /C >>'), UnsupportedFormatError),
                  (dict(extra=b'/Measure << >>'), UnsupportedFormatError),
                  (dict(extra=b'/PCPicture true'), UnsupportedFormatError),

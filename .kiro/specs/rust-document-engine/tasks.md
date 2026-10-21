@@ -639,5 +639,16 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add four native groups and five public workflows for output, identity, section starts/restarts, protected anchors, callbacks, placeholder reuse and rollback; deliberately update obsolete body-Unsupported assertions while preserving cell/PPTX/section checks.
 - [x] Complete focused native tests, fmt/Clippy/debug build and copied-package public/related checks; record exact results below.
 - [x] Complete integrated locked release and clean installed-wheel corpus: 330 native/472 Python tests, strict typing, license audit and independent472-test review.
-- [ ] Complete final exact-head/current-main CI and manual merge for body paragraph deletion.
+- [x] Complete final exact-head/current-main CI and manual merge for body paragraph deletion: PR96, run39549509766.
 - [ ] Keep section-boundary/semantic deletion, cell/PPTX deletion and broader DOC5/TXT1 insertion/movement/adoption open.
+
+
+## Native PDF comment opacity
+
+- [x] Audit pinned native Style/set_style and AP-local ExtGState generation; retain the seven existing comment kinds and canonical metadata profile.
+- [x] Reuse Annotation property/update, bounded target validation and staged native appearance/accounting.
+- [x] Complete three focused native groups plus six related native groups, 19 copied-package public tests (four new plus 15 related), formatter/Clippy/debug build and strict consumer typing.
+- [x] Migrate only the geometric-comment and lock evidence affected by intentional fractional-CA fixture changes to the exact new integrated artifact.
+- [x] Complete locked full native/release/installed corpus and independent artifact review: 333 native and 476 installed Python tests.
+- [ ] Complete final exact-head/current-main CI and manual merge for annotation opacity.
+- [ ] Retain broader PDF6 imported-inventory/reply and PDF8 encryption/profile work.

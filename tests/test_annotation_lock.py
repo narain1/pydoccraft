@@ -118,7 +118,7 @@ class AnnotationLockTests(unittest.TestCase):
         for extra, error in ((b'/F 0', UnsupportedFormatError), (b'/F (4)', UnsupportedFormatError),
                              (b'/IRT 4 0 R', UnsupportedFormatError),
                              (b'/Foreign [ [ 1 2 3 ] ]', UnsupportedFormatError),
-                             (b'/CA 0.5', UnsupportedFormatError),
+                             (b'/CA 1.5', UnsupportedFormatError),
                              (b'/Contents (' + b'x'*131075 + b')', UnsafeArchiveError)):
             with self.subTest(extra=extra[:30]), doc_ex.open(imported_shape(extra)) as source, source.edit() as document:
                 mark = document.pages[0].annotations[0]
