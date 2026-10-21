@@ -2261,3 +2261,19 @@ The explicit facade-only repack changes only `doc_ex/_authoring.py` and wheel RE
 A clean Python3.11.2 installed-wheel run passes all573 tests in417.440seconds (417.571seconds wrapper), with zero failures, errors or skips. Strict installed-consumer typing and six direct/resolved paragraph snapshot replays across body/header/cell with DOCX/PDF/PNG controls pass. Independent exact artifact, facade, native and attribution verification passes, as do the imported default-size regression (1.413seconds), snapshot replay and strict typing. This is one primary full573 corpus plus independent focused/artifact review; no second full573 run or new native build is claimed.
 
 The later authoring paragraph correction removes a stale reader-mismatch explanation while retaining the upgrade-only API refusal. Merging final Deck delivery documentation1579bcb adds only its accepted572 evidence. Neither post-corpus documentation change alters runtime/fixture bytes. The current support audit retains the reachable Word runtime checkpoint; historical profile/artifact records remain unchanged. Owned default-size reset remains a separate feature, and current-head CI plus independent manual merge are still required. No version/tag/publication change is included.
+
+### PR128 final current-main CI and manual merge
+
+The authoring/validation aggregate was manually merged as `48f1583fe843fb168a269e35f013b6aed9430554` on 2026-10-21 at 12:14:01 UTC. Reviewed head `fbcf0aaad5f29b06e7d380bd32e5c14f50a4ef59` included actual main `4ed440dd78efaba4a389210850e324c640035bf6`. Required CI39594229122 and documentation CI39594229092 passed; strict branch protection, exact head/current-main ancestry and disabled auto-merge were verified. No bypass was used.
+
+The fresh CI build passes 452 native tests in 510.94 seconds and 571 installed-wheel tests in 959.341 seconds (959.877 seconds wrapper), with zero failures/errors/skips. Formatting, strict Clippy, installed typing and the 264-package license audit pass. The CI wheel is 17,733,199 bytes, SHA256 `ba3f1a67d32aae029a369f587a69bdc42c19ab21957c10a7d1f313fccc5410b9`; its native extension is 41,125,296 bytes. Cargo.lock SHA256 remains `ae4bf514017df6a4317e81cb5b2f194f89acd1ee6bf8f7e6ebd54d21772f829d`. These are fresh CI artifact identities, not relabeled local repack bytes.
+
+This completes the current-main delivery gates for specs120/123/125/126/133. The dedicated Deck upgrade in PR129 remains a separate pending dependency change and still requires its own current-head CI and manual merge. No version, tag or release was published.
+
+### PR129 final current-main CI and manual merge
+
+The dedicated DeckCraft upgrade was manually merged as `b8f011b4f009cde5482b70010c4b94482438d0eb` on 2026-10-21 at 12:44:24 UTC. Reviewed head `14de8e1ef2d1a33c5ab35af60011a88c71b2e2b1` included actual main `48f1583fe843fb168a269e35f013b6aed9430554`. Required CI39598137797 and documentation CI39598137783 passed. Exact head, current-main ancestry, strict branch protection, clean merge state and disabled auto-merge were verified; no bypass was used.
+
+Fresh CI passes 453 native tests in 515.05 seconds and 572 installed-wheel tests in 969.911 seconds (970.472 seconds wrapper), with zero failures/errors/skips. Formatting, strict Clippy, installed typing and the 264-package license audit pass. The CI wheel is 17,733,301 bytes, SHA256 `352000882e5531ea8ca29fc05512589f82b0df0082b5a4f5dc9fe9cb1ee10b16`; its native extension is 41,125,088 bytes. Cargo.lock SHA256 remains `654a8eb11235a9962746610e98983fdc107a330eeee055198a4757ba6ec8ba95`. These fresh CI artifacts remain distinct from the original and repacked local artifacts.
+
+This completes spec128's current-main delivery gate. PR130 retains the separate Word upgrade and requires fresh current-head CI after this actual-main merge. No runtime, fixture, dependency, attribution, version or release changes are introduced by this merge-evidence update.
