@@ -726,3 +726,10 @@ The existing paragraph collection move operation shall support ordinary paragrap
 ## 99. Owned DOCX theme identity prerequisite
 
 Do not expose theme editing based only on palette/font metadata serialization. STY3 requires persistent theme references, tint/shade/mapping and font roles, native resolution after replacement, preservation of explicit overrides and independent DOCX/PNG/PDF acceptance. Existing fixed-color/font style/default formatting remains supported. Keep missing native semantics under U02; no new color/style manager or string-token workaround.
+
+
+## 101. Owned PPTX cell paragraph deletion
+
+Existing `del cell.paragraphs[index]` shall remove one intact native PPTX Paragraph using integer/negative indexes, including horizontal, vertical and rectangular merged aliases. Retain surviving paragraph/run properties, links, cell formatting and unrelated content. Deleting the final owned paragraph leaves an empty collection; the native writer supplies the required blank on serialization, and existing append initializes it without a leading separator. No new public API, placeholder registry or text-join workaround shall be introduced.
+
+Canonical cell body generations shall advance atomically, invalidating that cell's old paragraph handles; grid/Cell handles and unrelated cells remain valid. Copies remain independent, and deleted handles cannot revive after append. Native revision/content checks and checked generation exhaustion apply before publication. PPTX index callbacks that change or close the owner shall reject the outer deletion; existing DOCX stable-ID callback behavior remains unchanged. Validate source/readback/render/PDF output, first/middle/last/empty removal, merged aliases, resource reclamation, exact/+1 limits and rollback. Broader DOC5/TXT1/SLIDE3 and paragraph movement remain open.

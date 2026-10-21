@@ -63,6 +63,11 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(note.paragraphs.move(0, 0), None)
         assert_type(next(iter(word.images)), Picture)
 
+    with doc_ex.new('pptx') as deck:
+        cell = deck.slides.add().add_table([['Remove']], box=(20, 20, 200, 80))[0, 0]
+        assert_type(cell.paragraphs[0], Paragraph)
+        del cell.paragraphs[0]
+
     with doc_ex.new('pdf') as pdf:
         assert_type(pdf, PdfDocument)
         assert_type(pdf.to_bytes(object_streams=False), bytes)

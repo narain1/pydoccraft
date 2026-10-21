@@ -205,6 +205,6 @@ class StoryParagraphDeletionTests(unittest.TestCase):
         with doc_ex.new('pptx') as deck:
             table = deck.slides.add().add_table([['Cell']], box=(10, 10, 200, 80))
             before = deck.to_bytes()
-            with self.assertRaises(UnsupportedFormatError):
-                del table[0, 0].paragraphs[0]
+            with self.assertRaises(TypeError):
+                del table[0, 0].paragraphs[:]
             self.assertEqual(deck.to_bytes(), before)

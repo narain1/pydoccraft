@@ -181,8 +181,8 @@ class CellParagraphDeletionTests(unittest.TestCase):
                 del cell.paragraphs[0]
         with doc_ex.new('pptx') as document:
             cell = document.slides.add().add_table([['Kept']], box=(10, 10, 200, 80))[0, 0]
-            with self.assertRaises(UnsupportedFormatError):
-                del cell.paragraphs[0]
+            with self.assertRaises(TypeError):
+                del cell.paragraphs[:]
             self.assertEqual(cell.text, 'Kept')
 
     def test_callbacks_capture_ids_and_stale_grid_rejects_before_index_conversion(self):

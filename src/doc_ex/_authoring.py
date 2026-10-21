@@ -621,18 +621,25 @@ class _Collection(Sequence[_Item], Generic[_Item]):
 
 
 class _Paragraphs(_Collection["Paragraph"]):
-    """Ordered paragraph handles; deletion supports owned DOCX body, auxiliary and cell paragraphs."""
+    """Ordered paragraphs; deletion supports DOCX containers and PPTX cells."""
     def __delitem__(self, index: int) -> None:
         self._owner._ensure_open()
-        if not isinstance(self._owner, WordDocument):
-            raise UnsupportedFormatError("PPTX paragraph deletion is not supported")
         if isinstance(index, slice):
             raise TypeError("paragraph deletion requires an integer index")
+        revision = (None if isinstance(self._owner, WordDocument)
+                    else self._owner._call("revision"))
         identifiers = self._ids()
         selected = operator.index(index)
         self._owner._ensure_open()
+        if revision is not None and self._owner._call("revision") != revision:
+            raise ValueError("paragraph selection is stale after a document mutation")
         identifier = identifiers[_index(selected, len(identifiers))]
-        self._owner._call("remove_paragraph", identifier, _change=True)
+        if isinstance(self._owner, WordDocument):
+            self._owner._call("remove_paragraph", identifier, _change=True)
+        else:
+            paragraph = self._factory(self._owner, identifier)
+            self._owner._call("remove_cell_paragraph", *paragraph._range_args,
+                              paragraph._target, _change=True)
 
     def move(self, index: int, destination: int) -> None:
         """Move an owned DOCX paragraph to its final index in the same container and section."""

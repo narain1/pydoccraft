@@ -632,3 +632,10 @@ Generalize the existing transaction from root depth0 to an equal native parent p
 ## 99. Theme metadata versus native property identity
 
 Pinned WordCraft Settings stores theme metadata, but ordinary CharProps values and TextColor lack theme slot/tint/shade/font-reference identity. The reader resolves references to concrete values and the writer emits concrete property values. Native style and paragraph layout resolve those values independently of theme Settings; rendering/PDF consume the result. Graphic-text minor-font fallback is a distinct limited path. Private editor theme commands rewrite selected styles heuristically and are not an allowed substitute. Defer facade design until public native model/read/write/resolution support preserves this distinction; reuse existing formatting operations where fixed formatting is intended.
+
+
+## 101. Native PPTX cell paragraph removal
+
+Remove one public `TextBody.paragraphs` value inside the existing staged presentation mutation. Native text-range deletion joins paragraphs and retains the first paragraph's properties; it is unsuitable for deleting an intact first paragraph. The public model vector preserves all survivor values without reproducing a document standard. Existing content validation traverses the same shape graph before publication that refresh_budgets uses afterward.
+
+Validate the existing canonical CellTarget (row, column, paragraph, grid generation, body generation), preflight the next body generation, then publish native model/revision and update that cell's generation and accounting. Existing table and unrelated cell identities are unchanged. Owned zero-paragraph bodies already exist after splitting covered cells; use that same state after deleting the final paragraph. Native serialization alone emits its required empty paragraph, and existing append handles initialization. No new sentinel or identity allocator is needed. The Python collection dispatches to the native PPTX operation and scopes callback revision checks to PPTX, preserving DOCX captured stable-ID behavior.

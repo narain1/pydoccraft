@@ -1604,6 +1604,31 @@ impl EditablePptx {
         ))
     }
 
+    pub fn remove_cell_paragraph(
+        &mut self,
+        slide: usize,
+        id: u32,
+        cell: CellTarget,
+    ) -> PyResult<()> {
+        self.target_body(slide, id, Some(cell))?;
+        let (row, col, paragraph, _, old_generation) = cell;
+        let generation = old_generation
+            .checked_add(1)
+            .ok_or_else(|| EngineError::ResourceLimit("cell generation limit reached".into()))?;
+        self.mutate(|document| {
+            // Remove the intact public model value. Text-range deletion joins
+            // paragraphs and can transfer the removed paragraph's properties.
+            // The native writer supplies a required blank when the body is empty.
+            cell_mut(document, slide, id, row, col)?
+                .text
+                .paragraphs
+                .remove(paragraph);
+            Ok(())
+        })?;
+        self.cell_generations.insert((id, row, col), generation);
+        self.refresh_budgets()
+    }
+
     pub fn cell_add_paragraph(
         &mut self,
         slide: usize,
@@ -5780,3 +5805,7 @@ mod letter_spacing_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "pptx_cell_delete_proof.rs"]
+mod cell_delete_proof;

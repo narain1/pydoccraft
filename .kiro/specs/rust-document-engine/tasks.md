@@ -772,3 +772,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Connect the verified prerequisite to existing U02/STY3 and specify native fixtures without adding a speculative API/test.
 - [x] Independently review pinned source findings and validate documentation links.
 - [ ] Obtain native theme-reference/resolution support and execute the proposed save/render/export fixtures before implementing theme changes; leave STY3 open.
+
+
+## Owned PPTX cell paragraph deletion (spec101)
+
+- [x] Prove intact native model deletion, survivor properties, ordinary/horizontal/vertical/rectangular merges and final-blank writer behavior before integration: two raw groups pass, 30.86 s; fmt/Clippy pass.
+- [x] Integrate existing collection syntax with canonical generations, staged resource/revision guards and preserved DOCX callback behavior; source review clear.
+- [ ] Verify native/public rollback, copies, empty append, invalidation and actual PPTX/PNG/PDF output; independently review the final source and artifact.
+- [ ] Complete locked full corpus, exact-head/current-main CI and manual merge; retain broader DOC5/TXT1/SLIDE3 work.
