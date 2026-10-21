@@ -3814,4 +3814,13 @@ class _SlideCellParagraph(Paragraph):
     resolved_formatting = property(_unsupported)
     set_list = _unsupported
     add_field = _unsupported
-    add_break = _unsupported
+    def add_break(self, kind: str = "line") -> TextRange:
+        """Append a line break; the returned range reads one LF character."""
+        self._owner._call("cell_paragraph_alignment", *self._range_args, self._target)
+        revision = self._owner._call("revision")
+        if not isinstance(kind, str):
+            raise TypeError("break kind must be a string")
+        kind = str.__str__(kind)
+        start, end, revision = self._owner._call("cell_add_break", *self._range_args,
+                                               self._target, kind, revision, _change=True)
+        return _SlideTextRange(self, start, end, revision)

@@ -912,7 +912,7 @@ impl EditablePptx {
     pub fn shape_text(&self, slide: usize, id: u32, cell: Option<CellTarget>) -> PyResult<String> {
         let body = self.target_body(slide, id, cell)?;
         Ok(match cell {
-            Some((_, _, paragraph, _, _)) => body.paragraphs[paragraph].text(),
+            Some((_, _, paragraph, _, _)) => cell_public_text(body.paragraphs[paragraph].text()),
             None => body.text(),
         })
     }
@@ -928,7 +928,15 @@ impl EditablePptx {
     ) -> PyResult<(String, u64)> {
         let body = self.target_body(slide, id, cell)?;
         let (a, b) = target_positions(body, start, end, cell.map(|target| target.2))?;
-        Ok((deckcraft_model::edit::text_range(body, a, b), self.revision))
+        let text = deckcraft_model::edit::text_range(body, a, b);
+        Ok((
+            if cell.is_some() {
+                cell_public_text(text)
+            } else {
+                text
+            },
+            self.revision,
+        ))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1233,7 +1241,7 @@ impl EditablePptx {
                         if cell.is_covered() {
                             String::new()
                         } else {
-                            cell.text.text()
+                            cell_public_text(cell.text.text())
                         }
                     })
                     .collect()
@@ -1353,7 +1361,9 @@ impl EditablePptx {
     }
 
     pub fn cell_text(&self, slide: usize, id: u32, row: usize, col: usize) -> PyResult<String> {
-        Ok(table_cell(self.table(slide, id)?, row, col)?.text.text())
+        Ok(cell_public_text(
+            table_cell(self.table(slide, id)?, row, col)?.text.text(),
+        ))
     }
 
     pub fn cell_margins(
@@ -1728,6 +1738,64 @@ impl EditablePptx {
         })?;
         self.refresh_budgets()?;
         Ok((row, col, count, grid, generation))
+    }
+
+    pub fn cell_add_break(
+        &mut self,
+        slide: usize,
+        id: u32,
+        cell: CellTarget,
+        kind: &str,
+        revision: u64,
+    ) -> PyResult<(usize, usize, u64)> {
+        self.check_revision(revision)?;
+        let original = self.target_body(slide, id, Some(cell))?;
+        match kind {
+            "line" => (),
+            "page" | "column" => {
+                return Err(EngineError::Unsupported(
+                    "PPTX cell paragraphs support line breaks only".into(),
+                )
+                .into())
+            }
+            _ => {
+                return Err(PyValueError::new_err(
+                    "break kind must be line, page or column",
+                ))
+            }
+        }
+        // Validate bounded source before cloning inherited properties or the body.
+        let mut projected = content_budget(self.document()?)?;
+        let start = original.paragraphs[cell.2].char_len();
+        let end = start.checked_add(1).ok_or_else(|| {
+            EngineError::ResourceLimit("cell paragraph character limit reached".into())
+        })?;
+        let mut props = deckcraft_model::edit::props_at(original, (cell.2, start));
+        props.link = None;
+        props.hover = None;
+        // Append-only native VT adds at most one run and one logical byte;
+        // an empty stored Break.text still contributes one content() byte.
+        projected.add(ContentBudget {
+            text: 1,
+            runs: 1,
+            properties: props_cost(&props),
+            ..Default::default()
+        });
+        projected.check()?;
+        let mut body = original.clone();
+        let caret = deckcraft_model::edit::insert(&mut body, (cell.2, start), "\u{b}", Some(props));
+        if caret != (cell.2, end) || body.paragraphs.len() != original.paragraphs.len() {
+            return Err(EngineError::Malformed(
+                "native line-break insertion changed paragraph scope".into(),
+            )
+            .into());
+        }
+        self.mutate(|document| {
+            *target_body_mut(document, slide, id, Some(cell))? = body;
+            Ok(())
+        })?;
+        self.refresh_budgets()?;
+        Ok((start, end, self.revision))
     }
 
     pub fn cell_paragraph_alignment(
@@ -2640,6 +2708,12 @@ fn target_body_mut(
             .as_mut()
             .ok_or_else(|| PyValueError::new_err("shape has no text body"))
     }
+}
+
+// Native VT and public LF are both one Unicode character/UTF-8 byte. Keep
+// paragraph/range coordinates unchanged without changing native model content.
+fn cell_public_text(text: String) -> String {
+    text.replace('\u{b}', "\n")
 }
 
 fn paragraph_text_value(text: &str) -> PyResult<()> {
@@ -5990,3 +6064,11 @@ mod cell_move_proof;
 #[cfg(test)]
 #[path = "pptx_cell_format_proof.rs"]
 mod cell_format_proof;
+
+#[cfg(test)]
+#[path = "pptx_cell_break_proof.rs"]
+mod cell_break_proof;
+
+#[cfg(test)]
+#[path = "pptx_cell_break_tests.rs"]
+mod cell_break_tests;
