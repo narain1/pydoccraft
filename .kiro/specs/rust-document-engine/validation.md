@@ -1489,7 +1489,7 @@ Source-only baseline `991adbb7c24bf3823e951f775005e7b597778ffe`, pinned WordCraf
 The proposed raw fixture plan is explicitly unexecuted. No Cargo/native run, runtime/API change, new test/test-count, dependency, lockfile, version, imported editing or upstream post is claimed. Existing fixed formatting and reset/inherit behavior remain unchanged; no private editor algorithm is copied. Independent pinned-source review is clear. Static documentation built 29 pages and checked 1,729 local links/assets/fragments; roadmap validation passed 139 coverage IDs/14 workstreams, and all 19 support/reference documentation tests passed. Exact-head current-main CI remains required before manual merge.
 
 
-## Owned PPTX cell paragraph deletion — staged spec101 validation
+## Owned PPTX cell paragraph deletion — spec101 validation
 
 The existing integer collection deletion now removes intact native PPTX cell paragraphs, preserving survivor formatting and using canonical cell body generations. The two raw groups cover ordinary and horizontal/vertical/rectangular merged cells, first/middle/last removal, required blank serialization, empty append and copy independence. The final raw gate passed in 30.86 s; initial cross-DPI pixel assumptions were corrected only after unedited controls isolated native PDF raster resampling. At integral 200-DPI dimensions, source/PDF channel differences are at most one; 72/144-DPI checks separately verify dimensions and visible output. No general pixel-perfect conversion claim is made.
 
@@ -1497,4 +1497,4 @@ Integrated locked native tests: **366 passed in 47.08 s**. Formatting, all-targe
 
 Artifact: `dist/slide-cell-delete/pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`, **17,579,343 bytes**, extension **40,778,376 bytes**. Wheel SHA-256 `9990a673a573aaecbb26041061fbf7e34a0ddd21565568ed3b83fa6335f522c9`; native SHA-256 `b373b3195b2b001f2d5225b392ea1d41b9e19b9db369cdf735a0fdcbbf01c75f`. Environment: Linux x86_64, Rust 1.95, Python 3.11.2, maturin 1.8.1. All four upstream revisions and Cargo.lock remain unchanged. Roadmap/support/reference validation and 19 documentation tests pass; site checks cover 29 pages and 1,730 local links/assets/fragments.
 
-The full 506-test installed corpus, independent artifact replay and exact-head/current-main CI/manual merge remain pending at this staged checkpoint. This is unreleased development evidence, not a new version or completed DOC5/TXT1/SLIDE3 claim.
+The frozen runtime source is `eeb92e2d816e2b4d6b66cfe007a2d0db80bd8bcf`. The full installed corpus passed **506 tests in 281.087 s** (JSON wrapper 281.186 s); a clean independent install and copied exact source passed **506 tests in 280.791 s**, with zero failures, errors or skips in both. Independent source and strict installed consumer review pass. Exact-head/current-main CI and manual merge remain pending. This is unreleased development evidence, not a new version or completed DOC5/TXT1/SLIDE3 claim.

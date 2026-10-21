@@ -778,5 +778,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 
 - [x] Prove intact native model deletion, survivor properties, ordinary/horizontal/vertical/rectangular merges and final-blank writer behavior before integration: two raw groups pass, 30.86 s; fmt/Clippy pass.
 - [x] Integrate existing collection syntax with canonical generations, staged resource/revision guards and preserved DOCX callback behavior; source review clear.
-- [ ] Verify native/public rollback, copies, empty append, invalidation and actual PPTX/PNG/PDF output; independently review the final source and artifact.
-- [ ] Complete locked full corpus, exact-head/current-main CI and manual merge; retain broader DOC5/TXT1/SLIDE3 work.
+- [x] Verify native/public rollback, copies, empty append, invalidation and actual PPTX/PNG/PDF output; independent source and exact-wheel review pass.
+- [x] Complete locked full corpus: 366 native tests and two independent 506-test installed-wheel runs pass.
+- [ ] Complete exact-head/current-main CI and manual merge; retain broader DOC5/TXT1/SLIDE3 work.
