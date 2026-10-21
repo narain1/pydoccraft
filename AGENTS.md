@@ -25,8 +25,10 @@ Keep all crates from each repository on one revision:
 |---|---|---|
 | PdfCraft | `645016addcfb9078c557f0189559ab47cdcee057` | PDF inspection, text, links, images, rendering, DOCX export |
 | WordCraft | `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22` | DOCX model, layout, rendering, PDF export |
-| DeckCraft | `22db9261f9d1a214c296fd390173130c45d76d66` | PPTX model, rendering, PDF export |
+| DeckCraft (reviewed contribution fork) | `dd4fd70b6347dd2ce782e33f030a2b6c0abb0106` | PPTX model, fallible rendering, PDF export |
 | craft-libs | `c3487320b2d1de657b860b3c8abb44e1f2b32bd8` | Shared PDF backend required by WordCraft/DeckCraft |
+
+DeckCraft is pinned to the reviewed contribution fork at `https://github.com/narain1/deckcraft`, directly based on upstream `22db9261f9d1a214c296fd390173130c45d76d66`. This identifies fork provenance; it does not imply upstream acceptance.
 
 An upstream upgrade is a dedicated change: update every crate from that repository together, regenerate `Cargo.lock`, rerun the license audit, run the complete corpus, measure wheel size, and record results in the spec validation file.
 

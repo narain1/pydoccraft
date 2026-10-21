@@ -39,6 +39,8 @@ pub enum EngineError {
     Encrypted,
     #[error("conversion_failure:{0}")]
     Conversion(String),
+    #[error("rendering_failure:{0}")]
+    Rendering(String),
 }
 
 impl From<EngineError> for PyErr {

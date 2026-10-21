@@ -177,6 +177,7 @@ def _native(operation):
             "index": IndexError,
             "encrypted": MalformedDocumentError,
             "conversion_failure": DocExError,
+            "rendering_failure": DocExError,
             "closed": DocumentClosedError,
         }.get(category, DocExError)
         raise exception(message or str(error)) from None
