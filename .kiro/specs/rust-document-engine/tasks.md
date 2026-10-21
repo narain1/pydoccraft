@@ -1120,13 +1120,15 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Pass two new native groups, all nine default-filter groups, fmt/strict Clippy/debug and seven new/related public workflows including unchanged131 imported regression.
 - [x] Pass strict typing and independent final two-workflow copied-package/source review; retain every failed fixture premise and unchanged runtime/threshold evidence.
 - [x] Complete synchronized focused documentation and independent review.
-- [ ] Complete combined full installed artifact/native/source/attribution validation and current-head CI/manual merge. Broader STY2/U02 remain open.
+- [x] Complete combined460 native and final579 installed-artifact/source/attribution validation, with independent changed-workflow, typing and exact-artifact review.
+- [ ] Complete current-head CI/manual merge; separate acceptance audits govern broader roadmap criteria.
 ## Unit converter input typing (spec135)
 
 - [x] Reproduce strict rejection of ordinary int/float calls despite existing runtime support.
 - [x] Change only four input annotations and extend the strict consumer; verify annotation-erased whole-facade AST equality.
 - [x] Pass copied-package int/float/Fraction/Real consumers, three intended negative diagnostics and44 runtime conversion/refusal cases.
-- [ ] Complete independent source/focused review and final combined artifact/CI; retain broader API3 open.
+- [x] Complete independent source/focused review and final combined579 installed-artifact validation.
+- [ ] Complete current-head CI/manual merge; retain broader API3 open.
 
 
 ## Typed PDF drawing and metadata inputs (spec136)
@@ -1135,5 +1137,5 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Verify strict supported-source and tuple/list input consumers, metadata snapshot replay, precise None returns and nine invalid-call diagnostics.
 - [x] Verify whole-facade implementation AST identity and all15 existing underlay/text-box/drawing-ownership workflows against the copied-package candidate.
 - [x] Complete independent final source/AST/strict-consumer/negative-control review.
-- [ ] Complete final combined installed-artifact validation.
+- [x] Complete final combined579 installed-artifact validation, preserving the original460-native artifact and separately verified annotation-only repack.
 - [ ] Complete current-main CI and manual merge; keep broader API3 and raw path-command typing open.
