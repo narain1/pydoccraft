@@ -149,6 +149,7 @@ class _PdfMetadataPatch(TypedDict, total=False):
 
 
 class _WordCoreMetadata(_PdfMetadata, total=False):
+    language: str
     description: str
     category: str
     last_modified_by: str
@@ -831,7 +832,7 @@ class WordDocument(EditableDocument):
 
     def update_metadata(self, **values) -> None:
         """Patch supported properties; None clears a field or custom entry."""
-        allowed = {"title", "author", "subject", "keywords", "description", "category",
+        allowed = {"title", "author", "subject", "keywords", "language", "description", "category",
                    "last_modified_by", "created", "modified", "revision", "custom"}
         if values.keys() - allowed:
             raise ValueError("unsupported DOCX metadata key")

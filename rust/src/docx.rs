@@ -1039,6 +1039,7 @@ impl<'a> Adapter<'a> {
             ("subject", &self.document.core.subject),
             ("author", &self.document.core.creator),
             ("keywords", &self.document.core.keywords),
+            ("language", &self.document.core.language),
             ("description", &self.document.core.description),
             ("category", &self.document.core.category),
             ("last_modified_by", &self.document.core.last_modified_by),

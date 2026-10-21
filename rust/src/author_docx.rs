@@ -207,6 +207,7 @@ impl EditableDocx {
                 "author" => &mut candidate.core.creator,
                 "subject" => &mut candidate.core.subject,
                 "keywords" => &mut candidate.core.keywords,
+                "language" => &mut candidate.core.language,
                 "description" => &mut candidate.core.description,
                 "category" => &mut candidate.core.category,
                 "last_modified_by" => &mut candidate.core.last_modified_by,
@@ -5469,6 +5470,7 @@ fn core_metadata(document: &Document) -> Value {
         ("author", &core.creator),
         ("subject", &core.subject),
         ("keywords", &core.keywords),
+        ("language", &core.language),
         ("description", &core.description),
         ("category", &core.category),
         ("last_modified_by", &core.last_modified_by),
@@ -10253,7 +10255,7 @@ mod tests {
             .unwrap();
         assert_eq!(document.metadata().unwrap(), r#"{"custom":{}}"#);
         let values = json!({"title":"Report <&> Ω", "author":"Example Author", "subject":"Subject",
-            "keywords":"one;two", "description":"First line\nSecond line", "category":"Review",
+            "keywords":"one;two", "language":"en-GB", "description":"First line\nSecond line", "category":"Review",
             "last_modified_by":"Editor", "created":"2024-02-29T01:02:03Z",
             "modified":"2026-10-20T23:59:59Z", "revision":4294967295u32});
         document.update_metadata(&values.to_string()).unwrap();
@@ -10264,15 +10266,16 @@ mod tests {
         let reopened = wordcraft_docx::read(&bytes).unwrap();
         assert_eq!(document_metadata(&reopened).unwrap().to_string(), expected);
         assert_eq!(reopened.core.creator, "Example Author");
+        assert_eq!(reopened.core.language, "en-GB");
         assert_eq!(reopened.core.created, "2024-02-29T01:02:03Z");
         crate::docx::render(&bytes, 0, 72.0, None).unwrap();
         let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
         crate::pdf::render(&pdf, 0, 72.0, None).unwrap();
         document
-            .update_metadata(r#"{"author":null,"title":"","revision":null,"created":null}"#)
+            .update_metadata(r#"{"author":null,"title":"","revision":null,"created":null,"language":null}"#)
             .unwrap();
         let updated: Value = serde_json::from_str(&document.metadata().unwrap()).unwrap();
-        for key in ["title", "author", "revision", "created"] {
+        for key in ["title", "author", "revision", "created", "language"] {
             assert!(updated.get(key).is_none());
         }
         assert_eq!(updated["modified"], "2026-10-20T23:59:59Z");
@@ -10349,7 +10352,11 @@ mod tests {
         let revision = document.revision().unwrap();
         let mut invalid = vec![
             "[]".into(),
-            r#"{"title":"Changed","language":"en"}"#.into(),
+            r#"{"title":"Changed","unknown_property":"en"}"#.into(),
+            r#"{"title":"Changed","language":true}"#.into(),
+            r#"{"language":" en"}"#.into(),
+            r#"{"language":"en "}"#.into(),
+            r#"{"language":"en\u0000"}"#.into(),
             r#"{"title":" Changed"}"#.into(),
             r#"{"title":"Changed "}"#.into(),
             r#"{"title":"\u0000"}"#.into(),
@@ -10384,6 +10391,7 @@ mod tests {
             invalid.push(json!({"title":"Changed", "created":date}).to_string());
         }
         invalid.push(json!({"title":"x".repeat(MAX_PROPERTY_VALUE_BYTES+1)}).to_string());
+        invalid.push(json!({"language":"Ω".repeat(MAX_PROPERTY_VALUE_BYTES / 2 + 1)}).to_string());
         invalid.push(json!({"custom":{"x".repeat(256):1}}).to_string());
         for update in invalid {
             assert!(
@@ -10407,10 +10415,12 @@ mod tests {
                 .unwrap();
         }
         let revision = document.revision().unwrap();
-        assert!(document
-            .update_metadata(&json!({"keywords":&value}).to_string())
-            .is_err());
-        assert_eq!(document.revision().unwrap(), revision);
+        for name in ["keywords", "language"] {
+            assert!(document
+                .update_metadata(&json!({name:&value}).to_string())
+                .is_err());
+            assert_eq!(document.revision().unwrap(), revision);
+        }
         document.update_metadata(r#"{"description":null}"#).unwrap();
         document
             .update_metadata(&json!({"keywords":&value}).to_string())

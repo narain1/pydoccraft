@@ -37,6 +37,8 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         del word.shapes[0]
 
         assert_type(word.copy(), WordDocument)
+        word.update_metadata(language="en-GB")
+        assert_type(word.metadata["language"], str)
         assert_type(word.mirror_margins, bool)
         assert_type(word.sections[0].vertical_alignment, Literal["top", "center", "bottom", "justify"])
         word.sections[0].vertical_alignment = "center"
