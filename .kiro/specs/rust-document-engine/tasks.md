@@ -705,7 +705,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete six native groups, five new plus28 related copied-package tests, fmt/Clippy/debug build, strict typing and static-site/roadmap checks; record exact artifact evidence.
 - [x] Complete integrated locked full native/release/installed-wheel corpus and independent artifact review: 349 native and 490 installed Python tests.
 - [ ] Complete final exact-head/current-main CI and manual merge for picture placement.
-- [ ] Keep full MED2/BG2–BG5, front/contours/nested scope, opacity/rotation and independent layering/overlap controls open.
+- [ ] Keep full MED2/BG2–BG4/BG8, front/contours/nested scope, opacity/rotation and independent layering/overlap controls open. BG5 later closes only its bounded section-first letterhead criterion under spec105.
 
 
 ## Cross-format render-session evidence
