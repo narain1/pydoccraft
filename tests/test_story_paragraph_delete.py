@@ -174,6 +174,7 @@ class StoryParagraphDeletionTests(unittest.TestCase):
             body = document.add_paragraph('Target')
             document.bookmarks['target'] = body[:]
             table = document.add_table([['Cell']])
+            document.bookmarks['cell_target'] = table[0, 0].paragraphs[0][:]
             story = document.sections[0].header()
             paragraph = story.add_paragraph('Remove linked')
             paragraph[:].link = '#target'
@@ -204,6 +205,6 @@ class StoryParagraphDeletionTests(unittest.TestCase):
         with doc_ex.new('pptx') as deck:
             table = deck.slides.add().add_table([['Cell']], box=(10, 10, 200, 80))
             before = deck.to_bytes()
-            with self.assertRaises(UnsupportedFormatError):
-                del table[0, 0].paragraphs[0]
+            with self.assertRaises(TypeError):
+                del table[0, 0].paragraphs[:]
             self.assertEqual(deck.to_bytes(), before)

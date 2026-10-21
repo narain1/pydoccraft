@@ -326,7 +326,7 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 1. Opening DOCX/PPTX SHALL retain the native parsed model used for eager extraction and, for DOCX, its completed layout. Existing public rendering methods SHALL reuse that state without reparsing or repagination. No public session class or additional render vocabulary SHALL be introduced.
 2. Shared checked render helpers SHALL preserve one-shot PNG output, clipping, DPI/dimension/index errors and source preflight. DOCX retained state SHALL reject more than 10,000 laid-out pages or one million placed items after native layout; these are not peak-layout allocation guarantees. Temporary layout caches SHALL not be retained.
 3. Close SHALL serialize with render, release owned native state and private source/password references, and be idempotent. Already extracted values SHALL remain owned and usable. Python projection failure SHALL close unreturned sessions even if its traceback survives. Global/thread-local renderer caches are outside the session lifetime guarantee.
-4. Validation SHALL prove one native parse/layout, mixed-page full/clip PNG parity, source lifetime, concurrent close, resource/error behavior and installed-wheel acceptance. Separate-process synthetic measurements SHALL distinguish open, cold/warm/multi-page latency and native RSS/peak RSS. P1 remains open pending representative large-corpus evidence.
+4. Validation SHALL prove one native parse/layout, mixed-page full/clip PNG parity, source lifetime, concurrent close, resource/error behavior and installed-wheel acceptance. Separate-process synthetic measurements SHALL distinguish open, cold/warm/multi-page latency and native RSS/peak RSS. Spec92 supplies repeated large/image-heavy synthetic workload evidence across all three formats and closes the bounded P1 reuse criterion. These are representative workload shapes, not a representative real-world corpus; broader platform/corpus validation and allocation limits remain QA7/P4 work.
 
 
 ## 42. Decimal page and count fields
@@ -672,3 +672,115 @@ Existing annotation, picture, outline, page/slide and shape properties SHALL exp
 ## 91. Reproducible Office workload measurements
 
 Development benchmark tools SHALL reuse the installed public document APIs, retain the original small workload by default and bound optional page/image fixture parameters before creating output. Each fresh-process result SHALL identify input bytes/hash, actual page count, DPI, ordered all-page PNG digest, retained-session counters, timings and process memory observations. Paired comparisons SHALL use identical inputs and require all-page byte parity. Evidence SHALL distinguish synthetic workload observations from real-input fidelity, allocation bounds, cold-disk latency, historical-wheel comparisons and general performance guarantees. No package runtime or public API change is required.
+
+
+## 89. Native title and author fields
+
+1. Existing DOCX `Paragraph.add_field(kind)` SHALL accept `title` and `author` in addition to the three decimal page/count kinds, returning the existing revision-bound TextRange. Native TITLE/AUTHOR evaluation SHALL use public core metadata; no custom evaluator, arbitrary instructions, metadata alias or additional field manager SHALL be introduced.
+2. Authored fields SHALL retain empty dirty cached results in DOCX. Native PNG/PDF rendering SHALL evaluate current title/author, while source extraction SHALL preserve empty stored results and its existing diagnostic. Metadata edits SHALL invalidate snapshots; copies SHALL retain independent values. Nonempty imported cached results SHALL NOT be claimed refreshed by this feature.
+3. Every commit SHALL bound evaluated metadata text using the existing paragraph/document text limits and combined field count. Later metadata changes and duplicated story content SHALL not bypass the limits. Metadata used by fields SHALL be single-line without tabs. Source metadata without such fields SHALL retain existing behavior.
+4. Serialization SHALL reject unsupported native atomic-field placement before publishing output, using bounded public native line/cluster geometry within the existing layout preflight. The initial profile SHALL exclude turned/clipped cells and field advance outside the available line or physical page; it SHALL NOT promise glyph-outline containment or invent wrapping. Validation SHALL cover all six supported stories, current/cleared values, cache/readback semantics, PNG/PDF output, ranges, copies, byte budgets, geometry rejection and recovery. Broader REF3 and REF4 SHALL remain open.
+
+
+## 90. Guarded native DOCX picture placement
+
+1. Existing Picture handles SHALL expose format(**properties) and an owned formatting snapshot, using native Float properties. The initial supported profile SHALL be direct owned body pictures, wraps inline/square/top_bottom/behind, and page/margin/paragraph references. No separate image creator, placement or watermark manager SHALL be added.
+2. Position SHALL use finite point pairs bounded by native offsets and 0.05-point increments. Distance SHALL use scalar or top/right/bottom/left points in 0..1584 with equal left/right values. Inline reset SHALL clear placement and retain original media, dimensions, crop, flips and alt text. Closed/stale IDs and callback revision changes SHALL fail before retargeting; native patch JSON SHALL be bounded and changes staged atomically.
+3. Actual native placed picture frames SHALL remain within physical pages. Existing bounded pagination preflight SHALL perform one layout and revalidate at output after later paragraph/page changes. Existing container-width and media/decode/resource limits SHALL remain. Floating nested/auxiliary pictures, front/contour wrapping, alignment, independent layer/overlap controls, opacity and rotation SHALL remain explicit unsupported scope.
+4. Acceptance SHALL prove native save/readback/geometry/media identity, 72/144/300-DPI PNG and PDF placement, square/top-bottom exclusions, paragraph-owned page breaks, crop/flips/copy/reset, failed patch rollback, later invalid geometry and callbacks. The reproduced upstream front-layer defect and hardcoded overlap/layoutInCell writer settings SHALL be documented. MED2/BG2–BG5 SHALL remain incomplete.
+
+
+## 92. Cross-format render-session evidence
+
+The bounded P1 reuse criterion SHALL include reproducible PDF measurements alongside spec91 Office evidence. Identical native-exported inputs SHALL be rendered in fresh cached/one-shot processes with repeated timings, process memory observations, source identities and ordered every-page PNG digests. PDF counters SHALL retain their own parser/request/rasterization meanings and SHALL NOT imply a single parse across separate eager extraction subsystems. All observed regressions and measurement limits SHALL remain explicit. Closing reuse acceptance SHALL NOT close broader QA7 real-input/platform coverage or P4 allocation limits, and SHALL NOT add package API or runtime dependencies.
+
+
+## 94. Combined native DOCX cell layout acceptance
+
+Existing public cell/table formatting SHALL have a combined matrix covering asymmetric padding, three vertical alignments, three paragraph alignments, horizontal/up/down orientation, RTL table and paragraph direction, and true empty cells. Tests SHALL inspect native-written DOCX properties, reopen DOCX/PDF, preserve logical rows and each label once, and verify actual visible cell/glyph frames at 72/144/300 DPI. Alignment along the writing direction SHALL remain distinct from movement across turned cells and from table column reversal. Empty-cell copies/additions/reset SHALL preserve ownership and geometry without invented text. No runtime API, standard algorithm, dependency or historical fixture change SHALL be introduced. Inter-cell spacing and full vertical-script fidelity SHALL remain explicit incomplete TBL8/U03 scope.
+
+
+## 93. Owned DOCX cell paragraph deletion
+
+1. Existing `del cell.paragraphs[index]` SHALL remove ordinary owned DOCX body/header/footer cell paragraphs through public native remove_block, with normal integer/negative indexes, including merged aliases and supported nested cells. No new manager, alias, movement or standards algorithm SHALL be added. Image paragraphs, rich note cells, PPTX cells and slice deletion SHALL remain outside this profile.
+2. Locator shifts SHALL affect only the selected native parent container. Surviving paragraph/table/cell/picture identities, table generations, neighboring cells, other stories, section properties and referenced media SHALL remain intact. Deleted handles SHALL become invalid; copies SHALL remain independent, while existing ranges/caches follow ordinary revision invalidation. Index callbacks SHALL retain the captured target and reject stale cell generations before normalization.
+3. Native required final blanks SHALL remain hidden and reusable through existing cell placeholders. Authored empty paragraphs SHALL retain their identities until individually deleted. Accounting, locator, placeholder and document mutation SHALL be staged together; normal reference, ownership, field/media, traversal and resource guards SHALL not be weakened.
+4. Validation SHALL execute raw native proofs before integration, distinguish authored and generated blanks by identity, verify merged/nested and auxiliary scopes, actual DOCX/PNG/PDF content removal, stable descendants/siblings, precise resource charges, protected-anchor rollback, malformed locators, copies, callbacks and closed owners. Broader DOC5/TXT1 composition and cell movement SHALL remain incomplete. Earlier deletion specifications retain their historical narrower scope.
+
+
+### 96. Owned PPTX slide duplication prerequisite
+
+Keep SLIDE1 duplication/import open until a public lower-level native operation can allocate fresh identities and preserve or explicitly reject all semantic references. Existing slide append/move and whole-document copy remain the available composition operations. Native per-slide shape uniqueness is insufficient for the owned adapter's globally keyed table generations. No local copy/remapping algorithm or editor-engine dependency is permitted.
+
+
+## 95. Native-backed snapshot output types
+
+Existing WordDocument/PdfDocument.metadata and DOCX Picture/EditableTable/EditableCell.formatting getters SHALL expose verified output mapping types. Absent metadata keys SHALL differ from present nullable direct formatting values; Word custom SHALL remain a required non-null scalar mapping. Returned lists, tuples, nested borders and literal enums SHALL retain actual native/Python shapes. Private TypedDict declarations MAY describe these shapes, reusing accurate existing types; no public export, manager, accepted runtime input or method body/default SHALL change. Input annotations MAY be corrected only for already-accepted cell margin lists and table/cell snapshot-border dictionaries so typed snapshot replay remains valid; runtime state/combination guards SHALL remain intact. Strict positive/negative consumer checks, successful type-hint introspection and an annotation/type-declaration-erased AST comparison SHALL validate the change. Polymorphic paragraph/style/default snapshots and broader API3 SHALL remain open.
+
+
+## 97. Owned DOCX same-cell paragraph movement
+
+The existing paragraph collection move operation shall support ordinary paragraphs in one canonical owned body/header/footer cell, including nested and merged cells. Preserve native contents, other block order, surviving paragraph/table/picture identities, grid generations, neighboring containers, ordered body sections and exact resource accounting. Hide only native-created required tail paragraphs and reuse them on later append; authored empty paragraphs remain editable. No-op leaves revision/bytes/cache unchanged. Keep source semantic-anchor rejection, callback revision checks and normal commit guards; cross-container, imported, rich-note and PPTX movement remain unavailable.
+
+
+## 99. Owned DOCX theme identity prerequisite
+
+Do not expose theme editing based only on palette/font metadata serialization. STY3 requires persistent theme references, tint/shade/mapping and font roles, native resolution after replacement, preservation of explicit overrides and independent DOCX/PNG/PDF acceptance. Existing fixed-color/font style/default formatting remains supported. Keep missing native semantics under U02; no new color/style manager or string-token workaround.
+
+
+## 101. Owned PPTX cell paragraph deletion
+
+Existing `del cell.paragraphs[index]` shall remove one intact native PPTX Paragraph using integer/negative indexes, including horizontal, vertical and rectangular merged aliases. Retain surviving paragraph/run properties, links, cell formatting and unrelated content. Deleting the final owned paragraph leaves an empty collection; the native writer supplies the required blank on serialization, and existing append initializes it without a leading separator. No new public API, placeholder registry or text-join workaround shall be introduced.
+
+Canonical cell body generations shall advance atomically, invalidating that cell's old paragraph handles; grid/Cell handles and unrelated cells remain valid. Copies remain independent, and deleted handles cannot revive after append. Native revision/content checks and checked generation exhaustion apply before publication. PPTX index callbacks that change or close the owner shall reject the outer deletion; existing DOCX stable-ID callback behavior remains unchanged. Validate source/readback/render/PDF output, first/middle/last/empty removal, merged aliases, resource reclamation, exact/+1 limits and rollback. Broader DOC5/TXT1/SLIDE3 and paragraph movement remain open.
+
+
+## 98. Bounded owned DOCX comment roots and replies
+
+1. Owned documents SHALL expose one comments collection whose add operation accepts an existing whole-paragraph TextRange for a root or root Comment for a direct reply. Plain text, author, date and resolved properties SHALL use public native Comment/part/marker APIs. Fresh range and parent properties SHALL retain owner/revision/Unicode semantics; no rich-story manager or arbitrary source adoption SHALL be added.
+2. A root SHALL occupy the exact endpoints of one nonempty body paragraph, including ordinary/merged/nested body cells with horizontal, non-exact-height ancestry. Other inline objects, semantic anchors, interior/cross-paragraph/empty roots and nested replies SHALL reject explicitly. Every candidate commit and output SHALL validate the exact marker/map/part topology, including after later text or geometry edits. Roots with replies SHALL require explicit leaf deletion first.
+3. Monotonic owner IDs and explicit native durable IDs SHALL prevent deleted-handle and earlier-deletion retargeting. Private comment paragraphs SHALL reuse existing block/text accounting without appearing in public body/header/note collections. All registry/counter/document changes SHALL commit atomically; malformed/sentinel/extra-locator states SHALL reject rather than be cleaned silently.
+4. Limits SHALL include 1,000 comments, 200 direct replies per root, 1 MiB comment text, 1,024 author UTF-8 bytes, 256 KiB native metadata, existing document/block budgets, checked identity/revision exhaustion and a 2,000,000-item source preflight. Authors SHALL be nonempty trimmed single-line values (default Unknown); dates SHALL be empty or valid UTC timestamps. Comment parts SHALL be plain native text and remain separate from body content.
+5. Evidence SHALL distinguish stored comments from rendered review state: native PNG shades supported anchors even when resolved; default PDF omits comment markup/text; legacy extraction projection remains unchanged. Preserve raw interior-shaping, overlapping-shading and durable-ID controls as upstream evidence. REV1/TXT8/REV5 SHALL remain incomplete beyond this bounded slice.
+
+
+## 100. Bounded DOCX extraction provenance
+
+Existing Block/Table/Page metadata SHALL expose native source paths, explicit paragraph segments and available Body-story line selection observations without adding an inspection manager, public method or duplicate bbox alias. Source identity SHALL remain local to an extracted snapshot and distinguish stories; native UTF-8 source ranges SHALL NOT be described as offsets into normalized text. Existing mutable detached models, text ordering, table hierarchy, first-page paragraph assignment and post-close ownership SHALL remain compatible.
+
+Native x_spans and turn_rect SHALL own selection and coordinate transforms. Body indexed placements SHALL preserve page/item/line order and repeated occurrences. Auxiliary/Clip projections SHALL remain unavailable, and logical selection SHALL NOT imply glyph ink, clip containment, object bounds or complete semantic page slices. Block/Table bbox SHALL remain unset. Validate ranges and finite inputs before native helpers; precharge native temporary vectors/sort scratch, work, records, source metadata and copied representations. Limits SHALL fail explicitly, with exact/+1, malformed-input, render/PDF, deterministic-source and compatibility acceptance. E2/LAY8 remain open beyond this bounded slice.
+
+
+## 103. Office caller-font isolation prerequisite
+
+Keep STY5 open until public native APIs admit bounded caller programs with deterministic document-scoped face selection, lifetime and collision behavior across layout, PNG, PDF and Office save/reopen. Require explicit native embedding/subsetting policy and substitution/missing-glyph diagnostics. Existing PDF supplied-font drawing and literal Office family formatting remain supported. Do not mutate process-global font registries, fabricate OOXML font tables, link application loaders or add a duplicate font manager. Connect the prerequisite to existing U02/U11; keep theme-role identity under STY3.
+
+
+## 104. Existing formatting snapshot output types
+
+Annotate the existing paragraph/style/default formatting getters without changing runtime dispatch, accepted inputs, exports or native behavior. Preserve required common keys, native-kind-specific optional keys, nullability, list-valued tabs/margins and nonrecursive table regions. PPTX paragraph direct snapshots contain alignment alone; successful resolved paragraph snapshots remain Word-only. Do not advertise Style.kind as a static discriminator or treat table inheritance as concrete paragraph/character resolution. API3 remains open beyond this slice.
+
+
+## 102. Owned DOCX table deletion
+
+1. Existing table collections SHALL support integer/negative deletion in the body, independently owned headers/footers and ordinary nested/merged cells through public native remove_block. Rich note/comment stories, imported editing, slice deletion, arbitrary block movement and cross-container adoption SHALL remain outside this slice.
+2. Removal SHALL retire the target subtree only, shift surviving locators and hidden blanks within the exact native parent, and preserve surviving handles, ancestor/unrelated grid generations, ordered section metadata and shared media. Valid owned containers SHALL retain their existing final paragraph by identity; malformed sole/table-ended containers SHALL reject rather than fabricate or adopt a blank. Authored empty paragraphs SHALL remain editable and hidden required tails reusable.
+3. Original bounded source/comment inventory and global locator/image/generation consistency checks SHALL precede native content usage and any global pruning. Subtree section metadata and protected references SHALL reject. Text/cell/media reclamation, registry changes and exact candidate comment/navigation/media validation SHALL commit atomically, with existing identity, revision and resource limits.
+4. Validation SHALL distinguish raw-native structural capability from accepted ownership, prove output removal and preserved sibling/media/reference identities, exercise exact/+1 preflight and allocator/revision boundaries, malformed associations, copies, callbacks and closed/stale handles. Broader DOC5 SHALL remain incomplete.
+
+
+## 105. Section-first inline letterhead composition
+
+Reuse existing header/footer variants, PNG picture handles, ranges and section lifecycle for a caller-owned example; add no library API or runtime behavior. Verify first-slot precedence, independent copied section content, displayed-number even/default selection and native repagination after inserting earlier body text. Preserve original text/order, one body link and semantic table content exactly once across DOCX/PDF. Validate actual source/exported appearance at 72/144/300 DPI using full-page 72 controls and bounded higher-DPI header regions. Record intentional parity filler pages explicitly; keep section fills/linkage/continuous/floating/watermark exclusions honest.
+
+
+## 107. Reject unsupported owned table PAGE fields
+
+Owned DOCX PAGE field insertion SHALL reject table-cell paragraphs at every nesting depth and merged alias. The same scope rule SHALL validate every staged candidate and serialization after bounded source inventory, preventing later edits or privately constructed state from emitting a known incorrect page number. Direct body/header/footer/note paragraph PAGE and supported table NUMPAGES/SECTIONPAGES/TITLE/AUTHOR SHALL retain their existing behavior and limits. Removing an unsupported field SHALL remain a recovery operation. No local evaluation, result rewriting or imported mutation API SHALL be introduced.
+
+Tests SHALL preserve the native stale-context reproducer and successful direct/count controls, prove precise Unsupported errors and atomic byte/revision/registry/range/cache rollback, and verify output/lifetime behavior. Earlier successful cell-PAGE fixture setup SHALL be deliberately replaced with supported count fields while preserving resource/identity/geometry checks, with the correction documented and evidence fingerprints checked rather than refreshed broadly. U07/LAY6/REF3 SHALL remain open.
+
+
+## 109. Preserve page and slide selection across index callbacks
+
+PDF page lookup (including slices), deletion and movement SHALL capture page generation and count before caller index conversion. They SHALL reject an invalidated selection before returning current-generation handles or dispatching an outer mutation. Each movement argument SHALL be checked after its conversion. Slide deletion/movement SHALL equivalently retain a native slide-ID sequence snapshot. Callback-owned mutations remain visible; the outer operation SHALL not target a replacement item. Closed owners fail before caller conversion, ordinary negative indexes/bounds retain Python behavior, and metadata/content edits that leave the selection snapshot valid remain permitted. Existing stable-ID slide lookup remains unchanged. No public method, native mutation algorithm or new persistent identity registry is required.

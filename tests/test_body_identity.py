@@ -123,9 +123,10 @@ class BodyIdentityTests(unittest.TestCase):
                 self.assertEqual(copied.tables[0][0, 0].text, 'Cell')
                 self.assertEqual(copied.sections[0].header().paragraphs[0].text, 'Old header')
                 self.assertEqual(copied.images[0].data, red_picture(2, 2))
-                # The ordinary body scope is now supported; section-bearing
-                # paragraphs and cell deletion remain deliberately unsupported.
+                # Ordinary body/cell deletion is supported; section boundaries
+                # and protected cell anchors retain these atomic rejection checks.
                 document.sections.add()
+                document.bookmarks['protected_cell'] = fresh_child[:]
                 before = document.to_bytes()
                 with self.assertRaises(UnsupportedFormatError):
                     del document.paragraphs[-1]

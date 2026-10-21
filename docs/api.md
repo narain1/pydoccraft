@@ -241,3 +241,29 @@ These notices describe semantic extraction only. They do not claim that renderin
 ## Portable Markdown
 
 `document.export_markdown()` returns an owned `dict[str, bytes]` containing body/story Markdown, deduplicated local media and a JSON placement manifest. It reuses existing formatting and leaves `to_markdown()` compatible. See [portable Markdown and media](markdown-assets.md) for the schema, bounds and nested-table behavior.
+
+
+## DOCX source paths and line layout (unreleased)
+
+Paragraph and table metadata use `source_path`; paragraphs and their assets also use `segment`, the zero-based explicit page/column-break segment. Paths identify native model blocks: `[block]`, followed by `[row, physical_cell, block]` for each table nesting. Body values use the absence of auxiliary story keys to identify the Body story; no duplicate body tag is added. Auxiliary metadata uses existing `story_part_id` or separator story-kind/role keys. Identity belongs to this extracted snapshot; paths are not XML paths, file offsets or durable IDs across edits/reparse. Legacy aggregate page comments have no invented paragraph path.
+
+`Page.metadata` additionally exposes native `body_bbox`, zero-based `section` and `display_number`; existing `width` and `height` remain in points. The body box describes a layout frame.
+
+Supported Body paragraphs, including native indexed table-cell placements, have `block.metadata["layout"]`:
+
+```python
+{
+    "coordinate_space": "page-points",
+    "offset_space": "paragraph-utf8",
+    "geometry": "native-selection",
+    "lines": [
+        {"page": 0, "source_range": [0, 19], "rects": [[36, 36, 130, 50]]}
+    ],
+}
+```
+
+The example illustrates the shape, not fixed geometry. Each half-open source range refers to the native paragraph's UTF-8 bytes, including inline-object placeholder bytes; it is **not an offset into `block.text`**. Page/column-break tokens are excluded from their adjacent explicit segment ranges. Ordered line records retain actual pages and repeated table-header occurrences. Whole automatically split paragraph text still appears once on its first assigned page; later line records do not invent normalized page text slices.
+
+Rectangles are native logical selection extents. They can extend outside paint clipping and do not include every object, list label, drop cap or visible glyph overhang. Empty rectangles can accompany valid zero-width source evidence. Condensed text can have finite signed cluster advances. The projection follows native positive-span behavior and preserves source line records; it does not turn advances into glyph-ink bounds. Missing layout means this projection is unavailable: auxiliary stories and nested native Clip placements are not inferred. `Block.bbox`/`Table.bbox` remain `None` for DOCX; no union box is invented for multi-page/disjoint content. Existing extracted values and metadata are mutable owned snapshots and remain readable after closure; changing them does not change native document content.
+
+Additional extraction limits are 100,000 line observations, 200,000 rectangles, 8,000,000 conservative native work units and 128 MiB conservative retained-provenance allocation allowance, including copied output representations. The allocation allowance can bind well before the count caps: the measured 200-page synthetic report charges 132,081,792 bytes, close to 128 MiB. This is not a general 200-page guarantee. A separate 16 MiB conservative native temporary-memory allowance bounds selection buffers/sort scratch. Limits fail with `UnsafeArchiveError`; malformed native geometry fails with `MalformedDocumentError`. The existing 64 MiB normalized JSON boundary still applies.

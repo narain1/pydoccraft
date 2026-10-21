@@ -52,6 +52,13 @@ class TabStop(TypedDict, total=False):
     leader: str
 
 
+class PictureFormatting(TypedDict, total=False):
+    wrap: Literal["inline", "square", "top_bottom", "behind"]
+    anchor: Literal["page", "margin", "paragraph"]
+    position: tuple[float, float]
+    distance: float | tuple[float, float, float, float]
+
+
 class ParagraphFormatting(TypedDict, total=False):
     direction: Literal["ltr", "rtl"] | None
     borders: dict[str, BorderFormatting | None] | None
@@ -113,17 +120,180 @@ class TableFormatting(TypedDict, total=False):
     rtl: bool
     title: str | None
     description: str | None
-    borders: dict[str, BorderFormatting | None] | None
+    borders: dict[str, BorderFormatting | None] | dict[str, _BorderSnapshot | None] | None
 
 
 class CellFormatting(TypedDict, total=False):
     background: str | tuple[int, int, int] | None
-    margins: float | tuple[float, float, float, float] | None
+    margins: float | tuple[float, float, float, float] | list[float] | None
     alignment: str | None
     vertical_alignment: str | None
     text_direction: str | None
     no_wrap: bool
-    borders: dict[str, BorderFormatting | None] | None
+    borders: dict[str, BorderFormatting | None] | dict[str, _BorderSnapshot | None] | None
+
+
+# Snapshots describe returned values; input patches retain their existing contracts.
+class _PdfMetadata(TypedDict, total=False):
+    title: str
+    author: str
+    subject: str
+    keywords: str
+
+
+class _WordCoreMetadata(_PdfMetadata, total=False):
+    description: str
+    category: str
+    last_modified_by: str
+    created: str
+    modified: str
+    revision: int
+
+
+class _WordMetadata(_WordCoreMetadata):
+    custom: dict[str, str | bool | int | float]
+
+
+class _PictureSnapshot(TypedDict):
+    wrap: Literal["inline", "square", "top_bottom", "behind"]
+    anchor: Literal["page", "margin", "paragraph"]
+    position: tuple[float, float]
+    distance: tuple[float, float, float, float]
+
+
+class _BorderSnapshot(TypedDict):
+    style: str
+    color: str | None
+    width: float
+
+
+# Owned output snapshots. Optional keys describe native-kind differences, not
+# optional input patches; table style resolution can still retain None values.
+class _TabSnapshot(TypedDict):
+    position: float
+    alignment: str
+    leader: str
+
+
+class _CharacterSnapshot(TypedDict):
+    bold: bool | None
+    italic: bool | None
+    font: str | None
+    language: str | None
+    letter_spacing: float | None
+    font_size: float | None
+    color: str | None
+    underline: str | None
+    strike: bool | str | None
+    script: str | None
+    highlight: str | None
+    background: str | None
+
+
+class _ParagraphAlignmentSnapshot(TypedDict):
+    alignment: str | None
+
+
+class _ParagraphSnapshot(_ParagraphAlignmentSnapshot, total=False):
+    borders: dict[str, _BorderSnapshot | None] | None
+    tabs: list[_TabSnapshot] | None
+    direction: str | None
+    indent_left: float | None
+    indent_right: float | None
+    indent_first: float | None
+    space_before: float | None
+    space_after: float | None
+    line_spacing: float | None
+    keep_with_next: bool | None
+    keep_together: bool | None
+    widow_control: bool | None
+    page_break_before: bool | None
+    background: str | None
+
+class _ResolvedParagraphSnapshot(TypedDict):
+    borders: dict[str, _BorderSnapshot | None] | None
+    tabs: list[_TabSnapshot]
+    alignment: str
+    direction: str
+    indent_left: float
+    indent_right: float
+    indent_first: float
+    space_before: float
+    space_after: float
+    line_spacing: float
+    keep_with_next: bool
+    keep_together: bool
+    widow_control: bool
+    page_break_before: bool
+    background: str | None
+
+
+class _DefaultsSnapshot(_CharacterSnapshot):
+    borders: dict[str, _BorderSnapshot | None] | None
+    tabs: list[_TabSnapshot] | None
+    alignment: str | None
+    direction: str | None
+    indent_left: float | None
+    indent_right: float | None
+    indent_first: float | None
+    space_before: float | None
+    space_after: float | None
+    line_spacing: float | None
+    keep_with_next: bool | None
+    keep_together: bool | None
+    widow_control: bool | None
+    page_break_before: bool | None
+
+
+class _TableRegionSnapshot(_CharacterSnapshot):
+    alignment: str | None
+    vertical_alignment: str | None
+    borders: dict[str, _BorderSnapshot | None] | None
+
+
+class _StyleSnapshot(_CharacterSnapshot, total=False):
+    borders: dict[str, _BorderSnapshot | None] | None
+    tabs: list[_TabSnapshot] | None
+    alignment: str | None
+    direction: str | None
+    indent_left: float | None
+    indent_right: float | None
+    indent_first: float | None
+    space_before: float | None
+    space_after: float | None
+    line_spacing: float | None
+    keep_with_next: bool | None
+    keep_together: bool | None
+    widow_control: bool | None
+    page_break_before: bool | None
+    vertical_alignment: str | None
+    margins: list[float] | None
+    row_band_size: int | None
+    regions: dict[str, _TableRegionSnapshot]
+
+
+class _TableSnapshot(TypedDict):
+    alignment: str | None
+    indent: float | None
+    width: float | None
+    width_percent: float | None
+    layout: Literal["fixed", "autofit"]
+    rtl: bool
+    title: str | None
+    description: str | None
+    borders: dict[str, _BorderSnapshot | None] | None
+    style: str | None
+    look: TableLook
+
+
+class _CellSnapshot(TypedDict):
+    background: str | None
+    margins: list[float] | None
+    alignment: str | None
+    vertical_alignment: str | None
+    text_direction: str | None
+    no_wrap: bool
+    borders: dict[str, _BorderSnapshot | None] | None
 
 
 def _table_format_patch(values, *, cell: bool = False) -> str:
@@ -555,22 +725,41 @@ class _Collection(Sequence[_Item], Generic[_Item]):
         return self._factory(self._owner, ids[_index(index, len(ids))])
 
 
-class _Paragraphs(_Collection["Paragraph"]):
-    """Ordered paragraph handles; deletion supports direct owned DOCX body and auxiliary paragraphs."""
+class _Tables(_Collection["EditableTable"]):
+    """Ordered owned DOCX tables; deletion removes one complete subtree."""
     def __delitem__(self, index: int) -> None:
         self._owner._ensure_open()
-        if not isinstance(self._owner, WordDocument):
-            raise UnsupportedFormatError("PPTX paragraph deletion is not supported")
+        if isinstance(index, slice):
+            raise TypeError("table deletion requires an integer index")
+        identifiers = self._ids()  # Resolve stale parent-cell generations before callbacks.
+        selected = operator.index(index)
+        self._owner._ensure_open()
+        self._owner._call("remove_table", identifiers[_index(selected, len(identifiers))], _change=True)
+
+
+class _Paragraphs(_Collection["Paragraph"]):
+    """Ordered paragraphs; deletion supports DOCX containers and PPTX cells."""
+    def __delitem__(self, index: int) -> None:
+        self._owner._ensure_open()
         if isinstance(index, slice):
             raise TypeError("paragraph deletion requires an integer index")
+        revision = (None if isinstance(self._owner, WordDocument)
+                    else self._owner._call("revision"))
         identifiers = self._ids()
         selected = operator.index(index)
         self._owner._ensure_open()
+        if revision is not None and self._owner._call("revision") != revision:
+            raise ValueError("paragraph selection is stale after a document mutation")
         identifier = identifiers[_index(selected, len(identifiers))]
-        self._owner._call("remove_paragraph", identifier, _change=True)
+        if isinstance(self._owner, WordDocument):
+            self._owner._call("remove_paragraph", identifier, _change=True)
+        else:
+            paragraph = self._factory(self._owner, identifier)
+            self._owner._call("remove_cell_paragraph", *paragraph._range_args,
+                              paragraph._target, _change=True)
 
     def move(self, index: int, destination: int) -> None:
-        """Move a direct owned DOCX paragraph to its final index in the same section."""
+        """Move an owned DOCX paragraph to its final index in the same container and section."""
         self._owner._ensure_open()
         if not isinstance(self._owner, WordDocument):
             raise UnsupportedFormatError("PPTX paragraph movement is not supported")
@@ -594,7 +783,7 @@ class WordDocument(EditableDocument):
     _format = "docx"
 
     @property
-    def metadata(self) -> dict:
+    def metadata(self) -> _WordMetadata:
         """Owned core properties and a nested mapping of typed custom properties."""
         return json.loads(self._call("metadata"))
 
@@ -656,6 +845,10 @@ class WordDocument(EditableDocument):
         return _WordBookmarks(self)
 
     @property
+    def comments(self) -> Comments:
+        return Comments(self)
+
+    @property
     def notes(self) -> Notes:
         return Notes(self)
 
@@ -668,8 +861,8 @@ class WordDocument(EditableDocument):
         return _Paragraphs(self, lambda: self._call("paragraph_ids"), Paragraph)
 
     @property
-    def tables(self) -> _Collection[EditableTable]:
-        return _Collection(self, lambda: self._call("table_ids"), EditableTable)
+    def tables(self) -> _Tables:
+        return _Tables(self, lambda: self._call("table_ids"), EditableTable)
 
     @property
     def sections(self) -> Sections:
@@ -753,7 +946,7 @@ class Styles(_Collection["Style"]):
         return Style(self._owner, identifier)
 
     @property
-    def defaults(self) -> dict:
+    def defaults(self) -> _DefaultsSnapshot:
         """Direct native document character and paragraph defaults."""
         return json.loads(self._owner._call("default_formatting"))
 
@@ -827,12 +1020,12 @@ class Style:
         self._set_relation("linked", value)
 
     @property
-    def formatting(self) -> dict:
+    def formatting(self) -> _StyleSnapshot:
         """Direct properties; None denotes inheritance."""
         return json.loads(self._owner._call("style_formatting", self._id))
 
     @property
-    def resolved_formatting(self) -> dict:
+    def resolved_formatting(self) -> _StyleSnapshot:
         """Formatting resolved through the native style inheritance chain."""
         return json.loads(self._owner._call("style_formatting", self._id, True))
 
@@ -920,12 +1113,12 @@ class Paragraph:
         return (self._id,)
 
     @property
-    def formatting(self) -> dict:
+    def formatting(self) -> _ParagraphSnapshot:
         """Direct paragraph properties; None denotes inheritance."""
         return json.loads(self._owner._call("paragraph_formatting", self._id))
 
     @property
-    def resolved_formatting(self) -> dict:
+    def resolved_formatting(self) -> _ResolvedParagraphSnapshot:
         """Paragraph properties resolved through native defaults and styles."""
         return json.loads(self._owner._call("paragraph_formatting", self._id, True))
 
@@ -943,10 +1136,11 @@ class Paragraph:
         return TextRange(self, start, end, revision)
 
     def add_field(self, kind: str) -> TextRange:
-        """Append a decimal page, page_count or section_page_count field.
+        """Append a page/count field, or a title/author metadata field.
 
         The returned range contains one object marker. Native rendering evaluates
-        the number; source extraction retains the empty stored field result.
+        its value; source extraction retains the empty stored field result.
+        Metadata fields are indivisible and must fit their native line box.
         """
         start, end, revision = self._owner._call("add_paragraph_field", self._id, kind, _change=True)
         return TextRange(self, start, end, revision)
@@ -1332,14 +1526,14 @@ class EditableStory:
             raise UnsupportedFormatError("rich note content requires native note-container geometry support")
 
     @property
-    def tables(self) -> _Collection[EditableTable]:
+    def tables(self) -> _Tables:
         """Direct header/footer tables, sharing the normal table and cell API."""
         self._check_rich_content()
         def identifiers():
             self._check_rich_content()
             identifier = self._identifier()
             return [] if identifier is None else self._owner._call("story_table_ids", identifier)
-        return _Collection(self._owner, identifiers, EditableTable)
+        return _Tables(self._owner, identifiers, EditableTable)
 
     @property
     def images(self) -> Pictures:
@@ -1393,6 +1587,111 @@ class EditableStory:
                 native.set_paragraph_style(identifier, style)
             return identifier
         return Paragraph(self._owner, self._owner._atomic(append))
+
+
+def _comment_string(value: str, limit: int, name: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"comment {name} must be a string")
+    if str.__len__(value) > limit or len(str.encode(value, "utf-8")) > limit:
+        raise ValueError(f"comment {name} exceeds {limit} UTF-8 bytes")
+    return str.__str__(value)
+
+
+class Comments(_Collection["Comment"]):
+    """Owned whole-paragraph DOCX comments and direct replies in creation order."""
+    def __init__(self, owner: WordDocument):
+        super().__init__(owner, lambda: owner._call("comment_ids"), Comment)
+
+    def add(self, reference: TextRange | Comment, text: str = "", *,
+            author: str = "Unknown", date: str = "") -> Comment:
+        """Anchor a whole body paragraph, or reply to an existing root comment.
+
+        Interior/empty ranges, rotated or exact-height cells and nested replies
+        are unsupported. The date is empty or a valid UTC YYYY-MM-DDTHH:MM:SSZ.
+        """
+        self._owner._ensure_open()
+        text = _comment_string(text, 1024 * 1024, "text")
+        author = _comment_string(author, 1024, "author")
+        date = _comment_string(date, 20, "date")
+        if isinstance(reference, TextRange) and isinstance(reference._paragraph, Paragraph):
+            paragraph = reference._paragraph
+            if paragraph._owner is not self._owner:
+                raise ValueError("comment range must belong to this document")
+            args = (paragraph._id, reference._start, reference._end, reference._revision, None)
+        elif isinstance(reference, Comment):
+            if reference._owner is not self._owner:
+                raise ValueError("parent comment must belong to this document")
+            args = (None, 0, 0, 0, reference._id)
+        else:
+            raise TypeError("comment reference must be a DOCX paragraph TextRange or root Comment")
+        identifier = self._owner._call("add_comment", *args, text, author, date, _change=True)
+        return Comment(self._owner, identifier)
+
+    def __delitem__(self, index: int) -> None:
+        self._owner._ensure_open()
+        if isinstance(index, slice):
+            raise TypeError("comment deletion requires an integer index")
+        ids = self._ids()
+        selected = operator.index(index)
+        self._owner._ensure_open()
+        self._owner._call("remove_comment", ids[_index(selected, len(ids))], _change=True)
+
+
+class Comment:
+    """An owned comment; text is separate from its body range and direct replies."""
+    def __init__(self, owner: WordDocument, identifier: int):
+        self._owner, self._id = owner, identifier
+
+    @property
+    def range(self) -> TextRange:
+        identifier, start, end, revision = self._owner._call("comment_range", self._id)
+        return TextRange(Paragraph(self._owner, identifier), start, end, revision)
+
+    @property
+    def parent(self) -> Comment | None:
+        parent = json.loads(self._owner._call("comment_info", self._id))["parent"]
+        return None if parent is None else Comment(self._owner, parent)
+
+    @property
+    def text(self) -> str:
+        return json.loads(self._owner._call("comment_info", self._id))["text"]
+
+    @text.setter
+    def text(self, value: str) -> None:
+        self._owner._ensure_open()
+        value = _comment_string(value, 1024 * 1024, "text")
+        self._owner._call("update_comment", self._id, json.dumps({"text": value}, ensure_ascii=False), _change=True)
+
+    @property
+    def author(self) -> str:
+        return json.loads(self._owner._call("comment_info", self._id))["author"]
+
+    @author.setter
+    def author(self, value: str) -> None:
+        self._owner._ensure_open()
+        value = _comment_string(value, 1024, "author")
+        self._owner._call("update_comment", self._id, json.dumps({"author": value}, ensure_ascii=False), _change=True)
+
+    @property
+    def date(self) -> str:
+        return json.loads(self._owner._call("comment_info", self._id))["date"]
+
+    @date.setter
+    def date(self, value: str) -> None:
+        self._owner._ensure_open()
+        value = _comment_string(value, 20, "date")
+        self._owner._call("update_comment", self._id, json.dumps({"date": value}), _change=True)
+
+    @property
+    def resolved(self) -> bool:
+        return json.loads(self._owner._call("comment_info", self._id))["resolved"]
+
+    @resolved.setter
+    def resolved(self, value: bool) -> None:
+        self._owner._ensure_open()
+        if not isinstance(value, bool):
+            raise TypeError("comment resolved must be a bool")
+        self._owner._call("update_comment", self._id, json.dumps({"resolved": value}), _change=True)
 
 
 class Notes(_Collection["Note"]):
@@ -1450,7 +1749,7 @@ class Note(EditableStory):
 
 
 class Pictures(_Collection["Picture"]):
-    """Ordered inline pictures; deletion removes the selected placement."""
+    """Ordered pictures; deletion removes the selected placement."""
     def __init__(self, owner, ids):
         super().__init__(owner, ids, Picture)
 
@@ -1462,6 +1761,58 @@ class Pictures(_Collection["Picture"]):
 class Picture:
     def __init__(self, owner: WordDocument, identifier: int):
         self._owner, self._id = owner, identifier
+
+    @property
+    def formatting(self) -> _PictureSnapshot:
+        """Owned placement snapshot; lengths are points and distance is top/right/bottom/left."""
+        result = json.loads(self._owner._call("image_formatting", self._id))
+        result["position"] = tuple(result["position"])
+        result["distance"] = tuple(result["distance"])
+        return result
+
+    def format(self, **formatting: Unpack[PictureFormatting]) -> None:
+        """Set native wrapping and placement for direct body pictures.
+
+        Floating wraps are square, top_bottom and behind. Page/margin offsets
+        refer to the anchor paragraph's laid-out page; paragraph offsets follow
+        that paragraph. Lengths use 0.05-point increments. Horizontal distances
+        must match. Front layering and floating nested/story pictures are unavailable.
+        """
+        self._owner._call("image_formatting", self._id)
+        revision = self._owner._call("revision")
+        if not formatting:
+            return
+        if formatting.keys() - PictureFormatting.__annotations__.keys():
+            raise ValueError("unsupported picture formatting property")
+        def length(value):
+            result = pt(value)
+            self._owner._call("image_formatting", self._id)
+            if self._owner._call("revision") != revision:
+                raise ValueError("document changed while converting picture formatting")
+            return result
+
+        patch = {}
+        for key, value in formatting.items():
+            if key in {"wrap", "anchor"}:
+                if not isinstance(value, str) or len(value) > 32:
+                    raise TypeError("picture wrap and anchor require supported names")
+                patch[key] = value
+            elif key == "position":
+                if not isinstance(value, (tuple, list)) or len(value) != 2:
+                    raise TypeError("position must be an (x, y) pair in points")
+                patch[key] = tuple(map(length, value))
+            else:
+                if isinstance(value, Real):
+                    value = (value,) * 4
+                if not isinstance(value, (tuple, list)) or len(value) != 4:
+                    raise TypeError("distance must be a number or (top, right, bottom, left) in points")
+                patch[key] = tuple(map(length, value))
+        # Numeric conversions may execute caller code: never retarget a changed owner.
+        self._owner._call("image_formatting", self._id)
+        if self._owner._call("revision") != revision:
+            raise ValueError("document changed while converting picture formatting")
+        encoded = json.dumps(patch, allow_nan=False)
+        self._owner._call("format_image", self._id, encoded, revision, _change=True)
 
     @property
     def data(self) -> bytes:
@@ -1570,7 +1921,7 @@ class EditableTable:
         return self._id
 
     @property
-    def formatting(self) -> dict:
+    def formatting(self) -> _TableSnapshot:
         """A snapshot of direct native table formatting."""
         return json.loads(self._owner._call("table_formatting", self._word_id()))
 
@@ -1741,7 +2092,7 @@ class EditableCell:
 
     def _children(self, kind, factory):
         owner = self._table._owner
-        return _Collection(owner, lambda: owner._call(f"cell_{kind}_ids", *self._content_args()), factory)
+        return _Tables(owner, lambda: owner._call(f"cell_{kind}_ids", *self._content_args()), factory)
 
     @property
     def paragraphs(self) -> _Paragraphs:
@@ -1754,7 +2105,7 @@ class EditableCell:
         return _Paragraphs(self._table._owner, lambda: self._table._owner._call("cell_paragraph_ids", *self._content_args()), Paragraph)
 
     @property
-    def tables(self) -> _Collection[EditableTable]:
+    def tables(self) -> _Tables:
         return self._children("table", EditableTable)
 
     @property
@@ -1803,7 +2154,7 @@ class EditableCell:
         table._owner._call("split_cell", *self._args, columns, _change=True)
 
     @property
-    def formatting(self) -> dict:
+    def formatting(self) -> _CellSnapshot:
         """A snapshot of direct native cell formatting."""
         self._check()
         return json.loads(self._table._owner._call("cell_formatting", self._table._word_id(), self._row, self._column))
@@ -1873,7 +2224,7 @@ class PdfDocument(EditableDocument):
         return PdfFields(self)
 
     @property
-    def metadata(self):
+    def metadata(self) -> _PdfMetadata:
         """A snapshot of supported document-info fields."""
         return json.loads(self._call("metadata"))
 
@@ -2274,12 +2625,42 @@ class PdfPages(_Collection["PdfPage"]):
         identifier = self._owner._call("add_page", *_size(size), _change=True)
         return PdfPage(self._owner, identifier)
 
+    def _selection(self):
+        self._owner._ensure_open()
+        return self._owner._page_generation, self._owner.page_count
+
+    def _selected_index(self, index, selection):
+        value = operator.index(index)
+        if self._selection() != selection:
+            raise ValueError("page selection is stale after page organization")
+        return _index(value, selection[1])
+
+    @overload
+    def __getitem__(self, index: int) -> PdfPage: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> list[PdfPage]: ...
+
+    def __getitem__(self, index):
+        selection = self._selection()
+        if isinstance(index, slice):
+            indices = list(range(selection[1]))[index]
+            if self._selection() != selection:
+                raise ValueError("page selection is stale after page organization")
+            return [PdfPage(self._owner, value) for value in indices]
+        return PdfPage(self._owner, self._selected_index(index, selection))
+
     def __delitem__(self, index):
-        self._owner._call("delete_page", _index(index, len(self)), _change=True)
+        selection = self._selection()
+        index = self._selected_index(index, selection)
+        self._owner._call("delete_page", index, _change=True)
         self._owner._page_generation += 1
 
     def move(self, index: int, destination: int) -> None:
-        self._owner._call("move_page", _index(index, len(self)), _index(destination, len(self)), _change=True)
+        selection = self._selection()
+        index = self._selected_index(index, selection)
+        destination = self._selected_index(destination, selection)
+        self._owner._call("move_page", index, destination, _change=True)
         self._owner._page_generation += 1
 
     def insert(self, index: int, source: _Source | EditableDocument | Document, *, pages: Iterable[SupportsIndex] | None = None, password: str | None = None, outline_title: str | None = None) -> list[PdfPage]:
@@ -2689,11 +3070,25 @@ class Slides(_Collection["Slide"]):
         index = self._owner._call("add_slide", layout, _change=True)
         return Slide(self._owner, self._owner._call("slide_id", index))
 
+    def _selected_index(self, index, identifiers):
+        value = operator.index(index)
+        self._owner._ensure_open()
+        if tuple(self._ids()) != identifiers:
+            raise ValueError("slide selection is stale after slide organization")
+        return _index(value, len(identifiers))
+
     def __delitem__(self, index):
-        self._owner._call("remove_slide", _index(index, len(self)), _change=True)
+        self._owner._ensure_open()
+        identifiers = tuple(self._ids())
+        index = self._selected_index(index, identifiers)
+        self._owner._call("remove_slide", index, _change=True)
 
     def move(self, index: int, destination: int) -> None:
-        self._owner._call("move_slide", _index(index, len(self)), _index(destination, len(self)), _change=True)
+        self._owner._ensure_open()
+        identifiers = tuple(self._ids())
+        index = self._selected_index(index, identifiers)
+        destination = self._selected_index(destination, identifiers)
+        self._owner._call("move_slide", index, destination, _change=True)
 
 
 class Slide:
@@ -3101,7 +3496,7 @@ class _SlideCellParagraph(Paragraph):
         self._owner._call("set_cell_paragraph_alignment", *self._range_args, self._target, value, _change=True)
 
     @property
-    def formatting(self):
+    def formatting(self) -> _ParagraphSnapshot:
         return {"alignment": self.alignment}
 
     def format(self, **formatting):

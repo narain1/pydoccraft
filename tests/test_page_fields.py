@@ -35,7 +35,13 @@ class PageFieldTests(unittest.TestCase):
             counters(first.header().add_paragraph(), 'Header')
             counters(first.footer().add_paragraph(), 'Footer')
             body = counters(document.add_paragraph(), 'Body')
-            counters(document.add_table([['']])[0, 0].paragraphs[0], 'Cell')
+            cell = document.add_table([['']])[0, 0].paragraphs[0]
+            with self.assertRaises(UnsupportedFormatError):
+                cell.add_field('page')
+            cell.add_run('Cell pages=')
+            cell.add_field('page_count').format(color='#FF0000')
+            cell.add_run(' / section=')
+            cell.add_field('section_page_count').format(color='#FF0000')
             anchor = document.add_paragraph('References')
             note = document.notes.add(anchor.find('References')[0])
             counters(note.paragraphs[0], 'Note')
@@ -49,8 +55,9 @@ class PageFieldTests(unittest.TestCase):
             self.assertIn('Third page=9 / pages=3 / section=1', pdf_pages(document)[2])
             second.page_number_start = 20
             pages = pdf_pages(document)
-            for label in ('Body', 'Cell', 'Note', 'Header', 'Footer'):
+            for label in ('Body', 'Note', 'Header', 'Footer'):
                 self.assertIn(label + ' page=7 / pages=3 / section=2', pages[0])
+            self.assertIn('Cell pages=3 / section=2', pages[0])
             self.assertIn('Second page=8 / pages=3 / section=2', pages[1])
             self.assertIn('Third page=20 / pages=3 / section=1', pages[2])
             self.assertIn('Endnote page=20 / pages=3 / section=1', pages[2])

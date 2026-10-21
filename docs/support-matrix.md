@@ -437,7 +437,7 @@ Owners, roles and checkboxes below come from existing roadmap files. A checked c
 | E4: Exact PDF hyperlink labels. | W09 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | E5: Extraction/conversion diagnostics. | W03 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | E6: Portable Markdown plus media. | W09 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
-| P1: Reuse parse/layout work across renders. | W02 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
+| P1: Reuse parse/layout work across renders. | W02 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | P2: Render selected regions and previews. | W02 / implementation | open | [pdf.region](#pdfregion) | Unassessed: acceptance scope beyond linked profiles. |
 | P3: PDF assembly. | W10 / implementation | checked | [pdf.page-assembly](#pdfpage-assembly) | Unassessed: acceptance scope beyond linked profiles. |
 | P4: Bounded large-document processing. | W02 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
@@ -489,7 +489,7 @@ Owners, roles and checkboxes below come from existing roadmap files. A checked c
 | BG2: Background image recipe. | W13 / recipe | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | BG3: Text watermark recipe. | W13 / recipe | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | BG4: Image watermark recipe. | W13 / recipe | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
-| BG5: Section and first-page behavior. | W13 / recipe | open | [word.rich-stories](#wordrich-stories), [word.story-clear](#wordstory-clear) | Unassessed: linked-to-previous stories, general block movement, rich notes and complete variant/repagination fidelity beyond the owned rich-story/clear profiles. |
+| BG5: Section and first-page behavior. | W13 / recipe | checked | [word.rich-stories](#wordrich-stories), [word.story-clear](#wordstory-clear) | Unassessed: linked-to-previous headers, continuous-section first-page guarantees, floating header artwork and section fills. The owned next-page inline-letterhead repagination recipe is accepted in spec105; these older operation profiles are not extended by that recipe evidence. |
 | BG6: Shading consistency acceptance. | W13 / recipe | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | BG7: Advanced fills and page borders (P2). | W06 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | BG8: Background parity tests. | W14 / acceptance | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |

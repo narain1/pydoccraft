@@ -6,11 +6,11 @@ Run mypy==1.18.2 against an installed package with:
 Only imported package diagnostics are suppressed; this consumer is checked strictly.
 The private class imports supply expected identities, not extra public exports.
 """
-from typing import Any, assert_type
+from typing import Any, Literal, assert_type
 
 import doc_ex
 from doc_ex._authoring import (
-    Annotation, Bookmark, EditableCell, EditableTable, Paragraph, PdfDocument, PdfField,
+    Annotation, Bookmark, Comment, Comments, EditableCell, EditableTable, Paragraph, PdfDocument, PdfField,
     PdfPage, Picture, Presentation, Shape, SlidePicture, SlideTable, TextRange,
     WordDocument,
 )
@@ -33,6 +33,19 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(paragraph.add_run(" spaced", letter_spacing=0.3), TextRange)
         assert_type(paragraph[:].format(letter_spacing=None), None)
         assert_type(word.styles.format_defaults(letter_spacing=0), None)
+        comment_paragraph = word.add_paragraph("Comment target")
+        assert_type(word.comments, Comments)
+        comment = word.comments.add(comment_paragraph[:], "Review", author="Ada")
+        assert_type(comment, Comment)
+        assert_type(word.comments.add(comment, "Reply"), Comment)
+        assert_type(comment.range, TextRange)
+        assert_type(comment.parent, Comment | None)
+        assert_type(comment.text, str)
+        assert_type(comment.author, str)
+        assert_type(comment.date, str)
+        assert_type(comment.resolved, bool)
+        assert_type(word.comments[:], list[Comment])
+        assert_type(next(iter(word.comments)), Comment)
         note = word.notes.add(paragraph[:], 'Detail')
         note.add_paragraph('Remove')
         del note.paragraphs[1]
@@ -41,6 +54,12 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(word.sections[0].footer('even').clear(), None)
         assert_type(word.add_page_break(), Paragraph)
         assert_type(word.add_image(png, width=40), Picture)
+        picture = word.add_image(png, width=40)
+        assert_type(picture.format(wrap="behind", anchor="page", position=(20, 30), distance=2), None)
+        assert_type(picture.formatting["wrap"], Literal["inline", "square", "top_bottom", "behind"])
+        assert_type(picture.formatting["anchor"], Literal["page", "margin", "paragraph"])
+        assert_type(picture.formatting["position"], tuple[float, float])
+        assert_type(picture.formatting["distance"], tuple[float, float, float, float])
         table = word.add_table([['Heading'], ['Value']])
         assert_type(table, EditableTable)
         assert_type(table[0, 0], EditableCell)
@@ -50,11 +69,26 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(table.merge((0, 0), (1, 0)), EditableCell)
         assert_type(table[0, 0].add_table(1, columns=1), EditableTable)
         assert_type(table[0, 0].add_image(png, width=20), Picture)
+        disposable = word.add_table([['Delete']])
+        assert_type(disposable, EditableTable)
+        del word.tables[-1]
+        header = word.sections[0].header()
+        header.add_table([['Delete']])
+        del header.tables[-1]
+        cell = word.add_table([['Parent']])[0, 0]
+        cell.add_table([['Delete']])
+        del cell.tables[-1]
         assert_type(word.paragraphs[:], list[Paragraph])
         assert_type(word.paragraphs.move(0, -1), None)
+        assert_type(table[0, 0].paragraphs.move(0, -1), None)
         assert_type(word.sections[0].header().paragraphs.move(0, 0), None)
         assert_type(note.paragraphs.move(0, 0), None)
         assert_type(next(iter(word.images)), Picture)
+
+    with doc_ex.new('pptx') as deck:
+        cell = deck.slides.add().add_table([['Remove']], box=(20, 20, 200, 80))[0, 0]
+        assert_type(cell.paragraphs[0], Paragraph)
+        del cell.paragraphs[0]
 
     with doc_ex.new('pdf') as pdf:
         assert_type(pdf, PdfDocument)
@@ -198,3 +232,93 @@ def verify_properties(word: WordDocument, pdf: PdfDocument, presentation: Presen
     assert_type(slide_picture.alt, str)
     slide_picture.data = png
     slide_picture.crop = [0, .1, 0, .1]
+
+
+def verify_snapshots(word: WordDocument, pdf: PdfDocument, picture: Picture,
+                     table: EditableTable, cell: EditableCell) -> None:
+    assert_type(picture.format(**picture.formatting), None)
+    assert_type(table.format(**table.formatting), None)
+    assert_type(cell.format(**cell.formatting), None)
+    # Metadata keys are absent when unset; custom is always a non-null mapping.
+    assert_type(word.metadata["title"], str)
+    assert_type(word.metadata.get("title"), str | None)
+    assert_type(word.metadata.get("revision"), int | None)
+    assert_type(word.metadata["custom"], dict[str, str | bool | int | float])
+    assert_type(word.metadata["custom"]["value"], str | bool | int | float)
+    assert_type(pdf.metadata["author"], str)
+    assert_type(pdf.metadata.get("subject"), str | None)
+    assert_type(picture.formatting["position"], tuple[float, float])
+    assert_type(picture.formatting["distance"], tuple[float, float, float, float])
+    assert_type(table.formatting["alignment"], str | None)
+    assert_type(table.formatting["indent"], float | None)
+    assert_type(table.formatting["width"], float | None)
+    assert_type(table.formatting["width_percent"], float | None)
+    assert_type(table.formatting["layout"], Literal["fixed", "autofit"])
+    assert_type(table.formatting["rtl"], bool)
+    assert_type(table.formatting["title"], str | None)
+    assert_type(table.formatting["description"], str | None)
+    assert_type(table.formatting["style"], str | None)
+    assert_type(table.formatting["look"]["header_row"], bool)
+    borders = table.formatting["borders"]
+    if borders is not None:
+        line = borders["top"]
+        if line is not None:
+            assert_type(line["style"], str)
+            assert_type(line["color"], str | None)
+            assert_type(line["width"], float)
+    assert_type(cell.formatting["background"], str | None)
+    assert_type(cell.formatting["margins"], list[float] | None)
+    assert_type(cell.formatting["alignment"], str | None)
+    assert_type(cell.formatting["vertical_alignment"], str | None)
+    assert_type(cell.formatting["text_direction"], str | None)
+    assert_type(cell.formatting["no_wrap"], bool)
+    cell_borders = cell.formatting["borders"]
+    if cell_borders is not None:
+        bottom = cell_borders["bottom"]
+        if bottom is not None:
+            assert_type(bottom["color"], str | None)
+            assert_type(bottom["width"], float)
+
+
+def verify_formatting_snapshots(word: WordDocument, paragraph: Paragraph) -> None:
+    defaults = word.styles.defaults
+    assert_type(defaults["font_size"], float | None)
+    assert_type(defaults["language"], str | None)
+    assert_type(defaults["strike"], bool | str | None)
+    assert_type(defaults["direction"], str | None)
+    direct = paragraph.formatting
+    assert_type(direct["alignment"], str | None)
+    # A Paragraph can be a PPTX cell paragraph with alignment alone.
+    assert_type(direct.get("indent_left"), float | None)
+    tabs = direct.get("tabs")
+    if tabs is not None:
+        assert_type(tabs[0]["position"], float)
+        assert_type(tabs[0]["alignment"], str)
+        assert_type(tabs[0]["leader"], str)
+    resolved = paragraph.resolved_formatting  # Successful results are DOCX only.
+    assert_type(resolved["alignment"], str)
+    assert_type(resolved["indent_left"], float)
+    assert_type(resolved["keep_with_next"], bool)
+    assert_type(resolved["tabs"][0]["position"], float)
+    assert_type(resolved["background"], str | None)
+    for kind in ("character", "paragraph", "table"):
+        style = word.styles.add("Typed " + kind, kind=kind)
+        for snapshot in (style.formatting, style.resolved_formatting):
+            assert_type(snapshot["font"], str | None)
+            assert_type(snapshot["language"], str | None)
+            assert_type(snapshot["strike"], bool | str | None)
+            assert_type(snapshot.get("alignment"), str | None)
+            margins = snapshot.get("margins")
+            if margins is not None:
+                assert_type(margins, list[float])
+            regions = snapshot.get("regions")
+            if regions is not None:
+                region = regions["first_row"]
+                assert_type(region["vertical_alignment"], str | None)
+                assert_type(region["bold"], bool | None)
+                borders = region["borders"]
+                if borders is not None:
+                    edge = borders["top"]
+                    if edge is not None:
+                        assert_type(edge["width"], float)
+                        assert_type(edge["color"], str | None)
