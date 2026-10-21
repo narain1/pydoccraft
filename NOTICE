@@ -20,10 +20,10 @@ Copyright (c) 2026 ArtCraft Team and the WordCraft contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option.
 Upstream source: https://github.com/storytold/wordcraft
 Reviewed contribution fork: https://github.com/narain1/wordcraft
-Pinned revision: 517637db3caa0dffd1ad5e4e66c9bdd86e908742
-Reviewed contribution parent: 5312722fb1cefed837f00227e3afe919a6451b54
+Pinned revision: a57b416783b8ba25ec44e30ee0c3cd8362c44974
+Reviewed contribution parent: 517637db3caa0dffd1ad5e4e66c9bdd86e908742
 Original upstream base: f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22
-The reviewed contributions align native PDF shape stroke caps and joins with native raster output, preserve absent character-default sizes, and retain typed core document language through DOCX and Flat OPC read/write. It changes no bundled assets or licensing and is not represented as upstream acceptance.
+The reviewed contributions align native PDF shape stroke caps and joins with native raster output, preserve absent character-default sizes, retain typed core document language through DOCX and Flat OPC read/write, and expose strict opt-in typed access to eight retained extended properties without changing legacy read/write policy. It changes no bundled assets or licensing and is not represented as upstream acceptance.
 
 DeckCraft
 Copyright (c) 2026 ArtCraft Team and the DeckCraft contributors.
