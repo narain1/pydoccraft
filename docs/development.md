@@ -117,3 +117,5 @@ Upstream engine upgrades deserve isolated pull requests. Keep each project's cra
 ## Documentation website
 
 The [GitHub Pages site](documentation-site.md) builds directly from these Markdown guides. Use the documented build and local-link check before changing site navigation or publishing configuration.
+
+Validation-only runs also retain built wheels when the installed corpus fails, alongside the failed validation record. These diagnostic artifacts are not release artifacts; inspect the job outcome and validation JSON before using them. Ordinary release runs continue to upload wheels only after successful tests.
