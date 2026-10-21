@@ -700,3 +700,26 @@ This conservative supported profile excludes cell PAGE even where a current firs
 ## Callback-safe page/slide selection (spec109)
 
 PdfPages reuses its owner's existing page generation and count. Two private helpers obtain that snapshot and normalize/recheck an index. A PDF slice uses normal Python list slicing over bounded page positions, then rechecks before creating handles; no handle captures a newer generation for an older selection. Delete/move dispatch only after the checks. Slides compares its existing ordered native ID snapshot after each conversion; no generation or public collection class is introduced. PDF page-box/rotation operations already invalidate page generation and therefore invalidate selection even when page count stays unchanged. Metadata edits and slide-name/visibility edits can leave selection valid. These checks do not roll back arbitrary user callback code.
+
+
+## 108. Document-wide mirrored margins reuse section geometry
+
+The Python facade adds only `WordDocument.mirror_margins: bool`, with open-owner validation before exact bool validation. The native setter clones the current Document, assigns `settings.mirror_margins`, explicitly invokes existing `validate_unsplittable_page_bounds`, then uses ordinary staged `commit`. Geometry is not implicitly checked by every commit; this setter follows the existing picture-placement preflight pattern. No native dependency, coordinate algorithm or API manager is added. Ordinary commit retains anchor, reference, metadata, field, resource and revision guards, including spec107 table PAGE rejection.
+
+Pinned WordCraft Settings/read/write preserve the boolean. Native layout translates even displayed-page body/header/footer items and the body frame; native anchor resolution keeps page-relative artwork fixed. Margin values keep their established order: left+gutter is inside, right is outside when mirroring. A separate native NextPage branch inserts restarted physical-sheet parity fillers only with even/odd headers; mirroring alone does not activate that branch. Model part IDs are snapshot-local and may be reassigned by readback; tests compare each reopened model's own references and exact text instead of inventing durable numeric identity.
+
+Same-value assignment follows existing document-setting mutation semantics rather than adding a special no-op contract. Failures leave private accounting, registries, native bytes, revision and Python cache untouched. Equal columns and single-column labels remain separate profiles; labels that exceed the outside margin fail before this setting commits. Existing output checks guard later edits. The feature does not expose imported editing, binding/print imposition, top gutters or unverified broader layout settings.
+
+
+## 106. Intact table movement without a second block API
+
+`_Tables.move` reuses the paragraph collection's selection/revision pattern and calls native `move_table(id, target, revision)`. A narrow private `validate_table_operation` shares spec102's original bounded inventory, ownership, global associations, ordinary tail and subtree section checks with deletion; deletion retains its prior mutation and reclamation behavior. No generic block registry or manager is introduced.
+
+Movement rejects different parents/sections and source semantic anchors before no-op. It removes and reinserts the intact native block at the original destination coordinate, verifies unchanged parent length/final paragraph Arc and section metadata, and rotates only the selected parent coordinate of every locator and hidden blank. Descendant suffixes and every table generation remain intact; auxiliary direct-paragraph IDs are sorted using validated resulting locations. No pruning or new handle allocation occurs. Normal staged commit builds fresh candidate comment proof for retained references, media/navigation and output validation.
+
+The raw gate covers 336 structural and 24 colored-output profiles. A requested PAGE-positive control exposed the native stale table field context; spec107 now rejects owned table PAGE. Revised106 retains that native failure as an explicit diagnostic, pairs it with exact owned rejection, and uses NUMPAGES/SECTIONPAGES for supported movement output. It neither evaluates fields locally nor broadens imported editing. Final table ordinal semantics preserve intervening paragraph order, not reversibility of every interleaved block position.
+
+
+## 113. Release compiler selection
+
+Set the existing pinned maturin action input `rust-toolchain: 1.95.0` on both the Linux container build and the macOS/Windows build. The pinned action resolves this input before toolchain-file/default discovery, installs/selects it inside the Linux build container, and selects it through rustup on host builds. No runtime dependency, API, target, source engine, version or publish condition changes.

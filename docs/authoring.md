@@ -66,6 +66,16 @@ Bookmarks, note references, owned comments and section boundaries cannot be remo
 
 Index conversion captures the intended table identity. A callback deleting that table cannot redirect the operation to a replacement; its own changes remain. Stale cell grids and closed owners fail before conversion callbacks. Ordinary output and geometry guards still apply. This is whole-table removal, not general block movement, copying or cross-container adoption.
 
+## DOCX table movement
+
+Use `word.tables.move(index, destination)`, `header.tables.move(...)`, `footer.tables.move(...)` or `cell.tables.move(...)` to reorder an intact table in its current container. Both indexes select tables and support negative values; destination is the final table ordinal. Intervening paragraphs keep their relative order, but can move to the other side of the selected table. Moving table A past table B in `[A, paragraph, B]` gives `[paragraph, B, A]`; reversing table ordinals alone does not promise to restore every intervening block position.
+
+The supported containers are the body within one section, independently owned headers/footers, and ordinary nested or merged cells. Held table, row, cell, paragraph, nested-table and picture handles retain their identities, including displaced siblings and ancestor grids. Actual movement invalidates existing text ranges and rendered snapshots once; use fresh ranges afterward. A same-index move preserves bytes, ranges, revision and cached output after scope and reference validation. Copies stay independent and required blank paragraphs are preserved by identity.
+
+A moved subtree cannot contain bookmarks, note references, comments or section boundaries, including on a no-op. Bookmarks and comments can be removed explicitly through their existing APIs first. Clearing note content retains its reference, so that table still cannot move. Valid anchors in retained siblings stay attached and comments resolve fresh ranges after the shift. Owned table PAGE fields remain unsupported; total and section page counts retain their existing native evaluation. Moving across containers or sections, importing content, and rich-note/PPTX table movement remain outside this profile.
+
+Index-conversion callbacks cannot redirect a pending move after changing or closing the owner. Stale cell grids reject before those callbacks. Immediate ownership, source-work, registry, media and revision checks remain active; rejection preserves the prior state except for the callback's own completed mutation. Ordinary serialization/render geometry guards apply after movement; a successful move does not certify every later layout.
+
 ## DOCX comments
 
 Owned documents expose one `document.comments` collection for roots and direct replies, in creation order. It uses existing paragraph ranges:
@@ -363,7 +373,7 @@ Text edits preflight run/paragraph fragmentation (100,000 each), visible text an
 
 Each section exposes `start`, `page_size`, `margins`, `gutter`, `header_distance`, `footer_distance` and `columns=(count, gap_points, separator_bool)`. Section creation appends flowing content; subsequent document insertions belong to the final section. Section deletion/reorder and insertion into an earlier section are not yet exposed. Columns are limited to 1–45, with at least 18 points of usable width per column. There are at most 128 sections.
 
-`gutter` adds a left binding inset in points, reducing usable width. It accepts 0–1584 points subject to the page's remaining content area. Set `column_widths` to a tuple of explicit point widths matching the current column count; widths are 18–1584 points each, share the gap in `columns`, and must fit the usable width together with those gaps. Unused trailing space is allowed. The native layout positions and flows text; widths are never automatically scaled. `column_widths=None` restores equal columns. Assigning `columns` also clears explicit widths. Page dimensions determine orientation; mirrored/top gutters and independent per-column gaps are not exposed.
+`gutter` adds a binding inset in points, reducing usable width; it is on the left by default and on the inside when document-wide mirrored margins are enabled. It accepts 0–1584 points subject to the page's remaining content area. Set `column_widths` to a tuple of explicit point widths matching the current column count; widths are 18–1584 points each, share the gap in `columns`, and must fit the usable width together with those gaps. Unused trailing space is allowed. The native layout positions and flows text; widths are never automatically scaled. `column_widths=None` restores equal columns. Assigning `columns` also clears explicit widths. Page dimensions determine orientation; top gutters and independent per-column gaps are not exposed.
 
 ```python
 section = document.sections[0]
@@ -769,3 +779,24 @@ Creation of N widgets performs N initial pairs plus N(N+1)/2 member redraws. The
 The getter/setter use the same bounded canonical target profile as editing locks. Finite fractional `/CA` values are now supported within that profile; unrelated imported metadata/style restrictions remain. Links reject opacity. Nonfinite/out-of-range inputs fail instead of clamping; booleans, strings and `None` are invalid property values. `update(opacity=None)` leaves opacity unchanged, consistent with other optional update arguments. Locked comments refuse opacity changes. Native rendering, saved appearance streams and copies retain the value; style/opacity and geometry edits can replace custom imported appearances as documented above. Native note appearance regeneration draws the Comment icon as a bubble and other accepted icon names as a folded-page icon; imported note artwork is not preserved by these redraws.
 
 Comment style redraws charge each generated normal appearance plus a conservative 512-byte resource allowance for each generation, including intermediate rectangle/ellipse resize appearances. Canonical note recoloring now uses the same bounded target guard and 64 KiB appearance-work reservation as note opacity, including subsequent color-only changes after fractional opacity. Repeated identical assignments still regenerate native appearances and consume the cumulative mutation budget. Initial and final handle checks prevent numeric-conversion callbacks from retargeting deleted or moved comments. This is a bounded target operation, not a new general imported inventory guarantee.
+
+
+### Mirrored DOCX margins
+
+`document.mirror_margins = True` enables the native document-wide setting; its default is `False`. It accepts an exact Python boolean. Each section keeps the existing `(top, right, bottom, left)` margin tuple: left plus gutter becomes the inside margin and right becomes outside. Inside is left on odd **displayed page numbers** and right on even displayed numbers. Existing section page-number restarts therefore affect the side selection; physical page indexes alone do not determine it. `False` restores ordinary left/right placement without changing the saved margin values.
+
+```python
+with doc_ex.new("docx", size=(300, 300)) as document:
+    section = document.sections[0]
+    section.margins = (48, 36, 36, 72)
+    section.gutter = 8
+    document.mirror_margins = True
+    document.add_paragraph("Inside and outside margins follow native page numbering.")
+    document.save("mirrored.docx")
+```
+
+Body text, supported tables, inline header/footer content and supported margin/paragraph-anchored pictures follow native placement. Page-relative floating pictures retain their page coordinates. Native extraction body boxes and source-selection rectangles use the resulting geometry. Header variants remain a separate setting: for a next-page section restart, native parity filler pages depend on even/odd headers, not on `mirror_margins` alone. A first physical page displaying 2 has even mirrored margins even when it has no preceding filler.
+
+The setter stages the native candidate and reuses existing bounded geometry checks before committing. An outside margin too narrow for a line-number label, or a floating picture shifted outside its physical page, raises `UnsupportedFormatError` atomically; prior bytes, revision, ranges and render cache remain usable. Existing output guards still apply after later content/layout mutations. Single-column line numbers and ordinary equal-column flow have combined acceptance; multi-column line numbering retains its existing explicit rejection. Successful assignments, including assigning the current value, follow the existing document-setting convention: they advance the revision and invalidate previous text ranges/render cache. Copies remain independent.
+
+This owned horizontal-page profile adds no settings manager, section-specific mirror override, booklet printing, binding-direction switch, top gutter, imported editing or web-layout behavior. It does not expand the page-border, continuous-section, field or floating-artwork profiles. LAY10 remains open for its other settings.

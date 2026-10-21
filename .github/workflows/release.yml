@@ -75,6 +75,7 @@ jobs:
         with:
           command: build
           maturin-version: 1.8.1
+          rust-toolchain: 1.95.0
           args: --release --locked --out dist --interpreter /opt/python/cp${{ matrix.python.tag }}-cp${{ matrix.python.tag }}/bin/python
           manylinux: auto
 
@@ -84,6 +85,7 @@ jobs:
         with:
           command: build
           maturin-version: 1.8.1
+          rust-toolchain: 1.95.0
           args: --release --locked --out dist --interpreter python
 
       - name: Test installed wheel

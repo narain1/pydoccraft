@@ -726,7 +726,7 @@ class _Collection(Sequence[_Item], Generic[_Item]):
 
 
 class _Tables(_Collection["EditableTable"]):
-    """Ordered owned DOCX tables; deletion removes one complete subtree."""
+    """Ordered owned DOCX tables with subtree deletion and same-container movement."""
     def __delitem__(self, index: int) -> None:
         self._owner._ensure_open()
         if isinstance(index, slice):
@@ -735,6 +735,26 @@ class _Tables(_Collection["EditableTable"]):
         selected = operator.index(index)
         self._owner._ensure_open()
         self._owner._call("remove_table", identifiers[_index(selected, len(identifiers))], _change=True)
+
+    def move(self, index: int, destination: int) -> None:
+        """Move an owned DOCX table to its final index in the same container and section."""
+        self._owner._ensure_open()
+        if not isinstance(self._owner, WordDocument):
+            raise UnsupportedFormatError("PPTX table movement is not supported")
+        revision = self._owner._call("revision")
+        identifiers = self._ids()
+        selected = operator.index(index)
+        self._owner._ensure_open()
+        if self._owner._call("revision") != revision:
+            raise ValueError("table selection is stale after a document mutation")
+        target = operator.index(destination)
+        self._owner._ensure_open()
+        if self._owner._call("revision") != revision:
+            raise ValueError("table selection is stale after a document mutation")
+        identifier = identifiers[_index(selected, len(identifiers))]
+        target_id = identifiers[_index(target, len(identifiers))]
+        if self._owner._call("move_table", identifier, target_id, revision):
+            self._owner._invalidate()
 
 
 class _Paragraphs(_Collection["Paragraph"]):
@@ -871,6 +891,23 @@ class WordDocument(EditableDocument):
     @property
     def images(self) -> Pictures:
         return Pictures(self, lambda: self._call("image_ids"))
+
+    @property
+    def mirror_margins(self) -> bool:
+        """Mirror inside/outside margins by displayed page-number parity.
+
+        This document-wide setting uses each section's existing left margin
+        plus gutter as inside and right margin as outside. It does not change
+        even/odd header selection or add next-page restart filler pages.
+        """
+        return self._call("mirror_margins")
+
+    @mirror_margins.setter
+    def mirror_margins(self, value: bool) -> None:
+        self._ensure_open()
+        if type(value) is not bool:
+            raise TypeError("mirror_margins must be a bool")
+        self._call("set_mirror_margins", value, _change=True)
 
     @property
     def background(self) -> str | None:

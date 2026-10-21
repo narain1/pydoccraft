@@ -16,6 +16,9 @@ use crate::model::{
 };
 use crate::EngineError;
 
+#[cfg(test)]
+#[path = "docx_mirror_proof.rs"]
+mod mirror_proof;
 #[path = "docx_provenance.rs"]
 mod provenance;
 #[cfg(test)]

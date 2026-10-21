@@ -3253,6 +3253,17 @@ impl EditableDocx {
         self.set_section_props(0, &json!({"page_size": [width, height]}).to_string())
     }
 
+    pub fn mirror_margins(&self) -> PyResult<bool> {
+        Ok(self.document()?.settings.mirror_margins)
+    }
+
+    pub fn set_mirror_margins(&mut self, enabled: bool) -> PyResult<()> {
+        let mut candidate = self.document()?.clone();
+        candidate.settings.mirror_margins = enabled;
+        validate_unsplittable_page_bounds(&candidate)?;
+        self.commit(candidate)
+    }
+
     pub fn background(&self) -> PyResult<Option<String>> {
         Ok(self
             .document()?
@@ -3728,59 +3739,11 @@ impl EditableDocx {
 
     /// Remove one owned table subtree through native block removal.
     pub fn remove_table(&mut self, id: usize) -> PyResult<()> {
+        let (story, path) = self.validate_table_operation(id, "deletion")?;
         let document = self.document()?;
-        if self.locations.len() > MAX_BLOCKS
-            || self.images.len() > MAX_BLOCKS
-            || self.table_generations.len() > MAX_BLOCKS
-            || self.cell_placeholders.len() > MAX_CELLS
-            || self.cell_count > MAX_CELLS
-        {
-            return Err(limit("table deletion exceeds owned registry limits"));
-        }
-        // Bound source depth/text/objects before content_usage allocates object offsets.
-        let original_comments = comments::inventory(document)?;
-        comments::registry(self, &original_comments)?;
-        let (story, path) = self.location(id)?;
-        let root = document
-            .story(story)
-            .ok_or_else(|| PyIndexError::new_err("table story is missing"))?;
-        validate_story_locator(&path, root.len())?;
-        self.table(id)?;
         let root_placeholder = match story {
             StoryRef::Body => self.body_placeholder,
-            StoryRef::Part(part) => {
-                let native = &document.parts[&part];
-                if !matches!(native.kind, PartKind::Header | PartKind::Footer)
-                    || !self.stories.contains_key(&part)
-                {
-                    return Err(EngineError::Unsupported(
-                        "table deletion requires an owned body, header or footer".into(),
-                    )
-                    .into());
-                }
-                let refs = document
-                    .sections()
-                    .iter()
-                    .flat_map(|(_, section)| {
-                        [
-                            section.headers.default,
-                            section.headers.first,
-                            section.headers.even,
-                            section.footers.default,
-                            section.footers.first,
-                            section.footers.even,
-                        ]
-                    })
-                    .filter(|target| *target == Some(part))
-                    .count();
-                if refs != 1 {
-                    return Err(EngineError::Unsupported(
-                        "table deletion requires independent header/footer ownership".into(),
-                    )
-                    .into());
-                }
-                self.story_placeholders.get(&part).copied()
-            }
+            StoryRef::Part(part) => self.story_placeholders.get(&part).copied(),
         };
         let sections = if story == StoryRef::Body {
             Some(owned_body_sections(document)?)
@@ -3790,124 +3753,9 @@ impl EditableDocx {
         let depth = path.0.len() - 1;
         let direct = depth == 0;
         let index = path.last();
-        let parent = document
-            .container(story, &path)
-            .ok_or_else(|| PyValueError::new_err("table parent is missing"))?;
-        if root.len() > MAX_BLOCKS + usize::from(story != StoryRef::Body)
-            || parent.len() > MAX_BLOCKS + usize::from(!direct || story != StoryRef::Body)
-        {
-            return Err(limit("table deletion exceeds owned container limits"));
-        }
-        let tail = parent
-            .last()
-            .filter(|block| block.as_para().is_some_and(|p| p.section.is_none()))
-            .ok_or_else(|| {
-                PyValueError::new_err("owned table parent requires a final non-section paragraph")
-            })?;
+        let parent = document.container(story, &path).unwrap(); // validated above
+        let tail = parent.last().unwrap();
         let in_parent = |p: &Path| p.0.len() > depth && p.0[..depth] == path.0[..depth];
-        // Global association checks make invalidate_descendants' pruning exact, not cleanup
-        // of unrelated malformed image/generation entries. Locations remain one-to-one.
-        let mut locations = BTreeSet::new();
-        for (owner, position) in self.locations.values() {
-            let blocks = document
-                .story(*owner)
-                .ok_or_else(|| PyValueError::new_err("owned locator has no story"))?;
-            validate_story_locator(position, blocks.len())?;
-            if document.block(*owner, position).is_none()
-                || !locations.insert((*owner, position.clone()))
-            {
-                return Err(PyValueError::new_err(
-                    "invalid or duplicate owned block locator",
-                ));
-            }
-        }
-        let mut images = BTreeSet::new();
-        for image in &self.images {
-            let (owner, position) = self
-                .locations
-                .get(image)
-                .ok_or_else(|| PyValueError::new_err("image has no owned locator"))?;
-            if !images.insert(*image)
-                || !document
-                    .para(*owner, position)
-                    .is_some_and(|p| matches!(p.objects.first(), Some(InlineObject::Image { .. })))
-            {
-                return Err(PyValueError::new_err("invalid owned image association"));
-            }
-        }
-        for table in self.table_generations.keys() {
-            let (owner, position) = self
-                .locations
-                .get(table)
-                .ok_or_else(|| PyValueError::new_err("table generation has no owned locator"))?;
-            if document.table(*owner, position).is_none() {
-                return Err(PyValueError::new_err(
-                    "generation does not identify an owned table",
-                ));
-            }
-        }
-        if let StoryRef::Part(part) = story {
-            let ids = &self.stories[&part];
-            if ids.len() > MAX_BLOCKS {
-                return Err(limit("table deletion exceeds owned story registry limits"));
-            }
-            let mut seen = BTreeSet::new();
-            for child in ids {
-                let (owner, position) = self
-                    .locations
-                    .get(child)
-                    .ok_or_else(|| PyValueError::new_err("story child has no owned locator"))?;
-                if !seen.insert(*child)
-                    || *owner != story
-                    || position.0.len() != 1
-                    || images.contains(child)
-                    || document.para(story, position).is_none()
-                {
-                    return Err(PyValueError::new_err(
-                        "story registry requires unique direct paragraph children",
-                    ));
-                }
-            }
-        }
-        let plain_blank = |owner: StoryRef, position: &Path| -> bool {
-            document
-                .para(owner, position)
-                .is_some_and(|p| *p == Paragraph::new())
-                && !locations.contains(&(owner, position.clone()))
-        };
-        if let Some(position) = root_placeholder {
-            if !plain_blank(story, &Path::top(position)) {
-                return Err(PyValueError::new_err("invalid owned story placeholder"));
-            }
-        }
-        for (owner, position) in &self.cell_placeholders {
-            let blocks = document
-                .story(*owner)
-                .ok_or_else(|| PyValueError::new_err("cell placeholder has no story"))?;
-            validate_story_locator(position, blocks.len())?;
-            if position.0.len() == 1 || !plain_blank(*owner, position) {
-                return Err(PyValueError::new_err("invalid owned cell placeholder"));
-            }
-        }
-        let mut pending = vec![parent[index].as_ref()];
-        while let Some(block) = pending.pop() {
-            match block {
-                Block::Para(p) if p.section.is_some() => {
-                    return Err(EngineError::Unsupported(
-                        "table deletion cannot remove section boundaries".into(),
-                    )
-                    .into())
-                }
-                Block::Para(_) => (),
-                Block::Table(table) => {
-                    for row in &table.rows {
-                        for cell in &row.cells {
-                            pending.extend(cell.blocks.iter().map(Arc::as_ref));
-                        }
-                    }
-                }
-            }
-        }
         let mut staged = self.copy()?;
         let mut candidate = document.clone();
         let removed = candidate.remove_block(story, &path).map_err(model_error)?;
@@ -3968,6 +3816,148 @@ impl EditableDocx {
         staged.commit(candidate)?;
         *self = staged;
         Ok(())
+    }
+
+    /// Move one intact ordinary table to the original destination table position.
+    pub fn move_table(&mut self, id: usize, target: usize, revision: u64) -> PyResult<bool> {
+        self.check_revision(revision)?;
+        let (story, path) = self.validate_table_operation(id, "movement")?;
+        let (target_story, target_path) = self.location(target)?;
+        self.table(target)?;
+        if story != target_story || path.parent() != target_path.parent() {
+            return Err(EngineError::Unsupported(
+                "table movement requires the same owned container".into(),
+            )
+            .into());
+        }
+        let document = self.document()?;
+        // This defensive field check also applies to no-ops on malformed owned input.
+        page_field_count(document)?;
+        let sections = if story == StoryRef::Body {
+            if document.section_index_of(path.0[0] as usize)
+                != document.section_index_of(target_path.0[0] as usize)
+            {
+                return Err(EngineError::Unsupported(
+                    "table movement cannot cross body section boundaries".into(),
+                )
+                .into());
+            }
+            Some(owned_body_sections(document)?)
+        } else {
+            None
+        };
+        let parent = document.container(story, &path).unwrap(); // preflight validated it
+        let mut pending = vec![parent[path.last()].as_ref()];
+        while let Some(block) = pending.pop() {
+            match block {
+                Block::Para(p) => {
+                    if p.objects.iter().any(|object| {
+                        matches!(
+                            object,
+                            InlineObject::NoteRef { .. }
+                                | InlineObject::BookmarkStart { .. }
+                                | InlineObject::BookmarkEnd { .. }
+                                | InlineObject::CommentStart { .. }
+                                | InlineObject::CommentEnd { .. }
+                        )
+                    }) {
+                        return Err(EngineError::Unsupported(
+                            "moving tables containing note, bookmark or comment anchors is not supported".into(),
+                        ).into());
+                    }
+                }
+                Block::Table(table) => {
+                    for row in &table.rows {
+                        for cell in &row.cells {
+                            pending.extend(cell.blocks.iter().map(Arc::as_ref));
+                        }
+                    }
+                }
+            }
+        }
+        if id == target {
+            return Ok(false);
+        }
+        let tail = parent.last().unwrap();
+        let mut staged = self.copy()?;
+        let mut candidate = document.clone();
+        let moved = candidate.remove_block(story, &path).map_err(model_error)?;
+        candidate
+            .insert_block(story, &target_path, moved)
+            .map_err(model_error)?;
+        let after = candidate
+            .container(story, &path)
+            .ok_or_else(|| PyValueError::new_err("table parent is missing after movement"))?;
+        if after.len() != parent.len() || after.last().is_none_or(|last| !Arc::ptr_eq(tail, last)) {
+            return Err(PyValueError::new_err(
+                "native table movement must retain the existing final paragraph",
+            ));
+        }
+        if let Some(expected) = sections {
+            if owned_body_sections(&candidate)? != expected
+                || candidate.section_index_of(target_path.0[0] as usize)
+                    != document.section_index_of(path.0[0] as usize)
+            {
+                return Err(EngineError::Unsupported(
+                    "table movement cannot change section ownership or properties".into(),
+                )
+                .into());
+            }
+        }
+        let depth = path.0.len() - 1;
+        let (source, target) = (path.0[depth], target_path.0[depth]);
+        let rotate = |position| {
+            if position == source {
+                target
+            } else if source < position && position <= target {
+                position - 1
+            } else if target <= position && position < source {
+                position + 1
+            } else {
+                position
+            }
+        };
+        let rotate_path = |position: &mut Path| {
+            if position.0.len() > depth && position.0[..depth] == path.0[..depth] {
+                position.0[depth] = rotate(position.0[depth]);
+            }
+        };
+        for (owner, position) in staged.locations.values_mut() {
+            if *owner == story {
+                rotate_path(position);
+            }
+        }
+        staged.cell_placeholders = staged
+            .cell_placeholders
+            .into_iter()
+            .map(|(owner, mut position)| {
+                if owner == story {
+                    rotate_path(&mut position);
+                }
+                (owner, position)
+            })
+            .collect();
+        if depth == 0 {
+            match story {
+                StoryRef::Body => {
+                    staged.body_placeholder =
+                        staged.body_placeholder.map(|p| rotate(p as u32) as usize)
+                }
+                StoryRef::Part(part) => {
+                    let mut ids = staged.stories[&part].clone();
+                    ids.sort_by_key(|child| staged.locations[child].1 .0[0]);
+                    staged.stories.insert(part, ids);
+                    if let Some(position) = staged.story_placeholders.get_mut(&part) {
+                        *position = rotate(*position as u32) as usize;
+                    }
+                }
+            }
+        }
+        // All subtree handles/generations and resource counts survive; fresh candidate
+        // inventory validates shifted retained anchors, media and navigation in commit.
+        staged.commit(candidate)?;
+        *self = staged;
+        Ok(true)
     }
 
     /// Reorder one intact ordinary paragraph through native block operations.
@@ -4400,6 +4390,194 @@ impl Default for EditableDocx {
 }
 
 impl EditableDocx {
+    /// Shared bounded ownership/registry preflight for the two table operations.
+    fn validate_table_operation(&self, id: usize, operation: &str) -> PyResult<(StoryRef, Path)> {
+        let document = self.document()?;
+        if self.locations.len() > MAX_BLOCKS
+            || self.images.len() > MAX_BLOCKS
+            || self.table_generations.len() > MAX_BLOCKS
+            || self.cell_placeholders.len() > MAX_CELLS
+            || self.cell_count > MAX_CELLS
+        {
+            return Err(limit(&format!(
+                "table {operation} exceeds owned registry limits"
+            )));
+        }
+        // Bound source depth/text/objects before content_usage allocates object offsets.
+        let original_comments = comments::inventory(document)?;
+        comments::registry(self, &original_comments)?;
+        let (story, path) = self.location(id)?;
+        let root = document
+            .story(story)
+            .ok_or_else(|| PyIndexError::new_err("table story is missing"))?;
+        validate_story_locator(&path, root.len())?;
+        self.table(id)?;
+        let root_placeholder = match story {
+            StoryRef::Body => self.body_placeholder,
+            StoryRef::Part(part) => {
+                let native = &document.parts[&part];
+                if !matches!(native.kind, PartKind::Header | PartKind::Footer)
+                    || !self.stories.contains_key(&part)
+                {
+                    return Err(EngineError::Unsupported(format!(
+                        "table {operation} requires an owned body, header or footer"
+                    ))
+                    .into());
+                }
+                let refs = document
+                    .sections()
+                    .iter()
+                    .flat_map(|(_, section)| {
+                        [
+                            section.headers.default,
+                            section.headers.first,
+                            section.headers.even,
+                            section.footers.default,
+                            section.footers.first,
+                            section.footers.even,
+                        ]
+                    })
+                    .filter(|target| *target == Some(part))
+                    .count();
+                if refs != 1 {
+                    return Err(EngineError::Unsupported(format!(
+                        "table {operation} requires independent header/footer ownership"
+                    ))
+                    .into());
+                }
+                self.story_placeholders.get(&part).copied()
+            }
+        };
+        if story == StoryRef::Body {
+            owned_body_sections(document)?;
+        }
+        let depth = path.0.len() - 1;
+        let direct = depth == 0;
+        let index = path.last();
+        let parent = document
+            .container(story, &path)
+            .ok_or_else(|| PyValueError::new_err("table parent is missing"))?;
+        if root.len() > MAX_BLOCKS + usize::from(story != StoryRef::Body)
+            || parent.len() > MAX_BLOCKS + usize::from(!direct || story != StoryRef::Body)
+        {
+            return Err(limit(&format!(
+                "table {operation} exceeds owned container limits"
+            )));
+        }
+        parent
+            .last()
+            .filter(|block| block.as_para().is_some_and(|p| p.section.is_none()))
+            .ok_or_else(|| {
+                PyValueError::new_err("owned table parent requires a final non-section paragraph")
+            })?;
+        // Both operations reject malformed global associations; deletion's subsequent
+        // descendant pruning must never silently repair unrelated bookkeeping.
+        let mut locations = BTreeSet::new();
+        for (owner, position) in self.locations.values() {
+            let blocks = document
+                .story(*owner)
+                .ok_or_else(|| PyValueError::new_err("owned locator has no story"))?;
+            validate_story_locator(position, blocks.len())?;
+            if document.block(*owner, position).is_none()
+                || !locations.insert((*owner, position.clone()))
+            {
+                return Err(PyValueError::new_err(
+                    "invalid or duplicate owned block locator",
+                ));
+            }
+        }
+        let mut images = BTreeSet::new();
+        for image in &self.images {
+            let (owner, position) = self
+                .locations
+                .get(image)
+                .ok_or_else(|| PyValueError::new_err("image has no owned locator"))?;
+            if !images.insert(*image)
+                || !document
+                    .para(*owner, position)
+                    .is_some_and(|p| matches!(p.objects.first(), Some(InlineObject::Image { .. })))
+            {
+                return Err(PyValueError::new_err("invalid owned image association"));
+            }
+        }
+        for table in self.table_generations.keys() {
+            let (owner, position) = self
+                .locations
+                .get(table)
+                .ok_or_else(|| PyValueError::new_err("table generation has no owned locator"))?;
+            if document.table(*owner, position).is_none() {
+                return Err(PyValueError::new_err(
+                    "generation does not identify an owned table",
+                ));
+            }
+        }
+        if let StoryRef::Part(part) = story {
+            let ids = &self.stories[&part];
+            if ids.len() > MAX_BLOCKS {
+                return Err(limit(&format!(
+                    "table {operation} exceeds owned story registry limits"
+                )));
+            }
+            let mut seen = BTreeSet::new();
+            for child in ids {
+                let (owner, position) = self
+                    .locations
+                    .get(child)
+                    .ok_or_else(|| PyValueError::new_err("story child has no owned locator"))?;
+                if !seen.insert(*child)
+                    || *owner != story
+                    || position.0.len() != 1
+                    || images.contains(child)
+                    || document.para(story, position).is_none()
+                {
+                    return Err(PyValueError::new_err(
+                        "story registry requires unique direct paragraph children",
+                    ));
+                }
+            }
+        }
+        let plain_blank = |owner: StoryRef, position: &Path| -> bool {
+            document
+                .para(owner, position)
+                .is_some_and(|p| *p == Paragraph::new())
+                && !locations.contains(&(owner, position.clone()))
+        };
+        if let Some(position) = root_placeholder {
+            if !plain_blank(story, &Path::top(position)) {
+                return Err(PyValueError::new_err("invalid owned story placeholder"));
+            }
+        }
+        for (owner, position) in &self.cell_placeholders {
+            let blocks = document
+                .story(*owner)
+                .ok_or_else(|| PyValueError::new_err("cell placeholder has no story"))?;
+            validate_story_locator(position, blocks.len())?;
+            if position.0.len() == 1 || !plain_blank(*owner, position) {
+                return Err(PyValueError::new_err("invalid owned cell placeholder"));
+            }
+        }
+        let mut pending = vec![parent[index].as_ref()];
+        while let Some(block) = pending.pop() {
+            match block {
+                Block::Para(p) if p.section.is_some() => {
+                    return Err(EngineError::Unsupported(format!(
+                        "table {operation} cannot remove section boundaries"
+                    ))
+                    .into())
+                }
+                Block::Para(_) => (),
+                Block::Table(table) => {
+                    for row in &table.rows {
+                        for cell in &row.cells {
+                            pending.extend(cell.blocks.iter().map(Arc::as_ref));
+                        }
+                    }
+                }
+            }
+        }
+        Ok((story, path))
+    }
+
     /// Publish bookkeeping only after ordinary semantic/media guards accept the replacement.
     fn clear_owned_story_content(&mut self, id: u32, replacement: Paragraph) -> PyResult<bool> {
         let part = self
@@ -21980,3 +22158,15 @@ mod table_delete_tests;
 #[cfg(test)]
 #[path = "table_page_field_tests.rs"]
 mod table_page_field_tests;
+
+#[cfg(test)]
+#[path = "docx_mirror_tests.rs"]
+mod mirror_tests;
+
+#[cfg(test)]
+#[path = "table_move_scope_proof.rs"]
+mod table_move_scope_proof;
+
+#[cfg(test)]
+#[path = "author_docx_table_move_tests.rs"]
+mod table_move_tests;

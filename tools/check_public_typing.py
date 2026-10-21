@@ -20,6 +20,9 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
     with doc_ex.new('docx') as word:
         assert_type(word, WordDocument)
         assert_type(word.copy(), WordDocument)
+        assert_type(word.mirror_margins, bool)
+        word.mirror_margins = True
+        word.mirror_margins = False
         assert_type(word.notes.convert(kind="endnote"), int)
         paragraph = word.add_paragraph('Example')
         assert_type(paragraph, Paragraph)
@@ -72,6 +75,10 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         disposable = word.add_table([['Delete']])
         assert_type(disposable, EditableTable)
         del word.tables[-1]
+        assert_type(word.tables.move(0, -1), None)
+        assert_type(word.sections[0].header().tables.move(0, 0), None)
+        assert_type(word.sections[0].footer().tables.move(0, 0), None)
+        assert_type(table[0, 0].tables.move(0, -1), None)
         header = word.sections[0].header()
         header.add_table([['Delete']])
         del header.tables[-1]
