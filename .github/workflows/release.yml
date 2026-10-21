@@ -6,9 +6,14 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing version tag to release
+        description: Existing version tag, or exact commit SHA for validation only
         required: true
         type: string
+      validation_only:
+        description: Validate wheels without a version tag or any publication
+        required: true
+        default: false
+        type: boolean
       publish:
         description: Publish wheels to PyPI
         required: true
@@ -28,18 +33,30 @@ jobs:
         with:
           ref: ${{ github.event_name == 'push' && github.ref || inputs.release_tag }}
 
-      - name: Match release tag to package version
+      - name: Verify immutable validation source or release version
         shell: python
         env:
           RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
+          VALIDATION_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.validation_only }}
+          PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
         run: |
           import os
           import pathlib
+          import re
+          import subprocess
           import tomllib
 
           version = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"]
           tag = os.environ["RELEASE_TAG"]
-          if tag != f"v{version}":
+          if os.environ["VALIDATION_ONLY"] == "true":
+              if os.environ["PUBLISH"] == "true":
+                  raise SystemExit("validation-only mode cannot publish")
+              if not re.fullmatch(r"[0-9a-f]{40}", tag):
+                  raise SystemExit("validation-only mode requires an exact 40-character commit SHA")
+              actual = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+              if actual != tag:
+                  raise SystemExit(f"checked-out commit {actual!r} does not match {tag!r}")
+          elif tag != f"v{version}":
               raise SystemExit(f"tag {tag!r} does not match package version {version!r}")
 
   wheels:
@@ -110,6 +127,7 @@ jobs:
 
   github-release:
     name: Create GitHub release
+    if: github.event_name == 'push' || !inputs.validation_only
     needs: wheels
     runs-on: ubuntu-latest
     permissions:
@@ -136,7 +154,7 @@ jobs:
 
   pypi:
     name: Publish to PyPI
-    if: github.event_name == 'push' || inputs.publish
+    if: github.event_name == 'push' || (inputs.publish && !inputs.validation_only)
     needs: wheels
     runs-on: ubuntu-latest
     environment:

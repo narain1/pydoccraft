@@ -965,3 +965,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete corrected436-native and two clean556-test installed corpora, exact-artifact/source review, strict typing and synchronized bounded support documentation.
 - [ ] Complete closed-shape exact-head/current-main CI and manual merge; dependency PR122 is merged.
 - [ ] Keep MED4 open for lines/textboxes and excluded contexts; no new U-owner or broad shape-parity claim.
+
+
+## Pre-release platform validation (spec120)
+
+- [x] Add explicit validation-only dispatch to the existing matrix with exact-commit and conflicting-publication guards.
+- [x] Run actionlint and execute the actual workflow guard for accepted and refused inputs.
+- [x] Complete independent guard, publication-gating, privilege and unchanged matrix review.
+- [ ] Complete current-main CI before manual merge.
+- [ ] Dispatch the matrix against reviewed source, inspect every platform/Python corpus and fix failures before treating cross-platform validation as complete.
+- [ ] Retain final versioned release validation; this infrastructure change does not complete QA7 or authorize a premature release.

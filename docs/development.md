@@ -85,6 +85,14 @@ The canonical comparison is [PDF performance versus PyMuPDF](pdf-performance.md)
 
 The tagged release workflow builds wheels for Python 3.11–3.13 on Linux, macOS, and Windows. Each matrix job runs the installed-wheel corpus and uploads validation evidence before its wheel can be published. A local Linux pass does not establish that those remote jobs have passed.
 
+To validate the same nine jobs before creating a version tag, dispatch `release.yml` with `validation_only=true`, `publish=false`, and `release_tag` set to the exact 40-character commit SHA. Validation mode refuses branches, abbreviated SHAs and a simultaneous publication request. It builds and tests that source, uploads wheel/evidence artifacts, and skips both GitHub release creation and PyPI publication. Use the recorded commit and per-job validation results as evidence; a dispatched or successful build alone does not establish a passing corpus. The final tagged release still runs the matrix on the versioned source.
+
+```bash
+gh workflow run release.yml --ref main \
+  -f release_tag=FULL_REVIEWED_COMMIT_SHA \
+  -f validation_only=true -f publish=false
+```
+
 ## Release checklist
 
 1. Set matching versions in `Cargo.toml`, `pyproject.toml`, and `src/doc_ex/__init__.py`.

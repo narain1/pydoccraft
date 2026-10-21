@@ -848,3 +848,8 @@ Existing paragraph, table and row properties must retain concrete successful res
 3. Source admission SHALL require horizontal sections and an exact reference-free native shape profile, finite canonical dimensions and stroke widths no greater than 100 points or the smaller shape dimension. Every candidate/output SHALL verify requested dimensions, exactly one native placement per shape and full-outline physical-page containment without coordinate correction.
 4. Source work, shape count, patch bytes and existing block/cell/page/item limits SHALL be bounded before unbounded copying or layout. Existing style/media/semantic/field/alignment guards SHALL remain active. Caller conversions SHALL revalidate owner revision and exact target identity before mutation.
 5. DOCX readback, native PNG and PDF SHALL retain demonstrated source/order/links/tables/notes/images without fake extraction geometry. Line, textbox, rotation, front, groups, effects, auxiliary/cell placement and imported editing SHALL remain explicitly unsupported. MED4 SHALL remain incomplete.
+
+
+## 120. Validate release wheels before publishing
+
+The existing release matrix SHALL support an explicit validation-only dispatch against an exact immutable commit SHA. It SHALL run the same Python 3.11–3.13 Linux, macOS and Windows wheel builds and installed-wheel corpus, retain artifacts and validation evidence, and create neither a GitHub release nor a PyPI publication. Validation-only mode SHALL reject branch names, abbreviated or mismatched commits and simultaneous publication requests. Default tagged and manual release behavior SHALL retain version matching and all existing validation dependencies.
