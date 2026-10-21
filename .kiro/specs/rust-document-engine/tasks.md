@@ -751,5 +751,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Inventory exact native keys, omission/nullability and list/tuple shapes for five existing metadata/formatting getters; identify polymorphic snapshots separately.
 - [x] Add private output TypedDict declarations and strict consumer assertions without changing accepted runtime inputs, public exports or method bodies/defaults; correct only existing cell-list/border-replay annotations.
 - [x] Verify positive mypy, ten intended negative diagnostics, old-facade sensitivity, runtime snapshot/key introspection and annotation/type-declaration-erased AST equality; complete independent source/static review.
-- [ ] Complete exact installed candidate static/full-corpus and required CI/manual merge using unchanged native bytes.
+- [x] Verify the exact installed candidate, unchanged native bytes/runtime bodies, strict positive/negative consumers and runtime snapshot probes, including independent review.
+- [ ] Complete fresh full installed-corpus current-main CI and manual merge for snapshot typing.
 - [ ] Keep polymorphic paragraph/style/default snapshots and broader API3 discoverability open.
