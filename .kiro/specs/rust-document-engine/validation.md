@@ -1136,6 +1136,22 @@ PR90 independent source review and all 454 tests against its copied frozen packa
 
 PR78 final head `a2fec8ab021fcaddf77e33a4766e0d95316b9deb` passed [current-main CI 39511382470](https://github.com/narain1/pydoccraft/actions/runs/39511382470): 288 Rust / 413 installed-wheel Python tests and all required checks. Independent review retained the exact tooltip/lock artifacts and corrected historical outline profile. It was manually merged as `f6ffa2c87d92943f36c4fdb57f3f7700fa912ede`; auto-merge remains disabled.
 
+
+### PDF field value normalization — focused isolated validation
+
+Source-only Python correction; no Rust/dependency changes or new native build. The installed `/opt/storyparagraphdeletetest` release reproducer used a str subclass whose encode deleted `same` and created another field named `same` at a different box. The old stale assignment succeeded and changed that replacement's value to `STALE WRITE`. The corrected setter bypasses overridden len/str/encode, validates actual Unicode and UTF-8 size, serializes first, and repeats the existing identity check before dispatch.
+
+Three new public groups in `test_pdf_field_value_ownership.py` pass with an isolated copied installed package; fifteen related field/tooltip/read-only/add-ownership tests also pass (18 total, 0.334 seconds). Assertions cover exact café text, independent copy/source/PNG equality, uninvoked callbacks, actual oversized strings despite subclasses, surrogate/NUL/native-glyph failures, stale/closed precedence, unchanged replacement source/pixels/cache, and ordinary choice None/checkbox bool behavior. This is focused evidence, not a rebuilt release or broad callback certification.
+
+
+## PDF field value normalization — complete local artifact
+
+Facade `c4fea17472898a0df41b96a6731273438ac19daf` passes **458 clean installed-wheel Python tests**, zero failures/errors/skips, in 157.989 seconds on Linux x86_64 / Python 3.11.2. The native extension is byte-identical to the preceding 4988dd8 artifact that passed **318 locked Rust tests**, formatting and warnings-denied Clippy: extension SHA-256 `5926ce1d82ea3fb44ec391a554aa6e6588f54df0db12e46dc0642ce8a8f569de`. Those native results apply unchanged; no new native test rerun is claimed. Locked/offline release packaging and strict installed-package typing pass, and installed facade/native bytes match the wheel.
+
+Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,530,398 bytes**; extension **40,643,896 bytes**; SHA-256 `eccbf90a73e5e278c2e1d1c750d76a142a8f90337697020764e942cdf413eb01`. Lock SHA-256 remains `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`; all upstream pins and the audited 264-package license graph remain unchanged. No dependency or attribution changes.
+
+The full corpus verifies all three formats and the new value-normalization workflows. Real Unicode/byte bounds precede payload construction, overridden string hooks cannot replace the target, and initial/final identity checks retain lifetime safety. Native kind/glyph limitations and ordinary bool/None behavior remain unchanged. Independent complete-package review and exact-head/current-main CI remain required before manual merge; this is not broad callback or radio certification.
+
 ## Character-spacing mixed-scope fixture — independent CI correction
 
 Current-main CI39517446150 at `76d40ef83f9a257a1b4604ab3bc6ce97587d22d6` passed 302 native tests but failed one of432 installed-wheel tests: the mixed header/footer, note and nested-cell fixture had a chromatic channel difference64 instead of the required maximum1. The same failure was independently reproduced with Liberation Sans: two pixels at(105,124) and(106,124) lie where the `Scope2` descender intersects the nested table's bottom rule. Source/PDF red bounds and counts were identical; the other19 changed chromatic pixels differed by at most1. Setting all character spacing to zero retained the64-level difference; removing only native table/cell borders removed every difference above1. A separate default-font control reproduced the same interaction at a fractional72.3-point top margin. These controls establish a preexisting native structural-stroke/compositing difference, not a spacing-induced glyph-position change.

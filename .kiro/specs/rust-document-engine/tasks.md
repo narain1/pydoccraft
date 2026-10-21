@@ -600,3 +600,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete integrated locked release/clean installed-wheel validation: 318 Rust / 455 Python tests, strict typing and unchanged license audit.
 - [ ] Complete independent package review and exact-head/current-main CI before manual merge; radio expansion remains separate.
 - [ ] Keep broader PDF6/U10 imported-form and multiwidget acceptance open.
+
+
+## PDF field value normalization and ownership
+
+- [x] Reproduce overridden encode replacing a field and accepting a stale write on the installed story-deletion release.
+- [x] Normalize actual string content with base operations, retain initial lifetime precedence and recheck identity after payload construction.
+- [x] Validate three focused public groups and fifteen related field tests against an isolated copied installed package.
+- [x] Complete integrated installed-wheel validation: 458 Python tests, strict typing and byte-identical native extension from the 318-test artifact.
+- [ ] Complete independent review and exact-head/current-main CI before manual merge.
