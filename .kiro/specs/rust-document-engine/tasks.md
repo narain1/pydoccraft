@@ -1030,7 +1030,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete final raw/adapter native controls, four public workflows, precise historical fixture migrations and strict seven-key snapshot replay typing; independently replay the four public workflows.
 - [x] Complete combined 119/121 full 449-native/release and two clean 564-test installed-wheel corpora, attribution/size and independent source/artifact review.
 - [x] Complete synchronized documentation and final independent review, retaining all historical evidence and scoped upstream findings.
-- [ ] Complete current-head CI and manual merge. Keep broader TXT1/SLIDE3 and overall release gates open.
+- [x] Complete current-head CI and independent manual merge through PR127, required CI39590739971 and documentation CI39590739952. Broader TXT1/SLIDE3 and overall release gates remain open.
 
 
 ## Typed PDF underlays (spec123)
