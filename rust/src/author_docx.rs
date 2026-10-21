@@ -10272,7 +10272,9 @@ mod tests {
         let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
         crate::pdf::render(&pdf, 0, 72.0, None).unwrap();
         document
-            .update_metadata(r#"{"author":null,"title":"","revision":null,"created":null,"language":null}"#)
+            .update_metadata(
+                r#"{"author":null,"title":"","revision":null,"created":null,"language":null}"#,
+            )
             .unwrap();
         let updated: Value = serde_json::from_str(&document.metadata().unwrap()).unwrap();
         for key in ["title", "author", "revision", "created", "language"] {
