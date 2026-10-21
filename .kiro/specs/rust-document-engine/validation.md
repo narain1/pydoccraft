@@ -1162,6 +1162,15 @@ The first isolated `cargo test --locked author_docx::` run passed all 144 existi
 Numeric private `_id` and repr diagnostics deliberately change for newly authored DOCX blocks. Body/cell/PPTX deletion remains unsupported, and the remaining body section/semantic rules are not implemented. Historical spec78/evidence artifacts retain their original scope. No historical support-ledger artifact, hash or fixture is relabeled by this change.
 
 
+### Owned PDF radio groups — focused isolated validation
+
+The isolated implementation builds on the separately frozen cumulative field-accounting correction and field-value ownership fix; neither delta is duplicated. Native PdfCraft remains pinned to 645016addcfb9078c557f0189559ab47cdcee057; no crates, license graph or runtime executables change. Public native name helpers own PDF-name encoding; native create/fill/set_props/flatten own structure and appearances.
+
+Initial probes measured a 32-widget group retaining 1,120 tiny streams (32 initial pairs plus 528 member redraw pairs), 97,440 raw bytes in that fixture. The implementation reserves/charges inaccessible initial generations conservatively rather than scanning objects. Test-only scans of fresh synthetic models verify generation counts and charged history. Metadata redraws add 64 streams for 32 members; selection reuses existing states. Near-limit tests verify whole-operation rollback, exact 10,000 work units and copied counters. A non-raster 500-group fixture exercises exactly 1,000 widgets independently of 500 logical fields and proves capacity reuse after deletion without history refunds.
+
+Public fixtures verify literal A/#41/#4Fff/Unicode identities, native no-toggle/read-only failures, metadata/output preservation, whole-group deletion/copy/flatten, owned tuples and callback-driven page reorder/delete/close/exception refusal. Four rotated CropBox/UserUnit views retain actual selected-circle center pixels and byte-identical source/reopened/flattened PNGs. Coordinate snapshot comparisons allow 0.0001 point for the existing native f32 view transform; raster comparisons are exact. Broad imported-form, arbitrary mutable widget, security and total-process memory claims remain excluded. Five focused native groups pass (20.54 seconds), all-target locked/offline Clippy and debug build pass, and 29 public workflows pass (35.078 seconds: five new plus 24 related). Strict copied-package consumer typing passes. The 1,000-widget fixture performs no raster allocation. Integrated release evidence remains pending.
+
+
 ## Owned DOCX body identities — complete local artifact and independent review
 
 - Frozen runtime `091859307ed9563dc1bf799904cab7347003a992` has a completed local artifact at `dist/docx-body-identity/validation.json`: 462 clean installed-wheel Python tests passed, zero failures/errors/skips, in 156.368 seconds. The native/release log `/tmp/docx-body-identity-full-native.log` records 321 passing native tests and a successful release build. The shared source remained clean at that exact runtime when the reviewer recovered the completed artifact records.
@@ -1218,3 +1227,8 @@ The following delivery gates are complete after independent frozen-source/packag
 |92|`90e527ecb41d7283ec678dc21c401255beb16959`|39528765073|318 /458|
 
 Every final run also passed formatting, warnings-denied Clippy, strict installed-package typing and the unchanged 264-package audit. Each includes the independently reviewed DOCX spacing fixture correction. Earlier local artifacts, including the recorded 462-test identity artifact, retain their original test-file scope. Main integration changes no identity-refactor runtime or dependency bytes; final exact-head/current-main CI for PR93 remains pending.
+
+
+## DOCX body identities — final manual merge gate
+
+PR93 final head `fb56803d41c0341b0c0d71e9f43d5f0d5ccde042` passed [required current-main CI39530041981](https://github.com/narain1/pydoccraft/actions/runs/39530041981), following the recorded independent source and 462-test copied-package review. It was manually merged as `f0cd0a7ef92ba8531e13f680ac9b5ed75779385b`. Repository auto-merge remains disabled. This closes the delivery gate for the internal identity change; broader DOC5/TXT1 remains partial.
