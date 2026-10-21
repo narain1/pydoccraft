@@ -35,7 +35,8 @@ class SlideCellParagraphTests(unittest.TestCase):
             second.alignment = "right"
             self.assertEqual(second.formatting, {"alignment": "right", "indent_left": None,
                                                 "indent_right": None, "indent_first": None,
-                                                "space_before": None, "space_after": None, "line_spacing": None})
+                                                "space_before": None, "space_after": None,
+                                                "line_spacing": None, "tabs": None})
             first.format(alignment="left")
             self.assertEqual(first.alignment, "left")
             with self.assertRaisesRegex(ValueError, "mixed"):

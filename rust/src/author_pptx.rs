@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use deckcraft_model::style::PictureFill;
 use deckcraft_model::text::{
-    Action, Align, Anchor, AutoFit, Hyperlink, ParaProps, RunProps, Spacing, Strike, TextBody,
+    Action, Align, Anchor, AutoFit, Hyperlink, ListStyle, ParaProps, RunProps, Spacing, Strike,
+    TabStop, TextBody,
 };
 use deckcraft_model::{
     Background, ColorBase, ColorRef, Fill, Geom, LayoutType, Line, Presentation, Rgba, Shape,
@@ -28,6 +29,9 @@ const MAX_PROPERTIES: usize = 16 * 1024 * 1024;
 const MAX_PATCH: usize = 16 * 1024;
 const MAX_CELLS: usize = 100_000;
 const MIN_GRID: f64 = 0.05;
+const MAX_TABS: usize = 32;
+const MAX_TAB_POSITION: f64 = 2_147_483_647.0;
+const MAX_TAB_WORK: usize = 2_000_000;
 
 type TextFormat = (
     Option<f64>,
@@ -113,6 +117,7 @@ impl EditablePptx {
         &mut self,
         operation: impl FnOnce(&mut Presentation) -> PyResult<T>,
     ) -> PyResult<T> {
+        tab_inventory(self.document()?, MAX_TAB_WORK)?;
         let mut staged = self.document()?.clone();
         let result = operation(&mut staged)?;
         content_budget(&staged)?;
@@ -340,7 +345,7 @@ impl EditablePptx {
     }
 
     pub fn copy(&self) -> PyResult<Self> {
-        self.document()?;
+        tab_inventory(self.document()?, MAX_TAB_WORK)?;
         Ok(self.clone())
     }
 
@@ -449,6 +454,7 @@ impl EditablePptx {
 
     pub fn to_bytes(&self) -> PyResult<Vec<u8>> {
         let document = self.document()?;
+        tab_inventory(document, MAX_TAB_WORK)?;
         if document.slides.is_empty() {
             return Err(PyValueError::new_err(
                 "add at least one slide before saving",
@@ -1710,10 +1716,11 @@ impl EditablePptx {
                 text: text.len(),
                 paragraphs: 1,
                 runs: usize::from(!text.is_empty()),
+                properties: list_tabs_cost(&original.list_style)?,
                 ..Default::default()
             };
             content_budget(self.document()?)?
-                .replacing(body_budget(original), projected)
+                .replacing(body_budget(original)?, projected)
                 .check()?;
             let mut body = original.clone();
             deckcraft_model::edit::insert(&mut body, (0, 0), text, None);
@@ -1824,6 +1831,11 @@ impl EditablePptx {
         cell: CellTarget,
     ) -> PyResult<String> {
         let props = &self.target_body(slide, id, Some(cell))?.paragraphs[cell.2].props;
+        tabs_cost(&props.tabs)?;
+        let tabs = props.tabs.as_ref().map(|stops| stops.iter().map(|stop| {
+            let alignment = match stop.align.as_str() { "ctr" => "center", "r" => "right", "dec" => "decimal", _ => "left" };
+            serde_json::json!({"position": stop.pos, "alignment": alignment, "leader": "none"})
+        }).collect::<Vec<_>>());
         let scalar = |value: Option<Spacing>, percent: bool| -> PyResult<Option<f64>> {
             match value {
                 None => Ok(None),
@@ -1843,6 +1855,7 @@ impl EditablePptx {
             "space_before": scalar(props.space_before, false)?,
             "space_after": scalar(props.space_after, false)?,
             "line_spacing": scalar(props.line_spacing, true)?,
+            "tabs": tabs,
         })
         .to_string())
     }
@@ -1857,6 +1870,7 @@ impl EditablePptx {
     ) -> PyResult<()> {
         self.check_revision(revision)?;
         let original = &self.target_body(slide, id, Some(cell))?.paragraphs[cell.2].props;
+        tab_inventory(self.document()?, MAX_TAB_WORK)?;
         let props = cell_paragraph_patch(original, patch)?;
         self.mutate(|document| {
             target_body_mut(document, slide, id, Some(cell))?.paragraphs[cell.2].props = props;
@@ -1912,22 +1926,30 @@ impl EditablePptx {
         let cell = table_cell(self.table(slide, id)?, row, col)?;
         text_value(text)?;
         let count = paragraph_count(text);
+        let total = content_budget(self.document()?)?;
         let props = deckcraft_model::edit::props_at(&cell.text, (0, 0));
         let defaults = cell
             .text
             .paragraphs
             .first()
-            .map_or(0, |p| props_cost(&p.def_props) + props_cost(&p.end_props));
+            .map(|p| {
+                Ok::<_, PyErr>(
+                    props_cost(&p.def_props) + props_cost(&p.end_props) + tabs_cost(&p.props.tabs)?,
+                )
+            })
+            .transpose()?
+            .unwrap_or(0);
         let projected = ContentBudget {
             text: text.len(),
             paragraphs: count,
             runs: count,
             properties: count
-                .saturating_mul(defaults.saturating_add(props_cost(&props).saturating_mul(2))),
+                .saturating_mul(defaults.saturating_add(props_cost(&props).saturating_mul(2)))
+                .saturating_add(list_tabs_cost(&cell.text.list_style)?),
             ..Default::default()
         };
-        content_budget(self.document()?)?
-            .replacing(body_budget(&cell.text), projected)
+        total
+            .replacing(body_budget(&cell.text)?, projected)
             .check()?;
         self.mutate(|document| {
             let cell = cell_mut(document, slide, id, row, col)?;
@@ -2065,7 +2087,7 @@ impl EditablePptx {
             }
         };
         let body = self.text_body(slide, id)?;
-        let old = body_budget(body);
+        let old = body_budget(body)?;
         let mut projected = old;
         for paragraph in &body.paragraphs {
             for props in paragraph
@@ -2384,6 +2406,10 @@ fn cell_paragraph_patch(original: &ParaProps, source: &str) -> PyResult<ParaProp
         .ok_or_else(|| PyValueError::new_err("format patch must be a flat object"))?;
     let mut props = original.clone();
     for (key, value) in object {
+        if key == "tabs" {
+            props.tabs = parse_tabs(value)?;
+            continue;
+        }
         if key == "alignment" {
             props.align = match value {
                 serde_json::Value::Null => None,
@@ -2884,31 +2910,268 @@ fn props_cost(props: &RunProps) -> usize {
     .saturating_add(link_cost(&props.hover))
 }
 
-fn body_budget(body: &TextBody) -> ContentBudget {
+// These are source/serialization limits, not a promise that every stop fits a
+// particular cell. DeckCraft owns tab positioning, fallback and wrapping.
+fn tabs_cost(tabs: &Option<Vec<TabStop>>) -> PyResult<usize> {
+    let Some(tabs) = tabs else { return Ok(0) };
+    if tabs.len() > MAX_TABS {
+        return Err(
+            EngineError::ResourceLimit("PPTX tab sources support at most 32 stops".into()).into(),
+        );
+    }
+    let mut previous = None;
+    let mut cost = 0usize;
+    for stop in tabs {
+        if !stop.pos.is_finite() || stop.pos.abs() > MAX_TAB_POSITION {
+            return Err(PyValueError::new_err(
+                "tab position must be finite and between -2147483647 and 2147483647 points",
+            ));
+        }
+        // Match the public native writer's EMU rounding solely to reject
+        // duplicate/reversed serialized positions; do not perform layout.
+        let emu = (stop.pos * 12700.0).round();
+        if previous.is_some_and(|value| value >= emu) {
+            return Err(PyValueError::new_err("tab positions must increase and remain distinct after native 1/12700-point rounding"));
+        }
+        previous = Some(emu);
+        if !matches!(stop.align.as_str(), "l" | "ctr" | "r" | "dec") {
+            return Err(
+                EngineError::Unsupported("PPTX tab alignment is unavailable".into()).into(),
+            );
+        }
+        cost += std::mem::size_of::<TabStop>() + stop.align.len();
+    }
+    Ok(cost)
+}
+
+fn list_tabs_cost(style: &ListStyle) -> PyResult<usize> {
+    if style.levels.len() > 9 {
+        return Err(
+            EngineError::ResourceLimit("PPTX list styles support at most 9 levels".into()).into(),
+        );
+    }
+    style
+        .levels
+        .iter()
+        .flatten()
+        .try_fold(0usize, |sum, level| {
+            Ok(sum.saturating_add(tabs_cost(&level.para.tabs)?))
+        })
+}
+
+fn parse_tabs(value: &serde_json::Value) -> PyResult<Option<Vec<TabStop>>> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    let values = value
+        .as_array()
+        .ok_or_else(|| PyValueError::new_err("tabs must be an array or None"))?;
+    if values.len() > MAX_TABS {
+        return Err(EngineError::ResourceLimit("PPTX tabs support at most 32 stops".into()).into());
+    }
+    let mut tabs = Vec::with_capacity(values.len());
+    for value in values {
+        let item = value
+            .as_object()
+            .ok_or_else(|| PyValueError::new_err("each tab must be a mapping"))?;
+        if item
+            .keys()
+            .any(|key| !matches!(key.as_str(), "position" | "alignment" | "leader"))
+        {
+            return Err(PyValueError::new_err("unknown tab property"));
+        }
+        let pos = item
+            .get("position")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| PyValueError::new_err("tab position must be a number"))?;
+        let alignment = match item.get("alignment") {
+            None => "left",
+            Some(value) => value
+                .as_str()
+                .ok_or_else(|| PyValueError::new_err("tab alignment must be a string"))?,
+        };
+        let align = match alignment {
+            "left" => "l",
+            "center" => "ctr",
+            "right" => "r",
+            "decimal" => "dec",
+            _ => {
+                return Err(EngineError::Unsupported(
+                    "PPTX tabs support left, center, right or decimal alignment".into(),
+                )
+                .into())
+            }
+        };
+        if item
+            .get("leader")
+            .is_some_and(|value| value.as_str() != Some("none"))
+        {
+            return Err(EngineError::Unsupported("PPTX tab leaders are unavailable".into()).into());
+        }
+        tabs.push(TabStop {
+            pos,
+            align: align.into(),
+        });
+    }
+    let tabs = Some(tabs);
+    tabs_cost(&tabs)?;
+    Ok(tabs)
+}
+
+// One bounded inventory covers every public native source reached by text-style
+// resolution. Direct slide/notes bodies are charged by body_budget; auxiliary
+// master/layout/default sources are returned separately to avoid double charging.
+struct TabInventory {
+    work: usize,
+    limit: usize,
+    total: usize,
+}
+impl TabInventory {
+    fn charge(&mut self, count: usize) -> PyResult<()> {
+        self.work = self
+            .work
+            .checked_add(count)
+            .filter(|n| *n <= self.limit)
+            .ok_or_else(|| {
+                EngineError::ResourceLimit("PPTX tab source work limit exceeded".into())
+            })?;
+        Ok(())
+    }
+    fn props(&mut self, props: &ParaProps) -> PyResult<usize> {
+        self.charge(1)?;
+        if let Some(stops) = &props.tabs {
+            self.charge(stops.len())?;
+        }
+        let cost = tabs_cost(&props.tabs)?;
+        self.total = self.total.saturating_add(cost);
+        if self.total > MAX_PROPERTIES {
+            return Err(
+                EngineError::ResourceLimit("PPTX tab properties exceed 16 MiB".into()).into(),
+            );
+        }
+        Ok(cost)
+    }
+    fn list(&mut self, style: &ListStyle) -> PyResult<usize> {
+        self.charge(style.levels.len())?;
+        if style.levels.len() > 9 {
+            return Err(EngineError::ResourceLimit(
+                "PPTX list styles support at most 9 levels".into(),
+            )
+            .into());
+        }
+        style
+            .levels
+            .iter()
+            .flatten()
+            .try_fold(0usize, |sum, level| {
+                Ok(sum.saturating_add(self.props(&level.para)?))
+            })
+    }
+    fn body(&mut self, body: &TextBody) -> PyResult<usize> {
+        self.charge(body.paragraphs.len())?;
+        let mut cost = self.list(&body.list_style)?;
+        for paragraph in &body.paragraphs {
+            self.charge(paragraph.runs.len())?;
+            cost = cost.saturating_add(self.props(&paragraph.props)?);
+        }
+        Ok(cost)
+    }
+    fn shapes(&mut self, shapes: &[Shape]) -> PyResult<usize> {
+        self.charge(shapes.len())?;
+        let mut cost = 0usize;
+        visit_shapes(shapes, &mut |shape| {
+            if let ShapeKind::Group { children, .. } = &shape.kind {
+                self.charge(children.len())?;
+            }
+            if let Some(body) = &shape.text {
+                cost = cost.saturating_add(self.body(body)?);
+            }
+            if let ShapeKind::Table(table) = &shape.kind {
+                self.charge(table.rows.len())?;
+                for row in &table.rows {
+                    self.charge(row.cells.len())?;
+                    for cell in &row.cells {
+                        cost = cost.saturating_add(self.body(&cell.text)?);
+                    }
+                }
+            }
+            Ok(())
+        })?;
+        Ok(cost)
+    }
+}
+
+fn tab_inventory(document: &Presentation, work_limit: usize) -> PyResult<usize> {
+    let mut inventory = TabInventory {
+        work: 0,
+        limit: work_limit,
+        total: 0,
+    };
+    inventory.charge(document.slides.len())?;
+    for slide in &document.slides {
+        inventory.body(&slide.notes)?;
+        inventory.shapes(&slide.shapes)?;
+    }
+    let mut auxiliary = inventory.list(&document.default_text_style)?;
+    inventory.charge(document.masters.len())?;
+    for master in document
+        .masters
+        .iter()
+        .map(Arc::as_ref)
+        .chain(document.notes_master.as_deref())
+        .chain(document.handout_master.as_deref())
+    {
+        inventory.charge(1)?;
+        auxiliary = auxiliary
+            .saturating_add(inventory.list(&master.title_style)?)
+            .saturating_add(inventory.list(&master.body_style)?)
+            .saturating_add(inventory.list(&master.other_style)?)
+            .saturating_add(inventory.shapes(&master.shapes)?);
+        inventory.charge(master.layouts.len())?;
+        for layout in &master.layouts {
+            auxiliary = auxiliary.saturating_add(inventory.shapes(&layout.shapes)?);
+        }
+    }
+    Ok(auxiliary)
+}
+
+fn body_budget(body: &TextBody) -> PyResult<ContentBudget> {
+    if body.paragraphs.len() > MAX_PARAGRAPHS {
+        return Err(
+            EngineError::ResourceLimit("presentation paragraph limit exceeded".into()).into(),
+        );
+    }
     let mut budget = ContentBudget {
         paragraphs: body.paragraphs.len(),
         text: body.paragraphs.len().saturating_sub(1),
+        properties: list_tabs_cost(&body.list_style)?,
         ..Default::default()
     };
     for paragraph in &body.paragraphs {
         budget.properties = budget
             .properties
             .saturating_add(props_cost(&paragraph.def_props))
-            .saturating_add(props_cost(&paragraph.end_props));
+            .saturating_add(props_cost(&paragraph.end_props))
+            .saturating_add(tabs_cost(&paragraph.props.tabs)?);
         budget.runs = budget.runs.saturating_add(paragraph.runs.len());
+        budget.check()?;
         for run in &paragraph.runs {
             budget.text = budget.text.saturating_add(run.content().len());
             budget.properties = budget.properties.saturating_add(props_cost(&run.props));
         }
     }
-    budget
+    budget.check()
 }
 
 fn content_budget(document: &Presentation) -> PyResult<ContentBudget> {
-    let mut budget = ContentBudget::default();
+    let auxiliary_tabs = tab_inventory(document, MAX_TAB_WORK)?;
+    let mut budget = ContentBudget {
+        properties: auxiliary_tabs,
+        ..Default::default()
+    };
     for slide in &document.slides {
         budget.text = budget.text.saturating_add(slide.name.len());
-        budget.add(body_budget(&slide.notes));
+        budget.add(body_budget(&slide.notes)?);
         visit_shapes(&slide.shapes, &mut |shape| {
             budget.text = budget.text.saturating_add(shape.descr.len());
             budget.properties = budget
@@ -2916,7 +3179,7 @@ fn content_budget(document: &Presentation) -> PyResult<ContentBudget> {
                 .saturating_add(link_cost(&shape.click))
                 .saturating_add(link_cost(&shape.hover));
             if let Some(body) = &shape.text {
-                budget.add(body_budget(body));
+                budget.add(body_budget(body)?);
             }
             if let ShapeKind::Table(table) = &shape.kind {
                 validate_table_grid(table)?;
@@ -2924,7 +3187,7 @@ fn content_budget(document: &Presentation) -> PyResult<ContentBudget> {
                     .cells
                     .saturating_add(table.n_rows().saturating_mul(table.n_cols()));
                 for cell in table.rows.iter().flat_map(|row| &row.cells) {
-                    budget.add(body_budget(&cell.text));
+                    budget.add(body_budget(&cell.text)?);
                 }
             }
             budget.check().map(|_| ())
@@ -2980,6 +3243,7 @@ fn edited_body(
     } else {
         a
     };
+    let total = content_budget(document)?;
     let mut props = deckcraft_model::edit::props_at(body, props_position);
     if let Some(patch) = patch {
         // Appending inherits appearance, not an adjacent label's navigation target.
@@ -2987,8 +3251,7 @@ fn edited_body(
         props.hover = None;
         patch.apply(&mut props);
     }
-    let total = content_budget(document)?;
-    let old = body_budget(body);
+    let old = body_budget(body)?;
     let removed = deckcraft_model::edit::text_range(body, a, b).len();
     if total
         .text
@@ -3000,7 +3263,7 @@ fn edited_body(
     }
     let mut edited = body.clone();
     deckcraft_model::edit::delete(&mut edited, a, b);
-    let mut projected = body_budget(&edited);
+    let mut projected = body_budget(&edited)?;
     let added_paragraphs = paragraph_count(text) - 1;
     // Preflight cloning of insertion and paragraph properties before upstream insert.
     projected.paragraphs = projected.paragraphs.saturating_add(added_paragraphs);
@@ -3012,14 +3275,20 @@ fn edited_body(
     let paragraph_defaults = edited
         .paragraphs
         .get(a.0)
-        .map_or(0, |p| props_cost(&p.def_props) + props_cost(&p.end_props));
+        .map(|p| {
+            Ok::<_, PyErr>(
+                props_cost(&p.def_props) + props_cost(&p.end_props) + tabs_cost(&p.props.tabs)?,
+            )
+        })
+        .transpose()?
+        .unwrap_or(0);
     projected.properties = projected
         .properties
         .saturating_add((added_paragraphs + 3).saturating_mul(props_cost(&props)))
         .saturating_add(added_paragraphs.saturating_mul(paragraph_defaults));
     total.replacing(old, projected).check()?;
     deckcraft_model::edit::insert(&mut edited, a, text, Some(props));
-    total.replacing(old, body_budget(&edited)).check()?;
+    total.replacing(old, body_budget(&edited)?).check()?;
     Ok(edited)
 }
 
@@ -3031,7 +3300,7 @@ fn preflight_format(
     apply: &impl Fn(&mut RunProps),
     preserve_ends: bool,
 ) -> PyResult<()> {
-    let old = body_budget(body);
+    let old = body_budget(body)?;
     let mut projected = old;
     for (pi, paragraph) in body.paragraphs.iter().enumerate().take(b.0 + 1).skip(a.0) {
         let from = if pi == a.0 { a.1 } else { 0 };
@@ -6072,3 +6341,7 @@ mod cell_break_proof;
 #[cfg(test)]
 #[path = "pptx_cell_break_tests.rs"]
 mod cell_break_tests;
+
+#[cfg(test)]
+#[path = "pptx_cell_tabs_proof.rs"]
+mod pptx_cell_tabs_proof;

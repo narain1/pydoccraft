@@ -7,6 +7,8 @@ Only imported package diagnostics are suppressed; this consumer is checked stric
 The private class imports supply expected identities, not extra public exports.
 """
 from fractions import Fraction
+from io import BytesIO
+from pathlib import Path
 from numbers import Real
 from typing import Any, Literal, assert_type
 
@@ -14,7 +16,7 @@ import doc_ex
 from doc_ex._authoring import (
     Annotation, Bookmark, BorderFormatting, Comment, Comments, EditableCell, EditableTable, Paragraph, ParagraphFormatting, PdfDocument, PdfField,
     PdfPage, Picture, Presentation, Shape, SlidePicture, SlideTable, TabStop, TextRange,
-    WordDocument, _WordShape,
+    WordDocument, _WordShape, _SlideCellParagraph,
 )
 
 
@@ -37,6 +39,8 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         del word.shapes[0]
 
         assert_type(word.copy(), WordDocument)
+        word.update_metadata(language="en-GB")
+        assert_type(word.metadata["language"], str)
         assert_type(word.mirror_margins, bool)
         assert_type(word.sections[0].vertical_alignment, Literal["top", "center", "bottom", "justify"])
         word.sections[0].vertical_alignment = "center"
@@ -185,6 +189,9 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(cell_paragraph[:].format(letter_spacing=None), None)
         assert_type(cell_paragraph.format(indent_left=12, indent_right=None, indent_first=-6,
                                          space_before=4, space_after=8, line_spacing=1.5), None)
+        assert_type(cell_paragraph.format(tabs=[{"position": 72, "alignment": "decimal"}]), None)
+        assert_type(cell_paragraph.format(tabs=[]), None)
+        assert_type(cell_paragraph.format(tabs=None), None)
         assert_type(cell_paragraph.formatting["line_spacing"], float | None)
         cell_snapshot = cell_paragraph.formatting
         assert_type(cell_paragraph.format(**cell_snapshot), None)
@@ -429,3 +436,47 @@ def verify_unit_converters(real: Real) -> None:
         assert_type(converter(1.5), float)
         assert_type(converter(Fraction(1, 2)), float)
         assert_type(converter(real), float)
+
+
+class _PropertyIndex:
+    def __index__(self) -> int:
+        return 2
+
+def verify_property_setters(word: WordDocument, deck: Presentation, png: bytes) -> None:
+    word.background = (255, 0, 0)
+    word.background = [0, 0, 255]
+    word.background = None
+    word.background_image = Path('background.png')
+    word.background_image = BytesIO(png)
+    word.background_image = None
+    section = word.sections[0]
+    section.page_size = 'A4'
+    section.page_size = [400, 600]
+    section.margins = Fraction(12, 1)
+    section.margins = (10, 20, 30, 40)
+    section.margins = [10, 20, 30, 40]
+    section.gutter = Fraction(5, 1)
+    section.header_distance = 12
+    section.footer_distance = 12.5
+    section.columns = (_PropertyIndex(), 12, True)
+    section.columns = [2, 12, True]
+    section.column_widths = (100, 200)
+    section.column_widths = [100, 200]
+    section.column_widths = None
+    cell = word.add_table([['value']])[0, 0]
+    cell.margins = Fraction(3, 1)
+    cell.margins = [1, 2, 3, 4]
+    cell.margins = None
+    cell.background = 'navy'
+    cell.background = [0, 0, 255]
+    slide = deck.slides[0]
+    slide.background_image = png
+    shape = slide.add_shape('rectangle', box=(10, 10, 50, 50))
+    shape.stroke = ('blue', 2)
+    shape.stroke = [(0, 0, 255), 2]
+    shape.stroke = None
+
+
+def verify_slide_cell_alignment_reset(paragraph: _SlideCellParagraph) -> None:
+    paragraph.alignment = None
+    paragraph.alignment = "center"

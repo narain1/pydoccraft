@@ -1157,4 +1157,53 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Audit source-only lock changes,264 permissive runtime/build packages and55 Word citations across14 files; update current attribution while preserving historical artifacts/fingerprints.
 - [x] Finish linked baseline/candidate regression and full461-native/fmt/strictClippy/release; clean579 installed corpus, typing, exact artifact/source and independent review.
 - [x] Finalize synchronized native/pin/artifact evidence and independent source/focused review.
-- [ ] Complete current-head CI and manual merge. Python language admission141 and broader DOC7/U01 remain open.
+- [x] Complete current-head CI and manual merge through PR132, required CI39610487130 and documentation CI39610487137. Python language admission141 and broader DOC7/U01 remain separately tracked.
+
+
+## DOCX core-language metadata (spec141)
+
+- [x] Independently review the compact existing-dictionary API, native inventories, bounds and metadata/run-language distinction.
+- [x] Prepare the adapter and focused output/UTF-8/aggregate/rollback controls; retain intended baseline unsupported-key failures.
+- [x] Integrate after the independently reviewed native contribution139 and dedicated upgrade140 local acceptance.
+- [x] Pass native and installed focused controls, then explicitly record the sole reviewed metadata-test fingerprint migration without relabeling historical evidence.
+- [x] Pass full locked native/installed corpus, independent source/artifact/focused review, license/size checks and synchronized bounded documentation.
+- [ ] Complete fresh current-main CI and manual merge. Keep extended-property and broader DOC7 work open.
+
+
+## 134. PPTX cell paragraph direction investigation
+
+- [x] Execute and preserve the failed raw gate; distinguish invalid visual/CMap test assumptions from separately measured normalized text differences.
+- [x] Review four diagnostic controls and native source ownership under existing U10 without claiming direction support.
+- [ ] Prove a reviewed native semantic solution and complete the originally requested source/readback/PNG/PDF acceptance before admitting the existing-format direction control.
+
+
+## 137. PPTX cell tab stops
+
+- [x] Audit native writer/reader/layout/default inheritance and run the reviewed raw two-group gate; retain original failure and separate reading-order/endpoint diagnostics.
+- [x] Implement existing cell formatting/snapshot projection and bounded direct/inherited source/property accounting with callback and lifetime validation.
+- [x] Run focused six native groups and fmt/locked all-target Clippy; preserve the original raw source and explicit native-only malformed controls.
+- [x] Run copied-package public workflows and strict consumer.
+- [x] Complete independent source/accounting and exact copied-package focused review.
+- [x] Complete synchronized documentation review, including held134 evidence.
+- [x] Complete final full native/release/installed corpus and independent exact-artifact/source/focused verification.
+- [ ] Complete required current-head CI and manual PR review/merge. No release or broad TXT4/SLIDE3 completion is implied.
+
+
+## Stable property setter typing (spec142)
+
+- [x] Audit remaining missing property setter input/return annotations against existing Python and native dispatch.
+- [x] Annotate 28 existing setters without changing bodies, schemas, aliases or public methods; verify whole-facade AST equality after removing annotations.
+- [x] Pass valid strict consumer controls and reject exactly 13 invalid assignments previously accepted by the baseline.
+- [x] Pass all 37 existing authoring, section geometry, background, table formatting and style-default workflows against the copied-package candidate.
+- [x] Complete independent source, AST, strict positive/negative and nullable-reset review.
+- [x] Complete combined installed-artifact validation and independent artifact review.
+- [ ] Complete current-main CI and manual merge; keep API3 open.
+
+## 153. PDF inferred-table text preservation correction
+
+- [x] Preserve PR 133 failure and distinguish actual visible/native PDF content from normalized omission.
+- [x] Reproduce the defect with standalone builtin-font PDF data; preserve failed old native/public expectations.
+- [x] Review and implement conservative discarded-row admission before any page mutation, retaining the exact existing replacement predicate.
+- [x] Complete focused native/public and independent source/artifact verification, including unchanged tab proofs in both diagnostic font environments.
+- [x] Complete corrected parent-integrated469-native/586-installed artifact, strict typing and independent source/artifact review; preserve earlier failures and146/148 artifacts as historical sources.
+- [ ] Complete fresh current-head CI, actual-main synchronization and manual review/merge.

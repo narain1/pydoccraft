@@ -903,3 +903,41 @@ TXT1 reuses existing paragraph collections and revision-bound ranges. Its audit 
 The selected517637db contribution adds one public CoreProps String and two native core read/write entries. Empty is absent, including old model JSON; the existing reader trims surrounding whitespace and retains the last matching element, while the existing writer escapes and omits empty values. Flat OPC retains the package metadata. Word2003 XML's separate property converter remains outside scope; run-language formatting and PDF tagging are unrelated. Native privacy filtering continues to remove creator/editor without removing document language. No local XML implementation or metadata manager is added.
 
 This dedicated package upgrade changes only five direct/nine resolved Word source identities. One test-only linked-native fixture accesses serialized CoreProps language, so the exact desired source can execute on the former native model and demonstrate its preservation loss without exposing a Python key. Repeated source/PDF rendering and existing extraction/link controls establish unchanged fixture output; the full579 Python corpus remains unchanged. Python metadata admission141 and bounded extended properties remain separate.
+
+
+## DOCX core-language metadata (spec141)
+
+Add language to the existing native update target and core snapshot inventories, the extraction metadata projection, Python allowed-key set and private output schema. The native model/reader/writer come from prerequisite139/140; no OOXML processing is added to Python. Including language in core_metadata also includes it in the existing serialized aggregate budget. Reuse existing value validation, staged commit, revision invalidation, copies and cache behavior. Legacy unknown-key fixtures replace only their newly supported language example with a still-unknown key.
+
+
+## 134. Direction source evidence and logical PDF text
+
+The cell-only direction proposal remains at its native proof gate. Existing ParaProps.rtl and native layout are insufficient to claim semantic export fidelity. Preserve the original mistaken visual/CMap premises alongside separate actual normalized text differences; four matched visual diagnostic controls do not substitute for full acceptance. Route the source-backed logical-span investigation through existing U10 and the native Deck/PdfCraft boundary, with no new public manager or adapter workaround.
+
+
+## 137. PPTX cell tab formatting through native paragraph properties
+
+The existing cell paragraph patch projects tab mappings into DeckCraft ParaProps.tabs. Snapshot values preserve direct None/empty/list state; native serialization owns EMU rounding and native layout owns tab alignment, forward selection, default pitch and wrapping. The adapter checks only finite writer bounds,32-stop serialization capacity, roundtrip-distinct sorted order and supported alignment/leader vocabulary. No positioning or reading-order algorithm is added.
+
+A private bounded inventory walks presentation defaults, direct slide/notes bodies, master title/body/other styles, master/layout shapes and cells, notes and handout masters. It charges source containers/levels/paragraphs/runs/stops before traversal, caps work at2M, validates each source and returns auxiliary tab bytes. Fallible body budgets include direct paragraph/body-list tab cost; auxiliary sources are added once to the whole-document property budget. Differential projections retain inherited body-list cost and charge repeated paragraph tabs before native insertion. Generic staged mutation, copy and serialization validate source tabs before cloning/writing; exact candidate content budgets validate the result. This does not broaden unrelated malformed-state recovery.
+
+Cell-only facade normalization bypasses overridable built-in container/string hooks, checks32 stops before per-item conversion, uses existing pt() conversion and immediately rechecks revision/canonical target after each caller scalar conversion. Existing shared DOCX parsing, shape formatting, LF/VT validation and generation semantics remain intact.
+
+The first raw global normalized-PDF order assertion failed on a wide tab gap. Native emitted Unicode/source order and geometry were correct; two existing default HTs and one custom144-point stop had byte-identical native/PDF rasters and the same column-first normalization. The reviewed intentional oracle correction retains exact emitted token order, exact normalized token multiplicity, narrow/default ordered controls, native geometry and all unchanged pixel assertions. It does not claim general extraction-order equality or fix the separate held bidi issue134.
+
+
+## Stable property setter typing (spec142)
+
+Add annotations to 28 existing setters only. Reuse private source/size/color aliases and existing Python unions, including Real | float for scalar values handled by pt and SupportsIndex for section column count. Retain list and tuple forms; no new runtime alias, schema, validator, property or manager is introduced. Setters retain their existing bodies and precise None return types. Static checks reject obvious invalid assignments while native/runtime validation retains shape, boolean, range, format and ownership checks.
+
+The strict consumer exercises ordinary numbers, Fraction scalars, the index protocol, list/tuple values, path/stream image sources and supported clears. A whole-facade AST comparison erases only function/argument annotations and must otherwise be identical to aa1dae5. Dynamic metadata, note-option snapshots, raw path commands, the general range-link return contract and broader API3 discoverability remain separately scoped.
+
+Spec142 review retains the existing conventional float element hints in point containers; these do not describe every Real subtype accepted by runtime pt. Scalar distance/margin setters explicitly include Real. The PPTX cell-paragraph alignment override accepts str | None, preserving its native reset; ordinary Word paragraph alignment remains nonnullable. Wider static collection inference and exhaustive numeric protocols remain API3 work.
+
+## 153. Conservative admission of inferred PDF tables
+
+The existing PDF normalizer can identify an aligned grid from native reading blocks, discard singleton rows and then replace every normalized block centered within the resulting envelope. PR 133 exposed a real loss: a standalone EMERALD line was excluded from rows but its original paragraph was removed. Native glyphs, exported Unicode and pixels retained the line; this is distinct from native PDF column-reading-order behavior.
+
+The correction partitions the already-owned reading rows into candidates and discarded rows without cloning text. It computes the original replacement predicate once, unions the table envelope with full bounds of every selected original block, and declines adoption if a discarded native block overlaps that region. Coordinate conversion remains native. Invalid computed candidate-envelope/selected/discarded bounds also decline adoption. The guard uses linear scans and runs before any page mutation. Rejection retains original blocks/order/data; accepted tables use the existing construction/nonduplication path. This specifically protects discarded native rows and does not certify every possible native layout/normalization mismatch.
+
+Deterministic builtin-font PDF fixtures reproduce the omission independently of installed fonts. The original PPTX tab proof remains unchanged and is replayed with both the original local font set and a process-local Liberation font directory that reproduces the CI observation. No font files, dependency revisions, Python surface, parser or renderer behavior are changed by this fix. Existing E1/W09 ownership and roadmap status remain unchanged.

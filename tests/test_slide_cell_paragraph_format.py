@@ -135,7 +135,7 @@ class SlideCellParagraphFormatTests(unittest.TestCase):
                 self.assertEqual(deck._call('revision'), revision)
                 self.assertIs(deck._cached, cache)
                 self.assertEqual(live.text, 'Safe')
-            for patch in ({'keep_with_next': True}, {'tabs': []}, {'direction': 'rtl'}):
+            for patch in ({'keep_with_next': True}, {'tabs': [{'position': 72, 'leader': 'dot'}]}, {'direction': 'rtl'}):
                 with self.assertRaises(UnsupportedFormatError):
                     paragraph.format(space_after=8, **patch)
             paragraph.format()

@@ -979,3 +979,38 @@ The same audit compares original TXT1 ordinary paragraph/run editing and exact-t
 1. Select all five direct/nine resolved Word crates at the exact independently reviewed contribution, retaining all other locked sources/versions/edges/checksums, permissive licenses and assets.
 2. Add one linked-native regression for imported language, serialized CoreProps preservation, clear/default behavior and unchanged content/render/export paths. Keep all Python metadata inventories and historical public tests unchanged; admission belongs to spec141.
 3. Complete locked native/fmt/strictClippy/release, clean installed579 regression corpus, strict typing and independent source/artifact/attribution evidence. Record exact sizes/citations and distinguish native139 evidence from package140 evidence. No DOC7 checkbox or operation-profile promotion follows.
+
+
+## DOCX core-language metadata (spec141)
+
+The existing owned metadata patch and extraction metadata dictionary shall expose the native document-language value after the separately reviewed engine upgrade. Preserve existing nullable-clear/empty-omission behavior, 64 KiB UTF-8 scalar bounds, 256 KiB serialized core-metadata bounds and atomic rejection. Treat this as document metadata; do not infer run language, shaping, fonts, paragraph direction or PDF tagging. Extended properties remain separate DOC7/U01 work.
+
+
+## 134. PPTX cell paragraph direction investigation
+
+1. Keep the proposed existing-format direction control unadmitted until native source, glyph geometry, source/readback and semantic PDF acceptance pass. Distinguish language-dependent visual ordering, emitted glyph order/ActualText and normalized extraction.
+2. Preserve failed raw assertions and later diagnostic observations separately. Any logical-text correction SHALL use reviewed public native engines, retain links/search geometry and ordinary output, and complete its dedicated contribution/upgrade gates; do not reconstruct bidi order locally.
+
+
+## 137. Owned PPTX cell tab stops
+
+137.1 Reuse `Paragraph.format(tabs=...)` and the direct snapshot for owned horizontal PPTX cells. Preserve None versus explicit empty inheritance, four native alignments, supplied order and 1/12700-point serialization. Admit finite signed positions within the native +/-2147483647-point writer domain, at most32 stops, strictly increasing after rounding; reject leaders other than absent/none and unsupported alignments. Horizontal cells are the existing publicly constructible profile, not a new native orientation guard. No new alias, input text validator expansion, imported editing or resolved snapshot.
+
+137.2 Keep text/link character offsets and native emitted PDF label order. Preserve actual source/readback geometry and rendering for fitting controls. Explicitly distinguish native PDF column reading order from export text loss and retain the original failed global-order oracle. Extreme scalar acceptance is not a fit or page-containment guarantee.
+
+137.3 Validate bounded direct and inherited tab sources before cloning. Charge descriptors/alignment bytes once within existing property budgets, preflight paragraph-property cloning on LF insertion and retained body-list properties on replacement/empty insertion. Bound inherited-source work, refuse32+ sources before writer truncation, and preserve exact/+1 failures, atomicity, lifetimes, callback ordering and revision exhaustion.
+
+137.4 Preserve all prior negative guards except the documented obsolete tabs=[] refusal fixture. Keep raw native writer diagnostics distinct from adapter admission. Complete focused/native/public/typing/source review and final installed artifact/current-head CI gates before delivery; broader TXT4/SLIDE3 remain open.
+
+
+## Stable property setter typing (spec142)
+
+Existing authoring properties must describe supported input types and None returns without altering assignments, validation or the public surface. Cover the remaining missing setter annotations for document backgrounds, style relations, ranges, section geometry, table cells and slide shapes. Preserve the distinction between DOCX background-image clearing and PPTX image assignment, and between nullable cell margins and nonnullable direct cell colors. Static types do not certify numeric ranges, sequence lengths, colors, format-specific support or lifetime validity.
+
+## 153. Preserve text when inferred PDF table rows are incomplete
+
+153.1 Retain original normalized PDF blocks when a nonempty native reading block excluded from the candidate table intersects the region whose original blocks would be replaced. Use the same replacement predicate for all block kinds and include the full bounds of selected blocks. This is a conservative admission check within the existing small geometry normalizer, not a new table or reading-order engine.
+
+153.2 Check finite positive computed candidate-envelope, selected-block and discarded-block bounds, map coordinates with native PageInfo conversion, and decide before draining rows or changing page blocks/tables. Partial overlap must decline the candidate. Do not reconstruct missing text, alter font/rendering behavior, relax the original tab-proof multiplicity assertions, or promise arbitrary PDF table recognition.
+
+153.3 Preserve legitimate aligned-table extraction without duplicate text and preserve disjoint surrounding text. Verify interior singleton, partial overlap, extended block and invalid selected-bound controls, rotations, CropBox offsets and UserUnit with original deterministic PDF fixtures. Record the PR 133 failure, original artifacts and font-triggered reproduction separately from the corrected artifact/current-head gates.

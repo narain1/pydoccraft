@@ -149,6 +149,7 @@ class _PdfMetadataPatch(TypedDict, total=False):
 
 
 class _WordCoreMetadata(_PdfMetadata, total=False):
+    language: str
     description: str
     category: str
     last_modified_by: str
@@ -831,7 +832,7 @@ class WordDocument(EditableDocument):
 
     def update_metadata(self, **values) -> None:
         """Patch supported properties; None clears a field or custom entry."""
-        allowed = {"title", "author", "subject", "keywords", "description", "category",
+        allowed = {"title", "author", "subject", "keywords", "language", "description", "category",
                    "last_modified_by", "created", "modified", "revision", "custom"}
         if values.keys() - allowed:
             raise ValueError("unsupported DOCX metadata key")
@@ -964,7 +965,7 @@ class WordDocument(EditableDocument):
         return self._call("background")
 
     @background.setter
-    def background(self, color):
+    def background(self, color: _Color | None) -> None:
         self._call("set_background", None if color is None else _hex_color(color), _change=True)
 
     @property
@@ -974,7 +975,7 @@ class WordDocument(EditableDocument):
         return None if value is None else bytes(value)
 
     @background_image.setter
-    def background_image(self, source) -> None:
+    def background_image(self, source: _Source | None) -> None:
         """Set a stretched PNG, or clear only the image with None."""
         self._ensure_open()
         from . import _read
@@ -1093,7 +1094,7 @@ class Style:
         return None if identifier is None else Style(self._owner, identifier)
 
     @based_on.setter
-    def based_on(self, value: str | Style | None):
+    def based_on(self, value: str | Style | None) -> None:
         revision = self._owner._call("revision")
         self._info()
         reference = _style_reference(value, self._owner)
@@ -1117,7 +1118,7 @@ class Style:
         return None if identifier is None else Style(self._owner, identifier)
 
     @next.setter
-    def next(self, value: str | Style | None):
+    def next(self, value: str | Style | None) -> None:
         self._set_relation("next", value)
 
     @property
@@ -1131,7 +1132,7 @@ class Style:
         return Style(self._owner, identifier)
 
     @linked.setter
-    def linked(self, value: str | Style | None):
+    def linked(self, value: str | Style | None) -> None:
         self._set_relation("linked", value)
 
     @property
@@ -1309,7 +1310,7 @@ class TextRange:
         return paragraph._owner._call("range_text", *paragraph._range_args, self._start, self._end, self._revision, **getattr(paragraph, "_range_kwargs", {}))
 
     @text.setter
-    def text(self, value: str):
+    def text(self, value: str) -> None:
         paragraph = self._paragraph
         self._start, self._end, self._revision = paragraph._owner._call("replace_range", *paragraph._range_args, self._start, self._end, self._revision, value, _change=True, **getattr(paragraph, "_range_kwargs", {}))
 
@@ -1319,7 +1320,7 @@ class TextRange:
         return paragraph._owner._call("range_link", *paragraph._range_args, self._start, self._end, self._revision, **getattr(paragraph, "_range_kwargs", {}))
 
     @link.setter
-    def link(self, url: str | None):
+    def link(self, url: str | None) -> None:
         paragraph = self._paragraph
         self._revision = paragraph._owner._call("set_range_link", *paragraph._range_args, self._start, self._end, self._revision, url, _change=True, **getattr(paragraph, "_range_kwargs", {}))
 
@@ -1427,7 +1428,7 @@ class _SlideTextRange(TextRange):
         return _slide_link_value(self._paragraph._owner, self._link_info())
 
     @link.setter
-    def link(self, target: str | Slide | None):
+    def link(self, target: str | Slide | None) -> None:
         content = self._paragraph
         url, slide_id = _slide_link_target(content._owner, target)
         previous = self._link_info(allow_mixed=True)
@@ -1440,7 +1441,7 @@ class _SlideTextRange(TextRange):
         return "" if value is None else value[2]
 
     @link_tooltip.setter
-    def link_tooltip(self, value: str):
+    def link_tooltip(self, value: str) -> None:
         info = self._link_info()
         if info is None:
             raise ValueError("set a link before setting its tooltip")
@@ -1473,7 +1474,7 @@ class Section:
         return self._props()["start"]
 
     @start.setter
-    def start(self, value: str):
+    def start(self, value: str) -> None:
         self._set(start=value)
 
     @property
@@ -1540,7 +1541,7 @@ class Section:
         return tuple(self._props()["page_size"])
 
     @page_size.setter
-    def page_size(self, value):
+    def page_size(self, value: _Size) -> None:
         self._set(page_size=_size(value))
 
     @property
@@ -1549,7 +1550,7 @@ class Section:
         return tuple(self._props()["margins"])
 
     @margins.setter
-    def margins(self, value):
+    def margins(self, value: Real | float | tuple[float, float, float, float] | list[float]) -> None:
         self._set(margins=_margins(value))
 
     @property
@@ -1558,7 +1559,7 @@ class Section:
         return self._props()["gutter"]
 
     @gutter.setter
-    def gutter(self, value):
+    def gutter(self, value: Real | float) -> None:
         self._set(gutter=pt(value))
 
     @property
@@ -1566,7 +1567,7 @@ class Section:
         return self._props()["distances"][0]
 
     @header_distance.setter
-    def header_distance(self, value):
+    def header_distance(self, value: Real | float) -> None:
         self._set(distances=[pt(value), self.footer_distance])
 
     @property
@@ -1574,7 +1575,7 @@ class Section:
         return self._props()["distances"][1]
 
     @footer_distance.setter
-    def footer_distance(self, value):
+    def footer_distance(self, value: Real | float) -> None:
         self._set(distances=[self.header_distance, pt(value)])
 
     @property
@@ -1583,7 +1584,7 @@ class Section:
         return tuple(self._props()["columns"])
 
     @columns.setter
-    def columns(self, value):
+    def columns(self, value: tuple[SupportsIndex, float, bool] | list[SupportsIndex | float | bool]) -> None:
         if not isinstance(value, (tuple, list)) or len(value) != 3:
             raise TypeError("columns must be (count, gap, separator)")
         count, gap, separator = value
@@ -1598,7 +1599,7 @@ class Section:
         return None if widths is None else tuple(widths)
 
     @column_widths.setter
-    def column_widths(self, value):
+    def column_widths(self, value: tuple[float, ...] | list[float] | None) -> None:
         if value is None:
             self._set(column_widths=None)
             return
@@ -2338,7 +2339,7 @@ class EditableCell:
         return table._owner._call("cell_text", *self._args)
 
     @text.setter
-    def text(self, value: str):
+    def text(self, value: str) -> None:
         table = self._table
         table._owner._call("set_cell_text", *self._args, value, _change=True)
 
@@ -2432,7 +2433,7 @@ class EditableCell:
         return self._table._owner._call("cell_margins", *self._args)
 
     @margins.setter
-    def margins(self, value):
+    def margins(self, value: Real | float | tuple[float, float, float, float] | list[float] | None) -> None:
         self._table._owner._call("set_cell_margins", *self._args, None if value is None else _margins(value), _change=True)
 
     @property
@@ -2440,7 +2441,7 @@ class EditableCell:
         return self._table._owner._call("cell_alignment", *self._args)
 
     @alignment.setter
-    def alignment(self, value: str | None):
+    def alignment(self, value: str | None) -> None:
         self._table._owner._call("set_cell_alignment", *self._args, value, _change=True)
 
     @property
@@ -2450,7 +2451,7 @@ class EditableCell:
         return None if value is None else _hex_color(value)
 
     @background.setter
-    def background(self, value):
+    def background(self, value: _Color) -> None:
         table = self._table
         table._owner._call("set_cell_background", *self._args, _hex_color(value) if table._slide is None else _color(value), _change=True)
 
@@ -2460,7 +2461,7 @@ class EditableCell:
         return table._owner._call("cell_vertical_alignment", *self._args)
 
     @vertical_alignment.setter
-    def vertical_alignment(self, value: str):
+    def vertical_alignment(self, value: str) -> None:
         table = self._table
         table._owner._call("set_cell_vertical_alignment", *self._args, value, _change=True)
 
@@ -3429,7 +3430,7 @@ class Slide:
         return None if value is None else bytes(value)
 
     @background_image.setter
-    def background_image(self, source):
+    def background_image(self, source: _Source) -> None:
         from . import _read
         data, _ = _read(source)
         self._owner._call("set_background_image", self.number, data, _change=True)
@@ -3562,7 +3563,7 @@ class Shape:
         return _slide_link_value(self._owner, self._link_info())
 
     @link.setter
-    def link(self, target: str | Slide | None):
+    def link(self, target: str | Slide | None) -> None:
         url, slide_id = _slide_link_target(self._owner, target)
         previous = self._link_info()
         tooltip = previous[2] if previous is not None and target is not None else ""
@@ -3574,7 +3575,7 @@ class Shape:
         return "" if info is None else info[2]
 
     @link_tooltip.setter
-    def link_tooltip(self, value: str):
+    def link_tooltip(self, value: str) -> None:
         info = self._link_info()
         if info is None:
             raise ValueError("set a link before setting its tooltip")
@@ -3607,7 +3608,7 @@ class Shape:
         return None if value is None else (_hex_color(value[0]), value[1])
 
     @stroke.setter
-    def stroke(self, value):
+    def stroke(self, value: tuple[_Color, float] | list[_Color | float] | None) -> None:
         if value is None:
             color, width = None, 1
         elif isinstance(value, (tuple, list)) and len(value) == 2:
@@ -3760,7 +3761,7 @@ class _SlideCellParagraph(Paragraph):
         return self._owner._call("shape_text", *self._range_args, **self._range_kwargs)
 
     @text.setter
-    def text(self, value):
+    def text(self, value: str) -> None:
         self[:].text = value
 
     @property
@@ -3768,7 +3769,7 @@ class _SlideCellParagraph(Paragraph):
         return self._owner._call("cell_paragraph_alignment", *self._range_args, self._target)
 
     @alignment.setter
-    def alignment(self, value):
+    def alignment(self, value: str | None) -> None:
         self._owner._call("set_cell_paragraph_alignment", *self._range_args, self._target, value, _change=True)
 
     @property
@@ -3785,14 +3786,52 @@ class _SlideCellParagraph(Paragraph):
         self._owner._call("cell_paragraph_alignment", *self._range_args, self._target)
         revision = self._owner._call("revision")
         if formatting.keys() - {"alignment", "indent_left", "indent_right", "indent_first",
-                                "space_before", "space_after", "line_spacing"}:
+                                "space_before", "space_after", "line_spacing", "tabs"}:
             self._unsupported()
-        patch = {}
-        for key, value in formatting.items():
-            patch.update(json.loads(_format_patch({key: value})))
+        def check():
             if self._owner._call("revision") != revision:
                 raise ValueError("paragraph formatting is stale after a document change")
             self._owner._call("cell_paragraph_alignment", *self._range_args, self._target)
+
+        patch = {}
+        for key, value in formatting.items():
+            if key == "tabs" and value is not None:
+                if not isinstance(value, (list, tuple)):
+                    raise TypeError("tabs must be a list, tuple or None")
+                sequence = list if isinstance(value, list) else tuple
+                count = sequence.__len__(value)
+                if count > 32:
+                    raise ValueError("PPTX tabs support at most 32 stops")
+                stops = []
+                for index in range(count):
+                    stop = sequence.__getitem__(value, index)
+                    if not isinstance(stop, dict) or dict.__len__(stop) > 3:
+                        raise ValueError("each tab requires position and optional alignment/leader")
+                    # Bypass container/string-subclass hooks; only the existing
+                    # unit conversion may invoke a caller scalar protocol.
+                    item = {}
+                    for name, entry in dict.items(stop):
+                        if not isinstance(name, str):
+                            raise ValueError("tab property names must be strings")
+                        name = str.__str__(name)
+                        if name not in {"position", "alignment", "leader"}:
+                            raise ValueError("unknown tab property")
+                        item[name] = entry
+                    if "position" not in item:
+                        raise ValueError("each tab requires position")
+                    item["position"] = pt(item["position"])
+                    check()
+                    for name in ("alignment", "leader"):
+                        if name in item:
+                            entry = item[name]
+                            if not isinstance(entry, str) or str.__len__(entry) > 32:
+                                raise ValueError("tab alignment and leader must be supported names")
+                            item[name] = str.__str__(entry)
+                    stops.append(item)
+                patch[key] = stops
+            else:
+                patch.update(json.loads(_format_patch({key: value})))
+            check()
         if patch:
             self._owner._call("format_cell_paragraph", *self._range_args, self._target,
                               json.dumps(patch, allow_nan=False), revision, _change=True)

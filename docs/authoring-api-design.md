@@ -198,3 +198,8 @@ The facade annotates native-backed PDF annotation geometry/text/color/targets, o
 
 
 Spec 110 reuses collection deletion for unused owned DOCX styles. There is no remove/prune manager or automatic fallback style. Native exact-ID handle targets are distinct from intentional collection/string name lookup; bounded retirement and native new_id reservation preserve identity across same-name recreation. Reference preflight inspects raw public typed storage, including unrendered parts and definitions, before native remove. The 1024 lifetime-ID limit is explicit and copied with owners. STY6 remains partial for import and broader cleanup.
+
+
+### Property assignment hints
+
+The existing authoring setters now describe background colors and image sources, section geometry, cell formatting and shape strokes to static consumers. DOCX background images accept None to clear; PPTX background images require a source. Direct cell background colors remain nonnullable, while cell margins accept None to inherit. These are annotations on ordinary assignments, not new API families. Shape/length/range, format-specific behavior and lifetime checks remain runtime responsibilities.
