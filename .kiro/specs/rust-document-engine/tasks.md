@@ -819,7 +819,8 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Annotate existing getters without new exports, input changes, runtime branching or native changes; preserve behavior with a normalized AST comparison.
 - [x] Check strict copied-package consumer, deliberate invalid assignments/keys and populated/default snapshot shapes across all native kinds.
 - [x] Complete independent final source/serializer review and replay positive/negative typing, runtime-key/schema and AST checks.
-- [ ] Complete exact installed-wheel/source/native verification and agreed corpus before merge acceptance.
+- [x] Complete exact installed-wheel/source/native verification and agreed corpus: repacked annotation-only artifact and subsequent 395-native/523-Python integration pass.
+- [ ] Complete current-main CI and manual merge.
 - [ ] Retain remaining API3 property/documentation/IDE work; do not claim full-package strict typing.
 
 
@@ -830,7 +831,8 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Preflight bounded source/global associations, stage checked resource reclamation and retain semantic, section, comment/navigation/media and callback guards.
 - [x] Pass six focused native groups, formatting, all-target Clippy and a debug build after final tail-invariant review corrections.
 - [x] Pass six focused public workflows and independent replay, strict positive/four-negative typing checks and synchronized roadmap/support/reference/site checks; final source review clear.
-- [ ] Complete exact integrated native/installed-wheel corpus, independent artifact review and current-head CI before merge acceptance.
+- [x] Complete exact integrated corpus and independent artifact review: 395 native tests and two clean 523-test installed runs pass.
+- [ ] Complete current-head CI and manual merge.
 - [ ] Retain broader DOC5 movement, duplication, insertion and cross-container/reference adoption work.
 
 
@@ -840,5 +842,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Probe native reflow/variant/numbering behavior through the installed fixed-provenance wheel; replace the proposed +1 shift assumption with the observed exact +2 parity-preserving shift.
 - [x] Add one ordinary caller-PNG example and one combined fixture with exact body/link/table preservation, independent sections, filler checks and bounded three-DPI appearance controls.
 - [x] Complete independent source/replay review and documentation checks: one independently replayed workflow passes, with 19 support/reference tests and the site/roadmap checks passing.
-- [ ] Complete integrated corpus and exact-head CI; only then assess BG5 against its original supported-scope criterion.
+- [x] Complete integrated corpus and independent review: both 523-test installed runs pass; BG5 satisfies its original bounded section/header-anchor and repagination criterion.
+- [ ] Complete exact-head/current-main CI and manual merge; retain BG8 and documented broader limitations.
 - [ ] Keep BG8 and broader section-fill/linkage/continuous/floating/watermark coverage open.
