@@ -1256,7 +1256,7 @@
         "DOC8"
       ],
       "local_surface": "No new parallel metadata collection",
-      "remaining": "Pinned WordCraft app_xml passthrough uses private kept-property policy, not a public editable model; language/app metadata remain DOC7 gaps.",
+      "remaining": "Selected WordCraft now exposes strict typed access to eight retained extended properties (spec143/146); Python mapping admission remains separate147. Core language is already exposed; source completeness, computed producer/statistics and broader application properties remain DOC7 gaps.",
       "upstream_candidates": [
         "U02"
       ],
