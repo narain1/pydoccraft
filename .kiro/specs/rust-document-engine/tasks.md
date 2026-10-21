@@ -1207,7 +1207,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Verify source-only lock delta,264 permissive normal/build packages,55 Word citations across14 files and unchanged bundled assets; keep historical profiles/artifacts/fingerprints exact.
 - [x] Complete locked468 native/fmt/strictClippy/release, clean installed585, typing and exact source/artifact/attribution independent review.
 - [x] Finalize synchronized native/pin/artifact evidence and independent source/focused review.
-- [ ] Complete fresh current-head CI and manual delivery after inheriting reviewed spec153. Preserve the original468/585 artifact evidence; Python extended mapping147 and broad DOC7/U01 remain separate.
+- [x] Complete fresh current-head CI and manual delivery through PR134, required CI39620404796 and documentation CI39620404631, after inheriting reviewed spec153. Preserve the original468/585 artifact evidence; Python extended mapping147 and broad DOC7/U01 remain separate.
 
 
 ## 153. PDF inferred-table text preservation correction
@@ -1218,3 +1218,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete focused native/public and independent source/artifact verification, including unchanged tab proofs in both diagnostic font environments.
 - [x] Complete corrected parent-integrated469-native/586-installed artifact, strict typing and independent source/artifact review; preserve earlier failures and146/148 artifacts as historical sources.
 - [x] Complete fresh current-head CI, actual-main synchronization and manual review/merge. Completed through PR133, required CI39615420262 and documentation CI39615420264.
+
+## 144/148. Native slide-copy prerequisite and dedicated pin integration
+
+- [x] Implement/review bounded native copy inventory, local reference remapping, atomic limits and ordinary-profile refusals; retain unchanged-native Clone/ID diagnostics.
+- [x] Validate selected native84 and source/readback/output2, independent replays and seven exact baseline compatibility artifacts; publish reviewed five-file contribution to the existing fork without an upstream PR.
+- [x] Update all four direct/ten resolved Deck pins only; audit attribution, immutable lock/source identities and current citation links without changing historical support profiles.
+- [x] Preserve the first linked-test overlapping-label premise failure and separately review the corrected exact-link plus URI-only acceptance control.
+- [x] Complete final471 native/release, clean installed586/typing/license/size/source identity and independent focused/artifact review.
+- [ ] Complete current-head CI/manual delivery; keep Python slide-copy admission separate149 and broader SLIDE1/U11 work open.

@@ -1027,3 +1027,13 @@ Existing authoring properties must describe supported input types and None retur
 153.2 Check finite positive computed candidate-envelope, selected-block and discarded-block bounds, map coordinates with native PageInfo conversion, and decide before draining rows or changing page blocks/tables. Partial overlap must decline the candidate. Do not reconstruct missing text, alter font/rendering behavior, relax the original tab-proof multiplicity assertions, or promise arbitrary PDF table recognition.
 
 153.3 Preserve legitimate aligned-table extraction without duplicate text and preserve disjoint surrounding text. Verify interior singleton, partial overlap, extended block and invalid selected-bound controls, rotations, CropBox offsets and UserUnit with original deterministic PDF fixtures. Record the PR 133 failure, original artifacts and font-triggered reproduction separately from the corrected artifact/current-head gates.
+
+## 144/148. Bounded native slide-copy prerequisite and dedicated dependency upgrade
+
+144.1 Provide native same-presentation append-copy with fresh slide and shape identities, remapped local connector/animation references and preserved fixed hyperlink targets, including source self-links. Keep original slides and modeled payload independent while sharing media and layout/master storage. Cross-presentation import, arbitrary opaque imported models, editor undo and animation rendering remain outside this bounded ordinary-model profile.
+
+144.2 Inventory all cloned fields, identities, references and allocation/work costs before copying. Enforce final slide/shape counts, traversal depth, temporary/selected payload budgets, explicit unsupported-state refusals and atomic checked failures. Reuse native model algorithms; no graph copier in the Python package.
+
+148.1 Move every direct/resolved Deck dependency together to reviewed published16de1ca, retaining all other locked versions, sources, edges and assets. Preserve historical native144, package146 and153 prerequisite evidence. Add one actual linked native source/copy/readback/render/PDF regression and no Python API or public-test delta.
+
+148.2 Complete471 native, unchanged586 installed Python, strict typing, attribution/license/citation audit, artifact size/identity and independent focused review before current-head CI/manual delivery. The original146468/585 artifact and later153 source integration remain distinct; no broad SLIDE1/U11 closure is implied.
