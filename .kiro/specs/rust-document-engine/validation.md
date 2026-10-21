@@ -1970,3 +1970,19 @@ Actionlint 1.7.12 passes on the changed workflow. Its official Linux archive was
 Validation-only run39580637011 targets exact `fa1f9a2fba416fa3b33204228db07b20377644a3`, with publication false and runtime from PR123. It is a baseline before later PdfCraft/PPTX upgrades, not final release evidence. Linux3.11/3.13 passed. Windows3.12 ran556tests570.277s with6failures/1error/0skips: implicitCP1252 roadmap read,24 CRLF source fingerprints, a POSIX-only chmod expectation, two decimal-outline raster comparisons and metadata-field color. macOS3.12 ran556tests826.220s with11failures/0errors/0skips, including exact pagination/reflow and visible text/color assumptions. Other jobs and full matrix disposition are still being inspected. No rendering threshold or pagination expectation has changed.
 
 Independent review clears explicit UTF-8 roadmap reads, LF text checkout policy and actual-mode save preservation while retaining the POSIX0640 requirement. The latter also adds mode verification after failed replacement. Exactly one support-ledger test fingerprint changes: `tests/test_pdf_output_options.py` from `f840e55128bc8a4bd000e73ee0cb9d38e6b96746823e1153e8525f65e2848bb4` to `e970107c4245f335c301a2bc4012e107ac04fde60c5adce0d1d2e5d74c5e1bb5`. All other fingerprints, historical artifact records and support statuses remain unchanged. All five tests in that exact corrected module pass on Linux against the installed spec117 wheel in0.283s; all8 roadmap checks and the20-profile/139-join support audit pass. Windows execution of these corrections and actual font/raster diagnostics remain pending. This partial portability evidence does not certify any failed platform.
+
+All nine baseline jobs are now inspected; source guard passed and both publication jobs were skipped. Every job ran556tests. These are validation-wrapper durations, distinct from unittest runner timings quoted above.
+
+| Baseline job | Result | Tests | Failures/errors/skips | Seconds |
+|---|---|---|---|---|
+| macos-latest-py3.11 | fail | 556 | 11/0/0 | 770.431 |
+| macos-latest-py3.12 | fail | 556 | 11/0/0 | 827.062 |
+| macos-latest-py3.13 | fail | 556 | 11/0/0 | 779.423 |
+| ubuntu-latest-py3.11 | pass | 556 | 0/0/0 | 708.336 |
+| ubuntu-latest-py3.12 | pass | 556 | 0/0/0 | 1075.173 |
+| ubuntu-latest-py3.13 | pass | 556 | 0/0/0 | 632.117 |
+| windows-latest-py3.11 | fail | 556 | 6/1/0 | 1073.344 |
+| windows-latest-py3.12 | fail | 556 | 6/1/0 | 571.766 |
+| windows-latest-py3.13 | fail | 556 | 6/1/0 | 1069.61 |
+
+The separate diagnostic run39584493636 targets exact `1ef5594e492182e481cd8c8881834a1916573957`, retaining the same PR123 runtime plus reviewed portability fixtures. Its isolated branch uses the registered release workflow path solely to dispatch three Python3.12 diagnostic jobs, with read-only permissions and no publication jobs. It is not proposed for merge; the permanent release workflow retains all nine jobs. The diagnostic guard was independently exercised, and named-font controls are separate from the unchanged original assertions. Local diagnostic control runs35original tests successfully; the requested Source Sans3 control retains4failures/0errors, so it is not claimed to fix the fixtures. The earlier copied-harness smoke omitted examples/letterhead.py; that launcher error was corrected and its log retained. Full source DOCX/PDF/PNG artifacts and hashes are preserved.
