@@ -1,4 +1,4 @@
-name: Diagnose platform rendering
+name: Validate portable font fixtures
 
 on:
   workflow_dispatch:
@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   verify-version:
@@ -82,41 +83,50 @@ jobs:
         with:
           python-version: ${{ matrix.python.version }}
 
-      - name: Build Linux wheel
-        if: runner.os == 'Linux'
-        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
+      - name: Download exact diagnostic wheel
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          command: build
-          maturin-version: 1.8.1
-          rust-toolchain: 1.95.0
-          args: --release --locked --out dist --interpreter /opt/python/cp${{ matrix.python.tag }}-cp${{ matrix.python.tag }}/bin/python
-          manylinux: auto
+          name: wheel-${{ matrix.os }}-py${{ matrix.python.version }}
+          path: dist
+          run-id: 39584493636
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build macOS or Windows wheel
-        if: runner.os != 'Linux'
-        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
+      - name: Download original wheel validation identity
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          command: build
-          maturin-version: 1.8.1
-          rust-toolchain: 1.95.0
-          args: --release --locked --out dist --interpreter python
+          name: validation-${{ matrix.os }}-py${{ matrix.python.version }}
+          path: dist/baseline
+          run-id: 39584493636
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify reused wheel and unchanged dependency identity
+        shell: python
+        run: |
+          import hashlib
+          import json
+          import zipfile
+          from pathlib import Path
+
+          evidence = json.loads(Path("dist/baseline/validation.json").read_text(encoding="utf-8"))
+          wheels = list(Path("dist").glob("pydoccraft-*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit("expected exactly one diagnostic wheel")
+          if hashlib.sha256(wheels[0].read_bytes()).hexdigest() != evidence["wheel_sha256"]:
+              raise SystemExit("downloaded wheel differs from original validation identity")
+          if hashlib.sha256(Path("Cargo.lock").read_bytes()).hexdigest() != evidence["cargo_lock_sha256"]:
+              raise SystemExit("fixture source changed native dependencies")
+          with zipfile.ZipFile(wheels[0]) as archive:
+              for item in archive.infolist():
+                  if item.filename.startswith("doc_ex/") and item.filename.endswith((".py", ".pyi", "py.typed")):
+                      if (Path("src") / item.filename).read_bytes() != archive.read(item):
+                          raise SystemExit("source facade differs from reused wheel: " + item.filename)
+          print("Reusing diagnostic wheel:", wheels[0].name, evidence["wheel_sha256"])
+          print("Original validation passed:", evidence["passed"])
 
       - name: Test installed wheel
         run: |
           python -m pip install --no-index --find-links dist pydoccraft
           python tools/validate_installed.py --wheel-dir dist --output dist/validation.json
-
-      - name: Capture exact rendering fixtures and requested named-font controls
-        if: always()
-        run: python tools/diagnose_platform_rendering.py
-
-      - name: Upload rendering diagnostics
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: rendering-${{ matrix.os }}-py${{ matrix.python.version }}
-          path: dist/platform-diagnostics
-          if-no-files-found: error
 
       - name: Upload validation evidence
         if: always()
@@ -125,11 +135,3 @@ jobs:
           name: validation-${{ matrix.os }}-py${{ matrix.python.version }}
           path: dist/validation.json
           if-no-files-found: warn
-
-      - name: Upload wheel
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: wheel-${{ matrix.os }}-py${{ matrix.python.version }}
-          path: dist/*.whl
-          if-no-files-found: error
