@@ -638,5 +638,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Extend existing staged collection deletion to ordinary direct body paragraphs; retain section/semantic guards, bounded locator updates and existing auxiliary behavior.
 - [x] Add four native groups and five public workflows for output, identity, section starts/restarts, protected anchors, callbacks, placeholder reuse and rollback; deliberately update obsolete body-Unsupported assertions while preserving cell/PPTX/section checks.
 - [x] Complete focused native tests, fmt/Clippy/debug build and copied-package public/related checks; record exact results below.
-- [ ] Complete integrated locked release, clean installed-wheel corpus, independent review and current-main CI.
+- [x] Complete integrated locked release and clean installed-wheel corpus: 330 native/472 Python tests, strict typing, license audit and independent472-test review.
+- [ ] Complete final exact-head/current-main CI and manual merge for body paragraph deletion.
 - [ ] Keep section-boundary/semantic deletion, cell/PPTX deletion and broader DOC5/TXT1 insertion/movement/adoption open.
