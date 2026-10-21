@@ -1232,3 +1232,15 @@ Every final run also passed formatting, warnings-denied Clippy, strict installed
 ## DOCX body identities — final manual merge gate
 
 PR93 final head `fb56803d41c0341b0c0d71e9f43d5f0d5ccde042` passed [required current-main CI39530041981](https://github.com/narain1/pydoccraft/actions/runs/39530041981), following the recorded independent source and 462-test copied-package review. It was manually merged as `f0cd0a7ef92ba8531e13f680ac9b5ed75779385b`. Repository auto-merge remains disabled. This closes the delivery gate for the internal identity change; broader DOC5/TXT1 remains partial.
+
+
+## Owned PDF radio groups — complete local artifact
+
+Runtime `77915dc95e2aaad0be2ecde02dd34d24abfda194` passes **326 locked Rust tests and 467 clean installed-wheel Python tests**, with zero failures/errors/skips. Native tests took 47.00 seconds; the full Python corpus took 163.422 seconds on Linux x86_64 / Python3.11.2 / Rust1.95. Formatting, warnings-denied all-targets Clippy, locked/offline release build, strict installed-package typing and the unchanged264-package license audit pass. Installed package bytes match the wheel. All-format extraction, PNG rendering and reopened conversion checks remain passing.
+
+Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,534,970 bytes**; extension **40,674,856 bytes**; SHA-256 `553217fcd1a147a10ee4cdf199b8be60259437eabe7cc2a26a359cadc27f115d`. Lock SHA-256 remains `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`; dependencies, upstream revisions and attribution are unchanged.
+
+The supported profile is 2–32 immutable same-page widgets through existing field operations. Tests preserve native literal option identities, actual selected-circle pixels, copied source/reopened/flattened output and callback lifetime behavior. Exact cumulative work/byte/widget boundaries are tested on synthetic owned files; no total process-memory guarantee or arbitrary imported-form support is claimed. Independent exact-artifact review and final current-main CI remain required before manual merge; broader PDF6 remains partial.
+
+
+PR94 independent source review and all467 installed tests against the copied exact77915dc package passed in162.689 seconds, zero failures/errors/skips, with matching wheel SHA/size. Review corrected one stale value-type error description before the final wheel build; no runtime, test or evidence exceptions were introduced. Exact-head/current-main CI and manual merge remain pending.

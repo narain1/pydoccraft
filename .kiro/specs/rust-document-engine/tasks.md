@@ -627,5 +627,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Probe public native group creation, canonical Unicode/hash identities, clear/read-only behavior, fixed vector appearances and retained generation counts.
 - [x] Integrate immutable same-page groups through existing field containers/properties with independent field/widget bounds and cumulative preflight/accounting.
 - [x] Add native and public source/pixel/geometry/flatten/callback/identity/budget tests and consumer typing assertions.
-- [ ] Complete integrated release/clean installed-wheel corpus and independent exact-head/current-main review.
+- [x] Complete integrated release/clean installed-wheel corpus: 326 native and 467 Python tests, typing and unchanged license audit.
+- [ ] Complete independent exact-head/current-main review and manual merge.
 - [ ] Retain imported inventory, arbitrary mutable/multi-page groups and broader PDF6/U10 appearance work.
