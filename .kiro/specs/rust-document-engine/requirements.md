@@ -848,3 +848,12 @@ Existing paragraph, table and row properties must retain concrete successful res
 3. Source admission SHALL require horizontal sections and an exact reference-free native shape profile, finite canonical dimensions and stroke widths no greater than 100 points or the smaller shape dimension. Every candidate/output SHALL verify requested dimensions, exactly one native placement per shape and full-outline physical-page containment without coordinate correction.
 4. Source work, shape count, patch bytes and existing block/cell/page/item limits SHALL be bounded before unbounded copying or layout. Existing style/media/semantic/field/alignment guards SHALL remain active. Caller conversions SHALL revalidate owner revision and exact target identity before mutation.
 5. DOCX readback, native PNG and PDF SHALL retain demonstrated source/order/links/tables/notes/images without fake extraction geometry. Line, textbox, rotation, front, groups, effects, auxiliary/cell placement and imported editing SHALL remain explicitly unsupported. MED4 SHALL remain incomplete.
+
+
+## 117. Native PDF final integer allocation budget
+
+1. All direct and resolved PdfCraft crates SHALL use the same immutable reviewed contribution revision; unrelated packages, engine pins and local vendor source SHALL remain unchanged.
+2. The native renderer SHALL reject final integer rasters above its existing pixel budget before allocation in ordinary and strict modes, preserving accepted raster geometry/pixels and bounded tiles.
+3. Existing local rounded-dimension preflight and stable Python errors SHALL remain in place. The backend fix SHALL not be presented as newly available public behavior; existing public limit tests SHALL remain unchanged.
+4. Actual linked-native refusal/recovery and unchanged local preflight SHALL be tested separately. A test-only exact locked-source precondition SHALL prevent direct overcap tests from running against the unsafe old backend; original failure evidence SHALL use the independently reviewed intercepted allocator.
+5. Dedicated integration SHALL include source/lock/license/asset provenance review, complete native and installed-wheel extraction/conversion/reopen/render checks, measured artifact sizes and independent review. Broader U09/R4 and overall release work SHALL remain open.

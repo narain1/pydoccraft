@@ -520,9 +520,9 @@ fn render_with(
         })
         .transpose()?;
     if region.is_none() {
-        // Native scale limits use continuous point area; rounding to whole device
-        // pixels can exceed that area. Check the exact native pixel dimensions
-        // before requesting any output buffer, retaining reject_oversize as well.
+        // Keep local rejection before any native request, independently of the
+        // upstream final-allocation guard. Continuous scale limits can round
+        // above the pixel budget; retain strict scale rejection as well.
         crate::rendering::validate_size(
             f64::from(pdfcraft_render::device_pixels(size[0], scale)),
             f64::from(pdfcraft_render::device_pixels(size[1], scale)),
@@ -1805,6 +1805,79 @@ mod raster_limit_tests {
         assert!(
             crate::rendering::validate_size(8192.0, 1.0, pdfcraft_render::MAX_SIDE as u32).is_ok()
         );
+    }
+
+    #[test]
+    fn linked_native_integer_budget_rejects_before_allocation_and_recovers() {
+        // Safety precondition: never issue this large direct request to an older
+        // backend. Its original failure is proved upstream with an intercepted
+        // allocator, not by allocating a 256MB raster here.
+        let entries: Vec<_> = include_str!("../../Cargo.lock")
+            .split("[[package]]")
+            .filter(|entry| {
+                entry
+                    .lines()
+                    .any(|line| line.trim() == "name = \"pdfcraft-render\"")
+            })
+            .collect();
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].lines().any(|line| line.trim() ==
+            "source = \"git+https://github.com/narain1/pdfcraft?rev=60a8d7998b64c7718e08e9054e99f1f2eb1eda8d#60a8d7998b64c7718e08e9054e99f1f2eb1eda8d\""));
+        for rotation in [0, 90, 180, 270] {
+            let raw = fixture(4000.25, 3999.75, 2.0, rotation);
+            for reject_oversize in [false, true] {
+                let mut renderer = PageRenderer::new(
+                    Arc::new(raw.clone()),
+                    RenderConfig {
+                        reject_oversize,
+                        ..Default::default()
+                    },
+                );
+                assert_eq!(renderer.page_count(), 1);
+                let dimensions = if rotation % 180 == 0 {
+                    "8001x8000"
+                } else {
+                    "8000x8001"
+                };
+                let expected =
+                    format!("page 1 raster size {dimensions} exceeds renderer pixel limit");
+                let request = RenderRequest {
+                    scale: 1.0,
+                    ..Default::default()
+                };
+                let failed = renderer.render(request);
+                assert_eq!(failed.error.as_deref(), Some(expected.as_str()));
+                assert_eq!((failed.width, failed.height), (0, 0));
+                assert!(failed.rgba.is_empty());
+                assert_eq!(renderer.stats().render_requests, 1);
+                assert_eq!(renderer.stats().parser_builds, 1);
+                let tile = renderer.render(RenderRequest {
+                    tile: Some(pdfcraft_render::Tile {
+                        x: 0,
+                        y: 0,
+                        w: 3,
+                        h: 2,
+                    }),
+                    ..request
+                });
+                assert!(tile.error.is_none(), "{:?}", tile.error);
+                assert_eq!((tile.width, tile.height), (3, 2));
+                assert_eq!(&*tile.rgba, &[255; 24]);
+                let repeated = renderer.render(request);
+                assert_eq!(repeated.error.as_deref(), Some(expected.as_str()));
+                assert_eq!((repeated.width, repeated.height), (0, 0));
+                assert!(repeated.rgba.is_empty());
+                assert_eq!(renderer.stats().render_requests, 3);
+                assert_eq!(renderer.stats().parser_builds, 1);
+            }
+            let (session, _) = PdfSession::open(&raw, None).unwrap();
+            let before = session.stats().unwrap();
+            assert!(matches!(
+                session.render(0, 72.0, None),
+                Err(EngineError::ResourceLimit(_))
+            ));
+            assert_eq!(session.stats().unwrap(), before);
+        }
     }
 
     #[test]

@@ -4,7 +4,7 @@
 
 This comparison groups related reference members under existing Python handles and formatting properties. It is not an exhaustive member inventory, implementation test, or format-conformance claim. Open XML schema/model APIs do not establish pagination or rendering. Reference products are not runtime dependencies.
 
-Audited local surface: `b23d8954d1e75e041add8473b8b56662614b66ae`. The inventory contains 44 families and 198 representative members from 17 pinned source files. Later implementation changes require review.
+Audited local surface: `c9dd55b2184ae576f6a330fdbefe7b3d4b792c87`. The inventory contains 44 families and 198 representative members from 17 pinned source files. Later implementation changes require review.
 
 - [dotnet/Open-XML-SDK v3.5.1](https://github.com/dotnet/Open-XML-SDK/tree/3139fdfd27414548a41555f7848d5728f6e71a42) — `3139fdfd27414548a41555f7848d5728f6e71a42`
 - [pymupdf/PyMuPDF 2.0](https://github.com/pymupdf/PyMuPDF/tree/b8904b27efa0c4e2258f0e46ab4498a6173ffa22) — `b8904b27efa0c4e2258f0e46ab4498a6173ffa22`

@@ -963,5 +963,16 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete independent frozen source/public review (six workflows15.775s).
 - [x] Complete spec116 native closed-shape corner/outline parity gate, including min/max width and stroke-to-dimension boundaries; preserve 200-point/native-clamp diagnostics.
 - [x] Complete corrected436-native and two clean556-test installed corpora, exact-artifact/source review, strict typing and synchronized bounded support documentation.
-- [ ] Complete closed-shape exact-head/current-main CI and manual merge; dependency PR122 is merged.
+- [x] Complete closed-shape exact-head/current-main CI and independent manual merge through PR123, required CI39578015883 and documentation CI39578015866.
 - [ ] Keep MED4 open for lines/textboxes and excluded contexts; no new U-owner or broad shape-parity claim.
+
+
+## PdfCraft final integer raster allocation budget (spec117)
+
+- [x] Review source and safe actual-allocator originalFAIL/candidatePASS proof, exact-cap admission, complete tiny output/tile controls and test-only RAII restoration.
+- [x] Publish the reviewed two-file native contribution on an explicitly identified fork; verify exact parent/commit/files without claiming upstream acceptance.
+- [x] Move all11 direct/13 resolved PdfCraft source identities together; preserve other engine/dependency versions and audit264 permissive packages and23 current citations across11 native files.
+- [x] Preserve the existing two public raster-limit workflows and record their successful baseline behavior; add one linked-native guard/recovery test with exact-source safety precondition.
+- [x] Complete focused/full437-native, formatting, Clippy and locked release build.
+- [x] Complete clean installed556 workflows, independent artifact/corpus/typing/reopen checks, measured sizes and final source-ledger/documentation validation.
+- [ ] Complete current-head CI and manual merge; retain broad U09/R4 limits and separate release gates.

@@ -22,17 +22,17 @@ deckcraft-pdf = { git = "https://github.com/narain1/deckcraft", rev = "dd4fd70b6
 deckcraft-pptx = { git = "https://github.com/narain1/deckcraft", rev = "dd4fd70b6347dd2ce782e33f030a2b6c0abb0106" }
 deckcraft-render = { git = "https://github.com/narain1/deckcraft", rev = "dd4fd70b6347dd2ce782e33f030a2b6c0abb0106" }
 kurbo = "=0.13.1"
-pdfcraft-annot = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
-pdfcraft-cos = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
-pdfcraft-model = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
-pdfcraft-content = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
-pdfcraft-create = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
-pdfcraft-edit = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
-pdfcraft-export = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
-pdfcraft-fonts = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
-pdfcraft-forms = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
-pdfcraft-organize = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
-pdfcraft-render = { git = "https://github.com/storytold/pdfcraft", rev = "645016addcfb9078c557f0189559ab47cdcee057" }
+pdfcraft-annot = { git = "https://github.com/narain1/pdfcraft", rev = "60a8d7998b64c7718e08e9054e99f1f2eb1eda8d" }
+pdfcraft-cos = { git = "https://github.com/narain1/pdfcraft", rev = "60a8d7998b64c7718e08e9054e99f1f2eb1eda8d" }
+pdfcraft-model = { git = "https://github.com/narain1/pdfcraft", rev = "60a8d7998b64c7718e08e9054e99f1f2eb1eda8d" }
+pdfcraft-content = { git = "https://github.com/narain1/pdfcraft", rev = "60a8d7998b64c7718e08e9054e99f1f2eb1eda8d" }
+pdfcraft-create = { git = "https://github.com/narain1/pdfcraft", rev = "60a8d7998b64c7718e08e9054e99f1f2eb1eda8d" }
+pdfcraft-edit = { git = "https://github.com/narain1/pdfcraft", rev = "60a8d7998b64c7718e08e9054e99f1f2eb1eda8d" }
+pdfcraft-export = { git = "https://github.com/narain1/pdfcraft", rev = "60a8d7998b64c7718e08e9054e99f1f2eb1eda8d" }
+pdfcraft-fonts = { git = "https://github.com/narain1/pdfcraft", rev = "60a8d7998b64c7718e08e9054e99f1f2eb1eda8d" }
+pdfcraft-forms = { git = "https://github.com/narain1/pdfcraft", rev = "60a8d7998b64c7718e08e9054e99f1f2eb1eda8d" }
+pdfcraft-organize = { git = "https://github.com/narain1/pdfcraft", rev = "60a8d7998b64c7718e08e9054e99f1f2eb1eda8d" }
+pdfcraft-render = { git = "https://github.com/narain1/pdfcraft", rev = "60a8d7998b64c7718e08e9054e99f1f2eb1eda8d" }
 png = "=0.18.1"
 pyo3 = { version = "=0.23.5" }
 quick-xml = "=0.41.0"

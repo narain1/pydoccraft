@@ -7,8 +7,11 @@ pydoccraft links selected library crates from the following ArtCraft projects. T
 PdfCraft
 Copyright (c) 2026 ArtCraft Team and the PdfCraft contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option.
-Source: https://github.com/storytold/pdfcraft
-Pinned revision: 645016addcfb9078c557f0189559ab47cdcee057
+Upstream source: https://github.com/storytold/pdfcraft
+Reviewed contribution fork: https://github.com/narain1/pdfcraft
+Pinned revision: 60a8d7998b64c7718e08e9054e99f1f2eb1eda8d
+Direct upstream parent: 645016addcfb9078c557f0189559ab47cdcee057
+The reviewed contribution checks the final integer raster size before pixel allocation in ordinary and strict modes. It changes no bundled assets or licensing and is not represented as upstream acceptance.
 The selected PdfCraft library crates include pdfcraft-organize for page insertion and organization, pdfcraft-annot for annotations and links, pdfcraft-forms for bounded creation and filling of native form fields, and pdfcraft-model for native inherited page-resource inspection.
 
 WordCraft

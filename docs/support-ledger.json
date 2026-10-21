@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "audited_commit": "b23d8954d1e75e041add8473b8b56662614b66ae",
+  "audited_commit": "c9dd55b2184ae576f6a330fdbefe7b3d4b792c87",
   "references": {
     "pdfcraft": {
-      "revision": "645016addcfb9078c557f0189559ab47cdcee057",
+      "revision": "60a8d7998b64c7718e08e9054e99f1f2eb1eda8d",
       "kind": "engine",
-      "repository": "https://github.com/storytold/pdfcraft"
+      "repository": "https://github.com/narain1/pdfcraft"
     },
     "wordcraft": {
       "revision": "f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef",
