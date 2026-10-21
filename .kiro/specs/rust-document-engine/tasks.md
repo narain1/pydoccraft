@@ -854,7 +854,8 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Pass two focused native groups, related field and affected accounting controls, formatting, all-target Clippy and a frozen debug build.
 - [x] Pass 21 focused public/field/lifecycle tests and 27 roadmap/support/reference checks; final runtime/native/public source review clear.
 - [x] Complete independent exact copied-extension replay: 18 tests pass; preserve deliberate fixture corrections and unchanged ledger fingerprints.
-- [ ] Complete final docs review and exact integrated native/installed-wheel/CI gates.
+- [x] Complete final docs review, 397-native validation and corrected integrated acceptance: both clean 528-test installed runs pass; failed 524-test evidence and deliberate sixth fixture correction remain recorded.
+- [ ] Complete exact-head/current-main CI and manual merge.
 - [ ] Retain native table field-context repair under U07/LAY6/REF3; keep spec106 movement pending its revised raw gate.
 
 
@@ -863,4 +864,5 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reproduce wrong-target PDF delete/move/lookup and slide deletion on the installed pre-correction artifact.
 - [x] Reuse existing PDF generation/count and native slide-ID sequence snapshots; guard every mutation argument and PDF handle construction without new public APIs.
 - [x] Pass four focused workflows and 22 combined related workflows, strict typing and independent source/four-workflow replay.
-- [ ] Complete exact combined installed artifact/corpus, current-main CI and manual merge alongside the corrected spec107 fixture.
+- [x] Complete exact combined installed artifact/corpus alongside the corrected spec107 fixture: two clean 528-test installed runs pass with unchanged tested native bytes.
+- [ ] Complete current-main CI and manual merge.
