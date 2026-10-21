@@ -332,7 +332,7 @@
         "BG6"
       ],
       "local_surface": "styles.add/style.format/based_on/next/linked/defaults; recipes use existing handles",
-      "remaining": "Native absent-size readback is corrected; owned default font-size clear awaits separate adapter validation; arbitrary default-style selection resolves via Normal; next-style-on-enter is editor-only; style import/remapping unassessed.",
+      "remaining": "Native absent-size readback and owned default font-size clear are available; arbitrary default-style selection resolves via Normal; next-style-on-enter is editor-only; style import/remapping unassessed.",
       "upstream_candidates": [
         "U02"
       ],

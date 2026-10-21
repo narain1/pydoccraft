@@ -69,7 +69,7 @@ Named styles and inheritance.
 
 **Audited local surface:** styles.add/style.format/based_on/next/linked/defaults; recipes use existing handles.
 
-**Disposition:** `implemented_subset`. **Remaining:** Native absent-size readback is corrected; owned default font-size clear awaits separate adapter validation; arbitrary default-style selection resolves via Normal; next-style-on-enter is editor-only; style import/remapping unassessed.
+**Disposition:** `implemented_subset`. **Remaining:** Native absent-size readback and owned default font-size clear are available; arbitrary default-style selection resolves via Normal; next-style-on-enter is editor-only; style import/remapping unassessed.
 
 **Upstream candidates:** [U02](upstream-roadmap.md)
 
