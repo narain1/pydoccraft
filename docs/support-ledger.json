@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "audited_commit": "f82130cbd1daf8c557bf674d0088bfae455bc0e9",
+  "audited_commit": "c9dd55b2184ae576f6a330fdbefe7b3d4b792c87",
   "references": {
     "pdfcraft": {
       "revision": "60a8d7998b64c7718e08e9054e99f1f2eb1eda8d",
