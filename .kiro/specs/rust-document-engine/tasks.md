@@ -856,3 +856,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete independent exact copied-extension replay: 18 tests pass; preserve deliberate fixture corrections and unchanged ledger fingerprints.
 - [ ] Complete final docs review and exact integrated native/installed-wheel/CI gates.
 - [ ] Retain native table field-context repair under U07/LAY6/REF3; keep spec106 movement pending its revised raw gate.
+
+
+## Page and slide index callbacks (spec109)
+
+- [x] Reproduce wrong-target PDF delete/move/lookup and slide deletion on the installed pre-correction artifact.
+- [x] Reuse existing PDF generation/count and native slide-ID sequence snapshots; guard every mutation argument and PDF handle construction without new public APIs.
+- [x] Pass four focused workflows and 22 combined related workflows, strict typing and independent source/four-workflow replay.
+- [ ] Complete exact combined installed artifact/corpus, current-main CI and manual merge alongside the corrected spec107 fixture.

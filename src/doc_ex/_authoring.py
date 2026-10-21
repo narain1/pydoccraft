@@ -2625,12 +2625,42 @@ class PdfPages(_Collection["PdfPage"]):
         identifier = self._owner._call("add_page", *_size(size), _change=True)
         return PdfPage(self._owner, identifier)
 
+    def _selection(self):
+        self._owner._ensure_open()
+        return self._owner._page_generation, self._owner.page_count
+
+    def _selected_index(self, index, selection):
+        value = operator.index(index)
+        if self._selection() != selection:
+            raise ValueError("page selection is stale after page organization")
+        return _index(value, selection[1])
+
+    @overload
+    def __getitem__(self, index: int) -> PdfPage: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> list[PdfPage]: ...
+
+    def __getitem__(self, index):
+        selection = self._selection()
+        if isinstance(index, slice):
+            indices = list(range(selection[1]))[index]
+            if self._selection() != selection:
+                raise ValueError("page selection is stale after page organization")
+            return [PdfPage(self._owner, value) for value in indices]
+        return PdfPage(self._owner, self._selected_index(index, selection))
+
     def __delitem__(self, index):
-        self._owner._call("delete_page", _index(index, len(self)), _change=True)
+        selection = self._selection()
+        index = self._selected_index(index, selection)
+        self._owner._call("delete_page", index, _change=True)
         self._owner._page_generation += 1
 
     def move(self, index: int, destination: int) -> None:
-        self._owner._call("move_page", _index(index, len(self)), _index(destination, len(self)), _change=True)
+        selection = self._selection()
+        index = self._selected_index(index, selection)
+        destination = self._selected_index(destination, selection)
+        self._owner._call("move_page", index, destination, _change=True)
         self._owner._page_generation += 1
 
     def insert(self, index: int, source: _Source | EditableDocument | Document, *, pages: Iterable[SupportsIndex] | None = None, password: str | None = None, outline_title: str | None = None) -> list[PdfPage]:
@@ -3040,11 +3070,25 @@ class Slides(_Collection["Slide"]):
         index = self._owner._call("add_slide", layout, _change=True)
         return Slide(self._owner, self._owner._call("slide_id", index))
 
+    def _selected_index(self, index, identifiers):
+        value = operator.index(index)
+        self._owner._ensure_open()
+        if tuple(self._ids()) != identifiers:
+            raise ValueError("slide selection is stale after slide organization")
+        return _index(value, len(identifiers))
+
     def __delitem__(self, index):
-        self._owner._call("remove_slide", _index(index, len(self)), _change=True)
+        self._owner._ensure_open()
+        identifiers = tuple(self._ids())
+        index = self._selected_index(index, identifiers)
+        self._owner._call("remove_slide", index, _change=True)
 
     def move(self, index: int, destination: int) -> None:
-        self._owner._call("move_slide", _index(index, len(self)), _index(destination, len(self)), _change=True)
+        self._owner._ensure_open()
+        identifiers = tuple(self._ids())
+        index = self._selected_index(index, identifiers)
+        destination = self._selected_index(destination, identifiers)
+        self._owner._call("move_slide", index, destination, _change=True)
 
 
 class Slide:
