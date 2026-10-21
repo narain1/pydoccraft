@@ -673,3 +673,15 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete integrated installed-package strict typing, unchanged native-byte verification and independent 481-test package review.
 - [ ] Complete final exact-head/current-main CI and manual merge for property typing.
 - [ ] Retain unreviewed mappings/properties, documentation and IDE coverage under API3.
+
+
+## Reproducible Office workload measurements
+
+- [x] Preserve the default 20-page generator and add bounded 200-page/image-heavy configurations plus source manifests.
+- [x] Add ordered all-page PNG and input hashes to the existing benchmark, retaining explicit process-memory/cache caveats.
+- [x] Verify new image fixtures reopen, cached/one-shot smoke parity, four pre-creation budget rejections and existing-directory protection.
+- [x] Complete 36 sequential fresh-process measurements across six inputs and two modes, with three alternating-order repetitions and all-page byte/counter parity.
+- [x] Record exact source/tool/wheel identities, timings, memory ranges and limitations; independent benchmark source review found no blocker.
+- [x] Complete independent verification of all 36 samples, source/tool/artifact hashes, page digests, counters, table medians/ratios and memory ranges.
+- [ ] Complete required current-main CI and manual merge for Office benchmark evidence.
+- [ ] Keep P1's independently reproducible PDF memory/full-document counterpart and broader real-input/platform QA7 evidence open.

@@ -574,3 +574,8 @@ The adapter validates bounded direct IDs, locators and placeholders, then compos
 ## 87. Native-backed everyday property types
 
 Python annotations describe existing PyO3 return contracts and normalized JSON: displayed boxes are four-float tuples, sizes two-float tuples, colors optional hex strings where native values can be absent, outline destinations optional integers, and PPTX mixed/unset text format fields optional values. Bookmark.children returns the existing typed collection. Existing private source/box/color/size aliases are reused for inputs without adding exported vocabulary. The strict static consumer exercises property/collection/copy chains; runtime AST comparison with annotations removed establishes unchanged execution bodies. No Rust changes are involved.
+
+
+## 91. Reproducible Office workload measurements
+
+Extend the existing fixture generator with bounded page count, image dimensions, distinct deterministic PNG payloads and displayed size. Native writers create the documents; reopening produces a source manifest. The existing render-session benchmark hashes the input before measurement and accumulates fixed-length page PNG digests in source order while retaining only one PNG at a time. Fresh processes compare the same installed wheel with its retained native session versus that session explicitly closed before rendering. Three alternating-order repetitions provide timing medians and observed memory ranges; JSON retains every sample and source/tool/artifact identity. The input hash warms filesystem cache, and OS peak/current RSS counters do not establish native object reclamation or allocation limits.
