@@ -789,5 +789,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reuse one collection/add operation and existing ranges for plain-text root/direct-reply CRUD and typed metadata/navigation properties.
 - [x] Stage private locator/block/text accounting, monotonic IDs and exact-candidate inventory; reuse the proof in navigation/media/output without relaxing other anchors.
 - [x] Add native exact/+1, malformed topology/registry, revision/allocator exhaustion, Unicode author, media/reference and rollback controls; retain all historical fixtures unchanged.
-- [ ] Complete exact integrated native/installed-wheel corpus, independent final review and current-head CI before merge acceptance.
+- [x] Complete exact integrated native/installed-wheel corpus and independent final review: 379 native tests and two clean 512-test installed runs pass.
+- [ ] Complete exact-head/current-main CI and manual merge before merge acceptance.
 - [ ] Retain arbitrary interior/cross-paragraph roots, rich comment stories, nested replies, imported editing and review-display selection under existing REV1/TXT8/REV5 and U02 ownership.
