@@ -967,6 +967,19 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [ ] Keep MED4 open for lines/textboxes and excluded contexts; no new U-owner or broad shape-parity claim.
 
 
+## Pre-release platform validation (spec120)
+
+- [x] Add explicit validation-only dispatch to the existing matrix with exact-commit and conflicting-publication guards.
+- [x] Run actionlint and execute the actual workflow guard for accepted and refused inputs.
+- [x] Complete independent guard, publication-gating, privilege and unchanged matrix review.
+- [ ] Complete current-main CI before manual merge.
+- [x] Dispatch initial immutable baseline39580637011 without publication; preserve actual Windows/macOS failures.
+- [x] Independently review UTF-8/LF/actual-mode portability corrections and deliberately migrate only the affected save-test fingerprint.
+- [x] Execute corrected portability tests on Windows; retain measured native font/raster/pagination diagnostics and reviewed fixture changes.
+- [ ] Inspect every platform/Python corpus and fix failures before treating cross-platform validation as complete.
+- [ ] Retain final versioned release validation; this infrastructure change does not complete QA7 or authorize a premature release.
+
+
 ## PdfCraft final integer raster allocation budget (spec117)
 
 - [x] Review source and safe actual-allocator originalFAIL/candidatePASS proof, exact-cap admission, complete tiny output/tile controls and test-only RAII restoration.
@@ -1058,3 +1071,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Verify strict installed consumer, five intended negative cases, runtime direct/resolved body/header/cell replay, exact native/wheel facade identity and independent review.
 - [ ] Complete full exact installed-wheel corpus and synchronized documentation; keep broader API3 open.
 - [ ] Complete combined current-main CI and independent manual merge.
+- [ ] Complete current-head CI and independent manual merge. Python underlays, resource collisions and broader PDF3/U10 remain open.
+
+
+### Spec120 measured-font fixture gates
+
+- [x] Preserve original cross-platform failures and execute separate original/named-font diagnostic controls.
+- [x] Independently review explicit-font/positive-ink fixture changes and deliberate letterhead golden updates with unchanged thresholds.
+- [x] Record scoped Linux output evidence and migrate only the two affected additional source fingerprints.
+- [x] Complete actual Linux/Windows/macOS candidate full installed corpora: 556 tests each pass against exact retained wheels in run39589067301.
+- [x] Retain default-font/native isolation limitations under existing U02/STY5; broad fidelity and final release remain open.

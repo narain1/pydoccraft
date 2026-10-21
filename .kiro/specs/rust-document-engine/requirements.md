@@ -852,6 +852,13 @@ Existing paragraph, table and row properties must retain concrete successful res
 5. DOCX readback, native PNG and PDF SHALL retain demonstrated source/order/links/tables/notes/images without fake extraction geometry. Line, textbox, rotation, front, groups, effects, auxiliary/cell placement and imported editing SHALL remain explicitly unsupported. MED4 SHALL remain incomplete.
 
 
+## 120. Validate release wheels before publishing
+
+The existing release matrix SHALL support an explicit validation-only dispatch against an exact immutable commit SHA. It SHALL run the same Python 3.11–3.13 Linux, macOS and Windows wheel builds and installed-wheel corpus, retain artifacts and validation evidence, and create neither a GitHub release nor a PyPI publication. Validation-only mode SHALL reject branch names, abbreviated or mismatched commits and simultaneous publication requests. Default tagged and manual release behavior SHALL retain version matching and all existing validation dependencies.
+
+Validation fixtures SHALL read repository UTF-8 explicitly and retain identical LF text bytes across platform checkouts. Save-permission evidence SHALL assert exact POSIX permissions where supported and preservation of the actual platform mode after both failed and successful replacement. Existing rendering and pagination assertions SHALL not be relaxed to make a platform gate pass.
+
+
 ## 117. Native PDF final integer allocation budget
 
 1. All direct and resolved PdfCraft crates SHALL use the same immutable reviewed contribution revision; unrelated packages, engine pins and local vendor source SHALL remain unchanged.
@@ -913,3 +920,6 @@ Complete QA2's missing resume, review, form and multilingual examples using exis
 ## 133. Typed paragraph snapshot replay
 
 Support full existing direct/resolved paragraph snapshot replay in strict consumers while preserving existing inline patch inference, exact native direction literals and all malformed-input refusals. Keep full runtime implementation bodies, native bytes, key sets and method names unchanged. Do not claim full API3 closure or widen runtime acceptance to arbitrary Mapping/Sequence implementations. Preserve separately demonstrated existing border-container typing limitations.
+### Spec120 measured font fixtures
+
+Geometry and raster goldens SHALL name their font input explicitly rather than assume installed font substitution is portable. Positive solid-ink fixtures SHALL use a face/weight that actually contains solid interior ink at the tested DPI; thresholds, source-content checks and export checks SHALL remain intact. Recipe-specific pagination goldens SHALL be measured for the named font, with all additional pages included in existing per-page assertions. Preserve original default-font failures and require actual Windows/macOS evidence before accepting these corrections. This does not establish per-document font isolation or universal raster identity.

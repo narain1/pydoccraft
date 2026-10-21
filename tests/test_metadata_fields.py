@@ -25,6 +25,8 @@ def pdf_text(document):
 class MetadataFieldTests(unittest.TestCase):
     def test_current_metadata_in_all_stories_with_empty_stored_results(self):
         with doc_ex.new('docx') as document:
+            # A named bold face gives the color fixture solid interior ink at72DPI.
+            document.styles['Normal'].format(font='Source Sans 3', bold=True)
             document.update_metadata(title='Report Ω', author='Writer é')
             values(document.add_paragraph(), 'Body')
             values(document.add_table([['']])[0, 0].paragraphs[0], 'Cell')
