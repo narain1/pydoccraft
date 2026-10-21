@@ -2343,3 +2343,10 @@ This satisfies the remaining prerequisite for the separately reviewed STY2/TXT1 
 
 
 The current support-ledger audit identity is advanced to the exact validated combined source `282f48995412deba6283cdeaf9a49174ceaf8daf`; only that identity and the generated matrix audit link change. All historical operation profiles, artifacts and fingerprints remain unchanged. This documentation update does not relabel the original native build or final579 corpus.
+
+
+## 141. DOCX core-language metadata — prepared adapter
+
+Source18d3188 prepares the existing language-key projection/patch and private output schema without a dependency change. Compilation and capability admission are conditional on the separately reviewed native139/140 prerequisite; the current branch is not a validated artifact. Independent source/fixture review is clear. The exact two new public workflows run against the accepted579 wheel and both fail at the intended unsupported DOCX metadata key (0.797 seconds), after initial positive source/PDF text/link/image/three-DPI controls. The failure log is retained.
+
+The proposed candidate controls cover unchanged non-core ZIP parts and source/PDF pixels, metadata versus run-language separation, copy/snapshot ownership, omitted/update/null/empty clear semantics, repeated saves, exact64 KiB UTF-8 input, over-bound and serialized aggregate rejection/recovery, revision/range rollback and closed handles. The exact scalar boundary uses varied text so that it is not an unrelated archive-compression-ratio probe. Existing native/public metadata fixtures retain their old assertions; their obsolete language-as-unknown-key case is explicitly replaced with a still-unknown key. The existing custom-property evidence profile remains scoped to custom properties, and any source-fingerprint migration must be explicit after candidate behavior is verified. No profile/criterion is promoted by this preparation.

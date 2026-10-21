@@ -896,3 +896,8 @@ Reuse private source/box/color aliases on the existing PDF methods; point inputs
 The acceptance audit adds clause-to-fixture/native-resolution links to the existing documentation. It reuses the existing TODO ownership and generated support matrix; no runtime manager, new profile, duplicated completion ledger or implementation change is introduced.
 
 TXT1 reuses existing paragraph collections and revision-bound ranges. Its audit records ordinary ordered editing and source-text preservation without introducing a second run/ordered-content abstraction or changing protected-anchor guards.
+
+
+## DOCX core-language metadata (spec141)
+
+Add language to the existing native update target and core snapshot inventories, the extraction metadata projection, Python allowed-key set and private output schema. The native model/reader/writer come from prerequisite139/140; no OOXML processing is added to Python. Including language in core_metadata also includes it in the existing serialized aggregate budget. Reuse existing value validation, staged commit, revision invalidation, copies and cache behavior. Legacy unknown-key fixtures replace only their newly supported language example with a still-unknown key.

@@ -967,3 +967,8 @@ Existing PDF metadata updates, page rotation, text drawing and image placement m
 Judge STY2 against its original base/next/linked/default/effective/cycle/reset clauses. Keep imported editing, theme identity, font contexts and style import under their existing owners. Acceptance requires the reviewed default-size-reset behavior and final installed-artifact validation; source review alone is insufficient.
 
 The same audit compares original TXT1 ordinary paragraph/run editing and exact-text clauses. Cross-container structural adoption, imported editing and semantic-anchor deletion remain with DOC5/DOC2 and their existing semantic owners; they must not become duplicate blockers for ordinary text editing.
+
+
+## DOCX core-language metadata (spec141, pending native prerequisite)
+
+The existing owned metadata patch and extraction metadata dictionary shall expose the native document-language value after the separately reviewed engine upgrade. Preserve existing nullable-clear/empty-omission behavior, 64 KiB UTF-8 scalar bounds, 256 KiB serialized core-metadata bounds and atomic rejection. Treat this as document metadata; do not infer run language, shaping, fonts, paragraph direction or PDF tagging. Extended properties remain separate DOC7/U01 work.

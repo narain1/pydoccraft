@@ -1148,3 +1148,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Independently reconcile original TXT1 clauses and existing whitespace/Unicode/order/nonduplication fixtures with neighboring ownership.
 - [x] Verify final combined 579-test installed-artifact gate, mark only STY2/TXT1 and regenerate derived roadmap documentation (54 checked/85 open).
 - [ ] Complete current-main CI and independent manual merge.
+
+
+## DOCX core-language metadata (spec141)
+
+- [x] Independently review the compact existing-dictionary API, native inventories, bounds and metadata/run-language distinction.
+- [x] Prepare the adapter and focused output/UTF-8/aggregate/rollback controls; retain intended baseline unsupported-key failures.
+- [ ] Integrate only after the independently reviewed native contribution139 and dedicated upgrade140.
+- [ ] Pass native and installed focused controls, then explicitly review the one legacy metadata-test fingerprint migration without relabeling historical evidence.
+- [ ] Pass full locked native/installed corpus, independent source/artifact/focused review, license/size checks and synchronized bounded documentation.
+- [ ] Complete fresh current-main CI and manual merge. Keep extended-property and broader DOC7 work open.
