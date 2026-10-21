@@ -721,3 +721,8 @@ Existing WordDocument/PdfDocument.metadata and DOCX Picture/EditableTable/Editab
 ## 97. Owned DOCX same-cell paragraph movement
 
 The existing paragraph collection move operation shall support ordinary paragraphs in one canonical owned body/header/footer cell, including nested and merged cells. Preserve native contents, other block order, surviving paragraph/table/picture identities, grid generations, neighboring containers, ordered body sections and exact resource accounting. Hide only native-created required tail paragraphs and reuse them on later append; authored empty paragraphs remain editable. No-op leaves revision/bytes/cache unchanged. Keep source semantic-anchor rejection, callback revision checks and normal commit guards; cross-container, imported, rich-note and PPTX movement remain unavailable.
+
+
+## 99. Owned DOCX theme identity prerequisite
+
+Do not expose theme editing based only on palette/font metadata serialization. STY3 requires persistent theme references, tint/shade/mapping and font roles, native resolution after replacement, preservation of explicit overrides and independent DOCX/PNG/PDF acceptance. Existing fixed-color/font style/default formatting remains supported. Keep missing native semantics under U02; no new color/style manager or string-token workaround.

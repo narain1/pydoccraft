@@ -764,3 +764,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete independent final source review and focused replay (four workflows,24.049s).
 - [x] Complete integrated locked release/full corpus and independent artifact review: 361 native and 502 installed Python tests.
 - [ ] Complete exact-head/current-main CI and manual merge; retain broader DOC5/TXT1 work.
+
+
+## Owned DOCX theme source audit (spec99)
+
+- [x] Trace pinned theme Settings, property read/write, inheritance, layout and PDF; distinguish metadata preservation from live theme identity.
+- [x] Connect the verified prerequisite to existing U02/STY3 and specify native fixtures without adding a speculative API/test.
+- [x] Independently review pinned source findings and validate documentation links.
+- [ ] Obtain native theme-reference/resolution support and execute the proposed save/render/export fixtures before implementing theme changes; leave STY3 open.
