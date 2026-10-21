@@ -10,10 +10,12 @@ The package links selected library crates rather than complete ArtCraft applicat
 
 | Project | Pinned revision | Responsibility |
 |---|---|---|
-| [PdfCraft](https://github.com/storytold/pdfcraft) | `645016addcfb9078c557f0189559ab47cdcee057` | PDF inspection, reading-order text, links, images, rendering, DOCX export primitives |
-| [WordCraft](https://github.com/storytold/wordcraft) | `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22` | DOCX model, layout, rendering, PDF export |
-| [DeckCraft](https://github.com/storytold/deckcraft) | `22db9261f9d1a214c296fd390173130c45d76d66` | PPTX model, rendering, PDF export |
+| [PdfCraft contribution fork](https://github.com/narain1/pdfcraft) | `60a8d7998b64c7718e08e9054e99f1f2eb1eda8d` | PDF inspection, reading-order text, links, images, rendering, DOCX export primitives |
+| [WordCraft contribution fork](https://github.com/narain1/wordcraft) | `f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef` | DOCX model, layout, rendering, PDF export |
+| [DeckCraft contribution fork](https://github.com/narain1/deckcraft) | `dd4fd70b6347dd2ce782e33f030a2b6c0abb0106` | PPTX model, rendering, PDF export |
 | [craft-libs](https://github.com/storytold/craft-libs) | `c3487320b2d1de657b860b3c8abb44e1f2b32bd8` | Shared PDF backend and patched Krilla dependency |
+
+The PdfCraft fork is directly based on upstream `645016addcfb9078c557f0189559ab47cdcee057`; its reviewed change rejects final rounded rasters above the existing pixel budget before allocation. WordCraft and DeckCraft retain their separately reviewed stroke-parity and fallible-rendering forks. These are contribution forks, not claims of upstream acceptance; root NOTICE records original sources and parents. No bundled assets changed.
 
 Git dependencies use immutable `rev` values. Do not replace them with branches or floating tags.
 

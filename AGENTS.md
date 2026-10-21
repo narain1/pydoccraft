@@ -23,10 +23,12 @@ Keep all crates from each repository on one revision:
 
 | Project | Revision | Purpose |
 |---|---|---|
-| PdfCraft | `645016addcfb9078c557f0189559ab47cdcee057` | PDF inspection, text, links, images, rendering, DOCX export |
+| PdfCraft (reviewed contribution fork) | `60a8d7998b64c7718e08e9054e99f1f2eb1eda8d` | PDF inspection, text, links, images, rendering, DOCX export |
 | WordCraft | `f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef` | DOCX model, layout, rendering, PDF export |
 | DeckCraft (reviewed contribution fork) | `dd4fd70b6347dd2ce782e33f030a2b6c0abb0106` | PPTX model, fallible rendering, PDF export |
 | craft-libs | `c3487320b2d1de657b860b3c8abb44e1f2b32bd8` | Shared PDF backend required by WordCraft/DeckCraft |
+
+PdfCraft is pinned to the reviewed contribution fork at `https://github.com/narain1/pdfcraft`, directly based on upstream `645016addcfb9078c557f0189559ab47cdcee057`. Its final integer raster-budget guard changes no public package API and does not imply upstream acceptance.
 
 WordCraft is pinned to the reviewed contribution fork at `https://github.com/narain1/wordcraft`, directly based on upstream `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`. Its PDF shape stroke change does not imply upstream acceptance.
 
