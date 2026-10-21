@@ -1604,6 +1604,57 @@ impl EditablePptx {
         ))
     }
 
+    pub fn move_cell_paragraph(
+        &mut self,
+        slide: usize,
+        id: u32,
+        source: CellTarget,
+        destination: CellTarget,
+        revision: u64,
+    ) -> PyResult<bool> {
+        self.check_revision(revision)?;
+        self.target_body(slide, id, Some(source))?;
+        self.target_body(slide, id, Some(destination))?;
+        if (source.0, source.1, source.3, source.4)
+            != (destination.0, destination.1, destination.3, destination.4)
+        {
+            return Err(PyValueError::new_err(
+                "paragraph movement requires the same canonical cell",
+            ));
+        }
+        // Validate the bounded source even for a no-op. Ordinal equality must
+        // not make stale or malformed selections appear successful.
+        content_budget(self.document()?)?;
+        let errors = self.document()?.validate();
+        if !errors.is_empty() {
+            return Err(EngineError::Malformed(format!(
+                "invalid authored presentation: {}",
+                errors.join("; ")
+            ))
+            .into());
+        }
+        if source.2 == destination.2 {
+            return Ok(false);
+        }
+        let generation = source
+            .4
+            .checked_add(1)
+            .ok_or_else(|| EngineError::ResourceLimit("cell generation limit reached".into()))?;
+        self.mutate(|document| {
+            let paragraphs = &mut cell_mut(document, slide, id, source.0, source.1)?
+                .text
+                .paragraphs;
+            let paragraph = paragraphs.remove(source.2);
+            paragraphs.insert(destination.2, paragraph);
+            Ok(())
+        })?;
+        self.cell_generations
+            .insert((id, source.0, source.1), generation);
+        // Reordering intact values changes no live text, media, shape or
+        // property budget; retain the existing counters and grid generation.
+        Ok(true)
+    }
+
     pub fn remove_cell_paragraph(
         &mut self,
         slide: usize,
@@ -5809,3 +5860,7 @@ mod letter_spacing_tests {
 #[cfg(test)]
 #[path = "pptx_cell_delete_proof.rs"]
 mod cell_delete_proof;
+
+#[cfg(test)]
+#[path = "pptx_cell_move_proof.rs"]
+mod cell_move_proof;

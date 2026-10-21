@@ -118,8 +118,17 @@ class CellParagraphMoveTests(unittest.TestCase):
             cell.paragraphs.move(0, 0)
         with doc_ex.new('pptx') as presentation:
             cell = presentation.slides.add().add_table([['Text']], box=(20, 20, 200, 60))[0, 0]
-            with self.assertRaises(UnsupportedFormatError):
-                cell.paragraphs.move(0, 0)
+            paragraph = cell.paragraphs[0]
+            held = paragraph[:]
+            raw, revision = presentation.to_bytes(), presentation._call('revision')
+            presentation.render_page(0, dpi=72)
+            cache = presentation._cached
+            cell.paragraphs.move(0, 0)
+            self.assertEqual(presentation.to_bytes(), raw)
+            self.assertEqual(presentation._call('revision'), revision)
+            self.assertIs(presentation._cached, cache)
+            self.assertEqual(held.text, 'Text')
+            self.assertEqual(paragraph.text, 'Text')
 
     def test_callbacks_cannot_apply_pending_move_to_changed_cell_or_owner(self):
         class Index:
