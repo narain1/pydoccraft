@@ -579,3 +579,10 @@ Python annotations describe existing PyO3 return contracts and normalized JSON: 
 ## 91. Reproducible Office workload measurements
 
 Extend the existing fixture generator with bounded page count, image dimensions, distinct deterministic PNG payloads and displayed size. Native writers create the documents; reopening produces a source manifest. The existing render-session benchmark hashes the input before measurement and accumulates fixed-length page PNG digests in source order while retaining only one PNG at a time. Fresh processes compare the same installed wheel with its retained native session versus that session explicitly closed before rendering. Three alternating-order repetitions provide timing medians and observed memory ranges; JSON retains every sample and source/tool/artifact identity. The input hash warms filesystem cache, and OS peak/current RSS counters do not establish native object reclamation or allocation limits.
+
+
+## 89. Native title and author fields
+
+The two new kind strings map to existing native `InlineObject::Field` instructions TITLE/AUTHOR with empty results. Unlike page/count fields they have no Arabic numeric switch. WordCraft's public layout context obtains title/author from `Document.core`; its native field evaluator uses those values only when the stored result is empty. Python invalidates its immutable rendered snapshot after metadata mutation, so subsequent preview/export uses a fresh model/layout. No general cache refresh operation is added.
+
+The existing field traversal counts every field and conservatively includes the referenced metadata bytes in paragraph/document text budgets before commit. Repeated fields consume repeated display bytes; metadata changes recheck the same contract. The pagination preflight reuses its native layout for metadata-field line-box checks, with bounded item/line/cluster scans and public bidi-aware cluster edges. Native atomic fields remain indivisible; unsupported overflow, turned text and explicitly clipped cells fail rather than being reshaped locally. This checks native advance and line boxes, not glyph outlines. Existing save atomicity protects destination paths.

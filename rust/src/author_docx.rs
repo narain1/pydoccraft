@@ -1854,29 +1854,31 @@ impl EditableDocx {
     pub fn add_paragraph_field(&mut self, id: usize, kind: &str) -> PyResult<(usize, usize, u64)> {
         let paragraph = self.paragraph(id)?;
         let instruction = match kind {
-            "page" => "PAGE",
-            "page_count" => "NUMPAGES",
-            "section_page_count" => "SECTIONPAGES",
+            "page" => "PAGE \\* Arabic",
+            "page_count" => "NUMPAGES \\* Arabic",
+            "section_page_count" => "SECTIONPAGES \\* Arabic",
+            "title" => "TITLE",
+            "author" => "AUTHOR",
             _ => {
                 return Err(PyValueError::new_err(
-                    "field kind must be page, page_count or section_page_count",
+                    "field kind must be page, page_count, section_page_count, title or author",
                 ))
             }
         };
         let (offset, start) = (paragraph.text.len(), paragraph.text.chars().count());
         let text_bytes = self.updated_text_bytes(0, wordcraft_doc::para::OBJ.len_utf8())?;
         if page_field_count(self.document()?)? >= MAX_PAGE_FIELDS {
-            return Err(limit("document exceeds 10000 page fields"));
+            return Err(limit("document exceeds 10000 fields"));
         }
         let mut candidate = self.document()?.clone();
-        // Explicit decimal avoids the pinned renderer's inconsistent section-format
-        // inheritance between body/note and header/footer fields. The writer keeps an
-        // empty cached result; native layout evaluates the display without mutating it.
+        // Explicit decimal avoids inconsistent section-format inheritance for page
+        // fields. TITLE/AUTHOR use native core metadata. Empty cached results let
+        // native layout evaluate the display without mutating the stored result.
         self.paragraph_mut(&mut candidate, id)?
             .insert_object(
                 offset,
                 InlineObject::Field {
-                    instr: format!("{instruction} \\* Arabic"),
+                    instr: instruction.to_owned(),
                     result: String::new(),
                     locked: false,
                     dirty: true,
@@ -4899,6 +4901,8 @@ fn page_field_count(document: &Document) -> PyResult<usize> {
         }
     }
     let mut count = 0usize;
+    let mut expanded_bytes = 0usize;
+    let mut has_metadata_fields = false;
     for story in
         std::iter::once(StoryRef::Body).chain(document.parts.keys().copied().map(StoryRef::Part))
     {
@@ -4908,11 +4912,29 @@ fn page_field_count(document: &Document) -> PyResult<usize> {
                     StoryRef::Body => continuous.contains(&section_of(&path)),
                     StoryRef::Part(id) => continuous_parts.contains(&id),
                 };
+                let mut paragraph_bytes = paragraph.text.len();
                 for object in &paragraph.objects {
-                    if let InlineObject::Field { instr, .. } = object {
+                    if let InlineObject::Field { instr, result, .. } = object {
+                        if let Some(value) = metadata_field_value(document, instr, result) {
+                            has_metadata_fields = true;
+                            if value.chars().any(|ch| {
+                                matches!(
+                                    ch,
+                                    '\n' | '\t' | '\r' | '\u{85}' | '\u{2028}' | '\u{2029}'
+                                )
+                            }) {
+                                return Err(EngineError::Unsupported("title and author fields require single-line metadata without tabs".into()).into());
+                            }
+                            paragraph_bytes = paragraph_bytes.saturating_add(value.len());
+                            if paragraph_bytes > MAX_TEXT_BYTES {
+                                return Err(limit(
+                                    "metadata field expansion exceeds 1 MiB of paragraph text",
+                                ));
+                            }
+                        }
                         count = count.saturating_add(1);
                         if count > MAX_PAGE_FIELDS {
-                            return Err(limit("document exceeds 10000 page fields"));
+                            return Err(limit("document exceeds 10000 fields"));
                         }
                         if continuous_scope
                             && wordcraft_layout::fields::field_name(instr) == "SECTIONPAGES"
@@ -4921,10 +4943,67 @@ fn page_field_count(document: &Document) -> PyResult<usize> {
                         }
                     }
                 }
+                expanded_bytes = expanded_bytes.saturating_add(paragraph_bytes);
+                if has_metadata_fields && expanded_bytes > MAX_DOCUMENT_TEXT_BYTES {
+                    return Err(limit(
+                        "metadata field expansion exceeds 16 MiB of document text",
+                    ));
+                }
             }
         }
     }
     Ok(count)
+}
+
+fn metadata_field_value<'a>(
+    document: &'a Document,
+    instruction: &str,
+    result: &str,
+) -> Option<&'a str> {
+    if !result.is_empty() {
+        return None;
+    }
+    match wordcraft_layout::fields::field_name(instruction).as_str() {
+        "TITLE" => Some(&document.core.title),
+        "AUTHOR" => Some(&document.core.creator),
+        _ => None,
+    }
+}
+
+// Keys and object offsets are native UTF-8 paths/bytes, never Python scalar indexes.
+type MetadataFields = BTreeMap<(StoryRef, Path), BTreeMap<usize, usize>>;
+
+fn metadata_field_offsets(document: &Document) -> PyResult<MetadataFields> {
+    let mut fields = BTreeMap::new();
+    let mut count = 0usize;
+    for story in
+        std::iter::once(StoryRef::Body).chain(document.parts.keys().copied().map(StoryRef::Part))
+    {
+        for path in document.para_paths(story) {
+            let Some(paragraph) = document.para(story, &path) else {
+                continue;
+            };
+            for (offset, object) in paragraph
+                .object_offsets()
+                .into_iter()
+                .zip(&paragraph.objects)
+            {
+                if let InlineObject::Field { instr, result, .. } = object {
+                    if let Some(value) = metadata_field_value(document, instr, result) {
+                        count += 1;
+                        if count > MAX_PAGE_FIELDS {
+                            return Err(limit("document exceeds 10000 fields"));
+                        }
+                        fields
+                            .entry((story, path.clone()))
+                            .or_insert_with(BTreeMap::new)
+                            .insert(offset, value.len());
+                    }
+                }
+            }
+        }
+    }
+    Ok(fields)
 }
 
 fn attach_image_media(
@@ -5407,11 +5486,13 @@ fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
         .iter()
         .any(|(_, section)| section.line_numbers.is_some());
     let bookmarks = validate_bookmark_links(document)?;
+    let metadata_fields = metadata_field_offsets(document)?;
     if guarded.is_empty()
         && rich.is_empty()
         && !numbered
         && bookmarks.is_empty()
         && outlines.is_empty()
+        && metadata_fields.is_empty()
     {
         return Ok(());
     }
@@ -5427,6 +5508,8 @@ fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
         validate_line_number_bounds(&layout)?;
     }
     let mut items = 0usize;
+    let mut field_work = 0usize;
+    let mut field_display_bytes = 0usize;
     for page in &layout.pages {
         items = items
             .saturating_add(page.items.len())
@@ -5442,6 +5525,14 @@ fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
             .into());
         }
         validate_rich_story_page_bounds(page, &rich)?;
+        if !metadata_fields.is_empty() {
+            validate_metadata_field_placement(
+                page,
+                &metadata_fields,
+                &mut field_work,
+                &mut field_display_bytes,
+            )?;
+        }
         for item in page.items.iter().chain(&page.header).chain(&page.footer) {
             if let wordcraft_layout::Placed::Cell {
                 story,
@@ -5470,6 +5561,143 @@ fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
     }
     if !outlines.is_empty() {
         validate_outline_layout(&layout, &outlines)?;
+    }
+    Ok(())
+}
+
+// Native fields are indivisible text clusters. Check their public layout boxes;
+// do not reconstruct shaping, wrap field text, or promise glyph-outline bounds.
+fn validate_metadata_field_placement(
+    page: &wordcraft_layout::Page,
+    fields: &MetadataFields,
+    work: &mut usize,
+    display_bytes: &mut usize,
+) -> PyResult<()> {
+    let unsupported = || {
+        EngineError::Unsupported(
+        "metadata field requires an unclipped horizontal line box within its available width and physical page; shorten the metadata or change formatting/layout".into(),
+    )
+    };
+    let charge = |work: &mut usize, count: usize| -> PyResult<()> {
+        *work = work.saturating_add(count);
+        if *work > MAX_LAYOUT_ITEMS {
+            return Err(limit(
+                "metadata field placement exceeds 2000000 item/line/cluster scan units",
+            ));
+        }
+        Ok(())
+    };
+    // Charge every actual placement, including repeated headers/footers, before
+    // looking up field targets or collecting any clipping prefixes.
+    charge(
+        work,
+        page.items
+            .len()
+            .saturating_add(page.header.len())
+            .saturating_add(page.footer.len()),
+    )?;
+    let clipped: BTreeSet<_> = page
+        .items
+        .iter()
+        .chain(&page.header)
+        .chain(&page.footer)
+        .filter_map(|item| match item {
+            wordcraft_layout::Placed::Cell {
+                story,
+                table,
+                row,
+                cell,
+                clip: true,
+                ..
+            } => Some((
+                *story,
+                Path([table.0.as_slice(), &[*row as u32, *cell as u32]].concat()),
+            )),
+            _ => None,
+        })
+        .collect();
+    for item in page.items.iter().chain(&page.header).chain(&page.footer) {
+        let wordcraft_layout::Placed::Lines {
+            story,
+            path,
+            para,
+            l0,
+            l1,
+            x,
+            y,
+            turn,
+        } = item
+        else {
+            continue;
+        };
+        let Some(targets) = fields.get(&(*story, path.clone())) else {
+            continue;
+        };
+        if *turn != TextDirection::Horizontal
+            || *l0 >= *l1
+            || *l1 > para.lines.len()
+            || (3..path.0.len())
+                .step_by(3)
+                .any(|length| clipped.contains(&(*story, Path(path.0[..length].to_vec()))))
+        {
+            return Err(unsupported().into());
+        }
+        charge(work, l1 - l0)?;
+        let mut seen = BTreeSet::new();
+        for line in &para.lines[*l0..*l1] {
+            if line.c0 > line.c1 || line.c1 > para.clusters.len() {
+                return Err(unsupported().into());
+            }
+            charge(work, line.c1 - line.c0)?;
+            for index in line.c0..line.c1 {
+                let cluster = &para.clusters[index];
+                if cluster.start >= cluster.end {
+                    if targets.contains_key(&cluster.start) {
+                        return Err(unsupported().into());
+                    }
+                    continue;
+                }
+                let mut matches = targets.range(cluster.start..cluster.end);
+                let Some((offset, bytes)) = matches.next() else {
+                    continue;
+                };
+                if matches.next().is_some()
+                    || cluster.start != *offset
+                    || cluster.end != offset.saturating_add(wordcraft_doc::para::OBJ.len_utf8())
+                    || !seen.insert(*offset)
+                {
+                    return Err(unsupported().into());
+                }
+                *display_bytes = display_bytes.saturating_add(*bytes);
+                if *display_bytes > MAX_DOCUMENT_TEXT_BYTES {
+                    return Err(limit(
+                        "rendered metadata field occurrences exceed 16 MiB of display text",
+                    ));
+                }
+                let left = line.cl_left(index).ok_or_else(unsupported)?;
+                let right = line.cl_right(index).ok_or_else(unsupported)?;
+                let top = *y + line.top - para.lines[*l0].top;
+                let bottom = top + line.height;
+                if ![
+                    left, right, line.left, line.right, top, bottom, *x, *y, page.w, page.h,
+                ]
+                .iter()
+                .all(|value| value.is_finite())
+                    || page.w <= 0.0
+                    || page.h <= 0.0
+                    || right < left
+                    || bottom < top
+                    || left < line.left - 0.01
+                    || right > line.right + 0.01
+                    || *x + left < -0.01
+                    || *x + right > page.w + 0.01
+                    || top < -0.01
+                    || bottom > page.h + 0.01
+                {
+                    return Err(unsupported().into());
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -9317,6 +9545,341 @@ mod tests {
             assert_eq!(read.media.len(), 1);
             assert_eq!(page_field_count(&read).unwrap(), 1);
         }
+    }
+
+    #[test]
+    fn metadata_field_expansion_limits_recheck_later_updates_atomically() {
+        pyo3::prepare_freethreaded_python();
+        // Synthetic repeated native objects hit exact bounds without thousands
+        // of public transactions or allocating their evaluated display strings.
+        for (paragraphs, per_paragraph, message) in [(1, 16, "1 MiB"), (32, 8, "16 MiB")] {
+            let mut document = EditableDocx::new();
+            let value = "x".repeat(MAX_PROPERTY_VALUE_BYTES - wordcraft_doc::para::OBJ.len_utf8());
+            document
+                .update_metadata(&json!({"title":value}).to_string())
+                .unwrap();
+            let id = document.add_paragraph("").unwrap();
+            document.add_paragraph_field(id, "title").unwrap();
+            let mut paragraph = document.paragraph(id).unwrap().clone();
+            paragraph.text = wordcraft_doc::para::OBJ.to_string().repeat(per_paragraph);
+            paragraph.objects = vec![paragraph.objects[0].clone(); per_paragraph];
+            paragraph.touch();
+            let mut candidate = document.document().unwrap().clone();
+            candidate.body = (0..paragraphs)
+                .map(|_| Arc::new(Block::Para(paragraph.clone())))
+                .collect();
+            document.commit(candidate).unwrap();
+            document.text_bytes = paragraphs * per_paragraph * wordcraft_doc::para::OBJ.len_utf8();
+            assert_eq!(
+                page_field_count(document.document().unwrap()).unwrap(),
+                paragraphs * per_paragraph
+            );
+            let before = wordcraft_docx::write(document.document().unwrap()).unwrap();
+            let metadata = document.metadata().unwrap();
+            let revision = document.revision().unwrap();
+            let error = document
+                .update_metadata(&json!({"title":format!("{value}x")}).to_string())
+                .unwrap_err();
+            assert!(error.to_string().contains(message), "{error}");
+            assert_eq!(document.metadata().unwrap(), metadata);
+            assert_eq!(document.revision().unwrap(), revision);
+            assert_eq!(
+                wordcraft_docx::write(document.document().unwrap()).unwrap(),
+                before
+            );
+            // Lowering the value reclaims evaluated bytes without changing fields.
+            document.update_metadata(r#"{"title":""}"#).unwrap();
+            document
+                .update_metadata(&json!({"title":value}).to_string())
+                .unwrap();
+            assert_eq!(document.metadata().unwrap(), metadata);
+        }
+        // The normal commit path counts independent copied header parts too.
+        let mut document = EditableDocx::new();
+        document.update_metadata(r#"{"title":"Copied"}"#).unwrap();
+        let part = document.ensure_story("header", "default", 0).unwrap();
+        let paragraph = document.story_add_paragraph(part, "").unwrap();
+        document.add_paragraph_field(paragraph, "title").unwrap();
+        document.add_section("next_page").unwrap();
+        assert_eq!(page_field_count(document.document().unwrap()).unwrap(), 2);
+        assert_eq!(
+            metadata_field_offsets(document.document().unwrap())
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn metadata_field_placement_charges_repeated_occurrences_and_native_byte_offsets() {
+        pyo3::prepare_freethreaded_python();
+        let mut document = EditableDocx::new();
+        document.update_metadata(r#"{"title":"Abc"}"#).unwrap();
+        let id = document.add_paragraph("é😀 ").unwrap();
+        let (start, end, _) = document.add_paragraph_field(id, "title").unwrap();
+        assert_eq!((start, end), (3, 4));
+        let fields = metadata_field_offsets(document.document().unwrap()).unwrap();
+        assert_eq!(
+            fields[&(StoryRef::Body, Path::top(0))],
+            BTreeMap::from([(7, 3)])
+        );
+        let layout = wordcraft_layout::layout(
+            document.document().unwrap(),
+            &mut Default::default(),
+            &Default::default(),
+        );
+        let page = &layout.pages[0];
+        let (mut work, mut bytes) = (0, 0);
+        validate_metadata_field_placement(page, &fields, &mut work, &mut bytes).unwrap();
+        assert_eq!(bytes, 3);
+        let cost = work;
+        assert!(cost >= 3);
+        validate_metadata_field_placement(page, &fields, &mut work, &mut bytes).unwrap();
+        assert_eq!((work, bytes), (cost * 2, 6));
+        // Exact-bound then repeated-placement failure; no deduplication discount.
+        let mut work = MAX_LAYOUT_ITEMS - cost;
+        let mut bytes = MAX_DOCUMENT_TEXT_BYTES - 3;
+        validate_metadata_field_placement(page, &fields, &mut work, &mut bytes).unwrap();
+        assert_eq!((work, bytes), (MAX_LAYOUT_ITEMS, MAX_DOCUMENT_TEXT_BYTES));
+        assert!(
+            validate_metadata_field_placement(page, &fields, &mut work, &mut bytes)
+                .unwrap_err()
+                .to_string()
+                .contains("scan units")
+        );
+        work = 0;
+        assert!(
+            validate_metadata_field_placement(page, &fields, &mut work, &mut bytes)
+                .unwrap_err()
+                .to_string()
+                .contains("display text")
+        );
+        document
+            .format_paragraph(id, r#"{"direction":"rtl"}"#)
+            .unwrap();
+        let rtl = wordcraft_layout::layout(
+            document.document().unwrap(),
+            &mut Default::default(),
+            &Default::default(),
+        );
+        validate_metadata_field_placement(&rtl.pages[0], &fields, &mut 0, &mut 0).unwrap();
+        let mut repeated = EditableDocx::new();
+        repeated.update_metadata(r#"{"title":"Abc"}"#).unwrap();
+        repeated.add_paragraph("First page").unwrap();
+        for kind in ["header", "footer"] {
+            let story = repeated.ensure_story(kind, "default", 0).unwrap();
+            let paragraph = repeated.story_add_paragraph(story, "").unwrap();
+            repeated.add_paragraph_field(paragraph, "title").unwrap();
+        }
+        for _ in 0..2 {
+            repeated.add_page_break().unwrap();
+            repeated.add_paragraph("Later page").unwrap();
+        }
+        let repeated_fields = metadata_field_offsets(repeated.document().unwrap()).unwrap();
+        let repeated_layout = wordcraft_layout::layout(
+            repeated.document().unwrap(),
+            &mut Default::default(),
+            &Default::default(),
+        );
+        assert_eq!(repeated_layout.pages.len(), 3);
+        assert_eq!(repeated_fields.len(), 2);
+        let (mut repeated_work, mut repeated_bytes) = (0, 0);
+        for placed_page in &repeated_layout.pages {
+            let before = repeated_bytes;
+            validate_metadata_field_placement(
+                placed_page,
+                &repeated_fields,
+                &mut repeated_work,
+                &mut repeated_bytes,
+            )
+            .unwrap();
+            assert_eq!(repeated_bytes - before, 6);
+        }
+        assert_eq!(repeated_bytes, 18);
+        let pdf = crate::docx::to_pdf(&repeated.to_bytes().unwrap(), None).unwrap();
+        let extracted = crate::pdf::extract(&pdf, None).unwrap();
+        assert_eq!(extracted.pages.len(), 3);
+        for exported_page in &extracted.pages {
+            assert_eq!(
+                exported_page
+                    .blocks
+                    .iter()
+                    .map(|block| block.text.matches("Abc").count())
+                    .sum::<usize>(),
+                2
+            );
+        }
+        let mut invalid = page.clone();
+        let line = invalid
+            .items
+            .iter_mut()
+            .find_map(|item| match item {
+                wordcraft_layout::Placed::Lines { para, .. } => Some(Arc::make_mut(para)),
+                _ => None,
+            })
+            .unwrap();
+        line.lines[0].xs.fill(f32::NAN);
+        assert!(validate_metadata_field_placement(&invalid, &fields, &mut 0, &mut 0).is_err());
+    }
+
+    #[test]
+    fn upstream_metadata_fields_evaluate_all_stories_and_preserve_empty_caches() {
+        let mut owned = EditableDocx::new();
+        let body = owned.add_paragraph("Body ").unwrap();
+        owned.add_table(vec![vec!["Cell ".into()]]).unwrap();
+        for kind in ["header", "footer"] {
+            let story = owned.ensure_story(kind, "default", 0).unwrap();
+            owned
+                .story_add_paragraph(story, &format!("{kind} "))
+                .unwrap();
+        }
+        for kind in ["footnote", "endnote"] {
+            owned
+                .add_note(
+                    body,
+                    0,
+                    4,
+                    owned.revision().unwrap(),
+                    &format!("{kind} "),
+                    kind,
+                )
+                .unwrap();
+        }
+        let mut native = owned.document().unwrap().clone();
+        let stories: Vec<_> = std::iter::once(StoryRef::Body)
+            .chain(native.parts.keys().copied().map(StoryRef::Part))
+            .collect();
+        let mut count = 0;
+        for story in &stories {
+            for path in native.para_paths(*story) {
+                let paragraph = native.para_mut(*story, &path).unwrap();
+                if paragraph.text.is_empty() {
+                    continue;
+                }
+                for instruction in ["TITLE", "AUTHOR"] {
+                    paragraph
+                        .insert_object(
+                            paragraph.text.len(),
+                            InlineObject::Field {
+                                instr: instruction.into(),
+                                result: String::new(),
+                                locked: false,
+                                dirty: true,
+                                code: false,
+                                form: String::new(),
+                            },
+                            &CharProps::default(),
+                        )
+                        .unwrap();
+                    paragraph
+                        .insert_text(paragraph.text.len(), " ", &CharProps::default())
+                        .unwrap();
+                    count += 1;
+                }
+            }
+        }
+        assert_eq!(count, 12);
+        let mut previous = None;
+        for (title, author) in [("ReportOne", "WriterOne"), ("ReportTwo", "WriterTwo")] {
+            native.core.title = title.into();
+            native.core.creator = author.into();
+            let bytes = wordcraft_docx::write(&native).unwrap();
+            let read = wordcraft_docx::read(&bytes).unwrap();
+            let mut fields = 0;
+            for story in std::iter::once(StoryRef::Body)
+                .chain(read.parts.keys().copied().map(StoryRef::Part))
+            {
+                for path in read.para_paths(story) {
+                    for object in &read.para(story, &path).unwrap().objects {
+                        if let InlineObject::Field {
+                            instr,
+                            result,
+                            dirty,
+                            ..
+                        } = object
+                        {
+                            assert!(matches!(instr.as_str(), "TITLE" | "AUTHOR"));
+                            assert!(result.is_empty() && *dirty);
+                            fields += 1;
+                        }
+                    }
+                }
+            }
+            assert_eq!(fields, count);
+            let png = crate::docx::render(&bytes, 0, 144.0, None).unwrap();
+            if let Some(previous) = previous {
+                assert_ne!(png, previous);
+            }
+            previous = Some(png);
+            let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+            let extracted = crate::pdf::extract(&pdf, None).unwrap();
+            let text = extracted
+                .pages
+                .iter()
+                .flat_map(|page| &page.blocks)
+                .map(|block| block.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert_eq!(text.matches(title).count(), 6, "{text}");
+            assert_eq!(text.matches(author).count(), 6, "{text}");
+            for label in ["Body", "Cell", "header", "footer", "footnote", "endnote"] {
+                assert!(text.contains(label), "{text}");
+            }
+            let roundtrip = wordcraft_docx::write(&read).unwrap();
+            assert_eq!(
+                crate::docx::render(&roundtrip, 0, 144.0, None).unwrap(),
+                previous.clone().unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn upstream_metadata_fields_keep_cached_results_and_shape_one_cluster() {
+        let context = wordcraft_layout::FieldCtx {
+            title: "CurrentTitle".into(),
+            author: "CurrentAuthor".into(),
+            ..Default::default()
+        };
+        for (instruction, expected) in [("TITLE", "CurrentTitle"), ("AUTHOR", "CurrentAuthor")] {
+            assert_eq!(
+                wordcraft_layout::fields::field_text(instruction, "", &context),
+                (expected.into(), false)
+            );
+            assert_eq!(
+                wordcraft_layout::fields::field_text(instruction, "CachedValue", &context),
+                ("CachedValue".into(), false)
+            );
+        }
+        let mut native = Document::from_text("");
+        native.core.title = "Long title ".repeat(80);
+        let paragraph = native.para_mut(StoryRef::Body, &Path::top(0)).unwrap();
+        paragraph
+            .insert_object(
+                0,
+                InlineObject::Field {
+                    instr: "TITLE".into(),
+                    result: String::new(),
+                    locked: false,
+                    dirty: true,
+                    code: false,
+                    form: String::new(),
+                },
+                &CharProps::default(),
+            )
+            .unwrap();
+        let layout =
+            wordcraft_layout::layout(&native, &mut Default::default(), &Default::default());
+        let paragraph = layout
+            .pages
+            .iter()
+            .flat_map(|page| &page.items)
+            .find_map(|item| match item {
+                wordcraft_layout::Placed::Lines { para, .. } => Some(para),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(paragraph.clusters.len(), 1);
+        assert!(paragraph.clusters[0].adv > layout.pages[0].w);
     }
 
     #[test]

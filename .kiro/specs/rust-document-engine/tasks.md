@@ -685,3 +685,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete independent verification of all 36 samples, source/tool/artifact hashes, page digests, counters, table medians/ratios and memory ranges.
 - [ ] Complete required current-main CI and manual merge for Office benchmark evidence.
 - [ ] Keep P1's independently reproducible PDF memory/full-document counterpart and broader real-input/platform QA7 evidence open.
+
+
+## Native title and author fields
+
+- [x] Execute two raw native all-story evaluation, empty/nonempty cache and atomic-width proofs before adapter implementation.
+- [x] Extend existing add_field with title/author, every-commit expansion limits and bounded native placement preflight; retain the existing API surface and numeric-field behavior.
+- [x] Verify four new native groups, 28 related field groups, 13 copied-package public workflows, fmt/Clippy/debug build, strict typing and 19 support/reference documentation tests; record artifact scope.
+- [ ] Complete integrated locked release/corpus, independent review and exact-head CI before manual merge.
+- [ ] Keep general REF3 field kinds, REF4 refresh and imported preservation open.

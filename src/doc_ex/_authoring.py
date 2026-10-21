@@ -943,10 +943,11 @@ class Paragraph:
         return TextRange(self, start, end, revision)
 
     def add_field(self, kind: str) -> TextRange:
-        """Append a decimal page, page_count or section_page_count field.
+        """Append a page/count field, or a title/author metadata field.
 
         The returned range contains one object marker. Native rendering evaluates
-        the number; source extraction retains the empty stored field result.
+        its value; source extraction retains the empty stored field result.
+        Metadata fields are indivisible and must fit their native line box.
         """
         start, end, revision = self._owner._call("add_paragraph_field", self._id, kind, _change=True)
         return TextRange(self, start, end, revision)

@@ -361,3 +361,10 @@ U02/DOC5/TXT1: pinned public [remove_block](https://github.com/storytold/wordcra
 
 
 U02/DOC5/TXT1: ordinary same-container, same-section paragraph reordering composes the pinned document library's public `remove_block` and `insert_block`; another edit manager or document algorithm is not missing. Raw native fixtures confirm that removing a final paragraph after a table creates one necessary blank, and that choosing a section-ending destination can change content ownership even when the ordered section-property values are unchanged. The adapter retains the native blank and restricts the supported scope. Anchored/cross-section movement needs separate semantic export evidence before widening this operation; do not infer an upstream deficiency from that local scope limit.
+
+
+### Existing native title/author field evaluation
+
+U07/REF3: pinned public [field evaluation](https://github.com/storytold/wordcraft/blob/f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22/crates/layout/src/fields.rs#L139) already evaluates TITLE/AUTHOR from [core metadata in the layout context](https://github.com/storytold/wordcraft/blob/f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22/crates/layout/src/lib.rs#L2005) when the stored result is empty. It preserves a nonempty cached result instead. This is local integration through existing add_field, not a missing native evaluator or new metadata API. Saved empty caches and current PNG/PDF display remain different operations.
+
+Native [shape_atomic](https://github.com/storytold/wordcraft/blob/f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22/crates/layout/src/para.rs#L946) makes the entire result one indivisible cluster. The raw metadata-field proof demonstrates a long title wider than the physical page, so the local profile checks public native line/cluster boxes and refuses unsupported overflow rather than wrapping locally. General flowing field results and fallible preallocation layout limits remain native candidates under existing U07; date/custom-property/reference/merge evaluation is not implied by the two supported core fields.
