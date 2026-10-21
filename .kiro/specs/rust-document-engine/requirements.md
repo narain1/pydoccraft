@@ -852,6 +852,13 @@ Existing paragraph, table and row properties must retain concrete successful res
 5. DOCX readback, native PNG and PDF SHALL retain demonstrated source/order/links/tables/notes/images without fake extraction geometry. Line, textbox, rotation, front, groups, effects, auxiliary/cell placement and imported editing SHALL remain explicitly unsupported. MED4 SHALL remain incomplete.
 
 
+## 120. Validate release wheels before publishing
+
+The existing release matrix SHALL support an explicit validation-only dispatch against an exact immutable commit SHA. It SHALL run the same Python 3.11–3.13 Linux, macOS and Windows wheel builds and installed-wheel corpus, retain artifacts and validation evidence, and create neither a GitHub release nor a PyPI publication. Validation-only mode SHALL reject branch names, abbreviated or mismatched commits and simultaneous publication requests. Default tagged and manual release behavior SHALL retain version matching and all existing validation dependencies.
+
+Validation fixtures SHALL read repository UTF-8 explicitly and retain identical LF text bytes across platform checkouts. Save-permission evidence SHALL assert exact POSIX permissions where supported and preservation of the actual platform mode after both failed and successful replacement. Existing rendering and pagination assertions SHALL not be relaxed to make a platform gate pass.
+
+
 ## 117. Native PDF final integer allocation budget
 
 1. All direct and resolved PdfCraft crates SHALL use the same immutable reviewed contribution revision; unrelated packages, engine pins and local vendor source SHALL remain unchanged.
@@ -888,3 +895,31 @@ The pinned reference inventory SHALL distinguish implemented bounded operations 
 2. Finite left/right values SHALL be within 0..4032 pt, first-line within -4032..4032 pt, before/after within 0..1584 pt, and line multiplier within 1..100. `None` SHALL clear a direct value. Snapshots SHALL distinguish zero from inheritance and refuse unsupported native unit kinds. Document native EMU/hundredth-point/percentage quantization, first/last suppression and existing native overflow behavior.
 3. Exact canonical targets, generations and owner revision SHALL be validated before caller normalization and again after each callback. Compound invalid or unsupported patches SHALL preserve document bytes, cached output, revisions and handles. Property edits SHALL retain paragraph/grid identities while making old text ranges stale; copy independence and unchanged direct shape/Word behavior SHALL remain intact.
 4. Prove native scalar endpoints, quantization/reset/inheritance, fitting wrapped-text geometry, before-only/after-only deltas, hanging indentation, actual PNG/PDF text/links and readback. Preserve failed underline/resampling and tight-overlap diagnostics separately. Native source work/property budgets and revision exhaustion SHALL remain bounded. TXT1/SLIDE3 broader paragraph/shape parity SHALL remain partial.
+
+
+## 123. Typed PDF underlays through existing drawing methods
+
+1. Existing PdfPage.draw_text and add_image SHALL accept one strict boolean behind=False keyword. True SHALL use native typed underlay placement; False SHALL preserve existing overlay behavior. No layer manager, added-item handles or raw PDF operator generation is introduced.
+2. Built-in point/boxed text and bounded PNG/JPEG image insertion SHALL retain current geometry, wrapping/alignment, crop/quarter-turn/flips, source accounting, transactional staging and resource-preservation checks. Supplied-font text with behind=True SHALL refuse before reading caller font data; native boxed-font combinations SHALL also refuse. Raw draw_path remains overlay-only.
+3. Open/current page checks SHALL precede callbacks and be repeated after normalization/source reads. Preserve existing ordinary content edits inside callbacks, while close or page organization makes the outer operation fail without retargeting. Invalid flags SHALL not invoke arbitrary bool conversion or source reads. Failed native edits SHALL preserve bytes, counters and warm snapshots.
+4. Verify actual visible placement and opaque hiding, exact source text/link/image preservation, source/copy independence, current-page transforms, save/reopen, defaultfalse equivalence, resource collisions, bounds and lifetime semantics. Require full combined native/installed/independent/typing gates before delivery. Broader PDF3/U10 and unsupported raw-path/supplied-font composition remain open.
+
+
+## 125. Existing reporting and error-corpus acceptance
+
+1. Audit original roadmap clauses against exact existing implementation, source and installed-artifact evidence before changing checkboxes. Close only API7/QA6/QA8 as current reporting/representative-corpus gates; retain all original criterion clauses and explicit limits.
+2. Preserve every existing support profile, operation status, historical artifact and fixture fingerprint. Correct stale current profile-count prose without rewriting historical evidence. API1/QA1, R4/P4/U09, QA7 and other incomplete behavioral criteria SHALL remain open.
+3. Use the existing ledger, roadmap joins and published matrices; add no runtime query framework, engine, dependency or second completion database. Document source-audited offline/in-process architecture separately from dynamic sandbox or exhaustive hostile-input certification.
+4. Reuse the exact reviewed452-native/two568-installed artifact evidence; run documentation/source consistency and site-link checks after changes, without claiming a new native build or runtime test run.
+
+## 126. Representative combined authored documents
+
+Complete QA2's missing resume, review, form and multilingual examples using existing public operations. Combine tables, backgrounds and stories rather than only testing isolated formatting. Keep the multilingual fixture's Latin glyph/language scope explicit; preserve separate comment metadata and document native PDF review omission. Owned PDF form copies/flattening must retain visible appearances and source independence. No new package API or runtime dependency is required. Acceptance requires exact installed-wheel reuse identity, focused/full corpus results and actual visual inspection of retained source/PDF raster artifacts.
+
+
+## 133. Typed paragraph snapshot replay
+
+Support full existing direct/resolved paragraph snapshot replay in strict consumers while preserving existing inline patch inference, exact native direction literals and all malformed-input refusals. Keep full runtime implementation bodies, native bytes, key sets and method names unchanged. Do not claim full API3 closure or widen runtime acceptance to arbitrary Mapping/Sequence implementations. Preserve separately demonstrated existing border-container typing limitations.
+### Spec120 measured font fixtures
+
+Geometry and raster goldens SHALL name their font input explicitly rather than assume installed font substitution is portable. Positive solid-ink fixtures SHALL use a face/weight that actually contains solid interior ink at the tested DPI; thresholds, source-content checks and export checks SHALL remain intact. Recipe-specific pagination goldens SHALL be measured for the named font, with all additional pages included in existing per-page assertions. Preserve original default-font failures and require actual Windows/macOS evidence before accepting these corrections. This does not establish per-document font isolation or universal raster identity.

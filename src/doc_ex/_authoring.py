@@ -197,7 +197,7 @@ class _ParagraphAlignmentSnapshot(TypedDict):
 class _ParagraphSnapshot(_ParagraphAlignmentSnapshot, total=False):
     borders: dict[str, _BorderSnapshot | None] | None
     tabs: list[_TabSnapshot] | None
-    direction: str | None
+    direction: Literal["ltr", "rtl"] | None
     indent_left: float | None
     indent_right: float | None
     indent_first: float | None
@@ -214,7 +214,7 @@ class _ResolvedParagraphSnapshot(TypedDict):
     borders: dict[str, _BorderSnapshot | None] | None
     tabs: list[_TabSnapshot]
     alignment: str
-    direction: str
+    direction: Literal["ltr", "rtl"]
     indent_left: float
     indent_right: float
     indent_first: float
@@ -1237,7 +1237,11 @@ class Paragraph:
         """Paragraph properties resolved through native defaults and styles."""
         return json.loads(self._owner._call("paragraph_formatting", self._id, True))
 
-    def format(self, **formatting: Unpack[ParagraphFormatting]) -> None:
+    @overload
+    def format(self, **formatting: Unpack[ParagraphFormatting]) -> None: ...
+    @overload
+    def format(self, **formatting: Unpack[_ParagraphSnapshot]) -> None: ...
+    def format(self, **formatting: object) -> None:
         """Set paragraph properties; None restores inheritance.
 
         DOCX direction is ltr/rtl; native alignment, indents and tabs are
@@ -3018,13 +3022,20 @@ class PdfPage:
 
     def draw_text(self, text: str, *, at: tuple[float, float] | None = None,
                   box: tuple[float, float, float, float] | None = None,
-                  font_size: float = 12, font=None, color="black", align: str = "left"):
+                  font_size: float = 12, font=None, color="black", align: str = "left",
+                  behind: bool = False):
         """Draw searchable text at a point or inside a bounded top-left box.
 
         Built-in fonts wrap within boxes; supplied fonts require explicit lines.
         Overflow fails atomically. Alignment applies only to boxes.
+        behind=True prepends built-in text beneath existing page content; supplied
+        fonts are unavailable there. Later underlays paint beneath earlier ones.
         """
         self._check()
+        if not isinstance(behind, bool):
+            raise TypeError("behind must be a boolean")
+        if behind and font is not None:
+            raise UnsupportedFormatError("PDF underlays with supplied fonts are unavailable")
         if (at is None) == (box is None):
             raise ValueError("provide exactly one of at or box")
         if not isinstance(align, str) or align not in {"left", "center", "right", "justify"}:
@@ -3040,7 +3051,7 @@ class PdfPage:
             size, rgb = pt(font_size), _color(color)
             self._check()
             self._owner._call("add_text_box", self._id, text, rect, size,
-                              rgb, align, data, _change=True)
+                              rgb, align, data, behind, _change=True)
             return
         if align != "left":
             raise ValueError("alignment requires a text box")
@@ -3053,7 +3064,7 @@ class PdfPage:
         x, y, size, rgb = pt(at[0]), pt(at[1]), pt(font_size), _color(color)
         self._check()
         if font is None:
-            self._owner._call("add_text", self._id, text, x, y, size, rgb, _change=True)
+            self._owner._call("add_text", self._id, text, x, y, size, rgb, behind, _change=True)
         else:
             self._owner._call("add_text_with_font", self._id, text, x, y, size, data, rgb, _change=True)
 
@@ -3080,13 +3091,17 @@ class PdfPage:
         self._owner._call("draw_path", self._id, payload, stroke_rgb, fill_rgb, stroke_width, close, _change=True)
 
     def add_image(self, source, *, box, crop=None, rotation: int = 0,
-                  flip_h: bool = False, flip_v: bool = False):
+                  flip_h: bool = False, flip_v: bool = False, behind: bool = False):
         """Place an image with optional visual crop, quarter-turn and flips.
 
         Crop is (left, top, right, bottom), each a fraction from 0 to 0.45.
         Rotation is counterclockwise. Original embedded pixels are retained.
+        behind=True prepends beneath existing content, which may hide the image.
+        Later underlays paint beneath earlier ones.
         """
         self._check()
+        if not isinstance(behind, bool):
+            raise TypeError("behind must be a boolean")
         from . import _read
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
@@ -3107,7 +3122,7 @@ class PdfPage:
         rect = tuple(map(pt, box))
         self._check()
         self._owner._call("add_image", self._id, data, *rect, crop,
-                          rotation, flip_h, flip_v, _change=True)
+                          rotation, flip_h, flip_v, behind, _change=True)
 
     def get_pixmap(self, dpi: float = 144, *, clip: tuple[float, float, float, float] | None = None) -> bytes:
         self._check()
@@ -3751,7 +3766,11 @@ class _SlideCellParagraph(Paragraph):
     def formatting(self) -> _ParagraphSnapshot:
         return json.loads(self._owner._call("cell_paragraph_formatting", *self._range_args, self._target))
 
-    def format(self, **formatting: Unpack[ParagraphFormatting]) -> None:
+    @overload
+    def format(self, **formatting: Unpack[ParagraphFormatting]) -> None: ...
+    @overload
+    def format(self, **formatting: Unpack[_ParagraphSnapshot]) -> None: ...
+    def format(self, **formatting: object) -> None:
         # Validate the exact target before caller callbacks, then reject
         # reentrant edits after each scalar normalization, before another callback.
         self._owner._call("cell_paragraph_alignment", *self._range_args, self._target)

@@ -1,6 +1,6 @@
 # Cookbook
 
-These six runnable examples use the current authored-document profile. Install a wheel built from this checkout, then run an example from the same checkout. These authoring additions are unreleased and are absent from the published 0.2.1 wheel; see [development instructions](development.md). Each command takes an output directory and an optional `--dpi` (default 96); use a new directory because named outputs may be replaced. No external document applications, downloaded assets or optional Python packages are required.
+These runnable examples use the current authored-document profile. Install a wheel built from this checkout, then run an example from the same checkout. These authoring additions are unreleased and are absent from the published 0.2.1 wheel; see [development instructions](development.md). Each command takes an output directory and an optional `--dpi` (default 96); use a new directory because named outputs may be replaced. No external document applications, downloaded assets or optional Python packages are required.
 
 | Workflow | Source and entry point | Outputs |
 |---|---|---|
@@ -47,7 +47,7 @@ For caller-side thumbnails, load the PNG in optional Pillow and call `thumbnail`
 
 [Cookbook tests](../tests/test_cookbook.py) execute the actual example functions and CLI entry points against the installed wheel, reopen advertised formats and verify semantic order, links, page counts, DPI and visible content. Existing [template tests](../tests/test_template_recipes.py) own placeholder validation and copy independence, while the [table corpus](table-corpus.md) owns long/merged/nested/RTL/image table combinations. See the [validation record](../.kiro/specs/rust-document-engine/validation.md) for exact artifacts and test counts.
 
-These workflows exercise the current names, defaults, units, explicit failures and handle lifetimes with zero new public library methods. They complete the current-profile API10 usability gate; broader parity, imported Office editing, advanced preservation and the full representative document corpus remain separate open criteria. Conversion is not pixel-perfect; use the [format limits](formats.md) and [authoring guide](authoring.md) when adapting a recipe.
+These workflows exercise the current names, defaults, units, explicit failures and handle lifetimes with zero new public library methods. They complete the current-profile API10 usability gate; broader parity, imported Office editing and advanced preservation remain separate open criteria. The representative document corpus is mapped in the [QA2 acceptance audit](acceptance-audit.md#qa2-representative-authored-documents). Conversion is not pixel-perfect; use the [format limits](formats.md) and [authoring guide](authoring.md) when adapting a recipe.
 
 
 ## First-page letterhead that follows sections
@@ -71,6 +71,37 @@ The first section has one inline image in `header("first")`; its even/default he
 
 The first slot takes precedence on the section's first actual page. Other pages select even/default according to the native displayed page number, not the zero-based Python index. This example begins numbering at 2, so physical page 2 displays 3 and uses the default/odd header. The appendix restarts at 20. With even/odd headers enabled, the native paginator may insert a body-empty parity sheet before that next-page restart. The sheet belongs to the preceding section and still displays its applicable header/footer. Consequently adding content need not shift the next section by exactly one physical page.
 
-The [combined fixture](../tests/test_letterhead_composition.py) verifies six pages before insertion and eight afterward, including the exact filler page, while both section-first logos stay attached to their sections. It reopens DOCX/PDF, checks original body labels, link and table content exactly once, and verifies visible logo presence/absence and first/even/default header hues. Every page has full-page 72-DPI controls; bounded header regions are checked at 72/144/300 DPI with explicit dimensions and physical logo geometry. These are native source edits and output checks, not a preview overlay or a pixel-perfect conversion claim.
+The [combined fixture](../tests/test_letterhead_composition.py) verifies seven pages before insertion and nine afterward with the explicitly selected Source Sans 3 font, including the exact filler page, while both section-first logos stay attached to their sections. It reopens DOCX/PDF, checks original body labels, link and table content exactly once, and verifies visible logo presence/absence and first/even/default header hues. Every page has full-page 72-DPI controls; bounded header regions are checked at 72/144/300 DPI with explicit dimensions and physical logo geometry. These are native source edits and output checks, not a preview overlay or a pixel-perfect conversion claim.
 
 This recipe covers owned inline header artwork in independent next-page sections. Document `background`/`background_image` remain document-wide; section-specific page fills, linked-to-previous controls, continuous-section first-page guarantees, rotated watermarks and floating header artwork are outside it. BG8 remains open for those broader background examples. BG5 is complete for this documented owned next-page section/first/even/default profile, including the integrated repagination checks.
+
+
+## Resume, review and intake documents
+
+[representative_documents.py](../examples/representative_documents.py) provides three ordinary example functions that return owned documents. They do not write files during import or choose an output location. The resume combines English, French and German Latin text, proofing-language metadata, headings, header/footer stories, a shaded skills table and a portfolio link. Its fixture scope does not establish arbitrary-script font coverage.
+
+```python
+from pathlib import Path
+from examples.representative_documents import build_resume, build_review, build_intake_form
+
+with build_resume() as resume:
+    resume.save("resume.docx")
+    Path("resume.pdf").write_bytes(resume.convert("pdf"))
+    Path("resume.png").write_bytes(resume.render_page(0, dpi=144))
+
+with build_review() as review:
+    review.save("review.docx")
+    # PDF contains the proposal body; native export omits comment prose/markup.
+    Path("review.pdf").write_bytes(review.convert("pdf"))
+
+with build_intake_form() as form:
+    form.save("intake.pdf")
+    with form.copy() as flattened:
+        flattened.fields.flatten()
+        flattened.save("intake-flat.pdf")
+    # The original still owns its three interactive fields.
+```
+
+The review uses one whole-paragraph comment and one direct reply, preserving author/date/resolved metadata in the DOCX. It does not add tracked revisions or arbitrary comment anchors. The PDF form combines visible instructions and a link with owned text/checkbox/choice fields and stored help text. Flattening a copy preserves the checked visible appearances while leaving the original independent; imported form editing and signatures remain outside this recipe. Outputs are caller-owned files, without a multi-file transaction.
+
+[Representative document tests](../tests/test_representative_documents.py) execute these builders, check exact diacritics, source table/link/review data and copies, reopen advertised outputs, and inspect dimensions, DPI, visible fills and text at 72/144/300 DPI. The form and review include explicit clean-copy controls. Their final full-corpus acceptance is recorded in [validation](../.kiro/specs/rust-document-engine/validation.md); these fixtures do not promote broader TXT6, REV1, PDF6 or imported-preservation support.

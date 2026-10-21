@@ -1,5 +1,6 @@
 """PDF object representation options reuse the native full writer and shared save path."""
 import io
+import os
 from pathlib import Path
 import stat
 import tempfile
@@ -97,14 +98,19 @@ class PdfOutputOptionsTests(unittest.TestCase):
                 expected = document.to_bytes(object_streams=packed)
                 path.write_bytes(b"previous")
                 path.chmod(0o640)
+                # Windows exposes writable/read-only state, not POSIX permission bits.
+                previous_mode = stat.S_IMODE(path.stat().st_mode)
+                if os.name == "posix":
+                    self.assertEqual(previous_mode, 0o640)
                 with patch("doc_ex._authoring.os.replace", side_effect=OSError("replace failure")):
                     with self.assertRaisesRegex(OSError, "replace failure"):
                         document.save(path, object_streams=packed)
                 self.assertEqual(path.read_bytes(), b"previous")
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), previous_mode)
                 self.assertEqual(list(Path(directory).iterdir()), [path])
                 document.save(path, object_streams=packed)
                 self.assertEqual(path.read_bytes(), expected)
-                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), previous_mode)
                 stream = io.BytesIO()
                 self.assertIsNone(document.save(stream, object_streams=packed))
                 self.assertEqual(stream.getvalue(), expected)

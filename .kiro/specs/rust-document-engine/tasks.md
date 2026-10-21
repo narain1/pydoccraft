@@ -967,6 +967,19 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [ ] Keep MED4 open for lines/textboxes and excluded contexts; no new U-owner or broad shape-parity claim.
 
 
+## Pre-release platform validation (spec120)
+
+- [x] Add explicit validation-only dispatch to the existing matrix with exact-commit and conflicting-publication guards.
+- [x] Run actionlint and execute the actual workflow guard for accepted and refused inputs.
+- [x] Complete independent guard, publication-gating, privilege and unchanged matrix review.
+- [ ] Complete current-main CI before manual merge.
+- [x] Dispatch initial immutable baseline39580637011 without publication; preserve actual Windows/macOS failures.
+- [x] Independently review UTF-8/LF/actual-mode portability corrections and deliberately migrate only the affected save-test fingerprint.
+- [x] Execute corrected portability tests on Windows; retain measured native font/raster/pagination diagnostics and reviewed fixture changes.
+- [ ] Inspect every platform/Python corpus and fix failures before treating cross-platform validation as complete.
+- [ ] Retain final versioned release validation; this infrastructure change does not complete QA7 or authorize a premature release.
+
+
 ## PdfCraft final integer raster allocation budget (spec117)
 
 - [x] Review source and safe actual-allocator originalFAIL/candidatePASS proof, exact-cap admission, complete tiny output/tile controls and test-only RAII restoration.
@@ -1017,4 +1030,53 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete final raw/adapter native controls, four public workflows, precise historical fixture migrations and strict seven-key snapshot replay typing; independently replay the four public workflows.
 - [x] Complete combined 119/121 full 449-native/release and two clean 564-test installed-wheel corpora, attribution/size and independent source/artifact review.
 - [x] Complete synchronized documentation and final independent review, retaining all historical evidence and scoped upstream findings.
-- [ ] Complete current-head CI and manual merge. Keep broader TXT1/SLIDE3 and overall release gates open.
+- [x] Complete current-head CI and independent manual merge through PR127, required CI39590739971 and documentation CI39590739952. Broader TXT1/SLIDE3 and overall release gates remain open.
+
+
+## Typed PDF underlays (spec123)
+
+- [x] Review the compact one-keyword surface, native typed placement route and preserved callback/resource rules after dedicated spec119 acceptance.
+- [x] Implement built-in point/box text and PNG/JPEG placement through existing methods, with strict flag and supplied-font refusal before reads.
+- [x] Pass three new native groups, all72 PDF native authoring tests, fmt/Clippy/debug and all19 new/related public workflows. Audit53 mechanical legacy Rust call migrations without changing assertions.
+- [x] Pass strict positive typing and two expected negative boolean diagnostics.
+- [x] Complete independent focused source/artifact/public review and combined 452-native, fmt/Clippy/release gates, exact artifact/attribution/source checks and measured sizes.
+- [x] Complete both clean installed 568-test combined artifact runs, with zero failures/errors/skips.
+- [x] Promote only verified partial typed-underlay operation evidence; preserve historical fingerprints and separately verify the documentation-only profile-count migration.
+- [ ] Complete current-head CI/manual merge. Raw-path/supplied-font underlays and broader PDF3/U10 remain open.
+
+
+## Existing reporting and error-corpus gates (spec125)
+
+- [x] Compare all139 criteria and original ece6c85 clauses with reviewed source; independently review API7/QA6/QA8 candidate mappings. Defer TXT1 and all other incomplete criteria.
+- [x] Link exact existing representative error/ownership/budget/save fixtures and452-native/two568-installed evidence without inventing new runtime acceptance.
+- [x] Mark only the three reporting/corpus gates, preserve original clauses, correct stale current profile prose and retain all historical operation evidence.
+- [x] Pass27documentation tests, exact464-file source/test/vendor/attribution comparison, existing inventory checks and30pages/1,850site links.
+- [x] Complete final independent original-clause/checklist/JSON/source/documentation review.
+- [ ] Complete current-head CI/manual merge. No runtime/fixture/dependency change is part of this slice.
+
+## Representative authored-document corpus (spec126)
+
+- [x] Independently review original QA2 categories and the three-builder composition proposal; retain existing cookbook fixtures unchanged.
+- [x] Add resume/review/PDF-form examples and three focused installed-package workflows; inspect retained 144-DPI native artifacts.
+- [x] Complete independent source/focused/visual review and full retained-wheel corpus with exact source/artifact identity: final 571 tests pass with zero failures/errors/skips.
+- [x] Record seven-category evidence and close QA2; keep broader typography/review/forms/platform/preservation criteria open.
+- [ ] Complete current-main CI and independent manual merge.
+
+
+## Typed full paragraph snapshot replay (spec133)
+
+- [x] Reproduce eight strict-consumer gaps against the installed baseline while verifying existing native full replay.
+- [x] Reject input-union approaches that regress inline dictionaries; preserve their diagnostics and unchanged preexisting border-container limitations.
+- [x] Add two overloads on each existing paragraph formatter and exact native direction output literals, with unchanged implementation bodies and input TypedDict.
+- [x] Verify strict installed consumer, five intended negative cases, runtime direct/resolved body/header/cell replay, exact native/wheel facade identity and independent review.
+- [x] Complete full exact installed-wheel corpus and synchronized documentation:571 tests pass; keep broader API3 open.
+- [ ] Complete combined current-main CI and independent manual merge.
+
+
+### Spec120 measured-font fixture gates
+
+- [x] Preserve original cross-platform failures and execute separate original/named-font diagnostic controls.
+- [x] Independently review explicit-font/positive-ink fixture changes and deliberate letterhead golden updates with unchanged thresholds.
+- [x] Record scoped Linux output evidence and migrate only the two affected additional source fingerprints.
+- [x] Complete actual Linux/Windows/macOS candidate full installed corpora: 556 tests each pass against exact retained wheels in run39589067301.
+- [x] Retain default-font/native isolation limitations under existing U02/STY5; broad fidelity and final release remain open.

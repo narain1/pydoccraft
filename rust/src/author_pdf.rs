@@ -2,7 +2,7 @@ use std::{io::Cursor, sync::Arc};
 
 use pdfcraft_content::{serialize_ops, Op};
 use pdfcraft_cos::{Document, SaveOptions};
-use pdfcraft_edit::{AddedImage, AddedText, Content};
+use pdfcraft_edit::{AddedImage, AddedText, Content, Placement};
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use serde_json::{json, Value};
@@ -1947,7 +1947,7 @@ impl EditablePdf {
 
     /// x/y are the top-left of a text box, in points. Text wraps to the page's right edge.
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (page, text, x, y, size=12.0, color=(0, 0, 0)))]
+    #[pyo3(signature = (page, text, x, y, size=12.0, color=(0, 0, 0), behind=false))]
     pub fn add_text(
         &mut self,
         page: isize,
@@ -1956,6 +1956,7 @@ impl EditablePdf {
         y: f64,
         size: f64,
         color: (u8, u8, u8),
+        behind: bool,
     ) -> PyResult<()> {
         self.add_text_layout(
             page,
@@ -1966,12 +1967,13 @@ impl EditablePdf {
             color,
             None,
             pdfcraft_edit::Align::Left,
+            behind,
         )
     }
 
     /// A bounded native text area; caller fonts retain explicit-line layout only.
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (page, text, rect, size=12.0, color=(0,0,0), align="left", font_bytes=None))]
+    #[pyo3(signature = (page, text, rect, size=12.0, color=(0,0,0), align="left", font_bytes=None, behind=false))]
     pub fn add_text_box(
         &mut self,
         page: isize,
@@ -1981,7 +1983,15 @@ impl EditablePdf {
         color: (u8, u8, u8),
         align: &str,
         font_bytes: Option<&[u8]>,
+        behind: bool,
     ) -> PyResult<()> {
+        if behind && font_bytes.is_some() {
+            self.page_index(page)?;
+            return Err(EngineError::Unsupported(
+                "PDF underlays with supplied fonts are unavailable".into(),
+            )
+            .into());
+        }
         let alignment = match align {
             "left" => pdfcraft_edit::Align::Left,
             "center" => pdfcraft_edit::Align::Center,
@@ -2019,13 +2029,14 @@ impl EditablePdf {
                 color,
                 Some((rect.2, rect.3)),
                 alignment,
+                behind,
             ),
         }
     }
 
     /// Place PNG/JPEG bytes at a top-left position without resampling source pixels.
     #[allow(clippy::too_many_arguments)] // The narrow native boundary receives flattened geometry.
-    #[pyo3(signature = (page,data,x,y,width,height,crop=None,rotation=0,flip_h=false,flip_v=false))]
+    #[pyo3(signature = (page,data,x,y,width,height,crop=None,rotation=0,flip_h=false,flip_v=false,behind=false))]
     pub fn add_image(
         &mut self,
         page: isize,
@@ -2038,6 +2049,7 @@ impl EditablePdf {
         rotation: i64,
         flip_h: bool,
         flip_v: bool,
+        behind: bool,
     ) -> PyResult<()> {
         let (left, top, right, bottom) = crop.unwrap_or((0.0, 0.0, 0.0, 0.0));
         let crop = [left, bottom, right, top];
@@ -2095,7 +2107,7 @@ impl EditablePdf {
             .ok_or_else(|| EngineError::Malformed("image has no usable pixel dimensions".into()))?;
         crate::rendering::validate_size(dimensions.0 as f64, dimensions.1 as f64, 16_000)?;
         let rect = [x, page_height - y - height, x + width, page_height - y];
-        pdfcraft_edit::add_content(
+        pdfcraft_edit::add_content_with_placement(
             &mut edited,
             page,
             &Content::Image(AddedImage {
@@ -2105,6 +2117,11 @@ impl EditablePdf {
                 flip_v,
                 ..AddedImage::new(rect, image)
             }),
+            if behind {
+                Placement::Underlay
+            } else {
+                Placement::Overlay
+            },
         )
         .map_err(edit_error)?;
         preserve_drawing_resources(self.document()?, &edited, page)?;
@@ -2546,6 +2563,7 @@ impl EditablePdf {
         color: (u8, u8, u8),
         bounds: Option<(f64, f64)>,
         align: pdfcraft_edit::Align,
+        behind: bool,
     ) -> PyResult<()> {
         let page = self.page_index(page)?;
         self.validate_input(text.len())?;
@@ -2604,7 +2622,17 @@ impl EditablePdf {
             }
         }
         let mut edited = self.document()?.clone();
-        pdfcraft_edit::add_content(&mut edited, page, &Content::Text(item)).map_err(edit_error)?;
+        pdfcraft_edit::add_content_with_placement(
+            &mut edited,
+            page,
+            &Content::Text(item),
+            if behind {
+                Placement::Underlay
+            } else {
+                Placement::Overlay
+            },
+        )
+        .map_err(edit_error)?;
         preserve_drawing_resources(self.document()?, &edited, page)?;
         self.document = Some(edited);
         self.items += 1;
@@ -4084,11 +4112,13 @@ mod tests {
         pyo3::prepare_freethreaded_python();
         let mut document = EditablePdf::new(300.0, 400.0).unwrap();
         document
-            .add_text(0, "Stable output", 20.0, 30.0, 12.0, (0, 0, 0))
+            .add_text(0, "Stable output", 20.0, 30.0, 12.0, (0, 0, 0), false)
             .unwrap();
         let image = crate::rendering::encode_png(2, 2, &[255, 0, 0, 255].repeat(4), 72.0).unwrap();
         document
-            .add_image(0, &image, 20.0, 70.0, 30.0, 30.0, None, 0, false, false)
+            .add_image(
+                0, &image, 20.0, 70.0, 30.0, 30.0, None, 0, false, false, false,
+            )
             .unwrap();
         document
             .add_link(
@@ -4352,6 +4382,7 @@ mod tests {
                             (0, 0, 0),
                             "center",
                             Some(font),
+                            false,
                         )
                     } else {
                         document.add_text_with_font(
@@ -4389,6 +4420,7 @@ mod tests {
                 (0, 0, 0),
                 "right",
                 Some(font),
+                false,
             )
             .unwrap();
         assert_eq!(full_font_program_count(ordinary.document().unwrap()), 1);
@@ -4417,6 +4449,7 @@ mod tests {
                     (0, 0, 0),
                     align,
                     None,
+                    false,
                 )
                 .unwrap();
         }
@@ -4429,6 +4462,7 @@ mod tests {
                 (0, 0, 0),
                 "justify",
                 None,
+                false,
             )
             .unwrap();
         let (width, _, pixels) = pdf2_raster(&document);
@@ -4467,7 +4501,7 @@ mod tests {
             ("x", (20.0, 20.0, 20.0, 0.0)),
         ] {
             assert!(document
-                .add_text_box(0, text, rect, 10.0, (0, 0, 0), "left", None)
+                .add_text_box(0, text, rect, 10.0, (0, 0, 0), "left", None, false)
                 .is_err());
             assert_eq!(document.to_bytes().unwrap(), before);
         }
@@ -4480,6 +4514,7 @@ mod tests {
                 (0, 0, 0),
                 "left",
                 None,
+                false,
             )
             .unwrap();
     }
@@ -4500,6 +4535,7 @@ mod tests {
                 (0, 0, 0),
                 "left",
                 Some(font),
+                false,
             )
             .unwrap_err();
         assert!(
@@ -4523,6 +4559,7 @@ mod tests {
                 (0, 0, 0),
                 "center",
                 Some(font),
+                false,
             )
             .unwrap();
         let (width, height, pixels) = pdf2_raster(&boxed);
@@ -4588,6 +4625,7 @@ mod tests {
                     (0, 0, 180),
                     align,
                     Some(font),
+                    false,
                 )
                 .unwrap();
         }
@@ -4621,7 +4659,8 @@ mod tests {
                 12.0,
                 (0, 0, 0),
                 "justify",
-                Some(font)
+                Some(font),
+                false
             )
             .unwrap_err()
             .to_string()
@@ -4634,7 +4673,8 @@ mod tests {
                 12.0,
                 (0, 0, 0),
                 "left",
-                Some(font)
+                Some(font),
+                false
             )
             .is_err());
         assert!(document
@@ -4645,7 +4685,8 @@ mod tests {
                 12.0,
                 (0, 0, 0),
                 "left",
-                Some(font)
+                Some(font),
+                false
             )
             .is_err());
         assert_eq!(document.to_bytes().unwrap(), before);
@@ -4658,7 +4699,7 @@ mod tests {
         let before = document.to_bytes().unwrap();
         let text = "x".repeat(4001);
         assert!(document
-            .add_text(0, &text, 10.0, 10.0, 12.0, (0, 0, 0))
+            .add_text(0, &text, 10.0, 10.0, 12.0, (0, 0, 0), false)
             .unwrap_err()
             .to_string()
             .contains("resource_limit:"));
@@ -4670,7 +4711,8 @@ mod tests {
                 12.0,
                 (0, 0, 0),
                 "left",
-                None
+                None,
+                false
             )
             .unwrap_err()
             .to_string()
@@ -4685,7 +4727,8 @@ mod tests {
                 12.0,
                 (0, 0, 0),
                 "left",
-                None
+                None,
+                false
             )
             .unwrap_err()
             .to_string()
@@ -4697,7 +4740,8 @@ mod tests {
                 10.0,
                 10.0,
                 12.0,
-                (0, 0, 0)
+                (0, 0, 0),
+                false
             )
             .unwrap_err()
             .to_string()
@@ -4715,7 +4759,8 @@ mod tests {
                 12.0,
                 (0, 0, 0),
                 "center",
-                None
+                None,
+                false
             )
             .unwrap_err()
             .to_string()
@@ -4764,7 +4809,7 @@ mod tests {
             let mut document = EditablePdf::new(140.0, 140.0).unwrap();
             document
                 .add_image(
-                    0, &image, 30.0, 30.0, 80.0, 80.0, crop, rotation, flip_h, flip_v,
+                    0, &image, 30.0, 30.0, 80.0, 80.0, crop, rotation, flip_h, flip_v, false,
                 )
                 .unwrap();
             let (width, _, pixels) = pdf2_raster(&document);
@@ -4816,13 +4861,14 @@ mod tests {
                     Some(crop),
                     0,
                     false,
+                    false,
                     false
                 )
                 .is_err());
         }
         for rotation in [-90, 1, 45, 360] {
             assert!(document
-                .add_image(0, &image, 30.0, 30.0, 80.0, 80.0, None, rotation, false, false)
+                .add_image(0, &image, 30.0, 30.0, 80.0, 80.0, None, rotation, false, false, false)
                 .is_err());
         }
         assert_eq!(document.to_bytes().unwrap(), before);
@@ -4857,10 +4903,13 @@ mod tests {
                     (0, 0, 0),
                     "right",
                     None,
+                    false,
                 )
                 .unwrap();
             document
-                .add_image(0, &image, 20.0, 80.0, 80.0, 80.0, None, 90, false, false)
+                .add_image(
+                    0, &image, 20.0, 80.0, 80.0, 80.0, None, 90, false, false, false,
+                )
                 .unwrap();
             let (width, _, pixels) = pdf2_raster(&document);
             assert_eq!(&pixels[(100 * width + 40) * 4..][..4], &[0, 255, 0, 255]);
@@ -4982,11 +5031,13 @@ mod tests {
             assert_eq!((editable.items, editable.input_bytes), counts);
             // Methods whose native writer does not touch this binding remain available.
             editable
-                .add_text(0, "new", 10.0, 100.0, 12.0, (0, 0, 0))
+                .add_text(0, "new", 10.0, 100.0, 12.0, (0, 0, 0), false)
                 .unwrap();
             let image = crate::rendering::encode_png(1, 1, &[255, 0, 0, 255], 72.0).unwrap();
             editable
-                .add_image(0, &image, 10.0, 130.0, 20.0, 20.0, None, 0, false, false)
+                .add_image(
+                    0, &image, 10.0, 130.0, 20.0, 20.0, None, 0, false, false, false,
+                )
                 .unwrap();
             assert_eq!(
                 original_resource_pixels(editable.document().unwrap()),
@@ -5017,7 +5068,7 @@ mod tests {
         let mut editable = EditablePdf::from_bytes(&resource_fixture_bytes(&source), None).unwrap();
         let before = editable.to_bytes().unwrap();
         assert!(editable
-            .add_text(0, "new", 10.0, 100.0, 12.0, (0, 0, 0))
+            .add_text(0, "new", 10.0, 100.0, 12.0, (0, 0, 0), false)
             .unwrap_err()
             .to_string()
             .contains("unsupported:drawing cannot verify preservation"));
@@ -5112,7 +5163,7 @@ mod tests {
         .unwrap();
         assert_ne!(original_resource_pixels(&native), original_pixels);
         assert!(editable
-            .add_image(0, &blue, 10.0, 140.0, 20.0, 20.0, None, 0, false, false)
+            .add_image(0, &blue, 10.0, 140.0, 20.0, 20.0, None, 0, false, false, false)
             .unwrap_err()
             .to_string()
             .contains("unsupported:drawing cannot verify preservation"));
@@ -5152,10 +5203,10 @@ mod tests {
         editable.set_background(0, (255, 255, 255)).unwrap();
         editable.set_background(0, (240, 240, 240)).unwrap();
         editable
-            .add_text(0, "one", 10.0, 10.0, 12.0, (0, 0, 0))
+            .add_text(0, "one", 10.0, 10.0, 12.0, (0, 0, 0), false)
             .unwrap();
         editable
-            .add_text(0, "two", 10.0, 40.0, 12.0, (0, 0, 0))
+            .add_text(0, "two", 10.0, 40.0, 12.0, (0, 0, 0), false)
             .unwrap();
         editable
             .draw_path(
@@ -5170,7 +5221,7 @@ mod tests {
         let bytes = editable.to_bytes().unwrap();
         let mut imported = EditablePdf::from_bytes(&bytes, None).unwrap();
         imported
-            .add_text(0, "three", 10.0, 140.0, 12.0, (0, 0, 0))
+            .add_text(0, "three", 10.0, 140.0, 12.0, (0, 0, 0), false)
             .unwrap();
         imported.set_background(0, (250, 250, 250)).unwrap();
         let mut fonts = Dict::new();
@@ -5183,7 +5234,7 @@ mod tests {
         let mut editable = EditablePdf::from_bytes(&resource_fixture_bytes(&source), None).unwrap();
         let before = editable.to_bytes().unwrap();
         assert!(editable
-            .add_text(0, "new", 10.0, 100.0, 12.0, (0, 0, 0))
+            .add_text(0, "new", 10.0, 100.0, 12.0, (0, 0, 0), false)
             .unwrap_err()
             .to_string()
             .contains("resource_limit:drawing resource bindings"));
@@ -6271,7 +6322,7 @@ mod tests {
     fn builtin_and_supplied_font_colors_render_without_affecting_extraction() {
         let mut document = EditablePdf::new(240.0, 140.0).unwrap();
         document
-            .add_text(0, "Red", 10.0, 10.0, 24.0, (255, 0, 0))
+            .add_text(0, "Red", 10.0, 10.0, 24.0, (255, 0, 0), false)
             .unwrap();
         document
             .add_text_with_font(
@@ -7379,7 +7430,7 @@ mod tests {
                 let mut document = EditablePdf::from_bytes(&bytes, None).unwrap();
                 document.rotate_page(0, rotation).unwrap();
                 document
-                    .add_text(0, "Preserved body", 20.0, 190.0, 12.0, (0, 0, 0))
+                    .add_text(0, "Preserved body", 20.0, 190.0, 12.0, (0, 0, 0), false)
                     .unwrap();
                 let base = pdf2_raster(&document);
                 let index = document
@@ -7711,7 +7762,7 @@ mod tests {
         for kind in ["underline", "strikeout", "squiggly"] {
             let mut document = EditablePdf::new(220.0, 220.0).unwrap();
             document
-                .add_text(0, "Preserved body", 20.0, 160.0, 12.0, (0, 0, 0))
+                .add_text(0, "Preserved body", 20.0, 160.0, 12.0, (0, 0, 0), false)
                 .unwrap();
             let plain = crate::pdf::extract(&document.to_bytes().unwrap(), None)
                 .unwrap()
@@ -8185,11 +8236,13 @@ mod tests {
     fn blank_text_image_and_page_roundtrip() {
         let mut document = EditablePdf::new(300.0, 400.0).unwrap();
         document
-            .add_text(0, "Hello PDF", 20.0, 30.0, 12.0, (0, 0, 0))
+            .add_text(0, "Hello PDF", 20.0, 30.0, 12.0, (0, 0, 0), false)
             .unwrap();
         let png = crate::rendering::encode_png(1, 1, &[255, 0, 0, 255], 72.0).unwrap();
         document
-            .add_image(0, &png, 20.0, 60.0, 10.0, 10.0, None, 0, false, false)
+            .add_image(
+                0, &png, 20.0, 60.0, 10.0, 10.0, None, 0, false, false, false,
+            )
             .unwrap();
         assert_eq!(document.add_page(400.0, 300.0).unwrap(), 1);
         assert_eq!(document.page_size(-1).unwrap(), (400.0, 300.0));
@@ -8209,22 +8262,22 @@ mod tests {
         let mut original = EditablePdf::new(100.0, 100.0).unwrap();
         let before = original.to_bytes().unwrap();
         assert!(original
-            .add_text(0, "too low", 0.0, 99.0, 12.0, (0, 0, 0))
+            .add_text(0, "too low", 0.0, 99.0, 12.0, (0, 0, 0), false)
             .is_err());
         assert!(original
-            .add_text(0, "\u{1f600}", 0.0, 0.0, 12.0, (0, 0, 0))
+            .add_text(0, "\u{1f600}", 0.0, 0.0, 12.0, (0, 0, 0), false)
             .is_err());
         assert!(original
-            .add_text(1, "bad page", 0.0, 0.0, 12.0, (0, 0, 0))
+            .add_text(1, "bad page", 0.0, 0.0, 12.0, (0, 0, 0), false)
             .is_err());
         assert!(original
-            .add_image(0, b"not png", 0.0, 0.0, 10.0, 10.0, None, 0, false, false)
+            .add_image(0, b"not png", 0.0, 0.0, 10.0, 10.0, None, 0, false, false, false)
             .is_err());
         assert!(original.add_page(f64::INFINITY, 100.0).is_err());
         assert_eq!(original.to_bytes().unwrap(), before);
         let mut copied = original.copy().unwrap();
         copied
-            .add_text(0, "copy", 10.0, 10.0, 12.0, (0, 0, 0))
+            .add_text(0, "copy", 10.0, 10.0, 12.0, (0, 0, 0), false)
             .unwrap();
         assert_eq!(original.to_bytes().unwrap(), before);
         assert_ne!(copied.to_bytes().unwrap(), before);
@@ -8239,7 +8292,7 @@ mod tests {
     fn reopens_native_model_and_replaces_background_without_losing_text() {
         let mut source = EditablePdf::new(100.0, 100.0).unwrap();
         source
-            .add_text(0, "Kept", 10.0, 10.0, 12.0, (0, 0, 0))
+            .add_text(0, "Kept", 10.0, 10.0, 12.0, (0, 0, 0), false)
             .unwrap();
         let mut edited = EditablePdf::from_bytes(&source.to_bytes().unwrap(), None).unwrap();
         edited.set_background(0, (255, 0, 0)).unwrap();
@@ -8261,12 +8314,12 @@ mod tests {
     fn organizes_pages_preserving_content_and_known_backgrounds() {
         let mut document = EditablePdf::new(300.0, 400.0).unwrap();
         document
-            .add_text(0, "First", 20.0, 20.0, 12.0, (0, 0, 0))
+            .add_text(0, "First", 20.0, 20.0, 12.0, (0, 0, 0), false)
             .unwrap();
         document.set_background(0, (200, 210, 220)).unwrap();
         document.add_page(200.0, 300.0).unwrap();
         document
-            .add_text(1, "Second", 20.0, 20.0, 12.0, (0, 0, 0))
+            .add_text(1, "Second", 20.0, 20.0, 12.0, (0, 0, 0), false)
             .unwrap();
         document.move_page(0, -1).unwrap();
         assert_eq!(document.page_size(0).unwrap(), (200.0, 300.0));
@@ -8275,7 +8328,7 @@ mod tests {
         document.rotate_page(-1, 90).unwrap();
         assert_eq!(document.page_size(1).unwrap(), (400.0, 300.0));
         document
-            .add_text(1, "After rotation", 20.0, 70.0, 12.0, (0, 0, 0))
+            .add_text(1, "After rotation", 20.0, 70.0, 12.0, (0, 0, 0), false)
             .unwrap();
         let bytes = document.to_bytes().unwrap();
         let extracted = crate::pdf::extract(&bytes, None).unwrap();
@@ -8358,20 +8411,22 @@ mod tests {
     fn imports_and_extracts_pages_in_requested_order_with_independent_resources() {
         let mut source = EditablePdf::new(100.0, 120.0).unwrap();
         source
-            .add_text(0, "Source A", 10.0, 10.0, 10.0, (0, 0, 0))
+            .add_text(0, "Source A", 10.0, 10.0, 10.0, (0, 0, 0), false)
             .unwrap();
         let image = crate::rendering::encode_png(1, 1, &[255, 0, 0, 255], 72.0).unwrap();
         source
-            .add_image(0, &image, 10.0, 40.0, 20.0, 20.0, None, 0, false, false)
+            .add_image(
+                0, &image, 10.0, 40.0, 20.0, 20.0, None, 0, false, false, false,
+            )
             .unwrap();
         source.add_page(120.0, 100.0).unwrap();
         source
-            .add_text(1, "Source B", 10.0, 10.0, 10.0, (0, 0, 0))
+            .add_text(1, "Source B", 10.0, 10.0, 10.0, (0, 0, 0), false)
             .unwrap();
         let source_bytes = source.to_bytes().unwrap();
         let mut destination = EditablePdf::new(100.0, 100.0).unwrap();
         destination
-            .add_text(0, "Destination", 10.0, 10.0, 10.0, (0, 0, 0))
+            .add_text(0, "Destination", 10.0, 10.0, 10.0, (0, 0, 0), false)
             .unwrap();
         assert_eq!(
             destination
@@ -8393,7 +8448,7 @@ mod tests {
         assert_eq!(output.pages[1].images.len(), 1);
         let mut subset = destination.subset(vec![-1, 1]).unwrap();
         subset
-            .add_text(0, "Subset", 10.0, 50.0, 10.0, (0, 0, 0))
+            .add_text(0, "Subset", 10.0, 50.0, 10.0, (0, 0, 0), false)
             .unwrap();
         let extracted = crate::pdf::extract(&subset.to_bytes().unwrap(), None).unwrap();
         assert_eq!(extracted.pages.len(), 2);
@@ -8424,7 +8479,9 @@ mod tests {
         ).unwrap();
         let mut document = EditablePdf::new(100.0, 100.0).unwrap();
         document
-            .add_image(0, &jpeg, 10.0, 10.0, 20.0, 10.0, None, 0, false, false)
+            .add_image(
+                0, &jpeg, 10.0, 10.0, 20.0, 10.0, None, 0, false, false, false,
+            )
             .unwrap();
         let bytes = document.to_bytes().unwrap();
         let extracted = crate::pdf::extract(&bytes, None).unwrap();
@@ -8438,10 +8495,11 @@ mod tests {
             .unwrap();
         huge[frame + 7..frame + 9].copy_from_slice(&20_000_u16.to_be_bytes());
         assert!(document
-            .add_image(0, &huge, 10.0, 10.0, 20.0, 10.0, None, 0, false, false)
+            .add_image(0, &huge, 10.0, 10.0, 20.0, 10.0, None, 0, false, false, false)
             .is_err());
         assert_eq!(document.to_bytes().unwrap(), bytes);
     }
+    include!("author_pdf_underlay_tests.rs");
 }
 
 #[cfg(test)]

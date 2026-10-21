@@ -964,7 +964,7 @@
         "SLIDE3"
       ],
       "local_surface": "Existing PDF path primitives and PPTX shapes/text/backgrounds; bounded owned DOCX rectangle/ellipse creator and private handle reuse Picture placement vocabulary without a second geometry framework.",
-      "remaining": "DOCX lines/textboxes/group/rotation/front/auxiliary/imported editing and rich-text visible coverage remain unavailable or unassessed; native typed PDF content now has public placement, but Python underlays remain unavailable; render-transparent backdrop differs from authored fill.",
+      "remaining": "DOCX lines/textboxes/group/rotation/front/auxiliary/imported editing and rich-text visible coverage remain unavailable or unassessed; typed PDF text/image underlays use behind=True, while supplied-font/raw-path underlays remain unavailable; render-transparent backdrop differs from authored fill.",
       "upstream_candidates": [
         "U04",
         "U10",
@@ -1605,8 +1605,8 @@
         "MED3",
         "BG4"
       ],
-      "local_surface": "Existing owned Office picture operations and PDF add_image use native media APIs",
-      "remaining": "Source PDF image replacement/removal, arbitrary alpha/blends/underlays and non-PNG authored profiles require separate native acceptance.",
+      "local_surface": "Existing owned Office picture operations and PDF PNG/JPEG add_image use native media APIs; PDF behind=True reuses the existing crop/quarter-turn/flip controls",
+      "remaining": "Source PDF image replacement/removal and broader alpha/blend profiles require separate native acceptance. DOCX/PPTX authored picture formats remain limited to their existing PNG profiles; PDF accepts PNG/JPEG.",
       "upstream_candidates": [
         "U10"
       ],
@@ -1648,8 +1648,8 @@
         "MED4",
         "BG7"
       ],
-      "local_surface": "PdfPage.draw_path; typed PPTX shape properties",
-      "remaining": "Native typed add_content_with_placement exposes overlay/underlay; raw public stamping remains overlay-only. Python underlays, resource-collision-safe composition and bounded raw-stream admission remain open. Do not wrap every draw in an adapter-built Form/layer system.",
+      "local_surface": "PdfPage.draw_path; built-in PdfPage.draw_text and PNG/JPEG add_image reuse behind=True for typed native underlays; typed PPTX shape properties",
+      "remaining": "Raw draw_path and supplied-font text remain overlay-only. Resource-collision-safe composition and bounded raw-stream admission remain open; existing resource collisions fail atomically. No adapter-built Form/layer system is introduced.",
       "upstream_candidates": [
         "U10"
       ],
@@ -2042,5 +2042,5 @@
       "disposition": "reference_comparison"
     }
   ],
-  "audited_commit": "3504e4622aa13615d8da82a8d388f561d41ace2b"
+  "audited_commit": "50220d770c2a6aefb64c41ce15cfc6df039dcf6b"
 }

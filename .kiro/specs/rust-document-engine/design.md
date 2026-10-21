@@ -778,6 +778,13 @@ Table/cell descendant invalidation occurs only after source validation or centra
 The first profile caps outlines at100 points (native read/write ceiling) and at min(width,height); full-range corner/outline fidelity is separately gated by spec116 native evidence. The local adapter neither widens upstream clamps nor compensates for cap/join or thick-ellipse differences.
 
 
+## 120. Reuse the release matrix for pre-release evidence
+
+One boolean workflow input, `validation_only`, keeps the existing nine wheel jobs as the single implementation. The existing `release_tag` input accepts a full commit SHA only in this mode. Before builds, the Python guard verifies its syntax and checked-out identity and refuses `publish=true`. Both publication jobs explicitly exclude validation-only dispatches; wheel jobs retain read-only repository permissions. Ordinary release dispatches and tag pushes still require `v<project.version>`. No package API, version, dependency or runtime behavior changes.
+
+The repository text checkout policy uses Git text auto-detection with LF output; binary fixtures remain binary. Roadmap fixture reads name UTF-8. The atomic-save test records the actual mode after chmod, retains exact0640 admission on POSIX, and verifies mode preservation on failure and success on every platform. Runtime save code is unchanged. Its single source fingerprint migration records the deliberate portability correction without rewriting historical wheel artifacts.
+
+
 ## 117. Native PDF budget upgrade without another API
 
 The native contribution checks the widened integer product returned by the existing render_size helper immediately before Pixels::zeroed, using the existing normal error channel. Its allocator-observation harness is entirely upstream cfg(test); no hook, global counter or new renderer enters this package's runtime. Existing local preflight still prevents a native request for the same oversized public operation.
@@ -815,3 +822,31 @@ No adapter-built Form/layer system, resource-name rewrite or new manager is intr
 Native writer/read bounds determine the domains: 4032 pt margins, signed 4032 pt first-line, 1584 pt point spacing and reader-capped 100 multiplier. The initial multiplier minimum 1 is based on DeckCraft's natural=max(ascent+descent,font_size) normal-height formula; lower multipliers intentionally compress/overlap native line advances. Raw public `place_slide` confirms all 48 glyphs survive, and native COS/content APIs confirm the actual text-showing operators/ToUnicode streams are identical to the 1.0 baseline, while normalized PDF extraction loses overlapping repetitions. Preserve this as an extraction limitation; do not rewrite the evaluator or deduplicator. Raw 0/.06/.5/.99 probes are diagnostics, not extra public admission.
 
 Native EMU/point/percent serialization owns rounding. Existing table row fitting, merged/vertical stored heights and finite-page overflow limits remain authoritative. No sampled endpoint or fitting fixture establishes that extreme admitted offsets keep all ink visible. Existing body settings suppress first-before/last-after spacing. Raw thin linked glyphs expose the known low-DPI decoration/resampling discrepancy; unchanged baseline controls and exact 200 DPI comparisons isolate it. Fitting bold underline-off carriers preserve links and use the original 2 px color-band tolerance, with 200 DPI channel<=1 comparisons. Pixel components are not claimed to be native line boxes.
+
+
+## 123. A placement keyword on typed PDF drawing
+
+The two existing methods accept behind: bool=False. The facade validates actual bool after page lifetime checking and before source/geometry callbacks. Built-in point and box text share the existing native text layout; image insertion retains native PNG/JPEG embedding and image transforms. Their staged writer invokes add_content_with_placement with Underlay or Overlay, followed by the unchanged resource-binding comparison before publishing counters and model. No stream scanning, resource rewriting, generated Form or added-item registry is added locally.
+
+Supplied-font point text remains on its existing raw-stamp entrypoint, which has no placement argument. The facade rejects behind=True before reading a font, and boxed-font native dispatch rejects that combination explicitly. Ordinary callback-driven content edits retain existing semantics; callbacks that close or organize pages still fail the outer operation through the existing generation checks. Underlays A then B paint B, A, original. Opaque originals can hide them while their text remains extractable.
+
+Adding defaultfalse PyO3 parameters requires53 mechanical trailingfalse arguments at existing Rust test callsites. A token audit removes only those arguments and the new test include: all previous argument tokens and all other historical test tokens match. Python historical fixtures and dependencies remain unchanged. Three new native groups and four public workflows cover the actual adapter; the discrete transform matrix does not imply every parameter combination or general pixel-perfect composition.
+
+
+## 125. Criterion closure without capability promotion
+
+The acceptance audit compares the original ece6c85 wording with the tested source. API7 concerns one support-inventory/error mechanism, QA8 honest publication and sketch/recipe separation, and QA6 the enumerated representative malformed/edit/ownership/nesting/media/save corpus. None requires every operation to be implemented or a universal safety proof. Existing per-operation statuses and unassessed remainder fields remain unchanged apart from explanatory joins for these three gates; API1/QA1 still own completeness.
+
+One evidence document links exact selectors and historical validation. TODO checkboxes remain the only completion source, and the existing matrix generator derives their status. Volatile seven/nineteen profile descriptions are replaced by current generated-inventory links. Existing native/resource constraints and platform/font limitations are not narrowed or removed.
+
+## 126. Composed representative corpus
+
+Three builder functions live in examples, returning ordinary owned documents for caller-selected close/save/render/copy operations. The resume combines named headings, English/French/German Latin content, language metadata, a shaded semantic table and exact hyperlink; the review combines a decision table and stories with whole-paragraph comment/reply metadata; the PDF intake form combines text/graphics/link and existing owned fields. Existing letter/invoice/branded-report/letterhead fixtures supply the other QA2 categories. Source comment display and deliberately clean PDF output remain distinct. No new builder framework, template language, form manager, font registry or optional runtime is introduced.
+
+
+## 133. Paragraph formatting overloads
+
+The shared direct/resolved paragraph output declares direction as the exact native ltr/rtl literal (nullable only for direct inheritance). Existing Paragraph.format and its PPTX cell override expose two typing overloads: the unchanged ParagraphFormatting input patch and the full direct snapshot. The latter also accepts the resolved value set; a redundant third overload is unnecessary. The implementation accepts object-valued keyword arguments internally and retains its exact validation/dispatch body. Defaults/style input/output declarations are unchanged. No public helper, manager, method or general mapping adapter is introduced.
+### Spec120 explicit font inputs for measured fixtures
+
+Existing formatting selects Source Sans3 for the measured decimal-outline, pagination, bookmark and letterhead fixtures. The metadata-field and behind-image positive carriers use its bold face so exact-color checks measure actual solid glyph interiors even at72DPI. The letterhead recipe selects this font through its existing document defaults. Its font-specific golden has four appendix pages and four expanded main-paragraph layout pages; all physical pages still execute the existing logo/header/footer/content/link/table and72/144/300DPI checks. No layout compensation, renderer change, new font registry, test skip or tolerance widening is introduced. Requested family and emitted PDF BaseFont labels do not prove exact selected program bytes or isolate the native global font registry.

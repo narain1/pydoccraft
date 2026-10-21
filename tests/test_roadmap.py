@@ -36,10 +36,10 @@ class RoadmapTests(unittest.TestCase):
             self.assertTrue(any(substring in error for error in errors), (substring, errors))
 
     def test_repository_ledger_is_consistent(self):
-        ledger = json.loads((ROOT / "docs/roadmap-workstreams.json").read_text())
+        ledger = json.loads((ROOT / "docs/roadmap-workstreams.json").read_text(encoding="utf-8"))
         self.assertEqual([], checker.validate(
-            (ROOT / "TODO.md").read_text(), ledger,
-            (ROOT / "docs/upstream-roadmap.md").read_text(),
+            (ROOT / "TODO.md").read_text(encoding="utf-8"), ledger,
+            (ROOT / "docs/upstream-roadmap.md").read_text(encoding="utf-8"),
         ))
 
     def test_valid_dependency_and_existing_feature(self):

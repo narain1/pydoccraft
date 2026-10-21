@@ -4,7 +4,7 @@
 
 This comparison groups related reference members under existing Python handles and formatting properties. It is not an exhaustive member inventory, implementation test, or format-conformance claim. Open XML schema/model APIs do not establish pagination or rendering. Reference products are not runtime dependencies.
 
-Audited local surface: `3504e4622aa13615d8da82a8d388f561d41ace2b`. The inventory contains 44 families and 198 representative members from 17 pinned source files. Later implementation changes require review.
+Audited local surface: `50220d770c2a6aefb64c41ce15cfc6df039dcf6b`. The inventory contains 44 families and 198 representative members from 17 pinned source files. Later implementation changes require review.
 
 - [dotnet/Open-XML-SDK v3.5.1](https://github.com/dotnet/Open-XML-SDK/tree/3139fdfd27414548a41555f7848d5728f6e71a42) — `3139fdfd27414548a41555f7848d5728f6e71a42`
 - [pymupdf/PyMuPDF 2.0](https://github.com/pymupdf/PyMuPDF/tree/b8904b27efa0c4e2258f0e46ab4498a6173ffa22) — `b8904b27efa0c4e2258f0e46ab4498a6173ffa22`
@@ -277,7 +277,7 @@ Drawing fills, shapes, text boxes and groups.
 
 **Audited local surface:** Existing PDF path primitives and PPTX shapes/text/backgrounds; bounded owned DOCX rectangle/ellipse creator and private handle reuse Picture placement vocabulary without a second geometry framework..
 
-**Disposition:** `implemented_subset`. **Remaining:** DOCX lines/textboxes/group/rotation/front/auxiliary/imported editing and rich-text visible coverage remain unavailable or unassessed; native typed PDF content now has public placement, but Python underlays remain unavailable; render-transparent backdrop differs from authored fill.
+**Disposition:** `implemented_subset`. **Remaining:** DOCX lines/textboxes/group/rotation/front/auxiliary/imported editing and rich-text visible coverage remain unavailable or unassessed; typed PDF text/image underlays use behind=True, while supplied-font/raw-path underlays remain unavailable; render-transparent backdrop differs from authored fill.
 
 **Upstream candidates:** [U04](upstream-roadmap.md), [U10](upstream-roadmap.md), [U11](upstream-roadmap.md)
 
@@ -495,9 +495,9 @@ Image insertion, replacement and removal.
 
 **Criteria / owners:** PDF2 (W10), MED1 (W06), MED3 (W06), BG4 (W13)
 
-**Audited local surface:** Existing owned Office picture operations and PDF add_image use native media APIs.
+**Audited local surface:** Existing owned Office picture operations and PDF PNG/JPEG add_image use native media APIs; PDF behind=True reuses the existing crop/quarter-turn/flip controls.
 
-**Disposition:** `implemented_subset`. **Remaining:** Source PDF image replacement/removal, arbitrary alpha/blends/underlays and non-PNG authored profiles require separate native acceptance.
+**Disposition:** `implemented_subset`. **Remaining:** Source PDF image replacement/removal and broader alpha/blend profiles require separate native acceptance. DOCX/PPTX authored picture formats remain limited to their existing PNG profiles; PDF accepts PNG/JPEG.
 
 **Upstream candidates:** [U10](upstream-roadmap.md)
 
@@ -509,9 +509,9 @@ Vector paths, fills and paint ordering.
 
 **Criteria / owners:** PDF3 (W10), MED4 (W06), BG7 (W06)
 
-**Audited local surface:** PdfPage.draw_path; typed PPTX shape properties.
+**Audited local surface:** PdfPage.draw_path; built-in PdfPage.draw_text and PNG/JPEG add_image reuse behind=True for typed native underlays; typed PPTX shape properties.
 
-**Disposition:** `implemented_subset`. **Remaining:** Native typed add_content_with_placement exposes overlay/underlay; raw public stamping remains overlay-only. Python underlays, resource-collision-safe composition and bounded raw-stream admission remain open. Do not wrap every draw in an adapter-built Form/layer system.
+**Disposition:** `implemented_subset`. **Remaining:** Raw draw_path and supplied-font text remain overlay-only. Resource-collision-safe composition and bounded raw-stream admission remain open; existing resource collisions fail atomically. No adapter-built Form/layer system is introduced.
 
 **Upstream candidates:** [U10](upstream-roadmap.md)
 
