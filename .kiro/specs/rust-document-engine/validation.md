@@ -1162,6 +1162,15 @@ The first isolated `cargo test --locked author_docx::` run passed all 144 existi
 Numeric private `_id` and repr diagnostics deliberately change for newly authored DOCX blocks. Body/cell/PPTX deletion remains unsupported, and the remaining body section/semantic rules are not implemented. Historical spec78/evidence artifacts retain their original scope. No historical support-ledger artifact, hash or fixture is relabeled by this change.
 
 
+### Owned PDF radio groups — focused isolated validation
+
+The isolated implementation builds on the separately frozen cumulative field-accounting correction and field-value ownership fix; neither delta is duplicated. Native PdfCraft remains pinned to 645016addcfb9078c557f0189559ab47cdcee057; no crates, license graph or runtime executables change. Public native name helpers own PDF-name encoding; native create/fill/set_props/flatten own structure and appearances.
+
+Initial probes measured a 32-widget group retaining 1,120 tiny streams (32 initial pairs plus 528 member redraw pairs), 97,440 raw bytes in that fixture. The implementation reserves/charges inaccessible initial generations conservatively rather than scanning objects. Test-only scans of fresh synthetic models verify generation counts and charged history. Metadata redraws add 64 streams for 32 members; selection reuses existing states. Near-limit tests verify whole-operation rollback, exact 10,000 work units and copied counters. A non-raster 500-group fixture exercises exactly 1,000 widgets independently of 500 logical fields and proves capacity reuse after deletion without history refunds.
+
+Public fixtures verify literal A/#41/#4Fff/Unicode identities, native no-toggle/read-only failures, metadata/output preservation, whole-group deletion/copy/flatten, owned tuples and callback-driven page reorder/delete/close/exception refusal. Four rotated CropBox/UserUnit views retain actual selected-circle center pixels and byte-identical source/reopened/flattened PNGs. Coordinate snapshot comparisons allow 0.0001 point for the existing native f32 view transform; raster comparisons are exact. Broad imported-form, arbitrary mutable widget, security and total-process memory claims remain excluded. Five focused native groups pass (20.54 seconds), all-target locked/offline Clippy and debug build pass, and 29 public workflows pass (35.078 seconds: five new plus 24 related). Strict copied-package consumer typing passes. The 1,000-widget fixture performs no raster allocation. Integrated release evidence remains pending.
+
+
 ## Owned DOCX body identities — complete local artifact and independent review
 
 - Frozen runtime `091859307ed9563dc1bf799904cab7347003a992` has a completed local artifact at `dist/docx-body-identity/validation.json`: 462 clean installed-wheel Python tests passed, zero failures/errors/skips, in 156.368 seconds. The native/release log `/tmp/docx-body-identity-full-native.log` records 321 passing native tests and a successful release build. The shared source remained clean at that exact runtime when the reviewer recovered the completed artifact records.
@@ -1220,6 +1229,23 @@ The following delivery gates are complete after independent frozen-source/packag
 Every final run also passed formatting, warnings-denied Clippy, strict installed-package typing and the unchanged 264-package audit. Each includes the independently reviewed DOCX spacing fixture correction. Earlier local artifacts, including the recorded 462-test identity artifact, retain their original test-file scope. Main integration changes no identity-refactor runtime or dependency bytes; final exact-head/current-main CI for PR93 remains pending.
 
 
+## DOCX body identities — final manual merge gate
+
+PR93 final head `fb56803d41c0341b0c0d71e9f43d5f0d5ccde042` passed [required current-main CI39530041981](https://github.com/narain1/pydoccraft/actions/runs/39530041981), following the recorded independent source and 462-test copied-package review. It was manually merged as `f0cd0a7ef92ba8531e13f680ac9b5ed75779385b`. Repository auto-merge remains disabled. This closes the delivery gate for the internal identity change; broader DOC5/TXT1 remains partial.
+
+
+## Owned PDF radio groups — complete local artifact
+
+Runtime `77915dc95e2aaad0be2ecde02dd34d24abfda194` passes **326 locked Rust tests and 467 clean installed-wheel Python tests**, with zero failures/errors/skips. Native tests took 47.00 seconds; the full Python corpus took 163.422 seconds on Linux x86_64 / Python3.11.2 / Rust1.95. Formatting, warnings-denied all-targets Clippy, locked/offline release build, strict installed-package typing and the unchanged264-package license audit pass. Installed package bytes match the wheel. All-format extraction, PNG rendering and reopened conversion checks remain passing.
+
+Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,534,970 bytes**; extension **40,674,856 bytes**; SHA-256 `553217fcd1a147a10ee4cdf199b8be60259437eabe7cc2a26a359cadc27f115d`. Lock SHA-256 remains `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`; dependencies, upstream revisions and attribution are unchanged.
+
+The supported profile is 2–32 immutable same-page widgets through existing field operations. Tests preserve native literal option identities, actual selected-circle pixels, copied source/reopened/flattened output and callback lifetime behavior. Exact cumulative work/byte/widget boundaries are tested on synthetic owned files; no total process-memory guarantee or arbitrary imported-form support is claimed. Independent exact-artifact review and final current-main CI remain required before manual merge; broader PDF6 remains partial.
+
+
+PR94 independent source review and all467 installed tests against the copied exact77915dc package passed in162.689 seconds, zero failures/errors/skips, with matching wheel SHA/size. Review corrected one stale value-type error description before the final wheel build; no runtime, test or evidence exceptions were introduced. Exact-head/current-main CI and manual merge remain pending.
+
+
 ## GitHub Pages documentation site — local build validation
 
 The documentation-only change renders the existing Markdown guides plus a landing page into 28 static HTML pages using hash-pinned, build-only Python-Markdown 3.7. `tools/build_site.py` does not import the package or invoke Cargo. No runtime dependency, lockfile, feature status, upstream revision or package version changes.
@@ -1227,3 +1253,10 @@ The documentation-only change renders the existing Markdown guides plus a landin
 Local validation: clean site build; 1,642 generated local links, assets and fragments checked by `tools/check_site.py`; roadmap ownership check (139 coverage IDs, 14 workstreams); support evidence check (19 profiles, 139 joins); negative checker probes for missing files, missing fragments, duplicate IDs and absent homepage. External URLs are not fetched by the link checker. Browser surfaces were unavailable in the agent environment, so visual desktop/mobile inspection remains a deployment-review check rather than claimed local evidence.
 
 The pinned official Pages workflow builds pull requests with read-only permissions and deploys only reviewed `main` builds, with deployment permissions confined to its separate job. Public hosting is pending repository Pages configuration, independent review, merge, a successful deployment and a reachable public URL. These documentation checks do not substitute for native or installed-wheel release validation.
+
+
+## GitHub Pages documentation site — reviewed manual merge
+
+PR95 final head `d9a6cbb914ec8a1bd4172bbcb58d0acbfe0ac8ae` passed required [CI39547460948](https://github.com/narain1/pydoccraft/actions/runs/39547460948): 321 native tests, 462 installed-wheel tests in207.055 seconds, formatting, Clippy, strict typing and the unchanged264-package license audit. Its [documentation build39547460927](https://github.com/narain1/pydoccraft/actions/runs/39547460927) passed; deployment was correctly skipped for the pull request. Independent source review and a clean build checked28 pages and1,642 local links/assets/fragments; negative checks rejected missing files/fragments, duplicate IDs and output-root traversal.
+
+Root visual review used Chromium140 with1440×1000 and390×844 viewports on the home page, authoring guide and roadmap. All six requests returned200 with no JavaScript errors or horizontal overflow; desktop/mobile homepage screenshots were inspected. The reviewed exact head was manually merged as `5583f2946534041267f71691a732f5c0d96c6bcd` after current-main checks, with repository auto-merge disabled. Public deployment/reachability remains separately verified after merge; the site follows main and does not declare the roadmap or a package release complete.

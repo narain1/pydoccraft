@@ -1933,28 +1933,56 @@ class PdfFields:
         self._owner._field_generation += 1
         self._owner._annotation_generations[page] = self._owner._annotation_generations.get(page, 0) + 1
 
-    def add(self, name: str, box, *, kind: str = "text", options=()) -> PdfField:
-        """Create one text, checkbox or choice widget on this page."""
+    def add(self, name: str, box=None, *, kind: str = "text", options=(), boxes=None) -> PdfField:
+        """Create one widget, or an immutable same-page radio group using boxes and options."""
         if self._page is None:
             raise ValueError("add fields through page.fields")
         self._page_number()
-        if not isinstance(box, (tuple, list)) or len(box) != 4:
+        if not isinstance(kind, str):
+            raise TypeError("field kind must be a string")
+        kind = str.__str__(kind)
+        radio = kind == "radio"
+        if radio:
+            if box is not None or boxes is None:
+                raise ValueError("radio groups require boxes instead of box")
+        elif boxes is not None:
+            raise ValueError("boxes is only supported for radio groups")
+        elif not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in top-left points")
         if isinstance(options, (str, bytes)):
-            raise TypeError("options must be a sequence of choice strings")
+            raise TypeError("options must be a sequence of strings")
         values = []
+        maximum = 32 if radio else 256
         for value in options:
-            if len(values) >= 256:
-                raise ValueError("choice fields must not exceed 256 options")
+            if len(values) >= maximum:
+                raise ValueError(f"field must not exceed {maximum} options")
             if not isinstance(value, str):
-                raise TypeError("choice options must be strings")
-            if len(value) > 4096 or len(value.encode("utf-8")) > 4096:
-                raise ValueError("choice options must not exceed 4096 bytes")
-            values.append(value)
-        coordinates = tuple(map(pt, box))
-        # Iteration and coordinate conversion may reorganize or close the owner.
-        page = self._page_number()
-        identifier = self._owner._call("add_field", page, name, kind, coordinates, values, _change=True)
+                raise TypeError("field options must be strings")
+            if str.__len__(value) > 4096:
+                raise ValueError("field options must not exceed 4096 bytes")
+            try:
+                encoded = str.encode(value, "utf-8")
+            except UnicodeEncodeError as error:
+                raise ValueError("field options must be valid Unicode") from error
+            if len(encoded) > 4096:
+                raise ValueError("field options must not exceed 4096 bytes")
+            values.append(encoded.decode("utf-8"))
+        if radio:
+            coordinates = []
+            for item in boxes:
+                if len(coordinates) >= 32:
+                    raise ValueError("radio groups must not exceed 32 boxes")
+                if not isinstance(item, (tuple, list)) or len(item) != 4:
+                    raise TypeError("each box must be (x, y, width, height) in top-left points")
+                coordinates.append(tuple(map(pt, item)))
+            payload = json.dumps(coordinates, allow_nan=False)
+            # All caller iteration/conversion is complete before resolving the original page.
+            page = self._page_number()
+            identifier = self._owner._call("add_radio_field", page, name, payload, values, _change=True)
+        else:
+            coordinates = tuple(map(pt, box))
+            page = self._page_number()
+            identifier = self._owner._call("add_field", page, name, kind, coordinates, values, _change=True)
         self._owner._field_generation += 1
         return PdfField(self._owner, identifier)
 
@@ -2003,9 +2031,17 @@ class PdfField:
         return PdfPage(self._owner, self._info()["widgets"][0]["page"])
 
     @property
+    def boxes(self) -> tuple[tuple[float, float, float, float], ...]:
+        """Owned widget boxes in page view points; radio group geometry is immutable."""
+        return tuple(tuple(widget["box"]) for widget in self._info()["widgets"])
+
+    @property
     def box(self) -> tuple[float, float, float, float]:
         """Widget (x, y, width, height) in current page view points."""
-        return tuple(self._info()["widgets"][0]["box"])
+        info = self._info()
+        if info["kind"] == "radio":
+            raise UnsupportedFormatError("radio groups have multiple boxes; use field.boxes")
+        return tuple(info["widgets"][0]["box"])
 
     @box.setter
     def box(self, value) -> None:
@@ -2060,7 +2096,7 @@ class PdfField:
     def value(self, value: str | bool | None):
         self._check()
         if value is not None and not isinstance(value, (str, bool)):
-            raise TypeError("field values must be text, a checkbox bool or None for a choice")
+            raise TypeError("field values must be text, a checkbox bool or None for a choice or radio")
         if isinstance(value, str):
             if str.__len__(value) > 4096:
                 raise ValueError("field values must not exceed 4096 UTF-8 bytes")

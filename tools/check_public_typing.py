@@ -76,6 +76,13 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(field.read_only, bool)
         field.read_only = True
         assert_type(field.read_only, bool)
+        assert_type(field.boxes, tuple[tuple[float, float, float, float], ...])
+        radio = page.fields.add('delivery', kind='radio', options=('A', 'B'),
+                                boxes=((10, 110, 24, 24), (50, 110, 24, 24)))
+        assert_type(radio, PdfField)
+        assert_type(radio.boxes, tuple[tuple[float, float, float, float], ...])
+        radio.value = 'A'
+        field = page.fields['customer']
         field.tooltip = 'Customer identifier'
         assert_type(field.tooltip, str)
         assert_type(page.annotations.add_link(box=[10, 10, 20, 20], uri='https://example.com'), Annotation)

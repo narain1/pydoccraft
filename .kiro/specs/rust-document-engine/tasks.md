@@ -618,5 +618,15 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Update classified native test paths without relaxing format/geometry/output assertions, and add focused native/public identity, section and rollback coverage.
 - [x] Complete three focused native groups, four new public workflows, 59 related public workflows, formatter/Clippy/debug build and strict copied-package consumer typing.
 - [x] Complete the integrated local artifact and independent review: 321 recorded native tests and 462 clean installed-wheel tests; all 462 tests independently rerun with matching wheel bytes, typing and the locked license audit.
-- [ ] Complete final exact-head/current-main CI and manual merge.
+- [x] Complete final exact-head/current-main CI and manual merge: PR93, run39530041981.
 - [ ] Retain separately scoped body section/semantic deletion, cell/PPTX deletion and broader DOC5/TXT1 insertion/movement/adoption work. The historical spec78 identity-migration prerequisite is superseded by this internal change.
+
+
+## Bounded owned PDF radio groups
+
+- [x] Probe public native group creation, canonical Unicode/hash identities, clear/read-only behavior, fixed vector appearances and retained generation counts.
+- [x] Integrate immutable same-page groups through existing field containers/properties with independent field/widget bounds and cumulative preflight/accounting.
+- [x] Add native and public source/pixel/geometry/flatten/callback/identity/budget tests and consumer typing assertions.
+- [x] Complete integrated release/clean installed-wheel corpus: 326 native and 467 Python tests, typing and unchanged license audit.
+- [ ] Complete independent exact-head/current-main review and manual merge.
+- [ ] Retain imported inventory, arbitrary mutable/multi-page groups and broader PDF6/U10 appearance work.
