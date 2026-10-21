@@ -792,3 +792,8 @@ The integration changes all11 direct/13 resolved PdfCraft source identities toge
 All live text/property/media/shape counts and table-grid generations stay unchanged because the native values are permuted intact. PPTX paragraph handles are ordinal: every captured handle in the changed cell becomes stale; other-cell handles and cell/table identities remain live. Revision-bound ranges follow existing invalidation. No-op retains cached document/render objects, bytes and handles. Existing native table fitting and merged/vertical overflow behavior remains authoritative, rather than being recalculated locally.
 
 Raw proof deliberately separates model/default-property preservation from visible-order fixtures. Default native table styles inject a text color into runs lacking explicit fill, so the first inherited-color visual expectation failed before movement as well. Preserve that diagnostic; neutral-style explicit-run fixtures require positive unmoved ink before moved72/144/200DPI output comparisons. Only200DPI uses the native PDF export grid and a channel<=1 comparison;72/144 prove actual colored order/relationships/media, not general pixel identity.
+
+
+## 122. Targeted reference inventory maintenance
+
+Update the existing seven family summaries in `reference-api-inventory.json` and regenerate its Markdown; do not add a second inventory. Preserve all 44 family IDs, 198 representative member citations, reference snapshots, coverage/owner joins, upstream candidates, dispositions and support-profile joins. The current source checkpoint is the reviewed spec118 integration. Remaining limitations stay explicit, including arbitrary insertion/adoption, imported Office editing, unsupported picture/comment contexts and broader raster resource bounds.

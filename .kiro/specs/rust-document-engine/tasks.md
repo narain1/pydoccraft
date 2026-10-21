@@ -987,3 +987,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete integrated 443-native/release, two clean 560-test installed-wheel corpora and independent exact-artifact gates.
 - [ ] Complete current-head CI and manual merge.
 - [ ] Keep broader DOC5/TXT1/SLIDE3 adoption, duplication and shape-content work open; no version release before overall completion gates.
+
+
+## Reference disposition corrections (spec122)
+
+- [x] Compare seven stale family summaries with existing source, guides and accepted corpus modules.
+- [x] Correct bounded operation descriptions and regenerate the existing reference page without promoting feature status.
+- [x] Complete independent documentation and exact inventory-delta review.
+- [ ] Complete current-main CI/manual merge.
+- [ ] Keep exhaustive member dispositions and broad API1/QA1 acceptance open.
