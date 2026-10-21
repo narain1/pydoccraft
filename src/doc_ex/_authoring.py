@@ -2096,7 +2096,7 @@ class PdfField:
     def value(self, value: str | bool | None):
         self._check()
         if value is not None and not isinstance(value, (str, bool)):
-            raise TypeError("field values must be text, a checkbox bool or None for a choice")
+            raise TypeError("field values must be text, a checkbox bool or None for a choice or radio")
         if isinstance(value, str):
             if str.__len__(value) > 4096:
                 raise ValueError("field values must not exceed 4096 UTF-8 bytes")
