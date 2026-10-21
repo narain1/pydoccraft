@@ -917,3 +917,12 @@ A private bounded inventory walks presentation defaults, direct slide/notes bodi
 Cell-only facade normalization bypasses overridable built-in container/string hooks, checks32 stops before per-item conversion, uses existing pt() conversion and immediately rechecks revision/canonical target after each caller scalar conversion. Existing shared DOCX parsing, shape formatting, LF/VT validation and generation semantics remain intact.
 
 The first raw global normalized-PDF order assertion failed on a wide tab gap. Native emitted Unicode/source order and geometry were correct; two existing default HTs and one custom144-point stop had byte-identical native/PDF rasters and the same column-first normalization. The reviewed intentional oracle correction retains exact emitted token order, exact normalized token multiplicity, narrow/default ordered controls, native geometry and all unchanged pixel assertions. It does not claim general extraction-order equality or fix the separate held bidi issue134.
+
+
+## Stable property setter typing (spec142)
+
+Add annotations to 28 existing setters only. Reuse private source/size/color aliases and existing Python unions, including Real | float for scalar values handled by pt and SupportsIndex for section column count. Retain list and tuple forms; no new runtime alias, schema, validator, property or manager is introduced. Setters retain their existing bodies and precise None return types. Static checks reject obvious invalid assignments while native/runtime validation retains shape, boolean, range, format and ownership checks.
+
+The strict consumer exercises ordinary numbers, Fraction scalars, the index protocol, list/tuple values, path/stream image sources and supported clears. A whole-facade AST comparison erases only function/argument annotations and must otherwise be identical to aa1dae5. Dynamic metadata, note-option snapshots, raw path commands, the general range-link return contract and broader API3 discoverability remain separately scoped.
+
+Spec142 review retains the existing conventional float element hints in point containers; these do not describe every Real subtype accepted by runtime pt. Scalar distance/margin setters explicitly include Real. The PPTX cell-paragraph alignment override accepts str | None, preserving its native reset; ordinary Word paragraph alignment remains nonnullable. Wider static collection inference and exhaustive numeric protocols remain API3 work.

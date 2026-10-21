@@ -1176,3 +1176,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete independent source/accounting and exact copied-package focused review.
 - [x] Complete synchronized documentation review, including held134 evidence.
 - [ ] Complete final full native/release/installed corpus, exact-artifact verification, required current-head CI and manual PR review/merge. No release or broad TXT4/SLIDE3 completion is implied.
+
+
+## Stable property setter typing (spec142)
+
+- [x] Audit remaining missing property setter input/return annotations against existing Python and native dispatch.
+- [x] Annotate 28 existing setters without changing bodies, schemas, aliases or public methods; verify whole-facade AST equality after removing annotations.
+- [x] Pass valid strict consumer controls and reject exactly 13 invalid assignments previously accepted by the baseline.
+- [x] Pass all 37 existing authoring, section geometry, background, table formatting and style-default workflows against the copied-package candidate.
+- [x] Complete independent source, AST, strict positive/negative and nullable-reset review.
+- [ ] Complete combined installed-artifact validation, current-main CI and manual merge; keep API3 open.

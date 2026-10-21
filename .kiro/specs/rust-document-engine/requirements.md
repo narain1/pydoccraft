@@ -989,3 +989,8 @@ The existing owned metadata patch and extraction metadata dictionary shall expos
 137.3 Validate bounded direct and inherited tab sources before cloning. Charge descriptors/alignment bytes once within existing property budgets, preflight paragraph-property cloning on LF insertion and retained body-list properties on replacement/empty insertion. Bound inherited-source work, refuse32+ sources before writer truncation, and preserve exact/+1 failures, atomicity, lifetimes, callback ordering and revision exhaustion.
 
 137.4 Preserve all prior negative guards except the documented obsolete tabs=[] refusal fixture. Keep raw native writer diagnostics distinct from adapter admission. Complete focused/native/public/typing/source review and final installed artifact/current-head CI gates before delivery; broader TXT4/SLIDE3 remain open.
+
+
+## Stable property setter typing (spec142)
+
+Existing authoring properties must describe supported input types and None returns without altering assignments, validation or the public surface. Cover the remaining missing setter annotations for document backgrounds, style relations, ranges, section geometry, table cells and slide shapes. Preserve the distinction between DOCX background-image clearing and PPTX image assignment, and between nullable cell margins and nonnullable direct cell colors. Static types do not certify numeric ranges, sequence lengths, colors, format-specific support or lifetime validity.
