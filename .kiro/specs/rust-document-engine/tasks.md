@@ -832,3 +832,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Pass six focused public workflows and independent replay, strict positive/four-negative typing checks and synchronized roadmap/support/reference/site checks; final source review clear.
 - [ ] Complete exact integrated native/installed-wheel corpus, independent artifact review and current-head CI before merge acceptance.
 - [ ] Retain broader DOC5 movement, duplication, insertion and cross-container/reference adoption work.
+
+
+## Section-first letterhead composition (spec105)
+
+- [x] Audit existing cookbook/story/section tests and preserve their historical sources/fingerprints.
+- [x] Probe native reflow/variant/numbering behavior through the installed fixed-provenance wheel; replace the proposed +1 shift assumption with the observed exact +2 parity-preserving shift.
+- [x] Add one ordinary caller-PNG example and one combined fixture with exact body/link/table preservation, independent sections, filler checks and bounded three-DPI appearance controls.
+- [x] Complete independent source/replay review and documentation checks: one independently replayed workflow passes, with 19 support/reference tests and the site/roadmap checks passing.
+- [ ] Complete integrated corpus and exact-head CI; only then assess BG5 against its original supported-scope criterion.
+- [ ] Keep BG8 and broader section-fill/linkage/continuous/floating/watermark coverage open.
