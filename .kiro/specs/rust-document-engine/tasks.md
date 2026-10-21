@@ -1018,3 +1018,15 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete combined 119/121 full 449-native/release and two clean 564-test installed-wheel corpora, attribution/size and independent source/artifact review.
 - [x] Complete synchronized documentation and final independent review, retaining all historical evidence and scoped upstream findings.
 - [ ] Complete current-head CI and manual merge. Keep broader TXT1/SLIDE3 and overall release gates open.
+
+
+## Typed PDF underlays (spec123)
+
+- [x] Review the compact one-keyword surface, native typed placement route and preserved callback/resource rules after dedicated spec119 acceptance.
+- [x] Implement built-in point/box text and PNG/JPEG placement through existing methods, with strict flag and supplied-font refusal before reads.
+- [x] Pass three new native groups, all72 PDF native authoring tests, fmt/Clippy/debug and all19 new/related public workflows. Audit53 mechanical legacy Rust call migrations without changing assertions.
+- [x] Pass strict positive typing and two expected negative boolean diagnostics.
+- [x] Complete independent focused source/artifact/public review and combined 452-native, fmt/Clippy/release gates, exact artifact/attribution/source checks and measured sizes.
+- [x] Complete both clean installed 568-test combined artifact runs, with zero failures/errors/skips.
+- [x] Promote only verified partial typed-underlay operation evidence; preserve historical fingerprints and separately verify the documentation-only profile-count migration.
+- [ ] Complete current-head CI/manual merge. Raw-path/supplied-font underlays and broader PDF3/U10 remain open.

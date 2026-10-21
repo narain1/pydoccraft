@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "audited_commit": "3504e4622aa13615d8da82a8d388f561d41ace2b",
+  "audited_commit": "50220d770c2a6aefb64c41ce15cfc6df039dcf6b",
   "references": {
     "pdfcraft": {
       "revision": "516caea956c0aaf15f2bd1f35a15e07c73a9ead6",
@@ -132,6 +132,13 @@
       "wheel_sha256": "fa92abce09a6bb4af09c3ba2ae802ff9e57e3ab99249ffb933c5be8c8e5673fa",
       "source_commit": "b23d8954d1e75e041add8473b8b56662614b66ae",
       "date": "2026-10-21"
+    },
+    "pdf-typed-underlays-2026-10-21": {
+      "kind": "artifact",
+      "validation": ".kiro/specs/rust-document-engine/validation.md#123-typed-pdf-underlays--combined-installed-artifact",
+      "wheel_sha256": "190705742de9657b7463911af38019688d8b268e2dbc40347fb50f73b35896f1",
+      "source_commit": "50220d770c2a6aefb64c41ce15cfc6df039dcf6b",
+      "date": "2026-10-21"
     }
   },
   "test_sources": {
@@ -158,7 +165,8 @@
     "tests/test_slide_background_reset.py": "a76f9249da5695435353315417936c88c3a4ebf209ec41a7bf20e24af1c1f7f1",
     "tests/test_note_clear.py": "c1db35d457f3a637cf6e9e85d7faad86e49614796702224e0870d51264e5c10c",
     "tests/test_annotation_opacity.py": "2f94b75b40b1b720a3ee1b5be9afce7ae84f8ecf3cdf32353c0db85f2f97d5bd",
-    "tests/test_word_shapes.py": "ecd2a290b72931b53022ebfe5076503f032508a72ebd3ee25daaf3cbb3b9ebc1"
+    "tests/test_word_shapes.py": "ecd2a290b72931b53022ebfe5076503f032508a72ebd3ee25daaf3cbb3b9ebc1",
+    "tests/test_pdf_underlays.py": "73f5d254623dcbd70a452edcd8e82f76ba3eff667a79988c0f6e89ba77f4e225"
   },
   "profiles": [
     {
@@ -2817,6 +2825,156 @@
           ]
         }
       }
+    },
+    {
+      "id": "pdf.typed-underlays",
+      "format": "pdf",
+      "scope": "Built-in point/boxed text and PNG/JPEG underlays via behind=True on existing PdfPage.draw_text/add_image. Strict bool defaults False; native typed placement only. No supplied-font/raw-path underlay, added-item handles, replacement/removal or general layer manager. Existing resource collisions refuse atomically.",
+      "public_members": [
+        "PdfPage.draw_text(..., behind=True)",
+        "PdfPage.add_image(..., behind=True)"
+      ],
+      "adapter_sources": {
+        "src/doc_ex/_authoring.py": [
+          "PdfPage",
+          "draw_text",
+          "add_image"
+        ],
+        "rust/src/author_pdf.rs": [
+          "add_text",
+          "add_text_box",
+          "add_text_layout",
+          "add_image",
+          "preserve_drawing_resources"
+        ]
+      },
+      "native_sources": {
+        "placement": {
+          "reference": "pdfcraft",
+          "path": "crates/edit/src/added.rs",
+          "symbols": [
+            "Placement",
+            "Content",
+            "add_content_with_placement"
+          ]
+        },
+        "image": {
+          "reference": "pdfcraft",
+          "path": "crates/create/src/lib.rs",
+          "symbols": [
+            "image_xobject"
+          ]
+        },
+        "save": {
+          "reference": "pdfcraft",
+          "path": "crates/cos/src/writer.rs",
+          "symbols": [
+            "SaveOptions",
+            "write_full"
+          ]
+        },
+        "render": {
+          "reference": "pdfcraft",
+          "path": "crates/render/src/raster.rs",
+          "symbols": [
+            "PageRenderer",
+            "RenderRequest",
+            "render"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic owned and imported offset-CropBox/UserUnit PDFs with original opaque content, built-in text/links, PNG/JPEG bytes, copies and callback controls. Four page rotations are paired with four explicit image transform profiles; full page extents at72DPI and80pt image regions at72/144/300DPI. Owned160pt pages have full-page color/text controls at72/144/300DPI. Hidden and revealed content use separate owners; no background reset is introduced. Exact native typed models/source pixels and both save modes supplement visual tests. This is a finite matrix, not every parameter combination or pixel-perfect PDF composition.",
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "Reopened extraction retains tested original/added labels, link targets, decoded PNG source pixels and exact JPEG bytes, including hidden source text; extraction is independent of ink visibility. No underlay inspection or added-item handle API.",
+          "artifact": "pdf-typed-underlays-2026-10-21",
+          "tests": [
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_owned_layering_text_images_copy_reopen_and_hidden_source",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_imported_view_and_representative_image_transform_profiles"
+          ],
+          "native": [
+            "placement",
+            "image",
+            "save"
+          ]
+        },
+        "create": {
+          "status": "partial",
+          "scope": "Insert built-in point/box text and PNG/JPEG below all existing content; later underlays paint beneath earlier ones. Existing layout, font-size, alignment, image crop/quarter-turn/flips and geometry/resource limits remain.",
+          "artifact": "pdf-typed-underlays-2026-10-21",
+          "tests": [
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_owned_layering_text_images_copy_reopen_and_hidden_source",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_imported_view_and_representative_image_transform_profiles",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_strict_boolean_font_read_and_callback_lifetimes"
+          ],
+          "native": [
+            "placement",
+            "image"
+          ]
+        },
+        "edit_authored": {
+          "status": "partial",
+          "scope": "Add typed underlays to owned PDFs using staged native placement, with exact bool checks, callback target guards, copy independence and failure rollback. Ordinary callback content edits preserve prior semantics. Supplied-font text refuses before font reads.",
+          "artifact": "pdf-typed-underlays-2026-10-21",
+          "tests": [
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_owned_layering_text_images_copy_reopen_and_hidden_source",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_strict_boolean_font_read_and_callback_lifetimes",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_default_overlay_equivalence_and_failed_underlay_atomicity"
+          ],
+          "native": [
+            "placement",
+            "image"
+          ]
+        },
+        "edit_imported": {
+          "status": "partial",
+          "scope": "Insert into the tested imported page views with offset crop, UserUnit1.25 and four rotations; inherited/direct resource collisions refuse atomically. This does not certify arbitrary original graphics states, content replacement/removal or collision-safe resource remapping.",
+          "artifact": "pdf-typed-underlays-2026-10-21",
+          "tests": [
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_imported_view_and_representative_image_transform_profiles",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_default_overlay_equivalence_and_failed_underlay_atomicity"
+          ],
+          "native": [
+            "placement",
+            "image",
+            "save"
+          ]
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Preserve tested original text/links and uncovered ink, exact stored PNG pixels/JPEG bytes, copies, source independence, defaultfalse output and failed-edit cached bytes/counters. An opaque original may hide a successful underlay.",
+          "artifact": "pdf-typed-underlays-2026-10-21",
+          "tests": [
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_owned_layering_text_images_copy_reopen_and_hidden_source",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_imported_view_and_representative_image_transform_profiles",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_strict_boolean_font_read_and_callback_lifetimes",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_default_overlay_equivalence_and_failed_underlay_atomicity"
+          ],
+          "native": [
+            "placement",
+            "image",
+            "save"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "Actual revealed and opaque-hidden source/PDF pixels, full owned pages at72/144/300DPI, and imported image regions at those DPIs with full-page72extent controls; finite representative transform combinations only.",
+          "artifact": "pdf-typed-underlays-2026-10-21",
+          "tests": [
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_owned_layering_text_images_copy_reopen_and_hidden_source",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_imported_view_and_representative_image_transform_profiles"
+          ],
+          "native": [
+            "placement",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "not_applicable",
+          "scope": "This edits and saves PDFs through existing native serialization; no new cross-format export/conversion pair."
+        }
+      }
     }
   ],
   "coverage": {
@@ -3341,8 +3499,10 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "PDF3": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "pdf.typed-underlays"
+      ],
+      "remaining": "Unassessed: supplied-font/raw-path underlays, collision-safe composition and bounded raw-stream admission under U10. The partial built-in text/PNG/JPEG profile does not close PDF3."
     },
     "PDF4": {
       "profiles": [],
