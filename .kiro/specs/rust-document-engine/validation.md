@@ -1244,3 +1244,12 @@ The supported profile is 2–32 immutable same-page widgets through existing fie
 
 
 PR94 independent source review and all467 installed tests against the copied exact77915dc package passed in162.689 seconds, zero failures/errors/skips, with matching wheel SHA/size. Review corrected one stale value-type error description before the final wheel build; no runtime, test or evidence exceptions were introduced. Exact-head/current-main CI and manual merge remain pending.
+
+
+## Owned body paragraph deletion — focused isolated evidence
+
+The spec84 delta is based on frozen spec81 and changes no pins/dependencies. Four new native groups pass (0.28s), as do the three existing auxiliary-deletion groups (0.10s) and three identity groups (0.15s). Whole fmt check, all-targets Clippy with denied warnings and locked debug build pass. Five new public workflows pass in5.188s against an isolated copied extension/facade. The related42-test run passed41 and found an obsolete linked-body-target Unsupported expectation; after replacing it with the existing exact missing-bookmark ValueError, all five auxiliary-deletion tests passed in11.949s. All other related checks remain unchanged. These are focused results, not a new full release artifact.
+
+Native/public fixtures retain exact section values, unique endpoints, hidden final blanks, nested handles/generations, copied caches and protected references; they inspect actual removed blue/retained red pixels, exactly-once DOCX/PDF text, page sizes and displayed counters. Raw native removal exposes duplicate tail endpoints; one public native blank insertion restores the owned invariant without relocating section properties. The old identity fixture's unsupported target deliberately becomes a section boundary, while cell/PPTX guards remain explicit.
+
+Initial public restart assumptions were corrected using pinned [section_side](https://github.com/storytold/wordcraft/blob/f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22/crates/layout/src/lib.rs#L2570) and unchanged before/after controls: restart7 yields odd-page2pages/7 and even-page2pages/8, with next-page2pages/7 and continuous1page. Separate native no-restart controls retain odd3/even2pages. No numbering/parity implementation changed or general tolerance was introduced. Historical spec78/spec81 artifact scope remains unchanged; ordinary body deletion is this separate acceptance. Full integrated release, independent review and exact-head/current-main CI remain pending.

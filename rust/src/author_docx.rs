@@ -3369,16 +3369,10 @@ impl EditableDocx {
         self.clear_owned_story_content(note, replacement)
     }
 
-    /// Remove one owned direct auxiliary paragraph using native block removal.
+    /// Remove one owned direct paragraph while preserving native section boundaries.
     pub fn remove_paragraph(&mut self, id: usize) -> PyResult<()> {
         let paragraph = self.paragraph(id)?;
         let (story, path) = self.location(id)?;
-        let StoryRef::Part(part_id) = story else {
-            return Err(EngineError::Unsupported(
-                "body paragraph deletion is not supported; body section and semantic deletion rules are not yet available".into(),
-            )
-            .into());
-        };
         if path.0.len() != 1 {
             return Err(EngineError::Unsupported(
                 "cell paragraph deletion is not supported".into(),
@@ -3392,57 +3386,78 @@ impl EditableDocx {
             .into());
         }
         let document = self.document()?;
-        let part = document
-            .parts
-            .get(&part_id)
-            .ok_or_else(|| PyIndexError::new_err("owned story part is missing"))?;
-        if !matches!(
-            part.kind,
-            PartKind::Header | PartKind::Footer | PartKind::Footnote | PartKind::Endnote
-        ) {
-            return Err(EngineError::Unsupported(
-                "paragraph deletion requires an owned header, footer or note".into(),
-            )
-            .into());
-        }
-        let ids = self.story_paragraph_ids(part_id)?;
+        let (blocks, ids, part_kind, placeholder) = match story {
+            StoryRef::Body => (
+                &document.body,
+                self.paragraph_ids()?,
+                None,
+                self.body_placeholder,
+            ),
+            StoryRef::Part(part_id) => {
+                let part = document
+                    .parts
+                    .get(&part_id)
+                    .ok_or_else(|| PyIndexError::new_err("owned story part is missing"))?;
+                if !matches!(
+                    part.kind,
+                    PartKind::Header | PartKind::Footer | PartKind::Footnote | PartKind::Endnote
+                ) {
+                    return Err(EngineError::Unsupported(
+                        "paragraph deletion requires an owned body, header, footer or note".into(),
+                    )
+                    .into());
+                }
+                if matches!(part.kind, PartKind::Header | PartKind::Footer) {
+                    let refs = document
+                        .sections()
+                        .iter()
+                        .flat_map(|(_, section)| {
+                            [
+                                section.headers.default,
+                                section.headers.first,
+                                section.headers.even,
+                                section.footers.default,
+                                section.footers.first,
+                                section.footers.even,
+                            ]
+                        })
+                        .filter(|target| *target == Some(part_id))
+                        .count();
+                    if refs != 1 {
+                        return Err(EngineError::Unsupported(
+                            "paragraph deletion requires independent header/footer ownership"
+                                .into(),
+                        )
+                        .into());
+                    }
+                }
+                (
+                    &part.blocks,
+                    self.story_paragraph_ids(part_id)?,
+                    Some(part.kind),
+                    self.story_placeholders.get(&part_id).copied(),
+                )
+            }
+        };
         if !ids.contains(&id) {
             return Err(PyIndexError::new_err(
                 "paragraph is not a direct owned story child",
             ));
         }
-        if matches!(part.kind, PartKind::Header | PartKind::Footer) {
-            let refs = document
-                .sections()
-                .iter()
-                .flat_map(|(_, section)| {
-                    [
-                        section.headers.default,
-                        section.headers.first,
-                        section.headers.even,
-                        section.footers.default,
-                        section.footers.first,
-                        section.footers.even,
-                    ]
-                })
-                .filter(|target| *target == Some(part_id))
-                .count();
-            if refs != 1 {
-                return Err(EngineError::Unsupported(
-                    "paragraph deletion requires independent header/footer ownership".into(),
-                )
-                .into());
-            }
-        }
+        let original_sections = if story == StoryRef::Body {
+            Some(owned_body_sections(document)?)
+        } else {
+            None
+        };
         if self.locations.len() > MAX_BLOCKS
             || ids.len() > MAX_BLOCKS
             || self.cell_placeholders.len() > MAX_CELLS
-            || part.blocks.len() > MAX_BLOCKS + 1
+            || blocks.len() > MAX_BLOCKS + usize::from(story != StoryRef::Body)
         {
             return Err(limit("paragraph deletion exceeds owned locator limits"));
         }
         let index = path.last();
-        if self.story_placeholders.get(&part_id) == Some(&index) {
+        if placeholder == Some(index) {
             return Err(PyValueError::new_err(
                 "synthetic story paragraphs cannot be deleted by handle",
             ));
@@ -3452,7 +3467,7 @@ impl EditableDocx {
             if *owner != story {
                 continue;
             }
-            validate_story_locator(path, part.blocks.len())?;
+            validate_story_locator(path, blocks.len())?;
             if path.0[0] as usize == index && *other != id {
                 return Err(PyValueError::new_err(
                     "paragraph has inconsistent descendant locators",
@@ -3463,27 +3478,47 @@ impl EditableDocx {
             if *owner != story {
                 continue;
             }
-            validate_story_locator(path, part.blocks.len())?;
+            validate_story_locator(path, blocks.len())?;
             if path.0[0] as usize == index {
                 return Err(PyValueError::new_err(
                     "paragraph has an inconsistent cell placeholder",
                 ));
             }
         }
-        if self
-            .story_placeholders
-            .get(&part_id)
-            .is_some_and(|position| *position >= part.blocks.len())
-        {
+        if placeholder.is_some_and(|position| position >= blocks.len()) {
             return Err(PyValueError::new_err(
                 "story placeholder is outside its native container",
             ));
         }
-        let old_len = part.blocks.len();
-        let part_kind = part.kind;
+        let old_len = blocks.len();
         let mut staged = self.copy()?;
         let mut candidate = document.clone();
         let removed = candidate.remove_block(story, &path).map_err(model_error)?;
+        if let Some(expected) = original_sections {
+            // Native removal does not append after a section-bearing paragraph.
+            // Keep the final section's required physical body paragraph without
+            // moving any section property or assigning the blank an editable ID.
+            if candidate
+                .body
+                .last()
+                .and_then(|block| block.as_para())
+                .is_some_and(|paragraph| paragraph.section.is_some())
+            {
+                candidate
+                    .insert_block(
+                        StoryRef::Body,
+                        &Path::top(candidate.body.len()),
+                        Block::Para(Paragraph::new()),
+                    )
+                    .map_err(model_error)?;
+            }
+            if owned_body_sections(&candidate)? != expected {
+                return Err(EngineError::Unsupported(
+                    "paragraph deletion cannot change section properties or count".into(),
+                )
+                .into());
+            }
+        }
         let (removed_text, removed_cells) = content_usage(&vec![Arc::new(removed)]);
         if removed_cells != 0 {
             return Err(PyValueError::new_err(
@@ -3491,10 +3526,16 @@ impl EditableDocx {
             ));
         }
         staged.text_bytes = self.updated_text_bytes(removed_text, 0)?;
-        let new_len = candidate.parts[&part_id].blocks.len();
+        let new_len = match story {
+            StoryRef::Body => candidate.body.len(),
+            StoryRef::Part(part_id) => candidate.parts[&part_id].blocks.len(),
+        };
         let appended = new_len == old_len;
-        if appended && old_len == 1 && matches!(part_kind, PartKind::Footnote | PartKind::Endnote) {
-            let style = if part_kind == PartKind::Footnote {
+        if appended
+            && old_len == 1
+            && matches!(part_kind, Some(PartKind::Footnote | PartKind::Endnote))
+        {
+            let style = if part_kind == Some(PartKind::Footnote) {
                 "FootnoteText"
             } else {
                 "EndnoteText"
@@ -3522,20 +3563,33 @@ impl EditableDocx {
                 (owner, path)
             })
             .collect();
-        staged
-            .stories
-            .get_mut(&part_id)
-            .ok_or_else(|| PyIndexError::new_err("owned story is missing"))?
-            .retain(|child| *child != id);
-        staged.images.retain(|image| *image != id);
-        staged.table_generations.remove(&id);
-        if appended {
-            staged.story_placeholders.insert(part_id, new_len - 1);
-        } else if let Some(position) = staged.story_placeholders.get_mut(&part_id) {
-            if *position > index {
-                *position -= 1;
+        match story {
+            StoryRef::Body => {
+                if appended {
+                    staged.body_placeholder = Some(new_len - 1);
+                } else if let Some(position) = staged.body_placeholder.as_mut() {
+                    if *position > index {
+                        *position -= 1;
+                    }
+                }
+            }
+            StoryRef::Part(part_id) => {
+                staged
+                    .stories
+                    .get_mut(&part_id)
+                    .ok_or_else(|| PyIndexError::new_err("owned story is missing"))?
+                    .retain(|child| *child != id);
+                if appended {
+                    staged.story_placeholders.insert(part_id, new_len - 1);
+                } else if let Some(position) = staged.story_placeholders.get_mut(&part_id) {
+                    if *position > index {
+                        *position -= 1;
+                    }
+                }
             }
         }
+        staged.images.retain(|image| *image != id);
+        staged.table_generations.remove(&id);
         // The staged model still holds the original anchors until normal commit checks finish.
         staged.commit(candidate)?;
         *self = staged;
@@ -7976,6 +8030,46 @@ fn validate_grid_children(document: &Document, table: &Table) -> PyResult<()> {
         }
     }
     Ok(())
+}
+
+// Owned section ranges always have a physical block, including the final blank.
+// This validates native structure; it does not relocate or synthesize section properties.
+fn owned_body_sections(document: &Document) -> PyResult<Vec<SectionProps>> {
+    if document.body.len() > MAX_BLOCKS {
+        return Err(limit("paragraph deletion exceeds 100000 body blocks"));
+    }
+    if document
+        .body
+        .last()
+        .and_then(|block| block.as_para())
+        .is_none_or(|paragraph| paragraph.section.is_some())
+    {
+        return Err(PyValueError::new_err(
+            "owned body requires a final non-section paragraph",
+        ));
+    }
+    let sections = document.sections();
+    if sections.len() > MAX_SECTIONS {
+        return Err(limit("document exceeds 128 sections"));
+    }
+    let mut previous = None;
+    for (end, _) in &sections {
+        if *end >= document.body.len() || previous.is_some_and(|before| *end <= before) {
+            return Err(PyValueError::new_err(
+                "owned body section endpoints are invalid",
+            ));
+        }
+        previous = Some(*end);
+    }
+    if previous != document.body.len().checked_sub(1) {
+        return Err(PyValueError::new_err(
+            "owned body final section endpoint is invalid",
+        ));
+    }
+    Ok(sections
+        .into_iter()
+        .map(|(_, section)| section.clone())
+        .collect())
 }
 
 fn validate_story_locator(path: &Path, blocks: usize) -> PyResult<()> {
@@ -17665,6 +17759,7 @@ mod story_paragraph_delete_tests {
         pyo3::prepare_freethreaded_python();
         let mut document = EditableDocx::new();
         let body = document.add_paragraph("Body").unwrap();
+        document.add_section("next_page").unwrap();
         let table = document.add_table(vec![vec!["Cell".into()]]).unwrap();
         let cell = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
         let part = document.ensure_story("header", "default", 0).unwrap();
@@ -18006,5 +18101,304 @@ mod body_identity_tests {
         assert!(document.paragraph_ids().is_err());
         document.locations.remove(&id);
         assert_eq!(document.add_paragraph("Third").unwrap(), id);
+    }
+}
+
+#[cfg(test)]
+mod body_paragraph_delete_tests {
+    use super::*;
+
+    fn sections(document: &Document) -> Vec<SectionProps> {
+        document
+            .sections()
+            .iter()
+            .map(|(_, section)| (*section).clone())
+            .collect()
+    }
+
+    #[test]
+    fn body_delete_native_tail_requires_a_final_section_paragraph() {
+        let mut document = EditableDocx::new();
+        document.set_page_size(300.0, 360.0).unwrap();
+        document.set_margins(24.0, 24.0, 24.0, 24.0).unwrap();
+        document.add_paragraph("First section").unwrap();
+        document.add_section("next_page").unwrap();
+        document
+            .set_section_props(1, r#"{"page_size":[420,480],"page_number_start":7}"#)
+            .unwrap();
+        let tail = document.add_paragraph("Remove final section text").unwrap();
+        let mut raw = document.document().unwrap().clone();
+        let wanted = sections(&raw);
+        raw.remove_block(StoryRef::Body, &document.location(tail).unwrap().1)
+            .unwrap();
+        // Native remove_block only appends for empty/table-ended containers. A
+        // section-bearing paragraph is already a paragraph, so the final section
+        // now shares the prior section's endpoint rather than owning a body block.
+        assert_eq!(raw.body.len(), 1);
+        assert_eq!(
+            raw.sections()
+                .iter()
+                .map(|(end, _)| *end)
+                .collect::<Vec<_>>(),
+            vec![0, 0]
+        );
+        assert_eq!(sections(&raw), wanted);
+        raw.insert_block(
+            StoryRef::Body,
+            &Path::top(raw.body.len()),
+            Block::Para(Paragraph::new()),
+        )
+        .unwrap();
+        assert_eq!(raw.body.len(), 2);
+        assert_eq!(
+            raw.sections()
+                .iter()
+                .map(|(end, _)| *end)
+                .collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+        assert_eq!(sections(&raw), wanted);
+        let bytes = wordcraft_docx::write(&raw).unwrap();
+        let read = wordcraft_docx::read(&bytes).unwrap();
+        assert_eq!(
+            read.sections()
+                .iter()
+                .map(|(end, _)| *end)
+                .collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+        assert!(read.body[1].as_para().unwrap().text.is_empty());
+        assert!(read.body[1].as_para().unwrap().section.is_none());
+        let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+        let output = crate::pdf::extract(&pdf, None).unwrap();
+        assert_eq!(output.pages.len(), 2);
+        assert_eq!(output.pages[0].metadata["width"].as_f64(), Some(300.0));
+        assert_eq!(output.pages[1].metadata["width"].as_f64(), Some(420.0));
+        for (page, expected) in [(0, (300, 360)), (1, (420, 480))] {
+            assert_eq!(
+                validate_png(&crate::docx::render(&bytes, page, 72.0, None).unwrap()).unwrap(),
+                expected
+            );
+        }
+    }
+
+    fn unchanged(actual: &EditableDocx, before: &EditableDocx) {
+        assert_eq!(
+            wordcraft_docx::write(actual.document().unwrap()).unwrap(),
+            wordcraft_docx::write(before.document().unwrap()).unwrap()
+        );
+        assert_eq!(actual.locations, before.locations);
+        assert_eq!(actual.body_placeholder, before.body_placeholder);
+        assert_eq!(actual.cell_placeholders, before.cell_placeholders);
+        assert_eq!(actual.story_placeholders, before.story_placeholders);
+        assert_eq!(actual.stories, before.stories);
+        assert_eq!(actual.images, before.images);
+        assert_eq!(actual.table_generations, before.table_generations);
+        assert_eq!(
+            (
+                actual.text_bytes,
+                actual.cell_count,
+                actual.media_bytes,
+                actual.revision,
+                actual.next_block_id
+            ),
+            (
+                before.text_bytes,
+                before.cell_count,
+                before.media_bytes,
+                before.revision,
+                before.next_block_id
+            )
+        );
+    }
+
+    #[test]
+    fn body_delete_shifts_owned_descendants_and_reuses_native_tail_without_new_ids() {
+        let mut document = EditableDocx::new();
+        let first = document.add_paragraph("First").unwrap();
+        let table = document.add_table(vec![vec!["Cell".into()]]).unwrap();
+        let cell = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
+        let nested = document
+            .cell_add_table(table, 0, 0, vec![vec!["Deep".into()]])
+            .unwrap();
+        let deep = document.cell_paragraph_ids(nested, 0, 0).unwrap()[0];
+        let tail = document.add_paragraph("Tail").unwrap();
+        let header = document.ensure_story("header", "default", 0).unwrap();
+        let head = document.story_add_paragraph(header, "Head").unwrap();
+        let copy = document.copy().unwrap();
+        let path = document.location(deep).unwrap().1;
+        let next = document.next_block_id;
+        let bytes = document.text_bytes;
+        document.remove_paragraph(first).unwrap();
+        assert_eq!(document.text_bytes, bytes - 5);
+        assert!(document.paragraph_text(first).is_err());
+        assert_eq!(document.location(deep).unwrap().1 .0[0] + 1, path.0[0]);
+        assert_eq!(document.location(deep).unwrap().1 .0[1..], path.0[1..]);
+        assert_eq!(document.paragraph_text(cell).unwrap(), "Cell");
+        assert_eq!(document.paragraph_text(deep).unwrap(), "Deep");
+        assert_eq!(document.paragraph_text(head).unwrap(), "Head");
+        assert_eq!(
+            document.table_generation(table).unwrap(),
+            copy.table_generation(table).unwrap()
+        );
+        assert_eq!(
+            document.table_generation(nested).unwrap(),
+            copy.table_generation(nested).unwrap()
+        );
+        document.remove_paragraph(tail).unwrap();
+        assert_eq!(document.text_bytes, bytes - 9);
+        assert_eq!(document.next_block_id, next);
+        assert_eq!(document.body_placeholder, Some(1));
+        assert!(document.paragraph_ids().unwrap().is_empty());
+        assert_eq!(document.document().unwrap().body.len(), 2);
+        assert_eq!(
+            *document.document().unwrap().body[1],
+            Block::Para(Paragraph::new())
+        );
+        let fresh = document.add_paragraph("").unwrap();
+        assert_eq!(fresh, next);
+        assert_eq!(document.paragraph_ids().unwrap(), vec![fresh]);
+        document.remove_paragraph(fresh).unwrap();
+        assert_eq!(document.document().unwrap().body.len(), 2);
+        assert_eq!(document.body_placeholder, Some(1));
+        assert_eq!(copy.paragraph_text(first).unwrap(), "First");
+        assert_eq!(copy.paragraph_text(tail).unwrap(), "Tail");
+        // A shifted nested-table trailing placeholder remains reusable by its cell.
+        let before = document.cell_placeholders.len();
+        document
+            .cell_add_paragraph(table, 0, 0, "After nested")
+            .unwrap();
+        assert_eq!(document.cell_placeholders.len() + 1, before);
+        let bytes = document.to_bytes().unwrap();
+        let read = wordcraft_docx::read(&bytes).unwrap();
+        assert_eq!(
+            cell_plain_text(&read.table(StoryRef::Body, &Path::top(0)).unwrap().rows[0].cells[0]),
+            "Cell\nDeep\nAfter nested"
+        );
+        assert!(read.body[1].as_para().unwrap().text.is_empty());
+    }
+
+    #[test]
+    fn body_delete_preserves_all_section_values_and_boundary_handles() {
+        for (start, pages) in [
+            ("next_page", 2),
+            ("continuous", 1),
+            ("odd_page", 3),
+            ("even_page", 2),
+        ] {
+            let mut document = EditableDocx::new();
+            document.set_page_size(300.0, 360.0).unwrap();
+            document.set_margins(24.0, 24.0, 24.0, 24.0).unwrap();
+            let boundary = document.add_paragraph("Boundary").unwrap();
+            let head = document.ensure_story("header", "default", 0).unwrap();
+            document.story_add_paragraph(head, "Header").unwrap();
+            document.add_section(start).unwrap();
+            let tail = document.add_paragraph("Delete tail").unwrap();
+            let expected = owned_body_sections(document.document().unwrap()).unwrap();
+            let before = document.copy().unwrap();
+            assert!(document.remove_paragraph(boundary).is_err());
+            unchanged(&document, &before);
+            document.remove_paragraph(tail).unwrap();
+            assert_eq!(
+                owned_body_sections(document.document().unwrap()).unwrap(),
+                expected
+            );
+            assert_eq!(document.paragraph_ids().unwrap(), vec![boundary]);
+            assert_eq!(document.body_placeholder, Some(1));
+            assert_eq!(document.document().unwrap().body.len(), 2);
+            assert_eq!(document.next_block_id, before.next_block_id);
+            let bytes = document.to_bytes().unwrap();
+            let read = wordcraft_docx::read(&bytes).unwrap();
+            assert_eq!(read.sections().len(), 2);
+            assert_eq!(read.sections()[1].1.start, expected[1].start);
+            assert!(read.body[1].as_para().unwrap().text.is_empty());
+            let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+            assert_eq!(
+                crate::pdf::extract(&pdf, None).unwrap().pages.len(),
+                pages,
+                "{start}"
+            );
+            assert_eq!(
+                validate_png(&crate::docx::render(&bytes, pages - 1, 72.0, None).unwrap()).unwrap(),
+                (300, 360)
+            );
+            let fresh = document.add_paragraph("Fresh tail").unwrap();
+            assert!(fresh > tail);
+            assert_eq!(document.document().unwrap().body.len(), 2);
+            assert_eq!(
+                owned_body_sections(document.document().unwrap()).unwrap(),
+                expected
+            );
+        }
+        let mut empty = EditableDocx::new();
+        let paragraph = empty.add_paragraph("Only").unwrap();
+        let props = sections(empty.document().unwrap());
+        empty.remove_paragraph(paragraph).unwrap();
+        assert_eq!(sections(empty.document().unwrap()), props);
+        assert_eq!(empty.document().unwrap().body.len(), 1);
+        assert_eq!(empty.body_placeholder, Some(0));
+        assert!(empty.paragraph_ids().unwrap().is_empty());
+        let table = empty.add_table(vec![vec!["Recovered".into()]]).unwrap();
+        assert_eq!(empty.location(table).unwrap().1, Path::top(0));
+        assert_eq!(empty.document().unwrap().body.len(), 2);
+    }
+
+    #[test]
+    fn body_delete_rejects_protected_anchors_and_malformed_state_atomically() {
+        for protected in ["note", "bookmark"] {
+            let mut document = EditableDocx::new();
+            let preceding = document.add_paragraph("Before").unwrap();
+            let target = document.add_paragraph("Target").unwrap();
+            if protected == "note" {
+                document
+                    .add_note(target, 0, 6, document.revision, "Detail", "footnote")
+                    .unwrap();
+            } else {
+                document
+                    .set_bookmark("Target", target, 0, 6, document.revision)
+                    .unwrap();
+            }
+            let anchors = semantic_anchors(document.document().unwrap());
+            document.remove_paragraph(preceding).unwrap();
+            assert_eq!(semantic_anchors(document.document().unwrap()), anchors);
+            let before = document.copy().unwrap();
+            assert!(document.remove_paragraph(target).is_err());
+            unchanged(&document, &before);
+        }
+        for failure in 0..6 {
+            let mut document = EditableDocx::new();
+            let target = document.add_paragraph("Text").unwrap();
+            match failure {
+                0 => document.body_placeholder = Some(20),
+                1 => {
+                    document
+                        .locations
+                        .insert(usize::MAX, (StoryRef::Body, Path(vec![0; 52])));
+                }
+                2 => {
+                    document
+                        .cell_placeholders
+                        .insert((StoryRef::Body, Path(vec![])));
+                }
+                3 => document.text_bytes = 0,
+                4 => document.revision = u64::MAX,
+                _ => {
+                    document.document.as_mut().unwrap().last_section.page_w = f32::NAN;
+                }
+            }
+            // NaN section equality is intentionally not accepted as preservation.
+            let before = document.copy().unwrap();
+            assert!(
+                document.remove_paragraph(target).is_err(),
+                "failure {failure}"
+            );
+            unchanged(&document, &before);
+        }
+        let mut document = EditableDocx::new();
+        let target = document.add_paragraph("No allocation needed").unwrap();
+        document.next_block_id = usize::MAX;
+        document.remove_paragraph(target).unwrap();
+        assert_eq!(document.next_block_id, usize::MAX);
+        assert!(document.add_paragraph("Cannot allocate").is_err());
     }
 }
