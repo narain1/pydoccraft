@@ -69,6 +69,15 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(table.merge((0, 0), (1, 0)), EditableCell)
         assert_type(table[0, 0].add_table(1, columns=1), EditableTable)
         assert_type(table[0, 0].add_image(png, width=20), Picture)
+        disposable = word.add_table([['Delete']])
+        assert_type(disposable, EditableTable)
+        del word.tables[-1]
+        header = word.sections[0].header()
+        header.add_table([['Delete']])
+        del header.tables[-1]
+        cell = word.add_table([['Parent']])[0, 0]
+        cell.add_table([['Delete']])
+        del cell.tables[-1]
         assert_type(word.paragraphs[:], list[Paragraph])
         assert_type(word.paragraphs.move(0, -1), None)
         assert_type(table[0, 0].paragraphs.move(0, -1), None)
@@ -269,3 +278,47 @@ def verify_snapshots(word: WordDocument, pdf: PdfDocument, picture: Picture,
         if bottom is not None:
             assert_type(bottom["color"], str | None)
             assert_type(bottom["width"], float)
+
+
+def verify_formatting_snapshots(word: WordDocument, paragraph: Paragraph) -> None:
+    defaults = word.styles.defaults
+    assert_type(defaults["font_size"], float | None)
+    assert_type(defaults["language"], str | None)
+    assert_type(defaults["strike"], bool | str | None)
+    assert_type(defaults["direction"], str | None)
+    direct = paragraph.formatting
+    assert_type(direct["alignment"], str | None)
+    # A Paragraph can be a PPTX cell paragraph with alignment alone.
+    assert_type(direct.get("indent_left"), float | None)
+    tabs = direct.get("tabs")
+    if tabs is not None:
+        assert_type(tabs[0]["position"], float)
+        assert_type(tabs[0]["alignment"], str)
+        assert_type(tabs[0]["leader"], str)
+    resolved = paragraph.resolved_formatting  # Successful results are DOCX only.
+    assert_type(resolved["alignment"], str)
+    assert_type(resolved["indent_left"], float)
+    assert_type(resolved["keep_with_next"], bool)
+    assert_type(resolved["tabs"][0]["position"], float)
+    assert_type(resolved["background"], str | None)
+    for kind in ("character", "paragraph", "table"):
+        style = word.styles.add("Typed " + kind, kind=kind)
+        for snapshot in (style.formatting, style.resolved_formatting):
+            assert_type(snapshot["font"], str | None)
+            assert_type(snapshot["language"], str | None)
+            assert_type(snapshot["strike"], bool | str | None)
+            assert_type(snapshot.get("alignment"), str | None)
+            margins = snapshot.get("margins")
+            if margins is not None:
+                assert_type(margins, list[float])
+            regions = snapshot.get("regions")
+            if regions is not None:
+                region = regions["first_row"]
+                assert_type(region["vertical_alignment"], str | None)
+                assert_type(region["bold"], bool | None)
+                borders = region["borders"]
+                if borders is not None:
+                    edge = borders["top"]
+                    if edge is not None:
+                        assert_type(edge["width"], float)
+                        assert_type(edge["color"], str | None)

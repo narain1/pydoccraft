@@ -167,6 +167,111 @@ class _BorderSnapshot(TypedDict):
     width: float
 
 
+# Owned output snapshots. Optional keys describe native-kind differences, not
+# optional input patches; table style resolution can still retain None values.
+class _TabSnapshot(TypedDict):
+    position: float
+    alignment: str
+    leader: str
+
+
+class _CharacterSnapshot(TypedDict):
+    bold: bool | None
+    italic: bool | None
+    font: str | None
+    language: str | None
+    letter_spacing: float | None
+    font_size: float | None
+    color: str | None
+    underline: str | None
+    strike: bool | str | None
+    script: str | None
+    highlight: str | None
+    background: str | None
+
+
+class _ParagraphAlignmentSnapshot(TypedDict):
+    alignment: str | None
+
+
+class _ParagraphSnapshot(_ParagraphAlignmentSnapshot, total=False):
+    borders: dict[str, _BorderSnapshot | None] | None
+    tabs: list[_TabSnapshot] | None
+    direction: str | None
+    indent_left: float | None
+    indent_right: float | None
+    indent_first: float | None
+    space_before: float | None
+    space_after: float | None
+    line_spacing: float | None
+    keep_with_next: bool | None
+    keep_together: bool | None
+    widow_control: bool | None
+    page_break_before: bool | None
+    background: str | None
+
+class _ResolvedParagraphSnapshot(TypedDict):
+    borders: dict[str, _BorderSnapshot | None] | None
+    tabs: list[_TabSnapshot]
+    alignment: str
+    direction: str
+    indent_left: float
+    indent_right: float
+    indent_first: float
+    space_before: float
+    space_after: float
+    line_spacing: float
+    keep_with_next: bool
+    keep_together: bool
+    widow_control: bool
+    page_break_before: bool
+    background: str | None
+
+
+class _DefaultsSnapshot(_CharacterSnapshot):
+    borders: dict[str, _BorderSnapshot | None] | None
+    tabs: list[_TabSnapshot] | None
+    alignment: str | None
+    direction: str | None
+    indent_left: float | None
+    indent_right: float | None
+    indent_first: float | None
+    space_before: float | None
+    space_after: float | None
+    line_spacing: float | None
+    keep_with_next: bool | None
+    keep_together: bool | None
+    widow_control: bool | None
+    page_break_before: bool | None
+
+
+class _TableRegionSnapshot(_CharacterSnapshot):
+    alignment: str | None
+    vertical_alignment: str | None
+    borders: dict[str, _BorderSnapshot | None] | None
+
+
+class _StyleSnapshot(_CharacterSnapshot, total=False):
+    borders: dict[str, _BorderSnapshot | None] | None
+    tabs: list[_TabSnapshot] | None
+    alignment: str | None
+    direction: str | None
+    indent_left: float | None
+    indent_right: float | None
+    indent_first: float | None
+    space_before: float | None
+    space_after: float | None
+    line_spacing: float | None
+    keep_with_next: bool | None
+    keep_together: bool | None
+    widow_control: bool | None
+    page_break_before: bool | None
+    vertical_alignment: str | None
+    margins: list[float] | None
+    row_band_size: int | None
+    regions: dict[str, _TableRegionSnapshot]
+
+
 class _TableSnapshot(TypedDict):
     alignment: str | None
     indent: float | None
@@ -620,6 +725,18 @@ class _Collection(Sequence[_Item], Generic[_Item]):
         return self._factory(self._owner, ids[_index(index, len(ids))])
 
 
+class _Tables(_Collection["EditableTable"]):
+    """Ordered owned DOCX tables; deletion removes one complete subtree."""
+    def __delitem__(self, index: int) -> None:
+        self._owner._ensure_open()
+        if isinstance(index, slice):
+            raise TypeError("table deletion requires an integer index")
+        identifiers = self._ids()  # Resolve stale parent-cell generations before callbacks.
+        selected = operator.index(index)
+        self._owner._ensure_open()
+        self._owner._call("remove_table", identifiers[_index(selected, len(identifiers))], _change=True)
+
+
 class _Paragraphs(_Collection["Paragraph"]):
     """Ordered paragraphs; deletion supports DOCX containers and PPTX cells."""
     def __delitem__(self, index: int) -> None:
@@ -744,8 +861,8 @@ class WordDocument(EditableDocument):
         return _Paragraphs(self, lambda: self._call("paragraph_ids"), Paragraph)
 
     @property
-    def tables(self) -> _Collection[EditableTable]:
-        return _Collection(self, lambda: self._call("table_ids"), EditableTable)
+    def tables(self) -> _Tables:
+        return _Tables(self, lambda: self._call("table_ids"), EditableTable)
 
     @property
     def sections(self) -> Sections:
@@ -829,7 +946,7 @@ class Styles(_Collection["Style"]):
         return Style(self._owner, identifier)
 
     @property
-    def defaults(self) -> dict:
+    def defaults(self) -> _DefaultsSnapshot:
         """Direct native document character and paragraph defaults."""
         return json.loads(self._owner._call("default_formatting"))
 
@@ -903,12 +1020,12 @@ class Style:
         self._set_relation("linked", value)
 
     @property
-    def formatting(self) -> dict:
+    def formatting(self) -> _StyleSnapshot:
         """Direct properties; None denotes inheritance."""
         return json.loads(self._owner._call("style_formatting", self._id))
 
     @property
-    def resolved_formatting(self) -> dict:
+    def resolved_formatting(self) -> _StyleSnapshot:
         """Formatting resolved through the native style inheritance chain."""
         return json.loads(self._owner._call("style_formatting", self._id, True))
 
@@ -996,12 +1113,12 @@ class Paragraph:
         return (self._id,)
 
     @property
-    def formatting(self) -> dict:
+    def formatting(self) -> _ParagraphSnapshot:
         """Direct paragraph properties; None denotes inheritance."""
         return json.loads(self._owner._call("paragraph_formatting", self._id))
 
     @property
-    def resolved_formatting(self) -> dict:
+    def resolved_formatting(self) -> _ResolvedParagraphSnapshot:
         """Paragraph properties resolved through native defaults and styles."""
         return json.loads(self._owner._call("paragraph_formatting", self._id, True))
 
@@ -1409,14 +1526,14 @@ class EditableStory:
             raise UnsupportedFormatError("rich note content requires native note-container geometry support")
 
     @property
-    def tables(self) -> _Collection[EditableTable]:
+    def tables(self) -> _Tables:
         """Direct header/footer tables, sharing the normal table and cell API."""
         self._check_rich_content()
         def identifiers():
             self._check_rich_content()
             identifier = self._identifier()
             return [] if identifier is None else self._owner._call("story_table_ids", identifier)
-        return _Collection(self._owner, identifiers, EditableTable)
+        return _Tables(self._owner, identifiers, EditableTable)
 
     @property
     def images(self) -> Pictures:
@@ -1975,7 +2092,7 @@ class EditableCell:
 
     def _children(self, kind, factory):
         owner = self._table._owner
-        return _Collection(owner, lambda: owner._call(f"cell_{kind}_ids", *self._content_args()), factory)
+        return _Tables(owner, lambda: owner._call(f"cell_{kind}_ids", *self._content_args()), factory)
 
     @property
     def paragraphs(self) -> _Paragraphs:
@@ -1988,7 +2105,7 @@ class EditableCell:
         return _Paragraphs(self._table._owner, lambda: self._table._owner._call("cell_paragraph_ids", *self._content_args()), Paragraph)
 
     @property
-    def tables(self) -> _Collection[EditableTable]:
+    def tables(self) -> _Tables:
         return self._children("table", EditableTable)
 
     @property
@@ -2508,12 +2625,42 @@ class PdfPages(_Collection["PdfPage"]):
         identifier = self._owner._call("add_page", *_size(size), _change=True)
         return PdfPage(self._owner, identifier)
 
+    def _selection(self):
+        self._owner._ensure_open()
+        return self._owner._page_generation, self._owner.page_count
+
+    def _selected_index(self, index, selection):
+        value = operator.index(index)
+        if self._selection() != selection:
+            raise ValueError("page selection is stale after page organization")
+        return _index(value, selection[1])
+
+    @overload
+    def __getitem__(self, index: int) -> PdfPage: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> list[PdfPage]: ...
+
+    def __getitem__(self, index):
+        selection = self._selection()
+        if isinstance(index, slice):
+            indices = list(range(selection[1]))[index]
+            if self._selection() != selection:
+                raise ValueError("page selection is stale after page organization")
+            return [PdfPage(self._owner, value) for value in indices]
+        return PdfPage(self._owner, self._selected_index(index, selection))
+
     def __delitem__(self, index):
-        self._owner._call("delete_page", _index(index, len(self)), _change=True)
+        selection = self._selection()
+        index = self._selected_index(index, selection)
+        self._owner._call("delete_page", index, _change=True)
         self._owner._page_generation += 1
 
     def move(self, index: int, destination: int) -> None:
-        self._owner._call("move_page", _index(index, len(self)), _index(destination, len(self)), _change=True)
+        selection = self._selection()
+        index = self._selected_index(index, selection)
+        destination = self._selected_index(destination, selection)
+        self._owner._call("move_page", index, destination, _change=True)
         self._owner._page_generation += 1
 
     def insert(self, index: int, source: _Source | EditableDocument | Document, *, pages: Iterable[SupportsIndex] | None = None, password: str | None = None, outline_title: str | None = None) -> list[PdfPage]:
@@ -2923,11 +3070,25 @@ class Slides(_Collection["Slide"]):
         index = self._owner._call("add_slide", layout, _change=True)
         return Slide(self._owner, self._owner._call("slide_id", index))
 
+    def _selected_index(self, index, identifiers):
+        value = operator.index(index)
+        self._owner._ensure_open()
+        if tuple(self._ids()) != identifiers:
+            raise ValueError("slide selection is stale after slide organization")
+        return _index(value, len(identifiers))
+
     def __delitem__(self, index):
-        self._owner._call("remove_slide", _index(index, len(self)), _change=True)
+        self._owner._ensure_open()
+        identifiers = tuple(self._ids())
+        index = self._selected_index(index, identifiers)
+        self._owner._call("remove_slide", index, _change=True)
 
     def move(self, index: int, destination: int) -> None:
-        self._owner._call("move_slide", _index(index, len(self)), _index(destination, len(self)), _change=True)
+        self._owner._ensure_open()
+        identifiers = tuple(self._ids())
+        index = self._selected_index(index, identifiers)
+        destination = self._selected_index(destination, identifiers)
+        self._owner._call("move_slide", index, destination, _change=True)
 
 
 class Slide:
@@ -3335,7 +3496,7 @@ class _SlideCellParagraph(Paragraph):
         self._owner._call("set_cell_paragraph_alignment", *self._range_args, self._target, value, _change=True)
 
     @property
-    def formatting(self):
+    def formatting(self) -> _ParagraphSnapshot:
         return {"alignment": self.alignment}
 
     def format(self, **formatting):

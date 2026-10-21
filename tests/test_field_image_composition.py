@@ -5,9 +5,9 @@ from test_authoring import image_fixture
 from test_picture_media import media_parts, red_picture, count_color
 
 
-def field(paragraph, label):
+def field(paragraph, label, kind="page"):
     paragraph.add_run(label + '=')
-    paragraph.add_field('page')
+    paragraph.add_field(kind)
 
 
 class FieldImageCompositionTests(unittest.TestCase):
@@ -36,7 +36,7 @@ class FieldImageCompositionTests(unittest.TestCase):
             table = document.add_table([['Cell']])
             nested = table[0, 0].add_table([['Nested']])[0, 0]
             picture = nested.add_image(blue, width=48, alt='Nested')
-            field(nested.add_paragraph(), 'Cell page')
+            field(nested.add_paragraph(), 'Cell pages', 'page_count')
             field(document.sections[0].header().add_paragraph(), 'Header page')
             field(document.sections[0].footer().add_paragraph(), 'Footer page')
             anchor = document.add_paragraph('Note anchor')
@@ -55,7 +55,7 @@ class FieldImageCompositionTests(unittest.TestCase):
                 self.assertEqual(media_parts(document), [red])
                 with doc_ex.open(document.convert('pdf')) as pdf:
                     text = pdf[0].get_text()
-                    for label in ('Cell page=1', 'Header page=1', 'Footer page=1', 'Note page=1'):
+                    for label in ('Cell pages=1', 'Header page=1', 'Footer page=1', 'Note page=1'):
                         self.assertIn(label, text)
                     self.assertGreater(count_color(pdf.render_page(0, dpi=144), b'\xff\0\0\xff'), 100)
                 del nested.images[0]

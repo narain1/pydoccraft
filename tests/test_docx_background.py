@@ -88,7 +88,8 @@ class DocxBackgroundTests(unittest.TestCase):
             image = cell.add_image(blue, width=24)
             anchor = document.add_paragraph('Anchor')
             note = document.notes.add(anchor.find('Anchor')[0])
-            for paragraph in (anchor, cell.add_paragraph(), note.paragraphs[0],
+            cell.add_paragraph().add_field('page_count')
+            for paragraph in (anchor, note.paragraphs[0],
                               document.sections[0].header().add_paragraph()):
                 paragraph.add_field('page')
             self.assertEqual(media_parts(document), [blue])

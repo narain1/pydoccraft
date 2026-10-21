@@ -705,7 +705,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete six native groups, five new plus28 related copied-package tests, fmt/Clippy/debug build, strict typing and static-site/roadmap checks; record exact artifact evidence.
 - [x] Complete integrated locked full native/release/installed-wheel corpus and independent artifact review: 349 native and 490 installed Python tests.
 - [ ] Complete final exact-head/current-main CI and manual merge for picture placement.
-- [ ] Keep full MED2/BG2–BG5, front/contours/nested scope, opacity/rotation and independent layering/overlap controls open.
+- [ ] Keep full MED2/BG2–BG4/BG8, front/contours/nested scope, opacity/rotation and independent layering/overlap controls open. BG5 later closes only its bounded section-first letterhead criterion under spec105.
 
 
 ## Cross-format render-session evidence
@@ -792,3 +792,77 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete exact integrated native/installed-wheel corpus and independent final review: 379 native tests and two clean 512-test installed runs pass.
 - [ ] Complete exact-head/current-main CI and manual merge before merge acceptance.
 - [ ] Retain arbitrary interior/cross-paragraph roots, rich comment stories, nested replies, imported editing and review-display selection under existing REV1/TXT8/REV5 and U02 ownership.
+
+
+## DOCX extraction provenance (spec100)
+
+- [x] Audit pinned source/path/layout/normalization boundaries and independently review the bounded proposal.
+- [x] Execute three raw native groups for exact source intervals, selection helper parity, repeated/turned/clipped cells, story collisions and PNG/PDF location controls; fmt/Clippy pass.
+- [x] Complete bounded adapter/schema, source/copy/resource/malformed geometry and public compatibility acceptance, including the measured retained-allocation correction.
+- [x] Complete independent frozen-source/profile review and final four-workflow replay, including the exact known 200-page fixture.
+- [x] Complete integrated full corpus and independent artifact review: 387 native tests and two clean 516-test installed-wheel runs pass, including the caught and corrected signed-advance regression.
+- [ ] Complete exact-head/current-main CI and manual merge.
+- [ ] Retain E2/LAY8/U05 normalized slicing, auxiliary/object/table geometry and broader parity scope.
+
+
+## Office caller-font source audit (spec103)
+
+- [x] Separate existing PDF supplied-font support and STY3 theme identity from remaining Office STY5 acceptance.
+- [x] Trace pinned public font storage/admission, global selection, face lifetime and native PDF export behavior; connect precise prerequisites to U02/U11.
+- [x] Complete independent pinned-source review and documentation/link checks.
+- [ ] Obtain native document-scoped resolution/embedding contracts and execute the proposed valid-font isolation/save/render/export fixture gate before adding Office caller-font inputs; STY5 remains open.
+
+
+## Formatting snapshot annotations (spec104)
+
+- [x] Audit exact native direct/resolved/default/region serializers and PPTX alignment-only behavior before selecting conservative private output schemas.
+- [x] Annotate existing getters without new exports, input changes, runtime branching or native changes; preserve behavior with a normalized AST comparison.
+- [x] Check strict copied-package consumer, deliberate invalid assignments/keys and populated/default snapshot shapes across all native kinds.
+- [x] Complete independent final source/serializer review and replay positive/negative typing, runtime-key/schema and AST checks.
+- [x] Complete exact installed-wheel/source/native verification and agreed corpus: repacked annotation-only artifact and subsequent 395-native/523-Python integration pass.
+- [ ] Complete current-main CI and manual merge.
+- [ ] Retain remaining API3 property/documentation/IDE work; do not claim full-package strict typing.
+
+
+## Owned DOCX table deletion (spec102)
+
+- [x] Execute two raw native structure/output groups before integration, distinguishing required and authored blanks and retaining orphan/protected-reference diagnostics.
+- [x] Implement whole-table deletion through existing body/story/cell collections and public native remove_block with exact-parent shifts, preserved tail identity and subtree invalidation.
+- [x] Preflight bounded source/global associations, stage checked resource reclamation and retain semantic, section, comment/navigation/media and callback guards.
+- [x] Pass six focused native groups, formatting, all-target Clippy and a debug build after final tail-invariant review corrections.
+- [x] Pass six focused public workflows and independent replay, strict positive/four-negative typing checks and synchronized roadmap/support/reference/site checks; final source review clear.
+- [x] Complete exact integrated corpus and independent artifact review: 395 native tests and two clean 523-test installed runs pass.
+- [ ] Complete current-head CI and manual merge.
+- [ ] Retain broader DOC5 movement, duplication, insertion and cross-container/reference adoption work.
+
+
+## Section-first letterhead composition (spec105)
+
+- [x] Audit existing cookbook/story/section tests and preserve their historical sources/fingerprints.
+- [x] Probe native reflow/variant/numbering behavior through the installed fixed-provenance wheel; replace the proposed +1 shift assumption with the observed exact +2 parity-preserving shift.
+- [x] Add one ordinary caller-PNG example and one combined fixture with exact body/link/table preservation, independent sections, filler checks and bounded three-DPI appearance controls.
+- [x] Complete independent source/replay review and documentation checks: one independently replayed workflow passes, with 19 support/reference tests and the site/roadmap checks passing.
+- [x] Complete integrated corpus and independent review: both 523-test installed runs pass; BG5 satisfies its original bounded section/header-anchor and repagination criterion.
+- [ ] Complete exact-head/current-main CI and manual merge; retain BG8 and documented broader limitations.
+- [ ] Keep BG8 and broader section-fill/linkage/continuous/floating/watermark coverage open.
+
+
+## Owned table PAGE guard (spec107)
+
+- [x] Reproduce stale table PAGE context independently of movement/cache with native direct/nested fresh and read/write controls; retain correct direct PAGE and table count behavior.
+- [x] Reuse one private scope check for upfront field insertion, candidate editing and defensive serialization after bounded source inventory; allow unsupported-object removal as recovery.
+- [x] Pass two focused native groups, related field and affected accounting controls, formatting, all-target Clippy and a frozen debug build.
+- [x] Pass 21 focused public/field/lifecycle tests and 27 roadmap/support/reference checks; final runtime/native/public source review clear.
+- [x] Complete independent exact copied-extension replay: 18 tests pass; preserve deliberate fixture corrections and unchanged ledger fingerprints.
+- [x] Complete final docs review, 397-native validation and corrected integrated acceptance: both clean 528-test installed runs pass; failed 524-test evidence and deliberate sixth fixture correction remain recorded.
+- [ ] Complete exact-head/current-main CI and manual merge.
+- [ ] Retain native table field-context repair under U07/LAY6/REF3; keep spec106 movement pending its revised raw gate.
+
+
+## Page and slide index callbacks (spec109)
+
+- [x] Reproduce wrong-target PDF delete/move/lookup and slide deletion on the installed pre-correction artifact.
+- [x] Reuse existing PDF generation/count and native slide-ID sequence snapshots; guard every mutation argument and PDF handle construction without new public APIs.
+- [x] Pass four focused workflows and 22 combined related workflows, strict typing and independent source/four-workflow replay.
+- [x] Complete exact combined installed artifact/corpus alongside the corrected spec107 fixture: two clean 528-test installed runs pass with unchanged tested native bytes.
+- [ ] Complete current-main CI and manual merge.

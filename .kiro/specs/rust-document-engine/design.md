@@ -650,3 +650,53 @@ A bounded CommentInventory proves the exact staged candidate's unique parts, one
 The scan precharges two part/map passes plus blocks, private runs, rows, cells and objects before their bounded scans/allocations. Canonical author/date/durable/initials/date_utc fields bound individual metadata serialization before aggregate accounting. Source text is bounded separately. Root marker bytes and private text count in existing owner text/block budgets; copied allocators and revision counters preserve exhaustion/rollback behavior. Private comment paragraph locations never enter public story lists.
 
 Raw proof shows interior native markers alter ligatures, Arabic and combining-text ink/clusters, and overlapping IDs confuse PNG shading. Roots therefore occupy actual paragraph endpoints, not endpoints calculated after discarding controls. Whole-paragraph multiline/automatically split body and ordinary/nested/merged body-cell controls preserve corresponding-stage unshaded ink and default-PDF output at 72/144 DPI. Cell rotation/exact-height ancestry stays excluded. Native nested-table read/write itself changes one unmarked 144-DPI control, so the evidence compares marked/unmarked at corresponding stages and does not claim universal round-trip pixel parity. Resolved state is stored separately from native PNG display; no local shaping, XML repair or layout algorithm is introduced.
+
+
+## 100. Native DOCX source and line observations
+
+A private provenance collector observes each native Body paragraph's explicit source-break intervals once, then walks existing page.items in source layout order. Public ParaLayout.x_spans supplies bidi-aware logical selection extents; native turn_rect maps them to page points. It does not call selection_rects per paragraph because that API traverses all story paths on each call. Source ranges stay in native Paragraph.text UTF-8 bytes, including object placeholders, and never reuse normalized link character offsets. Existing source_path/segment/story keys extend to paragraph/table wrappers and assets. Page metadata carries native body_bbox, section and display_number.
+
+Per-segment layout metadata contains ordered page/source_range/rects line records. No single bbox is fabricated for disjoint or multi-page text; missing layout means the supported projection is unavailable. Source-only story paths remain available. Native clipping, list labels, drop caps and floating objects are not reinterpreted into ink geometry. Whole automatically split normalized paragraphs still occur once on the first assigned page.
+
+Counters bound line observations, rectangles, conservative native cluster work and projected metadata before allocation. Native ks/boxes/out and stable-sort scratch are precharged separately as a simultaneous temporary peak. Finite xs/vis/line/frame values and UTF-8/cluster bounds are checked before helpers can filter invalid values. Collector map/vector/key storage is reserved before construction. Each layout attachment separately reserves two complete output representations before cloning, so extra attachments cannot bypass accounting; each source metadata emission similarly reserves page/block copies using Value-sized path elements and conservative container allowances. Deferred source-budget exhaustion prevents further metadata allocations and makes the whole extraction fail at finish, following the existing bounded-normalization pattern. No dependency, runtime Python method or immutable-container promise is added.
+
+
+### Spec100 correction: finite signed cluster advances
+
+Pinned WordCraft adds character spacing to shaped advances and preserves signed adjacent-position differences in bidi VisCl widths. Negative widths are valid for condensed clusters. Provenance validates finite x, width and x+width before calling native helpers, without imposing nonnegative advances or taking absolute values. Native x_spans filters nonpositive bidi cluster widths; the projection retains its existing omission of nonpositive returned spans. Existing source ranges, line/cluster cardinalities, nonnegative line height, output geometry and all work/copy/allocation budgets remain unchanged.
+
+
+## 103. Font storage is separate from document resolution
+
+Pinned WordCraft exposes embedded-part extraction and FontDb admission but not a typed DOCX embedding operation found by this audit. DeckCraft already exposes embedded-font/media serialization and supported-wrapper extraction. Neither storage path supplies the document-owned resolver needed by ordinary text/layout, which currently uses globals; admission keeps existing family/style matches and selected FaceRef handles retain faces for process lifetime. Public independent FontDb construction alone cannot inject the context into all document operations. Defer local API design until native context/lifetime, permission, collision and diagnostic behavior are proven. Reuse existing formatting and lifecycle operations after that gate; native PDF subsetting already exists and must be validated rather than reimplemented.
+
+
+## 104. Conservative private formatting output schemas
+
+Private TypedDict snapshots mirror existing native serializers. Character fields are required for styles/defaults; Style adds optional paragraph/table fields and retains nullable scalar types even for resolved snapshots, because resolved table inheritance can still be unset. Paragraph direct output requires only alignment and permits Word-only fields; resolved Word paragraph output and defaults retain their required fields. Tabs have required position/alignment/leader keys; table regions have direct character and region fields without recursion or paragraph-only properties. Reuse existing border output values. Do not change input TypedDicts, native serializers or runtime-kind hierarchy. Returned dictionaries remain detached mutable values.
+
+
+## 102. Native DOCX table removal with stable identities
+
+A private specialization of the existing table collection delegates captured stable IDs to the native owned remove_table transaction; no public manager or alias is added. It resolves the registered StoryRef/Path, checks direct/ordinary-cell ownership and independently referenced header/footer parts, then uses public Document.container and remove_block. Parent prefix/depth determines exactly which coordinate shifts; existing invalidate_descendants retires the removed subtree. Ancestor and surviving grid generations are unchanged.
+
+Before allocation-producing content_usage, the original bounded comment/source inventory validates text, objects, parts, depth and physical cells, and registry checks reject missing/duplicate image associations, unrelated invalid table generations, malformed locators and sentinels. This prevents existing global pruning from silently repairing unrelated state. Descendant section-bearing paragraphs are rejected. Every accepted parent has a final non-section Paragraph; after native removal, its length must decrease by one and its final Arc must be identical. Raw native required-blank creation in synthetic sole/table-ended containers is diagnostic evidence, not authorization to adopt malformed owned state.
+
+The staged transaction subtracts checked returned-subtree text/cell usage, shifts only the selected parent coordinate, preserves authored blanks and existing hidden tails, and invokes ordinary commit. Commit builds a fresh proof from the candidate, preserving comment, navigation, field and media guards and reclaiming only unreferenced media. Private comment locations remain private. Capturing collection IDs before operator.index preserves existing DOCX callback semantics; cell source lookup checks stale grid generations before callbacks. Copies and monotonic IDs prevent deleted handles from retargeting later insertions.
+
+
+## 105. Letterhead belongs to a section story
+
+An ordinary example returns an owned WordDocument with inline PNGs in first headers and text-only even/default variants. A second next-page section receives copied independent parts and replaces only its first logo/text; existing paragraph insertion drives native body reflow. Native headers_footers selects first actual section pages, then displayed-number parity. Native section_side may insert a preceding-section filler before a restarted next-page section to align physical parity when even/odd headers are enabled. Do not compensate with explicit breaks, page-index edits, XML rewrites or artwork compositing. The fixture treats exact filler/header behavior separately from actual body-line growth and semantic preservation.
+
+
+## 107. One owned field-scope guard
+
+The existing native Path convention distinguishes direct story paragraphs (one coordinate) from cell paragraphs (one plus three per table depth). A private helper rejects field_name=PAGE when path depth exceeds one. add_paragraph_field invokes it before creating an object or changing accounting; page_field_count invokes it during ordinary candidate validation; to_bytes calls the same existing field validation after bounded comment/source inventory and registry checks, before layout/write. Save, render and conversion reuse serialization. No evaluator or second layout pass is added.
+
+This conservative supported profile excludes cell PAGE even where a current first-page value happens to be correct; pagination changes can expose stale context. Candidate validation still permits removal of that unsupported object, and direct note/header/footer paths remain direct. Imported extraction/rendering continues through native readers and is not covered by the owned guard. Existing table count fields retain continuous-section restrictions; metadata fields retain their separate expansion/geometry checks.
+
+
+## Callback-safe page/slide selection (spec109)
+
+PdfPages reuses its owner's existing page generation and count. Two private helpers obtain that snapshot and normalize/recheck an index. A PDF slice uses normal Python list slicing over bounded page positions, then rechecks before creating handles; no handle captures a newer generation for an older selection. Delete/move dispatch only after the checks. Slides compares its existing ordered native ID snapshot after each conversion; no generation or public collection class is introduced. PDF page-box/rotation operations already invalidate page generation and therefore invalidate selection even when page count stays unchanged. Metadata edits and slide-name/visibility edits can leave selection valid. These checks do not roll back arbitrary user callback code.

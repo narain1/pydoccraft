@@ -742,3 +742,45 @@ Canonical cell body generations shall advance atomically, invalidating that cell
 3. Monotonic owner IDs and explicit native durable IDs SHALL prevent deleted-handle and earlier-deletion retargeting. Private comment paragraphs SHALL reuse existing block/text accounting without appearing in public body/header/note collections. All registry/counter/document changes SHALL commit atomically; malformed/sentinel/extra-locator states SHALL reject rather than be cleaned silently.
 4. Limits SHALL include 1,000 comments, 200 direct replies per root, 1 MiB comment text, 1,024 author UTF-8 bytes, 256 KiB native metadata, existing document/block budgets, checked identity/revision exhaustion and a 2,000,000-item source preflight. Authors SHALL be nonempty trimmed single-line values (default Unknown); dates SHALL be empty or valid UTC timestamps. Comment parts SHALL be plain native text and remain separate from body content.
 5. Evidence SHALL distinguish stored comments from rendered review state: native PNG shades supported anchors even when resolved; default PDF omits comment markup/text; legacy extraction projection remains unchanged. Preserve raw interior-shaping, overlapping-shading and durable-ID controls as upstream evidence. REV1/TXT8/REV5 SHALL remain incomplete beyond this bounded slice.
+
+
+## 100. Bounded DOCX extraction provenance
+
+Existing Block/Table/Page metadata SHALL expose native source paths, explicit paragraph segments and available Body-story line selection observations without adding an inspection manager, public method or duplicate bbox alias. Source identity SHALL remain local to an extracted snapshot and distinguish stories; native UTF-8 source ranges SHALL NOT be described as offsets into normalized text. Existing mutable detached models, text ordering, table hierarchy, first-page paragraph assignment and post-close ownership SHALL remain compatible.
+
+Native x_spans and turn_rect SHALL own selection and coordinate transforms. Body indexed placements SHALL preserve page/item/line order and repeated occurrences. Auxiliary/Clip projections SHALL remain unavailable, and logical selection SHALL NOT imply glyph ink, clip containment, object bounds or complete semantic page slices. Block/Table bbox SHALL remain unset. Validate ranges and finite inputs before native helpers; precharge native temporary vectors/sort scratch, work, records, source metadata and copied representations. Limits SHALL fail explicitly, with exact/+1, malformed-input, render/PDF, deterministic-source and compatibility acceptance. E2/LAY8 remain open beyond this bounded slice.
+
+
+## 103. Office caller-font isolation prerequisite
+
+Keep STY5 open until public native APIs admit bounded caller programs with deterministic document-scoped face selection, lifetime and collision behavior across layout, PNG, PDF and Office save/reopen. Require explicit native embedding/subsetting policy and substitution/missing-glyph diagnostics. Existing PDF supplied-font drawing and literal Office family formatting remain supported. Do not mutate process-global font registries, fabricate OOXML font tables, link application loaders or add a duplicate font manager. Connect the prerequisite to existing U02/U11; keep theme-role identity under STY3.
+
+
+## 104. Existing formatting snapshot output types
+
+Annotate the existing paragraph/style/default formatting getters without changing runtime dispatch, accepted inputs, exports or native behavior. Preserve required common keys, native-kind-specific optional keys, nullability, list-valued tabs/margins and nonrecursive table regions. PPTX paragraph direct snapshots contain alignment alone; successful resolved paragraph snapshots remain Word-only. Do not advertise Style.kind as a static discriminator or treat table inheritance as concrete paragraph/character resolution. API3 remains open beyond this slice.
+
+
+## 102. Owned DOCX table deletion
+
+1. Existing table collections SHALL support integer/negative deletion in the body, independently owned headers/footers and ordinary nested/merged cells through public native remove_block. Rich note/comment stories, imported editing, slice deletion, arbitrary block movement and cross-container adoption SHALL remain outside this slice.
+2. Removal SHALL retire the target subtree only, shift surviving locators and hidden blanks within the exact native parent, and preserve surviving handles, ancestor/unrelated grid generations, ordered section metadata and shared media. Valid owned containers SHALL retain their existing final paragraph by identity; malformed sole/table-ended containers SHALL reject rather than fabricate or adopt a blank. Authored empty paragraphs SHALL remain editable and hidden required tails reusable.
+3. Original bounded source/comment inventory and global locator/image/generation consistency checks SHALL precede native content usage and any global pruning. Subtree section metadata and protected references SHALL reject. Text/cell/media reclamation, registry changes and exact candidate comment/navigation/media validation SHALL commit atomically, with existing identity, revision and resource limits.
+4. Validation SHALL distinguish raw-native structural capability from accepted ownership, prove output removal and preserved sibling/media/reference identities, exercise exact/+1 preflight and allocator/revision boundaries, malformed associations, copies, callbacks and closed/stale handles. Broader DOC5 SHALL remain incomplete.
+
+
+## 105. Section-first inline letterhead composition
+
+Reuse existing header/footer variants, PNG picture handles, ranges and section lifecycle for a caller-owned example; add no library API or runtime behavior. Verify first-slot precedence, independent copied section content, displayed-number even/default selection and native repagination after inserting earlier body text. Preserve original text/order, one body link and semantic table content exactly once across DOCX/PDF. Validate actual source/exported appearance at 72/144/300 DPI using full-page 72 controls and bounded higher-DPI header regions. Record intentional parity filler pages explicitly; keep section fills/linkage/continuous/floating/watermark exclusions honest.
+
+
+## 107. Reject unsupported owned table PAGE fields
+
+Owned DOCX PAGE field insertion SHALL reject table-cell paragraphs at every nesting depth and merged alias. The same scope rule SHALL validate every staged candidate and serialization after bounded source inventory, preventing later edits or privately constructed state from emitting a known incorrect page number. Direct body/header/footer/note paragraph PAGE and supported table NUMPAGES/SECTIONPAGES/TITLE/AUTHOR SHALL retain their existing behavior and limits. Removing an unsupported field SHALL remain a recovery operation. No local evaluation, result rewriting or imported mutation API SHALL be introduced.
+
+Tests SHALL preserve the native stale-context reproducer and successful direct/count controls, prove precise Unsupported errors and atomic byte/revision/registry/range/cache rollback, and verify output/lifetime behavior. Earlier successful cell-PAGE fixture setup SHALL be deliberately replaced with supported count fields while preserving resource/identity/geometry checks, with the correction documented and evidence fingerprints checked rather than refreshed broadly. U07/LAY6/REF3 SHALL remain open.
+
+
+## 109. Preserve page and slide selection across index callbacks
+
+PDF page lookup (including slices), deletion and movement SHALL capture page generation and count before caller index conversion. They SHALL reject an invalidated selection before returning current-generation handles or dispatching an outer mutation. Each movement argument SHALL be checked after its conversion. Slide deletion/movement SHALL equivalently retain a native slide-ID sequence snapshot. Callback-owned mutations remain visible; the outer operation SHALL not target a replacement item. Closed owners fail before caller conversion, ordinary negative indexes/bounds retain Python behavior, and metadata/content edits that leave the selection snapshot valid remain permitted. Existing stable-ID slide lookup remains unchanged. No public method, native mutation algorithm or new persistent identity registry is required.

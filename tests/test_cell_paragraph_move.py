@@ -23,7 +23,7 @@ class CellParagraphMoveTests(unittest.TestCase):
                 last = cell.add_paragraph('Moved red')
                 last[:].format(color='red')
                 last[:].link = 'https://example.com/moved'
-                last.add_field('page')
+                last.add_field('page_count')
                 before = document.render_page(0, dpi=144)
                 assets = media_parts(document)
                 with document.copy() as copied:
@@ -40,7 +40,7 @@ class CellParagraphMoveTests(unittest.TestCase):
                     self.assertLess(min(red_rows(document.render_page(0, dpi=144))), min(red_rows(before)))
                     native = cell_xml(document, scope)
                     self.assertEqual([b.tag for b in native if b.tag != W+'tcPr'], [W+'p', W+'p', W+'tbl', W+'p'])
-                    self.assertEqual([n.text.strip() for n in native[1].iter(W+'instrText')], ['PAGE \\* Arabic'])
+                    self.assertEqual([n.text.strip() for n in native[1].iter(W+'instrText')], ['NUMPAGES \\* Arabic'])
                     count = len(native)
                     fresh = cell.add_paragraph('Fresh tail')
                     self.assertEqual(len(cell_xml(document, scope)), count)

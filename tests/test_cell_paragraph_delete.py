@@ -153,7 +153,7 @@ class CellParagraphDeletionTests(unittest.TestCase):
             note = document.notes.add(citation[:], 'Retained note')
             outgoing = cell.add_paragraph('Jump target')
             outgoing[:].link = '#target'
-            outgoing.add_field('page')
+            outgoing.add_field('page_count')
             outgoing.add_field('title')
             for index, error in ((0, ValueError), (1, UnsupportedFormatError)):
                 before = document.to_bytes()
