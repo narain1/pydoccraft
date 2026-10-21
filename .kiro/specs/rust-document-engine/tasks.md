@@ -1007,3 +1007,14 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add one linked native identity/order/save/reopen/visible-output regression and retain existing allocation safety precondition and unchanged public tests.
 - [x] Complete locked444-native, fmt, Clippy, release build, two clean installed560 corpora, independent exact-artifact replay, typing and size gates.
 - [ ] Complete current-head CI and independent manual merge. Python underlays, resource collisions and broader PDF3/U10 remain open.
+
+
+## Direct PPTX cell paragraph spacing and indentation (spec121)
+
+- [x] Audit pinned public model/writer/reader/layout APIs and obtain raw-only scope review.
+- [x] Preserve first low-DPI decoration failure and zero/tight-overlap extraction failure; use native layout and actual PDF operators to distinguish export preservation from normalized extraction loss.
+- [x] Approve normal-height multiplier 1..100/None and the native point-bound domains without new layout algorithms or dependencies.
+- [x] Complete final raw/adapter native controls, four public workflows, precise historical fixture migrations and strict seven-key snapshot replay typing; independently replay the four public workflows.
+- [x] Complete combined 119/121 full 449-native/release and two clean 564-test installed-wheel corpora, attribution/size and independent source/artifact review.
+- [x] Complete synchronized documentation and final independent review, retaining all historical evidence and scoped upstream findings.
+- [ ] Complete current-head CI and manual merge. Keep broader TXT1/SLIDE3 and overall release gates open.
