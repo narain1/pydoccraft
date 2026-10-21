@@ -1040,3 +1040,14 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Pass27documentation tests, exact464-file source/test/vendor/attribution comparison, existing inventory checks and30pages/1,850site links.
 - [x] Complete final independent original-clause/checklist/JSON/source/documentation review.
 - [ ] Complete current-head CI/manual merge. No runtime/fixture/dependency change is part of this slice.
+
+
+## Dedicated DeckCraft break-text correction (spec128)
+
+- [x] Review and publish the narrow native contribution to the existing fork, preserving original baseline failures, exact no-break compatibility and independent native replay. No upstream pull request or message was sent.
+- [x] Approve the dedicated all-Deck pin upgrade and original imported-fixture regression without facade changes.
+- [x] Audit ten source-identity-only lock changes, unchanged 264-package license inventory and current source citations.
+- [x] Complete original fixture/native/public regression and preserved old installed-artifact failure.
+- [x] Complete full453-native, fmt/Clippy/release, two clean569-installed corpora, typing, source/artifact/size checks and independent review.
+- [x] Complete synchronized final evidence and independent documentation review.
+- [ ] Complete current-head CI and manual merge. Cell break authoring and broad TXT1/TXT4/SLIDE3 remain open.

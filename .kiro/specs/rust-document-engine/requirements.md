@@ -904,3 +904,11 @@ The pinned reference inventory SHALL distinguish implemented bounded operations 
 2. Preserve every existing support profile, operation status, historical artifact and fixture fingerprint. Correct stale current profile-count prose without rewriting historical evidence. API1/QA1, R4/P4/U09, QA7 and other incomplete behavioral criteria SHALL remain open.
 3. Use the existing ledger, roadmap joins and published matrices; add no runtime query framework, engine, dependency or second completion database. Document source-audited offline/in-process architecture separately from dynamic sandbox or exhaustive hostile-input certification.
 4. Reuse the exact reviewed452-native/two568-installed artifact evidence; run documentation/source consistency and site-link checks after changes, without claiming a new native build or runtime test run.
+
+
+## 128. Dedicated DeckCraft PDF line-break correction upgrade
+
+1. Update every selected DeckCraft crate together to the reviewed immutable contribution based on the existing fallible-rendering fork. Preserve all other dependency versions, sources, edges, assets and licenses.
+2. Native PDF slide and notes/handout master text SHALL use the same logical paragraph coordinate space as native layout, including one character for each explicit break. Preserve selectable Unicode text, hyperlinks, raster output and existing per-call rendering failures; do not repair text with a local parser or layout algorithm.
+3. Add a small original native-generated imported PPTX regression through existing import/render/convert APIs. Prove searchable labels, source break offsets, links and retained image ink, native writer readback and actual PNG/PDF output. Preserve old-pin failure and independent native contribution evidence.
+4. Complete locked native, installed-wheel, independent, typing, attribution, source-citation and artifact-size gates before manual merge. This dedicated upgrade SHALL not enable cell break authoring, change public text projections or close broader TXT1/TXT4/SLIDE3 criteria.

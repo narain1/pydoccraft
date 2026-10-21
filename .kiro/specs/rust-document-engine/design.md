@@ -24,9 +24,9 @@ flowchart LR
 
 Every upstream repository is pinned to an immutable commit:
 
-- PdfCraft v0.9.0: `645016addcfb9078c557f0189559ab47cdcee057`
+- PdfCraft v0.9.0, reviewed contribution fork `narain1/pdfcraft`: `516caea956c0aaf15f2bd1f35a15e07c73a9ead6` (reviewed parent `60a8d7998b64c7718e08e9054e99f1f2eb1eda8d`, original upstream base `645016addcfb9078c557f0189559ab47cdcee057`)
 - WordCraft v0.8.0, reviewed contribution fork `narain1/wordcraft`: `f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef` (direct upstream parent `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`)
-- DeckCraft v0.8.0, reviewed contribution fork `narain1/deckcraft`: `dd4fd70b6347dd2ce782e33f030a2b6c0abb0106` (direct upstream parent `22db9261f9d1a214c296fd390173130c45d76d66`)
+- DeckCraft v0.8.0, reviewed contribution fork `narain1/deckcraft`: `c9c7fff189c808bf7266d0b888c3636a1880080d` (reviewed parent `dd4fd70b6347dd2ce782e33f030a2b6c0abb0106`, original upstream base `22db9261f9d1a214c296fd390173130c45d76d66`)
 - Craft PDF backend patches use the immutable `craft-libs` revision required by WordCraft/DeckCraft.
 
 Rendering and conversion dependencies are currently unconditional in the release wheel; only operation-specific upstream crates are linked, and no application umbrella crate is used. A locked license audit must permit Apache-2.0, MIT, BSD, ISC, Zlib, Unicode, and similarly permissive licenses; GPL, AGPL, and LGPL-only dependencies are rejected.
@@ -831,3 +831,12 @@ Adding defaultfalse PyO3 parameters requires53 mechanical trailingfalse argument
 The acceptance audit compares the original ece6c85 wording with the tested source. API7 concerns one support-inventory/error mechanism, QA8 honest publication and sketch/recipe separation, and QA6 the enumerated representative malformed/edit/ownership/nesting/media/save corpus. None requires every operation to be implemented or a universal safety proof. Existing per-operation statuses and unassessed remainder fields remain unchanged apart from explanatory joins for these three gates; API1/QA1 still own completeness.
 
 One evidence document links exact selectors and historical validation. TODO checkboxes remain the only completion source, and the existing matrix generator derives their status. Volatile seven/nineteen profile descriptions are replaced by current generated-inventory links. Existing native/resource constraints and platform/font limitations are not narrowed or removed.
+
+
+## 128. Preserve native logical break coordinates in PDF text
+
+The reviewed DeckCraft contribution c9c7fff189c808bf7266d0b888c3636a1880080d, directly based on dd4fd70b6347dd2ce782e33f030a2b6c0abb0106, replaces two concatenations of stored Run.text with the existing Paragraph.text() projection. Break runs store empty text but contribute one native VT character to layout offsets. Omitting that character shifted the text slices passed to PDF export. The two corrected sites are normal slide text and notes/handout master text; native model, layout, renderer, fonts, error propagation and serializers are otherwise unchanged.
+
+All four direct and ten resolved DeckCraft source identities move together. No adapter or facade method changes. The original synthetic imported fixture uses public native model/edit/writer calls, explicit run colors/navigation and a generated one-pixel PNG; no third-party content is introduced. Package regressions verify native readback, normalized LF break offsets, searchable PDF labels and links, image/glyph positives and same-grid 200 DPI output. Lower DPI controls establish visible content/order, not general pixel-perfect parity. Native contribution controls separately cover Unicode fallback fonts, master/notes paths and unchanged no-break PDFs/Busy errors.
+
+Current ledger provenance and source citations follow the selected revision; existing profile scopes, statuses, historical artifacts and fixture fingerprints remain unchanged. Cell add_break and a coherent public LF read projection require their own later bounded adapter review.
