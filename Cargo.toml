@@ -17,10 +17,10 @@ extension-module = ["pyo3/extension-module"]
 
 [dependencies]
 base64 = "=0.22.1"
-deckcraft-model = { git = "https://github.com/narain1/deckcraft", rev = "dd4fd70b6347dd2ce782e33f030a2b6c0abb0106" }
-deckcraft-pdf = { git = "https://github.com/narain1/deckcraft", rev = "dd4fd70b6347dd2ce782e33f030a2b6c0abb0106" }
-deckcraft-pptx = { git = "https://github.com/narain1/deckcraft", rev = "dd4fd70b6347dd2ce782e33f030a2b6c0abb0106" }
-deckcraft-render = { git = "https://github.com/narain1/deckcraft", rev = "dd4fd70b6347dd2ce782e33f030a2b6c0abb0106" }
+deckcraft-model = { git = "https://github.com/narain1/deckcraft", rev = "c9c7fff189c808bf7266d0b888c3636a1880080d" }
+deckcraft-pdf = { git = "https://github.com/narain1/deckcraft", rev = "c9c7fff189c808bf7266d0b888c3636a1880080d" }
+deckcraft-pptx = { git = "https://github.com/narain1/deckcraft", rev = "c9c7fff189c808bf7266d0b888c3636a1880080d" }
+deckcraft-render = { git = "https://github.com/narain1/deckcraft", rev = "c9c7fff189c808bf7266d0b888c3636a1880080d" }
 kurbo = "=0.13.1"
 pdfcraft-annot = { git = "https://github.com/narain1/pdfcraft", rev = "516caea956c0aaf15f2bd1f35a15e07c73a9ead6" }
 pdfcraft-cos = { git = "https://github.com/narain1/pdfcraft", rev = "516caea956c0aaf15f2bd1f35a15e07c73a9ead6" }

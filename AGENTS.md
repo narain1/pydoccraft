@@ -25,14 +25,14 @@ Keep all crates from each repository on one revision:
 |---|---|---|
 | PdfCraft (reviewed contribution fork) | `516caea956c0aaf15f2bd1f35a15e07c73a9ead6` | PDF inspection, text, links, images, rendering, DOCX export |
 | WordCraft | `f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef` | DOCX model, layout, rendering, PDF export |
-| DeckCraft (reviewed contribution fork) | `dd4fd70b6347dd2ce782e33f030a2b6c0abb0106` | PPTX model, fallible rendering, PDF export |
+| DeckCraft (reviewed contribution fork) | `c9c7fff189c808bf7266d0b888c3636a1880080d` | PPTX model, fallible rendering, PDF export |
 | craft-libs | `c3487320b2d1de657b860b3c8abb44e1f2b32bd8` | Shared PDF backend required by WordCraft/DeckCraft |
 
 PdfCraft is pinned to the reviewed contribution fork at `https://github.com/narain1/pdfcraft`, derived from upstream `645016addcfb9078c557f0189559ab47cdcee057` through reviewed parent `60a8d7998b64c7718e08e9054e99f1f2eb1eda8d`. It retains the final integer raster-budget correction and adds native typed text/image placement. This upgrade exposes no Python underlay API and does not imply upstream acceptance.
 
 WordCraft is pinned to the reviewed contribution fork at `https://github.com/narain1/wordcraft`, directly based on upstream `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`. Its PDF shape stroke change does not imply upstream acceptance.
 
-DeckCraft is pinned to the reviewed contribution fork at `https://github.com/narain1/deckcraft`, directly based on upstream `22db9261f9d1a214c296fd390173130c45d76d66`. This identifies fork provenance; it does not imply upstream acceptance.
+DeckCraft is pinned to the reviewed contribution fork at `https://github.com/narain1/deckcraft`, derived from upstream `22db9261f9d1a214c296fd390173130c45d76d66` through reviewed parent `dd4fd70b6347dd2ce782e33f030a2b6c0abb0106`. It retains fallible rendering/PDF error propagation and corrects logical line-break offsets in exported text. This identifies fork provenance; it does not imply upstream acceptance.
 
 An upstream upgrade is a dedicated change: update every crate from that repository together, regenerate `Cargo.lock`, rerun the license audit, run the complete corpus, measure wheel size, and record results in the spec validation file.
 
