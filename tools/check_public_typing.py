@@ -127,3 +127,74 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(extracted[0].get_text('json'), str)
         assert_type(extracted[0].get_text('dict'), dict[str, Any])
         assert_type(extracted[0].get_text(mode), str | dict[str, Any])
+
+
+def verify_properties(word: WordDocument, pdf: PdfDocument, presentation: Presentation, png: bytes) -> None:
+    """Ordinary properties retain their native nullable and collection types."""
+    picture = word.copy().images[0]
+    assert_type(picture.size, tuple[float, float])
+    assert_type(picture.alt, str)
+    assert_type(picture.data, bytes)
+    assert_type(picture.crop, tuple[float, float, float, float])
+    assert_type(picture.flip_h, bool)
+    picture.size = [40, 30]
+    picture.alt = "Description"
+    picture.data = png
+    picture.crop = None
+    assert_type(word.tables[0][0, 0].background, str | None)
+    assert_type(word.tables[0][0, 0].vertical_alignment, str | None)
+
+    page = pdf.copy().pages[0]
+    assert_type(pdf.page_count, int)
+    assert_type(page.number, int)
+    assert_type(page.size, tuple[float, float])
+    assert_type(page.background, str | None)
+    assert_type(page.fields['customer'].page.size, tuple[float, float])
+    assert_type(next(iter(page.fields)).value, str | bool | None)
+    assert_type(page.fields['customer'].options, tuple[str, ...])
+    page.fields['customer'].box = [10, 10, 100, 20]
+    page.fields['customer'].value = "Example"
+    bookmark = pdf.bookmarks[0]
+    assert_type(bookmark.children[0].title, str)
+    assert_type(bookmark.page, int | None)
+    assert_type(bookmark.expanded, bool)
+    annotation = page.annotations[0]
+    assert_type(annotation.kind, str)
+    assert_type(annotation.box, tuple[float, float, float, float])
+    assert_type(annotation.text, str)
+    assert_type(annotation.author, str)
+    assert_type(annotation.color, str | None)
+    assert_type(annotation.uri, str | None)
+    assert_type(annotation.target_page, int | None)
+    assert_type(annotation.opacity, float)
+    assert_type(annotation.update(color="blue", opacity=.5), None)
+
+    assert_type(presentation.page_count, int)
+    slide = presentation.copy().slides[0]
+    assert_type(slide.number, int)
+    assert_type(slide.size, tuple[float, float])
+    assert_type(slide.name, str)
+    assert_type(slide.hidden, bool)
+    assert_type(slide.notes, str)
+    assert_type(slide.background_image, bytes | None)
+    shape = slide.shapes[0]
+    assert_type(shape.rotation, float)
+    assert_type(shape.fill, str | None)
+    assert_type(shape.stroke, tuple[str, float] | None)
+    assert_type(shape.box, tuple[float, float, float, float])
+    assert_type(shape.text, str)
+    assert_type(shape.color, str | None)
+    assert_type(shape.font_size, float | None)
+    assert_type(shape.bold, bool | None)
+    assert_type(shape.italic, bool | None)
+    assert_type(shape.font, str | None)
+    shape.box = [10, 20, 100, 40]
+    shape.fill = None
+    shape.rotation = 90
+    slide_picture = slide.add_image(png, box=(10, 100, 40, 30))
+    assert_type(slide_picture.box, tuple[float, float, float, float])
+    assert_type(slide_picture.rotation, float)
+    assert_type(slide_picture.data, bytes)
+    assert_type(slide_picture.alt, str)
+    slide_picture.data = png
+    slide_picture.crop = [0, .1, 0, .1]
