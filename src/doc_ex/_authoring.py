@@ -973,7 +973,7 @@ class TextRange:
 
         DOCX language is a literal ASCII alphanumeric/hyphen tag of at most
         63 bytes, not a complete BCP47 validator or font-selection guarantee.
-        DOCX letter_spacing adjusts native shaped clusters by -100..100 points in
+        letter_spacing adjusts native text advances by -100..100 points in
         0.05-point increments; 0 cancels inheritance and None restores it.
         """
         paragraph = self._paragraph

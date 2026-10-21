@@ -2183,6 +2183,7 @@ enum FormatChange {
     Bold(Option<bool>),
     Italic(Option<bool>),
     Size(Option<f64>),
+    Spacing(Option<f64>),
     Font(Option<String>),
     Color(Option<ColorRef>),
     Underline(Option<String>),
@@ -2215,6 +2216,27 @@ const UNDERLINES: &[(&str, &str)] = &[
     ("thick_wave", "wavyHeavy"),
 ];
 
+// Keep the initial cross-format contract at one twip even though DrawingML
+// supports hundredths of a point. Canonicalize ordinary f64 arithmetic before
+// the native writer rounds to its integer hundredths; no f32 conversion here.
+fn letter_spacing(value: &serde_json::Value) -> PyResult<f64> {
+    let points = value
+        .as_f64()
+        .ok_or_else(|| PyValueError::new_err("letter_spacing must be a number or None"))?;
+    if !points.is_finite() || !(-100.0..=100.0).contains(&points) {
+        return Err(PyValueError::new_err(
+            "letter_spacing must be finite and between -100 and 100 points",
+        ));
+    }
+    let canonical = (points * 20.0).round() / 20.0;
+    if (canonical - points).abs() > 4.0 * f64::EPSILON * points.abs().max(1.0) {
+        return Err(PyValueError::new_err(
+            "letter_spacing requires 0.05-point (one-twip) increments",
+        ));
+    }
+    Ok(canonical)
+}
+
 impl FormatPatch {
     fn parse(source: &str) -> PyResult<Self> {
         if source.len() > MAX_PATCH {
@@ -2242,6 +2264,11 @@ impl FormatPatch {
                         FormatChange::Italic(v)
                     }
                 }
+                "letter_spacing" => FormatChange::Spacing(if value.is_null() {
+                    None
+                } else {
+                    Some(letter_spacing(value)?)
+                }),
                 "font_size" => {
                     let v = if value.is_null() {
                         None
@@ -2331,6 +2358,7 @@ impl FormatPatch {
                 FormatChange::Bold(v) => props.bold = *v,
                 FormatChange::Italic(v) => props.italic = *v,
                 FormatChange::Size(v) => props.size = *v,
+                FormatChange::Spacing(v) => props.spacing = *v,
                 FormatChange::Font(v) => props.font = v.clone(),
                 FormatChange::Color(v) => props.fill = v.clone().map(Fill::solid),
                 FormatChange::Underline(v) => props.underline = v.clone(),
@@ -5446,6 +5474,309 @@ mod tests {
                 .contains("referenced-media"));
             assert_eq!(author.to_bytes().unwrap(), bytes);
             assert_eq!(author.revision, revision);
+        }
+    }
+}
+
+#[cfg(test)]
+mod letter_spacing_tests {
+    use super::*;
+    use deckcraft_model::text::Run;
+    use serde_json::json;
+
+    fn setup(text: &str) -> (EditablePptx, u32) {
+        pyo3::prepare_freethreaded_python();
+        let mut d = EditablePptx::new(1584.0, 288.0).unwrap();
+        d.add_slide("blank").unwrap();
+        let id = d
+            .add_text(0, text, 800.0, 30.0, 770.0, 220.0, 24.0)
+            .unwrap();
+        (d, id)
+    }
+
+    #[test]
+    fn pptx_spacing_all_twips_roundtrip_and_scalar_boundary() {
+        let (mut d, id) = setup("x");
+        let body = target_body_mut(d.presentation.as_mut().unwrap(), 0, id, None).unwrap();
+        body.paragraphs[0].runs = (-2000..=2000)
+            .map(|twip| {
+                let value = f64::from(twip) / 20.0;
+                let mut props = RunProps::default();
+                FormatPatch::parse(&json!({"letter_spacing":value}).to_string())
+                    .unwrap()
+                    .apply(&mut props);
+                assert_eq!(props.spacing, Some(value));
+                Run::with("x", props)
+            })
+            .collect();
+        let reopened = deckcraft_pptx::import(&d.to_bytes().unwrap()).unwrap();
+        let body = reopened.slides[0].shapes[0].text.as_ref().unwrap();
+        assert_eq!(body.paragraphs[0].runs.len(), 4001);
+        for (run, twip) in body.paragraphs[0].runs.iter().zip(-2000..=2000) {
+            assert_eq!(run.props.spacing, Some(f64::from(twip) / 20.0));
+        }
+        assert_eq!(letter_spacing(&json!(0.1_f64 + 0.2)).unwrap(), 0.3);
+        assert_eq!(letter_spacing(&json!(-0.1_f64 - 0.2)).unwrap(), -0.3);
+        for bad in [
+            json!(true),
+            json!("1"),
+            json!(100.05),
+            json!(-100.05),
+            json!(0.301),
+            json!(-0.001),
+        ] {
+            assert!(letter_spacing(&bad).is_err());
+        }
+    }
+
+    #[test]
+    fn pptx_spacing_native_inheritance_zero_reset_and_autofit() {
+        let (mut d, id) = setup("Inheritance");
+        let body = target_body_mut(d.presentation.as_mut().unwrap(), 0, id, None).unwrap();
+        body.paragraphs[0].def_props.spacing = Some(2.0);
+        body.paragraphs[0].runs[0].props.spacing = None;
+        let resolved = |d: &EditablePptx| {
+            let pres = d.document().unwrap();
+            let shape = &pres.slides[0].shapes[0];
+            let p = &shape.text.as_ref().unwrap().paragraphs[0];
+            deckcraft_model::resolve::run(
+                &deckcraft_model::resolve::Ctx::for_slide(pres, &pres.slides[0]).unwrap(),
+                shape,
+                p,
+                &p.runs[0].props,
+            )
+            .spacing
+        };
+        assert_eq!(resolved(&d), Some(2.0));
+        for (patch, expected) in [
+            (r#"{"letter_spacing":0}"#, Some(0.0)),
+            (r#"{"letter_spacing":null}"#, Some(2.0)),
+        ] {
+            d.format_range_patch(0, id, 0, 11, d.revision().unwrap(), patch, None)
+                .unwrap();
+            assert_eq!(resolved(&d), expected);
+        }
+        let raw = d.to_bytes().unwrap();
+        let reopened = deckcraft_pptx::import(&raw).unwrap();
+        assert_eq!(
+            reopened.slides[0].shapes[0]
+                .text
+                .as_ref()
+                .unwrap()
+                .paragraphs[0]
+                .runs[0]
+                .props
+                .spacing,
+            None
+        );
+        assert_eq!(
+            reopened.slides[0].shapes[0]
+                .text
+                .as_ref()
+                .unwrap()
+                .paragraphs[0]
+                .def_props
+                .spacing,
+            Some(2.0)
+        );
+        let source = deckcraft_render::place_slide(d.document().unwrap(), 0);
+        let original = &source.texts[0].layout;
+        let body = target_body_mut(d.presentation.as_mut().unwrap(), 0, id, None).unwrap();
+        body.body.autofit = Some(AutoFit::Shrink {
+            font_scale: Some(0.5),
+            line_reduction: 0.0,
+        });
+        let shrunk = deckcraft_render::place_slide(d.document().unwrap(), 0);
+        let half = &shrunk.texts[0].layout;
+        assert_eq!(half.font_scale, 0.5);
+        assert_eq!(original.runs[0].glyphs.len(), half.runs[0].glyphs.len());
+        let half_width =
+            half.runs[0].glyphs.last().unwrap().1 - half.runs[0].glyphs.first().unwrap().1;
+        let original_width =
+            original.runs[0].glyphs.last().unwrap().1 - original.runs[0].glyphs.first().unwrap().1;
+        assert!((half_width * 2.0 - original_width).abs() < 0.0001);
+    }
+
+    #[test]
+    fn pptx_spacing_shape_cell_atomicity_budgets_and_generations() {
+        let (mut d, id) = setup("Text");
+        let table = d
+            .add_table(0, vec![vec!["Cell".into()]], 20.0, 20.0, 500.0, 80.0, 24.0)
+            .unwrap();
+        let (_, _, grid, generation, _) = d.cell_paragraph_info(0, table, 0, 0).unwrap();
+        let cell = Some((0, 0, 0, grid, generation));
+        for (shape, target) in [(id, None), (table, cell)] {
+            d.format_range_patch(
+                0,
+                shape,
+                0,
+                4,
+                d.revision().unwrap(),
+                r#"{"letter_spacing":0.3}"#,
+                target,
+            )
+            .unwrap();
+            let before = d.document().unwrap().clone();
+            let revision = d.revision().unwrap();
+            for bad in [
+                r#"{"bold":true,"letter_spacing":true}"#,
+                r#"{"letter_spacing":0.301}"#,
+                r#"{"letter_spacing":100.05}"#,
+            ] {
+                assert!(d
+                    .format_range_patch(0, shape, 0, 4, revision, bad, target)
+                    .is_err());
+                assert!(d.add_run_patch(0, shape, "x", bad, target).is_err());
+                assert_eq!(d.document().unwrap(), &before);
+                assert_eq!(d.revision().unwrap(), revision);
+            }
+        }
+        d.set_cell_text(0, table, 0, 0, "Reset").unwrap();
+        assert!(d
+            .format_range_patch(
+                0,
+                table,
+                0,
+                4,
+                d.revision().unwrap(),
+                r#"{"letter_spacing":1}"#,
+                cell
+            )
+            .is_err());
+        d.revision = u64::MAX;
+        let before = d.document().unwrap().clone();
+        assert!(d
+            .format_range_patch(0, id, 0, 4, u64::MAX, r#"{"letter_spacing":1}"#, None)
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit"));
+        assert_eq!(d.document().unwrap(), &before);
+        assert_eq!(d.revision, u64::MAX);
+    }
+
+    #[test]
+    fn pptx_spacing_native_glyphs_source_pixels_and_pdf_output() {
+        let pixels = |data: Vec<u8>| {
+            let mut r = png::Decoder::new(Cursor::new(data)).read_info().unwrap();
+            let mut data = vec![0; r.output_buffer_size().unwrap()];
+            let info = r.next_frame(&mut data).unwrap();
+            assert_eq!(info.color_type, png::ColorType::Rgba);
+            data.truncate(info.buffer_size());
+            (info.width, info.height, data)
+        };
+        for text in ["office", "e\u{301} A", "سلام"] {
+            let mut baseline_glyphs = None;
+            for spacing in [-100.0, -0.05, 0.0, 2.0, 100.0] {
+                let (mut d, id) = setup(text);
+                d.format_range_patch(
+                    0,
+                    id,
+                    0,
+                    text.chars().count(),
+                    d.revision().unwrap(),
+                    &json!({"letter_spacing":spacing}).to_string(),
+                    None,
+                )
+                .unwrap();
+                let placed = deckcraft_render::place_slide(d.document().unwrap(), 0);
+                let glyphs: Vec<_> = placed
+                    .texts
+                    .iter()
+                    .flat_map(|p| &p.layout.runs)
+                    .flat_map(|r| r.glyphs.iter().map(|g| g.0))
+                    .collect();
+                if let Some(previous) = &baseline_glyphs {
+                    assert_eq!(&glyphs, previous);
+                } else {
+                    baseline_glyphs = Some(glyphs);
+                }
+                assert!(placed
+                    .texts
+                    .iter()
+                    .flat_map(|p| &p.layout.runs)
+                    .flat_map(|r| &r.glyphs)
+                    .all(|g| g.1.is_finite() && g.2.is_finite()));
+                let raw = d.to_bytes().unwrap();
+                let reopened = deckcraft_pptx::import(&raw).unwrap();
+                assert_eq!(
+                    reopened.slides[0].shapes[0].text.as_ref().unwrap().text(),
+                    text
+                );
+                let before =
+                    deckcraft_render::render_slide(d.document().unwrap(), 0, &Default::default());
+                let after = deckcraft_render::render_slide(&reopened, 0, &Default::default());
+                assert_eq!(before.pixels, after.pixels);
+                assert!(after.pixels.chunks_exact(4).filter(|p| p[0] < 128).count() > 20);
+                let source = pixels(crate::pptx::render(&raw, 0, 200.0).unwrap());
+                let pdf = crate::pptx::to_pdf(&raw).unwrap();
+                let exported = pixels(crate::pdf::render(&pdf, 0, 200.0, None).unwrap());
+                assert_eq!((source.0, source.1), (exported.0, exported.1));
+                assert!(source
+                    .2
+                    .iter()
+                    .zip(&exported.2)
+                    .all(|(a, b)| a.abs_diff(*b) <= 1));
+            }
+        }
+    }
+    #[test]
+    fn pptx_spacing_pdf_invisible_glyph_origins_follow_native_layout() {
+        let mut baseline: Option<(Vec<f64>, Vec<f32>)> = None;
+        for spacing in [0.0, 2.0, -1.0, -100.0, 100.0] {
+            let (mut d, id) = setup("ABC");
+            d.format_range_patch(
+                0,
+                id,
+                0,
+                3,
+                d.revision().unwrap(),
+                &json!({"letter_spacing": spacing}).to_string(),
+                None,
+            )
+            .unwrap();
+            let placed = deckcraft_render::place_slide(d.document().unwrap(), 0);
+            let text = &placed.texts[0];
+            let origins: Vec<f64> = text
+                .layout
+                .runs
+                .iter()
+                .flat_map(|run| &run.glyphs)
+                .map(|g| (text.transform * kurbo::Point::new(g.1, g.2)).x)
+                .collect();
+            assert_eq!(origins.len(), 3);
+            let pdf = crate::pptx::to_pdf(&d.to_bytes().unwrap()).unwrap();
+            let mut renderer =
+                pdfcraft_render::PageRenderer::new(Arc::new(pdf), Default::default());
+            let rendered = renderer.render(pdfcraft_render::RenderRequest {
+                page: 0,
+                kind: pdfcraft_render::RequestKind::Text,
+                ..Default::default()
+            });
+            assert!(rendered.error.is_none());
+            let text = rendered.text.unwrap();
+            let pdf_x: Vec<f32> = ["A", "B", "C"]
+                .into_iter()
+                .map(|label| {
+                    let found: Vec<_> = text.glyphs.iter().filter(|g| g.text == label).collect();
+                    assert_eq!(found.len(), 1);
+                    found[0].rect[0]
+                })
+                .collect();
+            if let Some((base_origins, base_pdf)) = &baseline {
+                for i in 0..3 {
+                    // Font-box bearings are constant for the same glyph. Compare
+                    // displacement from baseline, rather than advance vs ink width.
+                    let native_delta = origins[i] - base_origins[i];
+                    let pdf_delta = f64::from(pdf_x[i] - base_pdf[i]);
+                    assert!(
+                        (native_delta - pdf_delta).abs() < 0.002,
+                        "spacing={spacing} glyph={i} native={native_delta} pdf={pdf_delta}"
+                    );
+                    assert!((native_delta - spacing * i as f64).abs() < 0.0001);
+                }
+            } else {
+                baseline = Some((origins, pdf_x));
+            }
         }
     }
 }
