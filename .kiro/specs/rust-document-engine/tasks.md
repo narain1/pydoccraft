@@ -762,4 +762,5 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Extend existing move transaction and preserve parent-local identity/sentinel/accounting guards without a new API.
 - [x] Complete focused public/native/typing/documentation evidence, including cell anchor/alias/resource guards.
 - [x] Complete independent final source review and focused replay (four workflows,24.049s).
-- [ ] Complete integrated installed-wheel full corpus and exact-head CI before manual merge; leave broader DOC5/TXT1 work open.
+- [x] Complete integrated locked release/full corpus and independent artifact review: 361 native and 502 installed Python tests.
+- [ ] Complete exact-head/current-main CI and manual merge; retain broader DOC5/TXT1 work.
