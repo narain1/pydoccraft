@@ -1152,6 +1152,23 @@ Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,530,398 byt
 
 The full corpus verifies all three formats and the new value-normalization workflows. Real Unicode/byte bounds precede payload construction, overridden string hooks cannot replace the target, and initial/final identity checks retain lifetime safety. Native kind/glyph limitations and ordinary bool/None behavior remain unchanged. Independent complete-package review and exact-head/current-main CI remain required before manual merge; this is not broad callback or radio certification.
 
+
+## Owned DOCX body identity separation — isolated checks passed
+
+This internal change allocates body handles through the existing locator registry and preserves physical native positions/section boundaries. The code delta is based on b09863d88e57b561773e627921441354ee044068 plus the frozen spec78 patch and apply-checks against spec78-integrated b30033041b49ec05d6a4cad9507335f3c2c6848e; spec78 changes are not duplicated. No upstream revisions, dependencies, public API signatures, extraction schema or existing Python evidence fixture fingerprints change.
+
+The first isolated `cargo test --locked author_docx::` run passed all 144 existing DOCX native groups in 18.61s after replacing owned-ID-as-position assumptions with stored native paths. Existing format, geometry and rendered-output assertions are retained. The new acceptance module covers three native groups and four public workflows for interleaved allocations/source order, test-only opaque-ID permutation, cached/read-only membership, picture/paragraph identity, cell/story invalidation, copies, hidden empty section boundaries and failed allocation/commit rollback. Final isolated checks passed all three new native groups in 0.15s, formatter, all-targets Clippy with warnings denied and locked debug extension build. The exact copied extension/facade passed all four new public workflows in 2.294s and 59 related workflows in 48.981s; pinned strict consumer typing also passed. The clean integrated installed-wheel artifact, independent review and CI remain pending; these isolated checks are not a release or roadmap completion claim.
+
+Numeric private `_id` and repr diagnostics deliberately change for newly authored DOCX blocks. Body/cell/PPTX deletion remains unsupported, and the remaining body section/semantic rules are not implemented. Historical spec78/evidence artifacts retain their original scope. No historical support-ledger artifact, hash or fixture is relabeled by this change.
+
+
+## Owned DOCX body identities — complete local artifact and independent review
+
+- Frozen runtime `091859307ed9563dc1bf799904cab7347003a992` has a completed local artifact at `dist/docx-body-identity/validation.json`: 462 clean installed-wheel Python tests passed, zero failures/errors/skips, in 156.368 seconds. The native/release log `/tmp/docx-body-identity-full-native.log` records 321 passing native tests and a successful release build. The shared source remained clean at that exact runtime when the reviewer recovered the completed artifact records.
+- Independent review reran all 462 tests against a separate copy of `/opt/docxbodyidentitytest` in 147.585 seconds. All seven installed package members byte-match the frozen wheel. Strict installed-package typing, isolated formatting, roadmap/support/cached-reference checks and a fresh locked/offline 264-package license audit pass. No dependency, revision or existing Python evidence-module fingerprint changed.
+- Linux x86_64 / CPython 3.11.2 wheel: 17,522,079 bytes; extension: 40,646,328 bytes; SHA-256 `5c9166fc55ee307094bb62029cc0c8b05d7095260bedc44bd503a3d5cc196c6d`; lock SHA-256 `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. Native section/layout positions and output remain unchanged; opaque private IDs and their diagnostic repr numbers deliberately change.
+- Source review verified the monotonic allocator, bounded native-order reverse view, copy/placeholder behavior and native-test path migration without relaxed output assertions. Body deletion and broader adoption/movement remain excluded. This records local artifact evidence, not completion of the final exact-head/current-main CI and manual merge gate; those checks, including warnings-denied Clippy, remain required.
+
 ## Character-spacing mixed-scope fixture — independent CI correction
 
 Current-main CI39517446150 at `76d40ef83f9a257a1b4604ab3bc6ce97587d22d6` passed 302 native tests but failed one of432 installed-wheel tests: the mixed header/footer, note and nested-cell fixture had a chromatic channel difference64 instead of the required maximum1. The same failure was independently reproduced with Liberation Sans: two pixels at(105,124) and(106,124) lie where the `Scope2` descender intersects the nested table's bottom rule. Source/PDF red bounds and counts were identical; the other19 changed chromatic pixels differed by at most1. Setting all character spacing to zero retained the64-level difference; removing only native table/cell borders removed every difference above1. A separate default-font control reproduced the same interaction at a fractional72.3-point top margin. These controls establish a preexisting native structural-stroke/compositing difference, not a spacing-induced glyph-position change.
@@ -1183,3 +1200,21 @@ The delivery review gates for the following changes are complete, verified from 
 |84|`fa4d2c2142bc73dafa86a861d5e93dc29d7c4eec`|39519437872|302 /432|
 
 The final corrected PR84 head `189ce199cc4a49aeb3badf1aa9f0aee30e43edb8` passed all432 installed tests in222.911 seconds (JSON elapsed), plus302 native tests, formatting, warnings-denied Clippy, strict typing and the264-package audit. CI CPython3.11.17/Linux x86_64/glibc2.39 wheel SHA-256 is `c650d2399a403faca1ca03c690e7584688220ad0ba53d9da38f8fb212a99d6db`,17,518,181 bytes with40,618,928-byte extension. This final CI includes the reviewed explicit-padding/fractional-origin fixture; earlier local typography artifacts retain their historical fixture scope. The PPTX spacing runtime in this branch is unchanged by main integration, and its own final current-main CI is still required.
+
+
+## Independent manual merge gates PR85–PR92
+
+The following delivery gates are complete after independent frozen-source/package review, current-main integration, successful required final-head CI and manual merge. The corresponding review tasks are checked; broader roadmap criteria are unchanged. Repository auto-merge remains disabled.
+
+| PR | Merge commit | Final CI | Native / installed Python |
+|---|---|---|---|
+|85|`529c46f8dc3beacf8a7bd8860a0a4fdacc270f40`|39520453018|307 /436|
+|86|`b7fbc0a7d7566131887bd35203908d89f450c0c5`|39521468383|307 /439|
+|87|`bda4f0aea558dd2c66943e15f1877ce5839a9aa2`|39522670318|310 /444|
+|88|`1e7b17f1a65388807075363c3815702e53457f06`|39523905606|312 /446|
+|89|`70ae0c1878c6f6e025ec0a2c5c527f17a6b0086f`|39525138050|312 /449|
+|90|`07f5fa108e64a9dc83462ff26170aa979b60bc6e`|39526412315|315 /454|
+|91|`f615802243e4f5dbf7ed41e76dbd443fbdce0729`|39527687084|318 /455|
+|92|`90e527ecb41d7283ec678dc21c401255beb16959`|39528765073|318 /458|
+
+Every final run also passed formatting, warnings-denied Clippy, strict installed-package typing and the unchanged 264-package audit. Each includes the independently reviewed DOCX spacing fixture correction. Earlier local artifacts, including the recorded 462-test identity artifact, retain their original test-file scope. Main integration changes no identity-refactor runtime or dependency bytes; final exact-head/current-main CI for PR93 remains pending.
