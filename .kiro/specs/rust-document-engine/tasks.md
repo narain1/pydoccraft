@@ -1030,7 +1030,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete final raw/adapter native controls, four public workflows, precise historical fixture migrations and strict seven-key snapshot replay typing; independently replay the four public workflows.
 - [x] Complete combined 119/121 full 449-native/release and two clean 564-test installed-wheel corpora, attribution/size and independent source/artifact review.
 - [x] Complete synchronized documentation and final independent review, retaining all historical evidence and scoped upstream findings.
-- [ ] Complete current-head CI and manual merge. Keep broader TXT1/SLIDE3 and overall release gates open.
+- [x] Complete current-head CI and independent manual merge through PR127, required CI39590739971 and documentation CI39590739952. Broader TXT1/SLIDE3 and overall release gates remain open.
 
 
 ## Typed PDF underlays (spec123)
@@ -1081,7 +1081,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Verify strict installed consumer, five intended negative cases, runtime direct/resolved body/header/cell replay, exact native/wheel facade identity and independent review.
 - [x] Complete full exact installed-wheel corpus and synchronized documentation:571 tests pass; keep broader API3 open.
 - [ ] Complete combined current-main CI and independent manual merge.
-- [ ] Complete current-head CI and independent manual merge. Python underlays, resource collisions and broader PDF3/U10 remain open.
 
 
 ### Spec120 measured-font fixture gates
