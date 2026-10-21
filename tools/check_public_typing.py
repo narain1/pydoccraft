@@ -6,6 +6,8 @@ Run mypy==1.18.2 against an installed package with:
 Only imported package diagnostics are suppressed; this consumer is checked strictly.
 The private class imports supply expected identities, not extra public exports.
 """
+from fractions import Fraction
+from numbers import Real
 from typing import Any, Literal, assert_type
 
 import doc_ex
@@ -416,3 +418,11 @@ def verify_layout_values(word: WordDocument, deck: Presentation) -> None:
     assert_type(slide_table.borders, tuple[str, float] | None)
     assert_type(slide_table.row(0).height, tuple[float | None, str])
     slide_table.row(0).height = [30, "at_least"]
+
+
+def verify_unit_converters(real: Real) -> None:
+    for converter in (doc_ex.pt, doc_ex.mm, doc_ex.cm, doc_ex.inches):
+        assert_type(converter(1), float)
+        assert_type(converter(1.5), float)
+        assert_type(converter(Fraction(1, 2)), float)
+        assert_type(converter(real), float)

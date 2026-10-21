@@ -433,7 +433,7 @@ def _style_guard(owner, revision, *references) -> None:
         raise ValueError("style operation is stale after a document mutation")
 
 
-def pt(value: Real) -> float:
+def pt(value: Real | float) -> float:
     """Return a finite length in points (1/72 inch)."""
     if isinstance(value, bool) or not isinstance(value, Real):
         raise TypeError("length must be a number in points")
@@ -443,17 +443,17 @@ def pt(value: Real) -> float:
     return result
 
 
-def inches(value: Real) -> float:
+def inches(value: Real | float) -> float:
     """Convert inches to points."""
     return pt(pt(value) * 72)
 
 
-def mm(value: Real) -> float:
+def mm(value: Real | float) -> float:
     """Convert millimeters to points."""
     return pt(pt(value) * 72 / 25.4)
 
 
-def cm(value: Real) -> float:
+def cm(value: Real | float) -> float:
     """Convert centimeters to points."""
     return pt(pt(value) * 72 / 2.54)
 
