@@ -66,6 +66,16 @@ Bookmarks, note references, owned comments and section boundaries cannot be remo
 
 Index conversion captures the intended table identity. A callback deleting that table cannot redirect the operation to a replacement; its own changes remain. Stale cell grids and closed owners fail before conversion callbacks. Ordinary output and geometry guards still apply. This is whole-table removal, not general block movement, copying or cross-container adoption.
 
+## DOCX table movement
+
+Use `word.tables.move(index, destination)`, `header.tables.move(...)`, `footer.tables.move(...)` or `cell.tables.move(...)` to reorder an intact table in its current container. Both indexes select tables and support negative values; destination is the final table ordinal. Intervening paragraphs keep their relative order, but can move to the other side of the selected table. Moving table A past table B in `[A, paragraph, B]` gives `[paragraph, B, A]`; reversing table ordinals alone does not promise to restore every intervening block position.
+
+The supported containers are the body within one section, independently owned headers/footers, and ordinary nested or merged cells. Held table, row, cell, paragraph, nested-table and picture handles retain their identities, including displaced siblings and ancestor grids. Actual movement invalidates existing text ranges and rendered snapshots once; use fresh ranges afterward. A same-index move preserves bytes, ranges, revision and cached output after scope and reference validation. Copies stay independent and required blank paragraphs are preserved by identity.
+
+A moved subtree cannot contain bookmarks, note references, comments or section boundaries, including on a no-op. Bookmarks and comments can be removed explicitly through their existing APIs first. Clearing note content retains its reference, so that table still cannot move. Valid anchors in retained siblings stay attached and comments resolve fresh ranges after the shift. Owned table PAGE fields remain unsupported; total and section page counts retain their existing native evaluation. Moving across containers or sections, importing content, and rich-note/PPTX table movement remain outside this profile.
+
+Index-conversion callbacks cannot redirect a pending move after changing or closing the owner. Stale cell grids reject before those callbacks. Immediate ownership, source-work, registry, media and revision checks remain active; rejection preserves the prior state except for the callback's own completed mutation. Ordinary serialization/render geometry guards apply after movement; a successful move does not certify every later layout.
+
 ## DOCX comments
 
 Owned documents expose one `document.comments` collection for roots and direct replies, in creation order. It uses existing paragraph ranges:

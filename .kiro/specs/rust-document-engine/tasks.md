@@ -877,3 +877,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete independent frozen code/docs and four-workflow replay review; documentation/site checks pass.
 - [ ] Complete integrated installed corpus, current-head CI and manual merge.
 - [ ] Retain broader LAY10 settings and existing unsupported layout combinations under their current owners.
+
+
+## Same-parent owned DOCX table movement (spec106)
+
+- [x] Preserve original failed native PAGE proof, add spec107 rejection, and pass revised raw2 with 336 structural/24 output profiles and supported native count values.
+- [x] Implement only existing table collection movement with exact-parent coordinate rotation, stable descendant/generation identity and normal candidate guards.
+- [x] Share narrow spec102 preflight while retaining all deletion behavior; pass movement6, unchanged deletion6 and PAGE-guard2 native groups, formatting and all-target Clippy.
+- [x] Pass focused copied-package public/typing checks and independent source/six-workflow review; synchronize documentation with the bounded profile.
+- [ ] Complete integrated full native/installed-wheel corpus, independent artifact review, exact-head CI and manual merge.
+- [ ] Retain broader DOC5 insertion, duplication, adoption and semantic-anchor relocation gaps.

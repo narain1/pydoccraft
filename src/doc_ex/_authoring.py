@@ -726,7 +726,7 @@ class _Collection(Sequence[_Item], Generic[_Item]):
 
 
 class _Tables(_Collection["EditableTable"]):
-    """Ordered owned DOCX tables; deletion removes one complete subtree."""
+    """Ordered owned DOCX tables with subtree deletion and same-container movement."""
     def __delitem__(self, index: int) -> None:
         self._owner._ensure_open()
         if isinstance(index, slice):
@@ -735,6 +735,26 @@ class _Tables(_Collection["EditableTable"]):
         selected = operator.index(index)
         self._owner._ensure_open()
         self._owner._call("remove_table", identifiers[_index(selected, len(identifiers))], _change=True)
+
+    def move(self, index: int, destination: int) -> None:
+        """Move an owned DOCX table to its final index in the same container and section."""
+        self._owner._ensure_open()
+        if not isinstance(self._owner, WordDocument):
+            raise UnsupportedFormatError("PPTX table movement is not supported")
+        revision = self._owner._call("revision")
+        identifiers = self._ids()
+        selected = operator.index(index)
+        self._owner._ensure_open()
+        if self._owner._call("revision") != revision:
+            raise ValueError("table selection is stale after a document mutation")
+        target = operator.index(destination)
+        self._owner._ensure_open()
+        if self._owner._call("revision") != revision:
+            raise ValueError("table selection is stale after a document mutation")
+        identifier = identifiers[_index(selected, len(identifiers))]
+        target_id = identifiers[_index(target, len(identifiers))]
+        if self._owner._call("move_table", identifier, target_id, revision):
+            self._owner._invalidate()
 
 
 class _Paragraphs(_Collection["Paragraph"]):

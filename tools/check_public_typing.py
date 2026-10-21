@@ -75,6 +75,10 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         disposable = word.add_table([['Delete']])
         assert_type(disposable, EditableTable)
         del word.tables[-1]
+        assert_type(word.tables.move(0, -1), None)
+        assert_type(word.sections[0].header().tables.move(0, 0), None)
+        assert_type(word.sections[0].footer().tables.move(0, 0), None)
+        assert_type(table[0, 0].tables.move(0, -1), None)
         header = word.sections[0].header()
         header.add_table([['Delete']])
         del header.tables[-1]
