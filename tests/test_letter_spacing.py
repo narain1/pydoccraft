@@ -1,7 +1,5 @@
 """Native character spacing: owned formatting, native clusters, and output fidelity."""
 from io import BytesIO
-import base64
-import json
 import unittest
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
@@ -37,34 +35,15 @@ class LetterSpacingTests(unittest.TestCase):
                 b_width, b = rgba_pixels(png_chunks(pdf_png))
                 self.assertEqual((a_width, len(a)), (b_width, len(b)))
                 if red_text_only:
-                    # The zero-spacing control has the same grayscale grid/separator
-                    # raster differences. Compare all chromatic text pixels without
-                    # pretending character spacing changes structural stroke rendering.
+                    # Native grid/separator strokes differ even at zero spacing.
+                    # Explicit cell padding keeps glyphs off those strokes; compare
+                    # every chromatic pixel without claiming structural-stroke parity.
                     self.assertEqual(colored_extent(source_png)[:4], colored_extent(pdf_png)[:4])
                     offsets = [i for i in range(0, len(a), 4)
                                if a[i] > a[i + 1] or b[i] > b[i + 1]]
                     self.assertGreater(len(offsets), 100)
-                    delta = max(abs(a[i + channel] - b[i + channel])
-                                for i in offsets for channel in range(4))
-                    if delta > 1:
-                        differences = sorted(
-                            (max(abs(a[i + channel] - b[i + channel]) for channel in range(4)),
-                             i // 4 % a_width, i // 4 // a_width,
-                             list(a[i:i + 4]), list(b[i:i + 4]))
-                            for i in offsets if a[i:i + 4] != b[i:i + 4])
-                        print("LETTER_SPACING_DIAGNOSTIC " + json.dumps({
-                            "page": page, "dpi": dpi, "max_delta": delta,
-                            "source_extent": colored_extent(source_png),
-                            "pdf_extent": colored_extent(pdf_png),
-                            "changed_chromatic_pixels": len(differences),
-                            "largest_differences": differences[-40:],
-                        }), flush=True)
-                        for name, payload in (("source_png", source_png), ("pdf_png", pdf_png),
-                                              ("source_docx", document.to_bytes()),
-                                              ("output_pdf", document.convert("pdf"))):
-                            print("LETTER_SPACING_ASSET " + name + " "
-                                  + base64.b64encode(payload).decode("ascii"), flush=True)
-                    self.assertLessEqual(delta, 1)
+                    self.assertLessEqual(max(abs(a[i + channel] - b[i + channel])
+                                             for i in offsets for channel in range(4)), 1)
                 else:
                     self.assertLessEqual(max(abs(x - y) for x, y in zip(a, b)), 1)
 
@@ -128,7 +107,12 @@ class LetterSpacingTests(unittest.TestCase):
             anchor = document.add_paragraph("BodyAnchor")
             header = document.sections[0].header().add_paragraph("")
             footer = document.sections[0].footer().add_paragraph("")
-            nested = document.add_table([[""]])[0, 0].add_table([[""]])[0, 0].paragraphs[0]
+            nested_cell = document.add_table([[""]])[0, 0].add_table([[""]])[0, 0]
+            # A zero-bottom-margin descender can intersect the native table rule.
+            # Keep the border and every text assertion, with explicit glyph clearance.
+            top, right, _, left = nested_cell.margins
+            nested_cell.margins = (top, right, 3, left)
+            nested = nested_cell.paragraphs[0]
             foot = document.notes.add(anchor.find("Body")[0], "").paragraphs[0]
             end = document.notes.add(anchor.find("Anchor")[0], "", kind="endnote").paragraphs[0]
             for index, paragraph in enumerate([header, footer, nested, foot, end]):
@@ -150,6 +134,10 @@ class LetterSpacingTests(unittest.TestCase):
             selected.format(letter_spacing=None)
             self.assertEqual(table.column_widths, widths)
             self.assertEqual([table[row, 0].text for row in range(2)], ["Header", "Body"])
+            self.assert_pixel_parity(document, dpi=72, red_text_only=True)
+            # A fractional origin also exercised the previous descender/rule overlap.
+            top, right, bottom, left = document.sections[0].margins
+            document.sections[0].margins = (top + 0.3, right, bottom, left)
             self.assert_pixel_parity(document, dpi=72, red_text_only=True)
             with doc_ex.open(document.to_bytes()) as source:
                 text = source.to_markdown() + "\n" + "\n".join(s.get_text() for s in source.stories)
