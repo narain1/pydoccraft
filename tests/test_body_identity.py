@@ -123,9 +123,12 @@ class BodyIdentityTests(unittest.TestCase):
                 self.assertEqual(copied.tables[0][0, 0].text, 'Cell')
                 self.assertEqual(copied.sections[0].header().paragraphs[0].text, 'Old header')
                 self.assertEqual(copied.images[0].data, red_picture(2, 2))
+                # The ordinary body scope is now supported; section-bearing
+                # paragraphs and cell deletion remain deliberately unsupported.
+                document.sections.add()
                 before = document.to_bytes()
                 with self.assertRaises(UnsupportedFormatError):
-                    del document.paragraphs[0]
+                    del document.paragraphs[-1]
                 with self.assertRaises(UnsupportedFormatError):
                     del table[0, 0].paragraphs[0]
                 self.assertEqual(document.to_bytes(), before)

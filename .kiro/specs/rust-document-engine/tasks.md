@@ -628,5 +628,16 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Integrate immutable same-page groups through existing field containers/properties with independent field/widget bounds and cumulative preflight/accounting.
 - [x] Add native and public source/pixel/geometry/flatten/callback/identity/budget tests and consumer typing assertions.
 - [x] Complete integrated release/clean installed-wheel corpus: 326 native and 467 Python tests, typing and unchanged license audit.
-- [ ] Complete independent exact-head/current-main review and manual merge.
+- [x] Complete independent exact-head/current-main review and manual merge: PR94, run39548202131.
 - [ ] Retain imported inventory, arbitrary mutable/multi-page groups and broader PDF6/U10 appearance work.
+
+
+## Owned body paragraph deletion
+
+- [x] Prove the native final-section tail case and one-blank preservation with exact section values, DOCX readback, PNG dimensions and PDF page geometry.
+- [x] Extend existing staged collection deletion to ordinary direct body paragraphs; retain section/semantic guards, bounded locator updates and existing auxiliary behavior.
+- [x] Add four native groups and five public workflows for output, identity, section starts/restarts, protected anchors, callbacks, placeholder reuse and rollback; deliberately update obsolete body-Unsupported assertions while preserving cell/PPTX/section checks.
+- [x] Complete focused native tests, fmt/Clippy/debug build and copied-package public/related checks; record exact results below.
+- [x] Complete integrated locked release and clean installed-wheel corpus: 330 native/472 Python tests, strict typing, license audit and independent472-test review.
+- [ ] Complete final exact-head/current-main CI and manual merge for body paragraph deletion.
+- [ ] Keep section-boundary/semantic deletion, cell/PPTX deletion and broader DOC5/TXT1 insertion/movement/adoption open.

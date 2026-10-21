@@ -1229,6 +1229,15 @@ The following delivery gates are complete after independent frozen-source/packag
 Every final run also passed formatting, warnings-denied Clippy, strict installed-package typing and the unchanged 264-package audit. Each includes the independently reviewed DOCX spacing fixture correction. Earlier local artifacts, including the recorded 462-test identity artifact, retain their original test-file scope. Main integration changes no identity-refactor runtime or dependency bytes; final exact-head/current-main CI for PR93 remains pending.
 
 
+## GitHub Pages documentation site — local build validation
+
+The documentation-only change renders the existing Markdown guides plus a landing page into 28 static HTML pages using hash-pinned, build-only Python-Markdown 3.7. `tools/build_site.py` does not import the package or invoke Cargo. No runtime dependency, lockfile, feature status, upstream revision or package version changes.
+
+Local validation: clean site build; 1,642 generated local links, assets and fragments checked by `tools/check_site.py`; roadmap ownership check (139 coverage IDs, 14 workstreams); support evidence check (19 profiles, 139 joins); negative checker probes for missing files, missing fragments, duplicate IDs and absent homepage. External URLs are not fetched by the link checker. Browser surfaces were unavailable in the agent environment, so visual desktop/mobile inspection remains a deployment-review check rather than claimed local evidence.
+
+The pinned official Pages workflow builds pull requests with read-only permissions and deploys only reviewed `main` builds, with deployment permissions confined to its separate job. Public hosting is pending repository Pages configuration, independent review, merge, a successful deployment and a reachable public URL. These documentation checks do not substitute for native or installed-wheel release validation.
+
+
 ## DOCX body identities — final manual merge gate
 
 PR93 final head `fb56803d41c0341b0c0d71e9f43d5f0d5ccde042` passed [required current-main CI39530041981](https://github.com/narain1/pydoccraft/actions/runs/39530041981), following the recorded independent source and 462-test copied-package review. It was manually merged as `f0cd0a7ef92ba8531e13f680ac9b5ed75779385b`. Repository auto-merge remains disabled. This closes the delivery gate for the internal identity change; broader DOC5/TXT1 remains partial.
@@ -1246,17 +1255,37 @@ The supported profile is 2–32 immutable same-page widgets through existing fie
 PR94 independent source review and all467 installed tests against the copied exact77915dc package passed in162.689 seconds, zero failures/errors/skips, with matching wheel SHA/size. Review corrected one stale value-type error description before the final wheel build; no runtime, test or evidence exceptions were introduced. Exact-head/current-main CI and manual merge remain pending.
 
 
-## GitHub Pages documentation site — local build validation
+## Owned body paragraph deletion — focused isolated evidence
 
-The documentation-only change renders the existing Markdown guides plus a landing page into 28 static HTML pages using hash-pinned, build-only Python-Markdown 3.7. `tools/build_site.py` does not import the package or invoke Cargo. No runtime dependency, lockfile, feature status, upstream revision or package version changes.
+The spec84 delta is based on frozen spec81 and changes no pins/dependencies. Four new native groups pass (0.28s), as do the three existing auxiliary-deletion groups (0.10s) and three identity groups (0.15s). Whole fmt check, all-targets Clippy with denied warnings and locked debug build pass. Five new public workflows pass in5.188s against an isolated copied extension/facade. The related42-test run passed41 and found an obsolete linked-body-target Unsupported expectation; after replacing it with the existing exact missing-bookmark ValueError, all five auxiliary-deletion tests passed in11.949s. All other related checks remain unchanged. These are focused results, not a new full release artifact.
 
-Local validation: clean site build; 1,642 generated local links, assets and fragments checked by `tools/check_site.py`; roadmap ownership check (139 coverage IDs, 14 workstreams); support evidence check (19 profiles, 139 joins); negative checker probes for missing files, missing fragments, duplicate IDs and absent homepage. External URLs are not fetched by the link checker. Browser surfaces were unavailable in the agent environment, so visual desktop/mobile inspection remains a deployment-review check rather than claimed local evidence.
+Native/public fixtures retain exact section values, unique endpoints, hidden final blanks, nested handles/generations, copied caches and protected references; they inspect actual removed blue/retained red pixels, exactly-once DOCX/PDF text, page sizes and displayed counters. Raw native removal exposes duplicate tail endpoints; one public native blank insertion restores the owned invariant without relocating section properties. The old identity fixture's unsupported target deliberately becomes a section boundary, while cell/PPTX guards remain explicit.
 
-The pinned official Pages workflow builds pull requests with read-only permissions and deploys only reviewed `main` builds, with deployment permissions confined to its separate job. Public hosting is pending repository Pages configuration, independent review, merge, a successful deployment and a reachable public URL. These documentation checks do not substitute for native or installed-wheel release validation.
+Initial public restart assumptions were corrected using pinned [section_side](https://github.com/storytold/wordcraft/blob/f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22/crates/layout/src/lib.rs#L2570) and unchanged before/after controls: restart7 yields odd-page2pages/7 and even-page2pages/8, with next-page2pages/7 and continuous1page. Separate native no-restart controls retain odd3/even2pages. No numbering/parity implementation changed or general tolerance was introduced. Historical spec78/spec81 artifact scope remains unchanged; ordinary body deletion is this separate acceptance. Full integrated release, independent review and exact-head/current-main CI remain pending.
 
+
+## Owned body paragraph deletion — complete local artifact
+
+Runtime `cf1dedc2154b838b02326a3b0db9219ad7bcc7d3` passed **330 locked Rust tests and 472 clean installed-wheel Python tests**, zero failures/errors/skips. Native tests took45.53seconds and the Python corpus169.117seconds on Linux x86_64/Python3.11.2/Rust1.95. Formatting, warnings-denied all-target Clippy, locked/offline release, strict installed-package typing and unchanged264-package license audit pass. Installed package bytes match the wheel; extraction, PNG rendering and reopened conversions across all three formats pass.
+
+Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl` is **17,538,230 bytes**, extension **40,682,984 bytes**, SHA-256 `bc8c27e8633d67f82ac4599091f785ff150b93499c5bb01c097e65b4e209652f`. Lock SHA-256 remains `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. Dependencies, upstream revisions and attribution remain unchanged. Independent exact-artifact source/package review passed all472tests in166.551seconds with matching wheel bytes. Final current-main CI/manual merge remains pending.
+
+The two obsolete body-deletion assertions were deliberately changed to preserve section-boundary and missing-bookmark guards, as described in focused evidence; no historical fingerprinted module changes. An earlier local command incorrectly reused a scratch-worktree324-test binary through a shared Cargo target. That run was discarded; a package clean and explicit `/work` compilation produced the330-test run and release artifact recorded here. Expected test count and new acceptance groups were verified; future worktree switches require package rebuilds. Broad DOC5/TXT1 remains partial.
+
+## GitHub Pages documentation — published delivery
+
+PR95 was independently reviewed and manually merged as `5583f2946534041267f71691a732f5c0d96c6bcd` after requiredCI39547460948 (321Rust/462installedPython) and docsCI39547460927 passed. [Main deployment39548152976](https://github.com/narain1/pydoccraft/actions/runs/39548152976) succeeded. The site builds28pages from canonical Markdown with1,642checked local links/assets/fragments and no runtime dependency change.
+
+Public [github.io entrypoint](https://narain1.github.io/pydoccraft/) redirects through the existing account-level domain to https://blog.narain.dev/pydoccraft/. Root verified deployed home, authoring and roadmap in Chromium140 at1440×1000 and390×844: six200responses, no script errors/document overflow; API page and stylesheet also returned200. Homepage and authoring screenshots were visually reviewed. Pages uses main-only Actions deployment; no other repository or domain settings changed. This completes the website delivery, not broadQA8/full parity or a package release.
 
 ## GitHub Pages documentation site — reviewed manual merge
 
 PR95 final head `d9a6cbb914ec8a1bd4172bbcb58d0acbfe0ac8ae` passed required [CI39547460948](https://github.com/narain1/pydoccraft/actions/runs/39547460948): 321 native tests, 462 installed-wheel tests in207.055 seconds, formatting, Clippy, strict typing and the unchanged264-package license audit. Its [documentation build39547460927](https://github.com/narain1/pydoccraft/actions/runs/39547460927) passed; deployment was correctly skipped for the pull request. Independent source review and a clean build checked28 pages and1,642 local links/assets/fragments; negative checks rejected missing files/fragments, duplicate IDs and output-root traversal.
 
 Root visual review used Chromium140 with1440×1000 and390×844 viewports on the home page, authoring guide and roadmap. All six requests returned200 with no JavaScript errors or horizontal overflow; desktop/mobile homepage screenshots were inspected. The reviewed exact head was manually merged as `5583f2946534041267f71691a732f5c0d96c6bcd` after current-main checks, with repository auto-merge disabled. Public deployment/reachability remains separately verified after merge; the site follows main and does not declare the roadmap or a package release complete.
+
+## Owned PDF radio groups — final manual merge gate
+
+PR94 final head `0a0b225e12708d3d49c0bf7543d459b0c730cd49` passed required [current-main CI39548202131](https://github.com/narain1/pydoccraft/actions/runs/39548202131) and documentation CI39548202076 after the independent exact-artifact review recorded above. The final installed-wheel run passed all467 tests in388.512 seconds, with zero failures/errors/skips, on CPython3.11.17/Linux x86_64/glibc2.39. Wheel SHA-256 `11e5840634a7a95c9e7d2b515b064b355220fb181145a42fd5a17812a37b6efb`,17,535,375 bytes; extension40,677,744 bytes. Lock and upstream revisions are unchanged.
+
+The reviewed exact head was manually merged as `8979a6deb151742e18175cdebe843382ba3ac611`; repository auto-merge remains disabled. This completes the owned same-page radio-group delivery gate, while imported forms and broader PDF6 remain partial.
