@@ -25,7 +25,7 @@ flowchart LR
 Every upstream repository is pinned to an immutable commit:
 
 - PdfCraft v0.9.0, reviewed contribution fork `narain1/pdfcraft`: `516caea956c0aaf15f2bd1f35a15e07c73a9ead6` (reviewed parent `60a8d7998b64c7718e08e9054e99f1f2eb1eda8d`, original upstream base `645016addcfb9078c557f0189559ab47cdcee057`)
-- WordCraft v0.8.0, reviewed contribution fork `narain1/wordcraft`: `5312722fb1cefed837f00227e3afe919a6451b54` (reviewed parent `f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef`, original upstream `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`)
+- WordCraft v0.8.0, reviewed contribution fork `narain1/wordcraft`: `517637db3caa0dffd1ad5e4e66c9bdd86e908742` (reviewed parent `5312722fb1cefed837f00227e3afe919a6451b54`, original upstream `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`)
 - DeckCraft v0.8.0, reviewed contribution fork `narain1/deckcraft`: `c9c7fff189c808bf7266d0b888c3636a1880080d` (reviewed parent `dd4fd70b6347dd2ce782e33f030a2b6c0abb0106`, original upstream base `22db9261f9d1a214c296fd390173130c45d76d66`)
 - Craft PDF backend patches use the immutable `craft-libs` revision required by WordCraft/DeckCraft.
 
@@ -896,6 +896,13 @@ Reuse private source/box/color aliases on the existing PDF methods; point inputs
 The acceptance audit adds clause-to-fixture/native-resolution links to the existing documentation. It reuses the existing TODO ownership and generated support matrix; no runtime manager, new profile, duplicated completion ledger or implementation change is introduced.
 
 TXT1 reuses existing paragraph collections and revision-bound ranges. Its audit records ordinary ordered editing and source-text preservation without introducing a second run/ordered-content abstraction or changing protected-anchor guards.
+
+
+## Native core-language prerequisite (spec139/140)
+
+The selected517637db contribution adds one public CoreProps String and two native core read/write entries. Empty is absent, including old model JSON; the existing reader trims surrounding whitespace and retains the last matching element, while the existing writer escapes and omits empty values. Flat OPC retains the package metadata. Word2003 XML's separate property converter remains outside scope; run-language formatting and PDF tagging are unrelated. Native privacy filtering continues to remove creator/editor without removing document language. No local XML implementation or metadata manager is added.
+
+This dedicated package upgrade changes only five direct/nine resolved Word source identities. One test-only linked-native fixture accesses serialized CoreProps language, so the exact desired source can execute on the former native model and demonstrate its preservation loss without exposing a Python key. Repeated source/PDF rendering and existing extraction/link controls establish unchanged fixture output; the full579 Python corpus remains unchanged. Python metadata admission141 and bounded extended properties remain separate.
 
 
 ## DOCX core-language metadata (spec141)

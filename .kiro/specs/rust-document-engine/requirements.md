@@ -969,6 +969,18 @@ Judge STY2 against its original base/next/linked/default/effective/cycle/reset c
 The same audit compares original TXT1 ordinary paragraph/run editing and exact-text clauses. Cross-container structural adoption, imported editing and semantic-anchor deletion remain with DOC5/DOC2 and their existing semantic owners; they must not become duplicate blockers for ordinary text editing.
 
 
+## 139. Native core document language preservation
+
+1. The native contribution SHALL expose a typed CoreProps language String with empty/old-model defaults, reusing existing core reader/writer trim, duplicate, escaping and empty-omission semantics. Preserve DOCX and Flat OPC language separately from run language, direction and PDF tagging.
+2. Preserve positive unrelated metadata/body/style/media/link/output controls. Retain identical original failed XML fixtures, typed-model/old-model tests, selected native suites, original/candidate absent-package and rendered comparisons, and precise existing native lint limitations. Do not imply Word2003 XML conversion, tag validation, extended-property access or application parity.
+
+## 140. Dedicated WordCraft core-language prerequisite upgrade
+
+1. Select all five direct/nine resolved Word crates at the exact independently reviewed contribution, retaining all other locked sources/versions/edges/checksums, permissive licenses and assets.
+2. Add one linked-native regression for imported language, serialized CoreProps preservation, clear/default behavior and unchanged content/render/export paths. Keep all Python metadata inventories and historical public tests unchanged; admission belongs to spec141.
+3. Complete locked native/fmt/strictClippy/release, clean installed579 regression corpus, strict typing and independent source/artifact/attribution evidence. Record exact sizes/citations and distinguish native139 evidence from package140 evidence. No DOC7 checkbox or operation-profile promotion follows.
+
+
 ## DOCX core-language metadata (spec141, pending native prerequisite)
 
 The existing owned metadata patch and extraction metadata dictionary shall expose the native document-language value after the separately reviewed engine upgrade. Preserve existing nullable-clear/empty-omission behavior, 64 KiB UTF-8 scalar bounds, 256 KiB serialized core-metadata bounds and atomic rejection. Treat this as document metadata; do not infer run language, shaping, fonts, paragraph direction or PDF tagging. Extended properties remain separate DOC7/U01 work.

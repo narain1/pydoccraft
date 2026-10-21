@@ -1150,6 +1150,16 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [ ] Complete current-main CI and independent manual merge.
 
 
+## Native core language and dedicated upgrade (spec139/140)
+
+- [x] Review, validate and publish the bounded native contribution517637db on5312722; retain original failures, selected native suites,144 comparisons per revision,24 exact cross-version rasters and existing strict-lint limitations.
+- [x] Review the dedicated five-direct/nine-resolved Word upgrade and native-only regression plan; retain every Python inventory/test and other engine pin.
+- [x] Audit source-only lock changes,264 permissive runtime/build packages and55 Word citations across14 files; update current attribution while preserving historical artifacts/fingerprints.
+- [x] Finish linked baseline/candidate regression and full461-native/fmt/strictClippy/release; clean579 installed corpus, typing, exact artifact/source and independent review.
+- [x] Finalize synchronized native/pin/artifact evidence and independent source/focused review.
+- [ ] Complete current-head CI and manual merge. Python language admission141 and broader DOC7/U01 remain open.
+
+
 ## DOCX core-language metadata (spec141)
 
 - [x] Independently review the compact existing-dictionary API, native inventories, bounds and metadata/run-language distinction.
