@@ -904,3 +904,7 @@ The pinned reference inventory SHALL distinguish implemented bounded operations 
 2. Preserve every existing support profile, operation status, historical artifact and fixture fingerprint. Correct stale current profile-count prose without rewriting historical evidence. API1/QA1, R4/P4/U09, QA7 and other incomplete behavioral criteria SHALL remain open.
 3. Use the existing ledger, roadmap joins and published matrices; add no runtime query framework, engine, dependency or second completion database. Document source-audited offline/in-process architecture separately from dynamic sandbox or exhaustive hostile-input certification.
 4. Reuse the exact reviewed452-native/two568-installed artifact evidence; run documentation/source consistency and site-link checks after changes, without claiming a new native build or runtime test run.
+
+## 126. Representative combined authored documents
+
+Complete QA2's missing resume, review, form and multilingual examples using existing public operations. Combine tables, backgrounds and stories rather than only testing isolated formatting. Keep the multilingual fixture's Latin glyph/language scope explicit; preserve separate comment metadata and document native PDF review omission. Owned PDF form copies/flattening must retain visible appearances and source independence. No new package API or runtime dependency is required. Acceptance requires exact installed-wheel reuse identity, focused/full corpus results and actual visual inspection of retained source/PDF raster artifacts.

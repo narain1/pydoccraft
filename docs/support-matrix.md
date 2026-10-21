@@ -594,7 +594,7 @@ Owners, roles and checkboxes below come from existing roadmap files. A checked c
 | SLIDE5: Notes, comments and navigation. | W11 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | SLIDE6: Advanced preservation. | W11 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | QA1: Feature coverage ledger. | W01 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
-| QA2: Authoring fixture corpus. | W14 / acceptance | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
+| QA2: Authoring fixture corpus. | W14 / acceptance | checked | — | Unassessed: broader scripts, platforms, preservation and exhaustive operation coverage remain under their existing criteria. The seven-category representative corpus is accepted by spec126 and docs/acceptance-audit.md#qa2-representative-authored-documents; no operation profile is promoted. |
 | QA3: Round-trip tests. | W14 / acceptance | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | QA4: Rendering/export checks. | W14 / acceptance | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | QA5: Independent validity evidence. | W14 / acceptance | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |

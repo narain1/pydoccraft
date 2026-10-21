@@ -3566,7 +3566,7 @@
     },
     "QA2": {
       "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "remaining": "Unassessed: broader scripts, platforms, preservation and exhaustive operation coverage remain under their existing criteria. The seven-category representative corpus is accepted by spec126 and docs/acceptance-audit.md#qa2-representative-authored-documents; no operation profile is promoted."
     },
     "QA3": {
       "profiles": [],

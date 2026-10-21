@@ -1040,3 +1040,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Pass27documentation tests, exact464-file source/test/vendor/attribution comparison, existing inventory checks and30pages/1,850site links.
 - [x] Complete final independent original-clause/checklist/JSON/source/documentation review.
 - [ ] Complete current-head CI/manual merge. No runtime/fixture/dependency change is part of this slice.
+
+## Representative authored-document corpus (spec126)
+
+- [x] Independently review original QA2 categories and the three-builder composition proposal; retain existing cookbook fixtures unchanged.
+- [x] Add resume/review/PDF-form examples and three focused installed-package workflows; inspect retained 144-DPI native artifacts.
+- [x] Complete independent source/focused/visual review and full retained-wheel corpus with exact source/artifact identity: final 571 tests pass with zero failures/errors/skips.
+- [x] Record seven-category evidence and close QA2; keep broader typography/review/forms/platform/preservation criteria open.
+- [ ] Complete current-main CI and independent manual merge.
