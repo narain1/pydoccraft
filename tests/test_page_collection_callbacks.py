@@ -42,7 +42,7 @@ class PageCollectionCallbackTests(unittest.TestCase):
     def test_structural_callbacks_cannot_retarget_delete_or_either_move_index(self):
         for kind in ('pdf', 'pptx'):
             for operation in ('delete', 'move_source', 'move_destination'):
-                for change in ('append', 'delete', 'move', 'close'):
+                for change in ('append', 'delete', 'move', 'close') + (('rotate',) if kind == 'pdf' else ()):
                     with self.subTest(kind=kind, operation=operation, change=change), document(kind) as owner:
                         selected = collection(owner)
                         after = []
@@ -56,6 +56,8 @@ class PageCollectionCallbackTests(unittest.TestCase):
                                     del selected[1]
                                 elif change == 'move':
                                     selected.move(0, 1)
+                                elif change == 'rotate':
+                                    selected[0].rotate(90)
                                 else:
                                     owner.close()
                                 if not owner.closed:
@@ -76,7 +78,7 @@ class PageCollectionCallbackTests(unittest.TestCase):
 
     def test_pdf_lookup_checks_callbacks_before_constructing_current_handles(self):
         for lookup in ('index', 'slice_start', 'slice_stop', 'slice_step'):
-            for change in ('append', 'delete', 'move', 'close'):
+            for change in ('append', 'delete', 'move', 'close', 'rotate'):
                 with self.subTest(lookup=lookup, change=change), document('pdf') as owner:
                     after = []
                     def mutate():
@@ -86,6 +88,8 @@ class PageCollectionCallbackTests(unittest.TestCase):
                             del owner.pages[1]
                         elif change == 'move':
                             owner.pages.move(0, 1)
+                        elif change == 'rotate':
+                            owner.pages[0].rotate(90)
                         else:
                             owner.close()
                         if not owner.closed:
