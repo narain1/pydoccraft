@@ -224,6 +224,7 @@ impl EditableDocx {
     pub fn to_bytes(&self) -> PyResult<Vec<u8>> {
         let comments = comments::inventory(self.document()?)?;
         comments::registry(self, &comments)?;
+        page_field_count(self.document()?)?;
         validate_line_number_work(self.document()?)?;
         validate_unsplittable_page_bounds_with_comments(self.document()?, &comments)?;
         validate_unequal_column_tables(self.document()?)?;
@@ -1874,6 +1875,7 @@ impl EditableDocx {
                 ))
             }
         };
+        validate_table_page_field(&self.location(id)?.1, instruction)?;
         let (offset, start) = (paragraph.text.len(), paragraph.text.chars().count());
         let text_bytes = self.updated_text_bytes(0, wordcraft_doc::para::OBJ.len_utf8())?;
         if page_field_count(self.document()?)? >= MAX_PAGE_FIELDS {
@@ -5302,6 +5304,15 @@ fn patch_custom_metadata(candidate: &mut Document, value: Value) -> PyResult<()>
     Ok(())
 }
 
+fn validate_table_page_field(path: &Path, instruction: &str) -> PyResult<()> {
+    if path.0.len() > 1 && wordcraft_layout::fields::field_name(instruction) == "PAGE" {
+        return Err(EngineError::Unsupported(
+            "page fields in table cells are unsupported at this native revision; use a direct body, header, footer or note paragraph".into(),
+        ).into());
+    }
+    Ok(())
+}
+
 fn page_field_count(document: &Document) -> PyResult<usize> {
     let sections = document.sections();
     // Reuse native section endpoints: section_index_of() rebuilds that inventory
@@ -5381,6 +5392,7 @@ fn page_field_count(document: &Document) -> PyResult<usize> {
                 let mut paragraph_bytes = paragraph.text.len();
                 for object in &paragraph.objects {
                     if let InlineObject::Field { instr, result, .. } = object {
+                        validate_table_page_field(&path, instr)?;
                         if let Some(value) = metadata_field_value(document, instr, result) {
                             has_metadata_fields = true;
                             if value.chars().any(|ch| {
@@ -17900,12 +17912,12 @@ mod tests {
             .add_table(vec![vec!["".into()], vec!["Keep".into()]])
             .unwrap();
         let cell = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
-        document.add_paragraph_field(cell, "page").unwrap();
+        document.add_paragraph_field(cell, "page_count").unwrap();
         assert_eq!(document.text_bytes, 7);
         document.delete_row(table, 0).unwrap();
         assert_eq!(document.text_bytes, 4);
         let cell = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
-        document.add_paragraph_field(cell, "page").unwrap();
+        document.add_paragraph_field(cell, "page_count").unwrap();
         document.set_cell_text(table, 0, 0, "New").unwrap();
         assert_eq!(document.text_bytes, 3);
 
@@ -21386,7 +21398,7 @@ mod cell_paragraph_delete_tests {
             .unwrap();
         let target = document.cell_paragraph_ids(table, 0, 0).unwrap()[0];
         let other = document.cell_paragraph_ids(table, 0, 1).unwrap()[0];
-        document.add_paragraph_field(target, "page").unwrap();
+        document.add_paragraph_field(target, "page_count").unwrap();
         let metadata = document
             .cell_add_paragraph(table, 0, 1, "Metadata:")
             .unwrap();
@@ -21964,3 +21976,7 @@ mod table_delete_scope_proof;
 #[cfg(test)]
 #[path = "author_docx_table_delete_tests.rs"]
 mod table_delete_tests;
+
+#[cfg(test)]
+#[path = "table_page_field_tests.rs"]
+mod table_page_field_tests;

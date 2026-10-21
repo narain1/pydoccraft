@@ -115,6 +115,8 @@ DOCX paragraphs accept `paragraph.format(direction="rtl" | "ltr" | None)`. Direc
 
 `paragraph.add_field("page" | "page_count" | "section_page_count")` appends a native decimal field and returns the same TextRange used for runs and slices. The range selects the native object marker (`range.text` is U+FFFC), not an evaluated number. Format it through `range.format(...)`, or remove it by assigning `range.text = ""`. WordCraft evaluates the field for PNG/PDF output. Saved DOCX contains an empty dirty cached result: source extraction therefore does not fabricate a current page number. For example:
 
+`page` is unavailable in owned table cells, including nested and merged cells in every authored story. The pinned native table layout can keep the preceding paragraph's page-number context after pagination, so a cell on page 2 can display 1. The guard rejects this scope at insertion, every staged edit and serialization; it does not rewrite field results or guess when the value happens to be correct. Use a direct body, header, footer or note paragraph for `page`. Table `page_count` and `section_page_count` remain available within their existing section restrictions, as do supported title/author fields. This is an owned-authoring guard; rendering read-only imported documents continues to use native behavior and may exhibit the same limitation.
+
 ```python
 footer = document.sections[0].footer().add_paragraph("Page ")
 footer.add_field("page")

@@ -688,3 +688,10 @@ The staged transaction subtracts checked returned-subtree text/cell usage, shift
 ## 105. Letterhead belongs to a section story
 
 An ordinary example returns an owned WordDocument with inline PNGs in first headers and text-only even/default variants. A second next-page section receives copied independent parts and replaces only its first logo/text; existing paragraph insertion drives native body reflow. Native headers_footers selects first actual section pages, then displayed-number parity. Native section_side may insert a preceding-section filler before a restarted next-page section to align physical parity when even/odd headers are enabled. Do not compensate with explicit breaks, page-index edits, XML rewrites or artwork compositing. The fixture treats exact filler/header behavior separately from actual body-line growth and semantic preservation.
+
+
+## 107. One owned field-scope guard
+
+The existing native Path convention distinguishes direct story paragraphs (one coordinate) from cell paragraphs (one plus three per table depth). A private helper rejects field_name=PAGE when path depth exceeds one. add_paragraph_field invokes it before creating an object or changing accounting; page_field_count invokes it during ordinary candidate validation; to_bytes calls the same existing field validation after bounded comment/source inventory and registry checks, before layout/write. Save, render and conversion reuse serialization. No evaluator or second layout pass is added.
+
+This conservative supported profile excludes cell PAGE even where a current first-page value happens to be correct; pagination changes can expose stale context. Candidate validation still permits removal of that unsupported object, and direct note/header/footer paths remain direct. Imported extraction/rendering continues through native readers and is not covered by the owned guard. Existing table count fields retain continuous-section restrictions; metadata fields retain their separate expansion/geometry checks.

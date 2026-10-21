@@ -845,3 +845,14 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete integrated corpus and independent review: both 523-test installed runs pass; BG5 satisfies its original bounded section/header-anchor and repagination criterion.
 - [ ] Complete exact-head/current-main CI and manual merge; retain BG8 and documented broader limitations.
 - [ ] Keep BG8 and broader section-fill/linkage/continuous/floating/watermark coverage open.
+
+
+## Owned table PAGE guard (spec107)
+
+- [x] Reproduce stale table PAGE context independently of movement/cache with native direct/nested fresh and read/write controls; retain correct direct PAGE and table count behavior.
+- [x] Reuse one private scope check for upfront field insertion, candidate editing and defensive serialization after bounded source inventory; allow unsupported-object removal as recovery.
+- [x] Pass two focused native groups, related field and affected accounting controls, formatting, all-target Clippy and a frozen debug build.
+- [x] Pass 21 focused public/field/lifecycle tests and 27 roadmap/support/reference checks; final runtime/native/public source review clear.
+- [x] Complete independent exact copied-extension replay: 18 tests pass; preserve deliberate fixture corrections and unchanged ledger fingerprints.
+- [ ] Complete final docs review and exact integrated native/installed-wheel/CI gates.
+- [ ] Retain native table field-context repair under U07/LAY6/REF3; keep spec106 movement pending its revised raw gate.

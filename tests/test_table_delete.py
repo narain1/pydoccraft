@@ -35,7 +35,7 @@ class TableDeletionTests(unittest.TestCase):
                 removed_row = removed.row(0)
                 removed_cell.background = 'blue'
                 removed_paragraph = removed_cell.paragraphs[0]
-                removed_paragraph.add_field('page')
+                removed_paragraph.add_field('page_count')
                 deep = removed_cell.add_table([['DeepDrop']])
                 deep_paragraph = deep[0, 0].paragraphs[0]
                 picture = deep[0, 0].add_image(red_picture(2, 2), width=12)

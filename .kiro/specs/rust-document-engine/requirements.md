@@ -772,3 +772,10 @@ Annotate the existing paragraph/style/default formatting getters without changin
 ## 105. Section-first inline letterhead composition
 
 Reuse existing header/footer variants, PNG picture handles, ranges and section lifecycle for a caller-owned example; add no library API or runtime behavior. Verify first-slot precedence, independent copied section content, displayed-number even/default selection and native repagination after inserting earlier body text. Preserve original text/order, one body link and semantic table content exactly once across DOCX/PDF. Validate actual source/exported appearance at 72/144/300 DPI using full-page 72 controls and bounded higher-DPI header regions. Record intentional parity filler pages explicitly; keep section fills/linkage/continuous/floating/watermark exclusions honest.
+
+
+## 107. Reject unsupported owned table PAGE fields
+
+Owned DOCX PAGE field insertion SHALL reject table-cell paragraphs at every nesting depth and merged alias. The same scope rule SHALL validate every staged candidate and serialization after bounded source inventory, preventing later edits or privately constructed state from emitting a known incorrect page number. Direct body/header/footer/note paragraph PAGE and supported table NUMPAGES/SECTIONPAGES/TITLE/AUTHOR SHALL retain their existing behavior and limits. Removing an unsupported field SHALL remain a recovery operation. No local evaluation, result rewriting or imported mutation API SHALL be introduced.
+
+Tests SHALL preserve the native stale-context reproducer and successful direct/count controls, prove precise Unsupported errors and atomic byte/revision/registry/range/cache rollback, and verify output/lifetime behavior. Earlier successful cell-PAGE fixture setup SHALL be deliberately replaced with supported count fields while preserving resource/identity/geometry checks, with the correction documented and evidence fingerprints checked rather than refreshed broadly. U07/LAY6/REF3 SHALL remain open.

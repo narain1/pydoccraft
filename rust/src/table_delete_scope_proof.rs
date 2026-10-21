@@ -399,7 +399,7 @@ fn upstream_table_remove_docx_png_pdf_keep_media_sections_links_and_review() {
             owner
                 .set_range_link(p, 0, 9, owner.revision, Some("https://example.com"))
                 .unwrap();
-            owner.add_paragraph_field(p, "page").unwrap();
+            owner.add_paragraph_field(p, "page_count").unwrap();
             owner
                 .cell_add_table(table, 0, 0, vec![vec!["DeepDrop".into()]])
                 .unwrap();
