@@ -11,11 +11,11 @@ The package links selected library crates rather than complete ArtCraft applicat
 | Project | Pinned revision | Responsibility |
 |---|---|---|
 | [PdfCraft contribution fork](https://github.com/narain1/pdfcraft) | `516caea956c0aaf15f2bd1f35a15e07c73a9ead6` | PDF inspection, reading-order text, links, images, rendering, DOCX export primitives |
-| [WordCraft contribution fork](https://github.com/narain1/wordcraft) | `5312722fb1cefed837f00227e3afe919a6451b54` | DOCX model, layout, rendering, PDF export |
-| [DeckCraft contribution fork](https://github.com/narain1/deckcraft) | `dd4fd70b6347dd2ce782e33f030a2b6c0abb0106` | PPTX model, rendering, PDF export |
+| [WordCraft contribution fork](https://github.com/narain1/wordcraft) | `517637db3caa0dffd1ad5e4e66c9bdd86e908742` | DOCX model, layout, rendering, PDF export |
+| [DeckCraft contribution fork](https://github.com/narain1/deckcraft) | `c9c7fff189c808bf7266d0b888c3636a1880080d` | PPTX model, rendering, PDF export |
 | [craft-libs](https://github.com/storytold/craft-libs) | `c3487320b2d1de657b860b3c8abb44e1f2b32bd8` | Shared PDF backend and patched Krilla dependency |
 
-The PdfCraft fork derives from upstream `645016addcfb9078c557f0189559ab47cdcee057` through reviewed parent `60a8d7998b64c7718e08e9054e99f1f2eb1eda8d`. It retains the final rounded-raster allocation guard and adds placement for native typed text/image content; this dedicated upgrade adds no Python underlay API. WordCraft and DeckCraft retain their separately reviewed stroke-parity and fallible-rendering forks. These are contribution forks, not claims of upstream acceptance; root NOTICE records original sources and parents. No bundled assets changed.
+The PdfCraft fork derives from upstream `645016addcfb9078c557f0189559ab47cdcee057` through reviewed parent `60a8d7998b64c7718e08e9054e99f1f2eb1eda8d`. It retains the final rounded-raster allocation guard and adds placement for native typed text/image content; this dedicated upgrade adds no Python underlay API. WordCraft retains the reviewed stroke-parity and absent-default-size corrections and adds typed native core language preservation. DeckCraft retains fallible rendering/PDF error propagation and logical break-text correction. The current table reflects those existing pins; this upgrade changes only WordCraft. These are contribution forks, not claims of upstream acceptance; root NOTICE records original sources and parents. No bundled assets changed.
 
 Git dependencies use immutable `rev` values. Do not replace them with branches or floating tags.
 
@@ -38,7 +38,7 @@ Apache-2.0 redistribution requires preservation of applicable notices and identi
 
 ## Locked dependency inventory
 
-`THIRD_PARTY_LICENSES.md` is generated from the committed `Cargo.lock` and reviewed against the final normal/build graph. The current recorded audit covered 263 packages and found no undeclared or GPL-, AGPL-, or LGPL-only runtime dependency.
+`THIRD_PARTY_LICENSES.md` is generated from the committed `Cargo.lock` and reviewed against the final normal/build graph. The current recorded audit covered 264 packages and found no undeclared or GPL-, AGPL-, or LGPL-only runtime dependency.
 
 An SPDX `OR` expression is acceptable when at least one available license is allowed and the project complies with that choice. Bundled assets—such as fonts and CMaps—must be reviewed separately from crate metadata because asset licenses may not be represented by Cargo's package license field.
 
