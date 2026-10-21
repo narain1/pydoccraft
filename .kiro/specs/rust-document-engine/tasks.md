@@ -781,3 +781,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Verify native/public rollback, copies, empty append, invalidation and actual PPTX/PNG/PDF output; independent source and exact-wheel review pass.
 - [x] Complete locked full corpus: 366 native tests and two independent 506-test installed-wheel runs pass.
 - [ ] Complete exact-head/current-main CI and manual merge; retain broader DOC5/TXT1/SLIDE3 work.
+
+
+## Bounded owned DOCX comments (spec98)
+
+- [x] Execute raw native storage, metadata, durable-ID, endpoint/interior shaping, overlapping shading, multiline/split-page and ordinary/merged/nested cell controls before adapter implementation.
+- [x] Reuse one collection/add operation and existing ranges for plain-text root/direct-reply CRUD and typed metadata/navigation properties.
+- [x] Stage private locator/block/text accounting, monotonic IDs and exact-candidate inventory; reuse the proof in navigation/media/output without relaxing other anchors.
+- [x] Add native exact/+1, malformed topology/registry, revision/allocator exhaustion, Unicode author, media/reference and rollback controls; retain all historical fixtures unchanged.
+- [ ] Complete exact integrated native/installed-wheel corpus, independent final review and current-head CI before merge acceptance.
+- [ ] Retain arbitrary interior/cross-paragraph roots, rich comment stories, nested replies, imported editing and review-display selection under existing REV1/TXT8/REV5 and U02 ownership.

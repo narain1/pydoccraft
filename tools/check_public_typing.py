@@ -10,7 +10,7 @@ from typing import Any, Literal, assert_type
 
 import doc_ex
 from doc_ex._authoring import (
-    Annotation, Bookmark, EditableCell, EditableTable, Paragraph, PdfDocument, PdfField,
+    Annotation, Bookmark, Comment, Comments, EditableCell, EditableTable, Paragraph, PdfDocument, PdfField,
     PdfPage, Picture, Presentation, Shape, SlidePicture, SlideTable, TextRange,
     WordDocument,
 )
@@ -33,6 +33,19 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(paragraph.add_run(" spaced", letter_spacing=0.3), TextRange)
         assert_type(paragraph[:].format(letter_spacing=None), None)
         assert_type(word.styles.format_defaults(letter_spacing=0), None)
+        comment_paragraph = word.add_paragraph("Comment target")
+        assert_type(word.comments, Comments)
+        comment = word.comments.add(comment_paragraph[:], "Review", author="Ada")
+        assert_type(comment, Comment)
+        assert_type(word.comments.add(comment, "Reply"), Comment)
+        assert_type(comment.range, TextRange)
+        assert_type(comment.parent, Comment | None)
+        assert_type(comment.text, str)
+        assert_type(comment.author, str)
+        assert_type(comment.date, str)
+        assert_type(comment.resolved, bool)
+        assert_type(word.comments[:], list[Comment])
+        assert_type(next(iter(word.comments)), Comment)
         note = word.notes.add(paragraph[:], 'Detail')
         note.add_paragraph('Remove')
         del note.paragraphs[1]

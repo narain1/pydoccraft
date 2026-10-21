@@ -26,6 +26,10 @@ use wordcraft_doc::{
 
 use crate::{DocExNativeError, EngineError};
 
+#[path = "author_docx_comments.rs"]
+mod comments;
+use comments::CommentInventory;
+
 const MAX_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_DOCUMENT_TEXT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_BLOCKS: usize = 100_000;
@@ -91,6 +95,7 @@ pub struct EditableDocx {
     stories: BTreeMap<u32, Vec<usize>>,
     story_placeholders: BTreeMap<u32, usize>,
     next_block_id: usize,
+    next_comment_id: u32,
     cell_placeholders: BTreeSet<(StoryRef, Path)>,
     table_generations: BTreeMap<usize, u64>,
 }
@@ -111,6 +116,7 @@ impl EditableDocx {
             stories: BTreeMap::new(),
             story_placeholders: BTreeMap::new(),
             next_block_id: MAX_BLOCKS,
+            next_comment_id: 0,
             cell_placeholders: BTreeSet::new(),
             table_generations: BTreeMap::new(),
         }
@@ -129,6 +135,7 @@ impl EditableDocx {
             stories: self.stories.clone(),
             story_placeholders: self.story_placeholders.clone(),
             next_block_id: self.next_block_id,
+            next_comment_id: self.next_comment_id,
             cell_placeholders: self.cell_placeholders.clone(),
             table_generations: self.table_generations.clone(),
         })
@@ -215,8 +222,10 @@ impl EditableDocx {
     }
 
     pub fn to_bytes(&self) -> PyResult<Vec<u8>> {
+        let comments = comments::inventory(self.document()?)?;
+        comments::registry(self, &comments)?;
         validate_line_number_work(self.document()?)?;
-        validate_unsplittable_page_bounds(self.document()?)?;
+        validate_unsplittable_page_bounds_with_comments(self.document()?, &comments)?;
         validate_unequal_column_tables(self.document()?)?;
         let output = wordcraft_docx::write(self.document()?).map_err(|error| {
             EngineError::Conversion(format!("DOCX serialization failed: {error}"))
@@ -2488,6 +2497,44 @@ impl EditableDocx {
             .collect())
     }
 
+    pub fn comment_ids(&self) -> PyResult<Vec<u32>> {
+        comments::ids(self)
+    }
+
+    pub fn comment_info(&self, id: u32) -> PyResult<String> {
+        comments::info(self, id)
+    }
+
+    pub fn comment_range(&self, id: u32) -> PyResult<(usize, usize, usize, u64)> {
+        comments::range(self, id)
+    }
+
+    #[pyo3(signature = (paragraph, start, end, revision, parent, text, author, date))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_comment(
+        &mut self,
+        paragraph: Option<usize>,
+        start: usize,
+        end: usize,
+        revision: u64,
+        parent: Option<u32>,
+        text: &str,
+        author: &str,
+        date: &str,
+    ) -> PyResult<u32> {
+        comments::add(
+            self, paragraph, start, end, revision, parent, text, author, date,
+        )
+    }
+
+    pub fn update_comment(&mut self, id: u32, patch: &str) -> PyResult<()> {
+        comments::update(self, id, patch)
+    }
+
+    pub fn remove_comment(&mut self, id: u32) -> PyResult<()> {
+        comments::remove(self, id)
+    }
+
     pub fn note_info(&self, note: u32) -> PyResult<String> {
         let part = self
             .document()?
@@ -4692,10 +4739,30 @@ impl EditableDocx {
 
     fn commit_with_note_conversion(
         &mut self,
-        mut document: Document,
+        document: Document,
         removed_bookmark: Option<&str>,
         converted_notes: Option<NoteKind>,
     ) -> PyResult<()> {
+        self.commit_validated(document, removed_bookmark, converted_notes, None)
+    }
+
+    fn commit_validated(
+        &mut self,
+        mut document: Document,
+        removed_bookmark: Option<&str>,
+        converted_notes: Option<NoteKind>,
+        removed_comment: Option<&comments::CommentRemoval>,
+    ) -> PyResult<()> {
+        let comments = comments::inventory(&document)?;
+        comments::registry(self, &comments)?;
+        if let Some(removal) = removed_comment {
+            if removed_bookmark.is_some() || converted_notes.is_some() {
+                return Err(PyValueError::new_err(
+                    "comment deletion cannot combine semantic permissions",
+                ));
+            }
+            removal.validate(self.document()?, &document)?;
+        }
         if let Some(target) = converted_notes {
             if removed_bookmark.is_some() {
                 return Err(PyValueError::new_err(
@@ -4704,11 +4771,11 @@ impl EditableDocx {
             }
             validate_note_conversion_anchors(self.document()?, &document, target)?;
         }
-        validate_bookmark_links(&document)?;
+        validate_bookmark_links_with_comments(&document, &comments)?;
         let media_bytes = if document.media.is_empty() && document.settings.page_picture.is_none() {
             0
         } else {
-            retain_authored_image_media(&mut document)?
+            retain_authored_image_media_with_comments(&mut document, &comments)?
         };
         page_field_count(&document)?;
         validate_line_number_work(&document)?;
@@ -4733,7 +4800,8 @@ impl EditableDocx {
         if converted_notes.is_none() && !existing.is_empty() {
             let next = semantic_anchors(&document);
             if existing.iter().any(|(key, count)| {
-                !(removed_bookmark == Some(key.1.as_str()) && matches!(key.0, 2 | 3))
+                !(removed_bookmark == Some(key.1.as_str()) && matches!(key.0, 2 | 3)
+                    || removed_comment.is_some_and(|removal| removal.marker(key)))
                     && next.get(key) != Some(count)
             }) {
                 return Err(EngineError::Unsupported(
@@ -5176,7 +5244,16 @@ fn attach_image_media(
 
 /// Reference accounting for this owner's authored image/note/page-field profile. Native
 /// paths traverse nested tables; we do not reconstruct an OOXML resource graph.
+#[cfg(test)]
 fn retain_authored_image_media(document: &mut Document) -> PyResult<usize> {
+    let comments = comments::inventory(document)?;
+    retain_authored_image_media_with_comments(document, &comments)
+}
+
+fn retain_authored_image_media_with_comments(
+    document: &mut Document,
+    comments: &CommentInventory,
+) -> PyResult<usize> {
     let mut used = BTreeSet::new();
     // A document-wide background is one resource reference, not an inline
     // placement per rendered page. Shared inline/background bytes count once.
@@ -5209,6 +5286,7 @@ fn retain_authored_image_media(document: &mut Document) -> PyResult<usize> {
                         used.insert(media.clone());
                     }
                     InlineObject::NoteRef { .. } | InlineObject::BookmarkStart { .. } | InlineObject::BookmarkEnd { .. } => {}
+                    InlineObject::CommentStart { id } | InlineObject::CommentEnd { id } if comments.marker(*id) => {}
                     // Fields own instruction/result text, not media references. Legacy
                     // form XML is outside our authored page-field profile.
                     InlineObject::Field { form, .. } if form.is_empty() => {}
@@ -5646,6 +5724,14 @@ fn validate_floating_picture_bounds(
 /// Vertical merge anchors carry multi-row geometry and are deliberately outside
 /// this narrow check; exact-height clipping *inside* a page remains intentional.
 fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
+    let comments = comments::inventory(document)?;
+    validate_unsplittable_page_bounds_with_comments(document, &comments)
+}
+
+fn validate_unsplittable_page_bounds_with_comments(
+    document: &Document,
+    comments: &CommentInventory,
+) -> PyResult<()> {
     validate_line_number_work(document)?;
     let outlines = outline_targets(document)?;
     let floating = floating_picture_paths(document)?;
@@ -5697,7 +5783,7 @@ fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
         .sections()
         .iter()
         .any(|(_, section)| section.line_numbers.is_some());
-    let bookmarks = validate_bookmark_links(document)?;
+    let bookmarks = validate_bookmark_links_with_comments(document, comments)?;
     let metadata_fields = metadata_field_offsets(document)?;
     if guarded.is_empty()
         && rich.is_empty()
@@ -6281,6 +6367,14 @@ fn validate_bookmark_name(name: &str) -> PyResult<()> {
 /// Inspect only public native paragraph paths/inline markers. Names are identities,
 /// not cached coordinates; table grid edits may move their paths.
 fn validate_bookmark_links(document: &Document) -> PyResult<BTreeMap<String, BookmarkSpan>> {
+    let comments = comments::inventory(document)?;
+    validate_bookmark_links_with_comments(document, &comments)
+}
+
+fn validate_bookmark_links_with_comments(
+    document: &Document,
+    comments: &CommentInventory,
+) -> PyResult<BTreeMap<String, BookmarkSpan>> {
     let mut starts = BTreeMap::new();
     let mut ends = BTreeMap::new();
     let mut targets = BTreeSet::new();
@@ -6309,7 +6403,8 @@ fn validate_bookmark_links(document: &Document) -> PyResult<BTreeMap<String, Boo
                         | InlineObject::NoteRef { .. }
                         | InlineObject::BookmarkStart { .. }
                         | InlineObject::BookmarkEnd { .. }
-                ) && !matches!(object, InlineObject::Field { form, .. } if form.is_empty());
+                ) && !matches!(object, InlineObject::Field { form, .. } if form.is_empty())
+                    && !matches!(object, InlineObject::CommentStart { id } | InlineObject::CommentEnd { id } if comments.marker(*id));
                 let (name, map) = match object {
                     InlineObject::BookmarkStart { name } => (name, &mut starts),
                     InlineObject::BookmarkEnd { name } => (name, &mut ends),
@@ -21609,3 +21704,11 @@ mod cell_paragraph_move_tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "comment_scope_proof.rs"]
+mod comment_scope_proof;
+
+#[cfg(test)]
+#[path = "author_docx_comment_tests.rs"]
+mod owned_comment_tests;

@@ -728,6 +728,10 @@ class WordDocument(EditableDocument):
         return _WordBookmarks(self)
 
     @property
+    def comments(self) -> Comments:
+        return Comments(self)
+
+    @property
     def notes(self) -> Notes:
         return Notes(self)
 
@@ -1466,6 +1470,111 @@ class EditableStory:
                 native.set_paragraph_style(identifier, style)
             return identifier
         return Paragraph(self._owner, self._owner._atomic(append))
+
+
+def _comment_string(value: str, limit: int, name: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"comment {name} must be a string")
+    if str.__len__(value) > limit or len(str.encode(value, "utf-8")) > limit:
+        raise ValueError(f"comment {name} exceeds {limit} UTF-8 bytes")
+    return str.__str__(value)
+
+
+class Comments(_Collection["Comment"]):
+    """Owned whole-paragraph DOCX comments and direct replies in creation order."""
+    def __init__(self, owner: WordDocument):
+        super().__init__(owner, lambda: owner._call("comment_ids"), Comment)
+
+    def add(self, reference: TextRange | Comment, text: str = "", *,
+            author: str = "Unknown", date: str = "") -> Comment:
+        """Anchor a whole body paragraph, or reply to an existing root comment.
+
+        Interior/empty ranges, rotated or exact-height cells and nested replies
+        are unsupported. The date is empty or a valid UTC YYYY-MM-DDTHH:MM:SSZ.
+        """
+        self._owner._ensure_open()
+        text = _comment_string(text, 1024 * 1024, "text")
+        author = _comment_string(author, 1024, "author")
+        date = _comment_string(date, 20, "date")
+        if isinstance(reference, TextRange) and isinstance(reference._paragraph, Paragraph):
+            paragraph = reference._paragraph
+            if paragraph._owner is not self._owner:
+                raise ValueError("comment range must belong to this document")
+            args = (paragraph._id, reference._start, reference._end, reference._revision, None)
+        elif isinstance(reference, Comment):
+            if reference._owner is not self._owner:
+                raise ValueError("parent comment must belong to this document")
+            args = (None, 0, 0, 0, reference._id)
+        else:
+            raise TypeError("comment reference must be a DOCX paragraph TextRange or root Comment")
+        identifier = self._owner._call("add_comment", *args, text, author, date, _change=True)
+        return Comment(self._owner, identifier)
+
+    def __delitem__(self, index: int) -> None:
+        self._owner._ensure_open()
+        if isinstance(index, slice):
+            raise TypeError("comment deletion requires an integer index")
+        ids = self._ids()
+        selected = operator.index(index)
+        self._owner._ensure_open()
+        self._owner._call("remove_comment", ids[_index(selected, len(ids))], _change=True)
+
+
+class Comment:
+    """An owned comment; text is separate from its body range and direct replies."""
+    def __init__(self, owner: WordDocument, identifier: int):
+        self._owner, self._id = owner, identifier
+
+    @property
+    def range(self) -> TextRange:
+        identifier, start, end, revision = self._owner._call("comment_range", self._id)
+        return TextRange(Paragraph(self._owner, identifier), start, end, revision)
+
+    @property
+    def parent(self) -> Comment | None:
+        parent = json.loads(self._owner._call("comment_info", self._id))["parent"]
+        return None if parent is None else Comment(self._owner, parent)
+
+    @property
+    def text(self) -> str:
+        return json.loads(self._owner._call("comment_info", self._id))["text"]
+
+    @text.setter
+    def text(self, value: str) -> None:
+        self._owner._ensure_open()
+        value = _comment_string(value, 1024 * 1024, "text")
+        self._owner._call("update_comment", self._id, json.dumps({"text": value}, ensure_ascii=False), _change=True)
+
+    @property
+    def author(self) -> str:
+        return json.loads(self._owner._call("comment_info", self._id))["author"]
+
+    @author.setter
+    def author(self, value: str) -> None:
+        self._owner._ensure_open()
+        value = _comment_string(value, 1024, "author")
+        self._owner._call("update_comment", self._id, json.dumps({"author": value}, ensure_ascii=False), _change=True)
+
+    @property
+    def date(self) -> str:
+        return json.loads(self._owner._call("comment_info", self._id))["date"]
+
+    @date.setter
+    def date(self, value: str) -> None:
+        self._owner._ensure_open()
+        value = _comment_string(value, 20, "date")
+        self._owner._call("update_comment", self._id, json.dumps({"date": value}), _change=True)
+
+    @property
+    def resolved(self) -> bool:
+        return json.loads(self._owner._call("comment_info", self._id))["resolved"]
+
+    @resolved.setter
+    def resolved(self, value: bool) -> None:
+        self._owner._ensure_open()
+        if not isinstance(value, bool):
+            raise TypeError("comment resolved must be a bool")
+        self._owner._call("update_comment", self._id, json.dumps({"resolved": value}), _change=True)
 
 
 class Notes(_Collection["Note"]):
