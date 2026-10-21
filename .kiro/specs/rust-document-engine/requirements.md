@@ -839,3 +839,12 @@ Existing paragraph, table and row properties must retain concrete successful res
 2. Native PDF shape caps/joins SHALL match the existing native round-stroke contract in the verified profile. Keep the correction in the native PDF library; no adapter geometry compensation, new shape API, unrelated renderer rewrite or imported-mutation claim belongs in this upgrade.
 3. A meaningful imported native-generated DOCX regression SHALL fail against the original PDF corner behavior and pass through selected native and packaged PNG/PDF paths, with positive/negative visible controls at72/144/300DPI, readback and reopen. Preserve original native baseline failures and excluded geometry/serialization diagnostics.
 4. Keep historical support evidence unchanged and complete full locked native, installed-wheel, independent, typing, license/size and current-source audit gates before manual merge. Owned shape authoring and broad MED4/U04 completion remain separate; no version release follows from the pin change alone.
+
+
+## 112. Bounded owned DOCX closed shapes
+
+1. WordDocument SHALL expose one add_shape creator, its existing-style shapes collection and private owned handles for direct-body unrotated rectangle/ellipse geometry. The handle SHALL reuse Picture placement vocabulary and offer only kind, size, fill, stroke and formatting.
+2. Geometry SHALL use public native models/factories/paragraph insert/delete/layout/render/write APIs. Native marker/section behavior SHALL be preserved; deleted shape identities SHALL never retarget, and copies SHALL own independent registries.
+3. Source admission SHALL require horizontal sections and an exact reference-free native shape profile, finite canonical dimensions and stroke widths no greater than 100 points or the smaller shape dimension. Every candidate/output SHALL verify requested dimensions, exactly one native placement per shape and full-outline physical-page containment without coordinate correction.
+4. Source work, shape count, patch bytes and existing block/cell/page/item limits SHALL be bounded before unbounded copying or layout. Existing style/media/semantic/field/alignment guards SHALL remain active. Caller conversions SHALL revalidate owner revision and exact target identity before mutation.
+5. DOCX readback, native PNG and PDF SHALL retain demonstrated source/order/links/tables/notes/images without fake extraction geometry. Line, textbox, rotation, front, groups, effects, auxiliary/cell placement and imported editing SHALL remain explicitly unsupported. MED4 SHALL remain incomplete.

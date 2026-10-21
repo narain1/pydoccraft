@@ -963,14 +963,16 @@
         "PDF3",
         "SLIDE3"
       ],
-      "local_surface": "Existing PDF path primitives and PPTX shapes/text/backgrounds; no duplicate shape-building framework",
-      "remaining": "DOCX arbitrary drawing/textbox/group editing unassessed; PDF underlay API lacks public placement option; render-transparent backdrop differs from authored fill.",
+      "local_surface": "Existing PDF path primitives and PPTX shapes/text/backgrounds; bounded owned DOCX rectangle/ellipse creator and private handle reuse Picture placement vocabulary without a second geometry framework.",
+      "remaining": "DOCX lines/textboxes/group/rotation/front/auxiliary/imported editing and rich-text visible coverage remain unavailable or unassessed; PDF underlay API lacks public placement option; render-transparent backdrop differs from authored fill.",
       "upstream_candidates": [
         "U04",
         "U10",
         "U11"
       ],
-      "profiles": [],
+      "profiles": [
+        "word.closed-shapes"
+      ],
       "disposition": "implemented_subset"
     },
     {
@@ -2040,5 +2042,5 @@
       "disposition": "reference_comparison"
     }
   ],
-  "audited_commit": "58c1eaa53f5b37bb167958d8d6a059c2c9603a7c"
+  "audited_commit": "b23d8954d1e75e041add8473b8b56662614b66ae"
 }
