@@ -800,5 +800,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Execute three raw native groups for exact source intervals, selection helper parity, repeated/turned/clipped cells, story collisions and PNG/PDF location controls; fmt/Clippy pass.
 - [x] Complete bounded adapter/schema, source/copy/resource/malformed geometry and public compatibility acceptance, including the measured retained-allocation correction.
 - [x] Complete independent frozen-source/profile review and final four-workflow replay, including the exact known 200-page fixture.
-- [ ] Complete integrated installed full corpus, exact-head current-main CI and manual merge.
+- [x] Complete integrated full corpus and independent artifact review: 387 native tests and two clean 516-test installed-wheel runs pass, including the caught and corrected signed-advance regression.
+- [ ] Complete exact-head/current-main CI and manual merge.
 - [ ] Retain E2/LAY8/U05 normalized slicing, auxiliary/object/table geometry and broader parity scope.
