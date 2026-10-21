@@ -648,8 +648,9 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Audit pinned native Style/set_style and AP-local ExtGState generation; retain the seven existing comment kinds and canonical metadata profile.
 - [x] Reuse Annotation property/update, bounded target validation and staged native appearance/accounting.
 - [x] Complete three focused native groups plus six related native groups, 19 copied-package public tests (four new plus 15 related), formatter/Clippy/debug build and strict consumer typing.
-- [ ] Migrate only the geometric-comment and lock evidence affected by intentional fractional-CA fixture changes to the exact new integrated artifact.
-- [ ] Complete locked full native/release/installed corpus, independent review and exact-head/current-main CI before manual merge.
+- [x] Migrate only the geometric-comment and lock evidence affected by intentional fractional-CA fixture changes to the exact new integrated artifact.
+- [x] Complete locked full native/release/installed corpus and independent artifact review: 333 native and 476 installed Python tests.
+- [ ] Complete final exact-head/current-main CI and manual merge for annotation opacity.
 - [ ] Retain broader PDF6 imported-inventory/reply and PDF8 encryption/profile work.
 
 
@@ -659,5 +660,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reuse the existing paragraph collection move spelling and native staged transaction, bounded stable-ID/root-path updates, section/semantic guards and callback revision checks.
 - [x] Add six native groups and five public workflows for native padding, identity, rollback, output, auxiliary stories, no-ops, copies, iteration and callbacks; retain all existing tests unchanged.
 - [x] Complete six focused native groups, fmt/Clippy/debug build, five new plus 25 related copied-package workflows, final media/field checks and strict consumer typing; record exact local results below.
-- [ ] Complete integrated locked release/installed-wheel corpus, independent review and current-main CI before manual merge.
+- [x] Complete integrated locked release/installed-wheel corpus and independent review: 339 native and 481 installed Python tests.
+- [ ] Complete final exact-head/current-main CI and manual merge for paragraph movement.
 - [ ] Keep anchored/cross-section/cross-container/cell/PPTX movement, imported preservation and broader DOC5/TXT1 parity open.
