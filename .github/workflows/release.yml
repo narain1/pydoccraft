@@ -1,8 +1,6 @@
-name: Build and publish wheels
+name: Diagnose platform rendering
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       release_tag:
@@ -12,7 +10,7 @@ on:
       validation_only:
         description: Validate wheels without a version tag or any publication
         required: true
-        default: false
+        default: true
         type: boolean
       publish:
         description: Publish wheels to PyPI
@@ -48,6 +46,8 @@ jobs:
 
           version = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"]
           tag = os.environ["RELEASE_TAG"]
+          if os.environ["VALIDATION_ONLY"] != "true" or os.environ["PUBLISH"] != "false":
+              raise SystemExit("diagnostics requires validation_only=true and publish=false")
           if os.environ["VALIDATION_ONLY"] == "true":
               if os.environ["PUBLISH"] == "true":
                   raise SystemExit("validation-only mode cannot publish")
@@ -69,12 +69,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python:
-          - version: "3.11"
-            tag: "311"
           - version: "3.12"
             tag: "312"
-          - version: "3.13"
-            tag: "313"
     steps:
       - name: Check out release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -110,6 +106,18 @@ jobs:
           python -m pip install --no-index --find-links dist pydoccraft
           python tools/validate_installed.py --wheel-dir dist --output dist/validation.json
 
+      - name: Capture exact rendering fixtures and requested named-font controls
+        if: always()
+        run: python tools/diagnose_platform_rendering.py
+
+      - name: Upload rendering diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rendering-${{ matrix.os }}-py${{ matrix.python.version }}
+          path: dist/platform-diagnostics
+          if-no-files-found: error
+
       - name: Upload validation evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -119,56 +127,9 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload wheel
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: wheel-${{ matrix.os }}-py${{ matrix.python.version }}
           path: dist/*.whl
           if-no-files-found: error
-
-  github-release:
-    name: Create GitHub release
-    if: github.event_name == 'push' || !inputs.validation_only
-    needs: wheels
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download wheels
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: wheel-*
-          path: dist
-          merge-multiple: true
-
-      - name: Create or update release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
-        shell: bash
-        run: |
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" dist/*.whl --repo "$GITHUB_REPOSITORY" --clobber
-          else
-            gh release create "$RELEASE_TAG" dist/*.whl --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
-          fi
-
-  pypi:
-    name: Publish to PyPI
-    if: github.event_name == 'push' || (inputs.publish && !inputs.validation_only)
-    needs: wheels
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/project/pydoccraft/
-    permissions:
-      id-token: write
-    steps:
-      - name: Download wheels
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: wheel-*
-          path: dist
-          merge-multiple: true
-
-      - name: Publish with trusted publishing
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
