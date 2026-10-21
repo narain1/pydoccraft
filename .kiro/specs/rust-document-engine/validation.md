@@ -1995,3 +1995,10 @@ The CPython 3.11 manylinux_2_35 x86_64 wheel is 17,732,938 bytes, SHA256 `fc7192
 The main clean installed 560-test corpus passes in 361.842s (361.985s validation wrapper), with zero failures, errors or skips. It includes all 18 related workflows and the two reviewed singleton expectation migrations. The independent clean 560-test corpus passes in 363.645s (363.795s validation wrapper), also with zero failures, errors or skips. Independent review verifies all 174 source files, exact wheel/native/attribution bytes, strict typing and the two deliberate fixture migrations. Final documentation review is clear; exact-head/current-main CI and manual merge remain delivery gates. No new version/release is implied.
 
 The root integration checkpoint `8a37bcceebac6e249493714116018b85cd998ab4` preserves all 174 frozen runtime/test/typing/build-manifest files byte-for-byte. Final spec117 documentation and the completed PR122 gate are retained separately; the artifact above was built from the original checkpoint, not rebuilt for this documentation integration.
+
+
+## PR123 final current-main gate
+
+PR123 was independently reviewed and manually merged on 2026-10-21 at 09:49:53 UTC as `278570d487985863c8d1310fd31afabe2e652538`. Required CI39578015883 and documentation CI39578015866 passed for exact head `25ac31339f2a22b26a6d5b857f1adc3c28060508` against current main `cc60dab5cd122f91aa7be2e14ac9f928819f6eab`. The final gate passed 436 native tests in 218.66 seconds and all 556 installed-wheel tests in 436.697 seconds, with zero failures, errors or skips; formatting, Clippy, strict typing and the 264-package license audit passed.
+
+The CI wheel is 17,731,309 bytes, SHA256 `b5eb2e38e4b3b0995cbbfaa976edb87386f77d1f2632b08496b4a59c159393ae`; the uncompressed extension is 41,123,728 bytes. Cargo.lock remains SHA256 `95f41e1fc9c9215b46ae11a1dc6a68f1fa900000637675e276950346db56e6eb`. These CI artifact sizes are distinct from the earlier local artifact. Post-merge runtime, test, facade and Cargo source identity was verified. Auto-merge remained disabled, with no administrator or branch-protection bypass. Broader MED4 criteria and release gates remain open.
