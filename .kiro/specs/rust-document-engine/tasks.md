@@ -661,5 +661,15 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add six native groups and five public workflows for native padding, identity, rollback, output, auxiliary stories, no-ops, copies, iteration and callbacks; retain all existing tests unchanged.
 - [x] Complete six focused native groups, fmt/Clippy/debug build, five new plus 25 related copied-package workflows, final media/field checks and strict consumer typing; record exact local results below.
 - [x] Complete integrated locked release/installed-wheel corpus and independent review: 339 native and 481 installed Python tests.
-- [ ] Complete final exact-head/current-main CI and manual merge for paragraph movement.
+- [x] Complete final exact-head/current-main CI and manual merge for paragraph movement: PR99, run39551991262.
 - [ ] Keep anchored/cross-section/cross-container/cell/PPTX movement, imported preservation and broader DOC5/TXT1 parity open.
+
+
+## Native-backed everyday property types
+
+- [x] Audit selected native getter signatures and nullable JSON fields; retain current factory/copy ownership typing.
+- [x] Annotate existing property access and simple setters without aliases, runtime coercions or dynamic Any placeholders.
+- [x] Extend strict static consumer assertions and verify expected invalid typed uses are rejected; confirm runtime AST is unchanged after removing annotations.
+- [x] Complete integrated installed-package strict typing, unchanged native-byte verification and independent 481-test package review.
+- [ ] Complete final exact-head/current-main CI and manual merge for property typing.
+- [ ] Retain unreviewed mappings/properties, documentation and IDE coverage under API3.

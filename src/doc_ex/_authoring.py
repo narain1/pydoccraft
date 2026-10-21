@@ -1469,25 +1469,25 @@ class Picture:
         return bytes(self._owner._call("image_data", self._id))
 
     @data.setter
-    def data(self, source) -> None:
+    def data(self, source: _Source) -> None:
         from . import _read
         data, _ = _read(source)
         self._owner._call("set_image_data", self._id, data, _change=True)
 
     @property
-    def size(self):
+    def size(self) -> tuple[float, float]:
         return self._owner._call("image_size", self._id)
 
     @size.setter
-    def size(self, value):
+    def size(self, value: _Size) -> None:
         self._owner._call("set_image_size", self._id, *_size(value), _change=True)
 
     @property
-    def alt(self):
+    def alt(self) -> str:
         return self._owner._call("image_alt", self._id)
 
     @alt.setter
-    def alt(self, value: str):
+    def alt(self, value: str) -> None:
         self._owner._call("set_image_alt", self._id, value, _change=True)
 
     @property
@@ -1495,7 +1495,7 @@ class Picture:
         return self._owner._call("image_crop", self._id)
 
     @crop.setter
-    def crop(self, value) -> None:
+    def crop(self, value: tuple[float, float, float, float] | list[float] | None) -> None:
         values = _picture_crop(value)
         self._owner._call("set_image_crop", self._id, values, _change=True)
 
@@ -1830,7 +1830,7 @@ class EditableCell:
         self._table._owner._call("set_cell_alignment", *self._args, value, _change=True)
 
     @property
-    def background(self):
+    def background(self) -> str | None:
         table = self._table
         value = table._owner._call("cell_background", *self._args)
         return None if value is None else _hex_color(value)
@@ -1841,7 +1841,7 @@ class EditableCell:
         table._owner._call("set_cell_background", *self._args, _hex_color(value) if table._slide is None else _color(value), _change=True)
 
     @property
-    def vertical_alignment(self):
+    def vertical_alignment(self) -> str | None:
         table = self._table
         return table._owner._call("cell_vertical_alignment", *self._args)
 
@@ -1893,7 +1893,7 @@ class PdfDocument(EditableDocument):
         return Bookmarks(self)
 
     @property
-    def page_count(self):
+    def page_count(self) -> int:
         return self._call("page_count")
 
     @property
@@ -2064,7 +2064,7 @@ class PdfField:
         return tuple(info["widgets"][0]["box"])
 
     @box.setter
-    def box(self, value) -> None:
+    def box(self, value: _Box) -> None:
         if not isinstance(value, (tuple, list)) or len(value) != 4:
             raise TypeError("box must be (x, y, width, height) in top-left points")
         coordinates = tuple(map(pt, value))
@@ -2113,7 +2113,7 @@ class PdfField:
         return self._info()["value"]
 
     @value.setter
-    def value(self, value: str | bool | None):
+    def value(self, value: str | bool | None) -> None:
         self._check()
         if value is not None and not isinstance(value, (str, bool)):
             raise TypeError("field values must be text, a checkbox bool or None for a choice or radio")
@@ -2233,34 +2233,34 @@ class Bookmark:
         raise ValueError("bookmark no longer exists")
 
     @property
-    def children(self):
+    def children(self) -> Bookmarks:
         self._check()
         return Bookmarks(self._owner, self._path, self)
 
     @property
-    def title(self):
+    def title(self) -> str:
         return self._value()["title"]
 
     @title.setter
-    def title(self, value: str):
+    def title(self, value: str) -> None:
         self._check()
         self._owner._call("update_bookmark", list(self._path), title=value, _change=True)
 
     @property
-    def page(self):
+    def page(self) -> int | None:
         return self._value()["page"]
 
     @page.setter
-    def page(self, value: int):
+    def page(self, value: int) -> None:
         self._check()
         self._owner._call("update_bookmark", list(self._path), page=_index(value, self._owner.page_count), _change=True)
 
     @property
-    def expanded(self):
+    def expanded(self) -> bool:
         return self._value()["open"]
 
     @expanded.setter
-    def expanded(self, value: bool):
+    def expanded(self, value: bool) -> None:
         self._check()
         self._owner._call("update_bookmark", list(self._path), open=value, _change=True)
 
@@ -2325,12 +2325,12 @@ class PdfPage:
             raise ValueError("page handle is stale after page organization; retrieve it again")
 
     @property
-    def number(self):
+    def number(self) -> int:
         self._check()
         return self._id
 
     @property
-    def size(self):
+    def size(self) -> tuple[float, float]:
         self._check()
         return self._owner._call("page_size", self._id)
 
@@ -2353,13 +2353,13 @@ class PdfPage:
         self._generation = self._owner._page_generation
 
     @property
-    def background(self):
+    def background(self) -> str | None:
         self._check()
         value = self._owner._call("background", self._id)
         return None if value is None else _hex_color(value)
 
     @background.setter
-    def background(self, value):
+    def background(self, value: _Color) -> None:
         self._check()
         rgb = _color(value)
         self._check()
@@ -2569,7 +2569,7 @@ class Annotation:
                 return value
         raise ValueError("annotation no longer exists")
 
-    def update(self, *, text: str | None = None, box=None, color=None, uri: str | None = None, page: int | None = None, author: str | None = None, opacity: float | None = None):
+    def update(self, *, text: str | None = None, box: _Box | None = None, color: _Color | None = None, uri: str | None = None, page: int | None = None, author: str | None = None, opacity: float | None = None) -> None:
         self._check()
         rect = None if box is None else _annotation_rect(box)
         rgb = None if color is None else _color(color)
@@ -2592,7 +2592,7 @@ class Annotation:
         return self._page._owner._call("annotation_opacity", self._page.number, self._id)
 
     @opacity.setter
-    def opacity(self, value: float):
+    def opacity(self, value: float) -> None:
         if value is None:
             self._check()
             raise TypeError("annotation opacity must be a number")
@@ -2607,64 +2607,64 @@ class Annotation:
         return value["locked"]
 
     @locked.setter
-    def locked(self, value: bool):
+    def locked(self, value: bool) -> None:
         self._check()
         if type(value) is not bool:
             raise TypeError("annotation locked must be a bool")
         self._page._owner._call("set_annotation_locked", self._page.number, self._id, value, _change=True)
 
     @property
-    def kind(self):
+    def kind(self) -> str:
         return self._value()["kind"]
 
     @property
-    def box(self):
+    def box(self) -> tuple[float, float, float, float]:
         x0, y0, x1, y1 = self._value()["rect"]
         return x0, y0, x1 - x0, y1 - y0
 
     @box.setter
-    def box(self, value):
+    def box(self, value: _Box) -> None:
         self.update(box=value)
 
     @property
-    def text(self):
+    def text(self) -> str:
         return self._value()["text"]
 
     @text.setter
-    def text(self, value: str):
+    def text(self, value: str) -> None:
         self.update(text=value)
 
     @property
-    def author(self):
+    def author(self) -> str:
         return self._value()["author"]
 
     @author.setter
-    def author(self, value: str):
+    def author(self, value: str) -> None:
         self.update(author=value)
 
     @property
-    def color(self):
+    def color(self) -> str | None:
         value = self._value()["color"]
         return None if value is None else _hex_color(value)
 
     @color.setter
-    def color(self, value):
+    def color(self, value: _Color | None) -> None:
         self.update(color=value)
 
     @property
-    def uri(self):
+    def uri(self) -> str | None:
         return self._value()["uri"]
 
     @uri.setter
-    def uri(self, value: str):
+    def uri(self, value: str) -> None:
         self.update(uri=value)
 
     @property
-    def target_page(self):
+    def target_page(self) -> int | None:
         return self._value()["target_page"]
 
     @target_page.setter
-    def target_page(self, value: int):
+    def target_page(self, value: int) -> None:
         self.update(page=value)
 
 
@@ -2672,7 +2672,7 @@ class Presentation(EditableDocument):
     _format = "pptx"
 
     @property
-    def page_count(self):
+    def page_count(self) -> int:
         return self._call("slide_count")
 
     @property
@@ -2701,36 +2701,36 @@ class Slide:
         self._owner, self._id = owner, identifier
 
     @property
-    def number(self):
+    def number(self) -> int:
         return self._owner._call("slide_index", self._id)
 
     @property
-    def size(self):
+    def size(self) -> tuple[float, float]:
         self.number
         return self._owner._call("slide_size")
 
     @property
-    def name(self):
+    def name(self) -> str:
         return self._owner._call("slide_name", self.number)
 
     @name.setter
-    def name(self, value):
+    def name(self, value: str) -> None:
         self._owner._call("set_slide_name", self.number, value, _change=True)
 
     @property
-    def hidden(self):
+    def hidden(self) -> bool:
         return self._owner._call("slide_hidden", self.number)
 
     @hidden.setter
-    def hidden(self, value):
+    def hidden(self, value: bool) -> None:
         self._owner._call("set_slide_hidden", self.number, value, _change=True)
 
     @property
-    def notes(self):
+    def notes(self) -> str:
         return self._owner._call("slide_notes", self.number)
 
     @notes.setter
-    def notes(self, value):
+    def notes(self, value: str) -> None:
         self._owner._call("set_slide_notes", self.number, value, _change=True)
 
     @property
@@ -2753,7 +2753,7 @@ class Slide:
         return Shapes(self)
 
     @property
-    def background_image(self):
+    def background_image(self) -> bytes | None:
         value = self._owner._call("background_image", self.number)
         return None if value is None else bytes(value)
 
@@ -2910,28 +2910,28 @@ class Shape:
         self._owner._call("set_shape_link", self._slide_number, self._id, info[0], info[1], value, _change=True)
 
     @property
-    def rotation(self):
+    def rotation(self) -> float:
         return self._owner._call("shape_rotation", self._slide_number, self._id)
 
     @rotation.setter
-    def rotation(self, degrees):
+    def rotation(self, degrees: float) -> None:
         self._check()
         angle = pt(degrees)
         self._owner._call("set_shape_rotation", self._slide_number, self._id, angle, _change=True)
 
     @property
-    def fill(self):
+    def fill(self) -> str | None:
         value = self._owner._call("shape_fill", self._slide_number, self._id)
         return None if value is None else _hex_color(value)
 
     @fill.setter
-    def fill(self, color):
+    def fill(self, color: _Color | None) -> None:
         self._check()
         rgb = None if color is None else _color(color)
         self._owner._call("set_shape_fill", self._slide_number, self._id, rgb, _change=True)
 
     @property
-    def stroke(self):
+    def stroke(self) -> tuple[str, float] | None:
         value = self._owner._call("shape_stroke", self._slide_number, self._id)
         return None if value is None else (_hex_color(value[0]), value[1])
 
@@ -2946,11 +2946,11 @@ class Shape:
         self._owner._call("set_shape_stroke", self._slide_number, self._id, color, width, _change=True)
 
     @property
-    def box(self):
+    def box(self) -> tuple[float, float, float, float]:
         return self._owner._call("shape_box", self._slide_number, self._id)
 
     @box.setter
-    def box(self, value):
+    def box(self, value: _Box) -> None:
         self._check()
         if not isinstance(value, (tuple, list)) or len(value) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
@@ -2958,56 +2958,56 @@ class Shape:
         self._owner._call("set_shape_box", self._slide_number, self._id, *coordinates, _change=True)
 
     @property
-    def text(self):
+    def text(self) -> str:
         return self._owner._call("shape_text", self._slide_number, self._id)
 
     @text.setter
-    def text(self, value):
+    def text(self, value: str) -> None:
         self._owner._call("set_shape_text", self._slide_number, self._id, value, _change=True)
 
     @property
-    def color(self):
+    def color(self) -> str | None:
         value = self._owner._call("text_format", self._slide_number, self._id)[1]
         return None if value is None else _hex_color(value)
 
     @color.setter
-    def color(self, value):
+    def color(self, value: _Color) -> None:
         self._check()
         rgb = _color(value)
         self._owner._call("set_text_format", self._slide_number, self._id, color=rgb, _change=True)
 
     @property
-    def font_size(self):
+    def font_size(self) -> float | None:
         return self._owner._call("text_format", self._slide_number, self._id)[0]
 
     @font_size.setter
-    def font_size(self, value):
+    def font_size(self, value: float) -> None:
         self._check()
         size = pt(value)
         self._owner._call("set_text_format", self._slide_number, self._id, size=size, _change=True)
 
     @property
-    def bold(self):
+    def bold(self) -> bool | None:
         return self._owner._call("text_format", self._slide_number, self._id)[2]
 
     @bold.setter
-    def bold(self, value: bool):
+    def bold(self, value: bool) -> None:
         self._owner._call("set_text_format", self._slide_number, self._id, bold=value, _change=True)
 
     @property
-    def italic(self):
+    def italic(self) -> bool | None:
         return self._owner._call("text_format", self._slide_number, self._id)[3]
 
     @italic.setter
-    def italic(self, value: bool):
+    def italic(self, value: bool) -> None:
         self._owner._call("set_text_format", self._slide_number, self._id, italic=value, _change=True)
 
     @property
-    def font(self):
+    def font(self) -> str | None:
         return self._owner._call("text_format", self._slide_number, self._id)[4]
 
     @font.setter
-    def font(self, value: str):
+    def font(self, value: str) -> None:
         self._owner._call("set_text_format", self._slide_number, self._id, font=value, _change=True)
 
 
@@ -3019,7 +3019,7 @@ class SlidePicture(Shape):
         return bytes(self._owner._call("picture_data", self._slide_number, self._id))
 
     @data.setter
-    def data(self, source) -> None:
+    def data(self, source: _Source) -> None:
         from . import _read
         self._owner._ensure_open()
         data, _ = _read(source, limit=16 * 1024 * 1024)
@@ -3038,7 +3038,7 @@ class SlidePicture(Shape):
         return self._owner._call("picture_crop", self._slide_number, self._id)
 
     @crop.setter
-    def crop(self, value) -> None:
+    def crop(self, value: tuple[float, float, float, float] | list[float] | None) -> None:
         values = _picture_crop(value)
         self._owner._call("set_picture_crop", self._slide_number, self._id, values, _change=True)
 
