@@ -683,5 +683,5 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete 36 sequential fresh-process measurements across six inputs and two modes, with three alternating-order repetitions and all-page byte/counter parity.
 - [x] Record exact source/tool/wheel identities, timings, memory ranges and limitations; independent benchmark source review found no blocker.
 - [x] Complete independent verification of all 36 samples, source/tool/artifact hashes, page digests, counters, table medians/ratios and memory ranges.
-- [ ] Complete required current-main CI and manual merge for Office benchmark evidence.
+- [x] Complete required current-main CI and manual merge for Office benchmark evidence: PR101, run39554746117.
 - [ ] Keep P1's independently reproducible PDF memory/full-document counterpart and broader real-input/platform QA7 evidence open.

@@ -1378,3 +1378,15 @@ The reviewed exact head was manually merged as `49404df545cb5471dcc74e8d04dc9006
 PR100 final head `48c5fd9994009dbcf9222825e98aaba258dbf08d` passed required [current-main CI 39553367804](https://github.com/narain1/pydoccraft/actions/runs/39553367804) and documentation CI 39553367825 after the independent exact-artifact review recorded above. The final run passed 339 native tests in 192.96 seconds and 481 installed-wheel tests in 418.302 seconds, with zero failures, errors or skips, plus formatting, Clippy, strict typing and the 264-package license audit. On CPython 3.11.17/Linux x86_64/glibc 2.39, the wheel is 17,556,179 bytes, extension 40,724,848 bytes, SHA-256 `46a64e1cd6f14cedf70334e0fb038e10411a6240719db7b88facfc4b5681f96c`. Lock and pinned upstream revisions remain unchanged.
 
 The reviewed exact head was manually merged as `5d0ca81cfca948d34fcbe8805fbaf117a4958ff9`. Repository auto-merge remains disabled. This completes the selected property-typing delivery gate; dynamic mappings, other properties and broader API3/IDE coverage remain open.
+
+
+## Office workload measurements — final manual merge gate
+
+PR101 final head `8f9aa678264dcf669dbc298a887abdfde965ac26` passed required [current-main CI 39554746117](https://github.com/narain1/pydoccraft/actions/runs/39554746117) and documentation CI 39554746114 after independent source/hash/arithmetic review of all 36 samples. The final run passed 339 native tests in 193.53 seconds and 481 installed-wheel tests in 425.853 seconds, with zero failures, errors or skips, plus formatting, Clippy, strict typing and the 264-package license audit. On CPython 3.11.17/Linux x86_64/glibc 2.39, the wheel is 17,556,179 bytes, extension 40,724,848 bytes, SHA-256 `474025400fc1bb6993638998930c11cb2d00e88c0ca18bcf975d9130409086ab`. Lock and pinned upstream revisions remain unchanged.
+
+The reviewed exact head was manually merged as `554f0bb29b95e7fc24a4e845b6970da7dee4563e`. Repository auto-merge remains disabled. This closes the Office measurement delivery gate; the source-only benchmark change does not establish universal performance or real-input/platform coverage.
+
+
+## Pinned spacing and document-property prerequisites — source review
+
+PR98 independently checks pinned WordCraft public model, reader, writer and layout paths. Inter-cell spacing is absent from those paths and remains distinct from implemented padding; a WordML2003 name allowlist does not establish support. Core document language lacks a model/read/write path. Eight extended properties have bounded internal preservation, but no typed public accessor contract; native counts and privacy filtering remain explicit. Existing U01/U03 ownership and DOC7/TBL8 incomplete status are retained, with no duplicate local API, XML implementation, runtime dependency or capability promotion. Current-main integration retains the separately reviewed opacity, body-deletion and paragraph-movement upstream findings. Final required CI/manual merge remains pending for this source-only audit.
