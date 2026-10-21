@@ -69,6 +69,15 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(table.merge((0, 0), (1, 0)), EditableCell)
         assert_type(table[0, 0].add_table(1, columns=1), EditableTable)
         assert_type(table[0, 0].add_image(png, width=20), Picture)
+        disposable = word.add_table([['Delete']])
+        assert_type(disposable, EditableTable)
+        del word.tables[-1]
+        header = word.sections[0].header()
+        header.add_table([['Delete']])
+        del header.tables[-1]
+        cell = word.add_table([['Parent']])[0, 0]
+        cell.add_table([['Delete']])
+        del cell.tables[-1]
         assert_type(word.paragraphs[:], list[Paragraph])
         assert_type(word.paragraphs.move(0, -1), None)
         assert_type(table[0, 0].paragraphs.move(0, -1), None)

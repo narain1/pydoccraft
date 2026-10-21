@@ -759,3 +759,11 @@ Keep STY5 open until public native APIs admit bounded caller programs with deter
 ## 104. Existing formatting snapshot output types
 
 Annotate the existing paragraph/style/default formatting getters without changing runtime dispatch, accepted inputs, exports or native behavior. Preserve required common keys, native-kind-specific optional keys, nullability, list-valued tabs/margins and nonrecursive table regions. PPTX paragraph direct snapshots contain alignment alone; successful resolved paragraph snapshots remain Word-only. Do not advertise Style.kind as a static discriminator or treat table inheritance as concrete paragraph/character resolution. API3 remains open beyond this slice.
+
+
+## 102. Owned DOCX table deletion
+
+1. Existing table collections SHALL support integer/negative deletion in the body, independently owned headers/footers and ordinary nested/merged cells through public native remove_block. Rich note/comment stories, imported editing, slice deletion, arbitrary block movement and cross-container adoption SHALL remain outside this slice.
+2. Removal SHALL retire the target subtree only, shift surviving locators and hidden blanks within the exact native parent, and preserve surviving handles, ancestor/unrelated grid generations, ordered section metadata and shared media. Valid owned containers SHALL retain their existing final paragraph by identity; malformed sole/table-ended containers SHALL reject rather than fabricate or adopt a blank. Authored empty paragraphs SHALL remain editable and hidden required tails reusable.
+3. Original bounded source/comment inventory and global locator/image/generation consistency checks SHALL precede native content usage and any global pruning. Subtree section metadata and protected references SHALL reject. Text/cell/media reclamation, registry changes and exact candidate comment/navigation/media validation SHALL commit atomically, with existing identity, revision and resource limits.
+4. Validation SHALL distinguish raw-native structural capability from accepted ownership, prove output removal and preserved sibling/media/reference identities, exercise exact/+1 preflight and allocator/revision boundaries, malformed associations, copies, callbacks and closed/stale handles. Broader DOC5 SHALL remain incomplete.

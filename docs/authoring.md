@@ -54,6 +54,16 @@ Iteration captures membership and handles when iteration first advances. Later i
 
 DOCX and whole PPTX text bodies accept LF newlines and reject carriage returns (CR/CRLF); normalize external text to LF before insertion. Individual PPTX cell-paragraph edits reject LF: append another paragraph through the cell instead. This prevents inconsistent writer/parser paragraph normalization. Compound mutations validate before committing. Invalid styles, colors, geometry, text or media must leave the prior document usable. Native resource limits also apply to programmatic creation; a document's serializable model is not an unlimited storage container.
 
+## DOCX table deletion
+
+Delete a whole owned table through its existing collection: `del word.tables[index]`, `del header.tables[index]`, `del footer.tables[index]` or `del cell.tables[index]`. Integer and negative indexes are supported; deletion of slices is not. Nested tables and merged-cell aliases use the same canonical container. Headers and footers must be independently owned. Rich notes, comment parts and imported document editing are outside this profile.
+
+Deletion removes the table and its descendants. Their old table, cell, row, paragraph and picture handles become invalid; surviving handles in that container and other stories keep their identities. Removing a nested table does not invalidate its parent grid. Copies remain independent. Existing required final blanks stay hidden and reusable, while authored empty paragraphs stay editable. Text, cells and uniquely referenced media are reclaimed; media still used elsewhere, including a page background, is retained.
+
+Bookmarks, note references, owned comments and section boundaries cannot be removed incidentally. Clear those references using their existing APIs first; comments require leaf replies to be deleted before their root. A missing owned comment pair reports `ValueError` during candidate validation, before the general protected-anchor error. Rejected deletion leaves the document, counters and cached output unchanged. Later siblings containing valid comments retain fresh range lookup after their native paths shift.
+
+Index conversion captures the intended table identity. A callback deleting that table cannot redirect the operation to a replacement; its own changes remain. Stale cell grids and closed owners fail before conversion callbacks. Ordinary output and geometry guards still apply. This is whole-table removal, not general block movement, copying or cross-container adoption.
+
 ## DOCX comments
 
 Owned documents expose one `document.comments` collection for roots and direct replies, in creation order. It uses existing paragraph ranges:

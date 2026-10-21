@@ -3724,6 +3724,250 @@ impl EditableDocx {
         Ok(())
     }
 
+    /// Remove one owned table subtree through native block removal.
+    pub fn remove_table(&mut self, id: usize) -> PyResult<()> {
+        let document = self.document()?;
+        if self.locations.len() > MAX_BLOCKS
+            || self.images.len() > MAX_BLOCKS
+            || self.table_generations.len() > MAX_BLOCKS
+            || self.cell_placeholders.len() > MAX_CELLS
+            || self.cell_count > MAX_CELLS
+        {
+            return Err(limit("table deletion exceeds owned registry limits"));
+        }
+        // Bound source depth/text/objects before content_usage allocates object offsets.
+        let original_comments = comments::inventory(document)?;
+        comments::registry(self, &original_comments)?;
+        let (story, path) = self.location(id)?;
+        let root = document
+            .story(story)
+            .ok_or_else(|| PyIndexError::new_err("table story is missing"))?;
+        validate_story_locator(&path, root.len())?;
+        self.table(id)?;
+        let root_placeholder = match story {
+            StoryRef::Body => self.body_placeholder,
+            StoryRef::Part(part) => {
+                let native = &document.parts[&part];
+                if !matches!(native.kind, PartKind::Header | PartKind::Footer)
+                    || !self.stories.contains_key(&part)
+                {
+                    return Err(EngineError::Unsupported(
+                        "table deletion requires an owned body, header or footer".into(),
+                    )
+                    .into());
+                }
+                let refs = document
+                    .sections()
+                    .iter()
+                    .flat_map(|(_, section)| {
+                        [
+                            section.headers.default,
+                            section.headers.first,
+                            section.headers.even,
+                            section.footers.default,
+                            section.footers.first,
+                            section.footers.even,
+                        ]
+                    })
+                    .filter(|target| *target == Some(part))
+                    .count();
+                if refs != 1 {
+                    return Err(EngineError::Unsupported(
+                        "table deletion requires independent header/footer ownership".into(),
+                    )
+                    .into());
+                }
+                self.story_placeholders.get(&part).copied()
+            }
+        };
+        let sections = if story == StoryRef::Body {
+            Some(owned_body_sections(document)?)
+        } else {
+            None
+        };
+        let depth = path.0.len() - 1;
+        let direct = depth == 0;
+        let index = path.last();
+        let parent = document
+            .container(story, &path)
+            .ok_or_else(|| PyValueError::new_err("table parent is missing"))?;
+        if root.len() > MAX_BLOCKS + usize::from(story != StoryRef::Body)
+            || parent.len() > MAX_BLOCKS + usize::from(!direct || story != StoryRef::Body)
+        {
+            return Err(limit("table deletion exceeds owned container limits"));
+        }
+        let tail = parent
+            .last()
+            .filter(|block| block.as_para().is_some_and(|p| p.section.is_none()))
+            .ok_or_else(|| {
+                PyValueError::new_err("owned table parent requires a final non-section paragraph")
+            })?;
+        let in_parent = |p: &Path| p.0.len() > depth && p.0[..depth] == path.0[..depth];
+        // Global association checks make invalidate_descendants' pruning exact, not cleanup
+        // of unrelated malformed image/generation entries. Locations remain one-to-one.
+        let mut locations = BTreeSet::new();
+        for (owner, position) in self.locations.values() {
+            let blocks = document
+                .story(*owner)
+                .ok_or_else(|| PyValueError::new_err("owned locator has no story"))?;
+            validate_story_locator(position, blocks.len())?;
+            if document.block(*owner, position).is_none()
+                || !locations.insert((*owner, position.clone()))
+            {
+                return Err(PyValueError::new_err(
+                    "invalid or duplicate owned block locator",
+                ));
+            }
+        }
+        let mut images = BTreeSet::new();
+        for image in &self.images {
+            let (owner, position) = self
+                .locations
+                .get(image)
+                .ok_or_else(|| PyValueError::new_err("image has no owned locator"))?;
+            if !images.insert(*image)
+                || !document
+                    .para(*owner, position)
+                    .is_some_and(|p| matches!(p.objects.first(), Some(InlineObject::Image { .. })))
+            {
+                return Err(PyValueError::new_err("invalid owned image association"));
+            }
+        }
+        for table in self.table_generations.keys() {
+            let (owner, position) = self
+                .locations
+                .get(table)
+                .ok_or_else(|| PyValueError::new_err("table generation has no owned locator"))?;
+            if document.table(*owner, position).is_none() {
+                return Err(PyValueError::new_err(
+                    "generation does not identify an owned table",
+                ));
+            }
+        }
+        if let StoryRef::Part(part) = story {
+            let ids = &self.stories[&part];
+            if ids.len() > MAX_BLOCKS {
+                return Err(limit("table deletion exceeds owned story registry limits"));
+            }
+            let mut seen = BTreeSet::new();
+            for child in ids {
+                let (owner, position) = self
+                    .locations
+                    .get(child)
+                    .ok_or_else(|| PyValueError::new_err("story child has no owned locator"))?;
+                if !seen.insert(*child)
+                    || *owner != story
+                    || position.0.len() != 1
+                    || images.contains(child)
+                    || document.para(story, position).is_none()
+                {
+                    return Err(PyValueError::new_err(
+                        "story registry requires unique direct paragraph children",
+                    ));
+                }
+            }
+        }
+        let plain_blank = |owner: StoryRef, position: &Path| -> bool {
+            document
+                .para(owner, position)
+                .is_some_and(|p| *p == Paragraph::new())
+                && !locations.contains(&(owner, position.clone()))
+        };
+        if let Some(position) = root_placeholder {
+            if !plain_blank(story, &Path::top(position)) {
+                return Err(PyValueError::new_err("invalid owned story placeholder"));
+            }
+        }
+        for (owner, position) in &self.cell_placeholders {
+            let blocks = document
+                .story(*owner)
+                .ok_or_else(|| PyValueError::new_err("cell placeholder has no story"))?;
+            validate_story_locator(position, blocks.len())?;
+            if position.0.len() == 1 || !plain_blank(*owner, position) {
+                return Err(PyValueError::new_err("invalid owned cell placeholder"));
+            }
+        }
+        let mut pending = vec![parent[index].as_ref()];
+        while let Some(block) = pending.pop() {
+            match block {
+                Block::Para(p) if p.section.is_some() => {
+                    return Err(EngineError::Unsupported(
+                        "table deletion cannot remove section boundaries".into(),
+                    )
+                    .into())
+                }
+                Block::Para(_) => (),
+                Block::Table(table) => {
+                    for row in &table.rows {
+                        for cell in &row.cells {
+                            pending.extend(cell.blocks.iter().map(Arc::as_ref));
+                        }
+                    }
+                }
+            }
+        }
+        let mut staged = self.copy()?;
+        let mut candidate = document.clone();
+        let removed = candidate.remove_block(story, &path).map_err(model_error)?;
+        let (text, cells) = content_usage(&vec![Arc::new(removed)]);
+        staged.text_bytes = self.updated_text_bytes(text, 0)?;
+        staged.cell_count = self
+            .cell_count
+            .checked_sub(cells)
+            .ok_or_else(|| limit("table deletion cell accounting underflow"))?;
+        if let Some(expected) = sections {
+            if owned_body_sections(&candidate)? != expected {
+                return Err(EngineError::Unsupported(
+                    "table deletion cannot change section properties or count".into(),
+                )
+                .into());
+            }
+        }
+        let after = candidate
+            .container(story, &path)
+            .ok_or_else(|| PyValueError::new_err("table parent is missing after removal"))?;
+        if after.len() + 1 != parent.len()
+            || after.last().is_none_or(|last| !Arc::ptr_eq(tail, last))
+        {
+            return Err(PyValueError::new_err(
+                "native table removal must retain the existing final paragraph",
+            ));
+        }
+        staged.locations.remove(&id);
+        staged.invalidate_descendants(story, &path);
+        for (owner, position) in staged.locations.values_mut() {
+            if *owner == story && in_parent(position) && position.0[depth] as usize > index {
+                position.0[depth] -= 1;
+            }
+        }
+        staged.cell_placeholders = staged
+            .cell_placeholders
+            .into_iter()
+            .map(|(owner, mut position)| {
+                if owner == story && in_parent(&position) && position.0[depth] as usize > index {
+                    position.0[depth] -= 1;
+                }
+                (owner, position)
+            })
+            .collect();
+        if direct {
+            let next = root_placeholder.map(|p| if p > index { p - 1 } else { p });
+            match story {
+                StoryRef::Body => staged.body_placeholder = next,
+                StoryRef::Part(part) => {
+                    if let Some(position) = next {
+                        staged.story_placeholders.insert(part, position);
+                    } else {
+                        staged.story_placeholders.remove(&part);
+                    }
+                }
+            }
+        }
+        staged.commit(candidate)?;
+        *self = staged;
+        Ok(())
+    }
+
     /// Reorder one intact ordinary paragraph through native block operations.
     pub fn move_paragraph(&mut self, id: usize, target: usize, revision: u64) -> PyResult<bool> {
         self.check_revision(revision)?;
@@ -21712,3 +21956,11 @@ mod comment_scope_proof;
 #[cfg(test)]
 #[path = "author_docx_comment_tests.rs"]
 mod owned_comment_tests;
+
+#[cfg(test)]
+#[path = "table_delete_scope_proof.rs"]
+mod table_delete_scope_proof;
+
+#[cfg(test)]
+#[path = "author_docx_table_delete_tests.rs"]
+mod table_delete_tests;

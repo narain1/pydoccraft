@@ -821,3 +821,14 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete independent final source/serializer review and replay positive/negative typing, runtime-key/schema and AST checks.
 - [ ] Complete exact installed-wheel/source/native verification and agreed corpus before merge acceptance.
 - [ ] Retain remaining API3 property/documentation/IDE work; do not claim full-package strict typing.
+
+
+## Owned DOCX table deletion (spec102)
+
+- [x] Execute two raw native structure/output groups before integration, distinguishing required and authored blanks and retaining orphan/protected-reference diagnostics.
+- [x] Implement whole-table deletion through existing body/story/cell collections and public native remove_block with exact-parent shifts, preserved tail identity and subtree invalidation.
+- [x] Preflight bounded source/global associations, stage checked resource reclamation and retain semantic, section, comment/navigation/media and callback guards.
+- [x] Pass six focused native groups, formatting, all-target Clippy and a debug build after final tail-invariant review corrections.
+- [x] Pass six focused public workflows and independent replay, strict positive/four-negative typing checks and synchronized roadmap/support/reference/site checks; final source review clear.
+- [ ] Complete exact integrated native/installed-wheel corpus, independent artifact review and current-head CI before merge acceptance.
+- [ ] Retain broader DOC5 movement, duplication, insertion and cross-container/reference adoption work.

@@ -725,6 +725,18 @@ class _Collection(Sequence[_Item], Generic[_Item]):
         return self._factory(self._owner, ids[_index(index, len(ids))])
 
 
+class _Tables(_Collection["EditableTable"]):
+    """Ordered owned DOCX tables; deletion removes one complete subtree."""
+    def __delitem__(self, index: int) -> None:
+        self._owner._ensure_open()
+        if isinstance(index, slice):
+            raise TypeError("table deletion requires an integer index")
+        identifiers = self._ids()  # Resolve stale parent-cell generations before callbacks.
+        selected = operator.index(index)
+        self._owner._ensure_open()
+        self._owner._call("remove_table", identifiers[_index(selected, len(identifiers))], _change=True)
+
+
 class _Paragraphs(_Collection["Paragraph"]):
     """Ordered paragraphs; deletion supports DOCX containers and PPTX cells."""
     def __delitem__(self, index: int) -> None:
@@ -849,8 +861,8 @@ class WordDocument(EditableDocument):
         return _Paragraphs(self, lambda: self._call("paragraph_ids"), Paragraph)
 
     @property
-    def tables(self) -> _Collection[EditableTable]:
-        return _Collection(self, lambda: self._call("table_ids"), EditableTable)
+    def tables(self) -> _Tables:
+        return _Tables(self, lambda: self._call("table_ids"), EditableTable)
 
     @property
     def sections(self) -> Sections:
@@ -1514,14 +1526,14 @@ class EditableStory:
             raise UnsupportedFormatError("rich note content requires native note-container geometry support")
 
     @property
-    def tables(self) -> _Collection[EditableTable]:
+    def tables(self) -> _Tables:
         """Direct header/footer tables, sharing the normal table and cell API."""
         self._check_rich_content()
         def identifiers():
             self._check_rich_content()
             identifier = self._identifier()
             return [] if identifier is None else self._owner._call("story_table_ids", identifier)
-        return _Collection(self._owner, identifiers, EditableTable)
+        return _Tables(self._owner, identifiers, EditableTable)
 
     @property
     def images(self) -> Pictures:
@@ -2080,7 +2092,7 @@ class EditableCell:
 
     def _children(self, kind, factory):
         owner = self._table._owner
-        return _Collection(owner, lambda: owner._call(f"cell_{kind}_ids", *self._content_args()), factory)
+        return _Tables(owner, lambda: owner._call(f"cell_{kind}_ids", *self._content_args()), factory)
 
     @property
     def paragraphs(self) -> _Paragraphs:
@@ -2093,7 +2105,7 @@ class EditableCell:
         return _Paragraphs(self._table._owner, lambda: self._table._owner._call("cell_paragraph_ids", *self._content_args()), Paragraph)
 
     @property
-    def tables(self) -> _Collection[EditableTable]:
+    def tables(self) -> _Tables:
         return self._children("table", EditableTable)
 
     @property
