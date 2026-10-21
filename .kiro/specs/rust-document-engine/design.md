@@ -797,3 +797,12 @@ Raw proof deliberately separates model/default-property preservation from visibl
 ## 122. Targeted reference inventory maintenance
 
 Update the existing seven family summaries in `reference-api-inventory.json` and regenerate its Markdown; do not add a second inventory. Preserve all 44 family IDs, 198 representative member citations, reference snapshots, coverage/owner joins, upstream candidates, dispositions and support-profile joins. The current source checkpoint is the reviewed spec118 integration. Remaining limitations stay explicit, including arbitrary insertion/adoption, imported Office editing, unsupported picture/comment contexts and broader raster resource bounds.
+
+
+## 119. Native typed placement without Python API expansion
+
+The selected PdfCraft contribution adds Placement and add_content_with_placement. Existing add_content delegates to Overlay. Private placement returns the exact new ObjRef; typed writing attaches its existing metadata to that reference and finds its current page-local index. Prepending A then B yields B, A, original drawing order. Positions are mutable indexes, not persistent identities. Updates replace the selected exact stream in place; deletion removes that stream while preserving surviving relative order. Callers refresh positional indexes. Raw public stamping remains overlay-only.
+
+The package upgrade changes all11 direct and13 resolved PdfCraft source identities together to516caea956c0aaf15f2bd1f35a15e07c73a9ead6, directly based on60a8d7998b64c7718e08e9054e99f1f2eb1eda8d. Native raster.rs and pixels.rs are byte-identical to that reviewed parent; the allocation regression checks the unique locked render-package source before any oversized request. One additional small linked-native test exercises underlay identity/order, first/last update/delete, legacy overlay, preserved URI/text, real revealed/occluded color and glyph ink at72/144DPI through both save forms. Python source/tests are unchanged.
+
+No adapter-built Form/layer system, resource-name rewrite or new manager is introduced. Opaque originals may hide underlays; native fixed resource names can collide with originals, and generic stamp stream-state/scanner bounds are not solved by typed placement. A later Python slice needs independently bounded transactional admission and stable handle semantics.

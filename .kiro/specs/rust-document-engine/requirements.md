@@ -870,3 +870,11 @@ Existing paragraph, table and row properties must retain concrete successful res
 ## 122. Keep reference dispositions consistent with accepted features
 
 The pinned reference inventory SHALL distinguish implemented bounded operations from remaining work. Existing DOCX paragraph/table movement, mirrored margins, owned floating pictures/comments and fallible DeckCraft rendering SHALL not be described as wholly absent after acceptance. The PPTX same-cell movement addition SHALL reuse its existing family and workstream connections. Correcting prose SHALL not promote operation profiles, checklist completion, historical fingerprints or reference-version scope.
+
+
+## 119. Dedicated native typed PDF placement upgrade
+
+1. Move every selected PdfCraft crate together to the reviewed immutable typed-placement contribution, preserving other package versions, source identities, dependency edges, assets and licenses. Record the exact parent and retained integer-raster correction.
+2. Native typed content SHALL provide explicit overlay/underlay placement through the public edit API. Exact newly created object identity SHALL determine its returned current page-local index; updates SHALL replace the selected stream in place, while deletion SHALL remove only that stream and preserve surviving relative order. Callers SHALL refresh positional indexes. The legacy overlay wrapper SHALL retain existing bytes and behavior.
+3. Do not expose Python underlays or raw-stamp underlays in this upgrade. Existing resource-collision protection and bounded local admission SHALL remain unchanged; native resource naming and raw-stream validation limitations SHALL stay explicit.
+4. Verify linked native ordering, identity, positive and negative visible paint, text and links through incremental/full save and reopen. Retain the exact-source safety precondition on the existing native allocation-budget regression. Complete source/lock/license, full native, installed-wheel, independent, typing and size gates before manual merge. PDF3/U10 remain open.
