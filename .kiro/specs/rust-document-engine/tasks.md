@@ -1157,7 +1157,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Audit source-only lock changes,264 permissive runtime/build packages and55 Word citations across14 files; update current attribution while preserving historical artifacts/fingerprints.
 - [x] Finish linked baseline/candidate regression and full461-native/fmt/strictClippy/release; clean579 installed corpus, typing, exact artifact/source and independent review.
 - [x] Finalize synchronized native/pin/artifact evidence and independent source/focused review.
-- [ ] Complete current-head CI and manual merge. Python language admission141 and broader DOC7/U01 remain open.
+- [x] Complete current-head CI and manual merge through PR132, required CI39610487130 and documentation CI39610487137. Python language admission141 and broader DOC7/U01 remain separately tracked.
 
 
 ## DOCX core-language metadata (spec141)
