@@ -950,7 +950,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Preserve original shape matrix and additional ratio/refusal diagnostics; retain a conservative future profile without creating a new API here.
 - [x] Update every WordCraft source together and add one native plus one public imported-document regression using the original generated fixture and explicit provenance.
 - [x] Complete final428-native/full550-installed independent artifact, fmt/Clippy/typing/license/size and current source/ledger/documentation checks.
-- [ ] Complete exact-head/current-main CI and manual merge.
+- [x] Complete exact-head/current-main CI and independent manual merge through PR122 and required CI39575658890.
 - [ ] Keep shape authoring and broader MED4/U04 work separate; no version/tag/release before overall completion gates.
 
 
@@ -963,5 +963,5 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete independent frozen source/public review (six workflows15.775s).
 - [x] Complete spec116 native closed-shape corner/outline parity gate, including min/max width and stroke-to-dimension boundaries; preserve 200-point/native-clamp diagnostics.
 - [x] Complete corrected436-native and two clean556-test installed corpora, exact-artifact/source review, strict typing and synchronized bounded support documentation.
-- [ ] Complete dependency PR122 and closed-shape exact-head/current-main CI and manual merge.
+- [ ] Complete closed-shape exact-head/current-main CI and manual merge; dependency PR122 is merged.
 - [ ] Keep MED4 open for lines/textboxes and excluded contexts; no new U-owner or broad shape-parity claim.
