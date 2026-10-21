@@ -61,7 +61,7 @@ class PictureFormatting(TypedDict, total=False):
 
 class ParagraphFormatting(TypedDict, total=False):
     direction: Literal["ltr", "rtl"] | None
-    borders: dict[str, BorderFormatting | None] | dict[str, _BorderSnapshot | None] | None
+    borders: dict[str, BorderFormatting] | dict[str, BorderFormatting | None] | dict[str, _BorderSnapshot | None] | None
     tabs: list[TabStop] | list[_TabSnapshot] | None
     alignment: str | None
     indent_left: float | None
