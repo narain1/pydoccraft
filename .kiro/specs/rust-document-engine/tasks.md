@@ -628,7 +628,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Integrate immutable same-page groups through existing field containers/properties with independent field/widget bounds and cumulative preflight/accounting.
 - [x] Add native and public source/pixel/geometry/flatten/callback/identity/budget tests and consumer typing assertions.
 - [x] Complete integrated release/clean installed-wheel corpus: 326 native and 467 Python tests, typing and unchanged license audit.
-- [ ] Complete independent exact-head/current-main review and manual merge.
+- [x] Complete independent exact-head/current-main review and manual merge: PR94, run39548202131.
 - [ ] Retain imported inventory, arbitrary mutable/multi-page groups and broader PDF6/U10 appearance work.
 
 
