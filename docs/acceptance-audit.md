@@ -109,7 +109,7 @@ Only STY2 and TXT1 change completion state here, bringing the prepared roadmap t
 - **QA5**: repeated reopen and independent same-engine test execution do not establish all independent viewer/schema/conformance evidence.
 - **R4/P2/P4**: structured failures/native allocation entrypoints, alpha/background semantics and bounded selective processing remain documented gaps.
 - **C5/FORM2/DOC2/DOC5/DOC6/DOC8**: repeating rich rows/imported Office/template variants/cross-container remapping/duplication remain open; independent whole-document copy does not prove fragment adoption.
-- **DOC7**: core language and typed extended-property access remain absent despite supported core/custom scalars.
+- **DOC7**: typed extended-property access and imported-property completeness remain open; core language now joins the supported core/custom scalar metadata profile under spec141.
 - **E2/E3/E5/LAY8**: exact normalized/source offsets, broader scope geometry/revisions and substitution/omission diagnostics remain incomplete.
 - **STY3/STY5/STY6/TXT4/TXT5/TXT6/TXT8**: live theme identity, document-scoped fonts, style import/retarget, decimal/bar tabs, custom list/script coverage and arbitrary ranges remain native-backed gaps.
 - **TBL4/TBL6/TBL7/TBL8/TBL10**: complete vertical split reversibility, merged-row overflow, fill/border conflicts, inter-cell spacing/vertical script and captions/accessibility are not supplied by current ordinary-cell/table profiles.

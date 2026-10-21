@@ -680,18 +680,20 @@ Supplied static TrueType fonts additionally require every shaped glyph outline t
 
 ```python
 report.update_metadata(
-    title="Quarterly report", author="Reporting team", revision=2,
+    title="Quarterly report", author="Reporting team", language="en-GB", revision=2,
     modified="2026-10-20T12:00:00Z",
     custom={"Approved": False, "Quarter": 4, "Ratio": 1.25},
 )
 report.update_metadata(custom={"Approved": True, "Ratio": None})
 ```
 
-Core keys are `title`, `author`, `subject`, `keywords`, `description`, `category`, `last_modified_by`, `created`, `modified` and `revision`. Strings use XML-safe text without surrounding whitespace because the native reader trims it. Empty strings or `None` clear core strings; revision is an unsigned 32-bit integer, with zero/`None` clearing it. Created/modified accept valid UTC `YYYY-MM-DDTHH:MM:SSZ` timestamps, years 0001–9999. Saving leaves caller timestamps and revision unchanged. The dictionary omits cleared core values and always includes `custom`.
+Core keys are `title`, `author`, `subject`, `keywords`, `language`, `description`, `category`, `last_modified_by`, `created`, `modified` and `revision`. Strings use XML-safe text without surrounding whitespace because the native reader trims it. Empty strings or `None` clear core strings; revision is an unsigned 32-bit integer, with zero/`None` clearing it. Created/modified accept valid UTC `YYYY-MM-DDTHH:MM:SSZ` timestamps, years 0001–9999. Saving leaves caller timestamps and revision unchanged. The dictionary omits cleared core values and always includes `custom`.
 
 Custom values support strings, booleans, signed 64-bit integers and finite floats, preserving their native types. A custom dictionary patches entries: omitted names stay unchanged, per-entry `None` removes one, and `custom=None` clears all. Names use native ASCII case-insensitive identity while retaining their original spelling; ambiguous batch names fail. Custom string whitespace is preserved. Nested objects, arbitrary XML, vectors and custom date wrappers are unavailable. Names are 1–255 UTF-8 bytes with no control characters or surrounding whitespace; values are limited to 64 KiB, with at most 1,024 properties. Incoming JSON, stored core values and stored custom values each have a 256 KiB serialized budget. Compound updates fail atomically, retaining existing ranges and cached output on rejection.
 
-Ordinary DOCX extraction exposes the supported core properties. Imported custom-property inventory, core language and extended/application property editing remain DOC7 gaps. Metadata editing uses native CoreProps/CustomProp and the normal document writer; it does not add arbitrary source DOCX editing.
+The document-level `language` value is literal core metadata. It does not change run proofing language, font selection, text direction, shaping or PDF language tags. Omitted language stays unchanged; an empty string or None clears it. Core strings are limited to 64 KiB of UTF-8 within the shared core budget.
+
+Ordinary DOCX extraction exposes the supported core properties, including language. Imported custom-property completeness and extended/application property editing remain DOC7 gaps. Metadata editing uses native CoreProps/CustomProp and the normal document writer; it does not add arbitrary source DOCX editing.
 
 ### PDF rectangle and ellipse comments
 

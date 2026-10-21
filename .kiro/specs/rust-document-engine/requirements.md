@@ -981,7 +981,7 @@ The same audit compares original TXT1 ordinary paragraph/run editing and exact-t
 3. Complete locked native/fmt/strictClippy/release, clean installed579 regression corpus, strict typing and independent source/artifact/attribution evidence. Record exact sizes/citations and distinguish native139 evidence from package140 evidence. No DOC7 checkbox or operation-profile promotion follows.
 
 
-## DOCX core-language metadata (spec141, pending native prerequisite)
+## DOCX core-language metadata (spec141)
 
 The existing owned metadata patch and extraction metadata dictionary shall expose the native document-language value after the separately reviewed engine upgrade. Preserve existing nullable-clear/empty-omission behavior, 64 KiB UTF-8 scalar bounds, 256 KiB serialized core-metadata bounds and atomic rejection. Treat this as document metadata; do not infer run language, shaping, fonts, paragraph direction or PDF tagging. Extended properties remain separate DOC7/U01 work.
 

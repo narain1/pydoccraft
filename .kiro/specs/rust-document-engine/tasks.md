@@ -1164,8 +1164,8 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 
 - [x] Independently review the compact existing-dictionary API, native inventories, bounds and metadata/run-language distinction.
 - [x] Prepare the adapter and focused output/UTF-8/aggregate/rollback controls; retain intended baseline unsupported-key failures.
-- [ ] Integrate only after the independently reviewed native contribution139 and dedicated upgrade140.
-- [ ] Pass native and installed focused controls, then explicitly review the one legacy metadata-test fingerprint migration without relabeling historical evidence.
+- [x] Integrate after the independently reviewed native contribution139 and dedicated upgrade140 local acceptance.
+- [x] Pass native and installed focused controls, then explicitly record the sole reviewed metadata-test fingerprint migration without relabeling historical evidence.
 - [ ] Pass full locked native/installed corpus, independent source/artifact/focused review, license/size checks and synchronized bounded documentation.
 - [ ] Complete fresh current-main CI and manual merge. Keep extended-property and broader DOC7 work open.
 
