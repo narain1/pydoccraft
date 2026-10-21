@@ -2344,6 +2344,29 @@ This satisfies the remaining prerequisite for the separately reviewed STY2/TXT1 
 
 The current support-ledger audit identity is advanced to the exact validated combined source `282f48995412deba6283cdeaf9a49174ceaf8daf`; only that identity and the generated matrix audit link change. All historical operation profiles, artifacts and fingerprints remain unchanged. This documentation update does not relabel the original native build or final579 corpus.
 
+### PR128 final current-main CI and manual merge
+
+The authoring/validation aggregate was manually merged as `48f1583fe843fb168a269e35f013b6aed9430554` on 2026-10-21 at 12:14:01 UTC. Reviewed head `fbcf0aaad5f29b06e7d380bd32e5c14f50a4ef59` included actual main `4ed440dd78efaba4a389210850e324c640035bf6`. Required CI39594229122 and documentation CI39594229092 passed; strict branch protection, exact head/current-main ancestry and disabled auto-merge were verified. No bypass was used.
+
+The fresh CI build passes 452 native tests in 510.94 seconds and 571 installed-wheel tests in 959.341 seconds (959.877 seconds wrapper), with zero failures/errors/skips. Formatting, strict Clippy, installed typing and the 264-package license audit pass. The CI wheel is 17,733,199 bytes, SHA256 `ba3f1a67d32aae029a369f587a69bdc42c19ab21957c10a7d1f313fccc5410b9`; its native extension is 41,125,296 bytes. Cargo.lock SHA256 remains `ae4bf514017df6a4317e81cb5b2f194f89acd1ee6bf8f7e6ebd54d21772f829d`. These are fresh CI artifact identities, not relabeled local repack bytes.
+
+This completes the current-main delivery gates for specs120/123/125/126/133. The dedicated Deck upgrade in PR129 remains a separate pending dependency change and still requires its own current-head CI and manual merge. No version, tag or release was published.
+
+### PR129 final current-main CI and manual merge
+
+The dedicated DeckCraft upgrade was manually merged as `b8f011b4f009cde5482b70010c4b94482438d0eb` on 2026-10-21 at 12:44:24 UTC. Reviewed head `14de8e1ef2d1a33c5ab35af60011a88c71b2e2b1` included actual main `48f1583fe843fb168a269e35f013b6aed9430554`. Required CI39598137797 and documentation CI39598137783 passed. Exact head, current-main ancestry, strict branch protection, clean merge state and disabled auto-merge were verified; no bypass was used.
+
+Fresh CI passes 453 native tests in 515.05 seconds and 572 installed-wheel tests in 969.911 seconds (970.472 seconds wrapper), with zero failures/errors/skips. Formatting, strict Clippy, installed typing and the 264-package license audit pass. The CI wheel is 17,733,301 bytes, SHA256 `352000882e5531ea8ca29fc05512589f82b0df0082b5a4f5dc9fe9cb1ee10b16`; its native extension is 41,125,088 bytes. Cargo.lock SHA256 remains `654a8eb11235a9962746610e98983fdc107a330eeee055198a4757ba6ec8ba95`. These fresh CI artifacts remain distinct from the original and repacked local artifacts.
+
+This completes spec128's current-main delivery gate. PR130 retains the separate Word upgrade and requires fresh current-head CI after this actual-main merge. No runtime, fixture, dependency, attribution, version or release changes are introduced by this merge-evidence update.
+
+### PR130 final current-main CI and manual merge
+
+The dedicated WordCraft default-size upgrade was manually merged as `3f390672b7523ee83ce44a15819840a6afb6d922` on 2026-10-21 at 13:07:55 UTC. Reviewed head `47c1b8470691e9a702ddaffc1c321be6913b0bab` included actual main `b8f011b4f009cde5482b70010c4b94482438d0eb`. Required CI39602725245 and documentation CI39602726203 passed. Exact head/current-main ancestry, strict protection, clean merge state and disabled auto-merge were verified; no bypass was used.
+
+Fresh CI passes 453 native tests in 315.99 seconds and 573 installed-wheel tests in 595.398 seconds (595.975 seconds wrapper), with zero failures/errors/skips. Formatting, strict Clippy, installed typing and the 264-package license audit pass. The CI wheel is 17,735,388 bytes, SHA256 `90196cb6fd1f8da6699347da7d36caf8333cc14589964a74df52e767db7bac45`; its native extension is 41,125,616 bytes. Cargo.lock SHA256 remains `4fe281f41827701fd6d6d84a4e90191f37fbecb4a3e19a8c1ab311ddd84ca009`. These fresh CI artifacts remain distinct from the original and repacked local artifacts.
+
+This completes spec131's dedicated dependency delivery gate. The combined paragraph features in PR131 still require fresh current-main CI and independent manual merge. This evidence update changes no runtime, fixture, dependency, attribution, version or release.
 
 ## 2026-10-21 native core-language contribution and dedicated Word upgrade (spec139/140)
 
