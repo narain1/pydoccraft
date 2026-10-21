@@ -664,3 +664,8 @@ Counters bound line observations, rectangles, conservative native cluster work a
 ### Spec100 correction: finite signed cluster advances
 
 Pinned WordCraft adds character spacing to shaped advances and preserves signed adjacent-position differences in bidi VisCl widths. Negative widths are valid for condensed clusters. Provenance validates finite x, width and x+width before calling native helpers, without imposing nonnegative advances or taking absolute values. Native x_spans filters nonpositive bidi cluster widths; the projection retains its existing omission of nonpositive returned spans. Existing source ranges, line/cluster cardinalities, nonnegative line height, output geometry and all work/copy/allocation budgets remain unchanged.
+
+
+## 103. Font storage is separate from document resolution
+
+Pinned WordCraft exposes embedded-part extraction and FontDb admission but not a typed DOCX embedding operation found by this audit. DeckCraft already exposes embedded-font/media serialization and supported-wrapper extraction. Neither storage path supplies the document-owned resolver needed by ordinary text/layout, which currently uses globals; admission keeps existing family/style matches and selected FaceRef handles retain faces for process lifetime. Public independent FontDb construction alone cannot inject the context into all document operations. Defer local API design until native context/lifetime, permission, collision and diagnostic behavior are proven. Reuse existing formatting and lifecycle operations after that gate; native PDF subsetting already exists and must be validated rather than reimplemented.

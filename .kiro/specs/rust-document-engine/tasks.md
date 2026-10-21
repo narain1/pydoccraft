@@ -803,3 +803,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete integrated full corpus and independent artifact review: 387 native tests and two clean 516-test installed-wheel runs pass, including the caught and corrected signed-advance regression.
 - [ ] Complete exact-head/current-main CI and manual merge.
 - [ ] Retain E2/LAY8/U05 normalized slicing, auxiliary/object/table geometry and broader parity scope.
+
+
+## Office caller-font source audit (spec103)
+
+- [x] Separate existing PDF supplied-font support and STY3 theme identity from remaining Office STY5 acceptance.
+- [x] Trace pinned public font storage/admission, global selection, face lifetime and native PDF export behavior; connect precise prerequisites to U02/U11.
+- [x] Complete independent pinned-source review and documentation/link checks.
+- [ ] Obtain native document-scoped resolution/embedding contracts and execute the proposed valid-font isolation/save/render/export fixture gate before adding Office caller-font inputs; STY5 remains open.
