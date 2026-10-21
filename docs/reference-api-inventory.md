@@ -379,7 +379,7 @@ Extended application properties.
 
 **Audited local surface:** No new parallel metadata collection.
 
-**Disposition:** `upstream_or_unassessed`. **Remaining:** Pinned WordCraft app_xml passthrough uses private kept-property policy, not a public editable model; language/app metadata remain DOC7 gaps.
+**Disposition:** `upstream_or_unassessed`. **Remaining:** Selected WordCraft now exposes strict typed access to eight retained extended properties (spec143/146); Python mapping admission remains separate147. Core language is already exposed; source completeness, computed producer/statistics and broader application properties remain DOC7 gaps.
 
 **Upstream candidates:** [U02](upstream-roadmap.md)
 

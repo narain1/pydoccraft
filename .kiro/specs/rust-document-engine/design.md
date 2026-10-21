@@ -25,7 +25,7 @@ flowchart LR
 Every upstream repository is pinned to an immutable commit:
 
 - PdfCraft v0.9.0, reviewed contribution fork `narain1/pdfcraft`: `516caea956c0aaf15f2bd1f35a15e07c73a9ead6` (reviewed parent `60a8d7998b64c7718e08e9054e99f1f2eb1eda8d`, original upstream base `645016addcfb9078c557f0189559ab47cdcee057`)
-- WordCraft v0.8.0, reviewed contribution fork `narain1/wordcraft`: `517637db3caa0dffd1ad5e4e66c9bdd86e908742` (reviewed parent `5312722fb1cefed837f00227e3afe919a6451b54`, original upstream `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`)
+- WordCraft v0.8.0, reviewed contribution fork `narain1/wordcraft`: `a57b416783b8ba25ec44e30ee0c3cd8362c44974` (reviewed parent `517637db3caa0dffd1ad5e4e66c9bdd86e908742`, original upstream `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`)
 - DeckCraft v0.8.0, reviewed contribution fork `narain1/deckcraft`: `c9c7fff189c808bf7266d0b888c3636a1880080d` (reviewed parent `dd4fd70b6347dd2ce782e33f030a2b6c0abb0106`, original upstream base `22db9261f9d1a214c296fd390173130c45d76d66`)
 - Craft PDF backend patches use the immutable `craft-libs` revision required by WordCraft/DeckCraft.
 
@@ -933,3 +933,10 @@ Add annotations to 28 existing setters only. Reuse private source/size/color ali
 The strict consumer exercises ordinary numbers, Fraction scalars, the index protocol, list/tuple values, path/stream image sources and supported clears. A whole-facade AST comparison erases only function/argument annotations and must otherwise be identical to aa1dae5. Dynamic metadata, note-option snapshots, raw path commands, the general range-link return contract and broader API3 discoverability remain separately scoped.
 
 Spec142 review retains the existing conventional float element hints in point containers; these do not describe every Real subtype accepted by runtime pt. Scalar distance/margin setters explicitly include Real. The PPTX cell-paragraph alignment override accepts str | None, preserving its native reset; ordinary Word paragraph alignment remains nonnullable. Wider static collection inference and exhaustive numeric protocols remain API3 work.
+
+
+## Typed retained extended-property prerequisite (spec143/146)
+
+The selected native contribution exposes ExtendedProperties, ExtendedPropertyPatch and typed errors through wordcraft-docx. It reuses the private native storage internally; production adapters do not parse that bookkeeping or app.xml. Four optional strings and four optional booleans form the complete native snapshot. Empty text/False remain present. A patch slice of at most eight unique variants supports clear/leave unchanged, validates the whole retained record even for empty/no-op updates and commits one bounded replacement atomically. Raw byte limits precede UTF8, then records are checked in order; earlier semantic failures can precede a ninth-record Limit. Exact boolean source spellings true/false/1/0 are interpreted, unchanged lexical values/order retained, changed bools canonicalized. No allocation of an unbounded snapshot occurs.
+
+The default reader/writer remain unchanged, including legacy first-eight truncation/duplicate occupancy, omitted unknown/oversized/separator values, computed statistics and privacy filtering. Strict access cannot diagnose already omitted source values or namespace conformance. The native contribution465/460 tests and rich3DPI proof are separate from this dedicated package468/585 acceptance. One linked native regression exercises actual selected APIs, complete model rollback, same-model clear/no-op, DOCX/FlatOPC cycles and positive source/PDF72DPI output. Python metadata dictionaries remain unchanged here;147 owns their later bounded admission.

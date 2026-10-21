@@ -1198,3 +1198,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete independent source, AST, strict positive/negative and nullable-reset review.
 - [x] Complete combined installed-artifact validation and independent artifact review.
 - [ ] Complete current-main CI and manual merge; keep API3 open.
+
+
+## Typed retained extended properties and dedicated upgrade (spec143/146)
+
+- [x] Review/publish native a57b4167 on517637db; retain old API-availability failure,460/465 native suites, six exact legacy artifacts, independent six new tests and final output144/144 comparisons.
+- [x] Review the dedicated five-direct/nine-resolved Word-only upgrade and one linked-native regression, preserving all585 historical Python tests and other pins.
+- [x] Verify source-only lock delta,264 permissive normal/build packages,55 Word citations across14 files and unchanged bundled assets; keep historical profiles/artifacts/fingerprints exact.
+- [x] Complete locked468 native/fmt/strictClippy/release, clean installed585, typing and exact source/artifact/attribution independent review.
+- [x] Finalize synchronized native/pin/artifact evidence and independent source/focused review.
+- [ ] Complete current-head CI and manual delivery. Python extended mapping147 and broad DOC7/U01 remain separate.
