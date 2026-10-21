@@ -635,6 +635,11 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 4. Tests SHALL preserve existing native format/geometry/output assertions while resolving owned IDs through locations. They SHALL cover interleaved allocation, identity-key order different from source order, hidden section markers, copies, picture-to-paragraph identity, child invalidation, no-op reads and failed creation/commit rollback. Numeric private `_id` and diagnostic repr changes SHALL be documented explicitly; no public numeric-ID persistence contract SHALL be introduced.
 
 
+## 85. Native PDF comment opacity
+
+Existing Annotation.opacity and update(opacity=...) SHALL support finite [0,1] values for the seven existing comment kinds through native set_style. Links, malformed values, unsupported target dictionaries and locked style changes SHALL fail explicitly and atomically. The bounded canonical profile SHALL admit finite fractional direct CA without widening metadata/geometry/reply handling. Getter SHALL avoid native appearance reconstruction. Native AP regeneration, compound intermediate streams and note appearance work SHALL be bounded/accounted; callback ownership checks SHALL preserve identity. This does not complete imported-form/reply support, PDF6 or PDF8.
+
+
 ## 79. Bounded owned PDF radio groups
 
 1. Existing page.fields.add SHALL accept kind="radio" with explicit boxes and one distinct literal option per box, preserving existing singular-box calls. Groups SHALL be atomically created with 2–32 immutable same-page widgets through public native Radio primitives. All field kinds SHALL expose an owned immutable boxes tuple; singular radio box access/mutation SHALL fail explicitly. No child manager, arbitrary imported-form support or mutable group shape SHALL be introduced.

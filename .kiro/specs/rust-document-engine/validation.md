@@ -1229,6 +1229,17 @@ The following delivery gates are complete after independent frozen-source/packag
 Every final run also passed formatting, warnings-denied Clippy, strict installed-package typing and the unchanged 264-package audit. Each includes the independently reviewed DOCX spacing fixture correction. Earlier local artifacts, including the recorded 462-test identity artifact, retain their original test-file scope. Main integration changes no identity-refactor runtime or dependency bytes; final exact-head/current-main CI for PR93 remains pending.
 
 
+## Native PDF comment opacity — focused integration evidence
+
+Pinned source confirms set_style writes CA and redraws AP-local GS0 with CA/ca, retaining Highlight Multiply. This change reuses existing comment property/update methods and expands only finite fractional CA in the accepted canonical target profile. The two historical rejection fixtures in test_annotation_lock.py and test_pdf_geometric_annotations.py now reject CA1.5 rather than CA0.5; that is an intentional supported-contract change, not weakened rejection of malformed/out-of-range or foreign metadata. Existing native accounting assertions deliberately add the new 512-byte-per-AP resource allowance; they retain exact stream-byte accounting. The new native fixtures prove opacity followed by repeated color-only writes, fractional resize-only, two generations during fractional compound resize/style, and at-limit/+1 rollback. Their old full-artifact evidence remains historical; scoped evidence migration and integrated full validation are pending. No encryption API or dependency change is included.
+
+
+Focused isolated validation on Linux/Python3.11.2/Rust1.95: three new native groups passed in 0.05 s, three existing geometric groups in 1.93 s and three existing lock groups in 1.33 s. Formatter, locked offline Clippy/debug build and strict consumer typing passed. A copied package with the final debug extension passed all 19 selected Python workflows (four new opacity plus 15 related lock/geometric/markup tests) in 36.476 s. New public fixtures prove all seven kinds on white/colored backgrounds, 72/144-DPI PNGs, object-stream/classic saves and reopen, copy independence, finite values and canonical imported scalar restrictions, locked compound rollback and float-callback lifetime checks. These are focused development results; the full locked release wheel corpus, exact artifact scope migration and final CI/manual merge remain pending. Cargo.lock, pins and dependencies are unchanged.
+
+
+Integration review also found one pre-existing markup accounting assertion still expecting only stream bytes after recoloring. Its expected value now explicitly includes the same 512-byte resource allowance; no runtime behavior changed in that correction. The corrected assertion awaits the integrated full native run. A root run that reused a different worktree's cached native binary was discarded; native package rebuilds must establish the expected source-specific test count before recording complete artifact evidence.
+
+
 ## GitHub Pages documentation site — local build validation
 
 The documentation-only change renders the existing Markdown guides plus a landing page into 28 static HTML pages using hash-pinned, build-only Python-Markdown 3.7. `tools/build_site.py` does not import the package or invoke Cargo. No runtime dependency, lockfile, feature status, upstream revision or package version changes.

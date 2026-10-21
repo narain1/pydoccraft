@@ -543,6 +543,11 @@ Body collection enumeration builds a transient bounded position-to-ID BTreeMap f
 Section endpoints, section ordinals, hidden section-marker paragraphs, native layout paths, numbering and field scopes remain untouched. Copy clones allocator/maps; picture removal changes classification without replacing the empty anchor's ID. Part/grid invalidation and normal global TextRange revisions are unchanged. The historical spec78 audit preceded this migration; its body-deletion restriction remains, but the identity prerequisite is now complete. Body section-boundary/semantic deletion policies still require a separate accepted change. Private repr/ID numbers change intentionally and do not promise positions or cross-document identity.
 
 
+## 85. Native PDF comment opacity
+
+The existing optional update dispatch gains opacity and forwards color/opacity through one pdfcraft_annot::set_style call. The existing lock-target validator is reused for opacity reads/writes; only its CA scalar and the geometric validator expand from 1 to finite [0,1]. A single-target accessor reads validated CA, defaulting absent CA to 1, without props(). Python normalizes numeric inputs between initial/final ownership checks. Notes reserve a fixed 64 KiB appearance bound; generated stream bytes plus a conservative 512-byte ExtGState resource allowance are charged per native style/shape-resize AP generation, including subsequent color-only writes, identical writes and the already measured intermediate shape-resize AP. Canonical note recoloring uses the same bounded target guard and appearance ceiling as note opacity. Native Highlight Multiply and CA/ca resources remain upstream behavior. No dependencies or public manager are added.
+
+
 ## Owned radio groups
 
 A private add_radio_field boundary keeps old add_field callers unchanged. It caps boxes JSON at 16 KiB before deserialization, validates 2–32 tuples/options, native user geometry, canonical encoded names and the existing aggregate text/field/widget/history budgets, then stages native NewField::Radio calls. Public fields.add normalizes the actual string discriminator, options and all coordinates before its final original-page check. No callbacks choose a different native kind.

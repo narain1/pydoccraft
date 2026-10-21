@@ -67,6 +67,9 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(pdf.bookmarks.move(0, 0), Bookmark)
         annotation = page.annotations.add('note', box=(10, 10, 20, 20))
         assert_type(annotation, Annotation)
+        assert_type(annotation.opacity, float)
+        annotation.opacity = .5
+        annotation.update(opacity=.25, color="blue")
         assert_type(annotation.locked, bool)
         annotation.locked = True
         assert_type(annotation.locked, bool)

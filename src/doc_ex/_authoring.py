@@ -2549,15 +2549,34 @@ class Annotation:
                 return value
         raise ValueError("annotation no longer exists")
 
-    def update(self, *, text: str | None = None, box=None, color=None, uri: str | None = None, page: int | None = None, author: str | None = None):
+    def update(self, *, text: str | None = None, box=None, color=None, uri: str | None = None, page: int | None = None, author: str | None = None, opacity: float | None = None):
         self._check()
         rect = None if box is None else _annotation_rect(box)
         rgb = None if color is None else _color(color)
         target = None if page is None else _index(page, self._page._owner.page_count)
+        if opacity is not None:
+            if isinstance(opacity, (bool, str, bytes)):
+                raise TypeError("annotation opacity must be a number")
+            opacity = float(opacity)
+            if not math.isfinite(opacity) or not 0 <= opacity <= 1:
+                raise ValueError("annotation opacity must be finite and between 0 and 1")
         self._check()
         self._page._owner._call("update_annotation", self._page.number, self._id,
             text=text, rect=rect, color=rgb, uri=uri, target_page=target,
-            author=author, _change=True)
+            author=author, opacity=opacity, _change=True)
+
+    @property
+    def opacity(self) -> float:
+        """Native comment opacity from 0 (transparent) to 1 (opaque)."""
+        self._check()
+        return self._page._owner._call("annotation_opacity", self._page.number, self._id)
+
+    @opacity.setter
+    def opacity(self, value: float):
+        if value is None:
+            self._check()
+            raise TypeError("annotation opacity must be a number")
+        self.update(opacity=value)
 
     @property
     def locked(self) -> bool:
