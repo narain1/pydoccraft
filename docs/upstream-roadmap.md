@@ -50,7 +50,7 @@ Revision: `645016addcfb9078c557f0189559ab47cdcee057`.
 
 ### DeckCraft
 
-Current reviewed contribution fork: [`narain1/deckcraft` at `dd4fd70b6347dd2ce782e33f030a2b6c0abb0106`](https://github.com/narain1/deckcraft/commit/dd4fd70b6347dd2ce782e33f030a2b6c0abb0106), directly based on upstream `22db9261f9d1a214c296fd390173130c45d76d66`. The following original source audit is preserved at its original revision; spec114 below records the new selected error contract.
+Current reviewed contribution fork: [`narain1/deckcraft` at `c9c7fff189c808bf7266d0b888c3636a1880080d`](https://github.com/narain1/deckcraft/commit/c9c7fff189c808bf7266d0b888c3636a1880080d), based on reviewed `dd4fd70b6347dd2ce782e33f030a2b6c0abb0106` and original upstream `22db9261f9d1a214c296fd390173130c45d76d66`. The original source audit retains its historical links; spec114 records the selected error contract and spec128 the logical break-text correction.
 
 - [PPTX API](https://github.com/storytold/deckcraft/blob/22db9261f9d1a214c296fd390173130c45d76d66/crates/pptx/src/lib.rs) already exposes `export`, `export_as` and `import_theme`. The writer is present; preservation and facade integration remain to be verified.
 - [Renderer](https://github.com/storytold/deckcraft/blob/22db9261f9d1a214c296fd390173130c45d76d66/crates/render/src/lib.rs#L334) catches render panics and can return a correctly sized blank image. Its global counter is not a safe per-call failure signal. The former local adapter's dimension/PNG checks could not distinguish this fallback. Spec114 now selects a public fallible call in the reviewed contribution fork.
@@ -560,3 +560,12 @@ The fitting public profile has source/readback and actual PDF text/link controls
 The existing PdfPage.draw_text and add_image methods reuse the reviewed native typed-placement API through behind=True. Built-in point/boxed text and PNG/JPEG image placement retain their existing native layout/transforms and staged resource-preservation check. There is no new layer manager or local content-stream algorithm. Later underlays paint beneath earlier ones; opaque original content can hide them, and extraction is independent of visible ink.
 
 Supplied-font text remains on the raw-stamp route and refuses underlays before reading the font. Raw draw_path remains overlay-only. Fixed-name resource collisions still fail atomically rather than rewriting resources locally. Native bounded scanner/state handling and collision-safe composition are still U10 prerequisites for a broader raw-content underlay contract. The typed subset does not close PDF3 or general watermark/background parity.
+
+
+## PDF text after native PPTX line breaks (spec124/spec128; U11/TXT4)
+
+The reviewed [DeckCraft contribution c9c7fff](https://github.com/narain1/deckcraft/commit/c9c7fff189c808bf7266d0b888c3636a1880080d) is based directly on the selected fallible-rendering fork dd4fd70. Two PDF text projections concatenated stored run strings even though native Break runs store empty text and consume one logical layout character. Actual native content operators and ToUnicode maps confirmed shifted emitted text, independently of normalized extraction. The correction reuses public native Paragraph.text() in normal slide and notes/handout master paths; it adds no layout, font, parser or local text-reconstruction algorithm.
+
+The exact baseline passes15 existing native PDF tests and fails the two new desired regressions; the candidate passes17, including Unicode with actual selected font maps. Six no-break PDF outputs and three nested Busy error records remain byte-identical. The original desired raw124 source is unchanged and now passes24 model/eight output profiles. Initial one-font test-decoder failure and dependency-inclusive lint failures are preserved separately; package-only strict Clippy is the recorded passing gate. Publication to the reviewed fork does not imply upstream acceptance.
+
+Spec128 is the dedicated package pin and imported-regression change. It does not enable PPTX cell break creation or change Python text getters; those remain a separate existing-API adapter task. Broader U11/TXT4 fidelity and paragraph parity remain open.
