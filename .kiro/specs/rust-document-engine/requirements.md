@@ -908,3 +908,8 @@ The pinned reference inventory SHALL distinguish implemented bounded operations 
 ## 126. Representative combined authored documents
 
 Complete QA2's missing resume, review, form and multilingual examples using existing public operations. Combine tables, backgrounds and stories rather than only testing isolated formatting. Keep the multilingual fixture's Latin glyph/language scope explicit; preserve separate comment metadata and document native PDF review omission. Owned PDF form copies/flattening must retain visible appearances and source independence. No new package API or runtime dependency is required. Acceptance requires exact installed-wheel reuse identity, focused/full corpus results and actual visual inspection of retained source/PDF raster artifacts.
+
+
+## 133. Typed paragraph snapshot replay
+
+Support full existing direct/resolved paragraph snapshot replay in strict consumers while preserving existing inline patch inference, exact native direction literals and all malformed-input refusals. Keep full runtime implementation bodies, native bytes, key sets and method names unchanged. Do not claim full API3 closure or widen runtime acceptance to arbitrary Mapping/Sequence implementations. Preserve separately demonstrated existing border-container typing limitations.

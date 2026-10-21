@@ -70,7 +70,7 @@ The [spec126 validation](../.kiro/specs/rust-document-engine/validation.md#126-r
 ## Criteria deliberately not promoted
 
 - **API1/QA1**: representative198 reference members/44families and21operation profiles do not complete dispositions/status/native/test joins for every feature; unassessed joins cannot be relabeled verified.
-- **API3**: remaining property annotations and full Word snapshot replay/IDE coverage are explicitly incomplete. Existing common factories/getters/reprs are substantial partial evidence.
+- **API3**: remaining property annotations, some pretyped border dictionaries and IDE coverage are explicitly incomplete; spec133 covers full Word paragraph snapshot replay. Existing common factories/getters/reprs are substantial partial evidence.
 - **QA3**: broad save/reopen/copy and exact-link/nested-table evidence exists, but “for each operation” is not yet exhaustively mapped; leave open withQA1.
 - **QA4/QA7**: representative DPI/reopen/memory/size gates exist, but platform/font divergence is the separate active120 workstream. Do not claim cross-platform visual baselines from this Linux artifact.
 - **QA5**: repeated reopen and independent same-engine test execution do not establish all independent viewer/schema/conformance evidence.

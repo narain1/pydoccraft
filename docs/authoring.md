@@ -883,3 +883,10 @@ The existing Picture placement vocabulary is shared: `format(wrap=..., anchor=..
 `word.shapes` supports ordinary iteration, negative indexing, slices and single-item deletion. Its IDs survive surrounding paragraph/table edits; copies have independent owners. Deletion retains the native empty paragraph and any section boundary, like picture deletion. The deleted shape handle stays invalid even after new shapes are added. No shape movement, separate manager, second box/position representation or public handle class is added.
 
 This profile covers direct owned body shapes in horizontal sections. Lines, text boxes, rotated shapes, front layering, groups, effects, imported editing and header/footer/cell/note shapes remain unavailable. Existing non-top section-alignment restrictions still apply. `layoutInCell` and `allowOverlap` remain upstream writer behavior, not configurable guarantees. Shapes do not become fake extracted text or images: semantic extraction retains its existing `shape_geometry_omitted` document diagnostic, while rendering uses native geometry. MED4 remains open for the excluded functionality; see [upstream shape evidence](upstream-roadmap.md#docx-closed-shapes-and-text-boxes).
+
+
+### Reusing paragraph formatting
+
+For an owned DOCX paragraph, reuse its full direct formatting with `paragraph.format(**paragraph.formatting)`. To make the currently resolved values explicit, use `paragraph.format(**paragraph.resolved_formatting)`. Direct values retain `None` for inheritance; resolved values make a local copy of the effective formatting, so later style changes can behave differently. Both forms retain the existing validation and mutation rules. The same direct-snapshot call works for the supported PPTX cell paragraph properties; resolved paragraph formatting remains DOCX-only.
+
+Type checkers accept these complete snapshots and the existing inline patch dictionaries. This adds no method or new runtime formatting value. Some separately annotated nonnullable border dictionaries still have invariant-container typing limitations; explicit nullable input dictionaries follow the existing input contract.

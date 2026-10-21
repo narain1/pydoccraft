@@ -1048,3 +1048,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete independent source/focused/visual review and full retained-wheel corpus with exact source/artifact identity: final 571 tests pass with zero failures/errors/skips.
 - [x] Record seven-category evidence and close QA2; keep broader typography/review/forms/platform/preservation criteria open.
 - [ ] Complete current-main CI and independent manual merge.
+
+
+## Typed full paragraph snapshot replay (spec133)
+
+- [x] Reproduce eight strict-consumer gaps against the installed baseline while verifying existing native full replay.
+- [x] Reject input-union approaches that regress inline dictionaries; preserve their diagnostics and unchanged preexisting border-container limitations.
+- [x] Add two overloads on each existing paragraph formatter and exact native direction output literals, with unchanged implementation bodies and input TypedDict.
+- [x] Verify strict installed consumer, five intended negative cases, runtime direct/resolved body/header/cell replay, exact native/wheel facade identity and independent review.
+- [ ] Complete full exact installed-wheel corpus and synchronized documentation; keep broader API3 open.
+- [ ] Complete combined current-main CI and independent manual merge.

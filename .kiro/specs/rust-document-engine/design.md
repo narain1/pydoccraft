@@ -835,3 +835,8 @@ One evidence document links exact selectors and historical validation. TODO chec
 ## 126. Composed representative corpus
 
 Three builder functions live in examples, returning ordinary owned documents for caller-selected close/save/render/copy operations. The resume combines named headings, English/French/German Latin content, language metadata, a shaded semantic table and exact hyperlink; the review combines a decision table and stories with whole-paragraph comment/reply metadata; the PDF intake form combines text/graphics/link and existing owned fields. Existing letter/invoice/branded-report/letterhead fixtures supply the other QA2 categories. Source comment display and deliberately clean PDF output remain distinct. No new builder framework, template language, form manager, font registry or optional runtime is introduced.
+
+
+## 133. Paragraph formatting overloads
+
+The shared direct/resolved paragraph output declares direction as the exact native ltr/rtl literal (nullable only for direct inheritance). Existing Paragraph.format and its PPTX cell override expose two typing overloads: the unchanged ParagraphFormatting input patch and the full direct snapshot. The latter also accepts the resolved value set; a redundant third overload is unnecessary. The implementation accepts object-valued keyword arguments internally and retains its exact validation/dispatch body. Defaults/style input/output declarations are unchanged. No public helper, manager, method or general mapping adapter is introduced.
