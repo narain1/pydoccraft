@@ -901,3 +901,19 @@ TXT1 reuses existing paragraph collections and revision-bound ranges. Its audit 
 ## DOCX core-language metadata (spec141)
 
 Add language to the existing native update target and core snapshot inventories, the extraction metadata projection, Python allowed-key set and private output schema. The native model/reader/writer come from prerequisite139/140; no OOXML processing is added to Python. Including language in core_metadata also includes it in the existing serialized aggregate budget. Reuse existing value validation, staged commit, revision invalidation, copies and cache behavior. Legacy unknown-key fixtures replace only their newly supported language example with a still-unknown key.
+
+
+## 134. Direction source evidence and logical PDF text
+
+The cell-only direction proposal remains at its native proof gate. Existing ParaProps.rtl and native layout are insufficient to claim semantic export fidelity. Preserve the original mistaken visual/CMap premises alongside separate actual normalized text differences; four matched visual diagnostic controls do not substitute for full acceptance. Route the source-backed logical-span investigation through existing U10 and the native Deck/PdfCraft boundary, with no new public manager or adapter workaround.
+
+
+## 137. PPTX cell tab formatting through native paragraph properties
+
+The existing cell paragraph patch projects tab mappings into DeckCraft ParaProps.tabs. Snapshot values preserve direct None/empty/list state; native serialization owns EMU rounding and native layout owns tab alignment, forward selection, default pitch and wrapping. The adapter checks only finite writer bounds,32-stop serialization capacity, roundtrip-distinct sorted order and supported alignment/leader vocabulary. No positioning or reading-order algorithm is added.
+
+A private bounded inventory walks presentation defaults, direct slide/notes bodies, master title/body/other styles, master/layout shapes and cells, notes and handout masters. It charges source containers/levels/paragraphs/runs/stops before traversal, caps work at2M, validates each source and returns auxiliary tab bytes. Fallible body budgets include direct paragraph/body-list tab cost; auxiliary sources are added once to the whole-document property budget. Differential projections retain inherited body-list cost and charge repeated paragraph tabs before native insertion. Generic staged mutation, copy and serialization validate source tabs before cloning/writing; exact candidate content budgets validate the result. This does not broaden unrelated malformed-state recovery.
+
+Cell-only facade normalization bypasses overridable built-in container/string hooks, checks32 stops before per-item conversion, uses existing pt() conversion and immediately rechecks revision/canonical target after each caller scalar conversion. Existing shared DOCX parsing, shape formatting, LF/VT validation and generation semantics remain intact.
+
+The first raw global normalized-PDF order assertion failed on a wide tab gap. Native emitted Unicode/source order and geometry were correct; two existing default HTs and one custom144-point stop had byte-identical native/PDF rasters and the same column-first normalization. The reviewed intentional oracle correction retains exact emitted token order, exact normalized token multiplicity, narrow/default ordered controls, native geometry and all unchanged pixel assertions. It does not claim general extraction-order equality or fix the separate held bidi issue134.

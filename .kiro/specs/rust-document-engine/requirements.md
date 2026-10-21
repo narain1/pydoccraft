@@ -972,3 +972,20 @@ The same audit compares original TXT1 ordinary paragraph/run editing and exact-t
 ## DOCX core-language metadata (spec141, pending native prerequisite)
 
 The existing owned metadata patch and extraction metadata dictionary shall expose the native document-language value after the separately reviewed engine upgrade. Preserve existing nullable-clear/empty-omission behavior, 64 KiB UTF-8 scalar bounds, 256 KiB serialized core-metadata bounds and atomic rejection. Treat this as document metadata; do not infer run language, shaping, fonts, paragraph direction or PDF tagging. Extended properties remain separate DOC7/U01 work.
+
+
+## 134. PPTX cell paragraph direction investigation
+
+1. Keep the proposed existing-format direction control unadmitted until native source, glyph geometry, source/readback and semantic PDF acceptance pass. Distinguish language-dependent visual ordering, emitted glyph order/ActualText and normalized extraction.
+2. Preserve failed raw assertions and later diagnostic observations separately. Any logical-text correction SHALL use reviewed public native engines, retain links/search geometry and ordinary output, and complete its dedicated contribution/upgrade gates; do not reconstruct bidi order locally.
+
+
+## 137. Owned PPTX cell tab stops
+
+137.1 Reuse `Paragraph.format(tabs=...)` and the direct snapshot for owned horizontal PPTX cells. Preserve None versus explicit empty inheritance, four native alignments, supplied order and 1/12700-point serialization. Admit finite signed positions within the native +/-2147483647-point writer domain, at most32 stops, strictly increasing after rounding; reject leaders other than absent/none and unsupported alignments. Horizontal cells are the existing publicly constructible profile, not a new native orientation guard. No new alias, input text validator expansion, imported editing or resolved snapshot.
+
+137.2 Keep text/link character offsets and native emitted PDF label order. Preserve actual source/readback geometry and rendering for fitting controls. Explicitly distinguish native PDF column reading order from export text loss and retain the original failed global-order oracle. Extreme scalar acceptance is not a fit or page-containment guarantee.
+
+137.3 Validate bounded direct and inherited tab sources before cloning. Charge descriptors/alignment bytes once within existing property budgets, preflight paragraph-property cloning on LF insertion and retained body-list properties on replacement/empty insertion. Bound inherited-source work, refuse32+ sources before writer truncation, and preserve exact/+1 failures, atomicity, lifetimes, callback ordering and revision exhaustion.
+
+137.4 Preserve all prior negative guards except the documented obsolete tabs=[] refusal fixture. Keep raw native writer diagnostics distinct from adapter admission. Complete focused/native/public/typing/source review and final installed artifact/current-head CI gates before delivery; broader TXT4/SLIDE3 remain open.

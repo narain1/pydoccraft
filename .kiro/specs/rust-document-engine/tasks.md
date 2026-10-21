@@ -1158,3 +1158,21 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [ ] Pass native and installed focused controls, then explicitly review the one legacy metadata-test fingerprint migration without relabeling historical evidence.
 - [ ] Pass full locked native/installed corpus, independent source/artifact/focused review, license/size checks and synchronized bounded documentation.
 - [ ] Complete fresh current-main CI and manual merge. Keep extended-property and broader DOC7 work open.
+
+
+## 134. PPTX cell paragraph direction investigation
+
+- [x] Execute and preserve the failed raw gate; distinguish invalid visual/CMap test assumptions from separately measured normalized text differences.
+- [x] Review four diagnostic controls and native source ownership under existing U10 without claiming direction support.
+- [ ] Prove a reviewed native semantic solution and complete the originally requested source/readback/PNG/PDF acceptance before admitting the existing-format direction control.
+
+
+## 137. PPTX cell tab stops
+
+- [x] Audit native writer/reader/layout/default inheritance and run the reviewed raw two-group gate; retain original failure and separate reading-order/endpoint diagnostics.
+- [x] Implement existing cell formatting/snapshot projection and bounded direct/inherited source/property accounting with callback and lifetime validation.
+- [x] Run focused six native groups and fmt/locked all-target Clippy; preserve the original raw source and explicit native-only malformed controls.
+- [x] Run copied-package public workflows and strict consumer.
+- [x] Complete independent source/accounting and exact copied-package focused review.
+- [x] Complete synchronized documentation review, including held134 evidence.
+- [ ] Complete final full native/release/installed corpus, exact-artifact verification, required current-head CI and manual PR review/merge. No release or broad TXT4/SLIDE3 completion is implied.
