@@ -1111,3 +1111,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete combined spec131/spec130 full 458 native, fmt/Clippy/release, clean 574-test installed corpus, independent exact-artifact 185-file/source/typing and four changed plus one inherited workflow review, attribution and size checks.
 - [x] Complete final combined documentation review, including the historical upgrade-only versus current adapter distinction.
 - [ ] Complete current-head CI and manual review/merge. Keep broader TXT1/TXT4/SLIDE3 open.
+
+
+## Owned default-size reset (spec132)
+
+- [x] Review source/native correction and the existing parser/application path; retain dedicated131 dependency acceptance and no-new-method scope.
+- [x] Implement only the obsolete refusal removal/docstring change; deliberately migrate two old null-refusal assertions and expand the existing supported-clear loop after fingerprint audit.
+- [x] Pass two new native groups, all nine default-filter groups, fmt/strict Clippy/debug and seven new/related public workflows including unchanged131 imported regression.
+- [x] Pass strict typing and independent final two-workflow copied-package/source review; retain every failed fixture premise and unchanged runtime/threshold evidence.
+- [x] Complete synchronized focused documentation and independent review.
+- [ ] Complete combined full installed artifact/native/source/attribution validation and current-head CI/manual merge. Broader STY2/U02 remain open.
