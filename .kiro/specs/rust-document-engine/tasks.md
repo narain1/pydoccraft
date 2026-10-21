@@ -902,3 +902,14 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Resolve the reviewed rotated-cell coordinate gap with central horizontal section/cell admission and defensive output refusal; pass corrected independent four-workflow replay and documentation/site checks.
 - [ ] Complete final frozen documentation review, integrated full native/installed-wheel corpus and current-head CI before merge.
 - [ ] Retain broader LAY10 settings and excluded native compositions under existing U02; do not mark the roadmap criterion complete.
+
+
+## Unused owned DOCX styles (spec 110)
+
+- [x] Independently review pinned remove/find/get/new_id/reference-carrier premises and pass two raw groups structural/readback/PNG/PDF/identity proof.
+- [x] Add only existing-collection single-item deletion, complete bounded reference refusal and exact handle identity with atomic bounded retirement/native allocation.
+- [x] Pass five native adapter groups, all 26 selected style regressions, formatting/all-target Clippy/debug build, five copied-package public workflows,14 historical style/note workflows and strict consumer typing with three intended negative key diagnostics.
+- [x] Complete independent frozen source and five-workflow replay review (2.250s).
+- [x] Complete synchronized documentation review.
+- [ ] Complete integrated full native/release/installed-wheel corpus, exact-head CI and manual merge.
+- [ ] Keep STY6 open for style import, collision policy and general cleanup; no batch prune or automatic restyling.

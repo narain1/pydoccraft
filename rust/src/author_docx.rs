@@ -32,6 +32,9 @@ use comments::CommentInventory;
 #[path = "author_docx_valign.rs"]
 mod valign;
 
+#[path = "author_docx_styles.rs"]
+mod owned_styles;
+
 const MAX_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_DOCUMENT_TEXT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_BLOCKS: usize = 100_000;
@@ -100,6 +103,7 @@ pub struct EditableDocx {
     next_comment_id: u32,
     cell_placeholders: BTreeSet<(StoryRef, Path)>,
     table_generations: BTreeMap<usize, u64>,
+    retired_style_ids: BTreeSet<String>,
 }
 
 #[pymethods]
@@ -121,10 +125,12 @@ impl EditableDocx {
             next_comment_id: 0,
             cell_placeholders: BTreeSet::new(),
             table_generations: BTreeMap::new(),
+            retired_style_ids: BTreeSet::new(),
         }
     }
 
     pub fn copy(&self) -> PyResult<Self> {
+        owned_styles::storage(self.document()?, &self.retired_style_ids)?;
         Ok(Self {
             document: Some(self.document()?.clone()),
             body_placeholder: self.body_placeholder,
@@ -140,11 +146,13 @@ impl EditableDocx {
             next_comment_id: self.next_comment_id,
             cell_placeholders: self.cell_placeholders.clone(),
             table_generations: self.table_generations.clone(),
+            retired_style_ids: self.retired_style_ids.clone(),
         })
     }
 
     pub fn close(&mut self) {
         self.document = None;
+        self.retired_style_ids.clear();
     }
 
     pub fn revision(&self) -> PyResult<u64> {
@@ -1298,13 +1306,22 @@ impl EditableDocx {
     }
 
     pub fn style_info(&self, id: &str) -> PyResult<String> {
-        let style = supported_style(&self.document()?.styles, id)?;
-        Ok(json!({"id":style.id,"name":style.name,"kind":match style.kind {StyleKind::Paragraph => "paragraph", StyleKind::Character => "character", StyleKind::Table => "table", _ => "unsupported"},"based_on":style.based_on,"next":style.next,"linked":style.linked,"builtin":style.builtin}).to_string())
+        Ok(style_info_payload(supported_style(
+            &self.document()?.styles,
+            id,
+        )?))
+    }
+
+    pub fn style_info_exact(&self, id: &str) -> PyResult<String> {
+        Ok(style_info_payload(exact_style(
+            &self.document()?.styles,
+            id,
+        )?))
     }
 
     pub fn style_relations_patch(&mut self, id: &str, patch: &str) -> PyResult<()> {
         let document = self.document()?;
-        let style = supported_style(&document.styles, id)?;
+        let style = exact_style(&document.styles, id)?;
         let (id, kind) = (style.id.clone(), style.kind);
         let values = format_patch(patch)?;
         if values
@@ -1443,9 +1460,7 @@ impl EditableDocx {
         let document = self.document()?;
         validate_style_name(name)?;
         let kind = style_kind(kind)?;
-        if document.styles.styles.len() >= MAX_STYLES {
-            return Err(limit("document exceeds 1024 named styles"));
-        }
+        owned_styles::storage(document, &self.retired_style_ids)?;
         if document.styles.styles.iter().any(|style| {
             style.name.eq_ignore_ascii_case(name) || style.id.eq_ignore_ascii_case(name)
         }) {
@@ -1453,7 +1468,7 @@ impl EditableDocx {
                 "style name is already used by a style name or identifier",
             ));
         }
-        let id = document.styles.new_id(name);
+        let id = owned_styles::new_id(document, &self.retired_style_ids, name)?;
         if document
             .styles
             .styles
@@ -1478,10 +1493,30 @@ impl EditableDocx {
         Ok(id)
     }
 
+    pub fn remove_style(&mut self, id: &str, revision: u64) -> PyResult<()> {
+        self.check_revision(revision)?;
+        let document = self.document()?;
+        owned_styles::storage(document, &self.retired_style_ids)?;
+        owned_styles::unused(document, id)?;
+        let mut candidate = document.clone();
+        let mut retired = self.retired_style_ids.clone();
+        if !retired.insert(id.to_owned()) {
+            return Err(PyValueError::new_err("style identifier is already retired"));
+        }
+        candidate
+            .styles
+            .remove(id)
+            .ok_or_else(|| PyValueError::new_err("unknown style"))?;
+        owned_styles::storage(&candidate, &retired)?;
+        self.commit(candidate)?;
+        self.retired_style_ids = retired;
+        Ok(())
+    }
+
     #[pyo3(signature = (id, base=None))]
     pub fn set_style_base(&mut self, id: &str, base: Option<&str>) -> PyResult<()> {
         let styles = &self.document()?.styles;
-        let style = supported_style(styles, id)?;
+        let style = exact_style(styles, id)?;
         let (id, kind) = (style.id.clone(), style.kind);
         let base = style_base(styles, base, kind)?;
         let mut candidate = self.document()?.clone();
@@ -1498,7 +1533,7 @@ impl EditableDocx {
     #[pyo3(signature = (id, patch, region=None))]
     pub fn format_style(&mut self, id: &str, patch: &str, region: Option<&str>) -> PyResult<()> {
         let document = self.document()?;
-        let style = supported_style(&document.styles, id)?;
+        let style = exact_style(&document.styles, id)?;
         let id = style.id.clone();
         if style.kind == StyleKind::Table {
             let part = table_region(region.unwrap_or("whole_table"))?;
@@ -1551,7 +1586,7 @@ impl EditableDocx {
         region: Option<&str>,
     ) -> PyResult<String> {
         let document = self.document()?;
-        let style = supported_style(&document.styles, id)?;
+        let style = exact_style(&document.styles, id)?;
         if style.kind == StyleKind::Table {
             return table_style_snapshot(&document.styles, style, resolved, region)
                 .map(|v| v.to_string());
@@ -7603,6 +7638,22 @@ fn style_kind(kind: &str) -> PyResult<StyleKind> {
             "style kind must be paragraph, character or table",
         )),
     }
+}
+
+fn style_info_payload(style: &Style) -> String {
+    json!({"id":style.id,"name":style.name,"kind":match style.kind {StyleKind::Paragraph => "paragraph", StyleKind::Character => "character", StyleKind::Table => "table", _ => "unsupported"},"based_on":style.based_on,"next":style.next,"linked":style.linked,"builtin":style.builtin}).to_string()
+}
+
+fn exact_style<'a>(styles: &'a StyleSheet, id: &str) -> PyResult<&'a Style> {
+    styles
+        .get(id)
+        .filter(|style| {
+            matches!(
+                style.kind,
+                StyleKind::Paragraph | StyleKind::Character | StyleKind::Table
+            )
+        })
+        .ok_or_else(|| PyValueError::new_err("unknown or deleted style identifier"))
 }
 
 fn supported_style<'a>(styles: &'a StyleSheet, id: &str) -> PyResult<&'a Style> {
@@ -22186,3 +22237,7 @@ mod table_move_tests;
 #[cfg(test)]
 #[path = "section_vertical_alignment_proof.rs"]
 mod section_vertical_alignment_proof;
+
+#[cfg(test)]
+#[path = "docx_unused_style_proof.rs"]
+mod unused_style_proof;

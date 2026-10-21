@@ -817,3 +817,21 @@ While any section is non-top, every section must use one column and a next-page 
 The pinned native engine can shift page-anchored pictures and uneven columns incorrectly, and note serialization changes the available alignment space. These limits are explicit errors in owned non-top documents, not local layout corrections. Imported reading/rendering retains the upstream behavior. See [the recorded native limits](upstream-roadmap.md#section-vertical-alignment).
 
 Source-profile failures preserve document bytes, handles, revision and cached output. Successful typography/content edits can still produce invalid vertical geometry; ordinary serialization, save, rendering and PDF conversion then raise `UnsupportedFormatError`. Reduce the content/formatting, enlarge the page or restore top. The property does not promise pixel-perfect roundtrips or complete layout-settings support.
+
+
+### Delete an unused DOCX style
+
+```python
+with doc_ex.new("docx") as document:
+    draft = document.styles.add("Draft note", based_on="Normal")
+    draft_id = draft.id
+    del document.styles[draft_id]       # a name or integer index also works
+    replacement = document.styles.add("Draft note")
+    assert replacement.id != draft_id
+```
+
+Deletion removes one unused custom paragraph, character or table definition. Builtin/default styles are protected. Incoming references anywhere in owned content, another style, defaults or numbering prevent deletion, including unrendered stored stories and conditional regions. Clear or change those references with the existing formatting/relationship APIs first. Slices, automatic restyling, batch pruning and imported style editing are unavailable. Unsupported opaque or tracked-history carriers fail explicitly.
+
+A deleted Style handle remains invalid even if its name or ID becomes another style's display name. Existing name lookup still selects the current style. Copies retain independent identity history. A successful deletion invalidates revision-bound ranges and cached rendering; unrelated paragraph/table/picture/style handles remain valid. Conversion callbacks cannot redirect the outer style operation.
+
+A document has a lifetime budget of 1024 named style IDs including builtins: deleted IDs stay reserved, so deleting a style does not replenish that budget. Copies inherit the reservation history; it is not serialized into DOCX. Capacity/work limits raise the existing UnsafeArchiveError. These safeguards support unused-only deletion; STY6 style import and general cleanup remain open.

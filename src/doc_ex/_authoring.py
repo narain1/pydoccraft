@@ -418,10 +418,20 @@ def _style_reference(value, owner):
     if isinstance(value, Style):
         if value._owner is not owner:
             raise ValueError("style must belong to this document")
-        value = value.id
+        value = json.loads(owner._call("style_info_exact", value._id))["id"]
     if value is not None and not isinstance(value, str):
         raise TypeError("style must be a name, ID or Style from this document")
     return value
+
+def _style_guard(owner, revision, *references) -> None:
+    if owner._call("revision") != revision:
+        raise ValueError("style operation is stale after a document mutation")
+    for reference in references:
+        if isinstance(reference, Style):
+            _style_reference(reference, owner)
+    if owner._call("revision") != revision:
+        raise ValueError("style operation is stale after a document mutation")
+
 
 def pt(value: Real) -> float:
     """Return a finite length in points (1/72 inch)."""
@@ -935,7 +945,10 @@ class WordDocument(EditableDocument):
 
     def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
         """Append a paragraph with an optional named style and return its editable handle."""
+        revision = self._call("revision")
+        original_style = style
         style = _style_reference(style, self)
+        _style_guard(self, revision, original_style)
         if style is None:
             identifier = self._call("add_paragraph", text, _change=True)
         else:
@@ -978,8 +991,26 @@ class Styles(_Collection["Style"]):
             return Style(self._owner, json.loads(self._owner._call("style_info", key))["id"])
         return super().__getitem__(key)
 
+    def __delitem__(self, key: str | int) -> None:
+        """Delete one unused owned custom style; builtin/default styles are protected."""
+        revision = self._owner._call("revision")
+        if isinstance(key, slice):
+            raise TypeError("style deletion requires a name, ID or integer index")
+        if isinstance(key, str):
+            identifier = json.loads(self._owner._call("style_info", key))["id"]
+        else:
+            identifiers = self._ids()
+            selected = operator.index(key)
+            _style_guard(self._owner, revision)
+            identifier = identifiers[_index(selected, len(identifiers))]
+        _style_guard(self._owner, revision)
+        self._owner._call("remove_style", identifier, revision, _change=True)
+
     def add(self, name: str, *, kind: str = "paragraph", based_on: str | Style | None = None) -> Style:
-        identifier = self._owner._call("add_style", name, kind, _style_reference(based_on, self._owner), _change=True)
+        revision = self._owner._call("revision")
+        reference = _style_reference(based_on, self._owner)
+        _style_guard(self._owner, revision, based_on)
+        identifier = self._owner._call("add_style", name, kind, reference, _change=True)
         return Style(self._owner, identifier)
 
     @property
@@ -998,7 +1029,7 @@ class Style:
         self._owner, self._id = owner, identifier
 
     def _info(self):
-        return json.loads(self._owner._call("style_info", self._id))
+        return json.loads(self._owner._call("style_info_exact", self._id))
 
     @property
     def id(self) -> str:
@@ -1023,14 +1054,21 @@ class Style:
 
     @based_on.setter
     def based_on(self, value: str | Style | None):
-        self._owner._call("set_style_base", self._id, _style_reference(value, self._owner), _change=True)
+        revision = self._owner._call("revision")
+        self._info()
+        reference = _style_reference(value, self._owner)
+        _style_guard(self._owner, revision, self, value)
+        self._owner._call("set_style_base", self._id, reference, _change=True)
 
     def _set_relation(self, key: str, value: str | Style | None) -> None:
+        revision = self._owner._call("revision")
+        self._info()
         target = _style_reference(value, self._owner)
         if target is not None and len(target) > 1024:
             raise ValueError("style relation must be a bounded style name/ID or None")
-        self._owner._call("style_relations_patch", self._id,
-                          json.dumps({key: target}, ensure_ascii=False), _change=True)
+        patch = json.dumps({key: target}, ensure_ascii=False)
+        _style_guard(self._owner, revision, self, value)
+        self._owner._call("style_relations_patch", self._id, patch, _change=True)
 
     @property
     def next(self) -> Style | None:
@@ -1068,9 +1106,13 @@ class Style:
 
     def format(self, *, region: str | None = None, **formatting: Unpack[StyleFormatting]) -> None:
         """Set direct properties; an optional region selects table-style formatting."""
+        revision = self._owner._call("revision")
+        self._info()
         if region is not None and (not isinstance(region, str) or len(region) > 32):
             raise ValueError("region must be a supported table-style region name or None")
-        self._owner._call("format_style", self._id, _style_format_patch(formatting), region, _change=True)
+        patch = _style_format_patch(formatting)
+        _style_guard(self._owner, revision, self)
+        self._owner._call("format_style", self._id, patch, region, _change=True)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(id={reprlib.repr(self._id)}, closed={self._owner.closed})"
@@ -1094,7 +1136,10 @@ class Paragraph:
 
     @style.setter
     def style(self, value: str | Style):
-        self._owner._call("set_paragraph_style", self._id, _style_reference(value, self._owner), _change=True)
+        revision = self._owner._call("revision")
+        reference = _style_reference(value, self._owner)
+        _style_guard(self._owner, revision, value)
+        self._owner._call("set_paragraph_style", self._id, reference, _change=True)
 
     @property
     def alignment(self) -> str:
@@ -1630,7 +1675,10 @@ class EditableStory:
 
     def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
         """Append a paragraph with an optional named style and return its editable handle."""
+        revision = self._owner._call("revision")
+        original_style = style
         style = _style_reference(style, self._owner)
+        _style_guard(self._owner, revision, original_style)
         def append(native):
             story = self._ensure_identifier(native)
             identifier = native.story_add_paragraph(story, text)
@@ -1977,10 +2025,14 @@ class EditableTable:
         return json.loads(self._owner._call("table_formatting", self._word_id()))
 
     def format(self, **formatting: Unpack[TableFormatting]) -> None:
+        identifier = self._word_id()
+        revision = self._owner._call("revision")
+        reference = formatting.get("style")
         if "style" in formatting:
-            formatting["style"] = _style_reference(formatting["style"], self._owner)
-        self._owner._call("table_format_patch", self._word_id(),
-                          _table_format_patch(formatting), _change=True)
+            formatting["style"] = _style_reference(reference, self._owner)
+        patch = _table_format_patch(formatting)
+        _style_guard(self._owner, revision, reference)
+        self._owner._call("table_format_patch", identifier, patch, _change=True)
 
     def fit(self) -> list[float]:
         """Measure native cell content and apply checked column widths."""
@@ -2172,8 +2224,12 @@ class EditableCell:
                 raise UnsupportedFormatError("named paragraph styles are unavailable in PPTX cells")
             target = self._table._owner._call("cell_add_paragraph", *self._args, text, _change=True)
             return _SlideCellParagraph(self, target)
-        style = _style_reference(style, self._table._owner)
+        owner = self._table._owner
+        revision = owner._call("revision")
+        original_style = style
+        style = _style_reference(style, owner)
         args = self._content_args()
+        _style_guard(owner, revision, original_style)
         def append(native):
             identifier = native.cell_add_paragraph(*args, text)
             if style is not None:
