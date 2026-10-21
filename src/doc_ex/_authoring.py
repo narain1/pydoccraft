@@ -563,7 +563,7 @@ class _Collection(Sequence[_Item], Generic[_Item]):
 
 
 class _Paragraphs(_Collection["Paragraph"]):
-    """Ordered paragraph handles; deletion supports direct owned DOCX body and auxiliary paragraphs."""
+    """Ordered paragraph handles; deletion supports owned DOCX body, auxiliary and cell paragraphs."""
     def __delitem__(self, index: int) -> None:
         self._owner._ensure_open()
         if not isinstance(self._owner, WordDocument):

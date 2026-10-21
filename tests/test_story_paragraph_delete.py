@@ -174,6 +174,7 @@ class StoryParagraphDeletionTests(unittest.TestCase):
             body = document.add_paragraph('Target')
             document.bookmarks['target'] = body[:]
             table = document.add_table([['Cell']])
+            document.bookmarks['cell_target'] = table[0, 0].paragraphs[0][:]
             story = document.sections[0].header()
             paragraph = story.add_paragraph('Remove linked')
             paragraph[:].link = '#target'
