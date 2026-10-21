@@ -1522,6 +1522,74 @@ Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl` is **17,628,320 b
 
 Frozen runtime `c91ac8376048bf34d8c45f9a9745140d6f2171f7` passed the full clean installed-wheel corpus: **512 tests in 276.722 seconds** (wrapper 276.750 seconds), with zero failures, errors or skips. A second clean independent installation and exact source archive passed **512 tests in 274.980 seconds**, also with zero failures, errors or skips. Installed package bytes match the candidate wheel. Independent source review, strict positive typing and exactly five intended negative typing diagnostics pass. Both runs cover all-format extraction, requested-DPI rendering and reopened conversions, alongside the new comment workflows. No historical support fingerprint changed. Exact-head/current-main CI and manual merge remain required; REV1/TXT8/REV5 remain partial and no release/version change is made.
 
+## GitHub Pages documentation site — reviewed manual merge
+
+PR95 final head `d9a6cbb914ec8a1bd4172bbcb58d0acbfe0ac8ae` passed required [CI39547460948](https://github.com/narain1/pydoccraft/actions/runs/39547460948): 321 native tests, 462 installed-wheel tests in207.055 seconds, formatting, Clippy, strict typing and the unchanged264-package license audit. Its [documentation build39547460927](https://github.com/narain1/pydoccraft/actions/runs/39547460927) passed; deployment was correctly skipped for the pull request. Independent source review and a clean build checked28 pages and1,642 local links/assets/fragments; negative checks rejected missing files/fragments, duplicate IDs and output-root traversal.
+
+Root visual review used Chromium140 with1440×1000 and390×844 viewports on the home page, authoring guide and roadmap. All six requests returned200 with no JavaScript errors or horizontal overflow; desktop/mobile homepage screenshots were inspected. The reviewed exact head was manually merged as `5583f2946534041267f71691a732f5c0d96c6bcd` after current-main checks, with repository auto-merge disabled. Public deployment/reachability remains separately verified after merge; the site follows main and does not declare the roadmap or a package release complete.
+
+## Owned PDF radio groups — final manual merge gate
+
+PR94 final head `0a0b225e12708d3d49c0bf7543d459b0c730cd49` passed required [current-main CI39548202131](https://github.com/narain1/pydoccraft/actions/runs/39548202131) and documentation CI39548202076 after the independent exact-artifact review recorded above. The final installed-wheel run passed all467 tests in388.512 seconds, with zero failures/errors/skips, on CPython3.11.17/Linux x86_64/glibc2.39. Wheel SHA-256 `11e5840634a7a95c9e7d2b515b064b355220fb181145a42fd5a17812a37b6efb`,17,535,375 bytes; extension40,677,744 bytes. Lock and upstream revisions are unchanged.
+
+The reviewed exact head was manually merged as `8979a6deb151742e18175cdebe843382ba3ac611`; repository auto-merge remains disabled. This completes the owned same-page radio-group delivery gate, while imported forms and broader PDF6 remain partial.
+
+
+## Owned body paragraph deletion — final manual merge gate
+
+PR96 final head `eb13c92b784d7df29749ce5c064b0405f2b1afdf` passed required [current-main CI39549509766](https://github.com/narain1/pydoccraft/actions/runs/39549509766) and documentation CI39549509781 after the independent exact-artifact review recorded above. The final run passed330 native tests in169.05 seconds and472 installed-wheel tests in347.071 seconds, with zero failures/errors/skips, plus formatting, Clippy, strict typing and the264-package license audit. On CPython3.11.17/Linux x86_64/glibc2.39, the wheel is17,538,600 bytes, extension40,685,872 bytes, SHA-256 `c4930f0423d4ada1e3c43e0828abade59a7399057b9208ada183effd006420f9`. Lock and pinned upstream revisions remain unchanged.
+
+The reviewed exact head was manually merged as `3989bea9c7ce8b9c6bca6fd0cc2aab10f84d31fc`. Repository auto-merge remains disabled. This closes ordinary owned body-paragraph deletion; section-boundary/semantic deletion, cell/PPTX deletion and broader DOC5/TXT1 remain partial.
+
+
+## Native annotation opacity — final manual merge gate
+
+PR97 final head `497559528cae172d23db07c23edb8ae92bdde4d3` passed required [current-main CI39550636008](https://github.com/narain1/pydoccraft/actions/runs/39550636008) and documentation CI39550636033 after the independent exact-artifact review recorded above. The final run passed333 native tests in191.77 seconds and476 installed-wheel tests in398.263 seconds, with zero failures/errors/skips, plus formatting, Clippy, strict typing and the264-package license audit. On CPython3.11.17/Linux x86_64/glibc2.39, the wheel is17,539,834 bytes, extension40,689,200 bytes, SHA-256 `80b6d99d496277dd2015ebb91c7bcea36b310a45d242852d76d1846427165638`. Lock and pinned upstream revisions remain unchanged.
+
+The reviewed exact head was manually merged as `ddef9b89e1a0b7311550191a6db4c53ad099a93f`. Repository auto-merge remains disabled. This closes the bounded comment-opacity delivery gate; imported inventory, reply semantics, encryption and broader PDF6/PDF8 remain partial.
+
+
+## Owned paragraph movement — final manual merge gate
+
+PR99 final head `ce0dd3a934c0df0da8e7732264c5735dd904db18` passed required [current-main CI39551991262](https://github.com/narain1/pydoccraft/actions/runs/39551991262) and documentation CI39551991265 after the independent exact-artifact review recorded above. The final run passed339 native tests in195.23 seconds and481 installed-wheel tests in420.181 seconds, with zero failures/errors/skips, plus formatting, Clippy, strict typing and the264-package license audit. On CPython3.11.17/Linux x86_64/glibc2.39, the wheel is17,556,088 bytes, extension40,724,848 bytes, SHA-256 `edbac3e7a0d6292ff838c688e287e8cd3fd7824adf633f19d17bbca178b99f17`. Lock and pinned upstream revisions remain unchanged.
+
+The reviewed exact head was manually merged as `49404df545cb5471dcc74e8d04dc90068ca718e6`. Repository auto-merge remains disabled. This closes the ordinary same-container direct paragraph movement delivery gate; cell/cross-container/semantic movement, imported preservation and broader DOC5/TXT1 remain partial.
+
+
+## Native-backed property types — final manual merge gate
+
+PR100 final head `48c5fd9994009dbcf9222825e98aaba258dbf08d` passed required [current-main CI 39553367804](https://github.com/narain1/pydoccraft/actions/runs/39553367804) and documentation CI 39553367825 after the independent exact-artifact review recorded above. The final run passed 339 native tests in 192.96 seconds and 481 installed-wheel tests in 418.302 seconds, with zero failures, errors or skips, plus formatting, Clippy, strict typing and the 264-package license audit. On CPython 3.11.17/Linux x86_64/glibc 2.39, the wheel is 17,556,179 bytes, extension 40,724,848 bytes, SHA-256 `46a64e1cd6f14cedf70334e0fb038e10411a6240719db7b88facfc4b5681f96c`. Lock and pinned upstream revisions remain unchanged.
+
+The reviewed exact head was manually merged as `5d0ca81cfca948d34fcbe8805fbaf117a4958ff9`. Repository auto-merge remains disabled. This completes the selected property-typing delivery gate; dynamic mappings, other properties and broader API3/IDE coverage remain open.
+
+
+## Office workload measurements — final manual merge gate
+
+PR101 final head `8f9aa678264dcf669dbc298a887abdfde965ac26` passed required [current-main CI 39554746117](https://github.com/narain1/pydoccraft/actions/runs/39554746117) and documentation CI 39554746114 after independent source/hash/arithmetic review of all 36 samples. The final run passed 339 native tests in 193.53 seconds and 481 installed-wheel tests in 425.853 seconds, with zero failures, errors or skips, plus formatting, Clippy, strict typing and the 264-package license audit. On CPython 3.11.17/Linux x86_64/glibc 2.39, the wheel is 17,556,179 bytes, extension 40,724,848 bytes, SHA-256 `474025400fc1bb6993638998930c11cb2d00e88c0ca18bcf975d9130409086ab`. Lock and pinned upstream revisions remain unchanged.
+
+The reviewed exact head was manually merged as `554f0bb29b95e7fc24a4e845b6970da7dee4563e`. Repository auto-merge remains disabled. This closes the Office measurement delivery gate; the source-only benchmark change does not establish universal performance or real-input/platform coverage.
+
+
+## Pinned spacing and document-property prerequisites — source review
+
+PR98 independently checks pinned WordCraft public model, reader, writer and layout paths. Inter-cell spacing is absent from those paths and remains distinct from implemented padding; a WordML2003 name allowlist does not establish support. Core document language lacks a model/read/write path. Eight extended properties have bounded internal preservation, but no typed public accessor contract; native counts and privacy filtering remain explicit. Existing U01/U03 ownership and DOC7/TBL8 incomplete status are retained, with no duplicate local API, XML implementation, runtime dependency or capability promotion. Current-main integration retains the separately reviewed opacity, body-deletion and paragraph-movement upstream findings. Final required CI/manual merge remains pending for this source-only audit.
+
+
+## Pinned spacing and document properties — final manual merge gate
+
+PR98 final head `6f91e556b805aca86ff1265018e9206e24626457` passed required [current-main CI 39556244291](https://github.com/narain1/pydoccraft/actions/runs/39556244291) and documentation CI 39556244273. The run passed 339 native tests in 192.53 seconds and 481 installed-wheel tests in 419.486 seconds, with zero failures, errors or skips, plus formatting, Clippy, strict typing and the unchanged 264-package license audit. On CPython 3.11.17/Linux x86_64/glibc 2.39, the wheel is 17,556,179 bytes, extension 40,724,848 bytes, SHA-256 `1e6a805fb3f56173c50d629b8570c167d7177fc0f936623c744e48b102ec0f5a`. Lock and pinned upstream revisions remain unchanged.
+
+The reviewed head was manually merged as `7271ea7cb555387509eee84ed485ed2d8388a90a`. Repository auto-merge remains disabled. DOC7/TBL8 remain partial; the subsequent combined cell-layout evidence does not supply native inter-cell spacing.
+
+
+## Reviewed feature stack — aggregate current-main gate preparation
+
+PR102–PR111 exact reviewed heads are ancestors of PR112's reviewed `652b0d864cbf76044f611efc7d949e2fed09bcfa`. Their individual source, focused/native and clean installed-wheel evidence remains recorded above; the latest comments artifact covers the combined 379-native/512-installed runtime. Current main through PR98 was merged into this aggregate branch without changing Rust/Python runtime, tests, lockfile or dependencies relative to that reviewed head. Documentation conflicts retain all source audits and historical validation; TBL8 keeps the newer multi-DPI cell matrix evidence alongside the spacing prerequisite.
+
+The aggregate still requires fresh exact-head/current-main required CI and documentation checks, then a manual merge. No ancestor is claimed merged by this preparation, and no pending provenance or other unreviewed feature is included. Final merge evidence will identify the aggregate commit and verify the included pull-request ancestry/states. Auto-merge remains disabled.
+
+Aggregate integration checks pass: roadmap 139 IDs/14 workstreams, support evidence 19 profiles/139 joins, pinned reference inventory 44 families, all 19 support/reference documentation tests and a clean 29-page site with 1,741 checked local links/assets/fragments. The runtime/src/tests/lockfile comparison against reviewed PR112 head is empty.
+
 
 ## Spec100: bounded DOCX provenance (2026-10-20)
 
@@ -1700,3 +1768,25 @@ Current-main exact-head CI and manual merge remain required. Auto-merge is disab
 ## Spec113: explicit release compiler — configuration evidence
 
 The two release-build steps now pass `rust-toolchain: 1.95.0`, matching CI. Reviewed pinned maturin action `e83996d129638aa358a18fbd1dfb82f0b0fb5d3b`: `action.yml` declares the input; `src/index.ts` lines366–370 prefer it, lines629/713–715 select it inside the Linux container, and lines1036/1044–1047 select it for host builds. Previously Linux defaulted to floating stable and host builds could retain their installed compiler. This is configuration-source validation, not an executed nine-platform wheel build. Required CI, independent review and manual merge remain pending; the future release matrix remains mandatory. Package/runtime/test source, locked dependencies, versions, published artifacts and all release/publish conditions are unchanged.
+
+## Reviewed feature stack — corrected aggregate gate preparation
+
+The final reviewed PR117 head `9559e461e3d4bbd17b7d9d0a0fcece67acd0c001` is merged into the existing current-main aggregate candidate `63d1e3337b9b975b5646b5aa6496f340fd6e346a`. This includes the independently reviewed PR102–PR111 and PR113–PR117 source and evidence, including the corrected provenance and table-field/page-selection safety guards. The additive validation conflict retains both historical manual-merge records and every newer artifact result, including the failed 516- and 524-test findings and their separately validated corrections. Rust/Python runtime, tests, Cargo manifests and lockfile are byte-identical to the reviewed final PR117 head. Later mirrored-margin and table-movement work is excluded.
+
+Both final development installations pass all 528 tests as recorded above; the native artifact passed 397 tests. Fresh required CI and documentation checks for this exact aggregate head against current main remain pending, followed by a manual merge and ancestry/state verification of included pull requests. Earlier aggregate CI at `63d1e33` is historical and does not substitute for this gate. Auto-merge remains disabled; no release or complete-roadmap claim is made.
+
+Final aggregate preparation checks pass: 139 coverage IDs/14 workstreams, 19 support profiles/139 joins, 44 pinned reference families, all 19 support/reference documentation tests, and a clean 29-page site with 1,748 local links/assets/fragments. The exact PR102–PR111 and PR113–PR117 heads are verified ancestors of the reviewed PR117 head; current main `7271ea7cb555387509eee84ed485ed2d8388a90a` is retained through the existing aggregate parent. Final CI/manual merge remain pending.
+
+## Reviewed composition and safety stack — final manual merge gate
+
+PR112 final head `d99b39057c6a5ef1e31085743f2d91024662dc24` passed required [current-main CI39563664023](https://github.com/narain1/pydoccraft/actions/runs/39563664023) and [documentation CI39563664104](https://github.com/narain1/pydoccraft/actions/runs/39563664104). The run passed **397 native tests in 257.02 seconds** and **528 installed-wheel tests in 724.238 seconds**, with zero failures, errors or skips, plus formatting, warnings-denied Clippy, installed strict typing and the unchanged 264-package license audit. On CPython3.11.17/Linux x86_64/glibc2.39, wheel size is17,662,091 bytes, native extension40,976,480 bytes, wheel SHA-256 `ecae6fe880a87c4b344817a26fbf8149bce4790a2b4981089be7639f0c3a170f`. Lockfile and all pinned upstream revisions remain unchanged.
+
+After independent source/artifact/current-main checks, the exact head was manually merged at07:59:52UTC on2026-10-21 as `3dc087c5e41fa2c9b8fe826c9476f192e7e29b7c`. Every exact PR102–PR117 head is verified as an ancestor of main and GitHub reports all sixteen pull requests merged. Auto-merge remains disabled. Historical development artifacts, focused scopes and failed-corpus corrections remain separately recorded. This completes those delivery gates, not the broader partial roadmap or a version release.
+
+## Mirrored margins, table movement and release compiler — current-main preparation
+
+The independently reviewed PR118 head `f5722224b9b407cd6976c08ce87f0e42d36b1eed` and workflow-only PR119 head `ddb464271d7b135c08a294974eb2c186fa309619` are combined with actual main `3dc087c5e41fa2c9b8fe826c9476f192e7e29b7c`. Only additive validation text conflicted; both complete histories are retained. Runtime, tests, Cargo manifests and lockfile remain byte-identical to the reviewed 410-native/538-installed candidate. The release workflow differs only by its two reviewed compiler-selection inputs; the pinned action source blob identities were independently verified against the exact GitHub revision, with container/host selection behavior checked. This does not claim an executed nine-platform release matrix.
+
+Fresh exact-head/current-main required CI and documentation checks remain pending, followed by manual merge. Later style deletion, vertical alignment, shapes and renderer contribution work is excluded. Auto-merge remains disabled; no version or release change is made.
+
+Preparation checks pass: all19 support/reference tests,139 coverage IDs/14 workstreams,19 support profiles/139 joins,44 pinned reference families, and a clean29-page site with1,750 local links/assets/fragments. The comparison against frozen runtime `a8002f4` is empty for Rust/Python source, tests and Cargo files. The exact PR119 head and current main are both retained as ancestors of this candidate.

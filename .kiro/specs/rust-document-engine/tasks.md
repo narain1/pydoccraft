@@ -628,7 +628,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Integrate immutable same-page groups through existing field containers/properties with independent field/widget bounds and cumulative preflight/accounting.
 - [x] Add native and public source/pixel/geometry/flatten/callback/identity/budget tests and consumer typing assertions.
 - [x] Complete integrated release/clean installed-wheel corpus: 326 native and 467 Python tests, typing and unchanged license audit.
-- [ ] Complete independent exact-head/current-main review and manual merge.
+- [x] Complete independent exact-head/current-main review and manual merge: PR94, run39548202131.
 - [ ] Retain imported inventory, arbitrary mutable/multi-page groups and broader PDF6/U10 appearance work.
 
 
@@ -639,7 +639,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add four native groups and five public workflows for output, identity, section starts/restarts, protected anchors, callbacks, placeholder reuse and rollback; deliberately update obsolete body-Unsupported assertions while preserving cell/PPTX/section checks.
 - [x] Complete focused native tests, fmt/Clippy/debug build and copied-package public/related checks; record exact results below.
 - [x] Complete integrated locked release and clean installed-wheel corpus: 330 native/472 Python tests, strict typing, license audit and independent472-test review.
-- [ ] Complete final exact-head/current-main CI and manual merge for body paragraph deletion.
+- [x] Complete final exact-head/current-main CI and manual merge for body paragraph deletion: PR96, run39549509766.
 - [ ] Keep section-boundary/semantic deletion, cell/PPTX deletion and broader DOC5/TXT1 insertion/movement/adoption open.
 
 
@@ -650,7 +650,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete three focused native groups plus six related native groups, 19 copied-package public tests (four new plus 15 related), formatter/Clippy/debug build and strict consumer typing.
 - [x] Migrate only the geometric-comment and lock evidence affected by intentional fractional-CA fixture changes to the exact new integrated artifact.
 - [x] Complete locked full native/release/installed corpus and independent artifact review: 333 native and 476 installed Python tests.
-- [ ] Complete final exact-head/current-main CI and manual merge for annotation opacity.
+- [x] Complete final exact-head/current-main CI and manual merge for annotation opacity: PR97, run39550636008.
 - [ ] Retain broader PDF6 imported-inventory/reply and PDF8 encryption/profile work.
 
 
@@ -661,7 +661,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add six native groups and five public workflows for native padding, identity, rollback, output, auxiliary stories, no-ops, copies, iteration and callbacks; retain all existing tests unchanged.
 - [x] Complete six focused native groups, fmt/Clippy/debug build, five new plus 25 related copied-package workflows, final media/field checks and strict consumer typing; record exact local results below.
 - [x] Complete integrated locked release/installed-wheel corpus and independent review: 339 native and 481 installed Python tests.
-- [ ] Complete final exact-head/current-main CI and manual merge for paragraph movement.
+- [x] Complete final exact-head/current-main CI and manual merge for paragraph movement: PR99, run39551991262.
 - [ ] Keep anchored/cross-section/cross-container/cell/PPTX movement, imported preservation and broader DOC5/TXT1 parity open.
 
 
@@ -671,7 +671,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Annotate existing property access and simple setters without aliases, runtime coercions or dynamic Any placeholders.
 - [x] Extend strict static consumer assertions and verify expected invalid typed uses are rejected; confirm runtime AST is unchanged after removing annotations.
 - [x] Complete integrated installed-package strict typing, unchanged native-byte verification and independent 481-test package review.
-- [ ] Complete final exact-head/current-main CI and manual merge for property typing.
+- [x] Complete final exact-head/current-main CI and manual merge for property typing: PR100, run39553367804.
 - [ ] Retain unreviewed mappings/properties, documentation and IDE coverage under API3.
 
 
@@ -683,7 +683,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete 36 sequential fresh-process measurements across six inputs and two modes, with three alternating-order repetitions and all-page byte/counter parity.
 - [x] Record exact source/tool/wheel identities, timings, memory ranges and limitations; independent benchmark source review found no blocker.
 - [x] Complete independent verification of all 36 samples, source/tool/artifact hashes, page digests, counters, table medians/ratios and memory ranges.
-- [ ] Complete required current-main CI and manual merge for Office benchmark evidence.
+- [x] Complete required current-main CI and manual merge for Office benchmark evidence: PR101, run39554746117.
 - [x] Supply the independently reproducible PDF memory/full-document counterpart in spec92; retain broader real-input/platform QA7 work.
 
 
@@ -693,7 +693,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Extend existing add_field with title/author, every-commit expansion limits and bounded native placement preflight; retain the existing API surface and numeric-field behavior.
 - [x] Verify four new native groups, 28 related field groups, 13 copied-package public workflows, fmt/Clippy/debug build, strict typing and 19 support/reference documentation tests; record artifact scope.
 - [x] Complete integrated locked release/corpus, strict typing, license audit and independent artifact review: 343 native and 484 installed Python tests.
-- [ ] Complete final exact-head/current-main CI and manual merge for title/author fields.
+- [x] Complete final exact-head/current-main CI and manual merge for title/author fields. Completed through reviewed aggregate PR112, run39563664023.
 - [ ] Keep general REF3 field kinds, REF4 refresh and imported preservation open.
 
 
@@ -704,7 +704,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add focused native/public workflows for output, wrapping, transforms, identity, reset, rollback, later geometry and callbacks; document upstream front paint-order and overlap/layoutInCell prerequisites.
 - [x] Complete six native groups, five new plus28 related copied-package tests, fmt/Clippy/debug build, strict typing and static-site/roadmap checks; record exact artifact evidence.
 - [x] Complete integrated locked full native/release/installed-wheel corpus and independent artifact review: 349 native and 490 installed Python tests.
-- [ ] Complete final exact-head/current-main CI and manual merge for picture placement.
+- [x] Complete final exact-head/current-main CI and manual merge for picture placement. Completed through reviewed aggregate PR112, run39563664023.
 - [ ] Keep full MED2/BG2–BG4/BG8, front/contours/nested scope, opacity/rotation and independent layering/overlap controls open. BG5 later closes only its bounded section-first letterhead criterion under spec105.
 
 
@@ -716,7 +716,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Independently verify all samples, timings, memory ranges and hashes; retain the slower small-PDF case and separate eager-extraction counter limits.
 - [x] Combine spec91/spec92 evidence to close bounded P1 reuse, retaining QA7 real-input/platform and P4 allocation work.
 - [x] Complete final documentation/source checks and independent final evidence review: 19 documentation tests and a 29-page/1,716-link site.
-- [ ] Complete required exact-head/current-main CI and manual merge.
+- [x] Complete required exact-head/current-main CI and manual merge. Completed through reviewed aggregate PR112, run39563664023.
 
 
 ## Combined native DOCX cell layout acceptance
@@ -725,7 +725,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add a separate test module for the orientation/alignment matrix, independent paragraph/table direction and empty-cell copy/reset geometry; preserve historical fingerprinted fixtures and runtime APIs.
 - [x] Complete final three-workflow multi-DPI DOCX/PDF acceptance, including absolute native row geometry, static-site links and roadmap consistency.
 - [x] Complete independent final source review and all three workflows against the exact installed picture release wheel, including an independent rerun.
-- [ ] Complete required exact-head/current-main CI and manual merge for the combined cell-layout corpus.
+- [x] Complete required exact-head/current-main CI and manual merge for the combined cell-layout corpus. Completed through reviewed aggregate PR112, run39563664023.
 - [ ] Keep native inter-cell spacing, full vertical-script fidelity and complete TBL8 open.
 
 
@@ -735,7 +735,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Extend existing deletion with container-relative locator/sentinel maintenance and unchanged section/reference/resource guards; verify four focused native groups.
 - [x] Complete 13 related native tests, fmt/Clippy/debug build, 19 copied-package public deletion/identity workflows and 27 support/reference/roadmap checks; record exact evidence.
 - [x] Complete integrated locked release/full corpus and independent artifact review: 355 native and 498 installed Python tests.
-- [ ] Complete final exact-head/current-main CI and manual merge for cell paragraph deletion.
+- [x] Complete final exact-head/current-main CI and manual merge for cell paragraph deletion. Completed through reviewed aggregate PR112, run39563664023.
 - [ ] Keep broader DOC5/TXT1 composition, cell movement, imported editing and PPTX deletion open.
 
 
@@ -752,7 +752,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add private output TypedDict declarations and strict consumer assertions without changing accepted runtime inputs, public exports or method bodies/defaults; correct only existing cell-list/border-replay annotations.
 - [x] Verify positive mypy, ten intended negative diagnostics, old-facade sensitivity, runtime snapshot/key introspection and annotation/type-declaration-erased AST equality; complete independent source/static review.
 - [x] Verify the exact installed candidate, unchanged native bytes/runtime bodies, strict positive/negative consumers and runtime snapshot probes, including independent review.
-- [ ] Complete fresh full installed-corpus current-main CI and manual merge for snapshot typing.
+- [x] Complete fresh full installed-corpus current-main CI and manual merge for snapshot typing. Completed through reviewed aggregate PR112, run39563664023.
 - [ ] Keep polymorphic paragraph/style/default snapshots and broader API3 discoverability open.
 
 
@@ -763,7 +763,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete focused public/native/typing/documentation evidence, including cell anchor/alias/resource guards.
 - [x] Complete independent final source review and focused replay (four workflows,24.049s).
 - [x] Complete integrated locked release/full corpus and independent artifact review: 361 native and 502 installed Python tests.
-- [ ] Complete exact-head/current-main CI and manual merge; retain broader DOC5/TXT1 work.
+- [x] Complete exact-head/current-main CI and manual merge; retain broader DOC5/TXT1 work. Completed through reviewed aggregate PR112, run39563664023.
 
 
 ## Owned DOCX theme source audit (spec99)
@@ -780,7 +780,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Integrate existing collection syntax with canonical generations, staged resource/revision guards and preserved DOCX callback behavior; source review clear.
 - [x] Verify native/public rollback, copies, empty append, invalidation and actual PPTX/PNG/PDF output; independent source and exact-wheel review pass.
 - [x] Complete locked full corpus: 366 native tests and two independent 506-test installed-wheel runs pass.
-- [ ] Complete exact-head/current-main CI and manual merge; retain broader DOC5/TXT1/SLIDE3 work.
+- [x] Complete exact-head/current-main CI and manual merge; retain broader DOC5/TXT1/SLIDE3 work. Completed through reviewed aggregate PR112, run39563664023.
 
 
 ## Bounded owned DOCX comments (spec98)
@@ -790,7 +790,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Stage private locator/block/text accounting, monotonic IDs and exact-candidate inventory; reuse the proof in navigation/media/output without relaxing other anchors.
 - [x] Add native exact/+1, malformed topology/registry, revision/allocator exhaustion, Unicode author, media/reference and rollback controls; retain all historical fixtures unchanged.
 - [x] Complete exact integrated native/installed-wheel corpus and independent final review: 379 native tests and two clean 512-test installed runs pass.
-- [ ] Complete exact-head/current-main CI and manual merge before merge acceptance.
+- [x] Complete exact-head/current-main CI and manual merge before merge acceptance. Completed through reviewed aggregate PR112, run39563664023.
 - [ ] Retain arbitrary interior/cross-paragraph roots, rich comment stories, nested replies, imported editing and review-display selection under existing REV1/TXT8/REV5 and U02 ownership.
 
 
@@ -801,7 +801,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete bounded adapter/schema, source/copy/resource/malformed geometry and public compatibility acceptance, including the measured retained-allocation correction.
 - [x] Complete independent frozen-source/profile review and final four-workflow replay, including the exact known 200-page fixture.
 - [x] Complete integrated full corpus and independent artifact review: 387 native tests and two clean 516-test installed-wheel runs pass, including the caught and corrected signed-advance regression.
-- [ ] Complete exact-head/current-main CI and manual merge.
+- [x] Complete exact-head/current-main CI and manual merge. Completed through reviewed aggregate PR112, run39563664023.
 - [ ] Retain E2/LAY8/U05 normalized slicing, auxiliary/object/table geometry and broader parity scope.
 
 
@@ -820,7 +820,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Check strict copied-package consumer, deliberate invalid assignments/keys and populated/default snapshot shapes across all native kinds.
 - [x] Complete independent final source/serializer review and replay positive/negative typing, runtime-key/schema and AST checks.
 - [x] Complete exact installed-wheel/source/native verification and agreed corpus: repacked annotation-only artifact and subsequent 395-native/523-Python integration pass.
-- [ ] Complete current-main CI and manual merge.
+- [x] Complete current-main CI and manual merge. Completed through reviewed aggregate PR112, run39563664023.
 - [ ] Retain remaining API3 property/documentation/IDE work; do not claim full-package strict typing.
 
 
@@ -832,7 +832,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Pass six focused native groups, formatting, all-target Clippy and a debug build after final tail-invariant review corrections.
 - [x] Pass six focused public workflows and independent replay, strict positive/four-negative typing checks and synchronized roadmap/support/reference/site checks; final source review clear.
 - [x] Complete exact integrated corpus and independent artifact review: 395 native tests and two clean 523-test installed runs pass.
-- [ ] Complete current-head CI and manual merge.
+- [x] Complete current-head CI and manual merge. Completed through reviewed aggregate PR112, run39563664023.
 - [ ] Retain broader DOC5 movement, duplication, insertion and cross-container/reference adoption work.
 
 
@@ -843,7 +843,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add one ordinary caller-PNG example and one combined fixture with exact body/link/table preservation, independent sections, filler checks and bounded three-DPI appearance controls.
 - [x] Complete independent source/replay review and documentation checks: one independently replayed workflow passes, with 19 support/reference tests and the site/roadmap checks passing.
 - [x] Complete integrated corpus and independent review: both 523-test installed runs pass; BG5 satisfies its original bounded section/header-anchor and repagination criterion.
-- [ ] Complete exact-head/current-main CI and manual merge; retain BG8 and documented broader limitations.
+- [x] Complete exact-head/current-main CI and manual merge; retain BG8 and documented broader limitations. Completed through reviewed aggregate PR112, run39563664023.
 - [ ] Keep BG8 and broader section-fill/linkage/continuous/floating/watermark coverage open.
 
 
@@ -855,8 +855,8 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Pass 21 focused public/field/lifecycle tests and 27 roadmap/support/reference checks; final runtime/native/public source review clear.
 - [x] Complete independent exact copied-extension replay: 18 tests pass; preserve deliberate fixture corrections and unchanged ledger fingerprints.
 - [x] Complete final docs review, 397-native validation and corrected integrated acceptance: both clean 528-test installed runs pass; failed 524-test evidence and deliberate sixth fixture correction remain recorded.
-- [ ] Complete exact-head/current-main CI and manual merge.
-- [ ] Retain native table field-context repair under U07/LAY6/REF3; keep spec106 movement pending its revised raw gate.
+- [x] Complete exact-head/current-main CI and manual merge. Completed through reviewed aggregate PR112, run39563664023.
+- [ ] Retain native table field-context repair under U07/LAY6/REF3; spec106 movement separately passes its revised raw gate with supported count fields and the PAGE guard retained.
 
 
 ## Page and slide index callbacks (spec109)
@@ -865,7 +865,8 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reuse existing PDF generation/count and native slide-ID sequence snapshots; guard every mutation argument and PDF handle construction without new public APIs.
 - [x] Pass four focused workflows and 22 combined related workflows, strict typing and independent source/four-workflow replay.
 - [x] Complete exact combined installed artifact/corpus alongside the corrected spec107 fixture: two clean 528-test installed runs pass with unchanged tested native bytes.
-- [ ] Complete current-main CI and manual merge.
+- [x] Complete current-main CI and manual merge. Completed through reviewed aggregate PR112, run39563664023.
+
 
 
 ## Mirrored DOCX margins (spec108)
@@ -875,7 +876,8 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add one typed document-wide boolean using explicit existing geometry preflight and ordinary commit; preserve all semantic/resource/output guards.
 - [x] Add three native adapter groups and four public workflows for revision/copy/reset, strict bool/lifetime, geometry/cache rollback, section/header/table output, line labels, columns and natural growth; strict consumer and deliberate typing negatives pass.
 - [x] Complete independent frozen code/docs and four-workflow replay review; documentation/site checks pass.
-- [ ] Complete integrated installed corpus, current-head CI and manual merge.
+- [x] Complete integrated corpus and independent artifact review: 410 native tests and two clean 538-test installed runs pass.
+- [ ] Complete current-head CI and manual merge.
 - [ ] Retain broader LAY10 settings and existing unsupported layout combinations under their current owners.
 
 
@@ -885,11 +887,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Implement only existing table collection movement with exact-parent coordinate rotation, stable descendant/generation identity and normal candidate guards.
 - [x] Share narrow spec102 preflight while retaining all deletion behavior; pass movement6, unchanged deletion6 and PAGE-guard2 native groups, formatting and all-target Clippy.
 - [x] Pass focused copied-package public/typing checks and independent source/six-workflow review; synchronize documentation with the bounded profile.
-- [ ] Complete integrated full native/installed-wheel corpus, independent artifact review, exact-head CI and manual merge.
+- [x] Complete integrated full native/installed-wheel corpus and independent artifact review: 410 native tests and two clean 538-test installed runs pass.
+- [ ] Complete exact-head CI and manual merge.
 - [ ] Retain broader DOC5 insertion, duplication, adoption and semantic-anchor relocation gaps.
 
 
 ## 113. Release compiler selection
 
 - [x] Verify the immutable maturin action declares and uses its toolchain input for both container and host builds; explicitly select CI Rust 1.95.0 in both release steps.
-- [ ] Independently review the workflow-only change, run required current-main CI and merge manually; validate all nine platform/Python wheels at the eventual release gate. No new tag or release is authorized by this task alone.
+- [x] Independently review the exact pinned action input/source and verify only the two compiler-selection keys change the workflow.
+- [ ] Complete required current-main CI and manual merge; validate all nine platform/Python wheels at the eventual release gate. No new tag or release is authorized by this task alone.
