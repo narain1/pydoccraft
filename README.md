@@ -73,6 +73,8 @@ Track the work in the [GitHub Roadmap project](https://github.com/users/narain1/
 
 ## Documentation
 
+Browse the [documentation website](https://narain1.github.io/pydoccraft/) for guides, examples and the roadmap. It follows `main`; unreleased features remain labeled separately from published packages.
+
 - [Python API](docs/api.md)
 - [Native authoring (unreleased)](docs/authoring.md)
 - [Six runnable cookbook workflows](docs/cookbook.md)

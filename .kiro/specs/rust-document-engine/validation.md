@@ -1244,3 +1244,19 @@ The supported profile is 2–32 immutable same-page widgets through existing fie
 
 
 PR94 independent source review and all467 installed tests against the copied exact77915dc package passed in162.689 seconds, zero failures/errors/skips, with matching wheel SHA/size. Review corrected one stale value-type error description before the final wheel build; no runtime, test or evidence exceptions were introduced. Exact-head/current-main CI and manual merge remain pending.
+
+
+## GitHub Pages documentation site — local build validation
+
+The documentation-only change renders the existing Markdown guides plus a landing page into 28 static HTML pages using hash-pinned, build-only Python-Markdown 3.7. `tools/build_site.py` does not import the package or invoke Cargo. No runtime dependency, lockfile, feature status, upstream revision or package version changes.
+
+Local validation: clean site build; 1,642 generated local links, assets and fragments checked by `tools/check_site.py`; roadmap ownership check (139 coverage IDs, 14 workstreams); support evidence check (19 profiles, 139 joins); negative checker probes for missing files, missing fragments, duplicate IDs and absent homepage. External URLs are not fetched by the link checker. Browser surfaces were unavailable in the agent environment, so visual desktop/mobile inspection remains a deployment-review check rather than claimed local evidence.
+
+The pinned official Pages workflow builds pull requests with read-only permissions and deploys only reviewed `main` builds, with deployment permissions confined to its separate job. Public hosting is pending repository Pages configuration, independent review, merge, a successful deployment and a reachable public URL. These documentation checks do not substitute for native or installed-wheel release validation.
+
+
+## GitHub Pages documentation site — reviewed manual merge
+
+PR95 final head `d9a6cbb914ec8a1bd4172bbcb58d0acbfe0ac8ae` passed required [CI39547460948](https://github.com/narain1/pydoccraft/actions/runs/39547460948): 321 native tests, 462 installed-wheel tests in207.055 seconds, formatting, Clippy, strict typing and the unchanged264-package license audit. Its [documentation build39547460927](https://github.com/narain1/pydoccraft/actions/runs/39547460927) passed; deployment was correctly skipped for the pull request. Independent source review and a clean build checked28 pages and1,642 local links/assets/fragments; negative checks rejected missing files/fragments, duplicate IDs and output-root traversal.
+
+Root visual review used Chromium140 with1440×1000 and390×844 viewports on the home page, authoring guide and roadmap. All six requests returned200 with no JavaScript errors or horizontal overflow; desktop/mobile homepage screenshots were inspected. The reviewed exact head was manually merged as `5583f2946534041267f71691a732f5c0d96c6bcd` after current-main checks, with repository auto-merge disabled. Public deployment/reachability remains separately verified after merge; the site follows main and does not declare the roadmap or a package release complete.

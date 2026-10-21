@@ -1,0 +1,2 @@
+# Build-only Markdown renderer (BSD-3-Clause); no package runtime dependency.
+Markdown==3.7 --hash=sha256:7eb6df5690b81a1d7942992c97fad2938e956e79df20cbc6186e9c3a77b1c803

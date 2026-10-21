@@ -105,3 +105,7 @@ The tagged release workflow builds wheels for Python 3.11–3.13 on Linux, macOS
 ## Upstream changes
 
 Upstream engine upgrades deserve isolated pull requests. Keep each project's crates on one revision, preserve root patches, rerun the whole corpus, compare size and licenses, and document intentional output changes. Never track an upstream branch.
+
+## Documentation website
+
+The [GitHub Pages site](documentation-site.md) builds directly from these Markdown guides. Use the documented build and local-link check before changing site navigation or publishing configuration.
