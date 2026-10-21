@@ -2100,3 +2100,18 @@ The seven-category acceptance audit now closes only QA2, bringing this prepared 
 
 
 Final spec126 documentation checks pass all 27 support/reference/roadmap tests, 21 profiles and 139 coverage joins across 14 owners. The site contains 30 pages and passes 1,854 local link/asset/fragment checks. The first QA2 ledger draft failed the required `Unassessed:` prefix check; the final remainder uses the existing schema, with no validator change. A structural comparison confirms every historical profile/artifact and every coverage entry except QA2 is unchanged from the parent reporting audit.
+## PR126 final delivery gate
+
+The dedicated PDF typed-placement pin upgrade was independently reviewed and manually merged at 2026-10-21 11:00:22 UTC as `f6017727649e058afe98075982d7bc97618bb44a`, from exact head `9d458fd` against current main `398bbe7`. Required [CI39586980360](https://github.com/narain1/pydoccraft/actions/runs/39586980360) and [documentation CI39586980370](https://github.com/narain1/pydoccraft/actions/runs/39586980370) passed. All 444 native tests passed in 235.60 seconds; all 560 installed-wheel tests passed in 457.529 seconds (458.037-second wrapper), with zero failures, errors or skips. Formatting, Clippy, installed typing and the 264-package license audit passed. CI wheel: 17,726,464 bytes, SHA256 `b06404cd04916b64008e46df48962d607074c31a4696cfe73a727ff0fb2c77ae`; extension: 41,106,288 bytes; lock SHA256 `ae4bf514017df6a4317e81cb5b2f194f89acd1ee6bf8f7e6ebd54d21772f829d`. Runtime/source identity matches the independently reviewed integration checkpoint. Auto-merge stayed disabled; there was no protection bypass, version change or release publication.
+
+
+## PR127 diagnostic portability correction
+
+The first required CI run [39588800718](https://github.com/narain1/pydoccraft/actions/runs/39588800718) at exact head `4be6fc15a2dc452c49176b00eb73320c85213b7c` passed 447 native tests and failed two in 468.76 seconds, before wheel/Python validation. Deliberately unsupported overlapping line spacing retained 31 normalized repeated characters in CI, compared with the original local plain16/bold20 observations. Exact cause of this environment-dependent difference is unproved. Those survivor counts are diagnostic observations, not a supported text-retention contract. The supported 1..100 admission and the exact48 controls at .5/.99/1/1.5 are unchanged.
+
+Independently reviewed test-only correction `626bb4dbea782f2e2642998f9ebc8f710ab12ff0` requires nonzero strict loss for the two unsupported overlap cases, and records observed counts/native lines before assertions. It preserves all exact48 native-glyph and emitted text/ToUnicode controls, native model/link/geometry checks and the 200-DPI channel<=1 comparison. No production code, dependency, supported value, image tolerance or test count changes. Its two focused native tests pass in 51.33 seconds (447 filtered); formatting and strict all-target Clippy pass in 9.74 seconds. The old local16/20 and CI31 evidence remains retained.
+
+The original 176-file native/installed artifact records above retain their exact original test-source identity. This later test-only delta is not relabeled as part of those frozen builds; fresh current-head CI must pass before manual merge.
+
+
+The later integration of the reviewed PR127 diagnostic test correction changes only unsupported-overlap test assertions and preserves all production bytes. That one test-file delta is separate from the frozen spec123 artifact and spec126 installed run above; their original evidence is not relabeled. Current-head CI will validate the merged test source before delivery.

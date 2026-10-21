@@ -1006,7 +1006,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Upgrade all11 direct/13 resolved PdfCraft pins only; audit264 permissive packages and23 existing citations across11 files, including unchanged raster allocation correction.
 - [x] Add one linked native identity/order/save/reopen/visible-output regression and retain existing allocation safety precondition and unchanged public tests.
 - [x] Complete locked444-native, fmt, Clippy, release build, two clean installed560 corpora, independent exact-artifact replay, typing and size gates.
-- [ ] Complete current-head CI and independent manual merge. Python underlays, resource collisions and broader PDF3/U10 remain open.
+- [x] Complete current-head CI and independent manual merge through PR126, required CI39586980360 and documentation CI39586980370. Python underlays, resource collisions and broader PDF3/U10 remain separately tracked.
 
 
 ## Direct PPTX cell paragraph spacing and indentation (spec121)
