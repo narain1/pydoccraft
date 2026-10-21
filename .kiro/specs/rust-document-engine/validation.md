@@ -1229,6 +1229,15 @@ The following delivery gates are complete after independent frozen-source/packag
 Every final run also passed formatting, warnings-denied Clippy, strict installed-package typing and the unchanged 264-package audit. Each includes the independently reviewed DOCX spacing fixture correction. Earlier local artifacts, including the recorded 462-test identity artifact, retain their original test-file scope. Main integration changes no identity-refactor runtime or dependency bytes; final exact-head/current-main CI for PR93 remains pending.
 
 
+## GitHub Pages documentation site — local build validation
+
+The documentation-only change renders the existing Markdown guides plus a landing page into 28 static HTML pages using hash-pinned, build-only Python-Markdown 3.7. `tools/build_site.py` does not import the package or invoke Cargo. No runtime dependency, lockfile, feature status, upstream revision or package version changes.
+
+Local validation: clean site build; 1,642 generated local links, assets and fragments checked by `tools/check_site.py`; roadmap ownership check (139 coverage IDs, 14 workstreams); support evidence check (19 profiles, 139 joins); negative checker probes for missing files, missing fragments, duplicate IDs and absent homepage. External URLs are not fetched by the link checker. Browser surfaces were unavailable in the agent environment, so visual desktop/mobile inspection remains a deployment-review check rather than claimed local evidence.
+
+The pinned official Pages workflow builds pull requests with read-only permissions and deploys only reviewed `main` builds, with deployment permissions confined to its separate job. Public hosting is pending repository Pages configuration, independent review, merge, a successful deployment and a reachable public URL. These documentation checks do not substitute for native or installed-wheel release validation.
+
+
 ## DOCX body identities — final manual merge gate
 
 PR93 final head `fb56803d41c0341b0c0d71e9f43d5f0d5ccde042` passed [required current-main CI39530041981](https://github.com/narain1/pydoccraft/actions/runs/39530041981), following the recorded independent source and 462-test copied-package review. It was manually merged as `f0cd0a7ef92ba8531e13f680ac9b5ed75779385b`. Repository auto-merge remains disabled. This closes the delivery gate for the internal identity change; broader DOC5/TXT1 remains partial.
