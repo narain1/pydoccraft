@@ -2231,3 +2231,12 @@ Frozen source `727433a861cdfddd27c730a638c305b8fd68c2b3` incorporates the review
 The final clean Python3.11.2 installed corpus passes all572 tests in387.659seconds (387.788seconds wrapper), with zero failures/errors/skips. Independent exact source/wheel/facade/native/license review, the imported-break workflow (3.973seconds) and strict installed typing pass. Current support audit identity points to the frozen combined source. Historical profile/artifact records are unchanged. The later merge43ebf36 adds only aggregate validation/PR127 completion documentation; it does not change runtime or fixture bytes.
 
 This upgrade moves only the four direct/ten resolved DeckCraft crates to the reviewed contribution `c9c7fff189c808bf7266d0b888c3636a1880080d`. It fixes text after explicit line-break offsets in native PDF output; Python line-break creation and broader bidi/text fidelity are separate work. Current-head CI and independent manual merge remain required. No version/tag/publication change is included.
+
+
+### PR128 final current-main CI and manual merge
+
+The authoring/validation aggregate was manually merged as `48f1583fe843fb168a269e35f013b6aed9430554` on 2026-10-21 at 12:14:01 UTC. Reviewed head `fbcf0aaad5f29b06e7d380bd32e5c14f50a4ef59` included actual main `4ed440dd78efaba4a389210850e324c640035bf6`. Required CI39594229122 and documentation CI39594229092 passed; strict branch protection, exact head/current-main ancestry and disabled auto-merge were verified. No bypass was used.
+
+The fresh CI build passes 452 native tests in 510.94 seconds and 571 installed-wheel tests in 959.341 seconds (959.877 seconds wrapper), with zero failures/errors/skips. Formatting, strict Clippy, installed typing and the 264-package license audit pass. The CI wheel is 17,733,199 bytes, SHA256 `ba3f1a67d32aae029a369f587a69bdc42c19ab21957c10a7d1f313fccc5410b9`; its native extension is 41,125,296 bytes. Cargo.lock SHA256 remains `ae4bf514017df6a4317e81cb5b2f194f89acd1ee6bf8f7e6ebd54d21772f829d`. These are fresh CI artifact identities, not relabeled local repack bytes.
+
+This completes the current-main delivery gates for specs120/123/125/126/133. The dedicated Deck upgrade in PR129 remains a separate pending dependency change and still requires its own current-head CI and manual merge. No version, tag or release was published.
