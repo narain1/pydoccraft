@@ -1166,7 +1166,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Prepare the adapter and focused output/UTF-8/aggregate/rollback controls; retain intended baseline unsupported-key failures.
 - [x] Integrate after the independently reviewed native contribution139 and dedicated upgrade140 local acceptance.
 - [x] Pass native and installed focused controls, then explicitly record the sole reviewed metadata-test fingerprint migration without relabeling historical evidence.
-- [ ] Pass full locked native/installed corpus, independent source/artifact/focused review, license/size checks and synchronized bounded documentation.
+- [x] Pass full locked native/installed corpus, independent source/artifact/focused review, license/size checks and synchronized bounded documentation.
 - [ ] Complete fresh current-main CI and manual merge. Keep extended-property and broader DOC7 work open.
 
 
@@ -1185,7 +1185,8 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Run copied-package public workflows and strict consumer.
 - [x] Complete independent source/accounting and exact copied-package focused review.
 - [x] Complete synchronized documentation review, including held134 evidence.
-- [ ] Complete final full native/release/installed corpus, exact-artifact verification, required current-head CI and manual PR review/merge. No release or broad TXT4/SLIDE3 completion is implied.
+- [x] Complete final full native/release/installed corpus and independent exact-artifact/source/focused verification.
+- [ ] Complete required current-head CI and manual PR review/merge. No release or broad TXT4/SLIDE3 completion is implied.
 
 
 ## Stable property setter typing (spec142)
@@ -1195,4 +1196,5 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Pass valid strict consumer controls and reject exactly 13 invalid assignments previously accepted by the baseline.
 - [x] Pass all 37 existing authoring, section geometry, background, table formatting and style-default workflows against the copied-package candidate.
 - [x] Complete independent source, AST, strict positive/negative and nullable-reset review.
-- [ ] Complete combined installed-artifact validation, current-main CI and manual merge; keep API3 open.
+- [x] Complete combined installed-artifact validation and independent artifact review.
+- [ ] Complete current-main CI and manual merge; keep API3 open.
