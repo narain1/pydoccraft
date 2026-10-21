@@ -963,7 +963,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete independent frozen source/public review (six workflows15.775s).
 - [x] Complete spec116 native closed-shape corner/outline parity gate, including min/max width and stroke-to-dimension boundaries; preserve 200-point/native-clamp diagnostics.
 - [x] Complete corrected436-native and two clean556-test installed corpora, exact-artifact/source review, strict typing and synchronized bounded support documentation.
-- [ ] Complete closed-shape exact-head/current-main CI and manual merge; dependency PR122 is merged.
+- [x] Complete closed-shape exact-head/current-main CI and independent manual merge through PR123, required CI39578015883 and documentation CI39578015866.
 - [ ] Keep MED4 open for lines/textboxes and excluded contexts; no new U-owner or broad shape-parity claim.
 
 
