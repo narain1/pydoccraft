@@ -903,6 +903,34 @@ class WordDocument(EditableDocument):
         return Pictures(self, lambda: self._call("image_ids"))
 
     @property
+    def shapes(self) -> _WordShapes:
+        """Owned direct-body rectangles and ellipses in source order."""
+        return _WordShapes(self)
+
+    def add_shape(self, kind: Literal["rectangle", "ellipse"], *, width: float,
+                  height: float, fill: _Color | None = None,
+                  stroke: _Color | None = None, stroke_width: float = 1) -> _WordShape:
+        """Append an inline native closed shape; use format() for floating placement."""
+        revision = self._call("revision")
+        if not isinstance(kind, str):
+            raise TypeError("shape kind must be rectangle or ellipse")
+        if str.__len__(kind) > 32:
+            raise ValueError("shape kind must be rectangle or ellipse")
+        kind = str.__str__(kind)
+        def guard():
+            self._ensure_open()
+            if self._call("revision") != revision:
+                raise ValueError("document changed while converting shape values")
+        outline_width = pt(stroke_width)
+        guard()
+        if not 0.25 <= outline_width <= 100 or not math.isclose(outline_width * 20, round(outline_width * 20), rel_tol=0, abs_tol=1e-10):
+            raise ValueError("stroke width requires 0.25 to 100 points in 0.05-point increments")
+        properties = _shape_properties({"size": (width, height), "fill": fill,
+                                        "stroke": None if stroke is None else (stroke, outline_width)}, guard)
+        identifier = self._call("add_shape", kind, properties, revision, _change=True)
+        return _WordShape(self, identifier)
+
+    @property
     def mirror_margins(self) -> bool:
         """Mirror inside/outside margins by displayed page-number parity.
 
@@ -1847,6 +1875,46 @@ class Note(EditableStory):
         return json.loads(self._owner._call("note_info", self._id))["kind"]
 
 
+def _format_placement(owner, identifier, snapshot, operation, formatting):
+    """Shared conversion and callback guard for native Word object placement."""
+    label = "picture" if snapshot == "image_formatting" else "shape"
+    owner._call(snapshot, identifier)
+    revision = owner._call("revision")
+    if not formatting:
+        return
+    if formatting.keys() - PictureFormatting.__annotations__.keys():
+        raise ValueError(f"unsupported {label} formatting property")
+    def length(value):
+        result = pt(value)
+        owner._call(snapshot, identifier)
+        if owner._call("revision") != revision:
+            raise ValueError(f"document changed while converting {label} formatting")
+        return result
+
+    patch = {}
+    for key, value in formatting.items():
+        if key in {"wrap", "anchor"}:
+            if not isinstance(value, str) or len(value) > 32:
+                raise TypeError(f"{label} wrap and anchor require supported names")
+            patch[key] = value
+        elif key == "position":
+            if not isinstance(value, (tuple, list)) or len(value) != 2:
+                raise TypeError("position must be an (x, y) pair in points")
+            patch[key] = tuple(map(length, value))
+        else:
+            if isinstance(value, Real):
+                value = (value,) * 4
+            if not isinstance(value, (tuple, list)) or len(value) != 4:
+                raise TypeError("distance must be a number or (top, right, bottom, left) in points")
+            patch[key] = tuple(map(length, value))
+    # Numeric conversions may execute caller code: never retarget a changed owner.
+    owner._call(snapshot, identifier)
+    if owner._call("revision") != revision:
+        raise ValueError(f"document changed while converting {label} formatting")
+    encoded = json.dumps(patch, allow_nan=False)
+    owner._call(operation, identifier, encoded, revision, _change=True)
+
+
 class Pictures(_Collection["Picture"]):
     """Ordered pictures; deletion removes the selected placement."""
     def __init__(self, owner, ids):
@@ -1877,41 +1945,7 @@ class Picture:
         that paragraph. Lengths use 0.05-point increments. Horizontal distances
         must match. Front layering and floating nested/story pictures are unavailable.
         """
-        self._owner._call("image_formatting", self._id)
-        revision = self._owner._call("revision")
-        if not formatting:
-            return
-        if formatting.keys() - PictureFormatting.__annotations__.keys():
-            raise ValueError("unsupported picture formatting property")
-        def length(value):
-            result = pt(value)
-            self._owner._call("image_formatting", self._id)
-            if self._owner._call("revision") != revision:
-                raise ValueError("document changed while converting picture formatting")
-            return result
-
-        patch = {}
-        for key, value in formatting.items():
-            if key in {"wrap", "anchor"}:
-                if not isinstance(value, str) or len(value) > 32:
-                    raise TypeError("picture wrap and anchor require supported names")
-                patch[key] = value
-            elif key == "position":
-                if not isinstance(value, (tuple, list)) or len(value) != 2:
-                    raise TypeError("position must be an (x, y) pair in points")
-                patch[key] = tuple(map(length, value))
-            else:
-                if isinstance(value, Real):
-                    value = (value,) * 4
-                if not isinstance(value, (tuple, list)) or len(value) != 4:
-                    raise TypeError("distance must be a number or (top, right, bottom, left) in points")
-                patch[key] = tuple(map(length, value))
-        # Numeric conversions may execute caller code: never retarget a changed owner.
-        self._owner._call("image_formatting", self._id)
-        if self._owner._call("revision") != revision:
-            raise ValueError("document changed while converting picture formatting")
-        encoded = json.dumps(patch, allow_nan=False)
-        self._owner._call("format_image", self._id, encoded, revision, _change=True)
+        _format_placement(self._owner, self._id, "image_formatting", "format_image", formatting)
 
     @property
     def data(self) -> bytes:
@@ -1968,6 +2002,112 @@ class Picture:
         if not isinstance(value, bool):
             raise TypeError("flip_v must be a boolean")
         self._owner._call("set_image_flips", self._id, flip_v=value, _change=True)
+
+
+def _shape_properties(values, guard):
+    patch = {}
+    for key, value in values.items():
+        if key == "size":
+            if not isinstance(value, (tuple, list)) or len(value) != 2:
+                raise TypeError("shape size requires a (width, height) pair in points")
+            pair = []
+            for item in value:
+                pair.append(pt(item))
+                guard()
+            patch[key] = pair
+        elif key == "fill":
+            patch[key] = None if value is None else _color(value)
+            guard()
+        else:
+            if value is None:
+                patch[key] = None
+            else:
+                if not isinstance(value, (tuple, list)) or len(value) != 2:
+                    raise TypeError("stroke requires (color, width) or None")
+                color = _color(value[0])
+                guard()
+                width = pt(value[1])
+                guard()
+                patch[key] = (color, width)
+    encoded = json.dumps(patch, allow_nan=False)
+    guard()
+    return encoded
+
+
+class _WordShapes(_Collection["_WordShape"]):
+    def __init__(self, owner: WordDocument):
+        super().__init__(owner, lambda: owner._call("shape_ids"), _WordShape)
+
+    def __delitem__(self, index: int) -> None:
+        revision = self._owner._call("revision")
+        identifiers = self._ids()
+        if isinstance(index, slice):
+            raise TypeError("shape deletion requires an integer index")
+        selected = _index(index, len(identifiers))
+        self._owner._ensure_open()
+        if self._owner._call("revision") != revision:
+            raise ValueError("document changed while converting shape index")
+        self._owner._call("remove_shape", identifiers[selected], revision, _change=True)
+
+
+class _WordShape:
+    """An exact owned native rectangle/ellipse placement, independent of PPTX shapes."""
+    def __init__(self, owner: WordDocument, identifier: int):
+        self._owner, self._id = owner, identifier
+
+    def _info(self):
+        return json.loads(self._owner._call("shape_info", self._id))
+
+    def _set(self, key, value):
+        self._info()
+        revision = self._owner._call("revision")
+        def guard():
+            self._info()
+            if self._owner._call("revision") != revision:
+                raise ValueError("document changed while converting shape values")
+        properties = _shape_properties({key: value}, guard)
+        self._owner._call("update_shape", self._id, properties, revision, _change=True)
+
+    @property
+    def kind(self) -> Literal["rectangle", "ellipse"]:
+        return self._info()["kind"]
+
+    @property
+    def size(self) -> tuple[float, float]:
+        return tuple(self._info()["size"])
+
+    @size.setter
+    def size(self, value: tuple[float, float] | list[float]) -> None:
+        self._set("size", value)
+
+    @property
+    def fill(self) -> str | None:
+        value = self._info()["fill"]
+        return None if value is None else _hex_color(value)
+
+    @fill.setter
+    def fill(self, value: _Color | None) -> None:
+        self._set("fill", value)
+
+    @property
+    def stroke(self) -> tuple[str, float] | None:
+        value = self._info()["stroke"]
+        return None if value is None else (_hex_color(value[0]), value[1])
+
+    @stroke.setter
+    def stroke(self, value: tuple[_Color, float] | None) -> None:
+        self._set("stroke", value)
+
+    @property
+    def formatting(self) -> _PictureSnapshot:
+        result = json.loads(self._owner._call("shape_formatting", self._id))
+        result["position"] = tuple(result["position"])
+        result["distance"] = tuple(result["distance"])
+        return result
+
+    def format(self, **formatting: Unpack[PictureFormatting]) -> None:
+        """Apply the same native placement vocabulary as direct-body pictures."""
+        _format_placement(self._owner, self._id, "shape_formatting", "format_shape", formatting)
 
 
 class EditableTable:

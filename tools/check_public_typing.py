@@ -12,13 +12,28 @@ import doc_ex
 from doc_ex._authoring import (
     Annotation, Bookmark, Comment, Comments, EditableCell, EditableTable, Paragraph, PdfDocument, PdfField,
     PdfPage, Picture, Presentation, Shape, SlidePicture, SlideTable, TextRange,
-    WordDocument,
+    WordDocument, _WordShape,
 )
 
 
 def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
     with doc_ex.new('docx') as word:
         assert_type(word, WordDocument)
+        shape = word.add_shape("rectangle", width=40, height=20, fill="red", stroke="blue", stroke_width=2)
+        assert_type(shape, _WordShape)
+        assert_type(shape.kind, Literal["rectangle", "ellipse"])
+        assert_type(shape.size, tuple[float, float])
+        assert_type(shape.fill, str | None)
+        assert_type(shape.stroke, tuple[str, float] | None)
+        assert_type(word.shapes[:], list[_WordShape])
+        assert_type(next(iter(word.shapes)), _WordShape)
+        shape.size = (80, 40)
+        shape.fill = (255, 0, 0)
+        shape.stroke = ("blue", 2)
+        assert_type(shape.format(wrap="behind", anchor="page", position=(80, 100)), None)
+        assert_type(shape.formatting["position"], tuple[float, float])
+        del word.shapes[0]
+
         assert_type(word.copy(), WordDocument)
         assert_type(word.mirror_margins, bool)
         assert_type(word.sections[0].vertical_alignment, Literal["top", "center", "bottom", "justify"])

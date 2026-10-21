@@ -34,6 +34,8 @@ mod valign;
 
 #[path = "author_docx_styles.rs"]
 mod owned_styles;
+#[path = "author_docx_shapes.rs"]
+mod shapes;
 
 const MAX_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_DOCUMENT_TEXT_BYTES: usize = 16 * 1024 * 1024;
@@ -104,6 +106,7 @@ pub struct EditableDocx {
     cell_placeholders: BTreeSet<(StoryRef, Path)>,
     table_generations: BTreeMap<usize, u64>,
     retired_style_ids: BTreeSet<String>,
+    shape_ids: BTreeSet<usize>,
 }
 
 #[pymethods]
@@ -126,11 +129,17 @@ impl EditableDocx {
             cell_placeholders: BTreeSet::new(),
             table_generations: BTreeMap::new(),
             retired_style_ids: BTreeSet::new(),
+            shape_ids: BTreeSet::new(),
         }
     }
 
     pub fn copy(&self) -> PyResult<Self> {
         owned_styles::storage(self.document()?, &self.retired_style_ids)?;
+        // Preserve diagnostic copies of shape-free private states; mutation and
+        // output validate the complete native inventory independently.
+        if !self.shape_ids.is_empty() {
+            shapes::registry(self, &shapes::inventory(self.document()?)?)?;
+        }
         Ok(Self {
             document: Some(self.document()?.clone()),
             body_placeholder: self.body_placeholder,
@@ -147,12 +156,14 @@ impl EditableDocx {
             cell_placeholders: self.cell_placeholders.clone(),
             table_generations: self.table_generations.clone(),
             retired_style_ids: self.retired_style_ids.clone(),
+            shape_ids: self.shape_ids.clone(),
         })
     }
 
     pub fn close(&mut self) {
         self.document = None;
         self.retired_style_ids.clear();
+        self.shape_ids.clear();
     }
 
     pub fn revision(&self) -> PyResult<u64> {
@@ -234,6 +245,7 @@ impl EditableDocx {
     pub fn to_bytes(&self) -> PyResult<Vec<u8>> {
         let comments = comments::inventory(self.document()?)?;
         comments::registry(self, &comments)?;
+        shapes::registry(self, &shapes::inventory(self.document()?)?)?;
         page_field_count(self.document()?)?;
         validate_line_number_work(self.document()?)?;
         validate_unsplittable_page_bounds_with_comments(self.document()?, &comments)?;
@@ -1812,7 +1824,7 @@ impl EditableDocx {
         paragraph.props.numbering = Some(NumRef { num, level });
         paragraph.touch();
         if kind == Some(ListKind::Legal) {
-            validate_unsplittable_page_bounds(&candidate)?;
+            validate_layout_before_commit(&candidate)?;
         }
         self.commit(candidate)
     }
@@ -2219,7 +2231,7 @@ impl EditableDocx {
                 &CharProps::default(),
             )
             .map_err(model_error)?;
-        validate_unsplittable_page_bounds(&candidate)?;
+        validate_layout_before_commit(&candidate)?;
         self.commit(candidate)?;
         self.text_bytes = text_bytes;
         Ok(())
@@ -2343,7 +2355,7 @@ impl EditableDocx {
             )
             .map_err(model_error)?;
         if url.is_some_and(|target| target.starts_with('#')) {
-            validate_unsplittable_page_bounds(&candidate)?;
+            validate_layout_before_commit(&candidate)?;
         }
         self.commit(candidate)?;
         Ok(self.revision)
@@ -3006,6 +3018,28 @@ impl EditableDocx {
         )
     }
 
+    pub fn shape_ids(&self) -> PyResult<Vec<usize>> {
+        shapes::ids(self)
+    }
+    pub fn shape_info(&self, id: usize) -> PyResult<String> {
+        shapes::info(self, id)
+    }
+    pub fn shape_formatting(&self, id: usize) -> PyResult<String> {
+        shapes::formatting(self, id)
+    }
+    pub fn add_shape(&mut self, kind: &str, properties: &str, revision: u64) -> PyResult<usize> {
+        shapes::add(self, kind, properties, revision)
+    }
+    pub fn update_shape(&mut self, id: usize, properties: &str, revision: u64) -> PyResult<()> {
+        shapes::update(self, id, properties, revision, false)
+    }
+    pub fn format_shape(&mut self, id: usize, properties: &str, revision: u64) -> PyResult<()> {
+        shapes::update(self, id, properties, revision, true)
+    }
+    pub fn remove_shape(&mut self, id: usize, revision: u64) -> PyResult<()> {
+        shapes::remove(self, id, revision)
+    }
+
     #[pyo3(signature = (data, width=None, height=None, alt=""))]
     pub fn add_image(
         &mut self,
@@ -3181,7 +3215,7 @@ impl EditableDocx {
             *float = updated;
         }
         paragraph.touch();
-        validate_unsplittable_page_bounds(&candidate)?;
+        validate_layout_before_commit(&candidate)?;
         self.commit(candidate)
     }
 
@@ -3301,7 +3335,7 @@ impl EditableDocx {
     pub fn set_mirror_margins(&mut self, enabled: bool) -> PyResult<()> {
         let mut candidate = self.document()?.clone();
         candidate.settings.mirror_margins = enabled;
-        validate_unsplittable_page_bounds(&candidate)?;
+        validate_layout_before_commit(&candidate)?;
         self.commit(candidate)
     }
 
@@ -3522,6 +3556,7 @@ impl EditableDocx {
             .into());
         }
         let document = self.document()?;
+        shapes::registry(self, &shapes::inventory(document)?)?;
         let (root_blocks, ids, part_kind, root_placeholder) = match story {
             StoryRef::Body => (
                 &document.body,
@@ -4447,6 +4482,7 @@ impl EditableDocx {
         // Bound source depth/text/objects before content_usage allocates object offsets.
         let original_comments = comments::inventory(document)?;
         comments::registry(self, &original_comments)?;
+        shapes::registry(self, &shapes::inventory(document)?)?;
         let (story, path) = self.location(id)?;
         let root = document
             .story(story)
@@ -4907,6 +4943,9 @@ impl EditableDocx {
     }
 
     fn invalidate_descendants(&mut self, story: StoryRef, prefix: &Path) {
+        // Called only after staged copy or candidate commit validates the shape
+        // registry. Shapes are direct Body paths of length one, never strict
+        // descendants of these table/cell prefixes; do not silently retire them.
         self.locations.retain(|_, (owner, path)| {
             *owner != story || path.0.len() <= prefix.0.len() || !path.0.starts_with(&prefix.0)
         });
@@ -5136,7 +5175,12 @@ impl EditableDocx {
                 }
             }
         }
-        let images: BTreeSet<_> = self.images.iter().copied().collect();
+        let images: BTreeSet<_> = self
+            .images
+            .iter()
+            .copied()
+            .chain(self.shape_ids.iter().copied())
+            .collect();
         let mut ids = Vec::new();
         for (index, block) in document.body.iter().enumerate() {
             if tables {
@@ -5220,6 +5264,8 @@ impl EditableDocx {
     ) -> PyResult<()> {
         let comments = comments::inventory(&document)?;
         comments::registry(self, &comments)?;
+        let closed_shapes = shapes::inventory(&document)?;
+        shapes::registry(self, &closed_shapes)?;
         valign::profile(&document)?;
         if let Some(removal) = removed_comment {
             if removed_bookmark.is_some() || converted_notes.is_some() {
@@ -5278,6 +5324,9 @@ impl EditableDocx {
         if hyperlink_bytes(&document) > MAX_LINK_BYTES {
             return Err(limit("document hyperlink targets exceed 16 MiB"));
         }
+        if !closed_shapes.is_empty() {
+            validate_unsplittable_page_bounds_with_comments(&document, &comments)?;
+        }
         let revision = self
             .revision
             .checked_add(1)
@@ -5310,6 +5359,7 @@ impl EditableDocx {
             .para(story, &path)
             .filter(|_| {
                 !(self.images.contains(&id)
+                    || self.shape_ids.contains(&id)
                     || story == StoryRef::Body
                         && path.0.len() == 1
                         && self.body_placeholder == Some(path.0[0] as usize))
@@ -5761,6 +5811,7 @@ fn retain_authored_image_media_with_comments(
                         }
                         used.insert(media.clone());
                     }
+                    object if shapes::supported(object) => {}
                     InlineObject::NoteRef { .. } | InlineObject::BookmarkStart { .. } | InlineObject::BookmarkEnd { .. } => {}
                     InlineObject::CommentStart { id } | InlineObject::CommentEnd { id } if comments.marker(*id) => {}
                     // Fields own instruction/result text, not media references. Legacy
@@ -6195,6 +6246,13 @@ fn validate_floating_picture_bounds(
     Ok(())
 }
 
+fn validate_layout_before_commit(document: &Document) -> PyResult<()> {
+    if shapes::inventory(document)?.is_empty() {
+        validate_unsplittable_page_bounds(document)?;
+    }
+    Ok(())
+}
+
 /// The native paginator places an oversized unsplittable row whole, even beyond
 /// the physical page. Reject that known loss before serializing authored data.
 /// Vertical merge anchors carry multi-row geometry and are deliberately outside
@@ -6212,6 +6270,7 @@ fn validate_unsplittable_page_bounds_with_comments(
     validate_line_number_work(document)?;
     let outlines = outline_targets(document)?;
     let floating = floating_picture_paths(document)?;
+    let closed_shapes = shapes::inventory(document)?;
     let mut pending = native_table_roots(document);
     let mut guarded = BTreeSet::new();
     let mut cells = 0usize;
@@ -6269,6 +6328,7 @@ fn validate_unsplittable_page_bounds_with_comments(
         && outlines.is_empty()
         && metadata_fields.is_empty()
         && floating.is_empty()
+        && closed_shapes.is_empty()
         && !aligned
     {
         return Ok(());
@@ -6287,6 +6347,7 @@ fn validate_unsplittable_page_bounds_with_comments(
     let mut items = 0usize;
     let mut field_work = 0usize;
     let mut field_display_bytes = 0usize;
+    let mut seen_shapes = BTreeSet::new();
     for page in &layout.pages {
         items = items
             .saturating_add(page.items.len())
@@ -6305,6 +6366,7 @@ fn validate_unsplittable_page_bounds_with_comments(
             valign::page_bounds(page)?;
         }
         validate_rich_story_page_bounds(page, &rich)?;
+        shapes::page_bounds(page, &closed_shapes, &mut seen_shapes)?;
         if !floating.is_empty() {
             validate_floating_picture_bounds(page, &floating)?;
         }
@@ -6344,6 +6406,12 @@ fn validate_unsplittable_page_bounds_with_comments(
     }
     if !outlines.is_empty() {
         validate_outline_layout(&layout, &outlines)?;
+    }
+    if seen_shapes.len() != closed_shapes.len() {
+        return Err(EngineError::Unsupported(
+            "native layout omitted an owned shape placement".into(),
+        )
+        .into());
     }
     Ok(())
 }
@@ -6878,13 +6946,15 @@ fn validate_bookmark_links_with_comments(
                 .into_iter()
                 .zip(&paragraph.objects)
             {
-                unsupported_objects |= !matches!(
-                    object,
-                    InlineObject::Image { ole: None, .. }
-                        | InlineObject::NoteRef { .. }
-                        | InlineObject::BookmarkStart { .. }
-                        | InlineObject::BookmarkEnd { .. }
-                ) && !matches!(object, InlineObject::Field { form, .. } if form.is_empty())
+                unsupported_objects |= !shapes::supported(object)
+                    && !matches!(
+                        object,
+                        InlineObject::Image { ole: None, .. }
+                            | InlineObject::NoteRef { .. }
+                            | InlineObject::BookmarkStart { .. }
+                            | InlineObject::BookmarkEnd { .. }
+                    )
+                    && !matches!(object, InlineObject::Field { form, .. } if form.is_empty())
                     && !matches!(object, InlineObject::CommentStart { id } | InlineObject::CommentEnd { id } if comments.marker(*id));
                 let (name, map) = match object {
                     InlineObject::BookmarkStart { name } => (name, &mut starts),
@@ -9560,7 +9630,10 @@ fn content_usage(blocks: &wordcraft_doc::Blocks) -> (usize, usize) {
                         .object_offsets()
                         .into_iter()
                         .zip(&paragraph.objects)
-                        .filter(|(_, object)| matches!(object, InlineObject::Image { .. }))
+                        .filter(|(_, object)| {
+                            matches!(object, InlineObject::Image { .. })
+                                || shapes::supported(object)
+                        })
                         .count()
                         * wordcraft_doc::para::OBJ.len_utf8();
                     bytes += paragraph.text.len() - image_bytes
