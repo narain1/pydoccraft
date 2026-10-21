@@ -1007,6 +1007,19 @@ The existing owned metadata patch and extraction metadata dictionary shall expos
 
 Existing authoring properties must describe supported input types and None returns without altering assignments, validation or the public surface. Cover the remaining missing setter annotations for document backgrounds, style relations, ranges, section geometry, table cells and slide shapes. Preserve the distinction between DOCX background-image clearing and PPTX image assignment, and between nullable cell margins and nonnullable direct cell colors. Static types do not certify numeric ranges, sequence lengths, colors, format-specific support or lifetime validity.
 
+
+## 143. Native typed retained extended properties
+
+1. Provide an opt-in public native owned snapshot and bounded typed patch over the eight existing retained properties. Validate entire retained state, byte/count/UTF8/separator/scalar/duplicate bounds before allocation or mutation; preserve original sharing/bytes/order on semantic no-op and keep unrelated model state unchanged. Use the existing native XML-character predicate.
+2. Preserve ordinary reader/writer policy, first-eight/duplicate/omission diagnostics and privacy/computed behavior. Do not claim source completeness, custom/producer/statistics editing or Word2003 conversion. Retain exact old-pin API-availability compile-negative, unchanged legacy artifacts, complete selected native suites and positive DOCX/FlatOPC/render/export controls.
+
+## 146. Dedicated WordCraft extended-property prerequisite upgrade
+
+1. Select all five direct/nine resolved Word crates at the exact independently reviewed published143 contribution; preserve every other locked source/version/edge/checksum, permissive attribution and assets.
+2. Add one linked-native typed-property preservation/rollback/readback/output regression without changing the Python facade or historical public corpus. Do not fabricate a public baseline failure where the extended metadata API is unexposed.
+3. Complete locked468 native/fmt/strictClippy/release and clean installed585 corpus, strict typing, source/artifact/citation/license identity and independent review. Keep native143 evidence distinct. No DOC7 closure or operation-profile promotion; Python mapping admission is separate147.
+
+
 ## 153. Preserve text when inferred PDF table rows are incomplete
 
 153.1 Retain original normalized PDF blocks when a nonempty native reading block excluded from the candidate table intersects the region whose original blocks would be replaced. Use the same replacement predicate for all block kinds and include the full bounds of selected blocks. This is a conservative admission check within the existing small geometry normalizer, not a new table or reading-order engine.

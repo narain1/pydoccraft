@@ -2429,3 +2429,7 @@ mod closed_shape_proof;
 #[cfg(test)]
 #[path = "docx/core_language_regression_tests.rs"]
 mod core_language_regression_tests;
+
+#[cfg(test)]
+#[path = "docx/extended_properties_regression_tests.rs"]
+mod extended_properties_regression_tests;
