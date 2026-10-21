@@ -1,0 +1,1491 @@
+{
+  "schema_version": 1,
+  "measured_utc": "2026-10-21",
+  "cpu": "AMD Ryzen 9 9955HX 16-Core Processor",
+  "native_source_commit": "43fd15cc870f633947ab6ff420bb4591bc5dc9aa",
+  "wheel_sha256": "ffb815e29b7429ba7e6d9b8b74e6dbc1be9b68888edcb59a24665c3a8b5fa1b9",
+  "cargo_lock_sha256": "4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0",
+  "tools_sha256": {
+    "benchmarks/generate_office_session_inputs.py": "9850888fab27e9b4eff11125b5bfc759ec266e59449d5b75823bfefd5709ac88",
+    "benchmarks/benchmark_office_sessions.py": "5e400d685648f49562d5b87740ff87a556c2d50d77c359bd28388b576d8c4cba"
+  },
+  "method": "Three sequential fresh processes per mode/input at 144 DPI, five warm repetitions and every page; mode order alternated across repeats. No concurrent local validation/build processes. Input hashing precedes measurements and warms filesystem cache. Same build with native session kept versus explicitly closed before rendering.",
+  "runs": [
+    {
+      "mode": "cached",
+      "format": "docx",
+      "pages": 20,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 16.750653012422845,
+      "cold_render_ms": 12.674541008891538,
+      "warm_median_ms": 12.646368995774537,
+      "all_pages_total_ms": 238.44210096285678,
+      "all_pages_median_ms": 11.695917492033914,
+      "first_png_sha256": "bff94a3cc49ba29efa87062093e7d82581ff1b823913ba093b4eadf688c3fa61",
+      "all_pages_png_sha256": "e24d36f8b4c99f310972d83594ac62097a0b0ea12a7b4639a6894c436b68f2d5",
+      "source_sha256": "ebe30a3267d6a61497badf7faa1451b2e1fe5c3598ab76cdce7c29488c227da3",
+      "source_bytes": 9276,
+      "session_stats_parse_layout_attempts": [
+        1,
+        1,
+        26
+      ],
+      "before_open": {
+        "rss_bytes": 25075712,
+        "peak_rss_bytes": 24371200
+      },
+      "after_open": {
+        "rss_bytes": 48537600,
+        "peak_rss_bytes": 47652864
+      },
+      "before_close": {
+        "rss_bytes": 53506048,
+        "peak_rss_bytes": 64462848
+      },
+      "after_close": {
+        "rss_bytes": 53506048,
+        "peak_rss_bytes": 64462848
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "baseline",
+      "repeat": 1
+    },
+    {
+      "mode": "one-shot",
+      "format": "docx",
+      "pages": 20,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 17.542390996823087,
+      "cold_render_ms": 23.425198014592752,
+      "warm_median_ms": 22.03186898259446,
+      "all_pages_total_ms": 441.21902805636637,
+      "all_pages_median_ms": 21.93472650833428,
+      "first_png_sha256": "bff94a3cc49ba29efa87062093e7d82581ff1b823913ba093b4eadf688c3fa61",
+      "all_pages_png_sha256": "e24d36f8b4c99f310972d83594ac62097a0b0ea12a7b4639a6894c436b68f2d5",
+      "source_sha256": "ebe30a3267d6a61497badf7faa1451b2e1fe5c3598ab76cdce7c29488c227da3",
+      "source_bytes": 9276,
+      "session_stats_parse_layout_attempts": null,
+      "before_open": {
+        "rss_bytes": 25018368,
+        "peak_rss_bytes": 24842240
+      },
+      "after_open": {
+        "rss_bytes": 48037888,
+        "peak_rss_bytes": 47042560
+      },
+      "before_close": {
+        "rss_bytes": 53379072,
+        "peak_rss_bytes": 64274432
+      },
+      "after_close": {
+        "rss_bytes": 53379072,
+        "peak_rss_bytes": 64274432
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "baseline",
+      "repeat": 1
+    },
+    {
+      "mode": "cached",
+      "format": "pptx",
+      "pages": 20,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 6.674886011751369,
+      "cold_render_ms": 7.218737999210134,
+      "warm_median_ms": 4.227905999869108,
+      "all_pages_total_ms": 84.05012401635759,
+      "all_pages_median_ms": 4.16161649627611,
+      "first_png_sha256": "ea8f908b320ad13bd5627ee1e4a9a3740a666b5eafe6bc4ec431f2cecc439480",
+      "all_pages_png_sha256": "da0f6a153d2a33f57d604f7e12c016bcabce82bd48d9d4b52884c9d8642f96f8",
+      "source_sha256": "e44bd3658741d4f3020d4950487284ed9a1782c52d80ce0c39018872a99abbbc",
+      "source_bytes": 51797,
+      "session_stats_parse_layout_attempts": [
+        1,
+        0,
+        26
+      ],
+      "before_open": {
+        "rss_bytes": 25145344,
+        "peak_rss_bytes": 25169920
+      },
+      "after_open": {
+        "rss_bytes": 37294080,
+        "peak_rss_bytes": 36790272
+      },
+      "before_close": {
+        "rss_bytes": 43626496,
+        "peak_rss_bytes": 55488512
+      },
+      "after_close": {
+        "rss_bytes": 43626496,
+        "peak_rss_bytes": 55488512
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "baseline",
+      "repeat": 1
+    },
+    {
+      "mode": "one-shot",
+      "format": "pptx",
+      "pages": 20,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 6.700603989884257,
+      "cold_render_ms": 10.008961980929598,
+      "warm_median_ms": 8.228024002164602,
+      "all_pages_total_ms": 156.18473893846385,
+      "all_pages_median_ms": 7.599468488479033,
+      "first_png_sha256": "ea8f908b320ad13bd5627ee1e4a9a3740a666b5eafe6bc4ec431f2cecc439480",
+      "all_pages_png_sha256": "da0f6a153d2a33f57d604f7e12c016bcabce82bd48d9d4b52884c9d8642f96f8",
+      "source_sha256": "e44bd3658741d4f3020d4950487284ed9a1782c52d80ce0c39018872a99abbbc",
+      "source_bytes": 51797,
+      "session_stats_parse_layout_attempts": null,
+      "before_open": {
+        "rss_bytes": 24817664,
+        "peak_rss_bytes": 24453120
+      },
+      "after_open": {
+        "rss_bytes": 37158912,
+        "peak_rss_bytes": 36110336
+      },
+      "before_close": {
+        "rss_bytes": 45117440,
+        "peak_rss_bytes": 57110528
+      },
+      "after_close": {
+        "rss_bytes": 45117440,
+        "peak_rss_bytes": 57110528
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "baseline",
+      "repeat": 1
+    },
+    {
+      "mode": "cached",
+      "format": "docx",
+      "pages": 200,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 168.02158902282827,
+      "cold_render_ms": 12.099009996745735,
+      "warm_median_ms": 10.698077006964013,
+      "all_pages_total_ms": 2147.8142168780323,
+      "all_pages_median_ms": 10.638379491865635,
+      "first_png_sha256": "bff94a3cc49ba29efa87062093e7d82581ff1b823913ba093b4eadf688c3fa61",
+      "all_pages_png_sha256": "a76a4c52d49c3262bef4aba398e9aa21904d69ae36d54935920e6193e29c24ce",
+      "source_sha256": "1f2c62762c36127444e132fcc58f334b309224f7e2094ee22ac4d0a5296fc5f5",
+      "source_bytes": 25927,
+      "session_stats_parse_layout_attempts": [
+        1,
+        1,
+        206
+      ],
+      "before_open": {
+        "rss_bytes": 24821760,
+        "peak_rss_bytes": 24752128
+      },
+      "after_open": {
+        "rss_bytes": 143470592,
+        "peak_rss_bytes": 143273984
+      },
+      "before_close": {
+        "rss_bytes": 149942272,
+        "peak_rss_bytes": 147701760
+      },
+      "after_close": {
+        "rss_bytes": 149954560,
+        "peak_rss_bytes": 147701760
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "long",
+      "repeat": 1
+    },
+    {
+      "mode": "one-shot",
+      "format": "docx",
+      "pages": 200,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 173.7890979857184,
+      "cold_render_ms": 121.28538702381775,
+      "warm_median_ms": 122.51519900746644,
+      "all_pages_total_ms": 24807.266619929578,
+      "all_pages_median_ms": 123.54125748970546,
+      "first_png_sha256": "bff94a3cc49ba29efa87062093e7d82581ff1b823913ba093b4eadf688c3fa61",
+      "all_pages_png_sha256": "a76a4c52d49c3262bef4aba398e9aa21904d69ae36d54935920e6193e29c24ce",
+      "source_sha256": "1f2c62762c36127444e132fcc58f334b309224f7e2094ee22ac4d0a5296fc5f5",
+      "source_bytes": 25927,
+      "session_stats_parse_layout_attempts": null,
+      "before_open": {
+        "rss_bytes": 24985600,
+        "peak_rss_bytes": 25067520
+      },
+      "after_open": {
+        "rss_bytes": 143626240,
+        "peak_rss_bytes": 143613952
+      },
+      "before_close": {
+        "rss_bytes": 152518656,
+        "peak_rss_bytes": 150032384
+      },
+      "after_close": {
+        "rss_bytes": 152518656,
+        "peak_rss_bytes": 150032384
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "long",
+      "repeat": 1
+    },
+    {
+      "mode": "cached",
+      "format": "pptx",
+      "pages": 200,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 51.86454998329282,
+      "cold_render_ms": 4.8191979876719415,
+      "warm_median_ms": 3.408165997825563,
+      "all_pages_total_ms": 696.0296171018854,
+      "all_pages_median_ms": 3.512977506034076,
+      "first_png_sha256": "ea8f908b320ad13bd5627ee1e4a9a3740a666b5eafe6bc4ec431f2cecc439480",
+      "all_pages_png_sha256": "3b56e640f13aa0a030f949ebe974ffae433dcf4e39d77393a117994b055c9662",
+      "source_sha256": "afba59532ddbb46a29f34c0bd27b33a193548d94affcd672fcafa6fc25cca9d4",
+      "source_bytes": 328012,
+      "session_stats_parse_layout_attempts": [
+        1,
+        0,
+        206
+      ],
+      "before_open": {
+        "rss_bytes": 24883200,
+        "peak_rss_bytes": 25026560
+      },
+      "after_open": {
+        "rss_bytes": 93835264,
+        "peak_rss_bytes": 92401664
+      },
+      "before_close": {
+        "rss_bytes": 99307520,
+        "peak_rss_bytes": 97832960
+      },
+      "after_close": {
+        "rss_bytes": 99307520,
+        "peak_rss_bytes": 97832960
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "long",
+      "repeat": 1
+    },
+    {
+      "mode": "one-shot",
+      "format": "pptx",
+      "pages": 200,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 55.39939398295246,
+      "cold_render_ms": 33.89116798643954,
+      "warm_median_ms": 32.222251989878714,
+      "all_pages_total_ms": 6475.935953960288,
+      "all_pages_median_ms": 32.08355599781498,
+      "first_png_sha256": "ea8f908b320ad13bd5627ee1e4a9a3740a666b5eafe6bc4ec431f2cecc439480",
+      "all_pages_png_sha256": "3b56e640f13aa0a030f949ebe974ffae433dcf4e39d77393a117994b055c9662",
+      "source_sha256": "afba59532ddbb46a29f34c0bd27b33a193548d94affcd672fcafa6fc25cca9d4",
+      "source_bytes": 328012,
+      "session_stats_parse_layout_attempts": null,
+      "before_open": {
+        "rss_bytes": 24903680,
+        "peak_rss_bytes": 24981504
+      },
+      "after_open": {
+        "rss_bytes": 93851648,
+        "peak_rss_bytes": 93552640
+      },
+      "before_close": {
+        "rss_bytes": 106995712,
+        "peak_rss_bytes": 119291904
+      },
+      "after_close": {
+        "rss_bytes": 106995712,
+        "peak_rss_bytes": 119291904
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "long",
+      "repeat": 1
+    },
+    {
+      "mode": "cached",
+      "format": "docx",
+      "pages": 24,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 159.83738598879427,
+      "cold_render_ms": 16.560564981773496,
+      "warm_median_ms": 13.836255006026477,
+      "all_pages_total_ms": 374.61272097425535,
+      "all_pages_median_ms": 15.55704949714709,
+      "first_png_sha256": "45690d8c644852762821433352dbeb3e23e6411691d9e5efc1cf0e1e256a9a1b",
+      "all_pages_png_sha256": "e0a3b0a2d487daac2515d02119a41afda01580c157a4677f9a0938ede060c0ca",
+      "source_sha256": "8480c0cfa0a9c82a2e6ff35d28f745ec8f5bcb61c6f4835973d63af971bd0deb",
+      "source_bytes": 21611642,
+      "session_stats_parse_layout_attempts": [
+        1,
+        1,
+        30
+      ],
+      "before_open": {
+        "rss_bytes": 25010176,
+        "peak_rss_bytes": 24662016
+      },
+      "after_open": {
+        "rss_bytes": 196063232,
+        "peak_rss_bytes": 283799552
+      },
+      "before_close": {
+        "rss_bytes": 204128256,
+        "peak_rss_bytes": 283799552
+      },
+      "after_close": {
+        "rss_bytes": 182513664,
+        "peak_rss_bytes": 283799552
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "images",
+      "repeat": 1
+    },
+    {
+      "mode": "one-shot",
+      "format": "docx",
+      "pages": 24,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 172.89757300750352,
+      "cold_render_ms": 35.11129200342111,
+      "warm_median_ms": 35.67182598635554,
+      "all_pages_total_ms": 880.5694569309708,
+      "all_pages_median_ms": 36.525715491734445,
+      "first_png_sha256": "45690d8c644852762821433352dbeb3e23e6411691d9e5efc1cf0e1e256a9a1b",
+      "all_pages_png_sha256": "e0a3b0a2d487daac2515d02119a41afda01580c157a4677f9a0938ede060c0ca",
+      "source_sha256": "8480c0cfa0a9c82a2e6ff35d28f745ec8f5bcb61c6f4835973d63af971bd0deb",
+      "source_bytes": 21611642,
+      "session_stats_parse_layout_attempts": null,
+      "before_open": {
+        "rss_bytes": 25116672,
+        "peak_rss_bytes": 25133056
+      },
+      "after_open": {
+        "rss_bytes": 195969024,
+        "peak_rss_bytes": 283979776
+      },
+      "before_close": {
+        "rss_bytes": 235368448,
+        "peak_rss_bytes": 283979776
+      },
+      "after_close": {
+        "rss_bytes": 213753856,
+        "peak_rss_bytes": 283979776
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "images",
+      "repeat": 1
+    },
+    {
+      "mode": "cached",
+      "format": "pptx",
+      "pages": 24,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 92.21250397968106,
+      "cold_render_ms": 8.402201987337321,
+      "warm_median_ms": 4.686517990194261,
+      "all_pages_total_ms": 162.16208401601762,
+      "all_pages_median_ms": 6.749094507540576,
+      "first_png_sha256": "f1e56b792d69d175cab19faeb130f5fc98b2b46532efe8b645f83262163b59c5",
+      "all_pages_png_sha256": "182b22a7408206bbb66a116a067cda2960710815e21fa6566a42958458f47c84",
+      "source_sha256": "9603d837b1117d6c521c413d79e6e039f3d03f64a8f57c30d709d21a5543bfc1",
+      "source_bytes": 21660010,
+      "session_stats_parse_layout_attempts": [
+        1,
+        0,
+        30
+      ],
+      "before_open": {
+        "rss_bytes": 25149440,
+        "peak_rss_bytes": 24825856
+      },
+      "after_open": {
+        "rss_bytes": 162328576,
+        "peak_rss_bytes": 161824768
+      },
+      "before_close": {
+        "rss_bytes": 167723008,
+        "peak_rss_bytes": 167272448
+      },
+      "after_close": {
+        "rss_bytes": 146059264,
+        "peak_rss_bytes": 167272448
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "images",
+      "repeat": 1
+    },
+    {
+      "mode": "one-shot",
+      "format": "pptx",
+      "pages": 24,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 98.68564098724164,
+      "cold_render_ms": 21.26057998975739,
+      "warm_median_ms": 18.003487988607958,
+      "all_pages_total_ms": 401.8064598494675,
+      "all_pages_median_ms": 16.76942348422017,
+      "first_png_sha256": "f1e56b792d69d175cab19faeb130f5fc98b2b46532efe8b645f83262163b59c5",
+      "all_pages_png_sha256": "182b22a7408206bbb66a116a067cda2960710815e21fa6566a42958458f47c84",
+      "source_sha256": "9603d837b1117d6c521c413d79e6e039f3d03f64a8f57c30d709d21a5543bfc1",
+      "source_bytes": 21660010,
+      "session_stats_parse_layout_attempts": null,
+      "before_open": {
+        "rss_bytes": 25047040,
+        "peak_rss_bytes": 25194496
+      },
+      "after_open": {
+        "rss_bytes": 162197504,
+        "peak_rss_bytes": 161783808
+      },
+      "before_close": {
+        "rss_bytes": 216039424,
+        "peak_rss_bytes": 215724032
+      },
+      "after_close": {
+        "rss_bytes": 194375680,
+        "peak_rss_bytes": 215724032
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "images",
+      "repeat": 1
+    },
+    {
+      "mode": "one-shot",
+      "format": "docx",
+      "pages": 20,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 18.28188999206759,
+      "cold_render_ms": 24.53579500433989,
+      "warm_median_ms": 23.764234996633604,
+      "all_pages_total_ms": 465.6243940407876,
+      "all_pages_median_ms": 23.317089493502863,
+      "first_png_sha256": "bff94a3cc49ba29efa87062093e7d82581ff1b823913ba093b4eadf688c3fa61",
+      "all_pages_png_sha256": "e24d36f8b4c99f310972d83594ac62097a0b0ea12a7b4639a6894c436b68f2d5",
+      "source_sha256": "ebe30a3267d6a61497badf7faa1451b2e1fe5c3598ab76cdce7c29488c227da3",
+      "source_bytes": 9276,
+      "session_stats_parse_layout_attempts": null,
+      "before_open": {
+        "rss_bytes": 24887296,
+        "peak_rss_bytes": 24903680
+      },
+      "after_open": {
+        "rss_bytes": 47845376,
+        "peak_rss_bytes": 46915584
+      },
+      "before_close": {
+        "rss_bytes": 51978240,
+        "peak_rss_bytes": 64528384
+      },
+      "after_close": {
+        "rss_bytes": 51978240,
+        "peak_rss_bytes": 64528384
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "baseline",
+      "repeat": 2
+    },
+    {
+      "mode": "cached",
+      "format": "docx",
+      "pages": 20,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 16.760801983764395,
+      "cold_render_ms": 13.497428997652605,
+      "warm_median_ms": 11.95533000282012,
+      "all_pages_total_ms": 241.11242196522653,
+      "all_pages_median_ms": 11.934701498830691,
+      "first_png_sha256": "bff94a3cc49ba29efa87062093e7d82581ff1b823913ba093b4eadf688c3fa61",
+      "all_pages_png_sha256": "e24d36f8b4c99f310972d83594ac62097a0b0ea12a7b4639a6894c436b68f2d5",
+      "source_sha256": "ebe30a3267d6a61497badf7faa1451b2e1fe5c3598ab76cdce7c29488c227da3",
+      "source_bytes": 9276,
+      "session_stats_parse_layout_attempts": [
+        1,
+        1,
+        26
+      ],
+      "before_open": {
+        "rss_bytes": 25182208,
+        "peak_rss_bytes": 24416256
+      },
+      "after_open": {
+        "rss_bytes": 48685056,
+        "peak_rss_bytes": 47771648
+      },
+      "before_close": {
+        "rss_bytes": 53063680,
+        "peak_rss_bytes": 64688128
+      },
+      "after_close": {
+        "rss_bytes": 53063680,
+        "peak_rss_bytes": 64688128
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "baseline",
+      "repeat": 2
+    },
+    {
+      "mode": "one-shot",
+      "format": "pptx",
+      "pages": 20,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 6.455291993916035,
+      "cold_render_ms": 10.162129998207092,
+      "warm_median_ms": 7.745807990431786,
+      "all_pages_total_ms": 157.42829101509415,
+      "all_pages_median_ms": 7.623387995408848,
+      "first_png_sha256": "ea8f908b320ad13bd5627ee1e4a9a3740a666b5eafe6bc4ec431f2cecc439480",
+      "all_pages_png_sha256": "da0f6a153d2a33f57d604f7e12c016bcabce82bd48d9d4b52884c9d8642f96f8",
+      "source_sha256": "e44bd3658741d4f3020d4950487284ed9a1782c52d80ce0c39018872a99abbbc",
+      "source_bytes": 51797,
+      "session_stats_parse_layout_attempts": null,
+      "before_open": {
+        "rss_bytes": 25067520,
+        "peak_rss_bytes": 24690688
+      },
+      "after_open": {
+        "rss_bytes": 36655104,
+        "peak_rss_bytes": 36098048
+      },
+      "before_close": {
+        "rss_bytes": 44654592,
+        "peak_rss_bytes": 56573952
+      },
+      "after_close": {
+        "rss_bytes": 44654592,
+        "peak_rss_bytes": 56573952
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "baseline",
+      "repeat": 2
+    },
+    {
+      "mode": "cached",
+      "format": "pptx",
+      "pages": 20,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 6.763812009012327,
+      "cold_render_ms": 6.904506997670978,
+      "warm_median_ms": 4.262622009264305,
+      "all_pages_total_ms": 85.83154805819504,
+      "all_pages_median_ms": 4.244578012730926,
+      "first_png_sha256": "ea8f908b320ad13bd5627ee1e4a9a3740a666b5eafe6bc4ec431f2cecc439480",
+      "all_pages_png_sha256": "da0f6a153d2a33f57d604f7e12c016bcabce82bd48d9d4b52884c9d8642f96f8",
+      "source_sha256": "e44bd3658741d4f3020d4950487284ed9a1782c52d80ce0c39018872a99abbbc",
+      "source_bytes": 51797,
+      "session_stats_parse_layout_attempts": [
+        1,
+        0,
+        26
+      ],
+      "before_open": {
+        "rss_bytes": 24788992,
+        "peak_rss_bytes": 24723456
+      },
+      "after_open": {
+        "rss_bytes": 37056512,
+        "peak_rss_bytes": 37027840
+      },
+      "before_close": {
+        "rss_bytes": 42782720,
+        "peak_rss_bytes": 55070720
+      },
+      "after_close": {
+        "rss_bytes": 42782720,
+        "peak_rss_bytes": 55070720
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "baseline",
+      "repeat": 2
+    },
+    {
+      "mode": "one-shot",
+      "format": "docx",
+      "pages": 200,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 169.25612799241208,
+      "cold_render_ms": 125.29206700855866,
+      "warm_median_ms": 121.75251499866135,
+      "all_pages_total_ms": 24818.54880298488,
+      "all_pages_median_ms": 123.76626998593565,
+      "first_png_sha256": "bff94a3cc49ba29efa87062093e7d82581ff1b823913ba093b4eadf688c3fa61",
+      "all_pages_png_sha256": "a76a4c52d49c3262bef4aba398e9aa21904d69ae36d54935920e6193e29c24ce",
+      "source_sha256": "1f2c62762c36127444e132fcc58f334b309224f7e2094ee22ac4d0a5296fc5f5",
+      "source_bytes": 25927,
+      "session_stats_parse_layout_attempts": null,
+      "before_open": {
+        "rss_bytes": 25153536,
+        "peak_rss_bytes": 25296896
+      },
+      "after_open": {
+        "rss_bytes": 143708160,
+        "peak_rss_bytes": 143564800
+      },
+      "before_close": {
+        "rss_bytes": 155516928,
+        "peak_rss_bytes": 152641536
+      },
+      "after_close": {
+        "rss_bytes": 155516928,
+        "peak_rss_bytes": 152641536
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "long",
+      "repeat": 2
+    },
+    {
+      "mode": "cached",
+      "format": "docx",
+      "pages": 200,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 167.80913900583982,
+      "cold_render_ms": 12.324583978625014,
+      "warm_median_ms": 10.746087005827576,
+      "all_pages_total_ms": 2167.234330874635,
+      "all_pages_median_ms": 10.680248495191336,
+      "first_png_sha256": "bff94a3cc49ba29efa87062093e7d82581ff1b823913ba093b4eadf688c3fa61",
+      "all_pages_png_sha256": "a76a4c52d49c3262bef4aba398e9aa21904d69ae36d54935920e6193e29c24ce",
+      "source_sha256": "1f2c62762c36127444e132fcc58f334b309224f7e2094ee22ac4d0a5296fc5f5",
+      "source_bytes": 25927,
+      "session_stats_parse_layout_attempts": [
+        1,
+        1,
+        206
+      ],
+      "before_open": {
+        "rss_bytes": 25059328,
+        "peak_rss_bytes": 24305664
+      },
+      "after_open": {
+        "rss_bytes": 143638528,
+        "peak_rss_bytes": 142487552
+      },
+      "before_close": {
+        "rss_bytes": 149946368,
+        "peak_rss_bytes": 147910656
+      },
+      "after_close": {
+        "rss_bytes": 149946368,
+        "peak_rss_bytes": 147910656
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "long",
+      "repeat": 2
+    },
+    {
+      "mode": "one-shot",
+      "format": "pptx",
+      "pages": 200,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 56.05508599546738,
+      "cold_render_ms": 35.39179899962619,
+      "warm_median_ms": 32.8303049900569,
+      "all_pages_total_ms": 6455.969410308171,
+      "all_pages_median_ms": 32.06578800745774,
+      "first_png_sha256": "ea8f908b320ad13bd5627ee1e4a9a3740a666b5eafe6bc4ec431f2cecc439480",
+      "all_pages_png_sha256": "3b56e640f13aa0a030f949ebe974ffae433dcf4e39d77393a117994b055c9662",
+      "source_sha256": "afba59532ddbb46a29f34c0bd27b33a193548d94affcd672fcafa6fc25cca9d4",
+      "source_bytes": 328012,
+      "session_stats_parse_layout_attempts": null,
+      "before_open": {
+        "rss_bytes": 24666112,
+        "peak_rss_bytes": 23982080
+      },
+      "after_open": {
+        "rss_bytes": 93765632,
+        "peak_rss_bytes": 92909568
+      },
+      "before_close": {
+        "rss_bytes": 107081728,
+        "peak_rss_bytes": 118644736
+      },
+      "after_close": {
+        "rss_bytes": 107081728,
+        "peak_rss_bytes": 118644736
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "long",
+      "repeat": 2
+    },
+    {
+      "mode": "cached",
+      "format": "pptx",
+      "pages": 200,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 52.566219004802406,
+      "cold_render_ms": 4.735429974971339,
+      "warm_median_ms": 3.417464002268389,
+      "all_pages_total_ms": 703.0653950059786,
+      "all_pages_median_ms": 3.5174709919374436,
+      "first_png_sha256": "ea8f908b320ad13bd5627ee1e4a9a3740a666b5eafe6bc4ec431f2cecc439480",
+      "all_pages_png_sha256": "3b56e640f13aa0a030f949ebe974ffae433dcf4e39d77393a117994b055c9662",
+      "source_sha256": "afba59532ddbb46a29f34c0bd27b33a193548d94affcd672fcafa6fc25cca9d4",
+      "source_bytes": 328012,
+      "session_stats_parse_layout_attempts": [
+        1,
+        0,
+        206
+      ],
+      "before_open": {
+        "rss_bytes": 25088000,
+        "peak_rss_bytes": 24666112
+      },
+      "after_open": {
+        "rss_bytes": 94044160,
+        "peak_rss_bytes": 92987392
+      },
+      "before_close": {
+        "rss_bytes": 99549184,
+        "peak_rss_bytes": 98377728
+      },
+      "after_close": {
+        "rss_bytes": 99549184,
+        "peak_rss_bytes": 98377728
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "long",
+      "repeat": 2
+    },
+    {
+      "mode": "one-shot",
+      "format": "docx",
+      "pages": 24,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 177.33647499699146,
+      "cold_render_ms": 36.22711999923922,
+      "warm_median_ms": 35.440902021946386,
+      "all_pages_total_ms": 875.6858599954285,
+      "all_pages_median_ms": 36.264048496377654,
+      "first_png_sha256": "45690d8c644852762821433352dbeb3e23e6411691d9e5efc1cf0e1e256a9a1b",
+      "all_pages_png_sha256": "e0a3b0a2d487daac2515d02119a41afda01580c157a4677f9a0938ede060c0ca",
+      "source_sha256": "8480c0cfa0a9c82a2e6ff35d28f745ec8f5bcb61c6f4835973d63af971bd0deb",
+      "source_bytes": 21611642,
+      "session_stats_parse_layout_attempts": null,
+      "before_open": {
+        "rss_bytes": 25149440,
+        "peak_rss_bytes": 25296896
+      },
+      "after_open": {
+        "rss_bytes": 196001792,
+        "peak_rss_bytes": 284327936
+      },
+      "before_close": {
+        "rss_bytes": 235937792,
+        "peak_rss_bytes": 284327936
+      },
+      "after_close": {
+        "rss_bytes": 214323200,
+        "peak_rss_bytes": 284327936
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "images",
+      "repeat": 2
+    },
+    {
+      "mode": "cached",
+      "format": "docx",
+      "pages": 24,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 177.5532129977364,
+      "cold_render_ms": 16.933366016019136,
+      "warm_median_ms": 13.864487991668284,
+      "all_pages_total_ms": 380.82305100397207,
+      "all_pages_median_ms": 15.722140000434592,
+      "first_png_sha256": "45690d8c644852762821433352dbeb3e23e6411691d9e5efc1cf0e1e256a9a1b",
+      "all_pages_png_sha256": "e0a3b0a2d487daac2515d02119a41afda01580c157a4677f9a0938ede060c0ca",
+      "source_sha256": "8480c0cfa0a9c82a2e6ff35d28f745ec8f5bcb61c6f4835973d63af971bd0deb",
+      "source_bytes": 21611642,
+      "session_stats_parse_layout_attempts": [
+        1,
+        1,
+        30
+      ],
+      "before_open": {
+        "rss_bytes": 25022464,
+        "peak_rss_bytes": 24952832
+      },
+      "after_open": {
+        "rss_bytes": 196165632,
+        "peak_rss_bytes": 284364800
+      },
+      "before_close": {
+        "rss_bytes": 202301440,
+        "peak_rss_bytes": 284364800
+      },
+      "after_close": {
+        "rss_bytes": 180686848,
+        "peak_rss_bytes": 284364800
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "images",
+      "repeat": 2
+    },
+    {
+      "mode": "one-shot",
+      "format": "pptx",
+      "pages": 24,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 94.64689999003895,
+      "cold_render_ms": 20.68432600935921,
+      "warm_median_ms": 16.481316997669637,
+      "all_pages_total_ms": 405.4202840779908,
+      "all_pages_median_ms": 16.870854000444524,
+      "first_png_sha256": "f1e56b792d69d175cab19faeb130f5fc98b2b46532efe8b645f83262163b59c5",
+      "all_pages_png_sha256": "182b22a7408206bbb66a116a067cda2960710815e21fa6566a42958458f47c84",
+      "source_sha256": "9603d837b1117d6c521c413d79e6e039f3d03f64a8f57c30d709d21a5543bfc1",
+      "source_bytes": 21660010,
+      "session_stats_parse_layout_attempts": null,
+      "before_open": {
+        "rss_bytes": 24956928,
+        "peak_rss_bytes": 25100288
+      },
+      "after_open": {
+        "rss_bytes": 162156544,
+        "peak_rss_bytes": 161931264
+      },
+      "before_close": {
+        "rss_bytes": 215203840,
+        "peak_rss_bytes": 215068672
+      },
+      "after_close": {
+        "rss_bytes": 193540096,
+        "peak_rss_bytes": 215068672
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "images",
+      "repeat": 2
+    },
+    {
+      "mode": "cached",
+      "format": "pptx",
+      "pages": 24,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 95.01603298122063,
+      "cold_render_ms": 8.979887992609292,
+      "warm_median_ms": 4.660159000195563,
+      "all_pages_total_ms": 162.68652808503248,
+      "all_pages_median_ms": 6.779697505407967,
+      "first_png_sha256": "f1e56b792d69d175cab19faeb130f5fc98b2b46532efe8b645f83262163b59c5",
+      "all_pages_png_sha256": "182b22a7408206bbb66a116a067cda2960710815e21fa6566a42958458f47c84",
+      "source_sha256": "9603d837b1117d6c521c413d79e6e039f3d03f64a8f57c30d709d21a5543bfc1",
+      "source_bytes": 21660010,
+      "session_stats_parse_layout_attempts": [
+        1,
+        0,
+        30
+      ],
+      "before_open": {
+        "rss_bytes": 25063424,
+        "peak_rss_bytes": 25145344
+      },
+      "after_open": {
+        "rss_bytes": 162144256,
+        "peak_rss_bytes": 161984512
+      },
+      "before_close": {
+        "rss_bytes": 167563264,
+        "peak_rss_bytes": 167268352
+      },
+      "after_close": {
+        "rss_bytes": 145899520,
+        "peak_rss_bytes": 167268352
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "images",
+      "repeat": 2
+    },
+    {
+      "mode": "cached",
+      "format": "docx",
+      "pages": 20,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 16.754470008891076,
+      "cold_render_ms": 13.943075988208875,
+      "warm_median_ms": 11.806730995886028,
+      "all_pages_total_ms": 231.49637997266836,
+      "all_pages_median_ms": 11.530496994964778,
+      "first_png_sha256": "bff94a3cc49ba29efa87062093e7d82581ff1b823913ba093b4eadf688c3fa61",
+      "all_pages_png_sha256": "e24d36f8b4c99f310972d83594ac62097a0b0ea12a7b4639a6894c436b68f2d5",
+      "source_sha256": "ebe30a3267d6a61497badf7faa1451b2e1fe5c3598ab76cdce7c29488c227da3",
+      "source_bytes": 9276,
+      "session_stats_parse_layout_attempts": [
+        1,
+        1,
+        26
+      ],
+      "before_open": {
+        "rss_bytes": 24752128,
+        "peak_rss_bytes": 24772608
+      },
+      "after_open": {
+        "rss_bytes": 48439296,
+        "peak_rss_bytes": 47902720
+      },
+      "before_close": {
+        "rss_bytes": 53649408,
+        "peak_rss_bytes": 65249280
+      },
+      "after_close": {
+        "rss_bytes": 53649408,
+        "peak_rss_bytes": 65249280
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "baseline",
+      "repeat": 3
+    },
+    {
+      "mode": "one-shot",
+      "format": "docx",
+      "pages": 20,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 16.300416988087818,
+      "cold_render_ms": 24.63175597949885,
+      "warm_median_ms": 23.488206992624328,
+      "all_pages_total_ms": 465.6937138934154,
+      "all_pages_median_ms": 23.054010482155718,
+      "first_png_sha256": "bff94a3cc49ba29efa87062093e7d82581ff1b823913ba093b4eadf688c3fa61",
+      "all_pages_png_sha256": "e24d36f8b4c99f310972d83594ac62097a0b0ea12a7b4639a6894c436b68f2d5",
+      "source_sha256": "ebe30a3267d6a61497badf7faa1451b2e1fe5c3598ab76cdce7c29488c227da3",
+      "source_bytes": 9276,
+      "session_stats_parse_layout_attempts": null,
+      "before_open": {
+        "rss_bytes": 24977408,
+        "peak_rss_bytes": 24485888
+      },
+      "after_open": {
+        "rss_bytes": 48611328,
+        "peak_rss_bytes": 47886336
+      },
+      "before_close": {
+        "rss_bytes": 53616640,
+        "peak_rss_bytes": 65150976
+      },
+      "after_close": {
+        "rss_bytes": 53616640,
+        "peak_rss_bytes": 65150976
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "baseline",
+      "repeat": 3
+    },
+    {
+      "mode": "cached",
+      "format": "pptx",
+      "pages": 20,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 6.469960993854329,
+      "cold_render_ms": 6.368329020915553,
+      "warm_median_ms": 4.308978997869417,
+      "all_pages_total_ms": 87.5553009682335,
+      "all_pages_median_ms": 4.263107490260154,
+      "first_png_sha256": "ea8f908b320ad13bd5627ee1e4a9a3740a666b5eafe6bc4ec431f2cecc439480",
+      "all_pages_png_sha256": "da0f6a153d2a33f57d604f7e12c016bcabce82bd48d9d4b52884c9d8642f96f8",
+      "source_sha256": "e44bd3658741d4f3020d4950487284ed9a1782c52d80ce0c39018872a99abbbc",
+      "source_bytes": 51797,
+      "session_stats_parse_layout_attempts": [
+        1,
+        0,
+        26
+      ],
+      "before_open": {
+        "rss_bytes": 24707072,
+        "peak_rss_bytes": 24403968
+      },
+      "after_open": {
+        "rss_bytes": 37089280,
+        "peak_rss_bytes": 36306944
+      },
+      "before_close": {
+        "rss_bytes": 43433984,
+        "peak_rss_bytes": 54988800
+      },
+      "after_close": {
+        "rss_bytes": 43433984,
+        "peak_rss_bytes": 54988800
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "baseline",
+      "repeat": 3
+    },
+    {
+      "mode": "one-shot",
+      "format": "pptx",
+      "pages": 20,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 7.222073996672407,
+      "cold_render_ms": 9.891882014926523,
+      "warm_median_ms": 7.397643988952041,
+      "all_pages_total_ms": 149.25192296504974,
+      "all_pages_median_ms": 7.3865684971679,
+      "first_png_sha256": "ea8f908b320ad13bd5627ee1e4a9a3740a666b5eafe6bc4ec431f2cecc439480",
+      "all_pages_png_sha256": "da0f6a153d2a33f57d604f7e12c016bcabce82bd48d9d4b52884c9d8642f96f8",
+      "source_sha256": "e44bd3658741d4f3020d4950487284ed9a1782c52d80ce0c39018872a99abbbc",
+      "source_bytes": 51797,
+      "session_stats_parse_layout_attempts": null,
+      "before_open": {
+        "rss_bytes": 25055232,
+        "peak_rss_bytes": 24678400
+      },
+      "after_open": {
+        "rss_bytes": 36765696,
+        "peak_rss_bytes": 35950592
+      },
+      "before_close": {
+        "rss_bytes": 44560384,
+        "peak_rss_bytes": 56356864
+      },
+      "after_close": {
+        "rss_bytes": 44560384,
+        "peak_rss_bytes": 56356864
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "baseline",
+      "repeat": 3
+    },
+    {
+      "mode": "cached",
+      "format": "docx",
+      "pages": 200,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 166.04621600708924,
+      "cold_render_ms": 11.963716009631753,
+      "warm_median_ms": 10.559366986854002,
+      "all_pages_total_ms": 2152.7147019223776,
+      "all_pages_median_ms": 10.689410992199555,
+      "first_png_sha256": "bff94a3cc49ba29efa87062093e7d82581ff1b823913ba093b4eadf688c3fa61",
+      "all_pages_png_sha256": "a76a4c52d49c3262bef4aba398e9aa21904d69ae36d54935920e6193e29c24ce",
+      "source_sha256": "1f2c62762c36127444e132fcc58f334b309224f7e2094ee22ac4d0a5296fc5f5",
+      "source_bytes": 25927,
+      "session_stats_parse_layout_attempts": [
+        1,
+        1,
+        206
+      ],
+      "before_open": {
+        "rss_bytes": 24752128,
+        "peak_rss_bytes": 24465408
+      },
+      "after_open": {
+        "rss_bytes": 143446016,
+        "peak_rss_bytes": 142974976
+      },
+      "before_close": {
+        "rss_bytes": 150061056,
+        "peak_rss_bytes": 147755008
+      },
+      "after_close": {
+        "rss_bytes": 150061056,
+        "peak_rss_bytes": 147755008
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "long",
+      "repeat": 3
+    },
+    {
+      "mode": "one-shot",
+      "format": "docx",
+      "pages": 200,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 165.6676940037869,
+      "cold_render_ms": 120.6028840097133,
+      "warm_median_ms": 124.29826997686177,
+      "all_pages_total_ms": 24681.634036940522,
+      "all_pages_median_ms": 123.11851249251049,
+      "first_png_sha256": "bff94a3cc49ba29efa87062093e7d82581ff1b823913ba093b4eadf688c3fa61",
+      "all_pages_png_sha256": "a76a4c52d49c3262bef4aba398e9aa21904d69ae36d54935920e6193e29c24ce",
+      "source_sha256": "1f2c62762c36127444e132fcc58f334b309224f7e2094ee22ac4d0a5296fc5f5",
+      "source_bytes": 25927,
+      "session_stats_parse_layout_attempts": null,
+      "before_open": {
+        "rss_bytes": 25153536,
+        "peak_rss_bytes": 24875008
+      },
+      "after_open": {
+        "rss_bytes": 143679488,
+        "peak_rss_bytes": 143142912
+      },
+      "before_close": {
+        "rss_bytes": 152412160,
+        "peak_rss_bytes": 150224896
+      },
+      "after_close": {
+        "rss_bytes": 152412160,
+        "peak_rss_bytes": 150224896
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "long",
+      "repeat": 3
+    },
+    {
+      "mode": "cached",
+      "format": "pptx",
+      "pages": 200,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 54.84496199642308,
+      "cold_render_ms": 5.178173014428467,
+      "warm_median_ms": 3.4761439892463386,
+      "all_pages_total_ms": 693.4354208933655,
+      "all_pages_median_ms": 3.4986355021828786,
+      "first_png_sha256": "ea8f908b320ad13bd5627ee1e4a9a3740a666b5eafe6bc4ec431f2cecc439480",
+      "all_pages_png_sha256": "3b56e640f13aa0a030f949ebe974ffae433dcf4e39d77393a117994b055c9662",
+      "source_sha256": "afba59532ddbb46a29f34c0bd27b33a193548d94affcd672fcafa6fc25cca9d4",
+      "source_bytes": 328012,
+      "session_stats_parse_layout_attempts": [
+        1,
+        0,
+        206
+      ],
+      "before_open": {
+        "rss_bytes": 24797184,
+        "peak_rss_bytes": 24399872
+      },
+      "after_open": {
+        "rss_bytes": 93818880,
+        "peak_rss_bytes": 93417472
+      },
+      "before_close": {
+        "rss_bytes": 99221504,
+        "peak_rss_bytes": 98983936
+      },
+      "after_close": {
+        "rss_bytes": 99221504,
+        "peak_rss_bytes": 98983936
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "long",
+      "repeat": 3
+    },
+    {
+      "mode": "one-shot",
+      "format": "pptx",
+      "pages": 200,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 54.00863999966532,
+      "cold_render_ms": 35.147690010489896,
+      "warm_median_ms": 32.86629301146604,
+      "all_pages_total_ms": 6632.026140927337,
+      "all_pages_median_ms": 33.06218099896796,
+      "first_png_sha256": "ea8f908b320ad13bd5627ee1e4a9a3740a666b5eafe6bc4ec431f2cecc439480",
+      "all_pages_png_sha256": "3b56e640f13aa0a030f949ebe974ffae433dcf4e39d77393a117994b055c9662",
+      "source_sha256": "afba59532ddbb46a29f34c0bd27b33a193548d94affcd672fcafa6fc25cca9d4",
+      "source_bytes": 328012,
+      "session_stats_parse_layout_attempts": null,
+      "before_open": {
+        "rss_bytes": 24768512,
+        "peak_rss_bytes": 24907776
+      },
+      "after_open": {
+        "rss_bytes": 93872128,
+        "peak_rss_bytes": 93515776
+      },
+      "before_close": {
+        "rss_bytes": 107261952,
+        "peak_rss_bytes": 119349248
+      },
+      "after_close": {
+        "rss_bytes": 107261952,
+        "peak_rss_bytes": 119349248
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "long",
+      "repeat": 3
+    },
+    {
+      "mode": "cached",
+      "format": "docx",
+      "pages": 24,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 158.78340500057675,
+      "cold_render_ms": 16.563001001486555,
+      "warm_median_ms": 14.227070001652464,
+      "all_pages_total_ms": 374.37447800766677,
+      "all_pages_median_ms": 15.602024490362965,
+      "first_png_sha256": "45690d8c644852762821433352dbeb3e23e6411691d9e5efc1cf0e1e256a9a1b",
+      "all_pages_png_sha256": "e0a3b0a2d487daac2515d02119a41afda01580c157a4677f9a0938ede060c0ca",
+      "source_sha256": "8480c0cfa0a9c82a2e6ff35d28f745ec8f5bcb61c6f4835973d63af971bd0deb",
+      "source_bytes": 21611642,
+      "session_stats_parse_layout_attempts": [
+        1,
+        1,
+        30
+      ],
+      "before_open": {
+        "rss_bytes": 24895488,
+        "peak_rss_bytes": 24981504
+      },
+      "after_open": {
+        "rss_bytes": 195100672,
+        "peak_rss_bytes": 283250688
+      },
+      "before_close": {
+        "rss_bytes": 201121792,
+        "peak_rss_bytes": 283250688
+      },
+      "after_close": {
+        "rss_bytes": 179507200,
+        "peak_rss_bytes": 283250688
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "images",
+      "repeat": 3
+    },
+    {
+      "mode": "one-shot",
+      "format": "docx",
+      "pages": 24,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 171.05447899666615,
+      "cold_render_ms": 36.649303016019985,
+      "warm_median_ms": 36.46180999930948,
+      "all_pages_total_ms": 875.3378149704076,
+      "all_pages_median_ms": 36.21476099942811,
+      "first_png_sha256": "45690d8c644852762821433352dbeb3e23e6411691d9e5efc1cf0e1e256a9a1b",
+      "all_pages_png_sha256": "e0a3b0a2d487daac2515d02119a41afda01580c157a4677f9a0938ede060c0ca",
+      "source_sha256": "8480c0cfa0a9c82a2e6ff35d28f745ec8f5bcb61c6f4835973d63af971bd0deb",
+      "source_bytes": 21611642,
+      "session_stats_parse_layout_attempts": null,
+      "before_open": {
+        "rss_bytes": 24973312,
+        "peak_rss_bytes": 24297472
+      },
+      "after_open": {
+        "rss_bytes": 195743744,
+        "peak_rss_bytes": 283000832
+      },
+      "before_close": {
+        "rss_bytes": 235347968,
+        "peak_rss_bytes": 283000832
+      },
+      "after_close": {
+        "rss_bytes": 213733376,
+        "peak_rss_bytes": 283000832
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "images",
+      "repeat": 3
+    },
+    {
+      "mode": "cached",
+      "format": "pptx",
+      "pages": 24,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 92.2606639796868,
+      "cold_render_ms": 8.93837001058273,
+      "warm_median_ms": 4.833153012441471,
+      "all_pages_total_ms": 165.5370970547665,
+      "all_pages_median_ms": 6.939633007277735,
+      "first_png_sha256": "f1e56b792d69d175cab19faeb130f5fc98b2b46532efe8b645f83262163b59c5",
+      "all_pages_png_sha256": "182b22a7408206bbb66a116a067cda2960710815e21fa6566a42958458f47c84",
+      "source_sha256": "9603d837b1117d6c521c413d79e6e039f3d03f64a8f57c30d709d21a5543bfc1",
+      "source_bytes": 21660010,
+      "session_stats_parse_layout_attempts": [
+        1,
+        0,
+        30
+      ],
+      "before_open": {
+        "rss_bytes": 25133056,
+        "peak_rss_bytes": 25018368
+      },
+      "after_open": {
+        "rss_bytes": 162377728,
+        "peak_rss_bytes": 161742848
+      },
+      "before_close": {
+        "rss_bytes": 167841792,
+        "peak_rss_bytes": 167165952
+      },
+      "after_close": {
+        "rss_bytes": 146178048,
+        "peak_rss_bytes": 167165952
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "images",
+      "repeat": 3
+    },
+    {
+      "mode": "one-shot",
+      "format": "pptx",
+      "pages": 24,
+      "dpi": 144.0,
+      "rounds": 5,
+      "open_ms": 97.44331598631106,
+      "cold_render_ms": 21.76105001126416,
+      "warm_median_ms": 19.523194001521915,
+      "all_pages_total_ms": 418.9491269062273,
+      "all_pages_median_ms": 17.08060799865052,
+      "first_png_sha256": "f1e56b792d69d175cab19faeb130f5fc98b2b46532efe8b645f83262163b59c5",
+      "all_pages_png_sha256": "182b22a7408206bbb66a116a067cda2960710815e21fa6566a42958458f47c84",
+      "source_sha256": "9603d837b1117d6c521c413d79e6e039f3d03f64a8f57c30d709d21a5543bfc1",
+      "source_bytes": 21660010,
+      "session_stats_parse_layout_attempts": null,
+      "before_open": {
+        "rss_bytes": 24985600,
+        "peak_rss_bytes": 25038848
+      },
+      "after_open": {
+        "rss_bytes": 162312192,
+        "peak_rss_bytes": 161804288
+      },
+      "before_close": {
+        "rss_bytes": 217165824,
+        "peak_rss_bytes": 216649728
+      },
+      "after_close": {
+        "rss_bytes": 195502080,
+        "peak_rss_bytes": 216649728
+      },
+      "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.36",
+      "python": "3.11.2",
+      "package_version": "0.2.1",
+      "limitations": "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee.",
+      "workload": "images",
+      "repeat": 3
+    }
+  ]
+}

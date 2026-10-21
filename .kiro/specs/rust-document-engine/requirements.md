@@ -667,3 +667,8 @@ Existing Annotation.opacity and update(opacity=...) SHALL support finite [0,1] v
 ## 87. Native-backed everyday property types
 
 Existing annotation, picture, outline, page/slide and shape properties SHALL expose their native scalar, tuple, collection and nullable contracts to static consumers. Known nullable native returns SHALL not be declared nonnullable. Annotation-only changes SHALL preserve runtime method bodies, names, defaults, dispatch and errors; no new public aliases/managers or Any placeholders SHALL be introduced. Existing factory/copy/context chains SHALL retain concrete handle types. API3 SHALL remain open for unreviewed mappings/properties, documentation and IDE coverage.
+
+
+## 91. Reproducible Office workload measurements
+
+Development benchmark tools SHALL reuse the installed public document APIs, retain the original small workload by default and bound optional page/image fixture parameters before creating output. Each fresh-process result SHALL identify input bytes/hash, actual page count, DPI, ordered all-page PNG digest, retained-session counters, timings and process memory observations. Paired comparisons SHALL use identical inputs and require all-page byte parity. Evidence SHALL distinguish synthetic workload observations from real-input fidelity, allocation bounds, cold-disk latency, historical-wheel comparisons and general performance guarantees. No package runtime or public API change is required.
