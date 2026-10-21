@@ -635,7 +635,7 @@ class _Paragraphs(_Collection["Paragraph"]):
         self._owner._call("remove_paragraph", identifier, _change=True)
 
     def move(self, index: int, destination: int) -> None:
-        """Move a direct owned DOCX paragraph to its final index in the same section."""
+        """Move an owned DOCX paragraph to its final index in the same container and section."""
         self._owner._ensure_open()
         if not isinstance(self._owner, WordDocument):
             raise UnsupportedFormatError("PPTX paragraph movement is not supported")

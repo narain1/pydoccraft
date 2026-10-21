@@ -150,8 +150,14 @@ class ParagraphMoveTests(unittest.TestCase):
             document.paragraphs.move(1, 0)
             self.assertEqual(paragraphs(document)[0], other.text)
             table = document.add_table([['Cell']])
-            with self.assertRaises(UnsupportedFormatError):
-                table[0, 0].paragraphs.move(0, 0)
+            raw = document.to_bytes()
+            revision = document._call("revision")
+            document.render_page(0, dpi=72)
+            cache = document._cached
+            table[0, 0].paragraphs.move(0, 0)
+            self.assertEqual(document.to_bytes(), raw)
+            self.assertEqual(document._call("revision"), revision)
+            self.assertIs(document._cached, cache)
         with doc_ex.new('pptx') as slides:
             cell = slides.slides.add().add_table([['Text']], box=(20, 20, 200, 60))[0, 0]
             with self.assertRaises(UnsupportedFormatError):

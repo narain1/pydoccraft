@@ -754,3 +754,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Verify the exact installed candidate, unchanged native bytes/runtime bodies, strict positive/negative consumers and runtime snapshot probes, including independent review.
 - [ ] Complete fresh full installed-corpus current-main CI and manual merge for snapshot typing.
 - [ ] Keep polymorphic paragraph/style/default snapshots and broader API3 discoverability open.
+
+
+## Same-cell paragraph movement (spec97)
+
+- [x] Prove native remove/insert behavior in ordinary/nested body/header/footer cells and merged aliases before implementation.
+- [x] Extend existing move transaction and preserve parent-local identity/sentinel/accounting guards without a new API.
+- [x] Complete focused public/native/typing/documentation evidence, including cell anchor/alias/resource guards.
+- [x] Complete independent final source review and focused replay (four workflows,24.049s).
+- [ ] Complete integrated installed-wheel full corpus and exact-head CI before manual merge; leave broader DOC5/TXT1 work open.
