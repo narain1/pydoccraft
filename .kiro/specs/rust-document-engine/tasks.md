@@ -972,7 +972,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add explicit validation-only dispatch to the existing matrix with exact-commit and conflicting-publication guards.
 - [x] Run actionlint and execute the actual workflow guard for accepted and refused inputs.
 - [x] Complete independent guard, publication-gating, privilege and unchanged matrix review.
-- [ ] Complete current-main CI before manual merge.
+- [x] Complete current-main CI and independent manual merge through PR128, required CI39594229122 and documentation CI39594229092.
 - [x] Dispatch initial immutable baseline39580637011 without publication; preserve actual Windows/macOS failures.
 - [x] Independently review UTF-8/LF/actual-mode portability corrections and deliberately migrate only the affected save-test fingerprint.
 - [x] Execute corrected portability tests on Windows; retain measured native font/raster/pagination diagnostics and reviewed fixture changes.
@@ -1042,7 +1042,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete independent focused source/artifact/public review and combined 452-native, fmt/Clippy/release gates, exact artifact/attribution/source checks and measured sizes.
 - [x] Complete both clean installed 568-test combined artifact runs, with zero failures/errors/skips.
 - [x] Promote only verified partial typed-underlay operation evidence; preserve historical fingerprints and separately verify the documentation-only profile-count migration.
-- [ ] Complete current-head CI/manual merge. Raw-path/supplied-font underlays and broader PDF3/U10 remain open.
+- [x] Complete current-head CI/manual merge through PR128, required CI39594229122 and documentation CI39594229092. Raw-path/supplied-font underlays and broader PDF3/U10 remain open.
 
 
 ## Existing reporting and error-corpus gates (spec125)
@@ -1052,7 +1052,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Mark only the three reporting/corpus gates, preserve original clauses, correct stale current profile prose and retain all historical operation evidence.
 - [x] Pass27documentation tests, exact464-file source/test/vendor/attribution comparison, existing inventory checks and30pages/1,850site links.
 - [x] Complete final independent original-clause/checklist/JSON/source/documentation review.
-- [ ] Complete current-head CI/manual merge. No runtime/fixture/dependency change is part of this slice.
+- [x] Complete current-head CI/manual merge through PR128, required CI39594229122 and documentation CI39594229092. No runtime/fixture/dependency change is part of this slice.
 
 
 ## Dedicated DeckCraft break-text correction (spec128)
@@ -1063,14 +1063,14 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete original fixture/native/public regression and preserved old installed-artifact failure.
 - [x] Complete full453-native, fmt/Clippy/release, two clean569-installed corpora, typing, source/artifact/size checks and independent review.
 - [x] Complete synchronized final evidence and independent documentation review.
-- [ ] Complete current-head CI and manual merge. Cell break authoring and broad TXT1/TXT4/SLIDE3 remain open.
+- [x] Complete current-head CI and manual merge through PR129, required CI39598137797 and documentation CI39598137783. Cell break authoring and broad TXT1/TXT4/SLIDE3 remain separately tracked.
 ## Representative authored-document corpus (spec126)
 
 - [x] Independently review original QA2 categories and the three-builder composition proposal; retain existing cookbook fixtures unchanged.
 - [x] Add resume/review/PDF-form examples and three focused installed-package workflows; inspect retained 144-DPI native artifacts.
 - [x] Complete independent source/focused/visual review and full retained-wheel corpus with exact source/artifact identity: final 571 tests pass with zero failures/errors/skips.
 - [x] Record seven-category evidence and close QA2; keep broader typography/review/forms/platform/preservation criteria open.
-- [ ] Complete current-main CI and independent manual merge.
+- [x] Complete current-main CI and independent manual merge through PR128, required CI39594229122 and documentation CI39594229092.
 
 
 ## Typed full paragraph snapshot replay (spec133)
@@ -1080,7 +1080,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add two overloads on each existing paragraph formatter and exact native direction output literals, with unchanged implementation bodies and input TypedDict.
 - [x] Verify strict installed consumer, five intended negative cases, runtime direct/resolved body/header/cell replay, exact native/wheel facade identity and independent review.
 - [x] Complete full exact installed-wheel corpus and synchronized documentation:571 tests pass; keep broader API3 open.
-- [ ] Complete combined current-main CI and independent manual merge.
+- [x] Complete combined current-main CI and independent manual merge through PR128, required CI39594229122 and documentation CI39594229092.
 
 
 ### Spec120 measured-font fixture gates
@@ -1100,7 +1100,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Preserve the identical installed old-wheel failure after explicit and missing-styles controls pass.
 - [x] Complete full 453-native/fmt/Clippy/release, two clean 570-installed corpora, typing and exact artifact/source/attribution/size gates.
 - [x] Complete final synchronized evidence and independent source/artifact/documentation review.
-- [ ] Complete current-head CI/manual merge. No owned None reset or STY2/U02 completion is claimed.
+- [x] Complete current-head CI/manual merge through PR130, required CI39602725245 and documentation CI39602726203. Owned None reset and broader acceptance remain separate feature gates.
 ## Owned PPTX cell line breaks (spec130)
 
 - [x] Review exact cell-only getter/find/replace/setter projection and reuse public native insertion after the separate spec128 correction.
@@ -1110,7 +1110,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete synchronized documentation review, distinguishing bounded source inventory from generated-cost preflight.
 - [x] Complete combined spec131/spec130 full 458 native, fmt/Clippy/release, clean 574-test installed corpus, independent exact-artifact 185-file/source/typing and four changed plus one inherited workflow review, attribution and size checks.
 - [x] Complete final combined documentation review, including the historical upgrade-only versus current adapter distinction.
-- [ ] Complete current-head CI and manual review/merge. Keep broader TXT1/TXT4/SLIDE3 open.
+- [x] Complete current-head CI and manual review/merge. Keep broader TXT4/SLIDE3 open; TXT1 acceptance is recorded separately in spec138.
 
 
 ## Owned default-size reset (spec132)
@@ -1121,14 +1121,14 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Pass strict typing and independent final two-workflow copied-package/source review; retain every failed fixture premise and unchanged runtime/threshold evidence.
 - [x] Complete synchronized focused documentation and independent review.
 - [x] Complete combined460 native and final579 installed-artifact/source/attribution validation, with independent changed-workflow, typing and exact-artifact review.
-- [ ] Complete current-head CI/manual merge; separate acceptance audits govern broader roadmap criteria.
+- [x] Complete current-head CI/manual merge; separate acceptance audits govern broader roadmap criteria.
 ## Unit converter input typing (spec135)
 
 - [x] Reproduce strict rejection of ordinary int/float calls despite existing runtime support.
 - [x] Change only four input annotations and extend the strict consumer; verify annotation-erased whole-facade AST equality.
 - [x] Pass copied-package int/float/Fraction/Real consumers, three intended negative diagnostics and44 runtime conversion/refusal cases.
 - [x] Complete independent source/focused review and final combined579 installed-artifact validation.
-- [ ] Complete current-head CI/manual merge; retain broader API3 open.
+- [x] Complete current-head CI/manual merge; retain broader API3 open.
 
 
 ## Typed PDF drawing and metadata inputs (spec136)
@@ -1138,7 +1138,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Verify whole-facade implementation AST identity and all15 existing underlay/text-box/drawing-ownership workflows against the copied-package candidate.
 - [x] Complete independent final source/AST/strict-consumer/negative-control review.
 - [x] Complete final combined579 installed-artifact validation, preserving the original460-native artifact and separately verified annotation-only repack.
-- [ ] Complete current-main CI and manual merge; keep broader API3 and raw path-command typing open.
+- [x] Complete current-main CI and manual merge; keep broader API3 and raw path-command typing open.
 
 
 ## Style and ordinary-text acceptance audit (spec138)
@@ -1147,7 +1147,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete independent original-clause/source/fixture review; preserve explicit missing-companion and neighboring-feature limitations.
 - [x] Independently reconcile original TXT1 clauses and existing whitespace/Unicode/order/nonduplication fixtures with neighboring ownership.
 - [x] Verify final combined 579-test installed-artifact gate, mark only STY2/TXT1 and regenerate derived roadmap documentation (54 checked/85 open).
-- [ ] Complete current-main CI and independent manual merge.
+- [x] Complete current-main CI and independent manual merge.
 
 
 ## Native core language and dedicated upgrade (spec139/140)
@@ -1157,7 +1157,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Audit source-only lock changes,264 permissive runtime/build packages and55 Word citations across14 files; update current attribution while preserving historical artifacts/fingerprints.
 - [x] Finish linked baseline/candidate regression and full461-native/fmt/strictClippy/release; clean579 installed corpus, typing, exact artifact/source and independent review.
 - [x] Finalize synchronized native/pin/artifact evidence and independent source/focused review.
-- [ ] Complete current-head CI and manual merge. Python language admission141 and broader DOC7/U01 remain open.
+- [x] Complete current-head CI and manual merge through PR132, required CI39610487130 and documentation CI39610487137. Python language admission141 and broader DOC7/U01 remain separately tracked.
 
 
 ## DOCX core-language metadata (spec141)
@@ -1216,4 +1216,5 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reproduce the defect with standalone builtin-font PDF data; preserve failed old native/public expectations.
 - [x] Review and implement conservative discarded-row admission before any page mutation, retaining the exact existing replacement predicate.
 - [x] Complete focused native/public and independent source/artifact verification, including unchanged tab proofs in both diagnostic font environments.
-- [ ] Complete parent-integrated full artifact, fresh current-head CI and manual review/merge; preserve earlier 146/148 artifacts as historical sources.
+- [x] Complete corrected parent-integrated469-native/586-installed artifact, strict typing and independent source/artifact review; preserve earlier failures and146/148 artifacts as historical sources.
+- [ ] Complete fresh current-head CI, actual-main synchronization and manual review/merge.
