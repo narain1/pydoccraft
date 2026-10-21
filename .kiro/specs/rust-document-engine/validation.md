@@ -1001,6 +1001,22 @@ PR84 independent source review and all 432 tests against its copied frozen relea
 
 PR74 final head `60a568fbc8e04e0e15e048ed3f0ee7dad3a570db` passed [current-main CI 39507569770](https://github.com/narain1/pydoccraft/actions/runs/39507569770): 285 Rust / 409 installed-wheel Python tests and all required checks. It was manually merged as `57fcc94216e58d74b967b24cf2ced68f9f45b742` after independent review. Auto-merge remains disabled; broader PDF6 stays open.
 
+
+## Slide-cell append lifetime — isolated Python correction
+
+On 2026-10-20, an unmodified /opt/slidebackgroundresettest installed release reproduced the preexisting issue: close the presentation, then call cell.paragraphs[0].add_run("x", font=Font("Inter")) where Font.__len__ raises. The caller RuntimeError occurred before DocumentClosedError. The narrow facade correction checks an existing native alignment lookup first, without copying the paragraph text, then preserves final append validation after normalization.
+
+Three new test groups pass in 0.024 seconds against an isolated copy of that installed native release plus the corrected facade. They cover already-closed/deleted/stale body and grid targets without callbacks; reordering two slides with same-position tables while retaining the original logical cell; and live callback deletion/reset/close/raising with no append beyond callback effects. Ordinary source output and cached PNG bytes remain unchanged after a raising callback. No Cargo, native code, dependency or pin change. These are focused correction results, not a new full release artifact or a blanket callback-order guarantee for other methods.
+
+
+## Slide-cell append lifetime — complete local artifact
+
+Facade commit `f49d8c69511a0ba811703121974c12a80a0fb146` passes **439 clean installed-wheel Python tests**, zero failures/errors/skips, in 141.697 seconds on Linux x86_64 / Python 3.11.2. The native extension is byte-identical to the preceding c5a67d0 artifact that passed all **307 locked Rust tests**, formatting and warnings-denied Clippy: extension SHA-256 `caf0984cd1be54394e9ecedc8d12c8c756ab0d89aefcf4ff8ec230c130924f37`. The Rust suite is applicable unchanged evidence, not a newly claimed rerun. Release packaging and strict installed-package typing pass; installed package bytes match the wheel.
+
+Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,509,869 bytes**; native extension **40,616,840 bytes**; SHA-256 `438a5c25ae873258e4247c01abc7b773395de705c675f661cb83b2cee05c7bee`. Lock SHA-256 remains `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`; pinned revisions and the audited 264-package license graph remain unchanged. No native dependency or attribution changes.
+
+The full corpus checks all three formats, actual rendering/reopened conversions and the three new callback/lifetime workflows. This is a narrow early-check correction for PPTX cell add_run; other methods do not acquire a blanket error-order guarantee. Final independent review and exact-head/current-main CI remain required before manual merge.
+
 ## Character-spacing mixed-scope fixture — independent CI correction
 
 Current-main CI39517446150 at `76d40ef83f9a257a1b4604ab3bc6ce97587d22d6` passed 302 native tests but failed one of432 installed-wheel tests: the mixed header/footer, note and nested-cell fixture had a chromatic channel difference64 instead of the required maximum1. The same failure was independently reproduced with Liberation Sans: two pixels at(105,124) and(106,124) lie where the `Scope2` descender intersects the nested table's bottom rule. Source/PDF red bounds and counts were identical; the other19 changed chromatic pixels differed by at most1. Setting all character spacing to zero retained the64-level difference; removing only native table/cell borders removed every difference above1. A separate default-font control reproduced the same interaction at a fractional72.3-point top margin. These controls establish a preexisting native structural-stroke/compositing difference, not a spacing-induced glyph-position change.

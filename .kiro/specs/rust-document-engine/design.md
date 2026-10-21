@@ -487,3 +487,8 @@ All profiles keep the existing seven-operation schema, 139 coverage joins, 14 ow
 FormatPatch adds a Spacing(Option<f64>) case and sets only RunProps.spacing. The small scalar guard uses the same point/range/precision policy as DOCX while retaining f64 storage for DeckCraft; no shared layout helper or public options registry is introduced. Existing preflight_format/edited_body and native edit::format/insert own run splitting, inheritance, limits and commits. None clears the optional field; explicit zero survives native hundredth-point serialization. No source model snapshot/getter or native interface is widened.
 
 Native resolve::run fills omitted properties from paragraph/list/placeholder defaults. Native text layout scales tracking during autofit and applies it after drawn graphemes/spaces. PDF export uses the same placed origins for its invisible glyph layer, independently of its visible slide raster. Tests compare same-glyph displacement rather than equating font advance boxes with ink bounds. The source/PDF raster fixtures use whole-pixel page dimensions at the native 200-DPI export resolution; they do not hide or repair existing arbitrary-DPI dimension quantization differences.
+
+
+## 75. Validate the cell paragraph before append normalization
+
+_SlideCellParagraph.add_run performs an existing native cell_paragraph_alignment lookup before _format_patch. This checks the canonical target and both generations and returns only an optional static enum without copying paragraph text or introducing a new native endpoint. Existing final add_run_patch validation remains after callbacks and resolves the current stable slide identity. The change is separate from character-spacing support and applies to existing supported formatting keys.
