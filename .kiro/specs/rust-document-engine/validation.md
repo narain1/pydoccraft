@@ -2331,3 +2331,5 @@ Post-corpus merges retain the accepted Deck572 and Word573 delivery records. The
 ## 138. Style inheritance acceptance audit
 
 The independent original-clause audit identifies concrete acceptance for every STY2 clause in test_styles, test_style_defaults and the reviewed132 public/native reset fixtures, with upstream StyleSheet resolution and bounded cycle validation. The mapping is recorded in docs/acceptance-audit.md. No runtime, fixture, dependency or operation-profile change is introduced. The final combined installed-artifact gate remains pending; no checkbox is promoted by this source review alone.
+
+The independent TXT1 interpretation review also finds all original ordinary paragraph/run clauses covered by current text-selection, paragraph order/deletion and auxiliary-story fixtures. It distinguishes ordinary text operations from separately owned structural adoption and semantic-anchor removal, without changing any guard or fixture. Both candidate acceptance decisions remain conditional on the final installed-artifact gate.

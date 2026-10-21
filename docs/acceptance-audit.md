@@ -81,6 +81,19 @@ The independent spec138 audit compares the unchanged original criterion at `ece6
 
 The implementation stays within existing style handles and formatting dictionaries. Missing native built-in linked companions still raise an explicit error and can be cleared or replaced, as `test_undefined_builtin_link_is_explicit_and_repairable` proves; no style is fabricated. The resolver retains its native Normal fallback, and arbitrary default-kind selection is not added. Imported editing, theme identity, font contexts and style import/cleanup remain separate DOC2/STY3/STY5/STY6 criteria. This decision does not promote historical operation cells, claim arbitrary Open XML style parity or add a new completion database.
 
+## TXT1: ordinary DOCX paragraph/run editing — acceptance review pending final artifact
+
+The original `ece6c85` criterion asks for ordered paragraph/run creation and editing, significant whitespace, empty paragraphs, Unicode, tabs and line breaks, and exact reopened text without duplicate table or auxiliary content. The independent spec138 review resolves the earlier interpretation deferral: ordinary same-container editing belongs here; cross-container structural adoption and imported editing remain DOC5/DOC2, while deletion of semantic anchors retains the existing note/bookmark/review owners. No protected operation is silently enabled or reclassified. Final installed-artifact acceptance is still required before changing TXT1's checkbox.
+
+| Original clause | Concrete acceptance evidence |
+|---|---|
+| Create/edit ordered paragraphs and runs | `TextSelectionTests.test_empty_insertion_reuses_range_format_link_and_full_deletion` creates formatted runs, inserts Unicode into an empty range, changes formatting/links, deletes run text and restores a cleared paragraph. `ParagraphMoveTests.test_body_move_reorders_native_content_and_reuses_required_tail` proves append-plus-move insertion, native block order, preserved rich text/links and exact saved DOCX/PDF order. |
+| Empty paragraphs and deletion | `CellParagraphDeletionTests.test_authored_empty_paragraphs_stay_visible_until_deleted_and_required_blank_is_reused` distinguishes authored empty paragraphs from native sentinels; body/story/cell deletion suites preserve required blanks, surviving handles and referenced media. Protected semantic anchors still fail atomically. |
+| Significant whitespace, Unicode, tabs and line breaks | `TextSelectionTests.test_unicode_slices_follow_python_bounds_without_mutating_document` reopens the exact string containing leading/trailing spaces, an emoji, a combining mark, HT and LF, comparing its complete block text. Python slice semantics and unchanged source bytes are checked. |
+| No duplicate table/auxiliary text | `TextSelectionTests.test_same_selection_api_in_body_cell_header_and_note_stories` edits each supported scope and checks exactly-once converted labels. `ParagraphMoveTests` checks moved body/story labels once in DOCX/PDF, while `DocxStoriesTests.test_auxiliary_stories_are_owned_and_do_not_repeat_on_pages` checks nested table text once and keeps auxiliary stories separate. |
+
+The native adapter uses existing WordCraft model traversal, span replacement and serialization; the Python surface remains add_paragraph/add_run, paragraph collections and ordinary revision-bound ranges. This does not close TXT8 arbitrary anchors, DOC5 cross-container/cross-section composition, DOC2 imported editing, LAY7 semantic note-reference deletion or other owners' outstanding clauses. No new run manager or duplicate ordered-content API is introduced.
+
 ## Criteria deliberately not promoted
 
 - **API1/QA1**: representative198 reference members/44families and21operation profiles do not complete dispositions/status/native/test joins for every feature; unassessed joins cannot be relabeled verified.

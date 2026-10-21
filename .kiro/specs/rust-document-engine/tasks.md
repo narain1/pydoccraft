@@ -1141,9 +1141,10 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [ ] Complete current-main CI and manual merge; keep broader API3 and raw path-command typing open.
 
 
-## Style inheritance acceptance audit (spec138)
+## Style and ordinary-text acceptance audit (spec138)
 
 - [x] Compare original ece6c85 STY2 clauses with existing style/default/cycle fixtures and reviewed132 reset controls.
 - [x] Complete independent original-clause/source/fixture review; preserve explicit missing-companion and neighboring-feature limitations.
-- [ ] Verify final combined installed-artifact gate, then mark only STY2 and regenerate derived roadmap documentation.
+- [x] Independently reconcile original TXT1 clauses and existing whitespace/Unicode/order/nonduplication fixtures with neighboring ownership.
+- [ ] Verify final combined installed-artifact gate, then mark only STY2/TXT1 and regenerate derived roadmap documentation.
 - [ ] Complete current-main CI and independent manual merge.

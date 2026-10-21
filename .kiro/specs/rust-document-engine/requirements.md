@@ -965,3 +965,5 @@ Existing PDF metadata updates, page rotation, text drawing and image placement m
 ## Style inheritance acceptance audit (spec138)
 
 Judge STY2 against its original base/next/linked/default/effective/cycle/reset clauses. Keep imported editing, theme identity, font contexts and style import under their existing owners. Acceptance requires the reviewed default-size-reset behavior and final installed-artifact validation; source review alone is insufficient.
+
+The same audit compares original TXT1 ordinary paragraph/run editing and exact-text clauses. Cross-container structural adoption, imported editing and semantic-anchor deletion remain with DOC5/DOC2 and their existing semantic owners; they must not become duplicate blockers for ordinary text editing.

@@ -894,3 +894,5 @@ Reuse private source/box/color aliases on the existing PDF methods; point inputs
 ## Style inheritance acceptance audit (spec138)
 
 The acceptance audit adds clause-to-fixture/native-resolution links to the existing documentation. It reuses the existing TODO ownership and generated support matrix; no runtime manager, new profile, duplicated completion ledger or implementation change is introduced.
+
+TXT1 reuses existing paragraph collections and revision-bound ranges. Its audit records ordinary ordered editing and source-text preservation without introducing a second run/ordered-content abstraction or changing protected-anchor guards.
