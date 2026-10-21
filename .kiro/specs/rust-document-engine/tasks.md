@@ -811,3 +811,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Trace pinned public font storage/admission, global selection, face lifetime and native PDF export behavior; connect precise prerequisites to U02/U11.
 - [x] Complete independent pinned-source review and documentation/link checks.
 - [ ] Obtain native document-scoped resolution/embedding contracts and execute the proposed valid-font isolation/save/render/export fixture gate before adding Office caller-font inputs; STY5 remains open.
+
+
+## Formatting snapshot annotations (spec104)
+
+- [x] Audit exact native direct/resolved/default/region serializers and PPTX alignment-only behavior before selecting conservative private output schemas.
+- [x] Annotate existing getters without new exports, input changes, runtime branching or native changes; preserve behavior with a normalized AST comparison.
+- [x] Check strict copied-package consumer, deliberate invalid assignments/keys and populated/default snapshot shapes across all native kinds.
+- [x] Complete independent final source/serializer review and replay positive/negative typing, runtime-key/schema and AST checks.
+- [ ] Complete exact installed-wheel/source/native verification and agreed corpus before merge acceptance.
+- [ ] Retain remaining API3 property/documentation/IDE work; do not claim full-package strict typing.

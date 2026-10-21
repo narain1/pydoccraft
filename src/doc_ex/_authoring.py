@@ -167,6 +167,111 @@ class _BorderSnapshot(TypedDict):
     width: float
 
 
+# Owned output snapshots. Optional keys describe native-kind differences, not
+# optional input patches; table style resolution can still retain None values.
+class _TabSnapshot(TypedDict):
+    position: float
+    alignment: str
+    leader: str
+
+
+class _CharacterSnapshot(TypedDict):
+    bold: bool | None
+    italic: bool | None
+    font: str | None
+    language: str | None
+    letter_spacing: float | None
+    font_size: float | None
+    color: str | None
+    underline: str | None
+    strike: bool | str | None
+    script: str | None
+    highlight: str | None
+    background: str | None
+
+
+class _ParagraphAlignmentSnapshot(TypedDict):
+    alignment: str | None
+
+
+class _ParagraphSnapshot(_ParagraphAlignmentSnapshot, total=False):
+    borders: dict[str, _BorderSnapshot | None] | None
+    tabs: list[_TabSnapshot] | None
+    direction: str | None
+    indent_left: float | None
+    indent_right: float | None
+    indent_first: float | None
+    space_before: float | None
+    space_after: float | None
+    line_spacing: float | None
+    keep_with_next: bool | None
+    keep_together: bool | None
+    widow_control: bool | None
+    page_break_before: bool | None
+    background: str | None
+
+class _ResolvedParagraphSnapshot(TypedDict):
+    borders: dict[str, _BorderSnapshot | None] | None
+    tabs: list[_TabSnapshot]
+    alignment: str
+    direction: str
+    indent_left: float
+    indent_right: float
+    indent_first: float
+    space_before: float
+    space_after: float
+    line_spacing: float
+    keep_with_next: bool
+    keep_together: bool
+    widow_control: bool
+    page_break_before: bool
+    background: str | None
+
+
+class _DefaultsSnapshot(_CharacterSnapshot):
+    borders: dict[str, _BorderSnapshot | None] | None
+    tabs: list[_TabSnapshot] | None
+    alignment: str | None
+    direction: str | None
+    indent_left: float | None
+    indent_right: float | None
+    indent_first: float | None
+    space_before: float | None
+    space_after: float | None
+    line_spacing: float | None
+    keep_with_next: bool | None
+    keep_together: bool | None
+    widow_control: bool | None
+    page_break_before: bool | None
+
+
+class _TableRegionSnapshot(_CharacterSnapshot):
+    alignment: str | None
+    vertical_alignment: str | None
+    borders: dict[str, _BorderSnapshot | None] | None
+
+
+class _StyleSnapshot(_CharacterSnapshot, total=False):
+    borders: dict[str, _BorderSnapshot | None] | None
+    tabs: list[_TabSnapshot] | None
+    alignment: str | None
+    direction: str | None
+    indent_left: float | None
+    indent_right: float | None
+    indent_first: float | None
+    space_before: float | None
+    space_after: float | None
+    line_spacing: float | None
+    keep_with_next: bool | None
+    keep_together: bool | None
+    widow_control: bool | None
+    page_break_before: bool | None
+    vertical_alignment: str | None
+    margins: list[float] | None
+    row_band_size: int | None
+    regions: dict[str, _TableRegionSnapshot]
+
+
 class _TableSnapshot(TypedDict):
     alignment: str | None
     indent: float | None
@@ -829,7 +934,7 @@ class Styles(_Collection["Style"]):
         return Style(self._owner, identifier)
 
     @property
-    def defaults(self) -> dict:
+    def defaults(self) -> _DefaultsSnapshot:
         """Direct native document character and paragraph defaults."""
         return json.loads(self._owner._call("default_formatting"))
 
@@ -903,12 +1008,12 @@ class Style:
         self._set_relation("linked", value)
 
     @property
-    def formatting(self) -> dict:
+    def formatting(self) -> _StyleSnapshot:
         """Direct properties; None denotes inheritance."""
         return json.loads(self._owner._call("style_formatting", self._id))
 
     @property
-    def resolved_formatting(self) -> dict:
+    def resolved_formatting(self) -> _StyleSnapshot:
         """Formatting resolved through the native style inheritance chain."""
         return json.loads(self._owner._call("style_formatting", self._id, True))
 
@@ -996,12 +1101,12 @@ class Paragraph:
         return (self._id,)
 
     @property
-    def formatting(self) -> dict:
+    def formatting(self) -> _ParagraphSnapshot:
         """Direct paragraph properties; None denotes inheritance."""
         return json.loads(self._owner._call("paragraph_formatting", self._id))
 
     @property
-    def resolved_formatting(self) -> dict:
+    def resolved_formatting(self) -> _ResolvedParagraphSnapshot:
         """Paragraph properties resolved through native defaults and styles."""
         return json.loads(self._owner._call("paragraph_formatting", self._id, True))
 
@@ -3335,7 +3440,7 @@ class _SlideCellParagraph(Paragraph):
         self._owner._call("set_cell_paragraph_alignment", *self._range_args, self._target, value, _change=True)
 
     @property
-    def formatting(self):
+    def formatting(self) -> _ParagraphSnapshot:
         return {"alignment": self.alignment}
 
     def format(self, **formatting):

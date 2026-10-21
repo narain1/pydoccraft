@@ -669,3 +669,8 @@ Pinned WordCraft adds character spacing to shaped advances and preserves signed 
 ## 103. Font storage is separate from document resolution
 
 Pinned WordCraft exposes embedded-part extraction and FontDb admission but not a typed DOCX embedding operation found by this audit. DeckCraft already exposes embedded-font/media serialization and supported-wrapper extraction. Neither storage path supplies the document-owned resolver needed by ordinary text/layout, which currently uses globals; admission keeps existing family/style matches and selected FaceRef handles retain faces for process lifetime. Public independent FontDb construction alone cannot inject the context into all document operations. Defer local API design until native context/lifetime, permission, collision and diagnostic behavior are proven. Reuse existing formatting and lifecycle operations after that gate; native PDF subsetting already exists and must be validated rather than reimplemented.
+
+
+## 104. Conservative private formatting output schemas
+
+Private TypedDict snapshots mirror existing native serializers. Character fields are required for styles/defaults; Style adds optional paragraph/table fields and retains nullable scalar types even for resolved snapshots, because resolved table inheritance can still be unset. Paragraph direct output requires only alignment and permits Word-only fields; resolved Word paragraph output and defaults retain their required fields. Tabs have required position/alignment/leader keys; table regions have direct character and region fields without recursion or paragraph-only properties. Reuse existing border output values. Do not change input TypedDicts, native serializers or runtime-kind hierarchy. Returned dictionaries remain detached mutable values.

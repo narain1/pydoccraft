@@ -754,3 +754,8 @@ Native x_spans and turn_rect SHALL own selection and coordinate transforms. Body
 ## 103. Office caller-font isolation prerequisite
 
 Keep STY5 open until public native APIs admit bounded caller programs with deterministic document-scoped face selection, lifetime and collision behavior across layout, PNG, PDF and Office save/reopen. Require explicit native embedding/subsetting policy and substitution/missing-glyph diagnostics. Existing PDF supplied-font drawing and literal Office family formatting remain supported. Do not mutate process-global font registries, fabricate OOXML font tables, link application loaders or add a duplicate font manager. Connect the prerequisite to existing U02/U11; keep theme-role identity under STY3.
+
+
+## 104. Existing formatting snapshot output types
+
+Annotate the existing paragraph/style/default formatting getters without changing runtime dispatch, accepted inputs, exports or native behavior. Preserve required common keys, native-kind-specific optional keys, nullability, list-valued tabs/margins and nonrecursive table regions. PPTX paragraph direct snapshots contain alignment alone; successful resolved paragraph snapshots remain Word-only. Do not advertise Style.kind as a static discriminator or treat table inheritance as concrete paragraph/character resolution. API3 remains open beyond this slice.
