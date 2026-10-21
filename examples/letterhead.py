@@ -11,7 +11,7 @@ def build_letterhead(logo_png: bytes, appendix_logo_png: bytes):
     """Return a document whose headers follow sections as body content reflows."""
     document = doc_ex.new("docx", size=(300, 360))
     try:
-        document.styles.format_defaults(font_size=12, space_after=0, line_spacing=1)
+        document.styles.format_defaults(font="Source Sans 3", font_size=12, space_after=0, line_spacing=1)
         first = document.sections[0]
         first.page_number_start = 2
         first.margins = (64, 24, 28, 24)

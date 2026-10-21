@@ -164,9 +164,9 @@ class PicturePlacementTests(unittest.TestCase):
     def test_behind_picture_retains_text_on_both_sides_of_anchor(self):
         with doc_ex.new('docx', size=(300, 300)) as document:
             document.sections[0].margins = 30
-            document.add_paragraph('BLACK LABEL BEFORE')
+            document.add_paragraph('BLACK LABEL BEFORE')[:].format(font='Source Sans 3', bold=True)
             picture = document.add_image(quadrants(), width=200, height=100)
-            document.add_paragraph('BLACK LABEL AFTER')
+            document.add_paragraph('BLACK LABEL AFTER')[:].format(font='Source Sans 3', bold=True)
             picture.format(wrap='behind', anchor='page', position=(30, 30))
             for data in (document.to_bytes(), document.convert('pdf')):
                 with doc_ex.open(data) as reopened:
