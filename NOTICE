@@ -20,8 +20,11 @@ Pinned revision: f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22
 DeckCraft
 Copyright (c) 2026 ArtCraft Team and the DeckCraft contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option.
-Source: https://github.com/storytold/deckcraft
-Pinned revision: 22db9261f9d1a214c296fd390173130c45d76d66
+Upstream source: https://github.com/storytold/deckcraft
+Reviewed contribution fork: https://github.com/narain1/deckcraft
+Pinned revision: dd4fd70b6347dd2ce782e33f030a2b6c0abb0106
+Direct upstream parent: 22db9261f9d1a214c296fd390173130c45d76d66
+The reviewed contribution adds fallible slide rendering and propagates its errors through native PDF export. It changes no bundled assets or licensing and is not represented as upstream acceptance.
 
 craft-libs PDF backend
 Copyright (c) 2026 ArtCraft Team and craft-libs contributors.

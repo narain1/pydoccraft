@@ -907,7 +907,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Pass five native adapter groups, unchanged raw replay, four public workflows, strict consumer, formatting and Clippy; verify solid/PNG backgrounds explicitly.
 - [x] Resolve the reviewed rotated-cell coordinate gap with central horizontal section/cell admission and defensive output refusal; pass corrected independent four-workflow replay and documentation/site checks.
 - [x] Complete frozen documentation/source review and integrated425-native/two547-test clean installed-wheel corpora.
-- [ ] Complete final exact-head CI and manual merge.
+- [x] Complete final exact-head/current-main CI and manual merge through reviewed PR120, run39569285162.
 - [ ] Retain broader LAY10 settings and excluded native compositions under existing U02; do not mark the roadmap criterion complete.
 
 
@@ -919,7 +919,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete independent frozen source and five-workflow replay review (2.250s).
 - [x] Complete synchronized documentation review.
 - [x] Complete integrated425-native/release and two547-test clean installed-wheel corpora with independent artifact review.
-- [ ] Complete final exact-head CI and manual merge.
+- [x] Complete final exact-head/current-main CI and manual merge through reviewed PR120, run39569285162.
 - [ ] Keep STY6 open for style import, collision policy and general cleanup; no batch prune or automatic restyling.
 
 
@@ -929,5 +929,16 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Annotate 17 existing signatures and independently prove annotation-erased AST identity with the prior facade.
 - [x] Pass the strict installed consumer, ten intentional negative typing diagnostics and four unchanged DOCX/PPTX layout workflows against an explicitly repacked wheel with identical tested native bytes.
 - [x] Complete independent artifact/static/probe/documentation review and final547-test installed corpus against the explicit Python-only repack.
-- [ ] Complete final exact-head/current-main CI and manual merge.
+- [x] Complete final exact-head/current-main CI and manual merge through reviewed PR120, run39569285162.
 - [ ] Keep broader API3 discoverability and IDE coverage open.
+
+
+## Fallible PPTX rendering integration (spec114)
+
+- [x] Independently review the separate native renderer/PDF contribution, actual panic/Busy/thread/recovery evidence, original successful byte comparisons and unchanged upstream baseline limitations.
+- [x] Publish the reviewed six-file contribution to an explicitly identified fork; verify exact parent and patch identity without claiming upstream acceptance.
+- [x] Integrate all DeckCraft pins together, retain other engine revisions, use one fallible native PNG call and existing Python exception/PDF conversion mapping.
+- [x] Add actual production-path native Busy/preflight/recovery controls and explicitly scoped Python boundary/blank workflows.
+- [x] Complete final locked native/fmt/Clippy/release, clean installed corpus, independent exact artifact, typing, license/size and current source-ledger checks.
+- [ ] Complete exact-head/current-main CI and manual merge.
+- [ ] Retain broad R4/U09 limits and other native entry points; no version/tag/release before overall completion gates.

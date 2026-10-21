@@ -22,11 +22,11 @@ flowchart LR
 
 ## Dependency policy
 
-Every upstream repository is pinned to an immutable release commit:
+Every upstream repository is pinned to an immutable commit:
 
 - PdfCraft v0.9.0: `645016addcfb9078c557f0189559ab47cdcee057`
 - WordCraft v0.8.0: `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`
-- DeckCraft v0.8.0: `22db9261f9d1a214c296fd390173130c45d76d66`
+- DeckCraft v0.8.0, reviewed contribution fork `narain1/deckcraft`: `dd4fd70b6347dd2ce782e33f030a2b6c0abb0106` (direct upstream parent `22db9261f9d1a214c296fd390173130c45d76d66`)
 - Craft PDF backend patches use the immutable `craft-libs` revision required by WordCraft/DeckCraft.
 
 Rendering and conversion dependencies are currently unconditional in the release wheel; only operation-specific upstream crates are linked, and no application umbrella crate is used. A locked license audit must permit Apache-2.0, MIT, BSD, ISC, Zlib, Unicode, and similarly permissive licenses; GPL, AGPL, and LGPL-only dependencies are rejected.
@@ -70,7 +70,7 @@ Other pairs fail explicitly. Conversion fidelity and warnings are those of the p
 
 `Page.get_pixmap(dpi=144)` and `Document.render_page(page, dpi=144)` return PNG bytes. PDF uses PdfCraft rendering, DOCX uses WordCraft layout/render, and PPTX uses DeckCraft rendering. PDF eager open privately retains the same PdfCraft `PageRenderer` used for text extraction and reuses its parsed document for later renders; `Document.close()` drops that state while hydrated values remain owned. The one-shot `_core.render` boundary remains for non-session routing and compatibility. DOCX privately retains its parsed model and native layout, and PPTX retains its parsed presentation, for repeated rendering; closing the document releases these Office sessions. These dependencies are included unconditionally in the current wheel; extraction-only feature builds are not implemented.
 
-A private `rendering` helper validates finite DPI, raster dimensions and RGBA length. PDF/DOCX encoding unpremultiplies color channels and writes PNG physical resolution; PPTX retains upstream `to_png_at`. The shared raster budget is 64 million pixels. WordCraft/DeckCraft dimensions are preflighted before raster allocation. Full-page PDF requests additionally apply the shared budget to public native `device_pixels` dimensions derived from inspected CropBox/rotation/UserUnit display geometry before calling the renderer. Native `reject_oversize` remains enabled: its continuous f32 area check alone does not bound the product of separately rounded integer sides. DeckCraft's caught-panic blank-image behavior remains U09; local code cannot reliably distinguish that output from an intentional blank slide.
+A private `rendering` helper validates finite DPI, raster dimensions and RGBA length. PDF/DOCX encoding unpremultiplies color channels and writes PNG physical resolution; PPTX retains upstream `to_png_at`. The shared raster budget is 64 million pixels. WordCraft/DeckCraft dimensions are preflighted before raster allocation. Full-page PDF requests additionally apply the shared budget to public native `device_pixels` dimensions derived from inspected CropBox/rotation/UserUnit display geometry before calling the renderer. Native `reject_oversize` remains enabled: its continuous f32 area check alone does not bound the product of separately rounded integer sides. The selected DeckCraft PNG path calls the reviewed fork's `try_render_slide`; native failures map through private `rendering_failure` to existing DocExError. Native PDF export propagates the same fallible result through existing conversion_failure. A valid blank slide stays successful; global counters and pixel colors are not failure signals. Broader upstream allocation/work limits and other entry points remain U09.
 
 ## Normalized model
 
@@ -106,7 +106,7 @@ The expanded table/background roadmap distinguishes semantic cells, native docum
 
 The [canonical workstreams](../../../docs/roadmap-workstreams.md) consolidate 139 coverage IDs into 14 ownership units, with an exhaustive JSON mapping. Keep recipes and acceptance scenarios distinct from implementation primitives. Use existing PNG methods, content insertion, ordinary properties, safe copies and ordered collections; no extra rendered-page wrapper, report builder, template language, batch API or public session framework is planned.
 
-The [upstream register](../../../docs/upstream-roadmap.md) records a pinned-source audit. WordCraft and DeckCraft writers and numerous editing/background primitives already exist. Confirmed focused candidates include a public PdfCraft table detector, a fallible DeckCraft render path instead of blank-image fallback, and lower-level WordCraft revision-resolution routines currently located in engine code. Public availability, current integration and verified fidelity are separate states. Missing format algorithms belong upstream; adapter code must not duplicate them or link prohibited engines.
+The [upstream register](../../../docs/upstream-roadmap.md) records a pinned-source audit. WordCraft and DeckCraft writers and numerous editing/background primitives already exist. Confirmed focused candidates include a public PdfCraft table detector, the now-contributed fallible DeckCraft render path instead of blank-image fallback, and lower-level WordCraft revision-resolution routines currently located in engine code. Public availability, current integration and verified fidelity are separate states. Missing format algorithms belong upstream; adapter code must not duplicate them or link prohibited engines.
 
 ## Native authoring profile (unreleased)
 
@@ -505,7 +505,7 @@ The bool result controls Python cache invalidation; false does not create a revi
 
 ## 77. PDF integer raster preallocation boundary
 
-The existing one-shot and retained PDF paths share the same full-page preflight, including after a smaller cached render. At 72 DPI, an 8000.5 by 7999.5 point native view has a continuous f32 area of 64,000,000 but rounds to 8001 by 8000 device pixels (64,008,000). The adapter rejects that request before native output allocation rather than relying on the later PNG buffer check. It calls public native rounding, not a duplicate raster-sizing algorithm. Region rendering retains its existing quantization, tile-side and offset checks; small clips from a large page remain supported. Parser/layout/intermediate/encoder memory is not bounded by this one-buffer limit, and DeckCraft's caught-panic blank-image fallback remains U09/R4.
+The existing one-shot and retained PDF paths share the same full-page preflight, including after a smaller cached render. At 72 DPI, an 8000.5 by 7999.5 point native view has a continuous f32 area of 64,000,000 but rounds to 8001 by 8000 device pixels (64,008,000). The adapter rejects that request before native output allocation rather than relying on the later PNG buffer check. It calls public native rounding, not a duplicate raster-sizing algorithm. Region rendering retains its existing quantization, tile-side and offset checks; small clips from a large page remain supported. Parser/layout/intermediate/encoder memory is not bounded by this one-buffer limit, and broader DeckCraft allocation/work limits remain U09/R4; spec114 subsequently replaces the selected PNG/PDF fallback paths with per-call failures.
 
 
 ## PDF field creation callback ownership
@@ -747,3 +747,12 @@ The private lifetime registry is copied with the owner and released on close. Na
 ## 115. Native layout value contracts
 
 Annotate the existing facade signatures directly from the DOCX/PPTX PyO3 return contracts. Keep row height as `tuple[float | None, str]`, not a nullable whole tuple; borders are `tuple[str, float] | None`, widths are `list[float]`, and spacing is a three-float tuple. Existing setters keep their bodies and input normalization: column widths accept `Iterable[float]`, while heterogeneous list inputs use conservative element unions and retain runtime positional validation. Already typed paragraph/row setter arguments receive explicit `None` returns. No aliases, exports, methods or native changes are required. Unsupported PPTX row flags and auto/exact height modes remain unsupported. Cross-format range-link types and other property/method annotations remain separate API3 work.
+
+
+## 114. Reviewed native per-call rendering errors
+
+Use the explicitly identified DeckCraft contribution fork for all ten selected transitive/direct crates at one immutable revision, keeping PdfCraft, WordCraft and craft-libs fixed. The six-file native change retains successful rendering and adds typed per-call render errors plus PDF propagation; the original renderer and PDF algorithms remain native. No application or new runtime dependency is linked.
+
+The adapter replaces only its existing production render call with try_render_slide and maps its error to private EngineError::Rendering. Existing `_native` explicitly maps rendering_failure to DocExError. PDF export retains conversion_failure. DPI/index/size/region/RGBA/PNG metadata checks, retained-session ownership and request counters remain in their original order. Actual nested callbacks reach the production full/clip/session/PNG and PDF paths; no injectable API or private encoder abstraction is added.
+
+Current support citations update only the DeckCraft repository/revision and selected renderer symbols after native-file audit. Historical artifact references, fixture hashes, operation statuses and scope statements remain historical evidence. Package tests exercise reachable Busy; caught Panicked and thread isolation are separately proven by the native contribution tests. No claim covers process aborts, universal allocation limits or other renderer entry points.

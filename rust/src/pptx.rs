@@ -334,7 +334,7 @@ fn render_with(
             deckcraft_render::MAX_SIDE,
         )?;
     }
-    let image = deckcraft_render::render_slide(
+    let image = deckcraft_render::try_render_slide(
         presentation,
         page,
         &deckcraft_render::RenderOpts {
@@ -345,7 +345,8 @@ fn render_with(
             size: region.map(|region| (region.width, region.height)),
             ..deckcraft_render::RenderOpts::default()
         },
-    );
+    )
+    .map_err(|error| EngineError::Rendering(format!("PPTX rendering failed: {error}")))?;
     if let Some(region) = region {
         region.validate_result(image.width, image.height)?;
     }
@@ -1352,3 +1353,6 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod render_failure_tests;
