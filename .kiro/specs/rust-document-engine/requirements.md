@@ -896,3 +896,11 @@ The pinned reference inventory SHALL distinguish implemented bounded operations 
 2. Built-in point/boxed text and bounded PNG/JPEG image insertion SHALL retain current geometry, wrapping/alignment, crop/quarter-turn/flips, source accounting, transactional staging and resource-preservation checks. Supplied-font text with behind=True SHALL refuse before reading caller font data; native boxed-font combinations SHALL also refuse. Raw draw_path remains overlay-only.
 3. Open/current page checks SHALL precede callbacks and be repeated after normalization/source reads. Preserve existing ordinary content edits inside callbacks, while close or page organization makes the outer operation fail without retargeting. Invalid flags SHALL not invoke arbitrary bool conversion or source reads. Failed native edits SHALL preserve bytes, counters and warm snapshots.
 4. Verify actual visible placement and opaque hiding, exact source text/link/image preservation, source/copy independence, current-page transforms, save/reopen, defaultfalse equivalence, resource collisions, bounds and lifetime semantics. Require full combined native/installed/independent/typing gates before delivery. Broader PDF3/U10 and unsupported raw-path/supplied-font composition remain open.
+
+
+## 125. Existing reporting and error-corpus acceptance
+
+1. Audit original roadmap clauses against exact existing implementation, source and installed-artifact evidence before changing checkboxes. Close only API7/QA6/QA8 as current reporting/representative-corpus gates; retain all original criterion clauses and explicit limits.
+2. Preserve every existing support profile, operation status, historical artifact and fixture fingerprint. Correct stale current profile-count prose without rewriting historical evidence. API1/QA1, R4/P4/U09, QA7 and other incomplete behavioral criteria SHALL remain open.
+3. Use the existing ledger, roadmap joins and published matrices; add no runtime query framework, engine, dependency or second completion database. Document source-audited offline/in-process architecture separately from dynamic sandbox or exhaustive hostile-input certification.
+4. Reuse the exact reviewed452-native/two568-installed artifact evidence; run documentation/source consistency and site-link checks after changes, without claiming a new native build or runtime test run.

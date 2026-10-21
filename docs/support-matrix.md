@@ -487,7 +487,7 @@ Owners, roles and checkboxes below come from existing roadmap files. A checked c
 | API4: Define units, colors, and coordinates. | W01 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | API5: Specify collections and ownership. | W03 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | API6: Specify mutation semantics. | W03 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
-| API7: One support inventory and useful errors. | W01 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
+| API7: One support inventory and useful errors. | W01 / implementation | checked | — | Unassessed: complete reference/member and operation dispositions remain under API1/QA1. The current one-ledger/reporting/error mechanism is accepted by spec125; this does not certify additional operations. |
 | API8: Keep the facade independent. | W03 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | API9: Document image interoperability. | W13 / recipe | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | API10: Test API usability. | W01 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
@@ -598,6 +598,6 @@ Owners, roles and checkboxes below come from existing roadmap files. A checked c
 | QA3: Round-trip tests. | W14 / acceptance | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | QA4: Rendering/export checks. | W14 / acceptance | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | QA5: Independent validity evidence. | W14 / acceptance | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
-| QA6: Error and hostile-input corpus. | W14 / acceptance | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
+| QA6: Error and hostile-input corpus. | W14 / acceptance | checked | — | Unassessed: exhaustive hostile-input/allocation/platform guarantees remain separate. The representative malformed/invalid/stale/nesting/media/save-failure corpus is accepted by spec125. |
 | QA7: Performance and distribution budgets. | W14 / acceptance | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
-| QA8: Publish honest support matrices. | W01 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
+| QA8: Publish honest support matrices. | W01 / implementation | checked | — | Unassessed: wider format/member parity remains open. Current honest reporting, explicit partial/unassessed scope and runnable-versus-proposed documentation are accepted by spec125. |

@@ -824,3 +824,10 @@ The two existing methods accept behind: bool=False. The facade validates actual 
 Supplied-font point text remains on its existing raw-stamp entrypoint, which has no placement argument. The facade rejects behind=True before reading a font, and boxed-font native dispatch rejects that combination explicitly. Ordinary callback-driven content edits retain existing semantics; callbacks that close or organize pages still fail the outer operation through the existing generation checks. Underlays A then B paint B, A, original. Opaque originals can hide them while their text remains extractable.
 
 Adding defaultfalse PyO3 parameters requires53 mechanical trailingfalse arguments at existing Rust test callsites. A token audit removes only those arguments and the new test include: all previous argument tokens and all other historical test tokens match. Python historical fixtures and dependencies remain unchanged. Three new native groups and four public workflows cover the actual adapter; the discrete transform matrix does not imply every parameter combination or general pixel-perfect composition.
+
+
+## 125. Criterion closure without capability promotion
+
+The acceptance audit compares the original ece6c85 wording with the tested source. API7 concerns one support-inventory/error mechanism, QA8 honest publication and sketch/recipe separation, and QA6 the enumerated representative malformed/edit/ownership/nesting/media/save corpus. None requires every operation to be implemented or a universal safety proof. Existing per-operation statuses and unassessed remainder fields remain unchanged apart from explanatory joins for these three gates; API1/QA1 still own completeness.
+
+One evidence document links exact selectors and historical validation. TODO checkboxes remain the only completion source, and the existing matrix generator derives their status. Volatile seven/nineteen profile descriptions are replaced by current generated-inventory links. Existing native/resource constraints and platform/font limitations are not narrowed or removed.

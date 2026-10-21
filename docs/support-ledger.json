@@ -3089,7 +3089,7 @@
     },
     "API7": {
       "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "remaining": "Unassessed: complete reference/member and operation dispositions remain under API1/QA1. The current one-ledger/reporting/error mechanism is accepted by spec125; this does not certify additional operations."
     },
     "API8": {
       "profiles": [],
@@ -3582,7 +3582,7 @@
     },
     "QA6": {
       "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "remaining": "Unassessed: exhaustive hostile-input/allocation/platform guarantees remain separate. The representative malformed/invalid/stale/nesting/media/save-failure corpus is accepted by spec125."
     },
     "QA7": {
       "profiles": [],
@@ -3590,7 +3590,7 @@
     },
     "QA8": {
       "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "remaining": "Unassessed: wider format/member parity remains open. Current honest reporting, explicit partial/unassessed scope and runnable-versus-proposed documentation are accepted by spec125."
     }
   }
 }

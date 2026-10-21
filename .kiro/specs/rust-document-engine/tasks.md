@@ -1030,3 +1030,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete both clean installed 568-test combined artifact runs, with zero failures/errors/skips.
 - [x] Promote only verified partial typed-underlay operation evidence; preserve historical fingerprints and separately verify the documentation-only profile-count migration.
 - [ ] Complete current-head CI/manual merge. Raw-path/supplied-font underlays and broader PDF3/U10 remain open.
+
+
+## Existing reporting and error-corpus gates (spec125)
+
+- [x] Compare all139 criteria and original ece6c85 clauses with reviewed source; independently review API7/QA6/QA8 candidate mappings. Defer TXT1 and all other incomplete criteria.
+- [x] Link exact existing representative error/ownership/budget/save fixtures and452-native/two568-installed evidence without inventing new runtime acceptance.
+- [x] Mark only the three reporting/corpus gates, preserve original clauses, correct stale current profile prose and retain all historical operation evidence.
+- [x] Pass27documentation tests, exact464-file source/test/vendor/attribution comparison, existing inventory checks and30pages/1,850site links.
+- [x] Complete final independent original-clause/checklist/JSON/source/documentation review.
+- [ ] Complete current-head CI/manual merge. No runtime/fixture/dependency change is part of this slice.
