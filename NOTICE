@@ -30,10 +30,10 @@ Copyright (c) 2026 ArtCraft Team and the DeckCraft contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option.
 Upstream source: https://github.com/storytold/deckcraft
 Reviewed contribution fork: https://github.com/narain1/deckcraft
-Pinned revision: c9c7fff189c808bf7266d0b888c3636a1880080d
-Reviewed contribution parent: dd4fd70b6347dd2ce782e33f030a2b6c0abb0106
+Pinned revision: 16de1ca86058a96f1194c2ddc3a090c7f63f2640
+Reviewed contribution parent: c9c7fff189c808bf7266d0b888c3636a1880080d
 Original upstream base: 22db9261f9d1a214c296fd390173130c45d76d66
-The reviewed contributions retain fallible slide rendering and PDF error propagation, and preserve logical line-break offsets in selectable slide text and notes/handout master text. It changes no bundled assets or licensing and is not represented as upstream acceptance.
+The reviewed contributions retain fallible slide rendering and PDF error propagation, preserve logical line-break offsets in selectable slide text and notes/handout master text, and add bounded native same-presentation slide copying with fresh identities and explicit unsupported-profile refusal. It changes no bundled assets or licensing and is not represented as upstream acceptance.
 
 craft-libs PDF backend
 Copyright (c) 2026 ArtCraft Team and craft-libs contributors.
