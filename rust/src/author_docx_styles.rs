@@ -148,6 +148,7 @@ impl Walk<'_> {
                     self.charge(p.objects.len())?;
                     for object in &p.objects {
                         match object {
+                            object if shapes::supported(object) => (),
                             InlineObject::Image { ole: None, .. }
                             | InlineObject::NoteRef { .. }
                             | InlineObject::BookmarkStart { .. }

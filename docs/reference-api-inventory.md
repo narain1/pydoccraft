@@ -4,7 +4,7 @@
 
 This comparison groups related reference members under existing Python handles and formatting properties. It is not an exhaustive member inventory, implementation test, or format-conformance claim. Open XML schema/model APIs do not establish pagination or rendering. Reference products are not runtime dependencies.
 
-Audited local surface: `58c1eaa53f5b37bb167958d8d6a059c2c9603a7c`. The inventory contains 44 families and 198 representative members from 17 pinned source files. Later implementation changes require review.
+Audited local surface: `b23d8954d1e75e041add8473b8b56662614b66ae`. The inventory contains 44 families and 198 representative members from 17 pinned source files. Later implementation changes require review.
 
 - [dotnet/Open-XML-SDK v3.5.1](https://github.com/dotnet/Open-XML-SDK/tree/3139fdfd27414548a41555f7848d5728f6e71a42) — `3139fdfd27414548a41555f7848d5728f6e71a42`
 - [pymupdf/PyMuPDF 2.0](https://github.com/pymupdf/PyMuPDF/tree/b8904b27efa0c4e2258f0e46ab4498a6173ffa22) — `b8904b27efa0c4e2258f0e46ab4498a6173ffa22`
@@ -275,11 +275,13 @@ Drawing fills, shapes, text boxes and groups.
 
 **Criteria / owners:** MED4 (W06), MED5 (W06), BG7 (W06), PDF3 (W10), SLIDE3 (W11)
 
-**Audited local surface:** Existing PDF path primitives and PPTX shapes/text/backgrounds; no duplicate shape-building framework.
+**Audited local surface:** Existing PDF path primitives and PPTX shapes/text/backgrounds; bounded owned DOCX rectangle/ellipse creator and private handle reuse Picture placement vocabulary without a second geometry framework..
 
-**Disposition:** `implemented_subset`. **Remaining:** DOCX arbitrary drawing/textbox/group editing unassessed; PDF underlay API lacks public placement option; render-transparent backdrop differs from authored fill.
+**Disposition:** `implemented_subset`. **Remaining:** DOCX lines/textboxes/group/rotation/front/auxiliary/imported editing and rich-text visible coverage remain unavailable or unassessed; PDF underlay API lacks public placement option; render-transparent backdrop differs from authored fill.
 
 **Upstream candidates:** [U04](upstream-roadmap.md), [U10](upstream-roadmap.md), [U11](upstream-roadmap.md)
+
+**Evidence profiles:** [word.closed-shapes](support-matrix.md#wordclosed-shapes)
 
 ## REF-OX-THEMES
 

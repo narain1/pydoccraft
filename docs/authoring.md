@@ -835,3 +835,28 @@ Deletion removes one unused custom paragraph, character or table definition. Bui
 A deleted Style handle remains invalid even if its name or ID becomes another style's display name. Existing name lookup still selects the current style. Copies retain independent identity history. A successful deletion invalidates revision-bound ranges and cached rendering; unrelated paragraph/table/picture/style handles remain valid. Conversion callbacks cannot redirect the outer style operation.
 
 A document has a lifetime budget of 1024 named style IDs including builtins: deleted IDs stay reserved, so deleting a style does not replenish that budget. Copies inherit the reservation history; it is not serialized into DOCX. Capacity/work limits raise the existing UnsafeArchiveError. These safeguards support unused-only deletion; STY6 style import and general cleanup remain open.
+
+
+## Owned DOCX rectangles and ellipses
+
+```python
+word = doc_ex.new("docx", size=(300, 300))
+word.sections[0].margins = 30
+shape = word.add_shape("rectangle", width=60, height=30,
+                       fill="red", stroke="blue", stroke_width=2)
+shape.format(wrap="behind", anchor="page", position=(80, 100))
+shape.size = (80, 40)
+shape.stroke = ("navy", 1)
+shape.fill = None
+for shape in word.shapes:
+    print(shape.kind, shape.size, shape.formatting)
+del word.shapes[0]
+```
+
+`WordDocument.add_shape("rectangle" | "ellipse", *, width, height, fill=None, stroke=None, stroke_width=1)` appends an inline native closed shape and returns an owned handle. `kind` is read-only; `size`, `fill` and `stroke` are writable. Colors accept the existing names/hex/RGB forms and read back as hex strings; `None` clears fill or stroke. Clearing both makes an intentionally invisible shape. Width and height use 1–4000 points in 0.05-point increments, subject to native column and physical-page bounds. Outlines use 0.25–100 points and cannot exceed the smaller shape dimension. Values outside that profile fail explicitly; they are never clamped.
+
+The existing Picture placement vocabulary is shared: `format(wrap=..., anchor=..., position=..., distance=...)` and its owned `formatting` snapshot. Floating wraps are `square`, `top_bottom` and `behind`; `page`/`margin` anchor both axes together, while `paragraph` follows the native column/paragraph pair. Horizontal distances must match. Native layout supplies the physical placement, including mirrored margins and columns. The complete outline must fit the physical page; every later edit and output rechecks geometry, placement cardinality and unchanged requested dimensions. Shape editing can therefore reject a later paragraph/page/style change that would clip a shape.
+
+`word.shapes` supports ordinary iteration, negative indexing, slices and single-item deletion. Its IDs survive surrounding paragraph/table edits; copies have independent owners. Deletion retains the native empty paragraph and any section boundary, like picture deletion. The deleted shape handle stays invalid even after new shapes are added. No shape movement, separate manager, second box/position representation or public handle class is added.
+
+This profile covers direct owned body shapes in horizontal sections. Lines, text boxes, rotated shapes, front layering, groups, effects, imported editing and header/footer/cell/note shapes remain unavailable. Existing non-top section-alignment restrictions still apply. `layoutInCell` and `allowOverlap` remain upstream writer behavior, not configurable guarantees. Shapes do not become fake extracted text or images: semantic extraction retains its existing `shape_geometry_omitted` document diagnostic, while rendering uses native geometry. MED4 remains open for the excluded functionality; see [upstream shape evidence](upstream-roadmap.md#docx-closed-shapes-and-text-boxes).

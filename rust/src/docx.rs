@@ -2420,3 +2420,7 @@ mod imported_property_tests {
 #[cfg(test)]
 #[path = "docx/stroke_regression_tests.rs"]
 mod stroke_regression_tests;
+
+#[cfg(test)]
+#[path = "docx_closed_shape_proof.rs"]
+mod closed_shape_proof;

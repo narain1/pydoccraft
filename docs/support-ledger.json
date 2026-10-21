@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "audited_commit": "e8c795f2b45835cd94b0588979aca0461f4cfee4",
+  "audited_commit": "b23d8954d1e75e041add8473b8b56662614b66ae",
   "references": {
     "pdfcraft": {
       "revision": "645016addcfb9078c557f0189559ab47cdcee057",
@@ -125,6 +125,13 @@
       "kind": "artifact",
       "source_commit": "5ec49683832754faa5d1f5200108995077b2500b",
       "date": "2026-10-21"
+    },
+    "word-closed-shapes-2026-10-21": {
+      "kind": "artifact",
+      "validation": ".kiro/specs/rust-document-engine/validation.md#corrected-closed-shape-integration-artifact--final-installed-acceptance",
+      "wheel_sha256": "fa92abce09a6bb4af09c3ba2ae802ff9e57e3ab99249ffb933c5be8c8e5673fa",
+      "source_commit": "b23d8954d1e75e041add8473b8b56662614b66ae",
+      "date": "2026-10-21"
     }
   },
   "test_sources": {
@@ -150,7 +157,8 @@
     "tests/test_note_conversion.py": "4d9fbcb9330d703c8643e42fdcbce9d72126d0a16ecf3df91533f771a281dbd0",
     "tests/test_slide_background_reset.py": "a76f9249da5695435353315417936c88c3a4ebf209ec41a7bf20e24af1c1f7f1",
     "tests/test_note_clear.py": "c1db35d457f3a637cf6e9e85d7faad86e49614796702224e0870d51264e5c10c",
-    "tests/test_annotation_opacity.py": "2f94b75b40b1b720a3ee1b5be9afce7ae84f8ecf3cdf32353c0db85f2f97d5bd"
+    "tests/test_annotation_opacity.py": "2f94b75b40b1b720a3ee1b5be9afce7ae84f8ecf3cdf32353c0db85f2f97d5bd",
+    "tests/test_word_shapes.py": "ecd2a290b72931b53022ebfe5076503f032508a72ebd3ee25daaf3cbb3b9ebc1"
   },
   "profiles": [
     {
@@ -2596,6 +2604,219 @@
       },
       "adapter_sources": {},
       "fixture_provenance": "No local package fixture because the operation is absent. Native source fixture crates/redact/src/tests.rs::vertical_writing_text_under_a_mark_fails_closed constructs the failure case; inspected at the pinned revision, not rerun by this ledger validation."
+    },
+    {
+      "id": "word.closed-shapes",
+      "format": "docx",
+      "scope": "owned direct-body unrotated Rectangle/Ellipse in horizontal sections. Dimensions1\u20134000pt in0.05pt increments; outline0.25\u2013100pt and no wider than min(width,height); full outline must fit its physical page and inline width its column. Only native inline/square/top-bottom/behind placement with exact Page/Page, Margin/Margin or Column/Paragraph anchors. No imported editing, lines, textboxes, rotation/front/groups/effects or auxiliary/cell shapes. Existing non-top alignment and rendering resource limits remain.",
+      "public_members": [
+        "WordDocument.add_shape",
+        "WordDocument.shapes",
+        "shape.kind",
+        "shape.size",
+        "shape.fill",
+        "shape.stroke",
+        "shape.format",
+        "shape.formatting",
+        "del word.shapes[index]"
+      ],
+      "adapter_sources": {
+        "src/doc_ex/_authoring.py": [
+          "WordDocument",
+          "_WordShapes",
+          "_WordShape",
+          "_format_placement"
+        ],
+        "rust/src/author_docx_shapes.rs": [
+          "supported",
+          "inventory",
+          "registry",
+          "add",
+          "update",
+          "remove",
+          "page_bounds"
+        ],
+        "rust/src/author_docx.rs": [
+          "commit_validated",
+          "validate_unsplittable_page_bounds_with_comments"
+        ],
+        "rust/src/author_docx_styles.rs": [
+          "shapes"
+        ]
+      },
+      "native_sources": {
+        "model": {
+          "reference": "wordcraft",
+          "path": "crates/doc/src/para.rs",
+          "symbols": [
+            "InlineObject",
+            "ShapeKind",
+            "Float",
+            "Paragraph::insert_object",
+            "Paragraph::delete"
+          ]
+        },
+        "edit": {
+          "reference": "wordcraft",
+          "path": "crates/doc/src/edit.rs",
+          "symbols": [
+            "Document::insert_block",
+            "Document::remove_block"
+          ]
+        },
+        "layout": {
+          "reference": "wordcraft",
+          "path": "crates/layout/src/lib.rs",
+          "symbols": [
+            "layout",
+            "Placed::Object"
+          ]
+        },
+        "display": {
+          "reference": "wordcraft",
+          "path": "crates/layout/src/display.rs",
+          "symbols": [
+            "Draw::Shape",
+            "page_display"
+          ]
+        },
+        "read": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/read/story.rs",
+          "symbols": [
+            "read_wsp"
+          ]
+        },
+        "write": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/write/mod.rs",
+          "symbols": [
+            "write"
+          ]
+        },
+        "write_shape": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/write/story.rs",
+          "symbols": [
+            "Writer::object",
+            "shape_name"
+          ]
+        },
+        "render": {
+          "reference": "wordcraft",
+          "path": "crates/render/src/lib.rs",
+          "symbols": [
+            "render_page"
+          ]
+        },
+        "pdf": {
+          "reference": "wordcraft",
+          "path": "crates/pdf/src/lib.rs",
+          "symbols": [
+            "export_layout"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic public authored rectangle/ellipse and native coupled-anchor/primitive fixtures. Exact source/handle/copy/deletion/callback controls, DOCX ZIP/native readback,2pt outline/fill native-versus-PDF full-page colors at72/144/300DPI, body links/table/note-story/image preservation, document shape_geometry_omitted diagnostic and native malformed/budget/locator tests. Separate116 native upgrade evidence supplies0.25/2/100pt corners/outlines and bounded min-dimension ratio cases; it must be cited as native evidence, not described as public full-range tests. No independent Microsoft Word acceptance or arbitrary imported-shape preservation.",
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "owned handles read supported properties; reopened semantic extraction omits shape geometry with its existing document diagnostic and does not fabricate image/text geometry. Native DOCX readback checks selected properties; this is not general shape extraction.",
+          "artifact": "word-closed-shapes-2026-10-21",
+          "tests": [
+            "tests/test_word_shapes.py::WordShapeTests.test_source_order_exact_handles_copy_deletion_and_closed_owner",
+            "tests/test_word_shapes.py::WordShapeTests.test_inline_and_native_placement_docx_png_pdf_at_three_dpis",
+            "tests/test_word_shapes.py::WordShapeTests.test_composition_tables_styles_links_notes_images_and_source_identity"
+          ],
+          "native": [
+            "model",
+            "read"
+          ]
+        },
+        "create": {
+          "status": "partial",
+          "scope": "append native inline rectangles/ellipses with optional solid fill/outline, serialized through native DOCX writer; bounded factory/placeholder/resource checks. Other shape kinds/contexts remain excluded.",
+          "artifact": "word-closed-shapes-2026-10-21",
+          "tests": [
+            "tests/test_word_shapes.py::WordShapeTests.test_source_order_exact_handles_copy_deletion_and_closed_owner",
+            "tests/test_word_shapes.py::WordShapeTests.test_inline_and_native_placement_docx_png_pdf_at_three_dpis",
+            "tests/test_word_shapes.py::WordShapeTests.test_strict_values_failed_mutations_cache_revision_and_full_stroke"
+          ],
+          "native": [
+            "model",
+            "edit",
+            "write",
+            "write_shape"
+          ]
+        },
+        "edit_authored": {
+          "status": "partial",
+          "scope": "resize/recolor/change solid outline or shared placement, delete one shape retaining its paragraph/section, and retain surviving identities around body table/paragraph edits. Exact ownership, callback revision, full-outline and orientation guards reject unsafe changes atomically. No movement/text/rotation manager.",
+          "artifact": "word-closed-shapes-2026-10-21",
+          "tests": [
+            "tests/test_word_shapes.py::WordShapeTests.test_source_order_exact_handles_copy_deletion_and_closed_owner",
+            "tests/test_word_shapes.py::WordShapeTests.test_strict_values_failed_mutations_cache_revision_and_full_stroke",
+            "tests/test_word_shapes.py::WordShapeTests.test_conversion_callbacks_cannot_retarget_or_delete_changed_owner",
+            "tests/test_word_shapes.py::WordShapeTests.test_composition_tables_styles_links_notes_images_and_source_identity",
+            "tests/test_word_shapes.py::WordShapeTests.test_paragraph_anchor_wrap_mirroring_columns_and_section_rejection"
+          ],
+          "native": [
+            "model",
+            "edit",
+            "layout"
+          ]
+        },
+        "edit_imported": {
+          "status": "unsupported",
+          "scope": "Owned Office models do not adopt arbitrary imported shape graphs, stories or relationship identities."
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "retain demonstrated body text/external URL/bookmark/table/note story/image, unrelated handles, copies and empty section anchors through supported edits. Do not claim opaque/imported shape parts or arbitrary rich-text-box preservation.",
+          "artifact": "word-closed-shapes-2026-10-21",
+          "tests": [
+            "tests/test_word_shapes.py::WordShapeTests.test_source_order_exact_handles_copy_deletion_and_closed_owner",
+            "tests/test_word_shapes.py::WordShapeTests.test_composition_tables_styles_links_notes_images_and_source_identity",
+            "tests/test_word_shapes.py::WordShapeTests.test_conversion_callbacks_cannot_retarget_or_delete_changed_owner"
+          ],
+          "native": [
+            "model",
+            "edit",
+            "read",
+            "write"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "native PNG of supported source/reopened rectangles/ellipses;2pt public outline/fill placement controls at72/144/300DPI. Separate116 native cap/join+ratio evidence required for bounded outline range. Finite exact dimension/cardinality/full-outline guards and output limits remain; no pixel-perfect claim.",
+          "artifact": "word-closed-shapes-2026-10-21",
+          "tests": [
+            "tests/test_word_shapes.py::WordShapeTests.test_inline_and_native_placement_docx_png_pdf_at_three_dpis",
+            "tests/test_word_shapes.py::WordShapeTests.test_strict_values_failed_mutations_cache_revision_and_full_stroke",
+            "tests/test_word_shapes.py::WordShapeTests.test_paragraph_anchor_wrap_mirroring_columns_and_section_rejection"
+          ],
+          "native": [
+            "layout",
+            "display",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "partial",
+          "scope": "native DOCX-to-PDF export, reopened PDF text/links/table/note and selected color geometry compared to source PNG. Same bounded range and116 native evidence prerequisite; no new conversion pair or general drawing fidelity guarantee.",
+          "artifact": "word-closed-shapes-2026-10-21",
+          "tests": [
+            "tests/test_word_shapes.py::WordShapeTests.test_inline_and_native_placement_docx_png_pdf_at_three_dpis",
+            "tests/test_word_shapes.py::WordShapeTests.test_composition_tables_styles_links_notes_images_and_source_identity",
+            "tests/test_word_shapes.py::WordShapeTests.test_paragraph_anchor_wrap_mirroring_columns_and_section_rejection"
+          ],
+          "native": [
+            "pdf",
+            "layout",
+            "render"
+          ]
+        }
+      }
     }
   ],
   "coverage": {
@@ -2966,8 +3187,10 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "MED4": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "word.closed-shapes"
+      ],
+      "remaining": "Unassessed: lines, rich textboxes/source coverage, front/rotated/group/effect geometry, auxiliary/cell/imported editing, general fill/border/parity and arbitrary native drawing preservation. Bounded direct-body Rectangle/Ellipse does not close MED4."
     },
     "MED5": {
       "profiles": [],
