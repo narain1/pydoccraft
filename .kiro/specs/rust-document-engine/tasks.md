@@ -975,7 +975,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [ ] Complete current-main CI before manual merge.
 - [x] Dispatch initial immutable baseline39580637011 without publication; preserve actual Windows/macOS failures.
 - [x] Independently review UTF-8/LF/actual-mode portability corrections and deliberately migrate only the affected save-test fingerprint.
-- [ ] Execute corrected portability tests on Windows; diagnose native font/raster/pagination differences with unchanged assertions.
+- [x] Execute corrected portability tests on Windows; retain measured native font/raster/pagination diagnostics and reviewed fixture changes.
 - [ ] Inspect every platform/Python corpus and fix failures before treating cross-platform validation as complete.
 - [ ] Retain final versioned release validation; this infrastructure change does not complete QA7 or authorize a premature release.
 
@@ -1027,5 +1027,5 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Preserve original cross-platform failures and execute separate original/named-font diagnostic controls.
 - [x] Independently review explicit-font/positive-ink fixture changes and deliberate letterhead golden updates with unchanged thresholds.
 - [x] Record scoped Linux output evidence and migrate only the two affected additional source fingerprints.
-- [ ] Complete actual Windows/macOS candidate output and full installed corpus before accepting the portable fixture profile.
-- [ ] Retain default-font/native isolation limitations under existing U02/STY5; do not mark broad fidelity or release complete.
+- [x] Complete actual Linux/Windows/macOS candidate full installed corpora: 556 tests each pass against exact retained wheels in run39589067301.
+- [x] Retain default-font/native isolation limitations under existing U02/STY5; broad fidelity and final release remain open.
