@@ -703,5 +703,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reuse Picture.format/formatting with bounded native patching, canonical lengths, ownership/revision callbacks and existing one-layout geometry preflight.
 - [x] Add focused native/public workflows for output, wrapping, transforms, identity, reset, rollback, later geometry and callbacks; document upstream front paint-order and overlap/layoutInCell prerequisites.
 - [x] Complete six native groups, five new plus28 related copied-package tests, fmt/Clippy/debug build, strict typing and static-site/roadmap checks; record exact artifact evidence.
-- [ ] Complete integrated locked full native/release/installed-wheel corpus, independent review and current-main CI before manual merge.
+- [x] Complete integrated locked full native/release/installed-wheel corpus and independent artifact review: 349 native and 490 installed Python tests.
+- [ ] Complete final exact-head/current-main CI and manual merge for picture placement.
 - [ ] Keep full MED2/BG2–BG5, front/contours/nested scope, opacity/rotation and independent layering/overlap controls open.
