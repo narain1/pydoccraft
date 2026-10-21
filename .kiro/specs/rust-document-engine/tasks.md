@@ -734,5 +734,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Execute raw native body/header/footer, merged/nested, required-blank and authored-empty identity/output proofs before adapter implementation.
 - [x] Extend existing deletion with container-relative locator/sentinel maintenance and unchanged section/reference/resource guards; verify four focused native groups.
 - [x] Complete 13 related native tests, fmt/Clippy/debug build, 19 copied-package public deletion/identity workflows and 27 support/reference/roadmap checks; record exact evidence.
-- [ ] Complete independent review, integrated locked release/full corpus and exact-head CI before manual merge.
+- [x] Complete integrated locked release/full corpus and independent artifact review: 355 native and 498 installed Python tests.
+- [ ] Complete final exact-head/current-main CI and manual merge for cell paragraph deletion.
 - [ ] Keep broader DOC5/TXT1 composition, cell movement, imported editing and PPTX deletion open.
