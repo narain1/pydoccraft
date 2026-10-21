@@ -527,3 +527,21 @@ Text boxes remain blocked on exact visible source coverage: a raw 80-token overf
 
 
 U02/STY5/QA4 platform evidence: validation-only run39580637011 exposes different DOCX pagination and visible text assumptions across Linux, macOS and Windows. The selected WordCraft [global database](https://github.com/narain1/wordcraft/blob/f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef/crates/fonts/src/fontdb.rs#L947) catalogs installed system fonts, and [family resolution](https://github.com/narain1/wordcraft/blob/f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef/crates/fonts/src/word.rs#L214) prefers available requested/substitute families. This strengthens the existing scoped-font-context priority; it does not establish that every observed raster difference has the same cause. Explicit-font fixture controls and native output diagnostics are underway. Keep original failed artifacts, selected-face provenance and platform-specific outcomes; do not compensate with local layout or relax raster assertions. No new U-owner, font manager, global registry switch or runtime feature is introduced.
+
+
+## PdfCraft final integer raster budget (spec117)
+
+The reviewed [contribution fork](https://github.com/narain1/pdfcraft/commit/60a8d7998b64c7718e08e9054e99f1f2eb1eda8d), directly based on upstream645016, adds a final integer width-times-height check before the native pixel buffer allocation. Ordinary and strict whole-page requests whose rounded size exceeds64,000,000 pixels now return a normal error; accepted geometry/pixels and bounded tiles retain native behavior. This is a published contribution fork, not upstream acceptance or a total process-memory guarantee.
+
+The original continuous-area calculation admits an8000.5×7999.5-point page at72DPI, but its rounded8001×8000 raster exceeds the budget. Allocation-intercepted native tests safely prove the original real allocator attempt and corrected rejection, plus exact-cap admission without allocating256MB. Normal small raster bytes, tiles, invalid-input paths and parser reuse are covered separately. The pydoccraft adapter already rejected the oversized request before invoking native rendering; its existing public limit tests and stable exceptions remain unchanged.
+
+U09/R4 remain open for broader work/allocation bounds, structured errors and other entry points. This upgrade changes no public API, font asset, serializer or Office engine pin. Earlier pinned-source audit links remain historical evidence; current source identities and validation are recorded in the dependency and validation ledgers.
+
+
+## Typed PDF content placement (spec119; U10/PDF3)
+
+The reviewed [native contribution](https://github.com/narain1/pdfcraft/commit/516caea956c0aaf15f2bd1f35a15e07c73a9ead6), directly based on the reviewed60a8d799 raster-budget contribution, exposes Placement and add_content_with_placement for typed content. It is a contribution fork, not upstream acceptance. Private placement returns the exact new object reference so metadata and current-index discovery do not assume an appended stream. Existing overlay add_content and raw stamping retain their behavior; raw stamping remains overlay-only. Consecutive underlays A then B draw B, A, original, and prior page-local indexes shift. Updates replace the selected stream in place; deletion removes it and preserves surviving relative order. Callers refresh positional indexes.
+
+The native source gate passed original170/candidate174 tests, including four new identity/order/update/delete/save/reopen groups. The unchanged legacy overlay produced128 byte-identical baseline artifacts. Visible positive/negative image and glyph controls cover34 scenarios, two save forms and72/144/300DPI (204 renders);102 incremental/full raster pairs and all204 independent replay rasters match. A forced-overlay mutant fails three of the four new groups, demonstrating sensitivity to the placement behavior. Native manifests, lock and assets remain unchanged.
+
+The dedicated pydoccraft upgrade adds no Python underlay API and retains existing transaction/resource safeguards. Typed placement does not solve fixed-name resource collisions, bounded generic raw-stream validation or a stable Python added-item handle model. Opaque original content may hide an underlay. These limitations remain under U10/PDF3; broader vector/background completion is not claimed.

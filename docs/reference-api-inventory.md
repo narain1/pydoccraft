@@ -4,7 +4,7 @@
 
 This comparison groups related reference members under existing Python handles and formatting properties. It is not an exhaustive member inventory, implementation test, or format-conformance claim. Open XML schema/model APIs do not establish pagination or rendering. Reference products are not runtime dependencies.
 
-Audited local surface: `b23d8954d1e75e041add8473b8b56662614b66ae`. The inventory contains 44 families and 198 representative members from 17 pinned source files. Later implementation changes require review.
+Audited local surface: `c0b1caf64ac487caa9c9d21c513fd8972768c24a`. The inventory contains 44 families and 198 representative members from 17 pinned source files. Later implementation changes require review.
 
 - [dotnet/Open-XML-SDK v3.5.1](https://github.com/dotnet/Open-XML-SDK/tree/3139fdfd27414548a41555f7848d5728f6e71a42) — `3139fdfd27414548a41555f7848d5728f6e71a42`
 - [pymupdf/PyMuPDF 2.0](https://github.com/pymupdf/PyMuPDF/tree/b8904b27efa0c4e2258f0e46ab4498a6173ffa22) — `b8904b27efa0c4e2258f0e46ab4498a6173ffa22`
@@ -37,9 +37,9 @@ Ordered body/rich text and editing.
 
 **Criteria / owners:** DOC5 (W04), TXT1 (W04), TXT4 (W04), TXT7 (W07), TXT8 (W07), FORM1 (W13), FORM2 (W13), C5 (W13)
 
-**Audited local surface:** Paragraph.text/add_run/find/replace_text/slices; native explicit breaks; ordinary recipes.
+**Audited local surface:** Paragraph.text/add_run/find/replace_text/slices; native explicit breaks; bounded owned DOCX paragraph deletion and same-container movement; PPTX same-cell paragraph deletion/movement reuse the collection.
 
-**Disposition:** `implemented_subset`. **Remaining:** Top-level insertion/deletion/move needs stable locator redesign; cross-document Fragment does not remap the complete resource/semantic graph. Decimal/bar tabs remain rejected.
+**Disposition:** `implemented_subset`. **Remaining:** Append+move composes bounded paragraph insertion; arbitrary block-gap insertion and cross-container adoption remain unavailable. Cross-document Fragment does not remap the complete resource/semantic graph. DOCX movement retains stable paragraph identities, while PPTX movement invalidates ordinal handles in the changed cell. Decimal/bar tabs remain rejected.
 
 **Upstream candidates:** [U02](upstream-roadmap.md)
 
@@ -155,9 +155,9 @@ Page dimensions, margins, columns and section transitions.
 
 **Criteria / owners:** LAY1 (W06), LAY2 (W06), LAY4 (W06), LAY8 (W06)
 
-**Audited local surface:** Section page_size/margins/gutter/columns/column_widths/start; stable sections collection.
+**Audited local surface:** Section page_size/margins/gutter/columns/column_widths/start; stable sections collection; document-wide mirror_margins and bounded section vertical_alignment reuse native layout.
 
-**Disposition:** `implemented_subset`. **Remaining:** Per-column gap control, mirrored/top gutters and detailed layout inspection are not covered by current profile; avoid redundant orientation API.
+**Disposition:** `implemented_subset`. **Remaining:** Per-column gap and top-gutter controls, broader vertical-alignment contexts and detailed layout inspection remain open. Mirrored margins are document-wide, not a section override; no redundant orientation API is needed.
 
 **Upstream candidates:** [U04](upstream-roadmap.md), [U05](upstream-roadmap.md)
 
@@ -169,9 +169,9 @@ Headers, footers and page-specific linkage.
 
 **Criteria / owners:** LAY3 (W06), BG5 (W13)
 
-**Audited local surface:** Section.header/footer(default/first/even) reuse paragraphs/tables/pictures and owned clear(); copies retain independent parts, while missing/repeated clear is a true no-op.
+**Audited local surface:** Section.header/footer(default/first/even) reuse paragraphs/tables/pictures and owned clear(); bounded paragraph/table deletion and movement reuse existing collections; copies retain independent parts.
 
-**Disposition:** `implemented_subset`. **Remaining:** Link-to-previous/unlink and arbitrary block movement remain open. Inactive variants may lack measured cell geometry; rich notes are separate.
+**Disposition:** `implemented_subset`. **Remaining:** Link-to-previous/unlink, cross-story adoption and general block movement remain open. Missing/repeated clear is a true no-op; inactive variants may lack measured cell geometry. Rich notes retain their separate profile.
 
 **Upstream candidates:** [U02](upstream-roadmap.md), [U04](upstream-roadmap.md)
 
@@ -261,9 +261,9 @@ Inline/floating images and anchor positioning.
 
 **Criteria / owners:** MED1 (W06), MED2 (W06), MED3 (W06), MED8 (W06)
 
-**Audited local surface:** Owned Picture data/size/alt/crop/flips; related SlidePicture uses native placement.
+**Audited local surface:** Owned Picture data/size/alt/crop/flips; direct-body DOCX pictures reuse Picture.format/formatting for bounded page/margin/paragraph anchors and square/top_bottom/behind wrapping; SlidePicture uses native placement.
 
-**Disposition:** `implemented_subset`. **Remaining:** DOCX rotation has native ink loss. Floating positioning/wrapping needs native geometry/copy/serialization proof; opacity not inferred from transform fields.
+**Disposition:** `implemented_subset`. **Remaining:** DOCX rotation has native ink loss. Front layering has a reproduced native paint-order defect and is rejected. Floating cell/header/footer/note pictures, independent stacking/overlap/layout-in-cell controls, rotation and opacity remain unavailable in the owned DOCX profile.
 
 **Upstream candidates:** [U04](upstream-roadmap.md)
 
@@ -277,7 +277,7 @@ Drawing fills, shapes, text boxes and groups.
 
 **Audited local surface:** Existing PDF path primitives and PPTX shapes/text/backgrounds; bounded owned DOCX rectangle/ellipse creator and private handle reuse Picture placement vocabulary without a second geometry framework..
 
-**Disposition:** `implemented_subset`. **Remaining:** DOCX lines/textboxes/group/rotation/front/auxiliary/imported editing and rich-text visible coverage remain unavailable or unassessed; PDF underlay API lacks public placement option; render-transparent backdrop differs from authored fill.
+**Disposition:** `implemented_subset`. **Remaining:** DOCX lines/textboxes/group/rotation/front/auxiliary/imported editing and rich-text visible coverage remain unavailable or unassessed; native typed PDF content now has public placement, but Python underlays remain unavailable; render-transparent backdrop differs from authored fill.
 
 **Upstream candidates:** [U04](upstream-roadmap.md), [U10](upstream-roadmap.md), [U11](upstream-roadmap.md)
 
@@ -347,9 +347,9 @@ Comments and revision representation/resolution.
 
 **Criteria / owners:** REV1 (W07), REV2 (W07), REV3 (W07), REV4 (W07), REV5 (W07), REV6 (W13), E3 (W09)
 
-**Audited local surface:** Imported bounded stories/anchors/diagnostics only; no review editor API.
+**Audited local surface:** Owned document.comments provides plain-text root/direct-reply CRUD with author/date/resolved properties and fresh range navigation for bounded whole body-paragraph anchors, including supported body cells; imported stories retain separate extraction snapshots.
 
-**Disposition:** `upstream_or_unassessed`. **Remaining:** Formatting revision resolution is located in excluded application engine; move/re-export pure library operation upstream. Comment anchor editing needs balanced-ID proof.
+**Disposition:** `upstream_or_unassessed`. **Remaining:** Interior/cross-paragraph/imported anchors, rich comment stories and nested replies remain unsupported. Native interior markers change shaping. Tracked-change transformations remain separate; formatting revision resolution lives in the excluded application engine and needs a public library contribution.
 
 **Upstream candidates:** [U06](upstream-roadmap.md)
 
@@ -405,9 +405,9 @@ Slides, layouts, masters, notes and navigation.
 
 **Criteria / owners:** SLIDE1 (W11), SLIDE2 (W11), SLIDE3 (W11), SLIDE4 (W11), SLIDE5 (W11), SLIDE6 (W11)
 
-**Audited local surface:** Slides/layouts/typed shapes/text/tables/images/notes/internal links with stable IDs; existing Slide.background=None removes an explicit owned override.
+**Audited local surface:** Slides/layouts/typed shapes/text/tables/images/notes/internal links with stable IDs; Slide.background=None removes an owned override; same-cell paragraphs.move reuses native paragraph values and existing collection semantics.
 
-**Disposition:** `implemented_subset`. **Remaining:** Whole-slide import/copy needs public graph re-ID/remapping; comments lose shape anchors/deep replies; PDF artwork rasterized; imported preservation unassessed. Reset getter reports direct state rather than effective inherited color; imported inherited-media graphs remain outside mutable authoring.
+**Disposition:** `implemented_subset`. **Remaining:** Whole-slide import/copy needs public graph re-ID/remapping; comments lose shape anchors/deep replies; PDF artwork is rasterized; imported preservation remains unassessed. Cell paragraph handles are ordinal and become stale after a real reorder. Background reset reports direct state rather than effective inherited color.
 
 **Upstream candidates:** [U11](upstream-roadmap.md)
 
@@ -511,7 +511,7 @@ Vector paths, fills and paint ordering.
 
 **Audited local surface:** PdfPage.draw_path; typed PPTX shape properties.
 
-**Disposition:** `implemented_subset`. **Remaining:** Native public stamping forces overlay; private prepend support must be exposed upstream. Do not wrap every draw in an adapter-built Form/layer system.
+**Disposition:** `implemented_subset`. **Remaining:** Native typed add_content_with_placement exposes overlay/underlay; raw public stamping remains overlay-only. Python underlays, resource-collision-safe composition and bounded raw-stream admission remain open. Do not wrap every draw in an adapter-built Form/layer system.
 
 **Upstream candidates:** [U10](upstream-roadmap.md)
 
@@ -537,9 +537,9 @@ DPI rasterization, clipping and alpha behavior.
 
 **Criteria / owners:** R1 (W02), R2 (W02), R3 (W02), R4 (W02), P1 (W02), P2 (W02), API9 (W13), QA4 (W14), QA7 (W14)
 
-**Audited local surface:** render_page/get_pixmap return encoded PNG; region clip; private retained native sessions.
+**Audited local surface:** render_page/get_pixmap return encoded PNG; region clip and private retained native sessions; selected DeckCraft PNG/PDF paths use fallible per-call APIs; PDF checks final rounded integer allocation dimensions.
 
-**Disposition:** `implemented_subset`. **Remaining:** Explicit output alpha/backdrop replacement is not proven; DeckCraft can return blank fallback after panic; do not add Pixmap wrapper.
+**Disposition:** `implemented_subset`. **Remaining:** Explicit output alpha/backdrop replacement remains unproven. Broader upstream allocation/work limits, structured errors and other rendering entry points remain open. A real blank slide is still valid; no Pixmap wrapper is introduced.
 
 **Upstream candidates:** [U09](upstream-roadmap.md)
 

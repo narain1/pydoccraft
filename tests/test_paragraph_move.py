@@ -160,8 +160,17 @@ class ParagraphMoveTests(unittest.TestCase):
             self.assertIs(document._cached, cache)
         with doc_ex.new('pptx') as slides:
             cell = slides.slides.add().add_table([['Text']], box=(20, 20, 200, 60))[0, 0]
-            with self.assertRaises(UnsupportedFormatError):
-                cell.paragraphs.move(0, 0)
+            paragraph = cell.paragraphs[0]
+            held = paragraph[:]
+            raw, revision = slides.to_bytes(), slides._call('revision')
+            slides.render_page(0, dpi=72)
+            cache = slides._cached
+            cell.paragraphs.move(0, 0)
+            self.assertEqual(slides.to_bytes(), raw)
+            self.assertEqual(slides._call('revision'), revision)
+            self.assertIs(slides._cached, cache)
+            self.assertEqual(held.text, 'Text')
+            self.assertEqual(paragraph.text, 'Text')
 
     def test_noop_iteration_copy_negative_indexes_and_lifetimes(self):
         with doc_ex.new('docx') as document:

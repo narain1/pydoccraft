@@ -233,8 +233,8 @@
         "FORM2",
         "C5"
       ],
-      "local_surface": "Paragraph.text/add_run/find/replace_text/slices; native explicit breaks; ordinary recipes",
-      "remaining": "Top-level insertion/deletion/move needs stable locator redesign; cross-document Fragment does not remap the complete resource/semantic graph. Decimal/bar tabs remain rejected.",
+      "local_surface": "Paragraph.text/add_run/find/replace_text/slices; native explicit breaks; bounded owned DOCX paragraph deletion and same-container movement; PPTX same-cell paragraph deletion/movement reuse the collection",
+      "remaining": "Append+move composes bounded paragraph insertion; arbitrary block-gap insertion and cross-container adoption remain unavailable. Cross-document Fragment does not remap the complete resource/semantic graph. DOCX movement retains stable paragraph identities, while PPTX movement invalidates ordinal handles in the changed cell. Decimal/bar tabs remain rejected.",
       "upstream_candidates": [
         "U02"
       ],
@@ -615,8 +615,8 @@
         "LAY4",
         "LAY8"
       ],
-      "local_surface": "Section page_size/margins/gutter/columns/column_widths/start; stable sections collection",
-      "remaining": "Per-column gap control, mirrored/top gutters and detailed layout inspection are not covered by current profile; avoid redundant orientation API.",
+      "local_surface": "Section page_size/margins/gutter/columns/column_widths/start; stable sections collection; document-wide mirror_margins and bounded section vertical_alignment reuse native layout",
+      "remaining": "Per-column gap and top-gutter controls, broader vertical-alignment contexts and detailed layout inspection remain open. Mirrored margins are document-wide, not a section override; no redundant orientation API is needed.",
       "upstream_candidates": [
         "U04",
         "U05"
@@ -653,8 +653,8 @@
         "LAY3",
         "BG5"
       ],
-      "local_surface": "Section.header/footer(default/first/even) reuse paragraphs/tables/pictures and owned clear(); copies retain independent parts, while missing/repeated clear is a true no-op",
-      "remaining": "Link-to-previous/unlink and arbitrary block movement remain open. Inactive variants may lack measured cell geometry; rich notes are separate.",
+      "local_surface": "Section.header/footer(default/first/even) reuse paragraphs/tables/pictures and owned clear(); bounded paragraph/table deletion and movement reuse existing collections; copies retain independent parts",
+      "remaining": "Link-to-previous/unlink, cross-story adoption and general block movement remain open. Missing/repeated clear is a true no-op; inactive variants may lack measured cell geometry. Rich notes retain their separate profile.",
       "upstream_candidates": [
         "U02",
         "U04"
@@ -913,8 +913,8 @@
         "MED3",
         "MED8"
       ],
-      "local_surface": "Owned Picture data/size/alt/crop/flips; related SlidePicture uses native placement",
-      "remaining": "DOCX rotation has native ink loss. Floating positioning/wrapping needs native geometry/copy/serialization proof; opacity not inferred from transform fields.",
+      "local_surface": "Owned Picture data/size/alt/crop/flips; direct-body DOCX pictures reuse Picture.format/formatting for bounded page/margin/paragraph anchors and square/top_bottom/behind wrapping; SlidePicture uses native placement",
+      "remaining": "DOCX rotation has native ink loss. Front layering has a reproduced native paint-order defect and is rejected. Floating cell/header/footer/note pictures, independent stacking/overlap/layout-in-cell controls, rotation and opacity remain unavailable in the owned DOCX profile.",
       "upstream_candidates": [
         "U04"
       ],
@@ -964,7 +964,7 @@
         "SLIDE3"
       ],
       "local_surface": "Existing PDF path primitives and PPTX shapes/text/backgrounds; bounded owned DOCX rectangle/ellipse creator and private handle reuse Picture placement vocabulary without a second geometry framework.",
-      "remaining": "DOCX lines/textboxes/group/rotation/front/auxiliary/imported editing and rich-text visible coverage remain unavailable or unassessed; PDF underlay API lacks public placement option; render-transparent backdrop differs from authored fill.",
+      "remaining": "DOCX lines/textboxes/group/rotation/front/auxiliary/imported editing and rich-text visible coverage remain unavailable or unassessed; native typed PDF content now has public placement, but Python underlays remain unavailable; render-transparent backdrop differs from authored fill.",
       "upstream_candidates": [
         "U04",
         "U10",
@@ -1190,8 +1190,8 @@
         "REV6",
         "E3"
       ],
-      "local_surface": "Imported bounded stories/anchors/diagnostics only; no review editor API",
-      "remaining": "Formatting revision resolution is located in excluded application engine; move/re-export pure library operation upstream. Comment anchor editing needs balanced-ID proof.",
+      "local_surface": "Owned document.comments provides plain-text root/direct-reply CRUD with author/date/resolved properties and fresh range navigation for bounded whole body-paragraph anchors, including supported body cells; imported stories retain separate extraction snapshots",
+      "remaining": "Interior/cross-paragraph/imported anchors, rich comment stories and nested replies remain unsupported. Native interior markers change shaping. Tracked-change transformations remain separate; formatting revision resolution lives in the excluded application engine and needs a public library contribution.",
       "upstream_candidates": [
         "U06"
       ],
@@ -1356,8 +1356,8 @@
         "SLIDE5",
         "SLIDE6"
       ],
-      "local_surface": "Slides/layouts/typed shapes/text/tables/images/notes/internal links with stable IDs; existing Slide.background=None removes an explicit owned override",
-      "remaining": "Whole-slide import/copy needs public graph re-ID/remapping; comments lose shape anchors/deep replies; PDF artwork rasterized; imported preservation unassessed. Reset getter reports direct state rather than effective inherited color; imported inherited-media graphs remain outside mutable authoring.",
+      "local_surface": "Slides/layouts/typed shapes/text/tables/images/notes/internal links with stable IDs; Slide.background=None removes an owned override; same-cell paragraphs.move reuses native paragraph values and existing collection semantics",
+      "remaining": "Whole-slide import/copy needs public graph re-ID/remapping; comments lose shape anchors/deep replies; PDF artwork is rasterized; imported preservation remains unassessed. Cell paragraph handles are ordinal and become stale after a real reorder. Background reset reports direct state rather than effective inherited color.",
       "upstream_candidates": [
         "U11"
       ],
@@ -1649,7 +1649,7 @@
         "BG7"
       ],
       "local_surface": "PdfPage.draw_path; typed PPTX shape properties",
-      "remaining": "Native public stamping forces overlay; private prepend support must be exposed upstream. Do not wrap every draw in an adapter-built Form/layer system.",
+      "remaining": "Native typed add_content_with_placement exposes overlay/underlay; raw public stamping remains overlay-only. Python underlays, resource-collision-safe composition and bounded raw-stream admission remain open. Do not wrap every draw in an adapter-built Form/layer system.",
       "upstream_candidates": [
         "U10"
       ],
@@ -1701,8 +1701,8 @@
         "QA4",
         "QA7"
       ],
-      "local_surface": "render_page/get_pixmap return encoded PNG; region clip; private retained native sessions",
-      "remaining": "Explicit output alpha/backdrop replacement is not proven; DeckCraft can return blank fallback after panic; do not add Pixmap wrapper.",
+      "local_surface": "render_page/get_pixmap return encoded PNG; region clip and private retained native sessions; selected DeckCraft PNG/PDF paths use fallible per-call APIs; PDF checks final rounded integer allocation dimensions",
+      "remaining": "Explicit output alpha/backdrop replacement remains unproven. Broader upstream allocation/work limits, structured errors and other rendering entry points remain open. A real blank slide is still valid; no Pixmap wrapper is introduced.",
       "upstream_candidates": [
         "U09"
       ],
@@ -2042,5 +2042,5 @@
       "disposition": "reference_comparison"
     }
   ],
-  "audited_commit": "b23d8954d1e75e041add8473b8b56662614b66ae"
+  "audited_commit": "c0b1caf64ac487caa9c9d21c513fd8972768c24a"
 }

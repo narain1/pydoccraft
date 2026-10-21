@@ -783,3 +783,33 @@ The first profile caps outlines at100 points (native read/write ceiling) and at 
 One boolean workflow input, `validation_only`, keeps the existing nine wheel jobs as the single implementation. The existing `release_tag` input accepts a full commit SHA only in this mode. Before builds, the Python guard verifies its syntax and checked-out identity and refuses `publish=true`. Both publication jobs explicitly exclude validation-only dispatches; wheel jobs retain read-only repository permissions. Ordinary release dispatches and tag pushes still require `v<project.version>`. No package API, version, dependency or runtime behavior changes.
 
 The repository text checkout policy uses Git text auto-detection with LF output; binary fixtures remain binary. Roadmap fixture reads name UTF-8. The atomic-save test records the actual mode after chmod, retains exact0640 admission on POSIX, and verifies mode preservation on failure and success on every platform. Runtime save code is unchanged. Its single source fingerprint migration records the deliberate portability correction without rewriting historical wheel artifacts.
+
+
+## 117. Native PDF budget upgrade without another API
+
+The native contribution checks the widened integer product returned by the existing render_size helper immediately before Pixels::zeroed, using the existing normal error channel. Its allocator-observation harness is entirely upstream cfg(test); no hook, global counter or new renderer enters this package's runtime. Existing local preflight still prevents a native request for the same oversized public operation.
+
+The integration changes all11 direct/13 resolved PdfCraft source identities together, retaining the complete normalized dependency lock and vendored backend bytes otherwise. One native integration group validates the exact unique pdfcraft-render lock entry before issuing direct overcap requests, then checks both modes/four rotations/UserUnit2, normal errors, empty output, native request counts, tiny tiles and parser reuse. The old public limit workflows pass on both artifacts and are not duplicated or edited.
+
+
+## 118. PPTX cell paragraph movement through the existing collection
+
+`_Paragraphs.move` retains its Word path and adds a PPTX branch using the existing factory's canonical `CellTarget` tuples. Both indexes are coerced under captured revision after collection/grid validation. One private native `move_cell_paragraph` validates source/destination targets and same-cell scope, bounded content and native identity/layout consistency. Equality returns `false` before checking exhausted mutation counters; changed movement uses public `TextBody.paragraphs.remove/insert` inside existing staged `mutate`, then publishes the checked body generation. No text-range deletion, layout compensation, identity registry or new public API is needed.
+
+All live text/property/media/shape counts and table-grid generations stay unchanged because the native values are permuted intact. PPTX paragraph handles are ordinal: every captured handle in the changed cell becomes stale; other-cell handles and cell/table identities remain live. Revision-bound ranges follow existing invalidation. No-op retains cached document/render objects, bytes and handles. Existing native table fitting and merged/vertical overflow behavior remains authoritative, rather than being recalculated locally.
+
+Raw proof deliberately separates model/default-property preservation from visible-order fixtures. Default native table styles inject a text color into runs lacking explicit fill, so the first inherited-color visual expectation failed before movement as well. Preserve that diagnostic; neutral-style explicit-run fixtures require positive unmoved ink before moved72/144/200DPI output comparisons. Only200DPI uses the native PDF export grid and a channel<=1 comparison;72/144 prove actual colored order/relationships/media, not general pixel identity.
+
+
+## 122. Targeted reference inventory maintenance
+
+Update the existing seven family summaries in `reference-api-inventory.json` and regenerate its Markdown; do not add a second inventory. Preserve all 44 family IDs, 198 representative member citations, reference snapshots, coverage/owner joins, upstream candidates, dispositions and support-profile joins. The current source checkpoint is the reviewed spec118 integration. Remaining limitations stay explicit, including arbitrary insertion/adoption, imported Office editing, unsupported picture/comment contexts and broader raster resource bounds.
+
+
+## 119. Native typed placement without Python API expansion
+
+The selected PdfCraft contribution adds Placement and add_content_with_placement. Existing add_content delegates to Overlay. Private placement returns the exact new ObjRef; typed writing attaches its existing metadata to that reference and finds its current page-local index. Prepending A then B yields B, A, original drawing order. Positions are mutable indexes, not persistent identities. Updates replace the selected exact stream in place; deletion removes that stream while preserving surviving relative order. Callers refresh positional indexes. Raw public stamping remains overlay-only.
+
+The package upgrade changes all11 direct and13 resolved PdfCraft source identities together to516caea956c0aaf15f2bd1f35a15e07c73a9ead6, directly based on60a8d7998b64c7718e08e9054e99f1f2eb1eda8d. Native raster.rs and pixels.rs are byte-identical to that reviewed parent; the allocation regression checks the unique locked render-package source before any oversized request. One additional small linked-native test exercises underlay identity/order, first/last update/delete, legacy overlay, preserved URI/text, real revealed/occluded color and glyph ink at72/144DPI through both save forms. Python source/tests are unchanged.
+
+No adapter-built Form/layer system, resource-name rewrite or new manager is introduced. Opaque originals may hide underlays; native fixed resource names can collide with originals, and generic stamp stream-state/scanner bounds are not solved by typed placement. A later Python slice needs independently bounded transactional admission and stable handle semantics.

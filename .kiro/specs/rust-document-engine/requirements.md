@@ -855,3 +855,33 @@ Existing paragraph, table and row properties must retain concrete successful res
 The existing release matrix SHALL support an explicit validation-only dispatch against an exact immutable commit SHA. It SHALL run the same Python 3.11–3.13 Linux, macOS and Windows wheel builds and installed-wheel corpus, retain artifacts and validation evidence, and create neither a GitHub release nor a PyPI publication. Validation-only mode SHALL reject branch names, abbreviated or mismatched commits and simultaneous publication requests. Default tagged and manual release behavior SHALL retain version matching and all existing validation dependencies.
 
 Validation fixtures SHALL read repository UTF-8 explicitly and retain identical LF text bytes across platform checkouts. Save-permission evidence SHALL assert exact POSIX permissions where supported and preservation of the actual platform mode after both failed and successful replacement. Existing rendering and pagination assertions SHALL not be relaxed to make a platform gate pass.
+
+
+## 117. Native PDF final integer allocation budget
+
+1. All direct and resolved PdfCraft crates SHALL use the same immutable reviewed contribution revision; unrelated packages, engine pins and local vendor source SHALL remain unchanged.
+2. The native renderer SHALL reject final integer rasters above its existing pixel budget before allocation in ordinary and strict modes, preserving accepted raster geometry/pixels and bounded tiles.
+3. Existing local rounded-dimension preflight and stable Python errors SHALL remain in place. The backend fix SHALL not be presented as newly available public behavior; existing public limit tests SHALL remain unchanged.
+4. Actual linked-native refusal/recovery and unchanged local preflight SHALL be tested separately. A test-only exact locked-source precondition SHALL prevent direct overcap tests from running against the unsafe old backend; original failure evidence SHALL use the independently reviewed intercepted allocator.
+5. Dedicated integration SHALL include source/lock/license/asset provenance review, complete native and installed-wheel extraction/conversion/reopen/render checks, measured artifact sizes and independent review. Broader U09/R4 and overall release work SHALL remain open.
+
+
+## 118. Same-cell owned PPTX paragraph movement
+
+1. The existing `cell.paragraphs.move(index, destination)` SHALL reorder intact public native paragraph values within one canonical owned PPTX table cell, including merged aliases, normal negative indexes and final-index semantics. No new collection, manager, imported editing or cross-cell adoption is introduced.
+2. Preserve paragraph/run/default/end properties, links, authored empty paragraphs, neighboring cells, media, native grid and source order. A real move SHALL advance only the existing cell-local paragraph generation plus document revision; old handles in that cell and all revision-bound ranges become stale. Other-cell paragraph and Cell/table handles remain usable; copied documents remain independent.
+3. Validate revision, both canonical targets, bounded source and native identity/layout consistency before no-op acceptance. A valid no-op SHALL preserve bytes, revision, caches and handles, including at exhausted mutation counters. A changed move SHALL check generation/revision exhaustion and stage native mutation atomically, publishing no partial state on failure. Caller index callbacks SHALL be bracketed by lifetime/revision checks, and stale grids SHALL reject before callbacks.
+4. Prove exact model permutation, native readback, actual PNG/PDF order/links/media, empty/singleton cases, aliases, copy/lifetime/iteration, exact/+1 source budget and MAX counters. Preserve all existing deletion tests and historical support evidence. DOC5/TXT1/SLIDE3 remain open for broader content operations.
+
+
+## 122. Keep reference dispositions consistent with accepted features
+
+The pinned reference inventory SHALL distinguish implemented bounded operations from remaining work. Existing DOCX paragraph/table movement, mirrored margins, owned floating pictures/comments and fallible DeckCraft rendering SHALL not be described as wholly absent after acceptance. The PPTX same-cell movement addition SHALL reuse its existing family and workstream connections. Correcting prose SHALL not promote operation profiles, checklist completion, historical fingerprints or reference-version scope.
+
+
+## 119. Dedicated native typed PDF placement upgrade
+
+1. Move every selected PdfCraft crate together to the reviewed immutable typed-placement contribution, preserving other package versions, source identities, dependency edges, assets and licenses. Record the exact parent and retained integer-raster correction.
+2. Native typed content SHALL provide explicit overlay/underlay placement through the public edit API. Exact newly created object identity SHALL determine its returned current page-local index; updates SHALL replace the selected stream in place, while deletion SHALL remove only that stream and preserve surviving relative order. Callers SHALL refresh positional indexes. The legacy overlay wrapper SHALL retain existing bytes and behavior.
+3. Do not expose Python underlays or raw-stamp underlays in this upgrade. Existing resource-collision protection and bounded local admission SHALL remain unchanged; native resource naming and raw-stream validation limitations SHALL stay explicit.
+4. Verify linked native ordering, identity, positive and negative visible paint, text and links through incremental/full save and reopen. Retain the exact-source safety precondition on the existing native allocation-budget regression. Complete source/lock/license, full native, installed-wheel, independent, typing and size gates before manual merge. PDF3/U10 remain open.

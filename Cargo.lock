@@ -1226,7 +1226,7 @@ dependencies = [
 [[package]]
 name = "pdfcraft-annot"
 version = "0.9.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
+source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
 dependencies = [
  "pdfcraft-cos",
  "pdfcraft-fonts",
@@ -1237,7 +1237,7 @@ dependencies = [
 [[package]]
 name = "pdfcraft-content"
 version = "0.9.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
+source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
 dependencies = [
  "pdfcraft-cos",
 ]
@@ -1245,7 +1245,7 @@ dependencies = [
 [[package]]
 name = "pdfcraft-cos"
 version = "0.9.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
+source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
 dependencies = [
  "pdfcraft-crypt",
  "pdfcraft-filters",
@@ -1255,7 +1255,7 @@ dependencies = [
 [[package]]
 name = "pdfcraft-create"
 version = "0.9.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
+source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
 dependencies = [
  "encoding_rs",
  "image",
@@ -1271,7 +1271,7 @@ dependencies = [
 [[package]]
 name = "pdfcraft-crypt"
 version = "0.9.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
+source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
 dependencies = [
  "aes",
  "md-5",
@@ -1283,7 +1283,7 @@ dependencies = [
 [[package]]
 name = "pdfcraft-edit"
 version = "0.9.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
+source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
 dependencies = [
  "kurbo",
  "pdfcraft-annot",
@@ -1298,7 +1298,7 @@ dependencies = [
 [[package]]
 name = "pdfcraft-export"
 version = "0.9.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
+source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
 dependencies = [
  "flate2",
 ]
@@ -1306,7 +1306,7 @@ dependencies = [
 [[package]]
 name = "pdfcraft-filters"
 version = "0.9.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
+source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
 dependencies = [
  "flate2",
  "thiserror",
@@ -1315,7 +1315,7 @@ dependencies = [
 [[package]]
 name = "pdfcraft-fonts"
 version = "0.9.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
+source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
 dependencies = [
  "harfrust 0.12.0",
  "pdfcraft-cos",
@@ -1326,7 +1326,7 @@ dependencies = [
 [[package]]
 name = "pdfcraft-forms"
 version = "0.9.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
+source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
 dependencies = [
  "pdfcraft-content",
  "pdfcraft-cos",
@@ -1338,7 +1338,7 @@ dependencies = [
 [[package]]
 name = "pdfcraft-model"
 version = "0.9.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
+source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
 dependencies = [
  "pdfcraft-cos",
 ]
@@ -1346,7 +1346,7 @@ dependencies = [
 [[package]]
 name = "pdfcraft-organize"
 version = "0.9.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
+source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
 dependencies = [
  "pdfcraft-content",
  "pdfcraft-cos",
@@ -1356,7 +1356,7 @@ dependencies = [
 [[package]]
 name = "pdfcraft-render"
 version = "0.9.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=645016addcfb9078c557f0189559ab47cdcee057#645016addcfb9078c557f0189559ab47cdcee057"
+source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
 dependencies = [
  "bytemuck",
  "getrandom 0.4.3",

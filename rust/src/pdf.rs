@@ -520,9 +520,9 @@ fn render_with(
         })
         .transpose()?;
     if region.is_none() {
-        // Native scale limits use continuous point area; rounding to whole device
-        // pixels can exceed that area. Check the exact native pixel dimensions
-        // before requesting any output buffer, retaining reject_oversize as well.
+        // Keep local rejection before any native request, independently of the
+        // upstream final-allocation guard. Continuous scale limits can round
+        // above the pixel budget; retain strict scale rejection as well.
         crate::rendering::validate_size(
             f64::from(pdfcraft_render::device_pixels(size[0], scale)),
             f64::from(pdfcraft_render::device_pixels(size[1], scale)),
@@ -1805,6 +1805,241 @@ mod raster_limit_tests {
         assert!(
             crate::rendering::validate_size(8192.0, 1.0, pdfcraft_render::MAX_SIDE as u32).is_ok()
         );
+    }
+
+    #[test]
+    fn linked_native_typed_placement_preserves_identity_order_and_reopened_paint() {
+        use pdfcraft_cos::{
+            write_full, write_incremental, Dict, Document, Object, SaveOptions, Stream,
+        };
+        use pdfcraft_edit::{
+            add_content, add_content_with_placement, delete_content, list_added, update_content,
+            AddedImage, AddedText, Content, Placement,
+        };
+        let mut doc = Document::open(Arc::new(fixture(100.0, 120.0, 1.0, 0))).unwrap();
+        let image = |doc: &mut Document, rgb: [u8; 3]| {
+            let mut dict = Dict::new();
+            dict.set(b"Type".to_vec(), Object::name("XObject"));
+            dict.set(b"Subtype".to_vec(), Object::name("Image"));
+            dict.set(b"Width".to_vec(), Object::Int(1));
+            dict.set(b"Height".to_vec(), Object::Int(1));
+            dict.set(b"ColorSpace".to_vec(), Object::name("DeviceRGB"));
+            dict.set(b"BitsPerComponent".to_vec(), Object::Int(8));
+            doc.add(Object::Stream(Stream::from_raw(dict, rgb.to_vec())))
+        };
+        let text = |label: &str, rect| {
+            Content::Text(AddedText {
+                text: label.into(),
+                rect,
+                bold: true,
+                ..AddedText::default()
+            })
+        };
+        let blue = image(&mut doc, [0, 0, 255]);
+        let blue_item = Content::Image(AddedImage::new([40.0, 40.0, 80.0, 80.0], blue));
+        assert_eq!(add_content(&mut doc, 0, &blue_item).unwrap(), 0);
+        assert_eq!(
+            add_content(&mut doc, 0, &text("Original", [5.0, 96.0, 95.0, 112.0])).unwrap(),
+            1
+        );
+        let original_refs: Vec<_> = list_added(&doc).iter().map(|a| a.obj).collect();
+        pdfcraft_annot::links::add(
+            &mut doc,
+            0,
+            [15.0, 25.0, 45.0, 35.0],
+            &pdfcraft_annot::links::LinkAction::Uri("https://example.com/retained".into()),
+            &pdfcraft_annot::links::LinkStyle::default(),
+        )
+        .unwrap();
+        let red = image(&mut doc, [255, 0, 0]);
+        let red_item = Content::Image(AddedImage::new([20.0, 20.0, 90.0, 90.0], red));
+        assert_eq!(
+            add_content_with_placement(&mut doc, 0, &red_item, Placement::Underlay).unwrap(),
+            0
+        );
+        let red_ref = list_added(&doc)[0].obj;
+        assert_eq!(
+            add_content_with_placement(
+                &mut doc,
+                0,
+                &text("New", [5.0, 0.0, 95.0, 16.0]),
+                Placement::Underlay
+            )
+            .unwrap(),
+            0
+        );
+        let text_ref = list_added(&doc)[0].obj;
+        let expected = [text_ref, red_ref, original_refs[0], original_refs[1]];
+        assert_eq!(
+            list_added(&doc).iter().map(|a| a.obj).collect::<Vec<_>>(),
+            expected
+        );
+        update_content(&mut doc, 0, 0, &text("Updated", [5.0, 0.0, 95.0, 16.0])).unwrap();
+        update_content(&mut doc, 0, 3, &text("Original", [5.0, 96.0, 95.0, 112.0])).unwrap();
+        assert_eq!(
+            list_added(&doc).iter().map(|a| a.obj).collect::<Vec<_>>(),
+            expected
+        );
+
+        let verify = |doc: &Document, overlay: bool, labels: bool| {
+            for (incremental, bytes) in [
+                (
+                    true,
+                    write_incremental(doc, &SaveOptions::default()).unwrap(),
+                ),
+                (false, write_full(doc, &SaveOptions::default()).unwrap()),
+            ] {
+                let reopened = Document::open(Arc::new(bytes.clone())).unwrap();
+                let items = list_added(&reopened);
+                assert_eq!(items.len(), if labels { 4 } else { 3 });
+                if incremental && labels {
+                    assert_eq!(items.iter().map(|a| a.obj).collect::<Vec<_>>(), expected);
+                }
+                let info = pdfcraft_render::inspect(Arc::new(bytes.clone()), None).unwrap();
+                assert_eq!(info.links.len(), 1);
+                assert_eq!(
+                    info.links[0].target,
+                    pdfcraft_render::LinkTarget::Uri("https://example.com/retained".into())
+                );
+                let mut renderer = PageRenderer::new(Arc::new(bytes), RenderConfig::default());
+                let extracted = renderer
+                    .filtered_text(0, Default::default())
+                    .unwrap()
+                    .plain_text();
+                assert_eq!(extracted.matches("Original").count(), usize::from(labels));
+                assert_eq!(extracted.matches("Updated").count(), usize::from(labels));
+                assert!(!extracted.contains("New"));
+                for scale in [1.0_f32, 2.0] {
+                    let rendered = renderer.render(RenderRequest {
+                        scale,
+                        ..Default::default()
+                    });
+                    assert!(rendered.error.is_none(), "{:?}", rendered.error);
+                    assert_eq!(
+                        (rendered.width, rendered.height),
+                        ((100.0 * scale) as u32, (120.0 * scale) as u32)
+                    );
+                    assert_eq!(
+                        rendered.rgba.len(),
+                        rendered.width as usize * rendered.height as usize * 4
+                    );
+                    let pixel = |x: usize, y: usize| {
+                        let factor = scale as usize;
+                        let at = (((120 - y) * factor) * rendered.width as usize + x * factor) * 4;
+                        &rendered.rgba[at..at + 4]
+                    };
+                    assert_eq!(pixel(30, 30), &[255, 0, 0, 255]);
+                    assert_eq!(
+                        pixel(60, 60),
+                        if overlay {
+                            &[255, 0, 0, 255]
+                        } else {
+                            &[0, 0, 255, 255]
+                        }
+                    );
+                    assert_eq!(pixel(5, 60), &[255, 255, 255, 255]);
+                    if labels {
+                        for (top, bottom) in [(8, 22), (102, 119)] {
+                            let mut ink = 0;
+                            for y in top * scale as usize..bottom * scale as usize {
+                                for x in 5 * scale as usize..95 * scale as usize {
+                                    let at = (y * rendered.width as usize + x) * 4;
+                                    ink += usize::from(
+                                        rendered.rgba[at..at + 3].iter().all(|v| *v < 80),
+                                    );
+                                }
+                            }
+                            assert!(ink > 20, "actual label ink must survive save and reopen");
+                        }
+                    }
+                }
+            }
+        };
+        verify(&doc, false, true);
+        delete_content(&mut doc, 0, 3).unwrap();
+        delete_content(&mut doc, 0, 0).unwrap();
+        assert_eq!(
+            list_added(&doc).iter().map(|a| a.obj).collect::<Vec<_>>(),
+            [red_ref, original_refs[0]]
+        );
+        assert_eq!(add_content(&mut doc, 0, &red_item).unwrap(), 2);
+        assert_eq!(list_added(&doc)[0].obj, red_ref);
+        assert_eq!(list_added(&doc)[1].obj, original_refs[0]);
+        verify(&doc, true, false);
+    }
+
+    #[test]
+    fn linked_native_integer_budget_rejects_before_allocation_and_recovers() {
+        // Safety precondition: never issue this large direct request to an older
+        // backend. Its original failure is proved upstream with an intercepted
+        // allocator, not by allocating a 256MB raster here. The reviewed typed-placement
+        // descendant retains the exact raster.rs/pixels.rs correction from 60a8d799.
+        let entries: Vec<_> = include_str!("../../Cargo.lock")
+            .split("[[package]]")
+            .filter(|entry| {
+                entry
+                    .lines()
+                    .any(|line| line.trim() == "name = \"pdfcraft-render\"")
+            })
+            .collect();
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].lines().any(|line| line.trim() ==
+            "source = \"git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6\""));
+        for rotation in [0, 90, 180, 270] {
+            let raw = fixture(4000.25, 3999.75, 2.0, rotation);
+            for reject_oversize in [false, true] {
+                let mut renderer = PageRenderer::new(
+                    Arc::new(raw.clone()),
+                    RenderConfig {
+                        reject_oversize,
+                        ..Default::default()
+                    },
+                );
+                assert_eq!(renderer.page_count(), 1);
+                let dimensions = if rotation % 180 == 0 {
+                    "8001x8000"
+                } else {
+                    "8000x8001"
+                };
+                let expected =
+                    format!("page 1 raster size {dimensions} exceeds renderer pixel limit");
+                let request = RenderRequest {
+                    scale: 1.0,
+                    ..Default::default()
+                };
+                let failed = renderer.render(request);
+                assert_eq!(failed.error.as_deref(), Some(expected.as_str()));
+                assert_eq!((failed.width, failed.height), (0, 0));
+                assert!(failed.rgba.is_empty());
+                assert_eq!(renderer.stats().render_requests, 1);
+                assert_eq!(renderer.stats().parser_builds, 1);
+                let tile = renderer.render(RenderRequest {
+                    tile: Some(pdfcraft_render::Tile {
+                        x: 0,
+                        y: 0,
+                        w: 3,
+                        h: 2,
+                    }),
+                    ..request
+                });
+                assert!(tile.error.is_none(), "{:?}", tile.error);
+                assert_eq!((tile.width, tile.height), (3, 2));
+                assert_eq!(&*tile.rgba, &[255; 24]);
+                let repeated = renderer.render(request);
+                assert_eq!(repeated.error.as_deref(), Some(expected.as_str()));
+                assert_eq!((repeated.width, repeated.height), (0, 0));
+                assert!(repeated.rgba.is_empty());
+                assert_eq!(renderer.stats().render_requests, 3);
+                assert_eq!(renderer.stats().parser_builds, 1);
+            }
+            let (session, _) = PdfSession::open(&raw, None).unwrap();
+            let before = session.stats().unwrap();
+            assert!(matches!(
+                session.render(0, 72.0, None),
+                Err(EngineError::ResourceLimit(_))
+            ));
+            assert_eq!(session.stats().unwrap(), before);
+        }
     }
 
     #[test]

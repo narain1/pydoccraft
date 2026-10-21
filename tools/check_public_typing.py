@@ -112,6 +112,7 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
     with doc_ex.new('pptx') as deck:
         cell = deck.slides.add().add_table([['Remove']], box=(20, 20, 200, 80))[0, 0]
         assert_type(cell.paragraphs[0], Paragraph)
+        assert_type(cell.paragraphs.move(0, -1), None)
         del cell.paragraphs[0]
 
     with doc_ex.new('pdf') as pdf:

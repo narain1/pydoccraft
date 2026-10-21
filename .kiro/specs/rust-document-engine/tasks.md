@@ -963,7 +963,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete independent frozen source/public review (six workflows15.775s).
 - [x] Complete spec116 native closed-shape corner/outline parity gate, including min/max width and stroke-to-dimension boundaries; preserve 200-point/native-clamp diagnostics.
 - [x] Complete corrected436-native and two clean556-test installed corpora, exact-artifact/source review, strict typing and synchronized bounded support documentation.
-- [ ] Complete closed-shape exact-head/current-main CI and manual merge; dependency PR122 is merged.
+- [x] Complete closed-shape exact-head/current-main CI and independent manual merge through PR123, required CI39578015883 and documentation CI39578015866.
 - [ ] Keep MED4 open for lines/textboxes and excluded contexts; no new U-owner or broad shape-parity claim.
 
 
@@ -978,3 +978,45 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [ ] Execute corrected portability tests on Windows; diagnose native font/raster/pagination differences with unchanged assertions.
 - [ ] Inspect every platform/Python corpus and fix failures before treating cross-platform validation as complete.
 - [ ] Retain final versioned release validation; this infrastructure change does not complete QA7 or authorize a premature release.
+
+
+## PdfCraft final integer raster allocation budget (spec117)
+
+- [x] Review source and safe actual-allocator originalFAIL/candidatePASS proof, exact-cap admission, complete tiny output/tile controls and test-only RAII restoration.
+- [x] Publish the reviewed two-file native contribution on an explicitly identified fork; verify exact parent/commit/files without claiming upstream acceptance.
+- [x] Move all11 direct/13 resolved PdfCraft source identities together; preserve other engine/dependency versions and audit264 permissive packages and23 current citations across11 native files.
+- [x] Preserve the existing two public raster-limit workflows and record their successful baseline behavior; add one linked-native guard/recovery test with exact-source safety precondition.
+- [x] Complete focused/full437-native, formatting, Clippy and locked release build.
+- [x] Complete clean installed556 workflows, independent artifact/corpus/typing/reopen checks, measured sizes and final source-ledger/documentation validation.
+- [ ] Complete current-head CI and manual merge; retain broad U09/R4 limits and separate release gates.
+
+
+## Same-cell owned PPTX paragraph movement (spec118)
+
+- [x] Review public native model capability and raw two-group gate; preserve first fixture-color failure and unmoved source diagnostic separately.
+- [x] Pass100 raw intact permutations and8 native/source/readback PNG/PDF output profiles, fmt and locked all-target Clippy.
+- [x] Implement and validate existing collection dispatch, canonical/generation/no-op/callback guards and atomic boundary controls.
+- [x] Complete focused native/public, unchanged deletion regressions, strict typing and independent source/copied-artifact review.
+- [x] Complete integrated 443-native/release, two clean 560-test installed-wheel corpora and independent exact-artifact gates.
+- [ ] Complete current-head CI and manual merge.
+- [ ] Keep broader DOC5/TXT1/SLIDE3 adoption, duplication and shape-content work open; no version release before overall completion gates.
+
+
+## Reference disposition corrections (spec122)
+
+- [x] Compare seven stale family summaries with existing source, guides and accepted corpus modules.
+- [x] Correct bounded operation descriptions and regenerate the existing reference page without promoting feature status.
+- [x] Complete independent documentation and exact inventory-delta review.
+- [ ] Complete current-main CI/manual merge.
+- [ ] Keep exhaustive member dispositions and broad API1/QA1 acceptance open.
+
+
+## Native typed PDF content placement (spec119)
+
+- [x] Independently review native exact-object placement, four new edit groups, original170/candidate174 package gates, real paint/text/link controls and the forced-overlay negative control.
+- [x] Verify128 original/candidate legacy-overlay artifacts,102 incremental/full raster pairs and204 independent render outputs without changing native manifests, lock or assets.
+- [x] Publish the exact reviewed three-file contribution fork and verify its parent/files/diff; do not claim upstream acceptance.
+- [x] Upgrade all11 direct/13 resolved PdfCraft pins only; audit264 permissive packages and23 existing citations across11 files, including unchanged raster allocation correction.
+- [x] Add one linked native identity/order/save/reopen/visible-output regression and retain existing allocation safety precondition and unchanged public tests.
+- [x] Complete locked444-native, fmt, Clippy, release build, two clean installed560 corpora, independent exact-artifact replay, typing and size gates.
+- [ ] Complete current-head CI and independent manual merge. Python underlays, resource collisions and broader PDF3/U10 remain open.
