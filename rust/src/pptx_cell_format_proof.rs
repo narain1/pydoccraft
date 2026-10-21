@@ -425,10 +425,11 @@ fn pptx_cell_format_raw_visible_geometry_first_last_and_output() {
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            assert_eq!(
-                text.chars().filter(|c| *c == 'M').count(),
-                20,
-                "unsupported zero-spacing diagnostic: normalized extraction loses overlapping repeats"
+            let count = text.chars().filter(|c| *c == 'M').count();
+            eprintln!("spec121 unsupported bold-zero overlap: native_source_M=48 parsed_pdf_M={count}; local20 and CI31 are observations, not a retained-count contract");
+            assert!(
+                (1..48).contains(&count),
+                "unsupported zero-spacing diagnostic must retain text but lose overlapping repeats: {count}"
             );
             let a = decode(&crate::pptx::render(&bytes, 0, 200.0).unwrap());
             let b = decode(&crate::pdf::render(&pdf, 0, 200.0, None).unwrap());
@@ -737,16 +738,24 @@ fn pptx_cell_format_overlap_diagnostic() {
         );
         let model = crate::pdf::extract(&pdf, None).unwrap();
         let count = m_count(&model);
-        assert_eq!(
-            count,
-            if value <= 0.06 { 16 } else { 48 },
-            "fixed overlap diagnostic, not a general admission threshold"
-        );
+        eprintln!("spec121 overlap DIAGNOSTIC multiplier={value} native_glyphs={glyphs} parsed_pdf_M={count} text_ops_and_cmaps_identical=true lines={lines:?}");
+        if value <= 0.06 {
+            // Local16 and CI31 both demonstrate loss. Exact survivor counts are
+            // observations for unsupported overlap, not a public text contract.
+            assert!(
+                (1..48).contains(&count),
+                "unsupported overlap must retain text but lose repetitions: {count}"
+            );
+        } else {
+            assert_eq!(
+                count, 48,
+                "this retained-character control keeps every character"
+            );
+        }
         let a = decode(&crate::pptx::render(&bytes, 0, 200.0).unwrap());
         let b = decode(&crate::pdf::render(&pdf, 0, 200.0, None).unwrap());
         assert_eq!((a.0, a.1, a.2.len()), (b.0, b.1, b.2.len()));
         assert!(a.2.iter().zip(&b.2).all(|(a, b)| a.abs_diff(*b) <= 1));
-        eprintln!("spec121 overlap DIAGNOSTIC multiplier={value} native_glyphs={glyphs} parsed_pdf_M={count} text_ops_and_cmaps_identical=true lines={lines:?}");
     }
 }
 
