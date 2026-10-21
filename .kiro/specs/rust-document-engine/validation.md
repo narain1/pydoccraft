@@ -1338,3 +1338,43 @@ The existing paragraph-movement wheel (`43fd15cc870f633947ab6ff420bb4591bc5dc9aa
 The source pairs contain 20 pages with shared media, 200 pages with text/tables/shared media, and 24 pages with distinct 512×512 PNGs displayed at 144 points. The latter files are 21,611,642-byte DOCX and 21,660,010-byte PPTX. All reopened counts matched requested counts. Cached full-document median improvements range from 1.82× to 11.52× on this measured set. Peak process RSS spans about 52–271 MiB depending on format/workload/mode; image-heavy DOCX reaches about 271 MiB in either mode. Exact individual values, source/tool hashes, ordered page digests and artifact identity are retained in `docs/office-performance-results.json`; summaries and reproducible commands are in `docs/office-performance.md`.
 
 A two-page distinct-image smoke pair also matched every-page bytes. Four invalid parameter/budget configurations rejected before output-directory creation; an existing output directory and its manifest remained unchanged. Benchmark source received independent review. No package runtime, dependency, upstream revision, lockfile, attribution, support fingerprint or version changed; the previous 339-native/481-installed artifact evidence remains applicable, and no fresh native/package test run is claimed here. Input hashing warms the filesystem cache; peak/current RSS use different OS counters and do not prove reclamation or cap allocation. P1 remains open for a reproducible PDF memory/full-document counterpart, and real-input/platform QA7 evidence remains incomplete. Independent review recomputed all six paired table medians/ratios and memory ranges and verified every source/tool/artifact hash, page digest and cached counter, with no findings. All 19 support/reference documentation tests, roadmap/reference/support checks and the 28-page site build with 1,649 local links/assets/fragments pass. Final current-main CI/manual merge remains pending.
+
+## GitHub Pages documentation site — reviewed manual merge
+
+PR95 final head `d9a6cbb914ec8a1bd4172bbcb58d0acbfe0ac8ae` passed required [CI39547460948](https://github.com/narain1/pydoccraft/actions/runs/39547460948): 321 native tests, 462 installed-wheel tests in207.055 seconds, formatting, Clippy, strict typing and the unchanged264-package license audit. Its [documentation build39547460927](https://github.com/narain1/pydoccraft/actions/runs/39547460927) passed; deployment was correctly skipped for the pull request. Independent source review and a clean build checked28 pages and1,642 local links/assets/fragments; negative checks rejected missing files/fragments, duplicate IDs and output-root traversal.
+
+Root visual review used Chromium140 with1440×1000 and390×844 viewports on the home page, authoring guide and roadmap. All six requests returned200 with no JavaScript errors or horizontal overflow; desktop/mobile homepage screenshots were inspected. The reviewed exact head was manually merged as `5583f2946534041267f71691a732f5c0d96c6bcd` after current-main checks, with repository auto-merge disabled. Public deployment/reachability remains separately verified after merge; the site follows main and does not declare the roadmap or a package release complete.
+
+## Owned PDF radio groups — final manual merge gate
+
+PR94 final head `0a0b225e12708d3d49c0bf7543d459b0c730cd49` passed required [current-main CI39548202131](https://github.com/narain1/pydoccraft/actions/runs/39548202131) and documentation CI39548202076 after the independent exact-artifact review recorded above. The final installed-wheel run passed all467 tests in388.512 seconds, with zero failures/errors/skips, on CPython3.11.17/Linux x86_64/glibc2.39. Wheel SHA-256 `11e5840634a7a95c9e7d2b515b064b355220fb181145a42fd5a17812a37b6efb`,17,535,375 bytes; extension40,677,744 bytes. Lock and upstream revisions are unchanged.
+
+The reviewed exact head was manually merged as `8979a6deb151742e18175cdebe843382ba3ac611`; repository auto-merge remains disabled. This completes the owned same-page radio-group delivery gate, while imported forms and broader PDF6 remain partial.
+
+
+## Owned body paragraph deletion — final manual merge gate
+
+PR96 final head `eb13c92b784d7df29749ce5c064b0405f2b1afdf` passed required [current-main CI39549509766](https://github.com/narain1/pydoccraft/actions/runs/39549509766) and documentation CI39549509781 after the independent exact-artifact review recorded above. The final run passed330 native tests in169.05 seconds and472 installed-wheel tests in347.071 seconds, with zero failures/errors/skips, plus formatting, Clippy, strict typing and the264-package license audit. On CPython3.11.17/Linux x86_64/glibc2.39, the wheel is17,538,600 bytes, extension40,685,872 bytes, SHA-256 `c4930f0423d4ada1e3c43e0828abade59a7399057b9208ada183effd006420f9`. Lock and pinned upstream revisions remain unchanged.
+
+The reviewed exact head was manually merged as `3989bea9c7ce8b9c6bca6fd0cc2aab10f84d31fc`. Repository auto-merge remains disabled. This closes ordinary owned body-paragraph deletion; section-boundary/semantic deletion, cell/PPTX deletion and broader DOC5/TXT1 remain partial.
+
+
+## Native annotation opacity — final manual merge gate
+
+PR97 final head `497559528cae172d23db07c23edb8ae92bdde4d3` passed required [current-main CI39550636008](https://github.com/narain1/pydoccraft/actions/runs/39550636008) and documentation CI39550636033 after the independent exact-artifact review recorded above. The final run passed333 native tests in191.77 seconds and476 installed-wheel tests in398.263 seconds, with zero failures/errors/skips, plus formatting, Clippy, strict typing and the264-package license audit. On CPython3.11.17/Linux x86_64/glibc2.39, the wheel is17,539,834 bytes, extension40,689,200 bytes, SHA-256 `80b6d99d496277dd2015ebb91c7bcea36b310a45d242852d76d1846427165638`. Lock and pinned upstream revisions remain unchanged.
+
+The reviewed exact head was manually merged as `ddef9b89e1a0b7311550191a6db4c53ad099a93f`. Repository auto-merge remains disabled. This closes the bounded comment-opacity delivery gate; imported inventory, reply semantics, encryption and broader PDF6/PDF8 remain partial.
+
+
+## Owned paragraph movement — final manual merge gate
+
+PR99 final head `ce0dd3a934c0df0da8e7732264c5735dd904db18` passed required [current-main CI39551991262](https://github.com/narain1/pydoccraft/actions/runs/39551991262) and documentation CI39551991265 after the independent exact-artifact review recorded above. The final run passed339 native tests in195.23 seconds and481 installed-wheel tests in420.181 seconds, with zero failures/errors/skips, plus formatting, Clippy, strict typing and the264-package license audit. On CPython3.11.17/Linux x86_64/glibc2.39, the wheel is17,556,088 bytes, extension40,724,848 bytes, SHA-256 `edbac3e7a0d6292ff838c688e287e8cd3fd7824adf633f19d17bbca178b99f17`. Lock and pinned upstream revisions remain unchanged.
+
+The reviewed exact head was manually merged as `49404df545cb5471dcc74e8d04dc90068ca718e6`. Repository auto-merge remains disabled. This closes the ordinary same-container direct paragraph movement delivery gate; cell/cross-container/semantic movement, imported preservation and broader DOC5/TXT1 remain partial.
+
+
+## Native-backed property types — final manual merge gate
+
+PR100 final head `48c5fd9994009dbcf9222825e98aaba258dbf08d` passed required [current-main CI 39553367804](https://github.com/narain1/pydoccraft/actions/runs/39553367804) and documentation CI 39553367825 after the independent exact-artifact review recorded above. The final run passed 339 native tests in 192.96 seconds and 481 installed-wheel tests in 418.302 seconds, with zero failures, errors or skips, plus formatting, Clippy, strict typing and the 264-package license audit. On CPython 3.11.17/Linux x86_64/glibc 2.39, the wheel is 17,556,179 bytes, extension 40,724,848 bytes, SHA-256 `46a64e1cd6f14cedf70334e0fb038e10411a6240719db7b88facfc4b5681f96c`. Lock and pinned upstream revisions remain unchanged.
+
+The reviewed exact head was manually merged as `5d0ca81cfca948d34fcbe8805fbaf117a4958ff9`. Repository auto-merge remains disabled. This completes the selected property-typing delivery gate; dynamic mappings, other properties and broader API3/IDE coverage remain open.
