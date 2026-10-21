@@ -181,6 +181,8 @@ class DecimalOutlineTests(unittest.TestCase):
     def test_all_nine_levels_maximum_start_have_visible_native_pdf_ink(self):
         for direction in ("ltr", "rtl"):
             with self.subTest(direction=direction), doc_ex.new("docx") as document:
+                # Fix the measured font instead of relying on installed substitutes.
+                document.styles["Normal"].format(font="Source Sans 3")
                 paragraphs = [document.add_paragraph("") for _ in range(9)]
                 for paragraph in paragraphs:
                     paragraph.format(direction=direction)

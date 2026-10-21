@@ -90,6 +90,7 @@ class WordBookmarkTests(unittest.TestCase):
     def test_internal_label_destination_repagination_and_references_across_stories(self):
         with doc_ex.new('docx', size=(300, 300)) as document:
             document.sections[0].margins = 30
+            document.styles['Normal'].format(font='Source Sans 3')
             source = document.add_paragraph('Jump ')
             source.add_run('label', bold=True)
             target = document.add_paragraph('Before\n' * 40)

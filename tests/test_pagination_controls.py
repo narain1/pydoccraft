@@ -9,6 +9,7 @@ from test_rendering import has_visible_content, png_chunks
 class PaginationControlTests(unittest.TestCase):
     def prepare(self, document, filler=0):
         document.sections[0].margins = 30
+        document.styles["Normal"].format(font="Source Sans 3")
         style = document.styles.add("Measured lines")
         style.format(font_size=12, line_spacing=1, space_before=0, space_after=0)
         for index in range(filler):

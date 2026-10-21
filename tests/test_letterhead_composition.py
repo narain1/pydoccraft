@@ -100,15 +100,16 @@ class LetterheadCompositionTests(unittest.TestCase):
                         settings = ET.fromstring(archive.read('word/settings.xml'))
                         self.assertIsNotNone(settings.find(W + 'evenAndOddHeaders'))
                     with doc_ex.open(source_bytes) as source, doc_ex.open(document.convert('pdf')) as pdf:
+                        # Golden pagination uses the recipe's explicit Source Sans3 font.
                         main_pages = 5 if expanded else 3
-                        self.assertEqual((len(source), len(pdf)), (main_pages + 3,) * 2)
+                        self.assertEqual((len(source), len(pdf)), (main_pages + 4,) * 2)
                         self.assertEqual([(p.metadata['section'], p.metadata['display_number']) for p in source],
-                                         [(0, i + 2) for i in range(main_pages)] + [(1, 20), (1, 21), (1, 22)])
+                                         [(0, i + 2) for i in range(main_pages)] + [(1, 20), (1, 21), (1, 22), (1, 23)])
                         # Physical page2 is displayed page3, so it uses the odd/default slot.
                         self.assertEqual(source[1].metadata['display_number'], 3)
                         body_block = next(b for b in source[0].blocks if 'Main item 000' in b.text)
                         self.assertEqual({line['page'] for line in body_block.metadata['layout']['lines']},
-                                         set(range(3 if expanded else 2)))
+                                         set(range(4 if expanded else 2)))
                         expected_labels = inserted + [f'Main item {i:03}' for i in range(24)] + [
                             'Project guide', 'Item label', 'Value label', 'Table alpha', 'Table beta',
                             'End of main section'] + [f'Appendix item {i:03}' for i in range(54)]
