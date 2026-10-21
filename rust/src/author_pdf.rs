@@ -646,7 +646,11 @@ impl EditablePdf {
             _ => return Err(PyValueError::new_err("field kind must be text, checkbox, or choice; only choice fields take nonempty options")),
         };
         let cost = name.len() + options.iter().map(String::len).sum::<usize>();
-        self.validate_input(cost)?;
+        // add_field draws an initial appearance; set_props below draws it again.
+        // Both generations remain in the native object store after replacement.
+        self.validate_input(
+            cost.saturating_add(owned_field_appearance_work(cost).saturating_mul(2)),
+        )?;
         let (x, y, width, height) = rect;
         let view = self.annotation_rect(page, (x, y, x + width, y + height))?;
         let user_rect = self.geometry[page].view_rect_to_user(view).map(f64::from);
@@ -672,6 +676,15 @@ impl EditablePdf {
             )
             .into());
         }
+        // This temporary native appearance precedes our font/orientation setup.
+        // Read only our already-bounded owned tree here; the complete profile is
+        // checked after configuration, when view-relative fit is meaningful.
+        let initial_fields = pdfcraft_forms::fields(&edited);
+        let initial = initial_fields
+            .iter()
+            .find(|field| field.name == name)
+            .ok_or_else(|| EngineError::Conversion("created field is missing".into()))?;
+        let initial_appearance = owned_field_appearance_bytes(&edited, initial)?;
         pdfcraft_forms::set_props(
             &mut edited,
             name,
@@ -683,7 +696,15 @@ impl EditablePdf {
             },
         )
         .map_err(form_error)?;
-        checked_owned_fields(&edited)?;
+        let fields = checked_owned_fields(&edited)?;
+        let configured = fields
+            .iter()
+            .find(|field| field.name == name)
+            .ok_or_else(|| EngineError::Conversion("configured field is missing".into()))?;
+        let cost = cost
+            .saturating_add(initial_appearance)
+            .saturating_add(owned_field_appearance_bytes(&edited, configured)?);
+        self.validate_input(cost)?;
         self.document = Some(edited);
         self.input_bytes += cost;
         self.items += 1;
@@ -719,11 +740,32 @@ impl EditablePdf {
             }
             _ => return Err(PyValueError::new_err("field value must be a string for text, bool for checkbox, or option string/null for choice")),
         };
+        // Text/choice writes redraw even identical or empty values. A complete
+        // owned checkbox only switches existing states and generates no AP stream.
+        let redraws = matches!(field.kind, FieldKind::Text | FieldKind::Combo);
+        let peak = if redraws {
+            owned_field_appearance_peak(&field).saturating_add(value_json.len().saturating_mul(16))
+        } else {
+            0
+        };
+        self.validate_input(value_json.len().saturating_add(peak))?;
         let mut edited = self.document()?.clone();
         pdfcraft_forms::set_value(&mut edited, name, &native).map_err(form_error)?;
-        checked_owned_fields(&edited)?;
+        let fields = checked_owned_fields(&edited)?;
+        let generated = if redraws {
+            let actual = fields
+                .iter()
+                .find(|field| field.name == name)
+                .ok_or_else(|| EngineError::Conversion("filled field is missing".into()))?;
+            owned_field_appearance_bytes(&edited, actual)?
+        } else {
+            0
+        };
+        let cost = value_json.len().saturating_add(generated);
+        self.validate_input(cost)?;
         self.document = Some(edited);
-        self.input_bytes += value_json.len();
+        self.input_bytes += cost;
+        self.items += 1;
         Ok(())
     }
 
@@ -3156,7 +3198,12 @@ fn validate_value_fit(field: &pdfcraft_forms::Field, text: &str) -> PyResult<()>
     )
 }
 
-// Conservative peak reservation for the existing bounded, fixed-size owned appearance writer.
+// Conservative work/storage reservation for the bounded owned appearance writer.
+// This is not a whole-process peak-memory claim (native compression/cloning also allocates).
+fn owned_field_appearance_work(text_bytes: usize) -> usize {
+    (64 * 1024usize).saturating_add(text_bytes.saturating_mul(16))
+}
+
 fn owned_field_appearance_peak(field: &pdfcraft_forms::Field) -> usize {
     let text_bytes = field
         .value
@@ -3169,7 +3216,7 @@ fn owned_field_appearance_peak(field: &pdfcraft_forms::Field) -> usize {
             .iter()
             .map(|(export, display)| export.len() + display.len())
             .sum::<usize>();
-    64 * 1024 + 16 * text_bytes
+    owned_field_appearance_work(text_bytes)
 }
 
 // Only newly generated, owned single-widget appearances reach this helper. Never
@@ -7719,5 +7766,180 @@ mod tests {
             .add_image(0, &huge, 10.0, 10.0, 20.0, 10.0, None, 0, false, false)
             .is_err());
         assert_eq!(document.to_bytes().unwrap(), bytes);
+    }
+}
+
+#[cfg(test)]
+mod field_accounting_probes {
+    use super::*;
+    use pdfcraft_cos::Object;
+
+    // Only fresh, tiny owned synthetic documents reach this test-only scan.
+    fn retained_forms(document: &Document) -> (usize, usize) {
+        document
+            .scan_objects()
+            .filter_map(|(_, value)| {
+                let Object::Stream(stream) = value.as_ref() else {
+                    return None;
+                };
+                (stream.dict.name(b"Subtype") == Some(b"Form")).then_some(stream.raw.len())
+            })
+            .fold((0, 0), |(count, bytes), length| (count + 1, bytes + length))
+    }
+
+    #[test]
+    fn value_updates_charge_retained_appearances_and_bound_mutation_count() {
+        for (kind, options, value) in [
+            ("text", vec![], "\"\""),
+            ("choice", vec!["A".into(), "B".into()], "null"),
+            ("checkbox", vec![], "false"),
+        ] {
+            let mut document = EditablePdf::new(300.0, 300.0).unwrap();
+            document
+                .add_field(0, "field", kind, (20.0, 20.0, 180.0, 30.0), options)
+                .unwrap();
+            let (count, raw) = retained_forms(document.document().unwrap());
+            let input = document.input_bytes;
+            let items = document.items;
+            for _ in 0..32 {
+                document.set_field_value("field", value).unwrap();
+            }
+            let (after_count, after_raw) = retained_forms(document.document().unwrap());
+            assert_eq!(document.items, items + 32);
+            assert_eq!(
+                document.input_bytes - input,
+                32 * value.len() + after_raw - raw
+            );
+            if kind == "checkbox" {
+                assert_eq!((after_count, after_raw), (count, raw));
+            } else {
+                assert_eq!(after_count - count, 32);
+                assert!(after_raw - raw > 32 * value.len());
+            }
+            eprintln!("{kind}:32 empty/same fills, new retained streams={}, raw bytes={}, charged input={}, added items=32",after_count-count,after_raw-raw,document.input_bytes-input);
+            // The next mutation consumes the last item; same/empty writes cannot
+            // continue allocating behind a constant mutation counter.
+            document.items = MAX_ITEMS - 1;
+            document.set_field_value("field", value).unwrap();
+            assert_eq!(document.items, MAX_ITEMS);
+            let before = document.to_bytes().unwrap();
+            let retained = retained_forms(document.document().unwrap());
+            assert!(document.set_field_value("field", value).is_err());
+            assert_eq!(document.to_bytes().unwrap(), before);
+            assert_eq!(retained_forms(document.document().unwrap()), retained);
+            // Peak reservation rejects before staging when only input JSON fits.
+            document.items = items;
+            document.input_bytes = MAX_DOCUMENT_INPUT - value.len();
+            if kind == "checkbox" {
+                document.set_field_value("field", value).unwrap();
+                assert_eq!(document.input_bytes, MAX_DOCUMENT_INPUT);
+                assert_eq!(retained_forms(document.document().unwrap()), retained);
+            } else {
+                let before = document.to_bytes().unwrap();
+                assert!(document.set_field_value("field", value).is_err());
+                assert_eq!(document.to_bytes().unwrap(), before);
+                assert_eq!(document.input_bytes, MAX_DOCUMENT_INPUT - value.len());
+                assert_eq!(document.items, items);
+                assert_eq!(retained_forms(document.document().unwrap()), retained);
+            }
+            let copy = document.copy().unwrap();
+            assert_eq!(copy.items, document.items);
+            assert_eq!(copy.input_bytes, document.input_bytes);
+            assert_eq!(
+                retained_forms(copy.document().unwrap()),
+                retained_forms(document.document().unwrap())
+            );
+        }
+    }
+
+    #[test]
+    fn creation_and_property_updates_charge_every_retained_generation() {
+        for rotation in [0, 90, 180, 270] {
+            let mut document = EditablePdf::new(300.0, 300.0).unwrap();
+            document.rotate_page(0, rotation).unwrap();
+            let input = document.input_bytes;
+            document
+                .add_field(
+                    0,
+                    "rotated",
+                    "choice",
+                    (20.0, 20.0, 180.0, 40.0),
+                    vec!["Canada".into(), "France".into()],
+                )
+                .unwrap();
+            let (count, raw) = retained_forms(document.document().unwrap());
+            assert_eq!(count, 2);
+            assert_eq!(
+                document.input_bytes - input,
+                "rotated".len() + "Canada".len() + "France".len() + raw
+            );
+            document.set_field_value("rotated", "\"Canada\"").unwrap();
+            assert_eq!(
+                document.field_named("rotated").unwrap().value,
+                vec!["Canada"]
+            );
+        }
+        for (kind, options) in [
+            ("text", vec![]),
+            ("checkbox", vec![]),
+            ("choice", vec!["A".into(), "B".into()]),
+        ] {
+            let mut document = EditablePdf::new(300.0, 300.0).unwrap();
+            let option_bytes = options.iter().map(String::len).sum::<usize>();
+            document
+                .add_field(0, "field", kind, (20.0, 20.0, 180.0, 30.0), options)
+                .unwrap();
+            let (count, raw) = retained_forms(document.document().unwrap());
+            assert_eq!(count, if kind == "checkbox" { 4 } else { 2 });
+            assert_eq!(document.input_bytes, "field".len() + option_bytes + raw);
+            for operation in 0..3 {
+                let before = retained_forms(document.document().unwrap());
+                let input = document.input_bytes;
+                let items = document.items;
+                match operation {
+                    0 => document.set_field_tooltip("field", "Help").unwrap(),
+                    1 => document.set_field_read_only("field", true).unwrap(),
+                    _ => document
+                        .set_field_box("field", (30.0, 40.0, 180.0, 30.0))
+                        .unwrap(),
+                }
+                let after = retained_forms(document.document().unwrap());
+                assert_eq!(after.0 - before.0, if kind == "checkbox" { 2 } else { 1 });
+                let metadata_cost = if operation == 0 {
+                    2 * "Help".len() + 32
+                } else {
+                    32
+                };
+                assert_eq!(
+                    document.input_bytes - input,
+                    after.1 - before.1 + metadata_cost
+                );
+                assert_eq!(document.items - items, 1);
+            }
+            eprintln!(
+                "{kind}:creation retained streams={count}, raw bytes={raw}, charged input={}",
+                "field".len() + option_bytes + raw
+            );
+        }
+    }
+    #[test]
+    fn field_appearance_reservation_rejects_creation_before_mutation() {
+        for (kind, options) in [
+            ("text", vec![]),
+            ("checkbox", vec![]),
+            ("choice", vec!["A".into()]),
+        ] {
+            let mut document = EditablePdf::new(300.0, 300.0).unwrap();
+            document.input_bytes = MAX_DOCUMENT_INPUT - 1024;
+            let before = document.to_bytes().unwrap();
+            let counts = (document.input_bytes, document.items);
+            assert!(document
+                .add_field(0, "field", kind, (20.0, 20.0, 180.0, 30.0), options)
+                .is_err());
+            assert_eq!(document.to_bytes().unwrap(), before);
+            assert_eq!((document.input_bytes, document.items), counts);
+            assert_eq!(retained_forms(document.document().unwrap()), (0, 0));
+            assert!(document.owned_fields().unwrap().is_empty());
+        }
     }
 }

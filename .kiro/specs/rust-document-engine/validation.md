@@ -859,6 +859,7 @@ GitHub merge state was verified on 2026-10-20. Each change passed independent re
 | [75](https://github.com/narain1/pydoccraft/pull/75) | `c34ef0bc722963ed6f0213da9934f52c361167ba` | 285 / 409 |
 | [76](https://github.com/narain1/pydoccraft/pull/76) | `65d9535e87d502af92d1c252bc06c7e8ab76b7d9` | 285 / 409 |
 | [77](https://github.com/narain1/pydoccraft/pull/77) | `7d77625313b99fcc3e09f216b891389b7b870cda` | 288 / 413 |
+| [78](https://github.com/narain1/pydoccraft/pull/78) | `f6ffa2c87d92943f36c4fdb57f3f7700fa912ede` | 288 / 413 |
 
 Formatting, warnings-denied Clippy, strict installed-package typing and the unchanged 264-package runtime/build license audit passed in each final CI run. PR69 changes source-audit documentation/data only.
 
@@ -1110,6 +1111,30 @@ Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,529,441 byt
 The native model owns block removal and required trailing paragraphs; only bounded adapter locators move. Source review confirmed surviving nested handles and table generations, normal semantic guards and stable selection through index callbacks. Body/cell/PPTX deletion, section-boundary deletion and semantic note deletion remain unsupported. No historical behavioral test fingerprint is changed. Independent complete-package review and exact-head/current-main CI remain required; broader DOC5/TXT1 stays partial.
 
 PR89 independent source review and all 449 tests against its copied frozen package pass in 151.559 seconds, with strict typing, evidence checks and exact wheel hash. The reviewer separately confirmed native extension identity with PR88. Final main integration/CI remains queued.
+
+
+## Owned PDF field appearance history — focused isolated correction
+
+A small native reproducer confirmed that 32 repeated empty text writes retained 32 appearance streams / 4,096 raw bytes but charged only 64 JSON bytes and no mutation items; choice-null writes retained the same appearance bytes while charging 128 JSON bytes. Canonical checkbox writes generated no new AP stream. Ordinary creation retained two generations (256 raw bytes for text/choice, 334 for checkbox in the fixture) while charging only name/options. Existing geometry/tooltip/read_only updates already charged their generated streams correctly. These are bounded measurements on original synthetic owned PDFs, not arbitrary-input memory benchmarks.
+
+The correction reserves generation work before staging, charges both creation generations and every text/choice fill appearance, and advances the mutation counter on every successful fill. Temporary initial appearance inspection precedes native font/orientation configuration; the existing complete profile validation remains afterward, preserving rotated choice fields. Checkbox writes retain zero new AP-byte charge. No runtime whole-object scan, imported appearance decoding, orphan deletion, API change or dependency/pin update is introduced.
+
+Three final native accounting groups pass in 0.04 seconds, including exact retained-stream/input deltas, item/byte boundaries, copy counters and all-four-rotation choice controls. Ten existing native field groups also passed during the focused correction run. Rust 1.95 locked/offline formatting, warnings-denied all-target Clippy and debug compilation pass. The final copied debug extension passes 23 public workflows in 30.785 seconds (one new repeated-write/copy/source/PNG/flatten workflow plus 22 related field/geometry/tooltips/read-only/output-option checks). No existing tests were weakened or removed.
+
+Exact corrected 32-write charges are 4,160 bytes for text, 4,224 for choice and 160 for checkbox, with 32 mutation items for each. The new native tests scan only fresh tiny owned documents to measure retained objects; that scan is not runtime code. Full integrated release/clean installed-wheel validation and independent review remain required. Cumulative appearance accounting is not a universal object-count/process-memory guarantee; broader PDF6/U10 imported/multiwidget and radio support remains open.
+
+
+## Owned PDF field appearance history — complete local artifact
+
+Runtime `4988dd8ed007fe9cc29a07e7c4163a5c75110b9d` passed **318 locked Rust tests and 455 clean installed-wheel Python tests**, zero failures/errors/skips. The Python corpus ran in 151.908 seconds on Linux x86_64 / Python 3.11.2 / Rust 1.95. Formatting, warnings-denied all-target Clippy, locked/offline release build, strict installed-package typing and the unchanged 264-package license audit pass. Installed package bytes match the wheel; the complete corpus verifies extraction, PNG rendering and reopened conversion across all three formats.
+
+Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,530,351 bytes**; extension **40,643,896 bytes**; SHA-256 `4eceea458625803b9a404c1c3258da11861c56a035570a1e8c96ef8d4b3b71b5`. Lock SHA-256 remains `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`; upstream revisions, dependencies and attribution remain unchanged.
+
+Small native controls measure actual retained appearance streams and exact cumulative charges, copy counters and item/byte-limit rollback. Runtime performs no whole-object scan and claims no total process-memory bound. Radio and imported-form profiles remain outside this artifact. Independent package review and exact-head/current-main CI remain required before manual merge; broader PDF6/U10 stays partial.
+
+PR90 independent source review and all 454 tests against its copied frozen package pass in 159.536 seconds, with strict typing, evidence checks and matching wheel hash. Review confirmed native sentinel/style behavior, preserved nested locators and publication after ordinary guards. Final main integration/CI remains queued.
+
+PR78 final head `a2fec8ab021fcaddf77e33a4766e0d95316b9deb` passed [current-main CI 39511382470](https://github.com/narain1/pydoccraft/actions/runs/39511382470): 288 Rust / 413 installed-wheel Python tests and all required checks. Independent review retained the exact tooltip/lock artifacts and corrected historical outline profile. It was manually merged as `f6ffa2c87d92943f36c4fdb57f3f7700fa912ede`; auto-merge remains disabled.
 
 ## Character-spacing mixed-scope fixture — independent CI correction
 
