@@ -1217,3 +1217,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Review and implement conservative discarded-row admission before any page mutation, retaining the exact existing replacement predicate.
 - [x] Complete focused native/public and independent source/artifact verification, including unchanged tab proofs in both diagnostic font environments.
 - [ ] Complete parent-integrated full artifact, fresh current-head CI and manual review/merge; preserve earlier 146/148 artifacts as historical sources.
+
+## 144/148. Native slide-copy prerequisite and dedicated pin integration
+
+- [x] Implement/review bounded native copy inventory, local reference remapping, atomic limits and ordinary-profile refusals; retain unchanged-native Clone/ID diagnostics.
+- [x] Validate selected native84 and source/readback/output2, independent replays and seven exact baseline compatibility artifacts; publish reviewed five-file contribution to the existing fork without an upstream PR.
+- [x] Update all four direct/ten resolved Deck pins only; audit attribution, immutable lock/source identities and current citation links without changing historical support profiles.
+- [x] Preserve the first linked-test overlapping-label premise failure and separately review the corrected exact-link plus URI-only acceptance control.
+- [x] Complete final471 native/release, clean installed586/typing/license/size/source identity and independent focused/artifact review.
+- [ ] Complete current-head CI/manual delivery; keep Python slide-copy admission separate149 and broader SLIDE1/U11 work open.
