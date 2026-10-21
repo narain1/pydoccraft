@@ -519,6 +519,16 @@ fn render_with(
             Ok(region)
         })
         .transpose()?;
+    if region.is_none() {
+        // Native scale limits use continuous point area; rounding to whole device
+        // pixels can exceed that area. Check the exact native pixel dimensions
+        // before requesting any output buffer, retaining reject_oversize as well.
+        crate::rendering::validate_size(
+            f64::from(pdfcraft_render::device_pixels(size[0], scale)),
+            f64::from(pdfcraft_render::device_pixels(size[1], scale)),
+            pdfcraft_render::MAX_SIDE as u32,
+        )?;
+    }
     let rendered = renderer.render(RenderRequest {
         page,
         kind: RequestKind::Pixels,
@@ -1737,5 +1747,104 @@ mod search_tests {
             Err(EngineError::Closed(_))
         ));
         assert_eq!(first.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod raster_limit_tests {
+    use super::*;
+
+    fn fixture(width: f32, height: f32, unit: f32, rotation: u16) -> Vec<u8> {
+        // Original empty-page fixture; offset CropBox is smaller than MediaBox.
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_owned(),
+            format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] /CropBox [10 20 {} {}] /UserUnit {unit} /Rotate {rotation} /Resources << >> /Contents 4 0 R >>", width + 20.0, height + 40.0, width + 10.0, height + 20.0),
+            "<< /Length 0 >>\nstream\n\nendstream".to_owned(),
+        ];
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, object) in objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = out.len();
+        out.extend_from_slice(b"xref\n0 5\n0000000000 65535 f \n");
+        for offset in offsets {
+            out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(
+            format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+        );
+        out
+    }
+
+    #[test]
+    fn native_continuous_area_can_round_above_integer_pixel_budget() {
+        // Arithmetic only: never allocate a 64-million-pixel acceptance fixture.
+        let (w, h) = (8000.5_f32, 7999.5_f32);
+        assert_eq!(w * h, 64_000_000.0);
+        assert_eq!(pdfcraft_render::effective_scale(w, h, 1.0), 1.0);
+        let width = pdfcraft_render::device_pixels(w, 1.0);
+        let height = pdfcraft_render::device_pixels(h, 1.0);
+        assert_eq!((width, height), (8001, 8000));
+        assert_eq!(u64::from(width) * u64::from(height), 64_008_000);
+        assert!(matches!(
+            crate::rendering::validate_size(
+                f64::from(width),
+                f64::from(height),
+                pdfcraft_render::MAX_SIDE as u32
+            ),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        // Exact cap remains accepted by the pure helper without rasterization.
+        assert!(
+            crate::rendering::validate_size(8000.0, 8000.0, pdfcraft_render::MAX_SIDE as u32)
+                .is_ok()
+        );
+        assert!(
+            crate::rendering::validate_size(8192.0, 1.0, pdfcraft_render::MAX_SIDE as u32).is_ok()
+        );
+    }
+
+    #[test]
+    fn rounded_full_raster_rejects_before_native_request_after_small_cached_render() {
+        for rotation in [0, 90, 180, 270] {
+            // UserUnit 2 produces the same 8000.5 x 7999.5 displayed-point dimensions;
+            // only the 1 DPI control and 1x1/17x17 clips below are actually rasterized.
+            let raw = fixture(4000.25, 3999.75, 2.0, rotation);
+            let (session, payload) = PdfSession::open(&raw, None).unwrap();
+            let expected = if rotation % 180 == 0 {
+                [8000.5, 7999.5]
+            } else {
+                [7999.5, 8000.5]
+            };
+            assert_eq!(session.page_sizes[0], expected);
+            assert_eq!(payload.pages.len(), 1);
+            assert!(session.render(0, 1.0, None).is_ok());
+            let before = session.stats().unwrap();
+            for _ in 0..2 {
+                assert!(matches!(
+                    session.render(0, 72.0, None),
+                    Err(EngineError::ResourceLimit(_))
+                ));
+                let after = session.stats().unwrap();
+                assert_eq!(after.render_requests, before.render_requests);
+                assert_eq!(after.rasterizations, before.rasterizations);
+            }
+            assert!(matches!(
+                render(&raw, 0, 72.0, None),
+                Err(EngineError::ResourceLimit(_))
+            ));
+            assert!(session.render(0, 72.0, Some((0.0, 0.0, 1.0, 1.0))).is_ok());
+            assert!(session
+                .render(0, 1200.0, Some((0.0, 0.0, 1.0, 1.0)))
+                .is_ok());
+            session.close().unwrap();
+            assert!(matches!(
+                session.render(0, 72.0, None),
+                Err(EngineError::Closed(_))
+            ));
+        }
     }
 }
