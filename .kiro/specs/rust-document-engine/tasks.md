@@ -737,3 +737,10 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete integrated locked release/full corpus and independent artifact review: 355 native and 498 installed Python tests.
 - [ ] Complete final exact-head/current-main CI and manual merge for cell paragraph deletion.
 - [ ] Keep broader DOC5/TXT1 composition, cell movement, imported editing and PPTX deletion open.
+
+
+## Native slide duplication prerequisite (spec96)
+
+- [x] Audit pinned public model and private editor copying/remapping; record basic-validation and owned-generation identity distinction.
+- [x] Specify same-deck native copy prerequisite and concrete reference/media/layout/limits fixture plan without expanding the API.
+- [ ] Obtain and verify a public bounded native copy operation before implementing owned slide duplication; keep cross-presentation import separate and SLIDE1 open.
