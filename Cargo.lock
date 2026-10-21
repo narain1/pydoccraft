@@ -2327,7 +2327,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 [[package]]
 name = "wordcraft-doc"
 version = "0.8.0"
-source = "git+https://github.com/narain1/wordcraft?rev=f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef#f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef"
+source = "git+https://github.com/narain1/wordcraft?rev=5312722fb1cefed837f00227e3afe919a6451b54#5312722fb1cefed837f00227e3afe919a6451b54"
 dependencies = [
  "serde",
  "serde_json",
@@ -2339,7 +2339,7 @@ dependencies = [
 [[package]]
 name = "wordcraft-docx"
 version = "0.8.0"
-source = "git+https://github.com/narain1/wordcraft?rev=f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef#f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef"
+source = "git+https://github.com/narain1/wordcraft?rev=5312722fb1cefed837f00227e3afe919a6451b54#5312722fb1cefed837f00227e3afe919a6451b54"
 dependencies = [
  "aes",
  "base64",
@@ -2360,7 +2360,7 @@ dependencies = [
 [[package]]
 name = "wordcraft-fonts"
 version = "0.8.0"
-source = "git+https://github.com/narain1/wordcraft?rev=f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef#f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef"
+source = "git+https://github.com/narain1/wordcraft?rev=5312722fb1cefed837f00227e3afe919a6451b54#5312722fb1cefed837f00227e3afe919a6451b54"
 dependencies = [
  "harfrust 0.13.3",
  "kurbo",
@@ -2374,7 +2374,7 @@ dependencies = [
 [[package]]
 name = "wordcraft-geom"
 version = "0.8.0"
-source = "git+https://github.com/narain1/wordcraft?rev=f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef#f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef"
+source = "git+https://github.com/narain1/wordcraft?rev=5312722fb1cefed837f00227e3afe919a6451b54#5312722fb1cefed837f00227e3afe919a6451b54"
 dependencies = [
  "serde",
 ]
@@ -2382,7 +2382,7 @@ dependencies = [
 [[package]]
 name = "wordcraft-layout"
 version = "0.8.0"
-source = "git+https://github.com/narain1/wordcraft?rev=f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef#f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef"
+source = "git+https://github.com/narain1/wordcraft?rev=5312722fb1cefed837f00227e3afe919a6451b54#5312722fb1cefed837f00227e3afe919a6451b54"
 dependencies = [
  "image",
  "js-sys",
@@ -2402,7 +2402,7 @@ dependencies = [
 [[package]]
 name = "wordcraft-metafile"
 version = "0.8.0"
-source = "git+https://github.com/narain1/wordcraft?rev=f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef#f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef"
+source = "git+https://github.com/narain1/wordcraft?rev=5312722fb1cefed837f00227e3afe919a6451b54#5312722fb1cefed837f00227e3afe919a6451b54"
 dependencies = [
  "kurbo",
  "thiserror",
@@ -2411,7 +2411,7 @@ dependencies = [
 [[package]]
 name = "wordcraft-pdf"
 version = "0.8.0"
-source = "git+https://github.com/narain1/wordcraft?rev=f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef#f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef"
+source = "git+https://github.com/narain1/wordcraft?rev=5312722fb1cefed837f00227e3afe919a6451b54#5312722fb1cefed837f00227e3afe919a6451b54"
 dependencies = [
  "craft-pdf",
  "image",
@@ -2429,7 +2429,7 @@ dependencies = [
 [[package]]
 name = "wordcraft-proof"
 version = "0.8.0"
-source = "git+https://github.com/narain1/wordcraft?rev=f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef#f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef"
+source = "git+https://github.com/narain1/wordcraft?rev=5312722fb1cefed837f00227e3afe919a6451b54#5312722fb1cefed837f00227e3afe919a6451b54"
 dependencies = [
  "log",
  "miniz_oxide 0.8.9",
@@ -2438,7 +2438,7 @@ dependencies = [
 [[package]]
 name = "wordcraft-render"
 version = "0.8.0"
-source = "git+https://github.com/narain1/wordcraft?rev=f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef#f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef"
+source = "git+https://github.com/narain1/wordcraft?rev=5312722fb1cefed837f00227e3afe919a6451b54#5312722fb1cefed837f00227e3afe919a6451b54"
 dependencies = [
  "image",
  "log",

@@ -11,7 +11,7 @@ The package links selected library crates rather than complete ArtCraft applicat
 | Project | Pinned revision | Responsibility |
 |---|---|---|
 | [PdfCraft contribution fork](https://github.com/narain1/pdfcraft) | `516caea956c0aaf15f2bd1f35a15e07c73a9ead6` | PDF inspection, reading-order text, links, images, rendering, DOCX export primitives |
-| [WordCraft contribution fork](https://github.com/narain1/wordcraft) | `f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef` | DOCX model, layout, rendering, PDF export |
+| [WordCraft contribution fork](https://github.com/narain1/wordcraft) | `5312722fb1cefed837f00227e3afe919a6451b54` | DOCX model, layout, rendering, PDF export |
 | [DeckCraft contribution fork](https://github.com/narain1/deckcraft) | `dd4fd70b6347dd2ce782e33f030a2b6c0abb0106` | PPTX model, rendering, PDF export |
 | [craft-libs](https://github.com/storytold/craft-libs) | `c3487320b2d1de657b860b3c8abb44e1f2b32bd8` | Shared PDF backend and patched Krilla dependency |
 

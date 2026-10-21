@@ -25,7 +25,7 @@ flowchart LR
 Every upstream repository is pinned to an immutable commit:
 
 - PdfCraft v0.9.0, reviewed contribution fork `narain1/pdfcraft`: `516caea956c0aaf15f2bd1f35a15e07c73a9ead6` (reviewed parent `60a8d7998b64c7718e08e9054e99f1f2eb1eda8d`, original upstream base `645016addcfb9078c557f0189559ab47cdcee057`)
-- WordCraft v0.8.0, reviewed contribution fork `narain1/wordcraft`: `f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef` (direct upstream parent `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`)
+- WordCraft v0.8.0, reviewed contribution fork `narain1/wordcraft`: `5312722fb1cefed837f00227e3afe919a6451b54` (reviewed parent `f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef`, original upstream `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`)
 - DeckCraft v0.8.0, reviewed contribution fork `narain1/deckcraft`: `c9c7fff189c808bf7266d0b888c3636a1880080d` (reviewed parent `dd4fd70b6347dd2ce782e33f030a2b6c0abb0106`, original upstream base `22db9261f9d1a214c296fd390173130c45d76d66`)
 - Craft PDF backend patches use the immutable `craft-libs` revision required by WordCraft/DeckCraft.
 
@@ -188,7 +188,7 @@ Style information adds canonical next/linked IDs; the facade returns the same ow
 
 Document defaults reuse native default_chr/default_para and the existing character/paragraph patch parsers. Paragraph edits mark the native default paragraph part present for serialization. A flat direct snapshot follows the existing formatting vocabulary, with paragraph shading owning the background key. Native style/context resolution and shared affected-table/tab validation gate commit. No separate defaults owner, style-selection engine or property-inheritance implementation is introduced.
 
-The pinned reader materializes an omitted default font size as 10pt while the raw resolver falls back to 11pt; default-size reset is therefore rejected before mutation. Other supported clears have effective-formatting readback coverage. Built-in heading links can reference absent companions: the facade reports that unsupported relation, while native clearing/replacement repairs the source without touching unrelated styles.
+The selected reader now preserves an omitted default font size and the native resolver’s existing 11pt fallback (spec127/131). This changes imported parsed-but-unsized styles from the former 10pt fallback. Default-size reset remains rejected before mutation pending separate owned-reset admission (spec132). Other supported clears have effective-formatting readback coverage. Built-in heading links can reference absent companions: the facade reports that unsupported relation, while native clearing/replacement repairs the source without touching unrelated styles.
 
 ## PDF drawing resource preservation
 
@@ -858,3 +858,10 @@ The shared direct/resolved paragraph output declares direction as the exact nati
 ### Spec120 explicit font inputs for measured fixtures
 
 Existing formatting selects Source Sans3 for the measured decimal-outline, pagination, bookmark and letterhead fixtures. The metadata-field and behind-image positive carriers use its bold face so exact-color checks measure actual solid glyph interiors even at72DPI. The letterhead recipe selects this font through its existing document defaults. Its font-specific golden has four appendix pages and four expanded main-paragraph layout pages; all physical pages still execute the existing logo/header/footer/content/link/table and72/144/300DPI checks. No layout compensation, renderer change, new font registry, test skip or tolerance widening is introduced. Requested family and emitted PDF BaseFont labels do not prove exact selected program bytes or isolate the native global font registry.
+
+
+## Dedicated Word default-size policy correction (spec131)
+
+Five direct and nine resolved Word crates select the reviewed 5312722 contribution. Its sole native runtime change removes the reader’s injection of Some(10) when parsed docDefaults omits ordinary size. Effective ordinary size continues to use the existing 11pt resolver fallback; absent complex-script size inherits ordinary size before that fallback, while explicit complex-script values remain independent. Missing ZIP styles parts retain initialized 12pt defaults. The shared Flat OPC and Word2003 converter paths are verified in the native contribution; Word2003 conversion emits a styles part, so its implicit case follows parsed-but-unsized 11pt behavior. None of these values is claimed as a universal standards or Word application default.
+
+The package adds no formatting algorithm, new method, input format or reset admission. Existing default-size None refusal remains atomic with the same exception class and a truthful pending-admission explanation. One native diagnostic deliberately changes from preserving the old mismatch to preserving native None/effective 11 after serialization. One original synthetic imported fixture checks explicit/missing-style controls and source/PDF glyph output through the unchanged public API. Historical contribution and package artifacts remain distinct.
