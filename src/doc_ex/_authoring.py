@@ -141,6 +141,13 @@ class _PdfMetadata(TypedDict, total=False):
     keywords: str
 
 
+class _PdfMetadataPatch(TypedDict, total=False):
+    title: str | None
+    author: str | None
+    subject: str | None
+    keywords: str | None
+
+
 class _WordCoreMetadata(_PdfMetadata, total=False):
     description: str
     category: str
@@ -2484,7 +2491,7 @@ class PdfDocument(EditableDocument):
         """A snapshot of supported document-info fields."""
         return json.loads(self._call("metadata"))
 
-    def update_metadata(self, **values):
+    def update_metadata(self, **values: Unpack[_PdfMetadataPatch]) -> None:
         """Update title/author/subject/keywords; None or empty strings clear fields."""
         if values.keys() - {"title", "author", "subject", "keywords"}:
             raise ValueError("metadata keys must be title, author, subject or keywords")
@@ -3002,7 +3009,7 @@ class PdfPage:
         self._check()
         self._owner._call("set_background", self._id, rgb, _change=True)
 
-    def rotate(self, degrees: int):
+    def rotate(self, degrees: SupportsIndex) -> None:
         self._check()
         degrees = operator.index(degrees)
         self._check()
@@ -3020,10 +3027,11 @@ class PdfPage:
         self._check()
         return Annotations(self)
 
-    def draw_text(self, text: str, *, at: tuple[float, float] | None = None,
-                  box: tuple[float, float, float, float] | None = None,
-                  font_size: float = 12, font=None, color="black", align: str = "left",
-                  behind: bool = False):
+    def draw_text(self, text: str, *, at: tuple[float, float] | list[float] | None = None,
+                  box: _Box | None = None,
+                  font_size: float = 12, font: _Source | None = None,
+                  color: _Color = "black", align: str = "left",
+                  behind: bool = False) -> None:
         """Draw searchable text at a point or inside a bounded top-left box.
 
         Built-in fonts wrap within boxes; supplied fonts require explicit lines.
@@ -3090,8 +3098,9 @@ class PdfPage:
         self._check()
         self._owner._call("draw_path", self._id, payload, stroke_rgb, fill_rgb, stroke_width, close, _change=True)
 
-    def add_image(self, source, *, box, crop=None, rotation: int = 0,
-                  flip_h: bool = False, flip_v: bool = False, behind: bool = False):
+    def add_image(self, source: _Source, *, box: _Box, crop: _Box | None = None,
+                  rotation: SupportsIndex = 0, flip_h: bool = False,
+                  flip_v: bool = False, behind: bool = False) -> None:
         """Place an image with optional visual crop, quarter-turn and flips.
 
         Crop is (left, top, right, bottom), each a fraction from 0 to 0.45.
