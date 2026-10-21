@@ -3253,6 +3253,17 @@ impl EditableDocx {
         self.set_section_props(0, &json!({"page_size": [width, height]}).to_string())
     }
 
+    pub fn mirror_margins(&self) -> PyResult<bool> {
+        Ok(self.document()?.settings.mirror_margins)
+    }
+
+    pub fn set_mirror_margins(&mut self, enabled: bool) -> PyResult<()> {
+        let mut candidate = self.document()?.clone();
+        candidate.settings.mirror_margins = enabled;
+        validate_unsplittable_page_bounds(&candidate)?;
+        self.commit(candidate)
+    }
+
     pub fn background(&self) -> PyResult<Option<String>> {
         Ok(self
             .document()?
@@ -21980,3 +21991,7 @@ mod table_delete_tests;
 #[cfg(test)]
 #[path = "table_page_field_tests.rs"]
 mod table_page_field_tests;
+
+#[cfg(test)]
+#[path = "docx_mirror_tests.rs"]
+mod mirror_tests;

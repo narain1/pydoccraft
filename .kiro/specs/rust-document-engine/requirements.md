@@ -784,3 +784,10 @@ Tests SHALL preserve the native stale-context reproducer and successful direct/c
 ## 109. Preserve page and slide selection across index callbacks
 
 PDF page lookup (including slices), deletion and movement SHALL capture page generation and count before caller index conversion. They SHALL reject an invalidated selection before returning current-generation handles or dispatching an outer mutation. Each movement argument SHALL be checked after its conversion. Slide deletion/movement SHALL equivalently retain a native slide-ID sequence snapshot. Callback-owned mutations remain visible; the outer operation SHALL not target a replacement item. Closed owners fail before caller conversion, ordinary negative indexes/bounds retain Python behavior, and metadata/content edits that leave the selection snapshot valid remain permitted. Existing stable-ID slide lookup remains unchanged. No public method, native mutation algorithm or new persistent identity registry is required.
+
+
+## 108. Owned DOCX mirrored margins
+
+Provide one exact-boolean `WordDocument.mirror_margins` property, default false, using pinned public native Settings and existing section margins/gutter. Preserve original margin values and native displayed-page parity, including section restarts and the independent even/odd-header filler rule. Use native serialization, layout, rendering and PDF export without local coordinate compensation or another settings manager.
+
+Acceptance covers false/true/reset and independent copies; closed/type/revision/cache behavior; asymmetric margins/gutter, headers/footers, tables, native selection geometry, supported floating anchors, single-column labels and equal-column natural reflow. Preserve exact body/link/table content. Reject invalid resulting geometry and existing semantic/resource violations atomically; keep multi-column numbering and table PAGE fields unsupported. Reopen native DOCX and PDF and check actual bounded image/label geometry at declared DPIs. Broader LAY10 settings remain open.

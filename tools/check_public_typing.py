@@ -20,6 +20,9 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
     with doc_ex.new('docx') as word:
         assert_type(word, WordDocument)
         assert_type(word.copy(), WordDocument)
+        assert_type(word.mirror_margins, bool)
+        word.mirror_margins = True
+        word.mirror_margins = False
         assert_type(word.notes.convert(kind="endnote"), int)
         paragraph = word.add_paragraph('Example')
         assert_type(paragraph, Paragraph)

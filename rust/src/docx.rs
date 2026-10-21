@@ -21,6 +21,9 @@ mod provenance;
 #[cfg(test)]
 #[path = "docx_provenance_proof.rs"]
 mod provenance_proof;
+#[cfg(test)]
+#[path = "docx_mirror_proof.rs"]
+mod mirror_proof;
 
 #[cfg(test)]
 thread_local! {

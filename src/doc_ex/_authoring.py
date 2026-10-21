@@ -873,6 +873,23 @@ class WordDocument(EditableDocument):
         return Pictures(self, lambda: self._call("image_ids"))
 
     @property
+    def mirror_margins(self) -> bool:
+        """Mirror inside/outside margins by displayed page-number parity.
+
+        This document-wide setting uses each section's existing left margin
+        plus gutter as inside and right margin as outside. It does not change
+        even/odd header selection or add next-page restart filler pages.
+        """
+        return self._call("mirror_margins")
+
+    @mirror_margins.setter
+    def mirror_margins(self, value: bool) -> None:
+        self._ensure_open()
+        if type(value) is not bool:
+            raise TypeError("mirror_margins must be a bool")
+        self._call("set_mirror_margins", value, _change=True)
+
+    @property
     def background(self) -> str | None:
         return self._call("background")
 

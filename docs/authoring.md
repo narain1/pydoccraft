@@ -363,7 +363,7 @@ Text edits preflight run/paragraph fragmentation (100,000 each), visible text an
 
 Each section exposes `start`, `page_size`, `margins`, `gutter`, `header_distance`, `footer_distance` and `columns=(count, gap_points, separator_bool)`. Section creation appends flowing content; subsequent document insertions belong to the final section. Section deletion/reorder and insertion into an earlier section are not yet exposed. Columns are limited to 1–45, with at least 18 points of usable width per column. There are at most 128 sections.
 
-`gutter` adds a left binding inset in points, reducing usable width. It accepts 0–1584 points subject to the page's remaining content area. Set `column_widths` to a tuple of explicit point widths matching the current column count; widths are 18–1584 points each, share the gap in `columns`, and must fit the usable width together with those gaps. Unused trailing space is allowed. The native layout positions and flows text; widths are never automatically scaled. `column_widths=None` restores equal columns. Assigning `columns` also clears explicit widths. Page dimensions determine orientation; mirrored/top gutters and independent per-column gaps are not exposed.
+`gutter` adds a binding inset in points, reducing usable width; it is on the left by default and on the inside when document-wide mirrored margins are enabled. It accepts 0–1584 points subject to the page's remaining content area. Set `column_widths` to a tuple of explicit point widths matching the current column count; widths are 18–1584 points each, share the gap in `columns`, and must fit the usable width together with those gaps. Unused trailing space is allowed. The native layout positions and flows text; widths are never automatically scaled. `column_widths=None` restores equal columns. Assigning `columns` also clears explicit widths. Page dimensions determine orientation; top gutters and independent per-column gaps are not exposed.
 
 ```python
 section = document.sections[0]
@@ -769,3 +769,24 @@ Creation of N widgets performs N initial pairs plus N(N+1)/2 member redraws. The
 The getter/setter use the same bounded canonical target profile as editing locks. Finite fractional `/CA` values are now supported within that profile; unrelated imported metadata/style restrictions remain. Links reject opacity. Nonfinite/out-of-range inputs fail instead of clamping; booleans, strings and `None` are invalid property values. `update(opacity=None)` leaves opacity unchanged, consistent with other optional update arguments. Locked comments refuse opacity changes. Native rendering, saved appearance streams and copies retain the value; style/opacity and geometry edits can replace custom imported appearances as documented above. Native note appearance regeneration draws the Comment icon as a bubble and other accepted icon names as a folded-page icon; imported note artwork is not preserved by these redraws.
 
 Comment style redraws charge each generated normal appearance plus a conservative 512-byte resource allowance for each generation, including intermediate rectangle/ellipse resize appearances. Canonical note recoloring now uses the same bounded target guard and 64 KiB appearance-work reservation as note opacity, including subsequent color-only changes after fractional opacity. Repeated identical assignments still regenerate native appearances and consume the cumulative mutation budget. Initial and final handle checks prevent numeric-conversion callbacks from retargeting deleted or moved comments. This is a bounded target operation, not a new general imported inventory guarantee.
+
+
+### Mirrored DOCX margins
+
+`document.mirror_margins = True` enables the native document-wide setting; its default is `False`. It accepts an exact Python boolean. Each section keeps the existing `(top, right, bottom, left)` margin tuple: left plus gutter becomes the inside margin and right becomes outside. Inside is left on odd **displayed page numbers** and right on even displayed numbers. Existing section page-number restarts therefore affect the side selection; physical page indexes alone do not determine it. `False` restores ordinary left/right placement without changing the saved margin values.
+
+```python
+with doc_ex.new("docx", size=(300, 300)) as document:
+    section = document.sections[0]
+    section.margins = (48, 36, 36, 72)
+    section.gutter = 8
+    document.mirror_margins = True
+    document.add_paragraph("Inside and outside margins follow native page numbering.")
+    document.save("mirrored.docx")
+```
+
+Body text, supported tables, inline header/footer content and supported margin/paragraph-anchored pictures follow native placement. Page-relative floating pictures retain their page coordinates. Native extraction body boxes and source-selection rectangles use the resulting geometry. Header variants remain a separate setting: for a next-page section restart, native parity filler pages depend on even/odd headers, not on `mirror_margins` alone. A first physical page displaying 2 has even mirrored margins even when it has no preceding filler.
+
+The setter stages the native candidate and reuses existing bounded geometry checks before committing. An outside margin too narrow for a line-number label, or a floating picture shifted outside its physical page, raises `UnsupportedFormatError` atomically; prior bytes, revision, ranges and render cache remain usable. Existing output guards still apply after later content/layout mutations. Single-column line numbers and ordinary equal-column flow have combined acceptance; multi-column line numbering retains its existing explicit rejection. Successful assignments, including assigning the current value, follow the existing document-setting convention: they advance the revision and invalidate previous text ranges/render cache. Copies remain independent.
+
+This owned horizontal-page profile adds no settings manager, section-specific mirror override, booklet printing, binding-direction switch, top gutter, imported editing or web-layout behavior. It does not expand the page-border, continuous-section, field or floating-artwork profiles. LAY10 remains open for its other settings.

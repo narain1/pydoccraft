@@ -866,3 +866,14 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Pass four focused workflows and 22 combined related workflows, strict typing and independent source/four-workflow replay.
 - [x] Complete exact combined installed artifact/corpus alongside the corrected spec107 fixture: two clean 528-test installed runs pass with unchanged tested native bytes.
 - [ ] Complete current-main CI and manual merge.
+
+
+## Mirrored DOCX margins (spec108)
+
+- [x] Audit pinned public model/read/write/layout; independently clear a two-group raw gate without adapter coordinate logic.
+- [x] Execute raw asymmetric geometry, displayed/physical parity, header inheritance, native selection and source/PDF pixel tests; document corrected part-ID and filler assumptions.
+- [x] Add one typed document-wide boolean using explicit existing geometry preflight and ordinary commit; preserve all semantic/resource/output guards.
+- [x] Add three native adapter groups and four public workflows for revision/copy/reset, strict bool/lifetime, geometry/cache rollback, section/header/table output, line labels, columns and natural growth; strict consumer and deliberate typing negatives pass.
+- [x] Complete independent frozen code/docs and four-workflow replay review; documentation/site checks pass.
+- [ ] Complete integrated installed corpus, current-head CI and manual merge.
+- [ ] Retain broader LAY10 settings and existing unsupported layout combinations under their current owners.
