@@ -823,3 +823,11 @@ Exact-ID handle targets and conversion revision/identity checks SHALL prevent de
 ## 115. Existing layout value annotations
 
 Existing paragraph, table and row properties must retain concrete successful result types in Python consumers: boolean page-break/row flags, a spacing triple, a list of column widths, a nullable uniform-border pair and a height/rule pair whose height may be absent. Setter annotations retain documented iterable/tuple/list forms and nullable resets. This is static API3 discoverability work, not new format support or changed runtime validation.
+
+
+## 114. Fallible native PPTX rendering and PDF propagation
+
+1. Every selected DeckCraft Git crate SHALL use one immutable reviewed contribution-fork revision, with explicit upstream parent/provenance. Other engine pins and runtime package versions/edges SHALL remain unchanged unless a separately reviewed dependency requirement demands otherwise. Regenerate/review lock, attribution and both license inventories.
+2. The selected PNG render call SHALL return explicit per-call native failures through private rendering_failure and existing public DocExError. PDF export SHALL propagate the native renderer error through existing conversion_failure. Legitimate blank slides SHALL remain successful. Do not infer errors from global counters or white pixels, add a public exception or duplicate a rendering algorithm.
+3. Preserve preallocation DPI/index/geometry/region checks, RGBA/PNG validation, retained-session ownership/counters and close behavior. Real native reentry SHALL exercise full/clip/session and PDF paths with exact error mapping, unchanged outer pixels/extent and subsequent healthy recovery. Boundary-only Python error tests SHALL be identified as such.
+4. Audit cited native files/symbols and migrate current engine provenance without relabeling historical fixture/artifact evidence. Complete locked native, installed-wheel, independent, typing, license and size gates before merge. Broader R4 allocation/work limits and other native entry points remain open; no version release is implied.

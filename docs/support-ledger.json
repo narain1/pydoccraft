@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "audited_commit": "58c1eaa53f5b37bb167958d8d6a059c2c9603a7c",
+  "audited_commit": "66ba6a2fe6e9a5a0099474141058655563966e7a",
   "references": {
     "pdfcraft": {
       "revision": "645016addcfb9078c557f0189559ab47cdcee057",
@@ -13,9 +13,9 @@
       "repository": "https://github.com/storytold/wordcraft"
     },
     "deckcraft": {
-      "revision": "22db9261f9d1a214c296fd390173130c45d76d66",
+      "revision": "dd4fd70b6347dd2ce782e33f030a2b6c0abb0106",
       "kind": "engine",
-      "repository": "https://github.com/storytold/deckcraft"
+      "repository": "https://github.com/narain1/deckcraft"
     },
     "craft-libs": {
       "revision": "c3487320b2d1de657b860b3c8abb44e1f2b32bd8",
@@ -770,7 +770,7 @@
           "reference": "deckcraft",
           "path": "crates/render/src/lib.rs",
           "symbols": [
-            "render_slide"
+            "try_render_slide"
           ]
         },
         "pdf": {
@@ -868,7 +868,7 @@
           "shape_placeholder"
         ],
         "rust/src/pptx.rs": [
-          "render_slide"
+          "try_render_slide"
         ]
       },
       "fixture_provenance": "Synthetic DeckCraft default layouts reached through public Python authoring; tests fill every placeholder and inspect the authored PPTX ZIP parts. They reopen PPTX and exported PDF and inspect actual label text/PNG pixels; this is not independent PowerPoint validation."
@@ -2438,7 +2438,7 @@
           "reference": "deckcraft",
           "path": "crates/render/src/lib.rs",
           "symbols": [
-            "render_slide"
+            "try_render_slide"
           ]
         },
         "pdf": {
