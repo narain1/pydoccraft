@@ -1020,3 +1020,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add one linked native identity/order/save/reopen/visible-output regression and retain existing allocation safety precondition and unchanged public tests.
 - [x] Complete locked444-native, fmt, Clippy, release build, two clean installed560 corpora, independent exact-artifact replay, typing and size gates.
 - [ ] Complete current-head CI and independent manual merge. Python underlays, resource collisions and broader PDF3/U10 remain open.
+
+
+### Spec120 measured-font fixture gates
+
+- [x] Preserve original cross-platform failures and execute separate original/named-font diagnostic controls.
+- [x] Independently review explicit-font/positive-ink fixture changes and deliberate letterhead golden updates with unchanged thresholds.
+- [x] Record scoped Linux output evidence and migrate only the two affected additional source fingerprints.
+- [ ] Complete actual Windows/macOS candidate output and full installed corpus before accepting the portable fixture profile.
+- [ ] Retain default-font/native isolation limitations under existing U02/STY5; do not mark broad fidelity or release complete.
