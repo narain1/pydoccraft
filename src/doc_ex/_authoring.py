@@ -789,10 +789,8 @@ class _Paragraphs(_Collection["Paragraph"]):
                               paragraph._target, _change=True)
 
     def move(self, index: int, destination: int) -> None:
-        """Move an owned DOCX paragraph to its final index in the same container and section."""
+        """Move to the final index within one DOCX container/section or PPTX cell."""
         self._owner._ensure_open()
-        if not isinstance(self._owner, WordDocument):
-            raise UnsupportedFormatError("PPTX paragraph movement is not supported")
         revision = self._owner._call("revision")
         identifiers = self._ids()
         selected = operator.index(index)
@@ -805,7 +803,14 @@ class _Paragraphs(_Collection["Paragraph"]):
             raise ValueError("paragraph selection is stale after a document mutation")
         identifier = identifiers[_index(selected, len(identifiers))]
         target_id = identifiers[_index(target, len(identifiers))]
-        if self._owner._call("move_paragraph", identifier, target_id, revision):
+        if isinstance(self._owner, WordDocument):
+            changed = self._owner._call("move_paragraph", identifier, target_id, revision)
+        else:
+            paragraph = self._factory(self._owner, identifier)
+            destination_paragraph = self._factory(self._owner, target_id)
+            changed = self._owner._call("move_cell_paragraph", *paragraph._range_args,
+                                        paragraph._target, destination_paragraph._target, revision)
+        if changed:
             self._owner._invalidate()
 
 
