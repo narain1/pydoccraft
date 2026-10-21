@@ -270,3 +270,6 @@ Additional extraction limits are 100,000 line observations, 200,000 rectangles, 
 
 
 Owned DOCX style collections also support `del document.styles[name_or_id]` and integer-index deletion of one unused custom definition. Deleted handles stay invalid; builtin/default and referenced definitions refuse deletion. The 1024 lifetime named-ID budget includes builtin and retired IDs. See [unused-style deletion](authoring.md#delete-an-unused-docx-style) for ownership, callback and capacity behavior. No batch/import API is implied.
+
+
+Existing paragraph/table/row layout values retain concrete Python types for IDEs and static consumers: spacing is a three-float tuple, column widths a list, uniform borders a nullable color/width tuple, and row height a tuple containing a nullable height plus its rule. Assignments retain accepted tuple/list inputs and iterable column widths. These annotations do not broaden format capabilities; PPTX row height still requires `at_least`, and DOCX-only row flags retain their explicit refusal.

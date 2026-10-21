@@ -913,3 +913,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete synchronized documentation review.
 - [ ] Complete integrated full native/release/installed-wheel corpus, exact-head CI and manual merge.
 - [ ] Keep STY6 open for style import, collision policy and general cleanup; no batch prune or automatic restyling.
+
+
+## Existing layout value annotations (spec115)
+
+- [x] Review native successful result signatures and retain iterable widths, tuple/list forms and nullable resets; preserve runtime unsupported-format checks.
+- [x] Annotate 17 existing signatures and independently prove annotation-erased AST identity with the prior facade.
+- [x] Pass the strict installed consumer, ten intentional negative typing diagnostics and four unchanged DOCX/PPTX layout workflows against an explicitly repacked wheel with identical tested native bytes.
+- [ ] Complete independent artifact/static/probe review, final installed corpus, synchronized documentation and exact-head CI before manual merge.
+- [ ] Keep broader API3 discoverability and IDE coverage open.

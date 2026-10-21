@@ -1127,7 +1127,7 @@ class Paragraph:
         return self._owner._call("paragraph_text", self._id)
 
     @text.setter
-    def text(self, value: str):
+    def text(self, value: str) -> None:
         self._owner._call("set_paragraph_text", self._id, value, _change=True)
 
     @property
@@ -1135,7 +1135,7 @@ class Paragraph:
         return self._owner._call("paragraph_style", self._id)
 
     @style.setter
-    def style(self, value: str | Style):
+    def style(self, value: str | Style) -> None:
         revision = self._owner._call("revision")
         reference = _style_reference(value, self._owner)
         _style_guard(self._owner, revision, value)
@@ -1146,7 +1146,7 @@ class Paragraph:
         return self._owner._call("paragraph_alignment", self._id)
 
     @alignment.setter
-    def alignment(self, value: str):
+    def alignment(self, value: str) -> None:
         self._owner._call("set_paragraph_alignment", self._id, value, _change=True)
 
     @property
@@ -1172,20 +1172,20 @@ class Paragraph:
         self._owner._call("set_paragraph_list", self._id, kind, level, restart, start, _change=True)
 
     @property
-    def page_break_before(self):
+    def page_break_before(self) -> bool:
         return self._owner._call("page_break_before", self._id)
 
     @page_break_before.setter
-    def page_break_before(self, value: bool):
+    def page_break_before(self, value: bool) -> None:
         self._owner._call("set_page_break_before", self._id, value, _change=True)
 
     @property
-    def spacing(self):
+    def spacing(self) -> tuple[float, float, float]:
         """Spacing before/after in points and line-spacing multiplier."""
         return self._owner._call("paragraph_spacing", self._id)
 
     @spacing.setter
-    def spacing(self, value):
+    def spacing(self, value: tuple[float, float, float] | list[float]) -> None:
         if not isinstance(value, (tuple, list)) or len(value) != 3:
             raise TypeError("spacing must be (before, after, line_spacing)")
         self._owner._call("set_paragraph_spacing", self._id, *map(pt, value), _change=True)
@@ -2039,11 +2039,11 @@ class EditableTable:
         return self._owner._call("fit_table", self._word_id(), _change=True)
 
     @property
-    def column_widths(self):
+    def column_widths(self) -> list[float]:
         return self._owner._call("column_widths", *self._args)
 
     @column_widths.setter
-    def column_widths(self, widths):
+    def column_widths(self, widths: Iterable[float]) -> None:
         values = []
         for width in widths:
             if len(values) >= 1000:
@@ -2052,11 +2052,11 @@ class EditableTable:
         self._owner._call("set_column_widths", *self._args, values, _change=True)
 
     @property
-    def borders(self):
+    def borders(self) -> tuple[str, float] | None:
         return self._owner._call("table_borders", *self._args)
 
     @borders.setter
-    def borders(self, value):
+    def borders(self, value: tuple[_Color, float] | list[_Color | float] | None) -> None:
         if value is None:
             self._owner._call("clear_table_borders", *self._args, _change=True)
         elif isinstance(value, (tuple, list)) and len(value) == 2:
@@ -2125,12 +2125,12 @@ class EditableRow:
 
 
     @property
-    def height(self):
+    def height(self) -> tuple[float | None, str]:
         """(height in points or None, rule): auto, at_least or exact."""
         return self._table._owner._call("row_height", *self._args)
 
     @height.setter
-    def height(self, value):
+    def height(self, value: tuple[float | None, str] | list[float | str | None] | None) -> None:
         if value is None:
             height, rule = None, "auto"
         elif isinstance(value, (tuple, list)) and len(value) == 2:
@@ -2140,22 +2140,22 @@ class EditableRow:
         self._table._owner._call("set_row_height", *self._args, height, rule, _change=True)
 
     @property
-    def repeat_header(self):
+    def repeat_header(self) -> bool:
         self._check()
         return self._table._owner._call("row_repeat_header", self._table._word_id(), self._index)
 
     @repeat_header.setter
-    def repeat_header(self, value: bool):
+    def repeat_header(self, value: bool) -> None:
         self._check()
         self._table._owner._call("set_row_repeat_header", self._table._word_id(), self._index, value, _change=True)
 
     @property
-    def allow_split(self):
+    def allow_split(self) -> bool:
         self._check()
         return self._table._owner._call("row_allow_split", self._table._word_id(), self._index)
 
     @allow_split.setter
-    def allow_split(self, value: bool):
+    def allow_split(self, value: bool) -> None:
         self._check()
         self._table._owner._call("set_row_allow_split", self._table._word_id(), self._index, value, _change=True)
 
