@@ -4,7 +4,7 @@
 
 This comparison groups related reference members under existing Python handles and formatting properties. It is not an exhaustive member inventory, implementation test, or format-conformance claim. Open XML schema/model APIs do not establish pagination or rendering. Reference products are not runtime dependencies.
 
-Audited local surface: `8a37bcceebac6e249493714116018b85cd998ab4`. The inventory contains 44 families and 198 representative members from 17 pinned source files. Later implementation changes require review.
+Audited local surface: `c0b1caf64ac487caa9c9d21c513fd8972768c24a`. The inventory contains 44 families and 198 representative members from 17 pinned source files. Later implementation changes require review.
 
 - [dotnet/Open-XML-SDK v3.5.1](https://github.com/dotnet/Open-XML-SDK/tree/3139fdfd27414548a41555f7848d5728f6e71a42) — `3139fdfd27414548a41555f7848d5728f6e71a42`
 - [pymupdf/PyMuPDF 2.0](https://github.com/pymupdf/PyMuPDF/tree/b8904b27efa0c4e2258f0e46ab4498a6173ffa22) — `b8904b27efa0c4e2258f0e46ab4498a6173ffa22`
@@ -277,7 +277,7 @@ Drawing fills, shapes, text boxes and groups.
 
 **Audited local surface:** Existing PDF path primitives and PPTX shapes/text/backgrounds; bounded owned DOCX rectangle/ellipse creator and private handle reuse Picture placement vocabulary without a second geometry framework..
 
-**Disposition:** `implemented_subset`. **Remaining:** DOCX lines/textboxes/group/rotation/front/auxiliary/imported editing and rich-text visible coverage remain unavailable or unassessed; PDF underlay API lacks public placement option; render-transparent backdrop differs from authored fill.
+**Disposition:** `implemented_subset`. **Remaining:** DOCX lines/textboxes/group/rotation/front/auxiliary/imported editing and rich-text visible coverage remain unavailable or unassessed; native typed PDF content now has public placement, but Python underlays remain unavailable; render-transparent backdrop differs from authored fill.
 
 **Upstream candidates:** [U04](upstream-roadmap.md), [U10](upstream-roadmap.md), [U11](upstream-roadmap.md)
 
@@ -511,7 +511,7 @@ Vector paths, fills and paint ordering.
 
 **Audited local surface:** PdfPage.draw_path; typed PPTX shape properties.
 
-**Disposition:** `implemented_subset`. **Remaining:** Native public stamping forces overlay; private prepend support must be exposed upstream. Do not wrap every draw in an adapter-built Form/layer system.
+**Disposition:** `implemented_subset`. **Remaining:** Native typed add_content_with_placement exposes overlay/underlay; raw public stamping remains overlay-only. Python underlays, resource-collision-safe composition and bounded raw-stream admission remain open. Do not wrap every draw in an adapter-built Form/layer system.
 
 **Upstream candidates:** [U10](upstream-roadmap.md)
 
