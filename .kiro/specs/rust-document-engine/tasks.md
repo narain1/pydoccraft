@@ -651,3 +651,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [ ] Migrate only the geometric-comment and lock evidence affected by intentional fractional-CA fixture changes to the exact new integrated artifact.
 - [ ] Complete locked full native/release/installed corpus, independent review and exact-head/current-main CI before manual merge.
 - [ ] Retain broader PDF6 imported-inventory/reply and PDF8 encryption/profile work.
+
+
+## Owned paragraph movement
+
+- [x] Audit public native removal/insertion and execute raw table-tail/singleton/section-destination proofs before implementation.
+- [x] Reuse the existing paragraph collection move spelling and native staged transaction, bounded stable-ID/root-path updates, section/semantic guards and callback revision checks.
+- [x] Add six native groups and five public workflows for native padding, identity, rollback, output, auxiliary stories, no-ops, copies, iteration and callbacks; retain all existing tests unchanged.
+- [x] Complete six focused native groups, fmt/Clippy/debug build, five new plus 25 related copied-package workflows, final media/field checks and strict consumer typing; record exact local results below.
+- [ ] Complete integrated locked release/installed-wheel corpus, independent review and current-main CI before manual merge.
+- [ ] Keep anchored/cross-section/cross-container/cell/PPTX movement, imported preservation and broader DOC5/TXT1 parity open.

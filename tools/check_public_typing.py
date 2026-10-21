@@ -51,6 +51,9 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(table[0, 0].add_table(1, columns=1), EditableTable)
         assert_type(table[0, 0].add_image(png, width=20), Picture)
         assert_type(word.paragraphs[:], list[Paragraph])
+        assert_type(word.paragraphs.move(0, -1), None)
+        assert_type(word.sections[0].header().paragraphs.move(0, 0), None)
+        assert_type(note.paragraphs.move(0, 0), None)
         assert_type(next(iter(word.images)), Picture)
 
     with doc_ex.new('pdf') as pdf:

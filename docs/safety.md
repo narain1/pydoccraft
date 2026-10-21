@@ -99,3 +99,8 @@ These limits bound appearance-generation work/count and retained raw appearance 
 
 
 Comment-opacity edits reuse the bounded canonical lock target profile before native property inspection or mutation. Only the accepted `/CA` scalar expands to finite `[0,1]`; direct geometry, metadata, reference-only annotation arrays and appearance restrictions remain. Notes reserve 64 KiB for native appearance work, for both opacity and color-only changes under the same canonical note target guard. All supported style/shape-resize redraws charge observed AP stream bytes plus a fixed 512-byte resource allowance for each generation. Compound shape resize/style edits charge both retained native streams. These are local operation budgets, not a process-wide allocation guarantee or general imported-comment inventory bound.
+
+
+### Owned paragraph movement
+
+Direct DOCX paragraph reordering is one staged transaction through public native block removal/insertion. Existing bounds cover 100,000 owned locators, 100,000 cell placeholders and 49-component/16-table paths. Native required tail padding is retained once and counted against the physical block cap; moves consume no editable identity or text/cell budget. Existing body section invariants and normal bookmark/media/field/list/semantic commit checks remain. A move cannot select a section boundary, cross sections/containers, move protected semantic anchors or mutate an aliased header/footer. Python index callbacks are followed by lifetime/revision checks before native dispatch; callback edits are not rolled back. No-op movement of a supported paragraph preserves revision and cached output.
