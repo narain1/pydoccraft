@@ -52,6 +52,13 @@ class TabStop(TypedDict, total=False):
     leader: str
 
 
+class PictureFormatting(TypedDict, total=False):
+    wrap: Literal["inline", "square", "top_bottom", "behind"]
+    anchor: Literal["page", "margin", "paragraph"]
+    position: tuple[float, float]
+    distance: float | tuple[float, float, float, float]
+
+
 class ParagraphFormatting(TypedDict, total=False):
     direction: Literal["ltr", "rtl"] | None
     borders: dict[str, BorderFormatting | None] | None
@@ -1451,7 +1458,7 @@ class Note(EditableStory):
 
 
 class Pictures(_Collection["Picture"]):
-    """Ordered inline pictures; deletion removes the selected placement."""
+    """Ordered pictures; deletion removes the selected placement."""
     def __init__(self, owner, ids):
         super().__init__(owner, ids, Picture)
 
@@ -1463,6 +1470,58 @@ class Pictures(_Collection["Picture"]):
 class Picture:
     def __init__(self, owner: WordDocument, identifier: int):
         self._owner, self._id = owner, identifier
+
+    @property
+    def formatting(self) -> dict:
+        """Owned placement snapshot; lengths are points and distance is top/right/bottom/left."""
+        result = json.loads(self._owner._call("image_formatting", self._id))
+        result["position"] = tuple(result["position"])
+        result["distance"] = tuple(result["distance"])
+        return result
+
+    def format(self, **formatting: Unpack[PictureFormatting]) -> None:
+        """Set native wrapping and placement for direct body pictures.
+
+        Floating wraps are square, top_bottom and behind. Page/margin offsets
+        refer to the anchor paragraph's laid-out page; paragraph offsets follow
+        that paragraph. Lengths use 0.05-point increments. Horizontal distances
+        must match. Front layering and floating nested/story pictures are unavailable.
+        """
+        self._owner._call("image_formatting", self._id)
+        revision = self._owner._call("revision")
+        if not formatting:
+            return
+        if formatting.keys() - PictureFormatting.__annotations__.keys():
+            raise ValueError("unsupported picture formatting property")
+        def length(value):
+            result = pt(value)
+            self._owner._call("image_formatting", self._id)
+            if self._owner._call("revision") != revision:
+                raise ValueError("document changed while converting picture formatting")
+            return result
+
+        patch = {}
+        for key, value in formatting.items():
+            if key in {"wrap", "anchor"}:
+                if not isinstance(value, str) or len(value) > 32:
+                    raise TypeError("picture wrap and anchor require supported names")
+                patch[key] = value
+            elif key == "position":
+                if not isinstance(value, (tuple, list)) or len(value) != 2:
+                    raise TypeError("position must be an (x, y) pair in points")
+                patch[key] = tuple(map(length, value))
+            else:
+                if isinstance(value, Real):
+                    value = (value,) * 4
+                if not isinstance(value, (tuple, list)) or len(value) != 4:
+                    raise TypeError("distance must be a number or (top, right, bottom, left) in points")
+                patch[key] = tuple(map(length, value))
+        # Numeric conversions may execute caller code: never retarget a changed owner.
+        self._owner._call("image_formatting", self._id)
+        if self._owner._call("revision") != revision:
+            raise ValueError("document changed while converting picture formatting")
+        encoded = json.dumps(patch, allow_nan=False)
+        self._owner._call("format_image", self._id, encoded, revision, _change=True)
 
     @property
     def data(self) -> bytes:

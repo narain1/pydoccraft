@@ -695,3 +695,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete integrated locked release/corpus, strict typing, license audit and independent artifact review: 343 native and 484 installed Python tests.
 - [ ] Complete final exact-head/current-main CI and manual merge for title/author fields.
 - [ ] Keep general REF3 field kinds, REF4 refresh and imported preservation open.
+
+
+## Guarded native DOCX picture placement
+
+- [x] Audit pinned native Float/read/write/layout APIs and execute four raw fixture groups before implementing the passing direct-body subset.
+- [x] Reuse Picture.format/formatting with bounded native patching, canonical lengths, ownership/revision callbacks and existing one-layout geometry preflight.
+- [x] Add focused native/public workflows for output, wrapping, transforms, identity, reset, rollback, later geometry and callbacks; document upstream front paint-order and overlap/layoutInCell prerequisites.
+- [x] Complete six native groups, five new plus28 related copied-package tests, fmt/Clippy/debug build, strict typing and static-site/roadmap checks; record exact artifact evidence.
+- [ ] Complete integrated locked full native/release/installed-wheel corpus, independent review and current-main CI before manual merge.
+- [ ] Keep full MED2/BG2–BG5, front/contours/nested scope, opacity/rotation and independent layering/overlap controls open.

@@ -10,7 +10,7 @@ use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyInt};
 use serde_json::{json, Map, Value};
-use wordcraft_doc::para::{Float, InlineObject, NoteKind};
+use wordcraft_doc::para::{Anchor, Float, InlineObject, NoteKind, Wrap};
 use wordcraft_doc::props::{
     Border, BorderStyle, Borders, HeightRule, Highlight, LineSpacing, NumRef, TabAlign, TabLeader,
     TabStop, TextDirection, Underline, VAlign, VMerge, VertAlign, TAB_POS_EPS,
@@ -3056,6 +3056,45 @@ impl EditableDocx {
         }
     }
 
+    pub fn image_formatting(&self, id: usize) -> PyResult<String> {
+        let InlineObject::Image { float, .. } = self.image(id)? else {
+            return Err(PyIndexError::new_err(
+                "image index does not identify a picture",
+            ));
+        };
+        picture_snapshot(float)
+    }
+
+    pub fn format_image(&mut self, id: usize, patch: &str, revision: u64) -> PyResult<()> {
+        self.image(id)?;
+        if self.revision != revision {
+            return Err(PyValueError::new_err(
+                "document changed while converting picture formatting",
+            ));
+        }
+        let InlineObject::Image { float, .. } = self.image(id)? else {
+            return Err(PyIndexError::new_err(
+                "image index does not identify a picture",
+            ));
+        };
+        let updated = picture_patch(float, patch)?;
+        let (story, path) = self.location(id)?;
+        if updated.wrap != Wrap::Inline && (story != StoryRef::Body || path.0.len() != 1) {
+            return Err(EngineError::Unsupported("floating pictures require a direct body paragraph; cell, note, header and footer placement is unavailable".into()).into());
+        }
+        if updated == *float {
+            return Ok(());
+        }
+        let mut candidate = self.document()?.clone();
+        let paragraph = self.paragraph_mut(&mut candidate, id)?;
+        if let Some(InlineObject::Image { float, .. }) = paragraph.objects.first_mut() {
+            *float = updated;
+        }
+        paragraph.touch();
+        validate_unsplittable_page_bounds(&candidate)?;
+        self.commit(candidate)
+    }
+
     pub fn image_crop(&self, id: usize) -> PyResult<(f64, f64, f64, f64)> {
         let InlineObject::Image { crop, .. } = self.image(id)? else {
             return Err(PyIndexError::new_err(
@@ -5430,6 +5469,63 @@ fn validate_rich_story_page_bounds(
     Ok(())
 }
 
+fn floating_picture_paths(document: &Document) -> PyResult<BTreeSet<Path>> {
+    if document.body.len() > MAX_BLOCKS {
+        return Err(limit(
+            "picture pagination validation exceeds 100000 body blocks",
+        ));
+    }
+    Ok(document
+        .body
+        .iter()
+        .enumerate()
+        .filter_map(|(index, block)| {
+            block
+                .as_para()
+                .filter(|para| {
+                    para.objects.iter().any(|object| {
+            matches!(object, InlineObject::Image { float, .. } if float.wrap != Wrap::Inline)
+        })
+                })
+                .map(|_| Path::top(index))
+        })
+        .collect())
+}
+
+fn validate_floating_picture_bounds(
+    page: &wordcraft_layout::Page,
+    paths: &BTreeSet<Path>,
+) -> PyResult<()> {
+    for item in &page.items {
+        if let wordcraft_layout::Placed::Image {
+            story: StoryRef::Body,
+            path,
+            rect,
+            ..
+        } = item
+        {
+            if paths.contains(path)
+                && (!page.w.is_finite()
+                    || page.w <= 0.0
+                    || !page.h.is_finite()
+                    || page.h <= 0.0
+                    || [rect.x, rect.y, rect.w, rect.h]
+                        .iter()
+                        .any(|value| !value.is_finite())
+                    || rect.w <= 0.0
+                    || rect.h <= 0.0
+                    || rect.x < -0.01
+                    || rect.y < -0.01
+                    || rect.right() > page.w + 0.01
+                    || rect.bottom() > page.h + 0.01)
+            {
+                return Err(EngineError::Unsupported("floating picture exceeds its physical page; adjust position, size or page geometry".into()).into());
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The native paginator places an oversized unsplittable row whole, even beyond
 /// the physical page. Reject that known loss before serializing authored data.
 /// Vertical merge anchors carry multi-row geometry and are deliberately outside
@@ -5437,6 +5533,7 @@ fn validate_rich_story_page_bounds(
 fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
     validate_line_number_work(document)?;
     let outlines = outline_targets(document)?;
+    let floating = floating_picture_paths(document)?;
     let mut pending = native_table_roots(document);
     let mut guarded = BTreeSet::new();
     let mut cells = 0usize;
@@ -5493,6 +5590,7 @@ fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
         && bookmarks.is_empty()
         && outlines.is_empty()
         && metadata_fields.is_empty()
+        && floating.is_empty()
     {
         return Ok(());
     }
@@ -5525,6 +5623,9 @@ fn validate_unsplittable_page_bounds(document: &Document) -> PyResult<()> {
             .into());
         }
         validate_rich_story_page_bounds(page, &rich)?;
+        if !floating.is_empty() {
+            validate_floating_picture_bounds(page, &floating)?;
+        }
         if !metadata_fields.is_empty() {
             validate_metadata_field_placement(
                 page,
@@ -7078,6 +7179,171 @@ fn validate_document_tabs(document: &Document) -> PyResult<()> {
         }
     }
     Ok(())
+}
+
+fn picture_snapshot(float: &Float) -> PyResult<String> {
+    let wrap = match float.wrap {
+        Wrap::Inline => "inline",
+        Wrap::Square => "square",
+        Wrap::TopAndBottom => "top_bottom",
+        Wrap::BehindText => "behind",
+        _ => {
+            return Err(EngineError::Unsupported("picture uses unavailable wrapping".into()).into())
+        }
+    };
+    let inline = float.wrap == Wrap::Inline;
+    let anchor = if inline {
+        "paragraph"
+    } else {
+        match (float.h_rel, float.v_rel) {
+            (Anchor::Page, Anchor::Page) => "page",
+            (Anchor::Margin, Anchor::Margin) => "margin",
+            (Anchor::Column, Anchor::Paragraph) => "paragraph",
+            _ => {
+                return Err(EngineError::Unsupported(
+                    "picture uses unavailable anchor references".into(),
+                )
+                .into())
+            }
+        }
+    };
+    let position = if inline {
+        [0.0, 0.0]
+    } else {
+        [spacing_points(float.x), spacing_points(float.y)]
+    };
+    let distance = if inline {
+        [0.0; 4]
+    } else {
+        [
+            spacing_points(float.dist_top),
+            spacing_points(float.dist),
+            spacing_points(float.dist_bottom),
+            spacing_points(float.dist),
+        ]
+    };
+    Ok(json!({"wrap":wrap,"anchor":anchor,"position":position,"distance":distance}).to_string())
+}
+
+fn picture_length(value: &Value, minimum: f64, maximum: f64) -> PyResult<f32> {
+    let points = value
+        .as_f64()
+        .filter(|value| value.is_finite() && (minimum..=maximum).contains(value))
+        .ok_or_else(|| {
+            PyValueError::new_err("picture length is outside its finite supported range")
+        })?;
+    let canonical = (points * 20.0).round() / 20.0;
+    if (canonical - points).abs() > 4.0 * f64::EPSILON * points.abs().max(1.0) {
+        return Err(PyValueError::new_err(
+            "picture lengths require 0.05-point increments",
+        ));
+    }
+    Ok(canonical as f32)
+}
+
+fn picture_patch(float: &Float, input: &str) -> PyResult<Float> {
+    if input.len() > 1024 {
+        return Err(limit("picture format patch exceeds 1 KiB"));
+    }
+    let values: Map<String, Value> = serde_json::from_str(input)
+        .map_err(|_| PyValueError::new_err("picture format patch must be a JSON object"))?;
+    if values.is_empty() {
+        return Ok(float.clone());
+    }
+    let mut updated = float.clone();
+    if let Some(value) = values.get("wrap") {
+        updated.wrap = match value.as_str() {
+            Some("inline") => Wrap::Inline,
+            Some("square") => Wrap::Square,
+            Some("top_bottom") => Wrap::TopAndBottom,
+            Some("behind") => Wrap::BehindText,
+            Some("front" | "tight" | "through") => return Err(EngineError::Unsupported(
+                "front layering and contour wrapping are unavailable at the pinned native revision"
+                    .into(),
+            )
+            .into()),
+            _ => {
+                return Err(PyValueError::new_err(
+                    "wrap must be inline, square, top_bottom or behind",
+                ))
+            }
+        };
+    }
+    for (key, value) in &values {
+        match key.as_str() {
+            "wrap" => {}
+            "anchor" => {
+                (updated.h_rel, updated.v_rel) = match value.as_str() {
+                    Some("page") => (Anchor::Page, Anchor::Page),
+                    Some("margin") => (Anchor::Margin, Anchor::Margin),
+                    Some("paragraph") => (Anchor::Column, Anchor::Paragraph),
+                    _ => {
+                        return Err(PyValueError::new_err(
+                            "anchor must be page, margin or paragraph",
+                        ))
+                    }
+                };
+                updated.h_align = None;
+                updated.v_align = None;
+            }
+            "position" => {
+                let values = value
+                    .as_array()
+                    .filter(|values| values.len() == 2)
+                    .ok_or_else(|| PyValueError::new_err("position requires two lengths"))?;
+                updated.x = picture_length(&values[0], -31680.0, 31680.0)?;
+                updated.y = picture_length(&values[1], -31680.0, 31680.0)?;
+                updated.h_align = None;
+                updated.v_align = None;
+            }
+            "distance" => {
+                let values = value
+                    .as_array()
+                    .filter(|values| values.len() == 4)
+                    .ok_or_else(|| {
+                        PyValueError::new_err("distance requires top/right/bottom/left lengths")
+                    })?;
+                let values = values
+                    .iter()
+                    .map(|value| picture_length(value, 0.0, 1584.0))
+                    .collect::<PyResult<Vec<_>>>()?;
+                if values[1] != values[3] {
+                    return Err(EngineError::Unsupported(
+                        "native picture wrapping requires equal left and right distances".into(),
+                    )
+                    .into());
+                }
+                updated.dist_top = values[0];
+                updated.dist = values[1];
+                updated.dist_bottom = values[2];
+            }
+            _ => {
+                return Err(PyValueError::new_err(
+                    "unsupported picture formatting property",
+                ))
+            }
+        }
+    }
+    if updated.wrap == Wrap::Inline {
+        if values.keys().any(|key| key != "wrap") {
+            return Err(PyValueError::new_err(
+                "anchor, position and distance require a floating wrap",
+            ));
+        }
+        updated.h_rel = Anchor::Column;
+        updated.v_rel = Anchor::Paragraph;
+        updated.x = 0.0;
+        updated.y = 0.0;
+        updated.h_align = None;
+        updated.v_align = None;
+        updated.dist = 0.0;
+        updated.dist_top = 0.0;
+        updated.dist_bottom = 0.0;
+    } else if float.wrap == Wrap::Inline && !values.contains_key("anchor") {
+        updated.h_rel = Anchor::Column;
+        updated.v_rel = Anchor::Paragraph;
+    }
+    Ok(updated)
 }
 
 fn format_patch(input: &str) -> PyResult<Map<String, Value>> {
@@ -19680,5 +19946,395 @@ mod paragraph_move_raw_proof {
         assert_eq!(document.section_index_of(destination), 1);
         let read = wordcraft_docx::read(&wordcraft_docx::write(&document).unwrap()).unwrap();
         assert_eq!(read.section_index_of(destination), 1);
+    }
+}
+
+#[cfg(test)]
+mod picture_float_raw_proof {
+    use super::*;
+    use wordcraft_doc::para::{Anchor, Wrap};
+
+    fn blue_png() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, 8, 4);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&[0, 0, 255, 255].repeat(32))
+                .unwrap();
+        }
+        bytes
+    }
+
+    fn colored_bounds(data: &[u8], color: [u8; 4]) -> (u32, u32, u32, u32, usize) {
+        let decoder = png::Decoder::new(Cursor::new(data));
+        let mut reader = decoder.read_info().unwrap();
+        let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut pixels).unwrap();
+        assert_eq!(info.color_type, png::ColorType::Rgba);
+        let (mut x0, mut y0, mut x1, mut y1, mut count) = (u32::MAX, u32::MAX, 0, 0, 0);
+        for (index, pixel) in pixels[..info.buffer_size()].chunks_exact(4).enumerate() {
+            if pixel == color {
+                let (x, y) = (index as u32 % info.width, index as u32 / info.width);
+                x0 = x0.min(x);
+                y0 = y0.min(y);
+                x1 = x1.max(x);
+                y1 = y1.max(y);
+                count += 1;
+            }
+        }
+        (x0, y0, x1, y1, count)
+    }
+
+    fn image_document(first: bool, wrap: Wrap) -> Document {
+        let mut author = EditableDocx::new();
+        author.set_page_size(300.0, 300.0).unwrap();
+        author.set_margins(30.0, 30.0, 30.0, 30.0).unwrap();
+        if !first {
+            author.add_paragraph("BLACK LABEL BEFORE PICTURE").unwrap();
+        }
+        let id = author
+            .add_image(&blue_png(), Some(200.0), Some(100.0), "Float")
+            .unwrap();
+        if first {
+            author.add_paragraph("BLACK LABEL AFTER PICTURE").unwrap();
+        }
+        let mut raw = author.document().unwrap().clone();
+        let para = author.paragraph_mut(&mut raw, id).unwrap();
+        let float = para.objects[0].float_mut().unwrap();
+        float.wrap = wrap;
+        float.h_rel = Anchor::Page;
+        float.v_rel = Anchor::Page;
+        float.x = 30.0;
+        float.y = 30.0;
+        para.touch();
+        raw
+    }
+
+    #[test]
+    fn public_native_front_layer_is_sensitive_to_later_paragraph_source_order() {
+        for first in [false, true] {
+            for wrap in [Wrap::BehindText, Wrap::InFrontOfText] {
+                let raw = image_document(first, wrap);
+                let bytes = wordcraft_docx::write(&raw).unwrap();
+                let native_png = crate::docx::render(&bytes, 0, 72.0, None).unwrap();
+                let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+                let pdf_png = crate::pdf::render(&pdf, 0, 72.0, None).unwrap();
+                let native_dark = colored_bounds(&native_png, [0, 0, 0, 255]).4;
+                let pdf_dark = colored_bounds(&pdf_png, [0, 0, 0, 255]).4;
+                println!("image_first={first} wrap={wrap:?} native_black={native_dark} pdf_black={pdf_dark}");
+                assert_eq!(colored_bounds(&native_png, [0, 0, 255, 255]).0, 30);
+                assert_eq!(colored_bounds(&native_png, [0, 0, 255, 255]).1, 30);
+                if wrap == Wrap::InFrontOfText && !first {
+                    assert_eq!(native_dark, 0);
+                    assert_eq!(pdf_dark, 0);
+                } else {
+                    assert!(native_dark > 20);
+                    assert!(pdf_dark > 20);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn public_native_page_margin_and_paragraph_picture_anchors_roundtrip() {
+        for (anchor, hx, vy, expected) in [
+            ("page", Anchor::Page, Anchor::Page, (90.0, 120.0)),
+            ("margin", Anchor::Margin, Anchor::Margin, (120.0, 150.0)),
+            (
+                "paragraph",
+                Anchor::Column,
+                Anchor::Paragraph,
+                (120.0, 150.0),
+            ),
+        ] {
+            let mut author = EditableDocx::new();
+            author.set_page_size(300.0, 300.0).unwrap();
+            author.set_margins(30.0, 30.0, 30.0, 30.0).unwrap();
+            let original = blue_png();
+            let id = author
+                .add_image(&original, Some(80.0), Some(40.0), "Anchor")
+                .unwrap();
+            let mut raw = author.document().unwrap().clone();
+            let para = author.paragraph_mut(&mut raw, id).unwrap();
+            let float = para.objects[0].float_mut().unwrap();
+            float.wrap = Wrap::BehindText;
+            float.h_rel = hx;
+            float.v_rel = vy;
+            float.x = 90.0;
+            float.y = 120.0;
+            float.dist = 4.0;
+            float.dist_top = 2.0;
+            float.dist_bottom = 6.0;
+            let wanted = float.clone();
+            para.touch();
+            let bytes = wordcraft_docx::write(&raw).unwrap();
+            let read = wordcraft_docx::read(&bytes).unwrap();
+            let para = read.body[0].as_para().unwrap();
+            let InlineObject::Image { float, media, .. } = &para.objects[0] else {
+                panic!("image")
+            };
+            assert_eq!(*float, wanted, "{anchor}");
+            assert_eq!(read.media[media].as_ref(), original.as_slice());
+            let layout =
+                wordcraft_layout::layout(&read, &mut Default::default(), &Default::default());
+            let frames: Vec<_> = layout.pages[0]
+                .items
+                .iter()
+                .filter_map(|placed| {
+                    if let wordcraft_layout::Placed::Object { rect, .. } = placed {
+                        Some((rect.x, rect.y, rect.w, rect.h))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert_eq!(
+                frames,
+                vec![(expected.0, expected.1, 80.0, 40.0)],
+                "{anchor}"
+            );
+            for dpi in [72.0, 144.0, 300.0] {
+                let scale = dpi / 72.0;
+                let png = crate::docx::render(&bytes, 0, dpi, None).unwrap();
+                let bounds = colored_bounds(&png, [0, 0, 255, 255]);
+                println!("anchor={anchor} dpi={dpi} blue_bounds={bounds:?}");
+                assert!((f64::from(bounds.0) - f64::from(expected.0) * scale).abs() <= 1.0);
+                assert!((f64::from(bounds.1) - f64::from(expected.1) * scale).abs() <= 1.0);
+                assert!(
+                    (f64::from(bounds.2 + 1) - f64::from(expected.0 + 80.0) * scale).abs() <= 1.0
+                );
+                assert!(
+                    (f64::from(bounds.3 + 1) - f64::from(expected.1 + 40.0) * scale).abs() <= 1.0
+                );
+            }
+        }
+    }
+    #[test]
+    fn public_native_square_and_top_bottom_respect_picture_exclusion() {
+        for wrap in [Wrap::Square, Wrap::TopAndBottom] {
+            let mut author = EditableDocx::new();
+            author.set_page_size(300.0, 300.0).unwrap();
+            author.set_margins(30.0, 30.0, 30.0, 30.0).unwrap();
+            let id = author
+                .add_image(&blue_png(), Some(80.0), Some(60.0), "Wrap")
+                .unwrap();
+            author
+                .add_paragraph(&"Flowing words around native floating image. ".repeat(12))
+                .unwrap();
+            let mut raw = author.document().unwrap().clone();
+            let para = author.paragraph_mut(&mut raw, id).unwrap();
+            let float = para.objects[0].float_mut().unwrap();
+            float.wrap = wrap;
+            float.h_rel = Anchor::Page;
+            float.v_rel = Anchor::Page;
+            float.x = 100.0;
+            float.y = 60.0;
+            float.dist = 10.0;
+            float.dist_top = 5.0;
+            float.dist_bottom = 15.0;
+            para.touch();
+            let bytes = wordcraft_docx::write(&raw).unwrap();
+            let read = wordcraft_docx::read(&bytes).unwrap();
+            let layout =
+                wordcraft_layout::layout(&read, &mut Default::default(), &Default::default());
+            let mut beside = 0;
+            for item in &layout.pages[0].items {
+                if let wordcraft_layout::Placed::Lines {
+                    path,
+                    para,
+                    l0,
+                    l1,
+                    x,
+                    y,
+                    ..
+                } = item
+                {
+                    if path.last() != 1 {
+                        continue;
+                    }
+                    for line in &para.lines[*l0..*l1] {
+                        let top = y + line.top - para.lines[*l0].top;
+                        let left = x + line.left;
+                        let right = x + line.right;
+                        println!(
+                            "wrap={wrap:?} top={top} bottom={} left={left} right={right}",
+                            top + line.height
+                        );
+                        if top + line.height > 55.01 && top < 134.99 {
+                            assert_eq!(wrap, Wrap::Square);
+                            assert!(right <= 90.01 || left >= 189.99);
+                            beside += 1;
+                        }
+                    }
+                }
+            }
+            if wrap == Wrap::Square {
+                assert!(beside > 0);
+            }
+            let png = crate::docx::render(&bytes, 0, 72.0, None).unwrap();
+            assert_eq!(
+                colored_bounds(&png, [0, 0, 255, 255]),
+                (100, 60, 179, 119, 4800)
+            );
+            let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
+            let png = crate::pdf::render(&pdf, 0, 72.0, None).unwrap();
+            assert_eq!(
+                colored_bounds(&png, [0, 0, 255, 255]),
+                (100, 60, 179, 119, 4800)
+            );
+        }
+    }
+
+    #[test]
+    fn public_native_page_anchor_follows_its_paragraph_page_after_break() {
+        let mut author = EditableDocx::new();
+        author.set_page_size(300.0, 300.0).unwrap();
+        author.set_margins(30.0, 30.0, 30.0, 30.0).unwrap();
+        author.add_paragraph("First physical page").unwrap();
+        author.add_page_break().unwrap();
+        let id = author
+            .add_image(&blue_png(), Some(80.0), Some(40.0), "Second")
+            .unwrap();
+        let mut raw = author.document().unwrap().clone();
+        let para = author.paragraph_mut(&mut raw, id).unwrap();
+        let float = para.objects[0].float_mut().unwrap();
+        float.wrap = Wrap::BehindText;
+        float.h_rel = Anchor::Page;
+        float.v_rel = Anchor::Page;
+        float.x = 90.0;
+        float.y = 120.0;
+        para.touch();
+        let bytes = wordcraft_docx::write(&raw).unwrap();
+        let read = wordcraft_docx::read(&bytes).unwrap();
+        let layout = wordcraft_layout::layout(&read, &mut Default::default(), &Default::default());
+        assert_eq!(layout.pages.len(), 2);
+        assert!(!layout.pages[0]
+            .items
+            .iter()
+            .any(|item| matches!(item, wordcraft_layout::Placed::Image { .. })));
+        assert!(layout.pages[1].items.iter().any(|item| matches!(item, wordcraft_layout::Placed::Image { rect, .. } if rect.x == 90.0 && rect.y == 120.0)));
+        let png = crate::docx::render(&bytes, 1, 72.0, None).unwrap();
+        assert_eq!(
+            colored_bounds(&png, [0, 0, 255, 255]),
+            (90, 120, 169, 159, 3200)
+        );
+    }
+    #[test]
+    fn picture_patch_is_atomic_bounded_and_preserves_native_media_and_transforms() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditableDocx::new();
+        author.set_page_size(300.0, 300.0).unwrap();
+        author.set_margins(30.0, 30.0, 30.0, 30.0).unwrap();
+        let id = author
+            .add_image(&blue_png(), Some(80.0), Some(40.0), "Owned")
+            .unwrap();
+        author.set_image_crop(id, (0.25, 0.0, 0.0, 0.0)).unwrap();
+        author.set_image_flips(id, Some(true), Some(true)).unwrap();
+        let before = author.to_bytes().unwrap();
+        let revision = author.revision().unwrap();
+        for patch in [
+            r#"{"wrap":"front"}"#,
+            r#"{"wrap":"behind","distance":[1,2,3,4]}"#,
+            r#"{"wrap":"behind","anchor":"page","position":[290,10]}"#,
+            r#"{"wrap":"behind","position":[0.001,0]}"#,
+            r#"{"wrap":"behind","position":[31681,0]}"#,
+            r#"{"wrap":"behind","distance":[1585,0,0,0]}"#,
+            r#"{"wrap":"inline","position":[0,0]}"#,
+            r#"{"wrap":"behind","position":[true,0]}"#,
+            r#"{"unknown":1}"#,
+            r#"[]"#,
+        ] {
+            assert!(author.format_image(id, patch, revision).is_err(), "{patch}");
+            assert_eq!(author.to_bytes().unwrap(), before);
+            assert_eq!(author.revision().unwrap(), revision);
+        }
+        assert!(author
+            .format_image(id, &" ".repeat(1025), revision)
+            .is_err());
+        author.format_image(id,r#"{"wrap":"behind","anchor":"page","position":[60.05,70.15],"distance":[2.05,4.15,6.25,4.15]}"#,revision).unwrap();
+        let written = author.to_bytes().unwrap();
+        let read = wordcraft_docx::read(&written).unwrap();
+        let source = author.document().unwrap().body[0].as_para().unwrap();
+        assert_eq!(read.body[0].as_para().unwrap().objects, source.objects);
+        assert_eq!(author.image_data(id).unwrap(), blue_png());
+        assert_eq!(author.image_crop(id).unwrap(), (0.25, 0.0, 0.0, 0.0));
+        assert_eq!(author.image_flips(id).unwrap(), (true, true));
+        assert!(author
+            .format_image(id, r#"{"wrap":"inline"}"#, revision)
+            .is_err());
+        author
+            .format_image(id, r#"{"wrap":"inline"}"#, author.revision().unwrap())
+            .unwrap();
+        assert_eq!(author.image_data(id).unwrap(), blue_png());
+        assert_eq!(author.image_flips(id).unwrap(), (true, true));
+        let reset = wordcraft_docx::read(&author.to_bytes().unwrap()).unwrap();
+        assert!(
+            matches!(&reset.body[0].as_para().unwrap().objects[0],InlineObject::Image { float, .. } if float.wrap == Wrap::Inline)
+        );
+    }
+
+    #[test]
+    fn floating_picture_preflight_rechecks_later_geometry_and_paragraph_changes() {
+        pyo3::prepare_freethreaded_python();
+        let mut author = EditableDocx::new();
+        author.set_page_size(300.0, 300.0).unwrap();
+        author.set_margins(30.0, 30.0, 30.0, 30.0).unwrap();
+        let earlier = author.add_paragraph("Earlier").unwrap();
+        let id = author
+            .add_image(&blue_png(), Some(80.0), Some(40.0), "")
+            .unwrap();
+        author
+            .format_image(
+                id,
+                r#"{"wrap":"behind","anchor":"paragraph","position":[20,180]}"#,
+                author.revision().unwrap(),
+            )
+            .unwrap();
+        let image_y = |document: &Document| {
+            let layout =
+                wordcraft_layout::layout(document, &mut Default::default(), &Default::default());
+            layout.pages[0]
+                .items
+                .iter()
+                .find_map(|item| {
+                    if let wordcraft_layout::Placed::Image { rect, .. } = item {
+                        Some(rect.y)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap()
+        };
+        let before_y = image_y(author.document().unwrap());
+        author
+            .set_paragraph_text(earlier, "Earlier\nSecond")
+            .unwrap();
+        author.to_bytes().unwrap();
+        assert!(image_y(author.document().unwrap()) > before_y + 10.0);
+        author
+            .set_paragraph_text(earlier, &"Earlier line\n".repeat(5))
+            .unwrap();
+        assert!(author.to_bytes().is_err());
+        author.set_paragraph_text(earlier, "Earlier").unwrap();
+        author.to_bytes().unwrap();
+        author
+            .format_image(
+                id,
+                r#"{"anchor":"page","position":[200,100]}"#,
+                author.revision().unwrap(),
+            )
+            .unwrap();
+        author.set_page_size(200.0, 300.0).unwrap();
+        assert!(author.to_bytes().is_err());
+        author.set_page_size(300.0, 300.0).unwrap();
+        author.to_bytes().unwrap();
+        author.set_image_size(id, 80.0, 250.0).unwrap();
+        assert!(author.to_bytes().is_err());
+        author.set_image_size(id, 80.0, 40.0).unwrap();
+        author.to_bytes().unwrap();
     }
 }
