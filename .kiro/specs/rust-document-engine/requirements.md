@@ -693,3 +693,8 @@ Development benchmark tools SHALL reuse the installed public document APIs, reta
 ## 92. Cross-format render-session evidence
 
 The bounded P1 reuse criterion SHALL include reproducible PDF measurements alongside spec91 Office evidence. Identical native-exported inputs SHALL be rendered in fresh cached/one-shot processes with repeated timings, process memory observations, source identities and ordered every-page PNG digests. PDF counters SHALL retain their own parser/request/rasterization meanings and SHALL NOT imply a single parse across separate eager extraction subsystems. All observed regressions and measurement limits SHALL remain explicit. Closing reuse acceptance SHALL NOT close broader QA7 real-input/platform coverage or P4 allocation limits, and SHALL NOT add package API or runtime dependencies.
+
+
+## 94. Combined native DOCX cell layout acceptance
+
+Existing public cell/table formatting SHALL have a combined matrix covering asymmetric padding, three vertical alignments, three paragraph alignments, horizontal/up/down orientation, RTL table and paragraph direction, and true empty cells. Tests SHALL inspect native-written DOCX properties, reopen DOCX/PDF, preserve logical rows and each label once, and verify actual visible cell/glyph frames at 72/144/300 DPI. Alignment along the writing direction SHALL remain distinct from movement across turned cells and from table column reversal. Empty-cell copies/additions/reset SHALL preserve ownership and geometry without invented text. No runtime API, standard algorithm, dependency or historical fixture change SHALL be introduced. Inter-cell spacing and full vertical-script fidelity SHALL remain explicit incomplete TBL8/U03 scope.

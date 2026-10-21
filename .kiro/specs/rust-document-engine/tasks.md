@@ -717,3 +717,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Combine spec91/spec92 evidence to close bounded P1 reuse, retaining QA7 real-input/platform and P4 allocation work.
 - [x] Complete final documentation/source checks and independent final evidence review: 19 documentation tests and a 29-page/1,716-link site.
 - [ ] Complete required exact-head/current-main CI and manual merge.
+
+
+## Combined native DOCX cell layout acceptance
+
+- [x] Audit existing padding/orientation/RTL/alignment native paths; prove six combined public matrix profiles before final acceptance.
+- [x] Add a separate test module for the orientation/alignment matrix, independent paragraph/table direction and empty-cell copy/reset geometry; preserve historical fingerprinted fixtures and runtime APIs.
+- [x] Complete final three-workflow multi-DPI DOCX/PDF acceptance, including absolute native row geometry, static-site links and roadmap consistency.
+- [x] Complete independent final source review and all three workflows against the exact installed picture release wheel, including an independent rerun.
+- [ ] Complete required exact-head/current-main CI and manual merge for the combined cell-layout corpus.
+- [ ] Keep native inter-cell spacing, full vertical-script fidelity and complete TBL8 open.
