@@ -439,7 +439,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Verify focused stable-ID/control-output, early/late invalidation, copy and appended-range regressions; retain native final checks.
 - [x] Complete early stale-range normalization guard and DOCX/PPTX shape/cell controls.
 - [x] Complete integrated clean-wheel validation (402 tests), strict typing and structural checks.
-- [ ] Complete independent review and exact-head/current-main CI before manual merge.
+- [x] Complete independent review and exact-head/current-main CI: 280 Rust / 402 Python tests; manually merged as d0a8ec6de3e72f2472d411a7fe9577f638af8ad2.
 
 
 ## Conditional table-border fidelity correction
@@ -448,7 +448,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reject affected assignments in the existing staged parser; preserve resets and supported direct/whole-table/outer-edge controls.
 - [x] Retain raw-native source/readback/placed-rule/PNG/PDF repros and focused public atomicity/inheritance/cache/copy checks.
 - [x] Complete integrated locked native/release/installed-wheel validation (282 Rust / 405 Python).
-- [ ] Complete independent manual review/current-main CI.
+- [x] Complete independent manual review/current-main CI; PR73 merged after 282 Rust / 405 installed-wheel Python tests and all required checks.
 - [ ] Keep native conditional-edge selection, patterned shading and full shared-edge conflict resolution under existing U02/TBL7.
 
 
@@ -524,3 +524,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Extend owned-fields and add two scoped mutation profiles, reusing current criteria/reference families without changing feature completion or unrelated historical profiles.
 - [x] Validate 19-profile/133-cell generated guides, cached immutable sources and offline evidence drift checks; preserve independently corrected outline evidence.
 - [ ] Complete independent evidence review; broader feature/API/QA acceptance remains open.
+
+
+## Native DOCX character spacing
+
+- [x] Probe native cluster advances, expanded/condensed PNG/PDF output and twip write/read semantics without a local positioning algorithm.
+- [x] Reuse CharPatch, snapshots, existing style/default/region dispatch and public typing; retain explicit PPTX rejection and all existing guards.
+- [x] Add three focused native groups and six public workflows covering precision, output, scopes, inheritance, callbacks, ownership and atomic failures; run related regressions and strict copied-package typing.
+- [x] Complete integrated locked native/release/clean installed-wheel validation: 302 Rust / 432 Python tests, strict typing and unchanged license audit.
+- [ ] Complete independent review and exact-head/current-main CI before manual merge.
+- [ ] Keep broader TXT6 font/shaping controls and diagnostics under their existing owner.

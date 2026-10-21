@@ -33,6 +33,7 @@ class _CharacterProperties(TypedDict, total=False):
     font_size: float | None
     font: str | None
     language: str | None
+    letter_spacing: float | None
     color: str | tuple[int, int, int] | None
     underline: bool | str | None
     strike: bool | str | None
@@ -972,6 +973,8 @@ class TextRange:
 
         DOCX language is a literal ASCII alphanumeric/hyphen tag of at most
         63 bytes, not a complete BCP47 validator or font-selection guarantee.
+        DOCX letter_spacing adjusts native shaped clusters by -100..100 points in
+        0.05-point increments; 0 cancels inheritance and None restores it.
         """
         paragraph = self._paragraph
         if paragraph._owner._call("revision") != self._revision:

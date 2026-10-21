@@ -467,6 +467,14 @@ A narrow private clear_background(slide) stages Slide.background=None through th
 Only explicit-picture removal invokes existing authored media pruning and live-budget refresh; solid/absent reset cannot release media. Before that pruning, direct picture backgrounds in native master/layout fixtures are rejected rather than removed accidentally. This narrow safety check does not enable arbitrary imported asset graphs or add a generic reference walker. Successful repeated reset still follows normal revision/cache invalidation.
 
 
+
+## 72. Character spacing through the existing native patch
+
+CharPatch maps letter_spacing to CharProps.spacing and clears that optional field on None. A small scalar validator rejects nonnumeric/nonfinite/out-of-bound or non-twip values, allowing at most four f64 machine-epsilon units scaled by magnitude for ordinary arithmetic. It canonicalizes the accepted integer-twip value before f32 conversion; snapshots convert stored twips back to point values without float-storage noise. Native resolver limits [-100, 100] are checked before mutation instead of silently clamping. No per-character positioning loop, layout cache or new public object is added.
+
+Existing overlay/resolution carries defaults, paragraph/character styles and conditional table character regions. Existing Python formatting TypedDicts and the strict consumer gain one key. PPTX's existing unknown-property rejection remains authoritative. Native source fixtures distinguish intentional negative overlap from corruption: all source text stays owned/exact, while visual PDF text inference may reorder or insert spaces. Pure-text acceptance compares whole images; rich-story fixtures compare every chromatic text pixel and exact text bounds because the zero-spacing baseline already has independent grayscale table-grid raster differences. This is no broad pixel-perfect conversion claim.
+
+
 ## 73. Reuse operation profiles and distinguish semantic mutation from export
 
 Owned-field read/edit/preserve/render cells add read_only assertions and the exact 423 artifact; creation retains its earlier artifact and imported/format-export limits are unchanged. A new note-kind mutation profile uses the 419 artifact, with stable owned handles and explicit custom-style/native-placement limits. Its export cell refers to the separate document.convert("pdf") operation. A slide background-reset profile uses the 426 artifact and distinguishes explicit getter absence from native effective inheritance. Raw inherited-model controls do not establish arbitrary imported source editing.

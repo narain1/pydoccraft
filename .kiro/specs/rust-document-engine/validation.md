@@ -840,7 +840,7 @@ Full integrated locked tests, release wheel, installed-wheel corpus and independ
 - This supersedes focused-only lock evidence for local acceptance. All seven comment kinds retain tested appearances and pixels across transformed pages; native lock refusals preserve staged state. Inventory/initial-inspection limits, foreign profiles, links and reply-thread semantics remain outside this mutation profile. Independent review and exact-head/current-main CI remain required before manual merge; PDF6/U10 stay open.
 
 
-## Independent manual merge evidence through PR 70
+## Independent manual merge evidence through PR 73
 
 GitHub merge state was verified on 2026-10-20. Each change passed independent review, required fixes and fresh exact-head/current-main CI before manual merge; repository auto-merge remains disabled. These gates complete the corresponding delivery tasks, not broader roadmap criteria. Historical artifact sections above retain their original validation scope.
 
@@ -852,6 +852,9 @@ GitHub merge state was verified on 2026-10-20. Each change passed independent re
 | [68](https://github.com/narain1/pydoccraft/pull/68) | `b733c6ab41c44728920e97e6ba3b31e782b36aaa` | 276 / 379 |
 | [69](https://github.com/narain1/pydoccraft/pull/69) | `e59de48ce0c13c5ade87a626d25f7e2e74dc122a` | 276 / 379 |
 | [70](https://github.com/narain1/pydoccraft/pull/70) | `c99ba86f2c341c1229f6a24e5436cf98dae73c14` | 276 / 386 |
+| [71](https://github.com/narain1/pydoccraft/pull/71) | `e402268f5bc33f756f34587594761c41308a2a1e` | 280 / 393 |
+| [72](https://github.com/narain1/pydoccraft/pull/72) | `d0a8ec6de3e72f2472d411a7fe9577f638af8ad2` | 280 / 402 |
+| [73](https://github.com/narain1/pydoccraft/pull/73) | `0a47b4b001c52b1fa21ab40829d502620022c37e` | 282 / 405 |
 
 Formatting, warnings-denied Clippy, strict installed-package typing and the unchanged 264-package runtime/build license audit passed in each final CI run. PR69 changes source-audit documentation/data only.
 
@@ -956,3 +959,38 @@ Reviewed new module fingerprints match their respective runtime commits: test_fi
 Reference joins reuse the existing notes/presentation/forms families. Only representative Widget.field_flags at cached immutable widget.rst line 110 is added, bringing the inventory to 198 members across 44 families; this does not imply arbitrary flags, multiwidget synchronization or security parity. New coverage joins reuse LAY7/E3 and SLIDE4; the prior BG5/story-clear connection remains intact.
 
 The isolated documentation snapshot passes 14 support-ledger plus 5 reference-inventory tests, exact generated-byte checks, the 139-ID/14-owner roadmap validator and cached immutable source/member checks. The three new property suites were rerun with tests loaded from the isolated snapshot and doc_ex from their exact installed artifact environments: 4 read-only tests in 0.213 s on 423, 6 note-conversion tests in 12.452 s on 419, and 3 background-reset tests in 0.106 s on 426, all passing. No Cargo, new wheel, dependency or source-pin change. Broader API1/API7/QA1/QA8 and format acceptance remain open; independent evidence review is still required.
+
+PR72 final head `9588c1c54de9d0dd819fa8e096bbd4120abf2a04` passed [current-main CI 39505927934](https://github.com/narain1/pydoccraft/actions/runs/39505927934) after integrating the independently reviewed outline raster expectation. The runtime and Cargo graph were unchanged by that integration; append-only validation history and the callback target-scope correction were retained.
+
+
+## Native character spacing — isolated acceptance pending integration
+
+The isolated DOCX letter_spacing profile reuses native optional character spacing with [-100, 100] point bounds and 0.05 pt precision; no method/handle/dependency is added. Three native groups cover all 4,001 integer-twip values through native write/read, native cluster/source/PDF ink and default/style/table-region precedence plus rollback. Six public workflows pass, and a 60-test related suite passes in 43.836 seconds against the copied debug extension/facade. Formatting, all-targets warnings-denied Clippy, debug compilation and a pinned mypy 1.18.2 strict copied-package consumer pass. Root's complete locked release/clean installed-wheel artifact and independent current-main review remain required.
+
+Raw condensed-text probes found negative native advances but no source/PDF ink mismatch beyond one channel unit. Large negative spacing intentionally overlaps/reverses glyph positions; inferred PDF extraction order/spaces differs independently of exact source Unicode. No unsupported-negative guard was added from a monotonicity heuristic. In the combined nested-table/note fixture, source/PDF grayscale grid pixels differed by 109 at 72 DPI, with exactly the same 4,530-pixel count of differences after all character spacing was removed. Therefore rich-context acceptance compares exact chromatic text bounds and every chromatic text channel, while isolated text retains full-image channel comparisons. These observations do not broaden table-stroke fidelity or typography completion claims.
+
+
+## Native character spacing — complete local artifact
+
+Runtime commit `d8333dceda02962880e472d60928251cbc6a7f77` passed **302 Rust tests and 432 clean installed-wheel Python tests**, zero failures/errors/skips. The Python corpus ran in 122.144 seconds on Linux x86_64 / Python 3.11.2 / Rust 1.95. Installed facade/native files match the wheel exactly. Formatting, locked/offline all-target warnings-denied Clippy, release build, strict installed-package typing and the unchanged 264-package license audit pass. The full corpus verifies PDF/DOCX/PPTX extraction, PNG rendering and reopened conversions, including the independently corrected outline raster test.
+
+Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,517,771 bytes**; native extension **40,616,104 bytes**; SHA-256 `6d2e1a54c6e065917499d7102d50b21a96c15b643f2c64d224e8df1ea8fa5768`. Lock SHA-256 remains `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`. All upstream revisions remain pinned above; dependencies, attribution and the prohibited-runtime audit are unchanged.
+
+Spacing is native shaping/writing through the existing formatting patch. The rich-context chromatic-text comparisons do not certify grayscale table-rule parity; extreme condensation can reverse physical glyph positions and inferred PDF reading order. Final independent review and exact-head/current-main CI remain required. TXT6 stays partial.
+
+PR73 final head `c5cbc8bf8a8d156e9bb438df91ff0eb9080ac1e4` passed [current-main CI 39506841575](https://github.com/narain1/pydoccraft/actions/runs/39506841575): 282 Rust / 405 installed-wheel Python tests and all required checks. Independent review cleared the conditional-border correction, and PR73 was manually merged as `0a47b4b001c52b1fa21ab40829d502620022c37e`. Auto-merge remains disabled; native conditional-edge selection and broader TBL7 remain open.
+
+
+## Character-spacing mixed-scope fixture — independent CI correction
+
+Current-main CI39517446150 at `76d40ef83f9a257a1b4604ab3bc6ce97587d22d6` passed 302 native tests but failed one of432 installed-wheel tests: the mixed header/footer, note and nested-cell fixture had a chromatic channel difference64 instead of the required maximum1. The same failure was independently reproduced with Liberation Sans: two pixels at(105,124) and(106,124) lie where the `Scope2` descender intersects the nested table's bottom rule. Source/PDF red bounds and counts were identical; the other19 changed chromatic pixels differed by at most1. Setting all character spacing to zero retained the64-level difference; removing only native table/cell borders removed every difference above1. A separate default-font control reproduced the same interaction at a fractional72.3-point top margin. These controls establish a preexisting native structural-stroke/compositing difference, not a spacing-induced glyph-position change.
+
+The fixture deliberately sets the nested cell's native bottom margin to3 points, retaining its borders and all source/serialization assertions. It compares every chromatic pixel/channel with the original maximum1, exact dimensions and exact red bounds, at both integer and fractional body origins. No pixel is excluded by a new mask and no tolerance is enlarged. Native table-rule fidelity remains an upstream limitation; this acceptance isolates spacing rather than certifying structural-stroke pixels. Prior local432-test results retain their historical test-file scope. Fresh corrected-test installed-wheel and exact-head/current-main CI results are required before manual merge.
+
+
+### Corrected mixed-scope fixture — complete installed-wheel rerun
+
+Corrected test source `fd5123b` passes all **432 installed-wheel tests**, zero failures/errors/skips, in114.627 seconds (machine-readable elapsed time), using the unchanged release artifact from runtime `d8333dceda02962880e472d60928251cbc6a7f77`. Installed native/facade files byte-match wheel SHA-256 `6d2e1a54c6e065917499d7102d50b21a96c15b643f2c64d224e8df1ea8fa5768`: 17,517,771-byte wheel and40,616,104-byte extension, CPython3.11.2/Linux x86_64/glibc2.36. The corrected test module SHA-256 is `4661099653bccf5bf377f6d8c142749fc7d1eb618aa8cf5baad4434207ca7476`; the report is `/tmp/pr84-corrected-artifact/validation.json`. The six typography tests also pass independently in both default-font and fresh Liberation-font environments (5.698s/5.632s). Source review confirms unchanged pixel masks/tolerances, with borders retained and fractional-origin coverage added. No native/runtime, dependency, attribution or existing operation-evidence fingerprint changed; the prior302-native result applies to identical native code. Final exact-head/current-main CI remains required before manual merge.
+
+
+Diagnostic-only CI39518452872 at `1c101546ea2f65ef9c588ccc09fc241fbd428d61` reproduced exactly the independently controlled Liberation result: identical red extents/count489, the same two64-level pixels and19 other changed pixels at most1. Original source DOCX/PDF and both PNGs were recovered from its log into `/tmp/pr84-ci-diagnostic-assets`; diagnostic output was removed from the corrected test. This corroborates the fixture correction without changing the assertion. Independent second-agent review approved the final diff and control interpretation.
