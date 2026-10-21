@@ -877,7 +877,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add three native adapter groups and four public workflows for revision/copy/reset, strict bool/lifetime, geometry/cache rollback, section/header/table output, line labels, columns and natural growth; strict consumer and deliberate typing negatives pass.
 - [x] Complete independent frozen code/docs and four-workflow replay review; documentation/site checks pass.
 - [x] Complete integrated corpus and independent artifact review: 410 native tests and two clean 538-test installed runs pass.
-- [ ] Complete current-head CI and manual merge.
+- [x] Complete current-head CI and manual merge through reviewed PR118, run39566211261.
 - [ ] Retain broader LAY10 settings and existing unsupported layout combinations under their current owners.
 
 
@@ -888,7 +888,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Share narrow spec102 preflight while retaining all deletion behavior; pass movement6, unchanged deletion6 and PAGE-guard2 native groups, formatting and all-target Clippy.
 - [x] Pass focused copied-package public/typing checks and independent source/six-workflow review; synchronize documentation with the bounded profile.
 - [x] Complete integrated full native/installed-wheel corpus and independent artifact review: 410 native tests and two clean 538-test installed runs pass.
-- [ ] Complete exact-head CI and manual merge.
+- [x] Complete exact-head CI and manual merge through reviewed PR118, run39566211261.
 - [ ] Retain broader DOC5 insertion, duplication, adoption and semantic-anchor relocation gaps.
 
 
@@ -896,4 +896,38 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 
 - [x] Verify the immutable maturin action declares and uses its toolchain input for both container and host builds; explicitly select CI Rust 1.95.0 in both release steps.
 - [x] Independently review the exact pinned action input/source and verify only the two compiler-selection keys change the workflow.
-- [ ] Complete required current-main CI and manual merge; validate all nine platform/Python wheels at the eventual release gate. No new tag or release is authorized by this task alone.
+- [x] Complete required current-main CI and manual merge through reviewed PR118/PR119.
+- [ ] Validate all nine platform/Python wheels at the eventual release gate. No new tag or release is authorized by this task alone.
+
+
+## Section vertical alignment (spec111)
+
+- [x] Audit native model/read/write/layout/PDF and run three raw groups; retain desired-geometry failures and precise note/readback drift separately from accepted note-free controls.
+- [x] Add one typed Section property, strict native enum parsing, central candidate/output profile checks and vertical-only existing-layout bounds.
+- [x] Pass five native adapter groups, unchanged raw replay, four public workflows, strict consumer, formatting and Clippy; verify solid/PNG backgrounds explicitly.
+- [x] Resolve the reviewed rotated-cell coordinate gap with central horizontal section/cell admission and defensive output refusal; pass corrected independent four-workflow replay and documentation/site checks.
+- [x] Complete frozen documentation/source review and integrated425-native/two547-test clean installed-wheel corpora.
+- [ ] Complete final exact-head CI and manual merge.
+- [ ] Retain broader LAY10 settings and excluded native compositions under existing U02; do not mark the roadmap criterion complete.
+
+
+## Unused owned DOCX styles (spec 110)
+
+- [x] Independently review pinned remove/find/get/new_id/reference-carrier premises and pass two raw groups structural/readback/PNG/PDF/identity proof.
+- [x] Add only existing-collection single-item deletion, complete bounded reference refusal and exact handle identity with atomic bounded retirement/native allocation.
+- [x] Pass five native adapter groups, all 26 selected style regressions, formatting/all-target Clippy/debug build, five copied-package public workflows,14 historical style/note workflows and strict consumer typing with three intended negative key diagnostics.
+- [x] Complete independent frozen source and five-workflow replay review (2.250s).
+- [x] Complete synchronized documentation review.
+- [x] Complete integrated425-native/release and two547-test clean installed-wheel corpora with independent artifact review.
+- [ ] Complete final exact-head CI and manual merge.
+- [ ] Keep STY6 open for style import, collision policy and general cleanup; no batch prune or automatic restyling.
+
+
+## Existing layout value annotations (spec115)
+
+- [x] Review native successful result signatures and retain iterable widths, tuple/list forms and nullable resets; preserve runtime unsupported-format checks.
+- [x] Annotate 17 existing signatures and independently prove annotation-erased AST identity with the prior facade.
+- [x] Pass the strict installed consumer, ten intentional negative typing diagnostics and four unchanged DOCX/PPTX layout workflows against an explicitly repacked wheel with identical tested native bytes.
+- [x] Complete independent artifact/static/probe/documentation review and final547-test installed corpus against the explicit Python-only repack.
+- [ ] Complete final exact-head/current-main CI and manual merge.
+- [ ] Keep broader API3 discoverability and IDE coverage open.

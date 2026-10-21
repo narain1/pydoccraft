@@ -418,10 +418,20 @@ def _style_reference(value, owner):
     if isinstance(value, Style):
         if value._owner is not owner:
             raise ValueError("style must belong to this document")
-        value = value.id
+        value = json.loads(owner._call("style_info_exact", value._id))["id"]
     if value is not None and not isinstance(value, str):
         raise TypeError("style must be a name, ID or Style from this document")
     return value
+
+def _style_guard(owner, revision, *references) -> None:
+    if owner._call("revision") != revision:
+        raise ValueError("style operation is stale after a document mutation")
+    for reference in references:
+        if isinstance(reference, Style):
+            _style_reference(reference, owner)
+    if owner._call("revision") != revision:
+        raise ValueError("style operation is stale after a document mutation")
+
 
 def pt(value: Real) -> float:
     """Return a finite length in points (1/72 inch)."""
@@ -935,7 +945,10 @@ class WordDocument(EditableDocument):
 
     def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
         """Append a paragraph with an optional named style and return its editable handle."""
+        revision = self._call("revision")
+        original_style = style
         style = _style_reference(style, self)
+        _style_guard(self, revision, original_style)
         if style is None:
             identifier = self._call("add_paragraph", text, _change=True)
         else:
@@ -978,8 +991,26 @@ class Styles(_Collection["Style"]):
             return Style(self._owner, json.loads(self._owner._call("style_info", key))["id"])
         return super().__getitem__(key)
 
+    def __delitem__(self, key: str | int) -> None:
+        """Delete one unused owned custom style; builtin/default styles are protected."""
+        revision = self._owner._call("revision")
+        if isinstance(key, slice):
+            raise TypeError("style deletion requires a name, ID or integer index")
+        if isinstance(key, str):
+            identifier = json.loads(self._owner._call("style_info", key))["id"]
+        else:
+            identifiers = self._ids()
+            selected = operator.index(key)
+            _style_guard(self._owner, revision)
+            identifier = identifiers[_index(selected, len(identifiers))]
+        _style_guard(self._owner, revision)
+        self._owner._call("remove_style", identifier, revision, _change=True)
+
     def add(self, name: str, *, kind: str = "paragraph", based_on: str | Style | None = None) -> Style:
-        identifier = self._owner._call("add_style", name, kind, _style_reference(based_on, self._owner), _change=True)
+        revision = self._owner._call("revision")
+        reference = _style_reference(based_on, self._owner)
+        _style_guard(self._owner, revision, based_on)
+        identifier = self._owner._call("add_style", name, kind, reference, _change=True)
         return Style(self._owner, identifier)
 
     @property
@@ -998,7 +1029,7 @@ class Style:
         self._owner, self._id = owner, identifier
 
     def _info(self):
-        return json.loads(self._owner._call("style_info", self._id))
+        return json.loads(self._owner._call("style_info_exact", self._id))
 
     @property
     def id(self) -> str:
@@ -1023,14 +1054,21 @@ class Style:
 
     @based_on.setter
     def based_on(self, value: str | Style | None):
-        self._owner._call("set_style_base", self._id, _style_reference(value, self._owner), _change=True)
+        revision = self._owner._call("revision")
+        self._info()
+        reference = _style_reference(value, self._owner)
+        _style_guard(self._owner, revision, self, value)
+        self._owner._call("set_style_base", self._id, reference, _change=True)
 
     def _set_relation(self, key: str, value: str | Style | None) -> None:
+        revision = self._owner._call("revision")
+        self._info()
         target = _style_reference(value, self._owner)
         if target is not None and len(target) > 1024:
             raise ValueError("style relation must be a bounded style name/ID or None")
-        self._owner._call("style_relations_patch", self._id,
-                          json.dumps({key: target}, ensure_ascii=False), _change=True)
+        patch = json.dumps({key: target}, ensure_ascii=False)
+        _style_guard(self._owner, revision, self, value)
+        self._owner._call("style_relations_patch", self._id, patch, _change=True)
 
     @property
     def next(self) -> Style | None:
@@ -1068,9 +1106,13 @@ class Style:
 
     def format(self, *, region: str | None = None, **formatting: Unpack[StyleFormatting]) -> None:
         """Set direct properties; an optional region selects table-style formatting."""
+        revision = self._owner._call("revision")
+        self._info()
         if region is not None and (not isinstance(region, str) or len(region) > 32):
             raise ValueError("region must be a supported table-style region name or None")
-        self._owner._call("format_style", self._id, _style_format_patch(formatting), region, _change=True)
+        patch = _style_format_patch(formatting)
+        _style_guard(self._owner, revision, self)
+        self._owner._call("format_style", self._id, patch, region, _change=True)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(id={reprlib.repr(self._id)}, closed={self._owner.closed})"
@@ -1085,7 +1127,7 @@ class Paragraph:
         return self._owner._call("paragraph_text", self._id)
 
     @text.setter
-    def text(self, value: str):
+    def text(self, value: str) -> None:
         self._owner._call("set_paragraph_text", self._id, value, _change=True)
 
     @property
@@ -1093,15 +1135,18 @@ class Paragraph:
         return self._owner._call("paragraph_style", self._id)
 
     @style.setter
-    def style(self, value: str | Style):
-        self._owner._call("set_paragraph_style", self._id, _style_reference(value, self._owner), _change=True)
+    def style(self, value: str | Style) -> None:
+        revision = self._owner._call("revision")
+        reference = _style_reference(value, self._owner)
+        _style_guard(self._owner, revision, value)
+        self._owner._call("set_paragraph_style", self._id, reference, _change=True)
 
     @property
     def alignment(self) -> str:
         return self._owner._call("paragraph_alignment", self._id)
 
     @alignment.setter
-    def alignment(self, value: str):
+    def alignment(self, value: str) -> None:
         self._owner._call("set_paragraph_alignment", self._id, value, _change=True)
 
     @property
@@ -1127,20 +1172,20 @@ class Paragraph:
         self._owner._call("set_paragraph_list", self._id, kind, level, restart, start, _change=True)
 
     @property
-    def page_break_before(self):
+    def page_break_before(self) -> bool:
         return self._owner._call("page_break_before", self._id)
 
     @page_break_before.setter
-    def page_break_before(self, value: bool):
+    def page_break_before(self, value: bool) -> None:
         self._owner._call("set_page_break_before", self._id, value, _change=True)
 
     @property
-    def spacing(self):
+    def spacing(self) -> tuple[float, float, float]:
         """Spacing before/after in points and line-spacing multiplier."""
         return self._owner._call("paragraph_spacing", self._id)
 
     @spacing.setter
-    def spacing(self, value):
+    def spacing(self, value: tuple[float, float, float] | list[float]) -> None:
         if not isinstance(value, (tuple, list)) or len(value) != 3:
             raise TypeError("spacing must be (before, after, line_spacing)")
         self._owner._call("set_paragraph_spacing", self._id, *map(pt, value), _change=True)
@@ -1388,6 +1433,20 @@ class Section:
         self._set(start=value)
 
     @property
+    def vertical_alignment(self) -> Literal["top", "center", "bottom", "justify"]:
+        """Native page-body alignment; non-top requires the documented simple profile."""
+        return self._props()["vertical_alignment"]
+
+    @vertical_alignment.setter
+    def vertical_alignment(self, value: Literal["top", "center", "bottom", "justify"]) -> None:
+        self._owner._ensure_open()
+        if type(value) is not str:
+            raise TypeError("vertical_alignment must be a string")
+        if value not in ("top", "center", "bottom", "justify"):
+            raise ValueError("vertical_alignment must be top, center, bottom or justify")
+        self._set(vertical_alignment=value)
+
+    @property
     def line_numbers(self) -> tuple[int, int, float, str] | None:
         """(count_by, start, distance_pt, restart), or None; single columns only.
 
@@ -1616,7 +1675,10 @@ class EditableStory:
 
     def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
         """Append a paragraph with an optional named style and return its editable handle."""
+        revision = self._owner._call("revision")
+        original_style = style
         style = _style_reference(style, self._owner)
+        _style_guard(self._owner, revision, original_style)
         def append(native):
             story = self._ensure_identifier(native)
             identifier = native.story_add_paragraph(story, text)
@@ -1963,21 +2025,25 @@ class EditableTable:
         return json.loads(self._owner._call("table_formatting", self._word_id()))
 
     def format(self, **formatting: Unpack[TableFormatting]) -> None:
+        identifier = self._word_id()
+        revision = self._owner._call("revision")
+        reference = formatting.get("style")
         if "style" in formatting:
-            formatting["style"] = _style_reference(formatting["style"], self._owner)
-        self._owner._call("table_format_patch", self._word_id(),
-                          _table_format_patch(formatting), _change=True)
+            formatting["style"] = _style_reference(reference, self._owner)
+        patch = _table_format_patch(formatting)
+        _style_guard(self._owner, revision, reference)
+        self._owner._call("table_format_patch", identifier, patch, _change=True)
 
     def fit(self) -> list[float]:
         """Measure native cell content and apply checked column widths."""
         return self._owner._call("fit_table", self._word_id(), _change=True)
 
     @property
-    def column_widths(self):
+    def column_widths(self) -> list[float]:
         return self._owner._call("column_widths", *self._args)
 
     @column_widths.setter
-    def column_widths(self, widths):
+    def column_widths(self, widths: Iterable[float]) -> None:
         values = []
         for width in widths:
             if len(values) >= 1000:
@@ -1986,11 +2052,11 @@ class EditableTable:
         self._owner._call("set_column_widths", *self._args, values, _change=True)
 
     @property
-    def borders(self):
+    def borders(self) -> tuple[str, float] | None:
         return self._owner._call("table_borders", *self._args)
 
     @borders.setter
-    def borders(self, value):
+    def borders(self, value: tuple[_Color, float] | list[_Color | float] | None) -> None:
         if value is None:
             self._owner._call("clear_table_borders", *self._args, _change=True)
         elif isinstance(value, (tuple, list)) and len(value) == 2:
@@ -2059,12 +2125,12 @@ class EditableRow:
 
 
     @property
-    def height(self):
+    def height(self) -> tuple[float | None, str]:
         """(height in points or None, rule): auto, at_least or exact."""
         return self._table._owner._call("row_height", *self._args)
 
     @height.setter
-    def height(self, value):
+    def height(self, value: tuple[float | None, str] | list[float | str | None] | None) -> None:
         if value is None:
             height, rule = None, "auto"
         elif isinstance(value, (tuple, list)) and len(value) == 2:
@@ -2074,22 +2140,22 @@ class EditableRow:
         self._table._owner._call("set_row_height", *self._args, height, rule, _change=True)
 
     @property
-    def repeat_header(self):
+    def repeat_header(self) -> bool:
         self._check()
         return self._table._owner._call("row_repeat_header", self._table._word_id(), self._index)
 
     @repeat_header.setter
-    def repeat_header(self, value: bool):
+    def repeat_header(self, value: bool) -> None:
         self._check()
         self._table._owner._call("set_row_repeat_header", self._table._word_id(), self._index, value, _change=True)
 
     @property
-    def allow_split(self):
+    def allow_split(self) -> bool:
         self._check()
         return self._table._owner._call("row_allow_split", self._table._word_id(), self._index)
 
     @allow_split.setter
-    def allow_split(self, value: bool):
+    def allow_split(self, value: bool) -> None:
         self._check()
         self._table._owner._call("set_row_allow_split", self._table._word_id(), self._index, value, _change=True)
 
@@ -2158,8 +2224,12 @@ class EditableCell:
                 raise UnsupportedFormatError("named paragraph styles are unavailable in PPTX cells")
             target = self._table._owner._call("cell_add_paragraph", *self._args, text, _change=True)
             return _SlideCellParagraph(self, target)
-        style = _style_reference(style, self._table._owner)
+        owner = self._table._owner
+        revision = owner._call("revision")
+        original_style = style
+        style = _style_reference(style, owner)
         args = self._content_args()
+        _style_guard(owner, revision, original_style)
         def append(native):
             identifier = native.cell_add_paragraph(*args, text)
             if style is not None:

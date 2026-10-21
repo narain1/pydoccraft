@@ -21,6 +21,8 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(word, WordDocument)
         assert_type(word.copy(), WordDocument)
         assert_type(word.mirror_margins, bool)
+        assert_type(word.sections[0].vertical_alignment, Literal["top", "center", "bottom", "justify"])
+        word.sections[0].vertical_alignment = "center"
         word.mirror_margins = True
         word.mirror_margins = False
         assert_type(word.notes.convert(kind="endnote"), int)
@@ -329,3 +331,39 @@ def verify_formatting_snapshots(word: WordDocument, paragraph: Paragraph) -> Non
                     if edge is not None:
                         assert_type(edge["width"], float)
                         assert_type(edge["color"], str | None)
+
+
+def verify_layout_values(word: WordDocument, deck: Presentation) -> None:
+    """Existing native values and accepted tuple/list/iterable assignment forms."""
+    paragraph = word.add_paragraph("Layout")
+    assert_type(paragraph.page_break_before, bool)
+    assert_type(paragraph.spacing, tuple[float, float, float])
+    paragraph.text = "Updated"
+    paragraph.style = word.styles["Normal"]
+    paragraph.alignment = "left"
+    paragraph.page_break_before = False
+    paragraph.spacing = (1, 2, 1.2)
+    paragraph.spacing = [1, 2, 1.2]
+    table = word.add_table([["A", "B"]])
+    assert_type(table.column_widths, list[float])
+    assert_type(table.borders, tuple[str, float] | None)
+    table.column_widths = (width for width in (100, 120))
+    table.column_widths = [100, 120]
+    table.borders = ("navy", 1)
+    table.borders = [(10, 20, 30), 1]
+    table.borders = None
+    row = table.row(0)
+    assert_type(row.height, tuple[float | None, str])
+    assert_type(row.repeat_header, bool)
+    assert_type(row.allow_split, bool)
+    row.height = (20, "at_least")
+    row.height = [20, "at_least"]
+    row.height = (None, "auto")
+    row.height = None
+    row.repeat_header = True
+    row.allow_split = False
+    slide_table = deck.slides.add().add_table([["Slide"]], box=(10, 10, 100, 40))
+    assert_type(slide_table.column_widths, list[float])
+    assert_type(slide_table.borders, tuple[str, float] | None)
+    assert_type(slide_table.row(0).height, tuple[float | None, str])
+    slide_table.row(0).height = [30, "at_least"]

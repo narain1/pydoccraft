@@ -804,3 +804,22 @@ Acceptance covers false/true/reset and independent copies; closed/type/revision/
 ## 113. Release compiler selection
 
 Every Linux, macOS and Windows release-wheel build must explicitly select the same Rust 1.95.0 toolchain used by required CI. Keep the existing nine-wheel matrix, immutable actions, locked dependency graph and release/publish gates. Selecting a compiler is build configuration, not permission to publish an unfinished feature set.
+
+## 111. Bounded owned DOCX section vertical alignment
+
+1. Existing `Section.vertical_alignment` SHALL accept exactly `top`, `center`, `bottom` or `justify`, defaulting to native Top and delegating placement/readback/PDF behavior to public native PageVAlign. No new settings manager, coordinate compensation, nullable reset or parse aliases SHALL be introduced.
+2. If any section is non-top, the exact staged document SHALL require horizontal single-column NextPage sections, horizontal cells, no notes, no active even/odd header/footer mode and no floating objects in any story or nested group. Inactive even-story placeholders created by section copying SHALL remain valid. Ordinary body/nested tables, default/first stories, inline pictures and verified color/PNG backgrounds SHALL remain composable. Restoring all sections to Top SHALL recover the existing profile.
+3. The source restriction SHALL apply centrally to later mutations and ordinary output, after bounded source inventory, with bounded independent work accounting. Non-top output SHALL reuse the existing layout pass to reject nonfinite or out-of-body vertical geometry, including after typography changes. Horizontal signed advances SHALL retain their existing behavior; commit-time source validity SHALL not promise later output geometry.
+4. Validation SHALL preserve the native column, float, even-header and note-readback failures as diagnostics; positively verify note-free source/readback geometry, native PNG/PDF, field values, backgrounds, strict values, copy/section inheritance, cache/revision/registry rollback and Top recovery. Broader LAY10 SHALL remain pending.
+
+
+## 110. Unused owned DOCX custom-style deletion
+
+Existing Styles SHALL support single-item deletion by name/ID or integer index, with negative indexes and no slice/batch deletion. Only unused custom paragraph/character/table definitions SHALL be removable. Protect builtin/default/implicit native styles and reject every incoming raw reference across all stored stories, separators, nested table/row properties, document defaults, other style definitions/conditional regions and numbering levels/overrides. Opaque/history carriers outside the owned profile SHALL fail explicitly. Native removal SHALL be the only style edit; no automatic restyling, import or local standards algorithm is permitted.
+
+Exact-ID handle targets and conversion revision/identity checks SHALL prevent deleted handles from aliasing recreated names. Retired IDs SHALL be bounded, copied with owners and reserved using native allocation: live plus retired IDs at most 1024 including builtins, stored IDs at most 259 UTF-8 bytes. Prepare retirement before ordinary staged commit and publish it only after success; failed operations preserve bytes, counters, handles, revision/cache and history. Limit failures retain the existing UnsafeArchiveError resource_limit mapping. Verify raw premises, exact/+1 bounds, all callback consumers, copies and source/reopened DOCX/PNG/PDF preservation. STY6 import/general cleanup remains open.
+
+
+## 115. Existing layout value annotations
+
+Existing paragraph, table and row properties must retain concrete successful result types in Python consumers: boolean page-break/row flags, a spacing triple, a list of column widths, a nullable uniform-border pair and a height/rule pair whose height may be absent. Setter annotations retain documented iterable/tuple/list forms and nullable resets. This is static API3 discoverability work, not new format support or changed runtime validation.
