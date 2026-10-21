@@ -408,6 +408,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete independent review and exact-head/current-main CI before manual merge.
 - [ ] Retain Office search geometry, normalized source offsets and broad E2 grounding parity as open work.
 
+## PDF3 native drawing-style boundary audit
+
+- [x] Recheck pinned public/private placement and style-writing boundaries against existing drawing APIs; retain existing U10/PDF3 ownership.
+- [ ] Request typed native path painting/fill rules, collision-safe opacity resources and public native placement; do not extend local PDF operator construction.
+- [ ] Verify stroke work/bounds, contour pixels, rotated CropBox/UserUnit geometry, resource preservation and default compatibility before exposing additional drawing keywords. PDF3 remains open.
+
 
 ## PDF mutation ownership after caller normalization
 
@@ -469,7 +475,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Stage canonical flag-only mutations with bounded borrowed preflight and unchanged-appearance/target postconditions.
 - [x] Complete focused native/public fidelity, boundary, rollback and lifetime checks.
 - [x] Complete integrated locked native/release/installed-wheel validation (288 Rust / 413 Python).
-- [ ] Complete independent review and exact-head/current-main CI before manual merge.
+- [x] Complete independent review and exact-head/current-main CI before manual merge.
 - [ ] Keep PDF6/U10 broader imported inventory, reply-thread and annotation capabilities open.
 
 
@@ -478,7 +484,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Review actual tooltip/lock assertions and source fingerprints against their exact validated artifacts; retain historical scopes and geometric creation evidence.
 - [x] Reuse owned-fields and one orthogonal comment-lock profile with existing PDF6/reference joins and explicit imported limits.
 - [x] Validate the 17-profile/119-cell generated guides, cached immutable reference citations and existing offline drift checks.
-- [ ] Complete independent evidence review; keep broader PDF6/API1/API7/QA1/QA8 acceptance open.
+- [x] Complete independent evidence review; keep broader PDF6/API1/API7/QA1/QA8 acceptance open.
 
 
 ## Native owned-note conversion
@@ -488,7 +494,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Retain raw native shared-reference-run color-loss evidence; reject unsafe mixed runs with custom-style/marker-only recovery controls.
 - [x] Run five focused native groups, all-targets Clippy/debug build and six new public workflows within a 64-test related regression suite in isolation.
 - [x] Complete integrated locked native/release/clean installed-wheel validation: 293 Rust / 419 Python tests, strict typing and unchanged license audit.
-- [ ] Complete independent review/current-main CI after resolving prerequisite PR71 raster discrepancy.
+- [x] Complete independent review/current-main CI after resolving prerequisite PR71 raster discrepancy.
 - [ ] Retain semantic note deletion and arbitrary anchored-fragment remapping under existing LAY7/U02/U07 ownership.
 
 
@@ -498,7 +504,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Permit only READ_ONLY in addition to existing kind flags; preserve imported/multiwidget/script restrictions and native filling refusal.
 - [x] Complete focused native/public/typing tests for fidelity, saved flags, allowed edits, recovery and atomic bounds/lifetime errors.
 - [x] Complete integrated locked native/release/installed-wheel checks: 296 Rust / 423 Python tests, strict typing and unchanged license audit.
-- [ ] Complete independent review and fresh current-main CI before manual merge.
+- [x] Complete independent review and fresh current-main CI before manual merge.
 - [ ] Keep broader PDF6/U10 field/widget capabilities open.
 
 
@@ -508,7 +514,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Extend only Slide.background=None, with explicit getter semantics, stable ownership and bounded authored-media reclamation.
 - [x] Complete focused native/public/typing inheritance, output, sharing, rollback and lifetime evidence.
 - [x] Complete integrated release/clean installed-wheel validation: 299 Rust / 426 Python tests, strict typing and unchanged license audit.
-- [ ] Complete independent review and fresh current-main CI before manual merge.
+- [x] Complete independent review and fresh current-main CI before manual merge.
 - [ ] Retain broader SLIDE4/master/theme/imported-media preservation work.
 
 
@@ -517,7 +523,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Audit exact 419/423/426 runtime assertions and module fingerprints; separate note-kind mutation, same-format persistence and format export.
 - [x] Extend owned-fields and add two scoped mutation profiles, reusing current criteria/reference families without changing feature completion or unrelated historical profiles.
 - [x] Validate 19-profile/133-cell generated guides, cached immutable sources and offline evidence drift checks; preserve independently corrected outline evidence.
-- [ ] Complete independent evidence review; broader feature/API/QA acceptance remains open.
+- [x] Complete independent evidence review; broader feature/API/QA acceptance remains open.
 
 
 ## Native DOCX character spacing
@@ -526,7 +532,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reuse CharPatch, snapshots, existing style/default/region dispatch and public typing; retain explicit PPTX rejection and all existing guards.
 - [x] Add three focused native groups and six public workflows covering precision, output, scopes, inheritance, callbacks, ownership and atomic failures; run related regressions and strict copied-package typing.
 - [x] Complete integrated locked native/release/clean installed-wheel validation: 302 Rust / 432 Python tests, strict typing and unchanged license audit.
-- [ ] Complete independent review and exact-head/current-main CI before manual merge.
+- [x] Complete independent review and exact-head/current-main CI before manual merge.
 - [ ] Keep broader TXT6 font/shaping controls and diagnostics under their existing owner.
 
 
@@ -536,7 +542,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add five native groups and five public workflows for storage, output, invisible text positions, shape/cell ownership, links and atomic failures; explicitly retire the obsolete negative-PPTX group.
 - [x] Complete 33 related Python regressions and strict copied-package typing.
 - [x] Complete integrated locked release/installed-wheel validation: 307 Rust / 436 Python tests, strict typing and unchanged license audit.
-- [ ] Complete independent review/current-main CI; broader SLIDE3/TXT6 acceptance remains open.
+- [x] Complete independent review/current-main CI; broader SLIDE3/TXT6 acceptance remains open.
 
 
 ## Slide-cell append lifetime checks
@@ -544,7 +550,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reproduce the preexisting callback-before-closed-check behavior with the supported font key.
 - [x] Add a narrow initial target lookup while retaining final native validation; verify invalid targets, live reorder, deletion/reset/close and caller exceptions.
 - [x] Complete integrated installed-wheel regression validation: 439 Python tests and strict typing, with the byte-identical native extension retaining the preceding 307-test validation.
-- [ ] Complete independent review and exact-head/current-main CI before manual merge.
+- [x] Complete independent review and exact-head/current-main CI before manual merge.
 
 
 ## Owned note content clearing
@@ -553,7 +559,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reuse existing Note.clear, ordinary commit checks and staged story-local resource/identity cleanup without changing header/footer policies.
 - [x] Add three native groups and five public workflows covering blank/long/converted notes, actual mark/content ink, exact accounting, ownership/no-op/cache and protected-anchor rollback; run related story/note/field regressions.
 - [x] Complete integrated locked release/clean installed-wheel validation: 310 Rust / 444 Python tests, strict typing and unchanged license audit; refresh only affected story-clear evidence.
-- [ ] Complete independent review and exact-head/current-main CI before manual merge.
+- [x] Complete independent review and exact-head/current-main CI before manual merge.
 - [ ] Retain broader DOC5/LAY7 imported note, semantic deletion and fragment-remapping work.
 
 
@@ -563,7 +569,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reuse native device-pixel rounding in the common PDF full-page renderer; preserve native oversize and region checks.
 - [x] Add safe arithmetic, request-counter, view geometry and thin-raster regressions; complete focused native and public checks.
 - [x] Complete integrated release/installed-wheel validation: 312 Rust / 446 Python tests, strict typing and unchanged license audit.
-- [ ] Complete independent review and exact-head/current-main CI before manual merge.
+- [x] Complete independent review and exact-head/current-main CI before manual merge.
 - [ ] Keep R4/U09 open for upstream fallible per-call renderer failures and broader resource guarantees.
 
 
@@ -573,7 +579,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Retain initial validation and add final original-page resolution after options/coordinate normalization.
 - [x] Validate coordinate/iterator reordering, deletion, close, early-invalid precedence, callback exceptions, copies and exact callback-state source/PNG preservation.
 - [x] Complete integrated installed-wheel validation: 449 Python tests, strict typing and native extension identity with the 312-test artifact.
-- [ ] Complete independent review and exact-head/current-main CI; radio support remains separate.
+- [x] Complete independent review and exact-head/current-main CI; radio support remains separate.
 
 
 ## Owned auxiliary paragraph deletion
@@ -582,7 +588,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reuse integer collection deletion for owned direct header/footer/note paragraphs, with staged identity/accounting changes, bounds and ordinary semantic guards.
 - [x] Add three native groups and five public workflows for actual output, surviving nested ownership, sentinel/note behavior and atomic callback/scope/resource failures; run 41 related tests and strict copied-package typing.
 - [x] Complete integrated locked release/clean installed-wheel artifact: 315 Rust / 454 Python tests, strict typing and unchanged license audit.
-- [ ] Complete independent review and exact-head/current-main CI before manual merge.
+- [x] Complete independent review and exact-head/current-main CI before manual merge.
 - [ ] Retain body identity migration, cell/PPTX deletion and broader DOC5/TXT1 insertion/movement/adoption work.
 
 
@@ -592,7 +598,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Add shared appearance work reservation, both creation-generation charges, value-generation charges and successful-fill item accounting without runtime object scans.
 - [x] Add native count/byte/copy/boundary/rotation controls and public repeated-write/source/PNG/copy/flatten coverage; run related field regressions.
 - [x] Complete integrated locked release/clean installed-wheel validation: 318 Rust / 455 Python tests, strict typing and unchanged license audit.
-- [ ] Complete independent package review and exact-head/current-main CI before manual merge; radio expansion remains separate.
+- [x] Complete independent package review and exact-head/current-main CI before manual merge; radio expansion remains separate.
 - [ ] Keep broader PDF6/U10 imported-form and multiwidget acceptance open.
 
 
@@ -602,7 +608,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Normalize actual string content with base operations, retain initial lifetime precedence and recheck identity after payload construction.
 - [x] Validate three focused public groups and fifteen related field tests against an isolated copied installed package.
 - [x] Complete integrated installed-wheel validation: 458 Python tests, strict typing and byte-identical native extension from the 318-test artifact.
-- [ ] Complete independent review and exact-head/current-main CI before manual merge.
+- [x] Complete independent review and exact-head/current-main CI before manual merge.
 
 
 ## Owned DOCX body identity separation
