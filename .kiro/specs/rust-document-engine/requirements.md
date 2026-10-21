@@ -633,3 +633,42 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 2. Body collection enumeration SHALL retain native source order and hide required synthetic paragraphs. Native section boundaries, paths, layout/field/list targets and serialized structure SHALL remain physical and unchanged. Picture deletion SHALL retain its empty paragraph identity; existing cell/grid/story invalidation and whole-copy independence SHALL remain intact.
 3. The allocator SHALL check lifetime overflow before mutation and publish its counter/registry/classification/placeholder/accounting changes only after normal commit succeeds. Existing active-location, physical-body, cell, text, media and layout limits SHALL remain. Enumeration SHALL use a bounded temporary reverse view, not repeated unbounded searches or a second persistent registry.
 4. Tests SHALL preserve existing native format/geometry/output assertions while resolving owned IDs through locations. They SHALL cover interleaved allocation, identity-key order different from source order, hidden section markers, copies, picture-to-paragraph identity, child invalidation, no-op reads and failed creation/commit rollback. Numeric private `_id` and diagnostic repr changes SHALL be documented explicitly; no public numeric-ID persistence contract SHALL be introduced.
+
+
+## 85. Native PDF comment opacity
+
+Existing Annotation.opacity and update(opacity=...) SHALL support finite [0,1] values for the seven existing comment kinds through native set_style. Links, malformed values, unsupported target dictionaries and locked style changes SHALL fail explicitly and atomically. The bounded canonical profile SHALL admit finite fractional direct CA without widening metadata/geometry/reply handling. Getter SHALL avoid native appearance reconstruction. Native AP regeneration, compound intermediate streams and note appearance work SHALL be bounded/accounted; callback ownership checks SHALL preserve identity. This does not complete imported-form/reply support, PDF6 or PDF8.
+
+
+## 79. Bounded owned PDF radio groups
+
+1. Existing page.fields.add SHALL accept kind="radio" with explicit boxes and one distinct literal option per box, preserving existing singular-box calls. Groups SHALL be atomically created with 2–32 immutable same-page widgets through public native Radio primitives. All field kinds SHALL expose an owned immutable boxes tuple; singular radio box access/mutation SHALL fail explicitly. No child manager, arbitrary imported-form support or mutable group shape SHALL be introduced.
+2. Native canonical name helpers SHALL preserve Unicode/# literal identities. Off, empty/control-bearing/duplicate values and oversized inputs SHALL fail. Canonical RADIO|NO_TOGGLE_TO_OFF and optional READ_ONLY flags SHALL retain native fill/clear refusal. Existing tooltip, copy, page organization, deletion and flattening semantics SHALL remain; flatten SHALL return logical field count after separately verifying native widget count and complete removal.
+3. Total logical fields and widgets SHALL be bounded independently at 1,000; initial creation SHALL preflight encoded aggregate text, geometry and N(N+3)/2 member-generation work before staging. Conservative 64 KiB intermediate-pair charges and actual final AP bytes SHALL accumulate under existing history/work budgets without runtime orphan scans. All-member metadata/value work SHALL be counted; copies retain counters and failed updates remain atomic.
+4. Acceptance SHALL cover actual selection pixels/source/flatten parity across all rotations with CropBox/UserUnit, encoded name aliases, exact work/widget boundaries, metadata regeneration, read-only/no-toggle behavior, immutable snapshots, callbacks/lifetime and existing three-kind regressions. Broad PDF6/U10 imported/group/appearance parity SHALL remain partial.
+
+
+## 84. Owned body paragraph deletion
+
+1. Existing document.paragraphs integer-index deletion SHALL remove ordinary direct owned DOCX body paragraphs through public native remove_block, with no new method/manager. Section-bearing paragraphs, cell/PPTX and slice/batch operations SHALL remain unsupported; normal semantic-anchor/navigation checks SHALL remain without exemptions.
+2. Every ordered SectionProps value/count and valid unique section endpoint SHALL be preserved. If removal leaves a section-bearing tail, public insert_block SHALL append at most one plain unregistered final paragraph without relocating properties. Native empty/table-tail sentinels SHALL remain intact and reusable; explicit authored empty paragraphs SHALL remain real content.
+3. Staged locator/accounting changes SHALL retain surviving IDs, nested paths, table generations and auxiliary ownership, shift only later physical body roots, invalidate the removed handle and preserve the monotonic allocator. Callback selection SHALL retain captured identity with final lifetime/scope checks. Failure SHALL publish no additional mutation; normal global range/cache invalidation SHALL apply on success.
+4. Tests SHALL prove raw native tail behavior, exact ordered section values, next/continuous/odd/even boundaries and restart controls, DOCX/PDF source order and visible PNG content, protected references, nested handles, copies, placeholders, resource/revision errors and callbacks. Broader DOC5/TXT1 ordered insertion/movement/adoption and semantic section removal SHALL remain open. Historical specs78/81 describe their narrower original scope; this separate acceptance expands ordinary body deletion only.
+
+
+## 86. Owned paragraph movement
+
+1. Existing DOCX paragraph collections SHALL expose `move(index, destination) -> None`, with integer/negative indexes and destination defined as the final paragraph index. The supported profile SHALL be direct ordinary paragraphs within one owned body section/header/footer/note. Appending followed by movement SHALL compose insertion without adding another creator or manager.
+2. Movement SHALL call public native remove/insert block operations in a single staged transaction, retain native block content, preserve surviving IDs/descendant locations/table generations/accounting and keep other blocks in relative order. A required native table-tail blank SHALL remain hidden/reusable exactly once. The body SHALL retain ordered native section properties, valid physical endpoints and moved-content section ownership.
+3. Section-bearing source/destination paragraphs, cross-section/container movement, cell/PPTX scope, aliased header/footer parts and moved note/bookmark/comment anchors SHALL fail explicitly. Ordinary commit guards SHALL remain without semantic exemptions. A supported no-op SHALL preserve bytes, revision, ranges and cached output. Python index normalization SHALL recheck owner lifetime/revision and SHALL NOT retarget after callback edits.
+4. Validation SHALL prove raw native sentinel/section behavior, native identity/rollback invariants, actual DOCX/PNG/PDF reorder, auxiliary note marks, section preservation, callbacks, copies and captured iteration order. Broader DOC5/TXT1 parity and anchored/adopted/imported movement SHALL remain incomplete.
+
+
+## 87. Native-backed everyday property types
+
+Existing annotation, picture, outline, page/slide and shape properties SHALL expose their native scalar, tuple, collection and nullable contracts to static consumers. Known nullable native returns SHALL not be declared nonnullable. Annotation-only changes SHALL preserve runtime method bodies, names, defaults, dispatch and errors; no new public aliases/managers or Any placeholders SHALL be introduced. Existing factory/copy/context chains SHALL retain concrete handle types. API3 SHALL remain open for unreviewed mappings/properties, documentation and IDE coverage.
+
+
+## 91. Reproducible Office workload measurements
+
+Development benchmark tools SHALL reuse the installed public document APIs, retain the original small workload by default and bound optional page/image fixture parameters before creating output. Each fresh-process result SHALL identify input bytes/hash, actual page count, DPI, ordered all-page PNG digest, retained-session counters, timings and process memory observations. Paired comparisons SHALL use identical inputs and require all-page byte parity. Evidence SHALL distinguish synthetic workload observations from real-input fidelity, allocation bounds, cold-disk latency, historical-wheel comparisons and general performance guarantees. No package runtime or public API change is required.

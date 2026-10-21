@@ -618,5 +618,70 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Update classified native test paths without relaxing format/geometry/output assertions, and add focused native/public identity, section and rollback coverage.
 - [x] Complete three focused native groups, four new public workflows, 59 related public workflows, formatter/Clippy/debug build and strict copied-package consumer typing.
 - [x] Complete the integrated local artifact and independent review: 321 recorded native tests and 462 clean installed-wheel tests; all 462 tests independently rerun with matching wheel bytes, typing and the locked license audit.
-- [ ] Complete final exact-head/current-main CI and manual merge.
+- [x] Complete final exact-head/current-main CI and manual merge: PR93, run39530041981.
 - [ ] Retain separately scoped body section/semantic deletion, cell/PPTX deletion and broader DOC5/TXT1 insertion/movement/adoption work. The historical spec78 identity-migration prerequisite is superseded by this internal change.
+
+
+## Bounded owned PDF radio groups
+
+- [x] Probe public native group creation, canonical Unicode/hash identities, clear/read-only behavior, fixed vector appearances and retained generation counts.
+- [x] Integrate immutable same-page groups through existing field containers/properties with independent field/widget bounds and cumulative preflight/accounting.
+- [x] Add native and public source/pixel/geometry/flatten/callback/identity/budget tests and consumer typing assertions.
+- [x] Complete integrated release/clean installed-wheel corpus: 326 native and 467 Python tests, typing and unchanged license audit.
+- [x] Complete independent exact-head/current-main review and manual merge: PR94, run39548202131.
+- [ ] Retain imported inventory, arbitrary mutable/multi-page groups and broader PDF6/U10 appearance work.
+
+
+## Owned body paragraph deletion
+
+- [x] Prove the native final-section tail case and one-blank preservation with exact section values, DOCX readback, PNG dimensions and PDF page geometry.
+- [x] Extend existing staged collection deletion to ordinary direct body paragraphs; retain section/semantic guards, bounded locator updates and existing auxiliary behavior.
+- [x] Add four native groups and five public workflows for output, identity, section starts/restarts, protected anchors, callbacks, placeholder reuse and rollback; deliberately update obsolete body-Unsupported assertions while preserving cell/PPTX/section checks.
+- [x] Complete focused native tests, fmt/Clippy/debug build and copied-package public/related checks; record exact results below.
+- [x] Complete integrated locked release and clean installed-wheel corpus: 330 native/472 Python tests, strict typing, license audit and independent472-test review.
+- [x] Complete final exact-head/current-main CI and manual merge for body paragraph deletion: PR96, run39549509766.
+- [ ] Keep section-boundary/semantic deletion, cell/PPTX deletion and broader DOC5/TXT1 insertion/movement/adoption open.
+
+
+## Native PDF comment opacity
+
+- [x] Audit pinned native Style/set_style and AP-local ExtGState generation; retain the seven existing comment kinds and canonical metadata profile.
+- [x] Reuse Annotation property/update, bounded target validation and staged native appearance/accounting.
+- [x] Complete three focused native groups plus six related native groups, 19 copied-package public tests (four new plus 15 related), formatter/Clippy/debug build and strict consumer typing.
+- [x] Migrate only the geometric-comment and lock evidence affected by intentional fractional-CA fixture changes to the exact new integrated artifact.
+- [x] Complete locked full native/release/installed corpus and independent artifact review: 333 native and 476 installed Python tests.
+- [x] Complete final exact-head/current-main CI and manual merge for annotation opacity: PR97, run39550636008.
+- [ ] Retain broader PDF6 imported-inventory/reply and PDF8 encryption/profile work.
+
+
+## Owned paragraph movement
+
+- [x] Audit public native removal/insertion and execute raw table-tail/singleton/section-destination proofs before implementation.
+- [x] Reuse the existing paragraph collection move spelling and native staged transaction, bounded stable-ID/root-path updates, section/semantic guards and callback revision checks.
+- [x] Add six native groups and five public workflows for native padding, identity, rollback, output, auxiliary stories, no-ops, copies, iteration and callbacks; retain all existing tests unchanged.
+- [x] Complete six focused native groups, fmt/Clippy/debug build, five new plus 25 related copied-package workflows, final media/field checks and strict consumer typing; record exact local results below.
+- [x] Complete integrated locked release/installed-wheel corpus and independent review: 339 native and 481 installed Python tests.
+- [x] Complete final exact-head/current-main CI and manual merge for paragraph movement: PR99, run39551991262.
+- [ ] Keep anchored/cross-section/cross-container/cell/PPTX movement, imported preservation and broader DOC5/TXT1 parity open.
+
+
+## Native-backed everyday property types
+
+- [x] Audit selected native getter signatures and nullable JSON fields; retain current factory/copy ownership typing.
+- [x] Annotate existing property access and simple setters without aliases, runtime coercions or dynamic Any placeholders.
+- [x] Extend strict static consumer assertions and verify expected invalid typed uses are rejected; confirm runtime AST is unchanged after removing annotations.
+- [x] Complete integrated installed-package strict typing, unchanged native-byte verification and independent 481-test package review.
+- [x] Complete final exact-head/current-main CI and manual merge for property typing: PR100, run39553367804.
+- [ ] Retain unreviewed mappings/properties, documentation and IDE coverage under API3.
+
+
+## Reproducible Office workload measurements
+
+- [x] Preserve the default 20-page generator and add bounded 200-page/image-heavy configurations plus source manifests.
+- [x] Add ordered all-page PNG and input hashes to the existing benchmark, retaining explicit process-memory/cache caveats.
+- [x] Verify new image fixtures reopen, cached/one-shot smoke parity, four pre-creation budget rejections and existing-directory protection.
+- [x] Complete 36 sequential fresh-process measurements across six inputs and two modes, with three alternating-order repetitions and all-page byte/counter parity.
+- [x] Record exact source/tool/wheel identities, timings, memory ranges and limitations; independent benchmark source review found no blocker.
+- [x] Complete independent verification of all 36 samples, source/tool/artifact hashes, page digests, counters, table medians/ratios and memory ranges.
+- [x] Complete required current-main CI and manual merge for Office benchmark evidence: PR101, run39554746117.
+- [ ] Keep P1's independently reproducible PDF memory/full-document counterpart and broader real-input/platform QA7 evidence open.

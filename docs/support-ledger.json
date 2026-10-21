@@ -118,6 +118,13 @@
       "wheel_sha256": "73ab05afb724346031146a0eaf2d3f6c9b63cabf31330ead8540a1b446af60d8",
       "source_commit": "fecebc36f13a2e7ae7912f4e6ca28a25400f6124",
       "date": "2026-10-20"
+    },
+    "annotation-opacity-2026-10-21": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#native-annotation-opacity--artifact-evidence",
+      "wheel_sha256": "d33da01deced89b8e954ea0c64ab0da1d90cd0b9f949ccb0587e41382ff266cc",
+      "kind": "artifact",
+      "source_commit": "5ec49683832754faa5d1f5200108995077b2500b",
+      "date": "2026-10-21"
     }
   },
   "test_sources": {
@@ -131,18 +138,19 @@
     "tests/test_story_content.py": "c2432ede7ebf0ff0d3b3b5c6cef0729d77e30018f0eb0b576bcd8cd3324e4203",
     "tests/test_line_numbers.py": "b12daf4001b8134b9ae99d981c33c70615c51e3b4301575f2dfc4ea3dc568fdf",
     "tests/test_direction_language.py": "bc11d3b9f6c0e66e5b8d3337f1308ba3811cff0a6f477e1d035efe6a2a546a38",
-    "tests/test_pdf_geometric_annotations.py": "ee2f44cf291b930a314ecdb5bc61da0e34f710ccc6604dcf23f23de0b4ce9145",
+    "tests/test_pdf_geometric_annotations.py": "0b61bc426776a8f74c75a2ae364f2e01d3426a7d059b301971dc0dade049f3c8",
     "tests/test_word_bookmarks.py": "e74d4ae3d19b264fbb9dfb29f32d96a836cdbd30c44d4b42f9ca217d60281f89",
     "tests/test_story_clear.py": "ea43d861092700d6763636b622d56b261da0803c2d79916d0d8c0a688349d2ce",
     "tests/test_pdf_output_options.py": "f840e55128bc8a4bd000e73ee0cb9d38e6b96746823e1153e8525f65e2848bb4",
     "tests/test_pdf_search.py": "58fef2f3633a8578ceff0f2c5494f19c5cc8980bc6a3a6d1c154cf8134b4df29",
     "tests/test_decimal_outline.py": "e3d3c62c93b4290ad8d9176cf13d160219ceeecd97828301f25ff40d7f53f533",
     "tests/test_field_tooltips.py": "569ecc1cfbc33a6a22f32fe456639a7c2560ff11c0af1cecfcc9b22bf56f28f4",
-    "tests/test_annotation_lock.py": "b10af9191b773aac61be358a7fe3123e581628a8a636f2756b082c3373efd3d9",
+    "tests/test_annotation_lock.py": "b1720ec43863e426bce8bff198270f7f89d21b93a8b15a2748cb8f573c5232ad",
     "tests/test_field_read_only.py": "f3055f423c0f98cd9eb02bfc21927a7b251bed81da2764c4d765bb2d36108cb7",
     "tests/test_note_conversion.py": "4d9fbcb9330d703c8643e42fdcbce9d72126d0a16ecf3df91533f771a281dbd0",
     "tests/test_slide_background_reset.py": "a76f9249da5695435353315417936c88c3a4ebf209ec41a7bf20e24af1c1f7f1",
-    "tests/test_note_clear.py": "c1db35d457f3a637cf6e9e85d7faad86e49614796702224e0870d51264e5c10c"
+    "tests/test_note_clear.py": "c1db35d457f3a637cf6e9e85d7faad86e49614796702224e0870d51264e5c10c",
+    "tests/test_annotation_opacity.py": "2f94b75b40b1b720a3ee1b5be9afce7ae84f8ecf3cdf32353c0db85f2f97d5bd"
   },
   "profiles": [
     {
@@ -1289,18 +1297,22 @@
     {
       "id": "pdf.geometric-comments",
       "format": "pdf",
-      "scope": "Rectangle/ellipse annotation outlines with fixed solid opaque two-user-unit stroke and at least three-unit dimensions; distinct from drawing page content or secure redaction.",
+      "scope": "Native rectangle/ellipse outlines with fixed solid unfilled two-user-unit stroke and at least three-unit dimensions; existing comment opacity property also covers canonical notes and four markup kinds. Creation evidence remains rectangle/ellipse only; no page-content drawing or secure redaction certification.",
       "public_members": [
         "page.annotations.add(\"rectangle\" | \"ellipse\", ...)",
         "annotation.box",
         "annotation.color",
-        "annotation.update(...)"
+        "annotation.update(...)",
+        "annotation.opacity"
       ],
       "adapter_sources": {
         "rust/src/author_pdf.rs": [
           "add_annotation",
           "geometric_dict_peak",
-          "validate_geometric_rect"
+          "validate_geometric_rect",
+          "annotation_opacity",
+          "update_annotation",
+          "checked_lock_target"
         ],
         "src/doc_ex/_authoring.py": [
           "Annotations",
@@ -1335,15 +1347,16 @@
           ]
         }
       },
-      "fixture_provenance": "Synthetic native shapes and minimal imported annotation fixtures; actual outline pixels, empty centers, saved PNG equality, rotations and CropBox/UserUnit. A separate direct-native tiny-oval regression motivates the conservative minimum.",
+      "fixture_provenance": "Synthetic native shapes and minimal imported annotation fixtures; actual outline pixels, empty centers, saved PNG equality, rotations and CropBox/UserUnit. A separate direct-native tiny-oval regression motivates the conservative minimum. Opacity controls use seven native-authored kinds on white/colored backgrounds at 72/144 DPI, both writer representations and saved native readback. Hand-built fractional-CA imported acceptance is rectangle only.",
       "operations": {
         "read": {
           "status": "partial",
-          "scope": "Existing annotation handles report ellipse/rectangle, geometry and metadata. Global inventory/initial inspection allocations remain an upstream gap.",
-          "artifact": "ellipse-2026-10-20",
+          "scope": "Existing annotation handles report ellipse/rectangle, geometry and metadata. Global inventory/initial inspection allocations remain an upstream gap. Read native opacity for seven native-authored comment kinds within the canonical target profile.",
+          "artifact": "annotation-opacity-2026-10-21",
           "tests": [
             "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_visible_shapes_resize_recolor_reopen_copy_delete",
-            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_rotated_crop_userunit_and_page_organization"
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_rotated_crop_userunit_and_page_organization",
+            "tests/test_annotation_opacity.py::AnnotationOpacityTests.test_all_kinds_native_alpha_roundtrip_and_copy"
           ],
           "native": [
             "annot"
@@ -1352,7 +1365,7 @@
         "create": {
           "status": "partial",
           "scope": "Native fixed-profile outline comments reuse add and comment metadata; text is not a visible FreeText appearance.",
-          "artifact": "ellipse-2026-10-20",
+          "artifact": "annotation-opacity-2026-10-21",
           "tests": [
             "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_visible_shapes_resize_recolor_reopen_copy_delete",
             "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_three_user_unit_minimum_is_visible_at_fixture_dpi"
@@ -1363,12 +1376,15 @@
         },
         "edit_authored": {
           "status": "partial",
-          "scope": "Native move/resize/recolor, metadata, compound updates, deletion and callback/stale ownership checks.",
-          "artifact": "ellipse-2026-10-20",
+          "scope": "Native move/resize/recolor, metadata, compound updates, deletion and callback/stale ownership checks. Set finite opacity from 0 to 1 for seven native-authored comment kinds; invalid, locked and callback-driven stale edits fail in the stated fixtures.",
+          "artifact": "annotation-opacity-2026-10-21",
           "tests": [
             "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_visible_shapes_resize_recolor_reopen_copy_delete",
             "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_argument_callbacks_cannot_retarget_annotation_or_page",
-            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_stale_or_closed_handles_fail_before_argument_callbacks"
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_stale_or_closed_handles_fail_before_argument_callbacks",
+            "tests/test_annotation_opacity.py::AnnotationOpacityTests.test_all_kinds_native_alpha_roundtrip_and_copy",
+            "tests/test_annotation_opacity.py::AnnotationOpacityTests.test_invalid_values_locked_combined_updates_and_link",
+            "tests/test_annotation_opacity.py::AnnotationOpacityTests.test_float_callbacks_cannot_retarget_stale_handles"
           ],
           "native": [
             "annot"
@@ -1376,11 +1392,12 @@
         },
         "edit_imported": {
           "status": "partial",
-          "scope": "Only canonical bounded solid unfilled geometry/metadata dictionaries. Unsupported styles/extensions fail atomically; foreign appearance bytes are not decoded by target validation.",
-          "artifact": "ellipse-2026-10-20",
+          "scope": "Only canonical bounded solid unfilled geometry/metadata dictionaries. Unsupported styles/extensions fail atomically; foreign appearance bytes are not decoded by target validation. Canonical direct finite 0\u20131 CA is accepted on the hand-built rectangle control; seven-kind readback comes from native-authored output, not arbitrary foreign comments.",
+          "artifact": "annotation-opacity-2026-10-21",
           "tests": [
             "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_visible_shapes_resize_recolor_reopen_copy_delete",
-            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_imported_profile_rejections_preserve_foreign_appearance"
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_imported_profile_rejections_preserve_foreign_appearance",
+            "tests/test_annotation_opacity.py::AnnotationOpacityTests.test_canonical_imports_accept_fractional_scalar_only"
           ],
           "native": [
             "annot",
@@ -1389,12 +1406,13 @@
         },
         "preserve": {
           "status": "partial",
-          "scope": "Copies, saved/reopened shapes and existing page text/vector content retain tested values/pixels. Geometry/style edits regenerate standard appearances and do not promise custom-appearance preservation.",
-          "artifact": "ellipse-2026-10-20",
+          "scope": "Copies, saved/reopened shapes and existing page text/vector content retain tested values/pixels. Geometry/style edits regenerate standard appearances and do not promise custom-appearance preservation. Both PDF writer representations, saved native readback and independent copies retain the tested seven-kind opacity and pixels. Style/opacity redraws replace custom appearances; imported note artwork is not certified.",
+          "artifact": "annotation-opacity-2026-10-21",
           "tests": [
             "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_visible_shapes_resize_recolor_reopen_copy_delete",
             "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_rotated_crop_userunit_and_page_organization",
-            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_imported_profile_rejections_preserve_foreign_appearance"
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_imported_profile_rejections_preserve_foreign_appearance",
+            "tests/test_annotation_opacity.py::AnnotationOpacityTests.test_all_kinds_native_alpha_roundtrip_and_copy"
           ],
           "native": [
             "annot",
@@ -1403,12 +1421,13 @@
         },
         "render": {
           "status": "partial",
-          "scope": "Real colored outlines and empty centers at tested DPI, including all rotations/CropBox/UserUnit and native minimum-size controls. No arbitrary-low-DPI visibility guarantee.",
-          "artifact": "ellipse-2026-10-20",
+          "scope": "Real colored outlines and empty centers at tested DPI, including all rotations/CropBox/UserUnit and native minimum-size controls. No arbitrary-low-DPI visibility guarantee. Seven native-authored comment kinds show monotonic alpha attenuation and zero-opacity invisibility on white/colored fixture backgrounds at 72 DPI, with saved/reopened PNG equality also checked at 144 DPI; no arbitrary foreign-appearance fidelity is claimed.",
+          "artifact": "annotation-opacity-2026-10-21",
           "tests": [
             "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_visible_shapes_resize_recolor_reopen_copy_delete",
             "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_rotated_crop_userunit_and_page_organization",
-            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_three_user_unit_minimum_is_visible_at_fixture_dpi"
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_three_user_unit_minimum_is_visible_at_fixture_dpi",
+            "tests/test_annotation_opacity.py::AnnotationOpacityTests.test_all_kinds_native_alpha_roundtrip_and_copy"
           ],
           "native": [
             "annot",
@@ -2138,7 +2157,7 @@
         "read": {
           "status": "partial",
           "scope": "Read the native Locked bit for the seven supported comment kinds through existing handles, including stale/closed identity checks. Global imported summaries/initial inspection remain bounded-inventory upstream work; permissive native flag interpretation is not canonical-profile certification.",
-          "artifact": "comment-locks-2026-10-20",
+          "artifact": "annotation-opacity-2026-10-21",
           "tests": [
             "tests/test_annotation_lock.py::AnnotationLockTests.test_all_kinds_preserve_pixels_and_metadata_in_rotated_crop_userunit_views",
             "tests/test_annotation_lock.py::AnnotationLockTests.test_strict_bool_lifetime_and_page_identity",
@@ -2154,11 +2173,12 @@
         },
         "edit_authored": {
           "status": "verified",
-          "scope": "Toggle the strict boolean within the canonical target profile. Text remains editable; box/color/author/deletion and compound blocked updates fail atomically while locked, then work after unlock. Non-bool inputs never run truth-value callbacks; this does not inhibit document-level operations or grant security.",
-          "artifact": "comment-locks-2026-10-20",
+          "scope": "Toggle the strict boolean within the canonical target profile. Text remains editable; box/color/author/deletion and compound blocked updates fail atomically while locked, then work after unlock. Non-bool inputs never run truth-value callbacks; this does not inhibit document-level operations or grant security. A locked rectangle additionally rejects compound text/opacity updates without mutation.",
+          "artifact": "annotation-opacity-2026-10-21",
           "tests": [
             "tests/test_annotation_lock.py::AnnotationLockTests.test_locked_text_is_editable_but_geometry_style_author_delete_are_atomic",
-            "tests/test_annotation_lock.py::AnnotationLockTests.test_strict_bool_lifetime_and_page_identity"
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_strict_bool_lifetime_and_page_identity",
+            "tests/test_annotation_opacity.py::AnnotationOpacityTests.test_invalid_values_locked_combined_updates_and_link"
           ],
           "native": [
             "lock",
@@ -2168,7 +2188,7 @@
         "edit_imported": {
           "status": "partial",
           "scope": "Toggle only the tested canonical imported rectangle and saved/reopened native seven-kind outputs. Malformed flags, nested extensions, replies and noncanonical geometry styles fail atomically in tested rectangle variants; links reject this property. No arbitrary imported note/markup/thread certification.",
-          "artifact": "comment-locks-2026-10-20",
+          "artifact": "annotation-opacity-2026-10-21",
           "tests": [
             "tests/test_annotation_lock.py::AnnotationLockTests.test_all_kinds_preserve_pixels_and_metadata_in_rotated_crop_userunit_views",
             "tests/test_annotation_lock.py::AnnotationLockTests.test_imported_profiles_link_exclusion_and_warm_cache_rollback"
@@ -2180,13 +2200,14 @@
         },
         "preserve": {
           "status": "partial",
-          "scope": "Flag toggles retain tested metadata/geometry and exact fixture pixels through saved reopen and independent copies; rejected updates retain bytes/cache. Page organization invalidates old handles and retains the flag on the fresh handle. No generic foreign-dictionary, descendant-lock or custom-appearance preservation claim.",
-          "artifact": "comment-locks-2026-10-20",
+          "scope": "Flag toggles retain tested metadata/geometry and exact fixture pixels through saved reopen and independent copies; rejected updates retain bytes/cache. Page organization invalidates old handles and retains the flag on the fresh handle. No generic foreign-dictionary, descendant-lock or custom-appearance preservation claim. A locked rectangle additionally rejects compound text/opacity updates without mutation.",
+          "artifact": "annotation-opacity-2026-10-21",
           "tests": [
             "tests/test_annotation_lock.py::AnnotationLockTests.test_all_kinds_preserve_pixels_and_metadata_in_rotated_crop_userunit_views",
             "tests/test_annotation_lock.py::AnnotationLockTests.test_locked_text_is_editable_but_geometry_style_author_delete_are_atomic",
             "tests/test_annotation_lock.py::AnnotationLockTests.test_strict_bool_lifetime_and_page_identity",
-            "tests/test_annotation_lock.py::AnnotationLockTests.test_imported_profiles_link_exclusion_and_warm_cache_rollback"
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_imported_profiles_link_exclusion_and_warm_cache_rollback",
+            "tests/test_annotation_opacity.py::AnnotationOpacityTests.test_invalid_values_locked_combined_updates_and_link"
           ],
           "native": [
             "lock",
@@ -2196,7 +2217,7 @@
         "render": {
           "status": "partial",
           "scope": "Toggling/clearing the lock leaves actual seven-kind fixture ink byte-identical at 144 DPI across all four rotations with CropBox/UserUnit. This does not certify arbitrary foreign appearance rendering or annotation drawing/style features.",
-          "artifact": "comment-locks-2026-10-20",
+          "artifact": "annotation-opacity-2026-10-21",
           "tests": [
             "tests/test_annotation_lock.py::AnnotationLockTests.test_all_kinds_preserve_pixels_and_metadata_in_rotated_crop_userunit_views",
             "tests/test_annotation_lock.py::AnnotationLockTests.test_locked_text_is_editable_but_geometry_style_author_delete_are_atomic"

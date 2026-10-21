@@ -16,6 +16,8 @@ const MAX_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_DOCUMENT_INPUT: usize = 128 * 1024 * 1024;
 const MAX_OUTPUT_BYTES: usize = 256 * 1024 * 1024;
 const MAX_FIELDS: usize = 1_000;
+const MAX_RADIO_WIDGETS: usize = 32;
+const MAX_FIELD_WIDGETS: usize = 1_000;
 const MAX_FIELD_TEXT: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Copy)]
@@ -619,7 +621,9 @@ impl EditablePdf {
         let page = self.page_index(page)?;
         validate_field_name(name)?;
         let existing = self.owned_fields()?;
-        if existing.len() >= MAX_FIELDS {
+        if existing.len() >= MAX_FIELDS
+            || existing.iter().map(|f| f.widgets.len()).sum::<usize>() >= MAX_FIELD_WIDGETS
+        {
             return Err(EngineError::ResourceLimit("PDF exceeds 1000 fields".into()).into());
         }
         if existing.iter().any(|f| f.name == name) {
@@ -711,6 +715,140 @@ impl EditablePdf {
         Ok(name.into())
     }
 
+    // A group is created atomically; callers cannot incrementally grow or reshape it.
+    pub fn add_radio_field(
+        &mut self,
+        page: isize,
+        name: &str,
+        boxes_json: &str,
+        options: Vec<String>,
+    ) -> PyResult<String> {
+        self.document()?;
+        if !self.owns_fields {
+            return Err(EngineError::Unsupported(
+                "form creation requires a newly created PDF model".into(),
+            )
+            .into());
+        }
+        let page = self.page_index(page)?;
+        validate_field_name(name)?;
+        if boxes_json.len() > 16 * 1024 {
+            return Err(
+                EngineError::ResourceLimit("radio boxes JSON exceeds 16 KiB".into()).into(),
+            );
+        }
+        let boxes: Vec<[f64; 4]> = serde_json::from_str(boxes_json).map_err(|_| {
+            PyValueError::new_err("radio boxes must contain four finite coordinates each")
+        })?;
+        if !(2..=MAX_RADIO_WIDGETS).contains(&boxes.len()) || options.len() != boxes.len() {
+            return Err(PyValueError::new_err(
+                "radio groups require 2 to 32 boxes with one distinct option per box",
+            ));
+        }
+        let existing = self.owned_fields()?;
+        if existing.len() >= MAX_FIELDS
+            || existing.iter().map(|f| f.widgets.len()).sum::<usize>() + boxes.len()
+                > MAX_FIELD_WIDGETS
+        {
+            return Err(
+                EngineError::ResourceLimit("PDF exceeds 1000 fields or widgets".into()).into(),
+            );
+        }
+        if existing.iter().any(|f| f.name == name) {
+            return Err(PyValueError::new_err("field name already exists"));
+        }
+        let mut distinct = std::collections::HashSet::new();
+        let mut exports = Vec::with_capacity(options.len());
+        for option in &options {
+            validate_radio_option(option)?;
+            if !distinct.insert(option) {
+                return Err(PyValueError::new_err("radio options must be distinct"));
+            }
+            exports.push(pdfcraft_forms::name_text(option.as_bytes()));
+        }
+        let mut rects = Vec::with_capacity(boxes.len());
+        for [x, y, width, height] in boxes {
+            let view = self.annotation_rect(page, (x, y, x + width, y + height))?;
+            let rect = self.geometry[page].view_rect_to_user(view).map(f64::from);
+            validate_radio_rect(rect)?;
+            rects.push(rect);
+        }
+        let metadata = name
+            .len()
+            .saturating_add(exports.iter().map(String::len).sum::<usize>());
+        if existing
+            .iter()
+            .map(owned_field_text_bytes)
+            .sum::<usize>()
+            .saturating_add(metadata)
+            > MAX_FIELD_TEXT
+        {
+            return Err(
+                EngineError::ResourceLimit("aggregate form text exceeds 4 MiB".into()).into(),
+            );
+        }
+        let count = rects.len();
+        // Each add emits one initial pair, then redraws every current member.
+        let generations = count * (count + 3) / 2;
+        self.validate_field_work(
+            metadata.saturating_add(generations * RADIO_APPEARANCE_WORK),
+            generations,
+        )?;
+        let mut edited = self.document()?.clone();
+        let mut cost = metadata;
+        for (rect, export) in rects.into_iter().zip(exports) {
+            let created = pdfcraft_forms::add_field(
+                &mut edited,
+                page,
+                rect,
+                &pdfcraft_forms::NewField::Radio {
+                    group: Some(name.into()),
+                    export,
+                },
+                Some(name),
+            )
+            .map_err(form_error)?;
+            if created != name {
+                return Err(EngineError::Conversion(
+                    "radio writer changed the requested field name".into(),
+                )
+                .into());
+            }
+            // The initial pair is already orphaned by native redraw_field. Reserve its
+            // bounded fixed-vector cost; measure only the newly generated owned live pair(s).
+            let fields = pdfcraft_forms::fields(&edited);
+            let field = fields
+                .iter()
+                .find(|f| f.name == name)
+                .ok_or_else(|| EngineError::Conversion("created radio group is missing".into()))?;
+            let generated = owned_field_appearance_bytes(&edited, field)?;
+            if generated > field.widgets.len() * RADIO_APPEARANCE_WORK {
+                return Err(EngineError::ResourceLimit(
+                    "native radio appearance exceeds its reserved profile".into(),
+                )
+                .into());
+            }
+            cost = cost
+                .saturating_add(RADIO_APPEARANCE_WORK)
+                .saturating_add(generated);
+        }
+        let fields = checked_owned_fields(&edited)?;
+        let created = fields
+            .iter()
+            .find(|f| f.name == name)
+            .ok_or_else(|| EngineError::Conversion("created radio group is missing".into()))?;
+        if created.widgets.len() != count || fields.len() != existing.len() + 1 {
+            return Err(
+                EngineError::Conversion("radio writer changed group membership".into()).into(),
+            );
+        }
+        self.validate_field_work(cost, generations)?;
+        self.document = Some(edited);
+        self.input_bytes += cost;
+        self.items += generations;
+        Ok(name.into())
+    }
+
     pub fn set_field_value(&mut self, name: &str, value_json: &str) -> PyResult<()> {
         use pdfcraft_forms::{FieldKind, FieldValue};
         let field = self.field_named(name)?;
@@ -729,6 +867,15 @@ impl EditablePdf {
                 FieldValue::Text(text)
             }
             (FieldKind::CheckBox, Value::Bool(value)) => FieldValue::Check(value),
+            (FieldKind::Radio, Value::Null) => FieldValue::Radio(None),
+            (FieldKind::Radio, Value::String(text)) => {
+                validate_radio_option(&text)?;
+                let encoded = pdfcraft_forms::name_text(text.as_bytes());
+                if field.state_for(&encoded).is_none() {
+                    return Err(PyValueError::new_err("value is not a radio option"));
+                }
+                FieldValue::Radio(Some(encoded))
+            }
             (FieldKind::Combo, Value::Null) => FieldValue::Choice(vec![]),
             (FieldKind::Combo, Value::String(text)) => {
                 validate_field_text(&text)?;
@@ -738,7 +885,7 @@ impl EditablePdf {
                 validate_value_fit(&field, &text)?;
                 FieldValue::Choice(vec![text])
             }
-            _ => return Err(PyValueError::new_err("field value must be a string for text, bool for checkbox, or option string/null for choice")),
+            _ => return Err(PyValueError::new_err("field value must be a string for text, bool for checkbox, or option string/null for choice or radio")),
         };
         // Text/choice writes redraw even identical or empty values. A complete
         // owned checkbox only switches existing states and generates no AP stream.
@@ -748,7 +895,7 @@ impl EditablePdf {
         } else {
             0
         };
-        self.validate_input(value_json.len().saturating_add(peak))?;
+        self.validate_field_work(value_json.len().saturating_add(peak), field.widgets.len())?;
         let mut edited = self.document()?.clone();
         pdfcraft_forms::set_value(&mut edited, name, &native).map_err(form_error)?;
         let fields = checked_owned_fields(&edited)?;
@@ -762,15 +909,21 @@ impl EditablePdf {
             0
         };
         let cost = value_json.len().saturating_add(generated);
-        self.validate_input(cost)?;
+        self.validate_field_work(cost, field.widgets.len())?;
         self.document = Some(edited);
         self.input_bytes += cost;
-        self.items += 1;
+        self.items += field.widgets.len();
         Ok(())
     }
 
     pub fn set_field_box(&mut self, name: &str, rect: (f64, f64, f64, f64)) -> PyResult<()> {
         let mut expected = self.field_named(name)?;
+        if expected.kind == pdfcraft_forms::FieldKind::Radio {
+            return Err(EngineError::Unsupported(
+                "radio group boxes are immutable; use field.boxes to inspect them".into(),
+            )
+            .into());
+        }
         let page = expected.widgets[0]
             .page
             .ok_or_else(|| EngineError::Unsupported("owned field has no page".into()))?;
@@ -828,7 +981,10 @@ impl EditablePdf {
     pub fn set_field_read_only(&mut self, name: &str, read_only: bool) -> PyResult<()> {
         let mut expected = self.field_named(name)?;
         // Even this flag-only native property update regenerates appearances.
-        self.validate_input(owned_field_appearance_peak(&expected).saturating_add(32))?;
+        self.validate_field_work(
+            owned_field_appearance_peak(&expected).saturating_add(32),
+            expected.widgets.len(),
+        )?;
         if read_only {
             expected.flags |= pdfcraft_forms::flags::READ_ONLY;
         } else {
@@ -856,10 +1012,10 @@ impl EditablePdf {
             .into());
         }
         let cost = owned_field_appearance_bytes(&edited, actual)?.saturating_add(32);
-        self.validate_input(cost)?;
+        self.validate_field_work(cost, expected.widgets.len())?;
         self.document = Some(edited);
         self.input_bytes += cost;
-        self.items += 1;
+        self.items += expected.widgets.len();
         Ok(())
     }
 
@@ -868,7 +1024,10 @@ impl EditablePdf {
         validate_annotation_text(tooltip, 4096, "field tooltip")?;
         // The native metadata setter also regenerates the owned appearance.
         let metadata_cost = tooltip.len().saturating_mul(2).saturating_add(32);
-        self.validate_input(owned_field_appearance_peak(&expected).saturating_add(metadata_cost))?;
+        self.validate_field_work(
+            owned_field_appearance_peak(&expected).saturating_add(metadata_cost),
+            expected.widgets.len(),
+        )?;
         expected.tooltip = (!tooltip.is_empty()).then(|| tooltip.to_owned());
         let mut edited = self.document()?.clone();
         pdfcraft_forms::set_props(
@@ -894,10 +1053,10 @@ impl EditablePdf {
             .into());
         }
         let cost = owned_field_appearance_bytes(&edited, actual)?.saturating_add(metadata_cost);
-        self.validate_input(cost)?;
+        self.validate_field_work(cost, expected.widgets.len())?;
         self.document = Some(edited);
         self.input_bytes += cost;
-        self.items += 1;
+        self.items += expected.widgets.len();
         Ok(())
     }
 
@@ -931,7 +1090,7 @@ impl EditablePdf {
         let mut edited = self.document()?.clone();
         let flattened =
             pdfcraft_edit::flatten(&mut edited, &pages, false, true).map_err(edit_error)?;
-        if flattened != fields.len()
+        if flattened != fields.iter().map(|f| f.widgets.len()).sum::<usize>()
             || !checked_owned_fields(&edited)?.is_empty()
             || has_widgets(&edited)?
         {
@@ -941,7 +1100,7 @@ impl EditablePdf {
             .into());
         }
         self.document = Some(edited);
-        Ok(flattened)
+        Ok(fields.len())
     }
 
     #[pyo3(signature = (page, rect, uri=None, target_page=None))]
@@ -1141,7 +1300,7 @@ impl EditablePdf {
         Ok(payload)
     }
 
-    #[pyo3(signature = (page, index, text=None, rect=None, color=None, uri=None, target_page=None, author=None))]
+    #[pyo3(signature = (page, index, text=None, rect=None, color=None, uri=None, target_page=None, author=None, opacity=None))]
     #[allow(clippy::too_many_arguments)]
     pub fn update_annotation(
         &mut self,
@@ -1153,13 +1312,32 @@ impl EditablePdf {
         uri: Option<&str>,
         target_page: Option<isize>,
         author: Option<&str>,
+        opacity: Option<f64>,
     ) -> PyResult<()> {
         let page = self.page_index(page)?;
+        if let Some(value) = opacity {
+            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                return Err(PyValueError::new_err(
+                    "annotation opacity must be finite and between 0 and 1",
+                ));
+            }
+            let (_, peak) = checked_lock_target(self.document()?, page, index)?;
+            self.validate_input(peak)?;
+        }
         // props() builds an appearance internally. Bound accepted geometry and
         // imported style dictionaries before calling that native helper.
         let appearance_peak = with_annotation_dict(self.document()?, page, index, |dict| {
             let geometric = geometric_dict_peak(self.document()?, dict)?;
-            Ok(geometric.max(markup_dict_peak(dict)?))
+            let note = if (opacity.is_some() || color.is_some())
+                && dict.name(b"Subtype") == Some(b"Text")
+            {
+                let (_, target_peak) = checked_lock_target(self.document()?, page, index)?;
+                self.validate_input(target_peak)?;
+                65_536
+            } else {
+                0
+            };
+            Ok(geometric.max(markup_dict_peak(dict)?).max(note))
         })?;
         self.validate_input(appearance_peak)?;
         let props = pdfcraft_annot::props(self.document()?, page, index)
@@ -1182,11 +1360,17 @@ impl EditablePdf {
             validate_annotation_text(author, 4096, "annotation author")?;
         }
         let cost = text.map_or(0, str::len) + author.map_or(0, str::len) + uri.map_or(0, str::len);
-        self.validate_input(cost.saturating_add(appearance_peak))?;
+        let geometric = matches!(props.subtype.as_str(), "Square" | "Circle");
+        let style_redraw = props.subtype != "Link" && (color.is_some() || opacity.is_some());
+        let redraws = usize::from(style_redraw) + usize::from(geometric && rect.is_some());
+        self.validate_input(
+            cost.saturating_add(appearance_peak.saturating_mul(redraws.max(1)))
+                .saturating_add(redraws * 512),
+        )?;
         let mut edited = self.document()?.clone();
         let mut resized_appearance_bytes = 0usize;
         if props.subtype == "Link" {
-            if text.is_some() || author.is_some() {
+            if text.is_some() || author.is_some() || opacity.is_some() {
                 return Err(EngineError::Unsupported(
                     "link annotations do not have editable comment text or author".into(),
                 )
@@ -1263,13 +1447,13 @@ impl EditablePdf {
                 pdfcraft_annot::set_info(&mut edited, page, index, Some(author), None, None, &meta)
                     .map_err(annotation_error)?;
             }
-            if let Some(color) = color {
+            if color.is_some() || opacity.is_some() {
                 pdfcraft_annot::set_style(
                     &mut edited,
                     page,
                     index,
-                    Some(rgb(color)),
-                    None,
+                    color.map(rgb),
+                    opacity,
                     None,
                     None,
                     &meta,
@@ -1283,13 +1467,19 @@ impl EditablePdf {
             ))
             .into());
         }
-        // Color changes and geometric resizing regenerate the appearance.
+        // Color/opacity changes and geometric resizing regenerate the appearance.
         let geometric = matches!(props.subtype.as_str(), "Square" | "Circle");
-        let appearance_bytes = if appearance_peak != 0 && color.is_some() {
+        let appearance_bytes = if appearance_peak != 0 && (color.is_some() || opacity.is_some()) {
             annotation_appearance_bytes(&edited, page, index)?
         } else {
             0
         };
+        if props.subtype == "Text" && appearance_bytes > 65_536 {
+            return Err(EngineError::ResourceLimit(
+                "native note appearance exceeded its bound".into(),
+            )
+            .into());
+        }
         let appearance_bytes = appearance_bytes.saturating_add(resized_appearance_bytes);
         if geometric && appearance_bytes > GEOMETRIC_APPEARANCE_WORK {
             return Err(EngineError::ResourceLimit(
@@ -1297,12 +1487,28 @@ impl EditablePdf {
             )
             .into());
         }
-        let cost = cost.saturating_add(appearance_bytes);
+        // Reserve a fixed AP resource allowance for every native redraw, including
+        // intermediate resize appearances and styles retaining earlier opacity.
+        let resource_bytes = redraws * 512;
+        let cost = cost
+            .saturating_add(appearance_bytes)
+            .saturating_add(resource_bytes);
         self.validate_input(cost)?;
         self.document = Some(edited);
         self.input_bytes += cost;
         self.items += 1;
         Ok(())
+    }
+
+    pub fn annotation_opacity(&self, page: isize, index: usize) -> PyResult<f64> {
+        let page = self.page_index(page)?;
+        let (reference, _) = checked_lock_target(self.document()?, page, index)?;
+        let object = self.document()?.get(reference);
+        Ok(object
+            .as_dict()
+            .and_then(|dict| dict.get(b"CA"))
+            .and_then(pdfcraft_cos::Object::as_f64)
+            .unwrap_or(1.0))
     }
 
     pub fn set_annotation_locked(
@@ -2441,15 +2647,19 @@ impl EditablePdf {
 
     fn field_payload(&self, field: &pdfcraft_forms::Field) -> PyResult<Value> {
         use pdfcraft_forms::FieldKind;
-        let widget = &field.widgets[0];
-        let page = widget
-            .page
-            .ok_or_else(|| EngineError::Unsupported("form widget has no page".into()))?;
-        let geometry = self
-            .geometry
-            .get(page)
-            .ok_or_else(|| EngineError::Malformed("form widget page is out of range".into()))?;
-        let rect = view_rect(geometry, widget.rect.map(|v| v as f32));
+        let mut widgets = Vec::with_capacity(field.widgets.len());
+        for widget in &field.widgets {
+            let page = widget
+                .page
+                .ok_or_else(|| EngineError::Unsupported("form widget has no page".into()))?;
+            let geometry = self
+                .geometry
+                .get(page)
+                .ok_or_else(|| EngineError::Malformed("form widget page is out of range".into()))?;
+            let rect = view_rect(geometry, widget.rect.map(|v| v as f32));
+            widgets
+                .push(json!({"page":page,"box":[rect[0],rect[1],rect[2]-rect[0],rect[3]-rect[1]]}));
+        }
         let (kind, value) = match field.kind {
             FieldKind::Text => (
                 "text",
@@ -2457,16 +2667,31 @@ impl EditablePdf {
             ),
             FieldKind::CheckBox => ("checkbox", json!(!field.value.is_empty())),
             FieldKind::Combo => ("choice", json!(field.value.first())),
+            FieldKind::Radio => (
+                "radio",
+                json!(field.value.first().map(|v| radio_literal(v)).transpose()?),
+            ),
             _ => {
                 return Err(EngineError::Unsupported("unsupported owned field kind".into()).into())
             }
         };
+        let options = if field.kind == FieldKind::Radio {
+            field
+                .widgets
+                .iter()
+                .map(|w| radio_literal(w.on_state.as_deref().unwrap_or("")))
+                .collect::<PyResult<Vec<_>>>()?
+        } else {
+            field
+                .options
+                .iter()
+                .map(|(export, _)| export.clone())
+                .collect()
+        };
         Ok(json!({
-            "name": field.name, "kind":kind, "value":value,
-            "tooltip": field.tooltip.as_deref().unwrap_or(""), "read_only": field.read_only(),
-            "options": field.options.iter().map(|(export, _)| export).collect::<Vec<_>>(),
-            "widgets":[{"page":page,"box":[rect[0],rect[1],rect[2]-rect[0],rect[3]-rect[1]]}],
-            "font_size":12,
+            "name":field.name,"kind":kind,"value":value,
+            "tooltip":field.tooltip.as_deref().unwrap_or(""),"read_only":field.read_only(),
+            "options":options,"widgets":widgets,"font_size":12,
         }))
     }
 
@@ -2556,6 +2781,16 @@ impl EditablePdf {
         Ok(index as usize)
     }
 
+    fn validate_field_work(&self, bytes: usize, units: usize) -> PyResult<()> {
+        self.validate_input(bytes)?;
+        if units > MAX_ITEMS.saturating_sub(self.items) {
+            return Err(
+                EngineError::ResourceLimit("PDF field generation budget exceeded".into()).into(),
+            );
+        }
+        Ok(())
+    }
+
     fn validate_input(&self, bytes: usize) -> PyResult<()> {
         if self.items >= MAX_ITEMS || bytes > MAX_DOCUMENT_INPUT.saturating_sub(self.input_bytes) {
             return Err(EngineError::ResourceLimit(
@@ -2594,7 +2829,7 @@ fn geometric_dict_peak(document: &Document, dict: &pdfcraft_cos::Dict) -> PyResu
         return Ok(0);
     }
     let unsupported = || {
-        EngineError::Unsupported("editing rectangle/ellipse annotations requires canonical solid, unfilled, opaque 2-user-unit geometry and metadata".into())
+        EngineError::Unsupported("editing rectangle/ellipse annotations requires canonical solid, unfilled, 2-user-unit geometry and metadata".into())
     };
     if dict.len() > 20 {
         return Err(EngineError::ResourceLimit(
@@ -2610,7 +2845,10 @@ fn geometric_dict_peak(document: &Document, dict: &pdfcraft_cos::Dict) -> PyResu
             b"Subtype" => {}
             b"P" if matches!(value, Object::Ref(_)) => {}
             b"F" if matches!(value.as_int(), Some(4 | 132)) => {}
-            b"CA" if value.as_f64() == Some(1.0) => {}
+            b"CA"
+                if value
+                    .as_f64()
+                    .is_some_and(|n| n.is_finite() && (0.0..=1.0).contains(&n)) => {}
             b"Contents" | b"T" | b"NM" | b"M" | b"CreationDate" | b"Subj" => {
                 let bytes = value.as_string().ok_or_else(unsupported)?.bytes.len();
                 let maximum = if key.as_slice() == b"Contents" {
@@ -2755,7 +2993,7 @@ fn with_annotation_dict<T>(
     )
 }
 
-// This is a bounded profile for one flag-only mutation, not an imported
+// This is a bounded target profile for lock and opacity operations, not an imported
 // annotation parser. Native annot_ref clones all Annots entries, and update_dict
 // clones the target: reject deep inline siblings and unbounded target values.
 fn checked_lock_target(
@@ -2765,7 +3003,7 @@ fn checked_lock_target(
 ) -> PyResult<(pdfcraft_cos::ObjRef, usize)> {
     use pdfcraft_cos::Object;
     let unsupported = || {
-        EngineError::Unsupported("annotation locking requires a canonical note, text markup, rectangle or ellipse with reference-only page annotations".into())
+        EngineError::Unsupported("annotation properties require a canonical note, text markup, rectangle or ellipse with reference-only page annotations".into())
     };
     let missing = || PyIndexError::new_err("annotation index out of range");
     let pages = pdfcraft_organize::pages(document).map_err(organize_error)?;
@@ -2821,7 +3059,10 @@ fn checked_lock_target(
                 if matches!(value, Object::Ref(_)) && (key.as_slice() == b"P" || note) => {}
             b"F" if matches!(value, Object::Int(28 | 156)) && note => {}
             b"F" if matches!(value, Object::Int(4 | 132)) && !note => {}
-            b"CA" if value.as_f64() == Some(1.0) => {}
+            b"CA"
+                if value
+                    .as_f64()
+                    .is_some_and(|n| n.is_finite() && (0.0..=1.0).contains(&n)) => {}
             b"Contents" | b"T" | b"NM" | b"M" | b"CreationDate" | b"Subj" => {
                 let length = value.as_string().ok_or_else(unsupported)?.bytes.len();
                 let limit = if key.as_slice() == b"Contents" {
@@ -3160,6 +3401,43 @@ fn validate_field_text(text: &str) -> PyResult<()> {
     Ok(())
 }
 
+// The owned radio writer uses a fixed white/black frame and a four-curve circle.
+// With finite coordinates bounded to +/-1e6 and n()'s three decimals, the pair
+// contains fewer than 128 formatted scalars and 2 KiB of operators: < 4 KiB raw.
+// 64 KiB conservatively covers the two stored compressed streams; it is not a
+// general compression/allocator memory bound and does not inspect orphan objects.
+const RADIO_APPEARANCE_WORK: usize = 64 * 1024;
+
+fn validate_radio_rect(rect: [f64; 4]) -> PyResult<()> {
+    if rect.iter().any(|v| !v.is_finite() || v.abs() > 1_000_000.0)
+        || rect[2] - rect[0] < 12.0
+        || rect[3] - rect[1] < 12.0
+    {
+        return Err(PyValueError::new_err(
+            "radio boxes require at least 12 native user units and bounded finite coordinates",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_radio_option(value: &str) -> PyResult<()> {
+    if value.len() > 4096
+        || value.trim().is_empty()
+        || value == "Off"
+        || value.chars().any(char::is_control)
+    {
+        return Err(PyValueError::new_err(
+            "radio options must be nonempty, control-free, at most 4096 UTF-8 bytes, and not Off",
+        ));
+    }
+    Ok(())
+}
+
+fn radio_literal(value: &str) -> PyResult<String> {
+    String::from_utf8(pdfcraft_forms::name_bytes(value))
+        .map_err(|_| EngineError::Unsupported("radio option is not valid UTF-8".into()).into())
+}
+
 fn validate_field_fit(text: &str, width: f64, height: f64, size: f64) -> PyResult<()> {
     // Native appearances use a one-unit border and two-unit padding. Four units of inset
     // conservatively retain full glyphs instead of accepting text hidden by the widget clip.
@@ -3177,7 +3455,10 @@ fn validate_field_fit(text: &str, width: f64, height: f64, size: f64) -> PyResul
 }
 
 fn validate_value_fit(field: &pdfcraft_forms::Field, text: &str) -> PyResult<()> {
-    if field.kind == pdfcraft_forms::FieldKind::CheckBox {
+    if matches!(
+        field.kind,
+        pdfcraft_forms::FieldKind::CheckBox | pdfcraft_forms::FieldKind::Radio
+    ) {
         return Ok(());
     }
     let widget = &field.widgets[0];
@@ -3205,6 +3486,9 @@ fn owned_field_appearance_work(text_bytes: usize) -> usize {
 }
 
 fn owned_field_appearance_peak(field: &pdfcraft_forms::Field) -> usize {
+    if field.kind == pdfcraft_forms::FieldKind::Radio {
+        return RADIO_APPEARANCE_WORK.saturating_mul(field.widgets.len());
+    }
     let text_bytes = field
         .value
         .iter()
@@ -3219,7 +3503,7 @@ fn owned_field_appearance_peak(field: &pdfcraft_forms::Field) -> usize {
     owned_field_appearance_work(text_bytes)
 }
 
-// Only newly generated, owned single-widget appearances reach this helper. Never
+// Only newly generated appearances in our bounded owned field profile reach this helper. Never
 // traverse or decode arbitrary imported AP graphs; imports with forms stay unsupported.
 fn owned_field_appearance_bytes(
     document: &Document,
@@ -3228,31 +3512,65 @@ fn owned_field_appearance_bytes(
     use pdfcraft_cos::Object;
     let missing =
         || EngineError::Conversion("native field appearance is missing or unsupported".into());
-    let widget = document.get(field.widgets[0].obj);
-    let ap = document.resolve(
-        widget
-            .as_dict()
-            .and_then(|d| d.get(b"AP"))
-            .ok_or_else(missing)?,
-    );
-    let normal = document.resolve(ap.as_dict().and_then(|d| d.get(b"N")).ok_or_else(missing)?);
-    match normal.as_ref() {
-        Object::Stream(stream) => Ok(stream.raw.len()),
-        Object::Dict(states)
-            if field.kind == pdfcraft_forms::FieldKind::CheckBox && states.len() <= 2 =>
-        {
-            let mut bytes = 0usize;
-            for (_, value) in states.iter() {
-                let appearance = document.resolve(value);
-                let Object::Stream(stream) = appearance.as_ref() else {
-                    return Err(missing().into());
-                };
-                bytes = bytes.saturating_add(stream.raw.len());
+    let mut bytes = 0usize;
+    for widget in &field.widgets {
+        let widget = document.get(widget.obj);
+        let ap = document.resolve(
+            widget
+                .as_dict()
+                .and_then(|d| d.get(b"AP"))
+                .ok_or_else(missing)?,
+        );
+        let normal = document.resolve(ap.as_dict().and_then(|d| d.get(b"N")).ok_or_else(missing)?);
+        match normal.as_ref() {
+            Object::Stream(stream)
+                if !matches!(
+                    field.kind,
+                    pdfcraft_forms::FieldKind::Radio | pdfcraft_forms::FieldKind::CheckBox
+                ) =>
+            {
+                bytes = bytes.saturating_add(stream.raw.len())
             }
-            Ok(bytes)
+            Object::Dict(states)
+                if matches!(
+                    field.kind,
+                    pdfcraft_forms::FieldKind::Radio | pdfcraft_forms::FieldKind::CheckBox
+                ) && states.len() == 2 =>
+            {
+                for (_, value) in states.iter() {
+                    let appearance = document.resolve(value);
+                    let Object::Stream(stream) = appearance.as_ref() else {
+                        return Err(missing().into());
+                    };
+                    bytes = bytes.saturating_add(stream.raw.len());
+                }
+            }
+            _ => return Err(missing().into()),
         }
-        _ => Err(missing().into()),
     }
+    Ok(bytes)
+}
+
+// Matches the encoded live-text inventory checked below; owned sizes/counts were
+// already validated before this pre-staging aggregate calculation.
+fn owned_field_text_bytes(field: &pdfcraft_forms::Field) -> usize {
+    field.name.len()
+        + field.tooltip.as_ref().map_or(0, String::len)
+        + field
+            .options
+            .iter()
+            .map(|(export, _)| export.len())
+            .sum::<usize>()
+        + field.value.iter().map(String::len).sum::<usize>()
+        + if field.kind == pdfcraft_forms::FieldKind::Radio {
+            field
+                .widgets
+                .iter()
+                .map(|w| w.on_state.as_ref().map_or(0, String::len))
+                .sum::<usize>()
+        } else {
+            0
+        }
 }
 
 fn checked_owned_fields(document: &Document) -> PyResult<Vec<pdfcraft_forms::Field>> {
@@ -3260,7 +3578,9 @@ fn checked_owned_fields(document: &Document) -> PyResult<Vec<pdfcraft_forms::Fie
     // This reader only sees our bounded, shallow, script-free trees. Imported forms never
     // enter this path; upstream has no fallible caller-bounded reader for arbitrary trees yet.
     let read = pdfcraft_forms::fields_with_adopted(document);
-    if read.items.len() > MAX_FIELDS {
+    if read.items.len() > MAX_FIELDS
+        || read.items.iter().map(|f| f.widgets.len()).sum::<usize>() > MAX_FIELD_WIDGETS
+    {
         return Err(EngineError::ResourceLimit("PDF exceeds 1000 fields".into()).into());
     }
     if read.adopted_page_fields != 0 {
@@ -3273,7 +3593,9 @@ fn checked_owned_fields(document: &Document) -> PyResult<Vec<pdfcraft_forms::Fie
     for field in &read.items {
         validate_field_name(&field.name)?;
         if !names.insert(&field.name)
-            || field.widgets.len() != 1
+            || (field.kind != FieldKind::Radio && field.widgets.len() != 1)
+            || (field.kind == FieldKind::Radio
+                && !(2..=MAX_RADIO_WIDGETS).contains(&field.widgets.len()))
             || field.widgets[0].page.is_none()
             || field.widgets[0].hidden
             || field.value.len() > 1
@@ -3282,7 +3604,7 @@ fn checked_owned_fields(document: &Document) -> PyResult<Vec<pdfcraft_forms::Fie
             || field.button.is_some()
         {
             return Err(EngineError::Unsupported(
-                "owned form no longer matches the supported single-widget profile".into(),
+                "owned form no longer matches the supported widget profile".into(),
             )
             .into());
         }
@@ -3291,6 +3613,10 @@ fn checked_owned_fields(document: &Document) -> PyResult<Vec<pdfcraft_forms::Fie
         match field.kind {
             FieldKind::Text if base_flags == 0 && field.options.is_empty() => {}
             FieldKind::CheckBox if base_flags == 0 && field.options.is_empty() => {}
+            FieldKind::Radio
+                if base_flags
+                    == pdfcraft_forms::flags::RADIO | pdfcraft_forms::flags::NO_TOGGLE_TO_OFF
+                    && field.options.is_empty() => {}
             FieldKind::Combo
                 if base_flags == pdfcraft_forms::flags::COMBO && !field.options.is_empty() => {}
             _ => {
@@ -3305,6 +3631,54 @@ fn checked_owned_fields(document: &Document) -> PyResult<Vec<pdfcraft_forms::Fie
             validate_annotation_text(tooltip, 4096, "field tooltip")?;
             bytes = bytes.saturating_add(tooltip.len());
         }
+        if field.kind == FieldKind::Radio {
+            let mut states = std::collections::HashSet::new();
+            let mut identities = std::collections::HashSet::new();
+            for widget in &field.widgets {
+                if widget.page != field.widgets[0].page
+                    || widget.hidden
+                    || widget.locked
+                    || !identities.insert(widget.obj)
+                {
+                    return Err(EngineError::Unsupported(
+                        "radio group must contain distinct visible same-page widgets".into(),
+                    )
+                    .into());
+                }
+                validate_radio_rect(widget.rect)?;
+                let state = widget
+                    .on_state
+                    .as_deref()
+                    .ok_or_else(|| EngineError::Unsupported("radio on-state is missing".into()))?;
+                let literal = radio_literal(state)?;
+                validate_radio_option(&literal)?;
+                if pdfcraft_forms::name_text(literal.as_bytes()) != state || !states.insert(state) {
+                    return Err(EngineError::Unsupported(
+                        "radio options are not canonical and distinct".into(),
+                    )
+                    .into());
+                }
+                let selected = field.value.first().is_some_and(|v| v == state);
+                if widget.state.as_deref() != Some(if selected { state } else { "Off" }) {
+                    return Err(EngineError::Unsupported(
+                        "radio widget state disagrees with its group value".into(),
+                    )
+                    .into());
+                }
+                bytes = bytes.saturating_add(state.len());
+            }
+            if field.default.len() > 1
+                || field
+                    .value
+                    .iter()
+                    .chain(&field.default)
+                    .any(|v| !states.contains(v.as_str()))
+            {
+                return Err(
+                    EngineError::Unsupported("radio value is not a group option".into()).into(),
+                );
+            }
+        }
         let mut options = std::collections::HashSet::new();
         for (export, display) in &field.options {
             validate_field_text(display)?;
@@ -3318,7 +3692,9 @@ fn checked_owned_fields(document: &Document) -> PyResult<Vec<pdfcraft_forms::Fie
             bytes = bytes.saturating_add(export.len());
         }
         for value in &field.value {
-            validate_field_text(value)?;
+            if field.kind != FieldKind::Radio {
+                validate_field_text(value)?;
+            }
             validate_value_fit(field, value)?;
             bytes = bytes.saturating_add(value.len());
         }
@@ -6270,6 +6646,272 @@ mod tests {
     }
 
     #[test]
+    fn annotation_opacity_native_alpha_resources_and_readback() {
+        pyo3::prepare_freethreaded_python();
+        use pdfcraft_cos::Object;
+        for kind in [
+            "note",
+            "highlight",
+            "underline",
+            "strikeout",
+            "squiggly",
+            "rectangle",
+            "ellipse",
+        ] {
+            let mut document = EditablePdf::new(180.0, 180.0).unwrap();
+            let index = document
+                .add_annotation(
+                    0,
+                    kind,
+                    if kind == "note" {
+                        (20.0, 30.0, 40.0, 50.0)
+                    } else {
+                        (20.0, 30.0, 120.0, 60.0)
+                    },
+                    "Text",
+                    "Author",
+                    (255, 0, 0),
+                )
+                .unwrap();
+            assert_eq!(document.annotation_opacity(0, index).unwrap(), 1.0);
+            for opacity in [0.0, 0.25, 0.5, 1.0] {
+                document
+                    .update_annotation(0, index, None, None, None, None, None, None, Some(opacity))
+                    .unwrap();
+                assert_eq!(document.annotation_opacity(0, index).unwrap(), opacity);
+                with_annotation_dict(document.document().unwrap(), 0, index, |dict| {
+                    assert_eq!(dict.contains(b"CA"), opacity < 1.0);
+                    let normal = dict
+                        .get(b"AP")
+                        .unwrap()
+                        .as_dict()
+                        .unwrap()
+                        .reference(b"N")
+                        .unwrap();
+                    let appearance = document.document().unwrap().get(normal);
+                    let Object::Stream(stream) = appearance.as_ref() else {
+                        panic!("native AP")
+                    };
+                    assert!(stream.raw.len() < 65_536);
+                    let resources = stream.dict.get(b"Resources").unwrap().as_dict().unwrap();
+                    if opacity < 1.0 || kind == "highlight" {
+                        let gs = resources
+                            .get(b"ExtGState")
+                            .unwrap()
+                            .as_dict()
+                            .unwrap()
+                            .get(b"GS0")
+                            .unwrap()
+                            .as_dict()
+                            .unwrap();
+                        assert_eq!(gs.get(b"CA").unwrap().as_f64(), Some(opacity));
+                        assert_eq!(gs.get(b"ca").unwrap().as_f64(), Some(opacity));
+                        assert_eq!(
+                            gs.name(b"BM"),
+                            (kind == "highlight").then_some(b"Multiply".as_slice())
+                        );
+                    } else {
+                        assert!(!resources.contains(b"ExtGState"));
+                    }
+                    Ok(())
+                })
+                .unwrap();
+                for packed in [false, true] {
+                    let bytes = document.to_bytes_with_options(packed).unwrap();
+                    let reopened = EditablePdf::from_bytes(&bytes, None).unwrap();
+                    assert_eq!(reopened.annotation_opacity(0, index).unwrap(), opacity);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn annotation_opacity_charges_repeated_native_appearances_atomically() {
+        pyo3::prepare_freethreaded_python();
+        for kind in [
+            "note",
+            "highlight",
+            "underline",
+            "strikeout",
+            "squiggly",
+            "rectangle",
+            "ellipse",
+        ] {
+            let mut document = EditablePdf::new(180.0, 180.0).unwrap();
+            let index = document
+                .add_annotation(
+                    0,
+                    kind,
+                    if kind == "note" {
+                        (20.0, 30.0, 40.0, 50.0)
+                    } else {
+                        (20.0, 30.0, 120.0, 60.0)
+                    },
+                    "",
+                    "",
+                    (255, 0, 0),
+                )
+                .unwrap();
+            for opacity in [Some(0.5), None, None] {
+                let (bytes, items) = (document.input_bytes, document.items);
+                document
+                    .update_annotation(
+                        0,
+                        index,
+                        None,
+                        None,
+                        Some((0, 0, 255)),
+                        None,
+                        None,
+                        None,
+                        opacity,
+                    )
+                    .unwrap();
+                let generated =
+                    annotation_appearance_bytes(document.document().unwrap(), 0, index).unwrap();
+                assert_eq!(document.input_bytes - bytes, generated + 512, "{kind}");
+                assert_eq!(document.items, items + 1);
+            }
+            let before = document.to_bytes().unwrap();
+            for opacity in [f64::NAN, f64::INFINITY, -0.1, 1.1] {
+                let counters = (document.items, document.input_bytes);
+                assert!(document
+                    .update_annotation(0, index, None, None, None, None, None, None, Some(opacity))
+                    .is_err());
+                assert_eq!((document.items, document.input_bytes), counters);
+                assert_eq!(document.to_bytes().unwrap(), before);
+            }
+            let peak = with_annotation_dict(document.document().unwrap(), 0, index, |dict| {
+                Ok(if kind == "note" {
+                    65_536
+                } else {
+                    geometric_dict_peak(document.document().unwrap(), dict)?
+                        .max(markup_dict_peak(dict)?)
+                })
+            })
+            .unwrap()
+                + 512;
+            let mut at_limit = document.copy().unwrap();
+            at_limit.input_bytes = MAX_DOCUMENT_INPUT - peak;
+            at_limit
+                .update_annotation(
+                    0,
+                    index,
+                    None,
+                    None,
+                    Some((0, 0, 255)),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+            let mut over_limit = document.copy().unwrap();
+            over_limit.input_bytes = MAX_DOCUMENT_INPUT - peak + 1;
+            assert!(over_limit
+                .update_annotation(
+                    0,
+                    index,
+                    None,
+                    None,
+                    Some((0, 0, 255)),
+                    None,
+                    None,
+                    None,
+                    None
+                )
+                .is_err());
+            assert_eq!(over_limit.to_bytes().unwrap(), before);
+            document.input_bytes = MAX_DOCUMENT_INPUT;
+            let items = document.items;
+            assert!(document
+                .update_annotation(0, index, None, None, None, None, None, None, Some(0.25))
+                .is_err());
+            assert_eq!(document.items, items);
+            assert_eq!(document.input_bytes, MAX_DOCUMENT_INPUT);
+            assert_eq!(document.to_bytes().unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn annotation_opacity_combined_resize_charges_both_appearances() {
+        pyo3::prepare_freethreaded_python();
+        for kind in ["rectangle", "ellipse"] {
+            let mut document = EditablePdf::new(180.0, 180.0).unwrap();
+            let index = document
+                .add_annotation(
+                    0,
+                    kind,
+                    if kind == "note" {
+                        (20.0, 30.0, 40.0, 50.0)
+                    } else {
+                        (20.0, 30.0, 120.0, 60.0)
+                    },
+                    "",
+                    "",
+                    (255, 0, 0),
+                )
+                .unwrap();
+            document
+                .update_annotation(0, index, None, None, None, None, None, None, Some(0.25))
+                .unwrap();
+            let mut resize_only = document.copy().unwrap();
+            let input = resize_only.input_bytes;
+            resize_only
+                .update_annotation(
+                    0,
+                    index,
+                    None,
+                    Some((30.0, 40.0, 130.0, 80.0)),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+            assert_eq!(
+                resize_only.input_bytes - input,
+                annotation_appearance_bytes(resize_only.document().unwrap(), 0, index).unwrap()
+                    + 512
+            );
+            let mut resized = document.document().unwrap().clone();
+            let rect = document.geometry[0]
+                .view_rect_to_user([30.0, 40.0, 130.0, 80.0])
+                .map(f64::from);
+            pdfcraft_annot::set_rect(
+                &mut resized,
+                0,
+                index,
+                rect,
+                &pdfcraft_annot::Meta::default(),
+            )
+            .unwrap();
+            let intermediate = annotation_appearance_bytes(&resized, 0, index).unwrap();
+            let before = document.input_bytes;
+            document
+                .update_annotation(
+                    0,
+                    index,
+                    None,
+                    Some((30.0, 40.0, 130.0, 80.0)),
+                    Some((0, 0, 255)),
+                    None,
+                    None,
+                    None,
+                    Some(0.5),
+                )
+                .unwrap();
+            let final_bytes =
+                annotation_appearance_bytes(document.document().unwrap(), 0, index).unwrap();
+            assert_eq!(
+                document.input_bytes - before,
+                intermediate + final_bytes + 1024
+            );
+        }
+    }
+
+    #[test]
     fn annotation_lock_preserves_dictionary_appearance_and_native_edit_rules() {
         pyo3::prepare_freethreaded_python();
         use pdfcraft_cos::Object;
@@ -6379,7 +7021,8 @@ mod tests {
                         color,
                         None,
                         None,
-                        author
+                        author,
+                        None
                     )
                     .unwrap_err()
                     .to_string()
@@ -6397,6 +7040,7 @@ mod tests {
                     0,
                     index,
                     Some("Editable while locked"),
+                    None,
                     None,
                     None,
                     None,
@@ -6420,6 +7064,7 @@ mod tests {
                     None,
                     None,
                     Some("Changed"),
+                    None,
                 )
                 .unwrap();
             document.delete_annotation(0, index).unwrap();
@@ -6653,6 +7298,7 @@ mod tests {
                 None,
                 None,
                 Some("Reviewer"),
+                None,
             )
             .unwrap();
         document
@@ -6665,6 +7311,7 @@ mod tests {
                 None,
                 Some(1),
                 None,
+                None,
             )
             .unwrap();
         document
@@ -6674,6 +7321,7 @@ mod tests {
                 None,
                 Some((60.0, 90.0, 160.0, 110.0)),
                 Some((0, 100, 255)),
+                None,
                 None,
                 None,
                 None,
@@ -6765,6 +7413,7 @@ mod tests {
                         None,
                         None,
                         None,
+                        None,
                     )
                     .unwrap();
                 let resized_cost = resized_only.input_bytes - document.input_bytes;
@@ -6779,6 +7428,7 @@ mod tests {
                         None,
                         None,
                         Some("Reviewer"),
+                        None,
                     )
                     .unwrap();
                 assert_eq!(
@@ -6787,6 +7437,7 @@ mod tests {
                         + resized_cost
                         + annotation_appearance_bytes(document.document().unwrap(), 0, index)
                             .unwrap()
+                        + 512
                         + "Revised ✓".len()
                         + "Reviewer".len()
                 );
@@ -6877,6 +7528,7 @@ mod tests {
                 Some((0, 0, 255)),
                 None,
                 None,
+                None,
                 None
             )
             .is_err());
@@ -6933,11 +7585,13 @@ mod tests {
                     None,
                     None,
                     None,
+                    None,
                 )
                 .unwrap();
             assert_eq!(
                 document.input_bytes,
                 initial
+                    + 512
                     + annotation_appearance_bytes(document.document().unwrap(), 0, index).unwrap()
             );
             let before = document.to_bytes().unwrap();
@@ -6952,6 +7606,7 @@ mod tests {
                         index,
                         Some("Do not commit"),
                         Some(rect),
+                        None,
                         None,
                         None,
                         None,
@@ -6972,7 +7627,7 @@ mod tests {
                 ),
                 (b"RD".to_vec(), Object::Array(vec![Object::Int(0); 4])),
                 (b"IC".to_vec(), Object::Array(vec![Object::Int(1); 3])),
-                (b"CA".to_vec(), Object::Real(0.5)),
+                (b"CA".to_vec(), Object::Real(1.5)),
                 (b"Measure".to_vec(), Object::Dict(Dict::new())),
                 (b"PCPicture".to_vec(), Object::Bool(true)),
                 (b"AP".to_vec(), Object::Dict(Dict::new())),
@@ -7014,6 +7669,7 @@ mod tests {
                         Some((0, 0, 255)),
                         None,
                         None,
+                        None,
                         None
                     )
                     .is_err());
@@ -7034,6 +7690,7 @@ mod tests {
                     0,
                     index,
                     Some("Do not commit"),
+                    None,
                     None,
                     None,
                     None,
@@ -7084,6 +7741,7 @@ mod tests {
                     None,
                     None,
                     Some("Reviewer"),
+                    None,
                 )
                 .unwrap();
             let snapshot: Value = serde_json::from_str(&document.annotations(0).unwrap()).unwrap();
@@ -7284,6 +7942,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
                 None
             )
             .unwrap_err()
@@ -7312,11 +7971,22 @@ mod tests {
             assert!(charged > 0);
             assert_eq!(document.input_bytes, charged);
             document
-                .update_annotation(0, index, None, None, Some((0, 0, 255)), None, None, None)
+                .update_annotation(
+                    0,
+                    index,
+                    None,
+                    None,
+                    Some((0, 0, 255)),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
                 .unwrap();
             assert_eq!(
                 document.input_bytes,
                 charged
+                    + 512
                     + annotation_appearance_bytes(document.document().unwrap(), 0, index).unwrap()
             );
             document.input_bytes = MAX_DOCUMENT_INPUT - 1;
@@ -7326,6 +7996,7 @@ mod tests {
                     0,
                     index,
                     Some("Do not commit"),
+                    None,
                     None,
                     None,
                     None,
@@ -7368,6 +8039,7 @@ mod tests {
                     None,
                     None,
                     None,
+                    None,
                     None
                 )
                 .is_err());
@@ -7379,6 +8051,7 @@ mod tests {
                     None,
                     None,
                     Some("https://example.com"),
+                    None,
                     None,
                     None
                 )
@@ -7436,6 +8109,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
                 None
             )
             .is_err());
@@ -7447,6 +8121,7 @@ mod tests {
                 None,
                 None,
                 Some("https://example.com"),
+                None,
                 None,
                 None
             )
@@ -7941,5 +8616,288 @@ mod field_accounting_probes {
             assert_eq!(retained_forms(document.document().unwrap()), (0, 0));
             assert!(document.owned_fields().unwrap().is_empty());
         }
+    }
+}
+
+#[cfg(test)]
+mod owned_radio_tests {
+    use super::*;
+    use pdfcraft_cos::Object;
+
+    fn add(document: &mut EditablePdf, count: usize) {
+        let boxes = (0..count)
+            .map(|i| [20.0 + i as f64 * 30.0, 20.0, 24.0, 24.0])
+            .collect::<Vec<_>>();
+        document
+            .add_radio_field(
+                0,
+                "group",
+                &serde_json::to_string(&boxes).unwrap(),
+                (0..count).map(|i| format!("Option {i}")).collect(),
+            )
+            .unwrap();
+    }
+
+    fn retained(document: &EditablePdf) -> (usize, usize) {
+        // This scan is only a measurement of the freshly authored synthetic fixture.
+        document
+            .document()
+            .unwrap()
+            .scan_objects()
+            .filter_map(|(_, o)| {
+                let Object::Stream(s) = o.as_ref() else {
+                    return None;
+                };
+                (s.dict.name(b"Subtype") == Some(b"Form")).then_some(s.raw.len())
+            })
+            .fold((0, 0), |(n, bytes), value| (n + 1, bytes + value))
+    }
+
+    #[test]
+    fn owned_radio_generations_are_reserved_charged_and_preserved_on_copy() {
+        let mut document = EditablePdf::new(1100.0, 200.0).unwrap();
+        add(&mut document, 32);
+        assert_eq!(document.items, 560);
+        assert_eq!(retained(&document).0, 1120);
+        assert!(document.input_bytes >= retained(&document).1);
+        assert!(document.input_bytes < 560 * RADIO_APPEARANCE_WORK);
+        let original = document.input_bytes;
+        let original_objects = retained(&document);
+        document.set_field_value("group", "\"Option 31\"").unwrap();
+        assert_eq!(retained(&document), original_objects);
+        assert_eq!(document.items, 592);
+        assert_eq!(document.input_bytes, original + "\"Option 31\"".len());
+        let count = document.items;
+        let before = retained(&document);
+        document.set_field_tooltip("group", "Help").unwrap();
+        assert_eq!(document.items, count + 32);
+        assert_eq!(retained(&document).0, before.0 + 64);
+        assert!(document.input_bytes >= retained(&document).1);
+        document.set_field_read_only("group", true).unwrap();
+        assert_eq!(retained(&document).0, before.0 + 128);
+        let copy = document.copy().unwrap();
+        assert_eq!(
+            (copy.items, copy.input_bytes, retained(&copy)),
+            (document.items, document.input_bytes, retained(&document))
+        );
+        // Every member, not only the first, consumes a mutation unit.
+        document.items = MAX_ITEMS - 31;
+        let bytes = document.to_bytes().unwrap();
+        assert!(document.set_field_tooltip("group", "Different").is_err());
+        assert_eq!(document.to_bytes().unwrap(), bytes);
+        assert_eq!(retained(&document).0, before.0 + 128);
+        document.items = MAX_ITEMS - 32;
+        document.set_field_tooltip("group", "Last").unwrap();
+        assert_eq!(document.items, MAX_ITEMS);
+        let snapshot = document.to_bytes().unwrap();
+        assert!(document.set_field_read_only("group", false).is_err());
+        assert_eq!(document.to_bytes().unwrap(), snapshot);
+    }
+
+    #[test]
+    fn owned_radio_creation_and_metadata_peak_limits_are_atomic() {
+        let mut document = EditablePdf::new(200.0, 200.0).unwrap();
+        let boxes = "[[20,20,24,24],[60,20,24,24]]";
+        document.input_bytes = MAX_DOCUMENT_INPUT - 5 * RADIO_APPEARANCE_WORK;
+        let before = document.to_bytes().unwrap();
+        assert!(document
+            .add_radio_field(0, "group", boxes, vec!["A".into(), "B".into()])
+            .is_err());
+        assert_eq!(document.to_bytes().unwrap(), before);
+        assert_eq!(retained(&document), (0, 0));
+        document.input_bytes = 0;
+        document.items = MAX_ITEMS - 4;
+        assert!(document
+            .add_radio_field(0, "group", boxes, vec!["A".into(), "B".into()])
+            .is_err());
+        document.items = 0;
+        add(&mut document, 2);
+        document.input_bytes = MAX_DOCUMENT_INPUT - 2 * RADIO_APPEARANCE_WORK;
+        let before = document.to_bytes().unwrap();
+        let counters = (document.items, document.input_bytes, retained(&document));
+        assert!(document.set_field_read_only("group", true).is_err());
+        assert!(document.set_field_tooltip("group", "Help").is_err());
+        assert_eq!(
+            (document.items, document.input_bytes, retained(&document)),
+            counters
+        );
+        assert_eq!(document.to_bytes().unwrap(), before);
+        let mut copied = document.copy().unwrap();
+        assert!(copied.set_field_tooltip("group", "Help").is_err());
+        assert_eq!(copied.to_bytes().unwrap(), before);
+        // Deletion removes live widgets but never refunds generation history.
+        document.delete_field("group").unwrap();
+        assert_eq!(
+            (document.items, document.input_bytes, retained(&document)),
+            counters
+        );
+    }
+
+    #[test]
+    fn owned_radio_canonical_unicode_aliases_no_toggle_and_read_only() {
+        let mut document = EditablePdf::new(300.0, 300.0).unwrap();
+        let options = vec!["A", "#41", "#4Fff", "café 顧客"];
+        let boxes = "[[20,20,24,24],[60,20,24,24],[100,20,24,24],[140,20,24,24]]";
+        document
+            .add_radio_field(
+                0,
+                "group",
+                boxes,
+                options.iter().map(|s| s.to_string()).collect(),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&document.field_info("group").unwrap()).unwrap()
+                ["options"],
+            json!(options)
+        );
+        document.set_field_value("group", "null").unwrap();
+        for (i, value) in options.iter().enumerate() {
+            document
+                .set_field_value("group", &serde_json::to_string(value).unwrap())
+                .unwrap();
+            let field = document.field_named("group").unwrap();
+            for (j, widget) in field.widgets.iter().enumerate() {
+                assert_eq!(
+                    widget.state.as_deref(),
+                    if i == j {
+                        widget.on_state.as_deref()
+                    } else {
+                        Some("Off")
+                    }
+                );
+            }
+            let source = document.to_bytes().unwrap();
+            let read = Document::open(Arc::new(source)).unwrap();
+            let field = pdfcraft_forms::fields(&read).remove(0);
+            assert_eq!(radio_literal(&field.value[0]).unwrap(), *value);
+        }
+        let source = document.to_bytes().unwrap();
+        assert!(document.set_field_value("group", "null").is_err());
+        assert!(document
+            .set_field_box("group", (30.0, 30.0, 24.0, 24.0))
+            .is_err());
+        assert_eq!(document.to_bytes().unwrap(), source);
+        document.set_field_read_only("group", true).unwrap();
+        let source = document.to_bytes().unwrap();
+        for value in ["null", "\"A\"", "\"café 顧客\""] {
+            assert!(document.set_field_value("group", value).is_err());
+            assert_eq!(document.to_bytes().unwrap(), source);
+        }
+        document.set_field_read_only("group", false).unwrap();
+        document.set_field_value("group", "\"A\"").unwrap();
+        let original = document.to_bytes().unwrap();
+        assert_eq!(document.flatten_fields().unwrap(), 1);
+        assert!(document.owned_fields().unwrap().is_empty());
+        assert!(!has_widgets(document.document().unwrap()).unwrap());
+        assert_eq!(
+            crate::pdf::render(&original, 0, 144.0, None).unwrap(),
+            crate::pdf::render(&document.to_bytes().unwrap(), 0, 144.0, None).unwrap()
+        );
+    }
+
+    #[test]
+    fn owned_radio_view_geometry_and_native_pair_bound() {
+        for rotation in [0, 90, 180, 270] {
+            let mut document = EditablePdf::new(300.0, 400.0).unwrap();
+            let page = pdfcraft_organize::pages(document.document().unwrap()).unwrap()[0].obj;
+            document
+                .document
+                .as_mut()
+                .unwrap()
+                .update_dict(page, |d| {
+                    d.set(
+                        b"CropBox".to_vec(),
+                        Object::Array([20.0, 30.0, 220.0, 330.0].map(Object::Real).to_vec()),
+                    );
+                    d.set(b"UserUnit".to_vec(), Object::Real(1.25));
+                    d.set(b"Rotate".to_vec(), Object::Int(rotation));
+                })
+                .unwrap();
+            let info =
+                pdfcraft_render::inspect(Arc::new(document.to_bytes().unwrap()), None).unwrap();
+            document.geometry = info.pages;
+            document.sizes = document
+                .geometry
+                .iter()
+                .map(|p| (f64::from(p.width), f64::from(p.height)))
+                .collect();
+            add(&mut document, 2);
+            let off = crate::pdf::render(&document.to_bytes().unwrap(), 0, 144.0, None).unwrap();
+            document.set_field_value("group", "\"Option 1\"").unwrap();
+            let on = crate::pdf::render(&document.to_bytes().unwrap(), 0, 144.0, None).unwrap();
+            assert_ne!(off, on);
+            let mut reader = png::Decoder::new(Cursor::new(on.clone()))
+                .read_info()
+                .unwrap();
+            let mut rgba = vec![0; reader.output_buffer_size().unwrap()];
+            let info = reader.next_frame(&mut rgba).unwrap();
+            let center = ((32 * 2 * info.width + 62 * 2) * 4) as usize;
+            assert!(rgba[center] < 30, "rotation {rotation}");
+            let payload: Value =
+                serde_json::from_str(&document.field_info("group").unwrap()).unwrap();
+            for (actual, expected) in payload["widgets"][1]["box"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .zip([50.0, 20.0, 24.0, 24.0])
+            {
+                assert!((actual.as_f64().unwrap() - expected).abs() < 0.0001);
+            }
+            let field = document.field_named("group").unwrap();
+            assert!(
+                owned_field_appearance_bytes(document.document().unwrap(), &field).unwrap()
+                    < 2 * RADIO_APPEARANCE_WORK
+            );
+            assert_eq!(document.flatten_fields().unwrap(), 1);
+            assert_eq!(
+                crate::pdf::render(&document.to_bytes().unwrap(), 0, 144.0, None).unwrap(),
+                on
+            );
+        }
+        // Fixed-vector raw appearance bound at the supported coordinate extremes.
+        let mut document = EditablePdf::new(14400.0, 14400.0).unwrap();
+        document
+            .add_radio_field(
+                0,
+                "group",
+                "[[0,0,14000,14000],[14000,14000,12,12]]",
+                vec!["A".into(), "B".into()],
+            )
+            .unwrap();
+        assert!(retained(&document).1 < 5 * RADIO_APPEARANCE_WORK);
+    }
+    #[test]
+    fn owned_radio_total_widget_limit_is_independent_of_logical_fields() {
+        let mut document = EditablePdf::new(200.0, 200.0).unwrap();
+        let boxes = "[[20,20,24,24],[60,20,24,24]]";
+        for i in 0..500 {
+            document
+                .add_radio_field(0, &format!("g{i}"), boxes, vec!["A".into(), "B".into()])
+                .unwrap();
+        }
+        assert_eq!(document.owned_fields().unwrap().len(), 500);
+        assert_eq!(document.items, 2500);
+        let before = document.to_bytes().unwrap();
+        let counters = (document.items, document.input_bytes);
+        assert!(document
+            .add_radio_field(0, "overflow", boxes, vec!["A".into(), "B".into()])
+            .is_err());
+        assert!(document
+            .add_field(0, "single", "text", (20.0, 70.0, 100.0, 30.0), vec![])
+            .is_err());
+        assert_eq!(document.to_bytes().unwrap(), before);
+        assert_eq!((document.items, document.input_bytes), counters);
+        document.delete_field("g0").unwrap();
+        document
+            .add_field(0, "single", "text", (20.0, 70.0, 100.0, 30.0), vec![])
+            .unwrap();
+        assert!(document
+            .add_radio_field(0, "two", boxes, vec!["A".into(), "B".into()])
+            .is_err());
+        document
+            .add_field(0, "last", "checkbox", (20.0, 110.0, 24.0, 24.0), vec![])
+            .unwrap();
+        assert_eq!(document.owned_fields().unwrap().len(), 501);
     }
 }

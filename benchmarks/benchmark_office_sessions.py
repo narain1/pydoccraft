@@ -40,6 +40,9 @@ def timed(call):
 
 
 def run(source: Path, mode: str, dpi: float, rounds: int):
+    with source.open("rb") as stream:
+        source_digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    source_bytes = source.stat().st_size
     before = memory()
     document, opened_ms = timed(lambda: doc_ex.open(source))
     try:
@@ -62,9 +65,11 @@ def run(source: Path, mode: str, dpi: float, rounds: int):
             warm.append(elapsed)
             del output
         mixed = []
+        all_pages_digest = hashlib.sha256()
         # Include every page without retaining all PNG outputs in memory.
         for page in range(document.page_count):
             output, elapsed = timed(lambda: document.render_page(page, dpi))
+            all_pages_digest.update(hashlib.sha256(output).digest())
             mixed.append(elapsed)
             del output
         before_close = memory()
@@ -74,6 +79,8 @@ def run(source: Path, mode: str, dpi: float, rounds: int):
             "dpi": dpi, "rounds": rounds, "open_ms": opened_ms, "cold_render_ms": cold_ms,
             "warm_median_ms": statistics.median(warm), "all_pages_total_ms": sum(mixed),
             "all_pages_median_ms": statistics.median(mixed), "first_png_sha256": digest,
+            "all_pages_png_sha256": all_pages_digest.hexdigest(),
+            "source_sha256": source_digest, "source_bytes": source_bytes,
             "session_stats_parse_layout_attempts": stats, "before_open": before,
             "after_open": after_open, "before_close": before_close,
         }
@@ -84,7 +91,7 @@ def run(source: Path, mode: str, dpi: float, rounds: int):
     result["platform"] = platform.platform()
     result["python"] = platform.python_version()
     result["package_version"] = doc_ex.__version__
-    result["limitations"] = "Synthetic or caller-selected input only. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee."
+    result["limitations"] = "Synthetic or caller-selected input only. Input hashing precedes measurement and warms the filesystem cache. RSS includes native/global caches and allocator retention; peak RSS cannot decrease or prove close reclamation. Calls hold the Python GIL. No cross-format fidelity or throughput guarantee."
     return result
 
 

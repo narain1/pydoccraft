@@ -182,9 +182,12 @@ class StoryParagraphDeletionTests(unittest.TestCase):
             current = paragraph[:]
             document.render_page(0, dpi=72)
             cached = document._cached
-            for collection in (document.paragraphs, table[0, 0].paragraphs):
-                with self.assertRaises(UnsupportedFormatError):
-                    del collection[0]
+            # Body deletion is supported now; its linked target remains protected
+            # by the existing dangling-link check before anchor removal validation.
+            with self.assertRaisesRegex(ValueError, 'missing bookmark'):
+                del document.paragraphs[0]
+            with self.assertRaises(UnsupportedFormatError):
+                del table[0, 0].paragraphs[0]
             for bad in (2, -2, 10**200, 1.5, '0', slice(None)):
                 with self.assertRaises((TypeError, IndexError, OverflowError)):
                     del story.paragraphs[bad]
