@@ -33,7 +33,9 @@ class SlideCellParagraphTests(unittest.TestCase):
             added = second.add_run(" BLUE", font_size=24, color="blue", italic=True)
             self.assertIsInstance(added, TextRange)
             second.alignment = "right"
-            self.assertEqual(second.formatting, {"alignment": "right"})
+            self.assertEqual(second.formatting, {"alignment": "right", "indent_left": None,
+                                                "indent_right": None, "indent_first": None,
+                                                "space_before": None, "space_after": None, "line_spacing": None})
             first.format(alignment="left")
             self.assertEqual(first.alignment, "left")
             with self.assertRaisesRegex(ValueError, "mixed"):
@@ -136,7 +138,7 @@ class SlideCellParagraphTests(unittest.TestCase):
                           lambda: paragraph.page_break_before, lambda: setattr(paragraph, "page_break_before", True),
                           lambda: paragraph.spacing, lambda: setattr(paragraph, "spacing", (0, 0, 1)),
                           lambda: paragraph.resolved_formatting, lambda: paragraph.add_field("page"),
-                          lambda: paragraph.add_break(), lambda: paragraph.format(space_after=12),
+                          lambda: paragraph.add_break(), lambda: paragraph.format(keep_with_next=True),
                           lambda: cell.add_paragraph("No", style="Normal"),
                           lambda: len(cell.tables), lambda: len(cell.images)]
             for operation in operations:

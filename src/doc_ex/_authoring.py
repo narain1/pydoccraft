@@ -3749,15 +3749,25 @@ class _SlideCellParagraph(Paragraph):
 
     @property
     def formatting(self) -> _ParagraphSnapshot:
-        return {"alignment": self.alignment}
+        return json.loads(self._owner._call("cell_paragraph_formatting", *self._range_args, self._target))
 
-    def format(self, **formatting):
-        if formatting.keys() - {"alignment"}:
+    def format(self, **formatting: Unpack[ParagraphFormatting]) -> None:
+        # Validate the exact target before caller callbacks, then reject
+        # reentrant edits after each scalar normalization, before another callback.
+        self._owner._call("cell_paragraph_alignment", *self._range_args, self._target)
+        revision = self._owner._call("revision")
+        if formatting.keys() - {"alignment", "indent_left", "indent_right", "indent_first",
+                                "space_before", "space_after", "line_spacing"}:
             self._unsupported()
-        if "alignment" in formatting:
-            self.alignment = formatting["alignment"]
-        else:
-            _ = self.text  # Empty patches still validate the owner and handle.
+        patch = {}
+        for key, value in formatting.items():
+            patch.update(json.loads(_format_patch({key: value})))
+            if self._owner._call("revision") != revision:
+                raise ValueError("paragraph formatting is stale after a document change")
+            self._owner._call("cell_paragraph_alignment", *self._range_args, self._target)
+        if patch:
+            self._owner._call("format_cell_paragraph", *self._range_args, self._target,
+                              json.dumps(patch, allow_nan=False), revision, _change=True)
 
     def add_run(self, text, **formatting):
         # Validate the exact paragraph target before caller formatting callbacks;
