@@ -975,7 +975,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Preserve the existing two public raster-limit workflows and record their successful baseline behavior; add one linked-native guard/recovery test with exact-source safety precondition.
 - [x] Complete focused/full437-native, formatting, Clippy and locked release build.
 - [x] Complete clean installed556 workflows, independent artifact/corpus/typing/reopen checks, measured sizes and final source-ledger/documentation validation.
-- [ ] Complete current-head CI and manual merge; retain broad U09/R4 limits and separate release gates.
+- [x] Complete current-head CI and manual merge through PR124, required CI39580088971 and documentation CI39580088936; retain broad U09/R4 limits and separate release gates.
 
 
 ## Same-cell owned PPTX paragraph movement (spec118)
@@ -985,7 +985,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Implement and validate existing collection dispatch, canonical/generation/no-op/callback guards and atomic boundary controls.
 - [x] Complete focused native/public, unchanged deletion regressions, strict typing and independent source/copied-artifact review.
 - [x] Complete integrated 443-native/release, two clean 560-test installed-wheel corpora and independent exact-artifact gates.
-- [ ] Complete current-head CI and manual merge.
+- [x] Complete current-head CI and manual merge through PR125, required CI39583701211 and documentation CI39583701226.
 - [ ] Keep broader DOC5/TXT1/SLIDE3 adoption, duplication and shape-content work open; no version release before overall completion gates.
 
 
@@ -994,7 +994,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Compare seven stale family summaries with existing source, guides and accepted corpus modules.
 - [x] Correct bounded operation descriptions and regenerate the existing reference page without promoting feature status.
 - [x] Complete independent documentation and exact inventory-delta review.
-- [ ] Complete current-main CI/manual merge.
+- [x] Complete current-main CI/manual merge through PR125, required CI39583701211 and documentation CI39583701226.
 - [ ] Keep exhaustive member dispositions and broad API1/QA1 acceptance open.
 
 
