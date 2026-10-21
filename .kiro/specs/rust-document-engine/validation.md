@@ -840,7 +840,7 @@ Full integrated locked tests, release wheel, installed-wheel corpus and independ
 - This supersedes focused-only lock evidence for local acceptance. All seven comment kinds retain tested appearances and pixels across transformed pages; native lock refusals preserve staged state. Inventory/initial-inspection limits, foreign profiles, links and reply-thread semantics remain outside this mutation profile. Independent review and exact-head/current-main CI remain required before manual merge; PDF6/U10 stay open.
 
 
-## Independent manual merge evidence through PR 74
+## Independent manual merge evidence through PR 75
 
 GitHub merge state was verified on 2026-10-20. Each change passed independent review, required fixes and fresh exact-head/current-main CI before manual merge; repository auto-merge remains disabled. These gates complete the corresponding delivery tasks, not broader roadmap criteria. Historical artifact sections above retain their original validation scope.
 
@@ -856,6 +856,7 @@ GitHub merge state was verified on 2026-10-20. Each change passed independent re
 | [72](https://github.com/narain1/pydoccraft/pull/72) | `d0a8ec6de3e72f2472d411a7fe9577f638af8ad2` | 280 / 402 |
 | [73](https://github.com/narain1/pydoccraft/pull/73) | `0a47b4b001c52b1fa21ab40829d502620022c37e` | 282 / 405 |
 | [74](https://github.com/narain1/pydoccraft/pull/74) | `57fcc94216e58d74b967b24cf2ced68f9f45b742` | 285 / 409 |
+| [75](https://github.com/narain1/pydoccraft/pull/75) | `c34ef0bc722963ed6f0213da9934f52c361167ba` | 285 / 409 |
 
 Formatting, warnings-denied Clippy, strict installed-package typing and the unchanged 264-package runtime/build license audit passed in each final CI run. PR69 changes source-audit documentation/data only.
 
@@ -1016,6 +1017,33 @@ Facade commit `f49d8c69511a0ba811703121974c12a80a0fb146` passes **439 clean inst
 Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,509,869 bytes**; native extension **40,616,840 bytes**; SHA-256 `438a5c25ae873258e4247c01abc7b773395de705c675f661cb83b2cee05c7bee`. Lock SHA-256 remains `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`; pinned revisions and the audited 264-package license graph remain unchanged. No native dependency or attribution changes.
 
 The full corpus checks all three formats, actual rendering/reopened conversions and the three new callback/lifetime workflows. This is a narrow early-check correction for PPTX cell add_run; other methods do not acquire a blanket error-order guarantee. Final independent review and exact-head/current-main CI remain required before manual merge.
+
+
+## Owned note content clearing — isolated implementation evidence
+
+Implementation based on d8333dc, spec76; complete integrated release/installed-wheel artifact is pending. Three new focused native groups passed using the locked Rust1.95 container build, followed by formatting, all-targets Clippy and a copied debug extension. Five new public workflows plus existing story-clear, note, note-conversion and page-field modules passed: 23 tests. An added blue FootnoteText/red EndnoteText own-mark PNG/PDF assertion then passed in a separate focused run. These checks are isolated evidence, not a release or broad DOC5/LAY7 completion claim.
+
+Native checks retain part identity/body options, external anchors, canonical style and exactly one writer-generated own mark after clear; repeated and clear→convert→clear calls leave revisions unchanged. They check copied/exact near-limit charged text/field accounting, synthetic placeholder reuse/monotonic IDs, shared media and raw native note-cell reclamation, wrong/missing/closed identities, and full-state rollback for unexpected own/foreign note, bookmark and comment anchors. Native-only rich-content fixtures test cleanup internals; public rich note insertion remains unsupported.
+
+Public tests verify long footnotes/endnotes actually span pages before clear and return to one page after clear, while copies retain every paragraph; warmed render caches invalidate only on actual changes. Source XML keeps original note IDs/options and emits one own mark, erased text disappears from extracted note stories and rendered PDF, untouched second notes keep their next counter, and distinct note styles produce actual blue/red own-mark pixels in native PNG and PDF. Existing header/footer clear, conversion guards and field scope tests remain passing. The previous public assertion that Note.clear is unsupported was deliberately replaced with the newly supported content-clear behavior; semantic note deletion remains unsupported. No dependencies, pins, license files, local format algorithms or new public method names changed.
+
+
+PR75 final head `88a27cc7d8f5e843245ca8303edc1a5a24a70364` passed [current-main CI 39508256843](https://github.com/narain1/pydoccraft/actions/runs/39508256843), including 285 Rust / 409 installed-wheel Python tests and all required checks. Independent review retained the corrected 393-test outline artifact separately from the other four historical 402-test profiles and cleared the documentation update. PR75 was manually merged as `c34ef0bc722963ed6f0213da9934f52c361167ba`; no runtime/Cargo change or broad completion flag was introduced.
+
+PR85 independent source review and all 436 tests against its copied frozen package pass in 143.308 seconds, with strict typing and matching wheel hash. Final main integration/CI remains queued; this independent run does not replace the exact local artifact evidence above.
+
+
+## Owned note content clear — artifact evidence
+
+Runtime `fecebc36f13a2e7ae7912f4e6ca28a25400f6124` passed **310 locked Rust tests and 444 clean installed-wheel Python tests**, zero failures/errors/skips. The Python corpus ran in 150.483 seconds on Linux x86_64 / Python 3.11.2 / Rust 1.95. Formatting, warnings-denied all-target Clippy, release build, strict installed-package typing and the unchanged 264-package license audit pass. Installed facade/native bytes match the built wheel. The corpus includes all three formats, actual PNG output and reopened conversions, plus the intentional Note.clear contract replacement.
+
+Wheel `pydoccraft-0.2.1-cp311-cp311-manylinux_2_35_x86_64.whl`: **17,520,377 bytes**; extension **40,620,456 bytes**; SHA-256 `73ab05afb724346031146a0eaf2d3f6c9b63cabf31330ead8540a1b446af60d8`. Lock SHA-256 remains `4c984b3524c75b77e651cf9d201c432dd1b6baa35ca3c206100e680bd403b7f0`; all upstream revisions, dependencies and attribution remain unchanged.
+
+The existing word.story-clear profile reuses this exact artifact for its edit-authored/preserve/render/export cells, retaining the header/footer assertions and adding bounded note clearing. The reviewed test_story_clear fingerprint is `ea43d861092700d6763636b622d56b261da0803c2d79916d0d8c0a688349d2ce`; new test_note_clear fingerprint is `c1db35d457f3a637cf6e9e85d7faad86e49614796702224e0870d51264e5c10c`. The formerly unsupported note assertion is deliberately replaced, not silently certified against the old wheel. Historical ownership-2026-10-20 references/sections and every unrelated profile remain unchanged. This keeps 19 profiles/133 operation cells, 139 criteria, 46 checked flags, 14 owners and 44 reference families/198 members. Existing LAY7 and note-family joins reuse the same story-clear profile. Generated guides, cached immutable references and the full corpus’s 19 evidence checks pass.
+
+Clearing retains the reference/kind/options and native number mark, not zero-height removal or semantic note deletion. Native-only media/cell cleanup tests do not expose public rich-note insertion. Independent review and exact-head/current-main CI remain required; broader LAY7/DOC5 are partial.
+
+PR86 independent source review and all 439 tests against its copied frozen package pass in 145.448 seconds, with strict typing and matching wheel hash. Its extension was independently confirmed byte-identical to PR85; final main integration/CI remains queued.
 
 ## Character-spacing mixed-scope fixture — independent CI correction
 

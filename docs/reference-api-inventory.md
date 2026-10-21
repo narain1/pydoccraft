@@ -201,13 +201,13 @@ Footnotes and endnotes.
 
 **Criteria / owners:** LAY7 (W07), E3 (W09), REF8 (W07)
 
-**Audited local surface:** Notes collection plus shared Paragraph handles; section note_options/configure_notes; notes.convert changes owned kind through the native semantic operation.
+**Audited local surface:** Notes collection plus shared Paragraph handles; section note_options/configure_notes; notes.convert changes owned kind through the native semantic operation; Note.clear removes owned content while retaining reference/kind/options and a native styled number mark.
 
 **Disposition:** `implemented_subset`. **Remaining:** Semantic note deletion, fragment graph remapping, rich-note geometry and broader placement/restart fidelity remain open. Shared standard-style runs fail if native conversion would restyle unrelated content; custom-style identity is preserved. This edit is separate from existing DOCX-to-PDF export.
 
 **Upstream candidates:** [U02](upstream-roadmap.md), [U07](upstream-roadmap.md)
 
-**Evidence profiles:** [word.note-kind-conversion](support-matrix.md#wordnote-kind-conversion)
+**Evidence profiles:** [word.note-kind-conversion](support-matrix.md#wordnote-kind-conversion), [word.story-clear](support-matrix.md#wordstory-clear)
 
 ## REF-OX-NAVIGATION
 

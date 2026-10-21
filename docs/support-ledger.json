@@ -111,6 +111,13 @@
       "kind": "artifact",
       "source_commit": "d5912b9aad74520b13a9753e6b6ee4b27c2caa3d",
       "date": "2026-10-20"
+    },
+    "note-content-clear-2026-10-20": {
+      "kind": "artifact",
+      "validation": ".kiro/specs/rust-document-engine/validation.md#owned-note-content-clear--artifact-evidence",
+      "wheel_sha256": "73ab05afb724346031146a0eaf2d3f6c9b63cabf31330ead8540a1b446af60d8",
+      "source_commit": "fecebc36f13a2e7ae7912f4e6ca28a25400f6124",
+      "date": "2026-10-20"
     }
   },
   "test_sources": {
@@ -126,7 +133,7 @@
     "tests/test_direction_language.py": "bc11d3b9f6c0e66e5b8d3337f1308ba3811cff0a6f477e1d035efe6a2a546a38",
     "tests/test_pdf_geometric_annotations.py": "ee2f44cf291b930a314ecdb5bc61da0e34f710ccc6604dcf23f23de0b4ce9145",
     "tests/test_word_bookmarks.py": "e74d4ae3d19b264fbb9dfb29f32d96a836cdbd30c44d4b42f9ca217d60281f89",
-    "tests/test_story_clear.py": "0f0946902c79f8516fc963104402f7cf31d77ab621e51bd82a7e7d0c188b239e",
+    "tests/test_story_clear.py": "ea43d861092700d6763636b622d56b261da0803c2d79916d0d8c0a688349d2ce",
     "tests/test_pdf_output_options.py": "f840e55128bc8a4bd000e73ee0cb9d38e6b96746823e1153e8525f65e2848bb4",
     "tests/test_pdf_search.py": "58fef2f3633a8578ceff0f2c5494f19c5cc8980bc6a3a6d1c154cf8134b4df29",
     "tests/test_decimal_outline.py": "e3d3c62c93b4290ad8d9176cf13d160219ceeecd97828301f25ff40d7f53f533",
@@ -134,7 +141,8 @@
     "tests/test_annotation_lock.py": "b10af9191b773aac61be358a7fe3123e581628a8a636f2756b082c3373efd3d9",
     "tests/test_field_read_only.py": "f3055f423c0f98cd9eb02bfc21927a7b251bed81da2764c4d765bb2d36108cb7",
     "tests/test_note_conversion.py": "4d9fbcb9330d703c8643e42fdcbce9d72126d0a16ecf3df91533f771a281dbd0",
-    "tests/test_slide_background_reset.py": "a76f9249da5695435353315417936c88c3a4ebf209ec41a7bf20e24af1c1f7f1"
+    "tests/test_slide_background_reset.py": "a76f9249da5695435353315417936c88c3a4ebf209ec41a7bf20e24af1c1f7f1",
+    "tests/test_note_clear.py": "c1db35d457f3a637cf6e9e85d7faad86e49614796702224e0870d51264e5c10c"
   },
   "profiles": [
     {
@@ -1577,16 +1585,19 @@
     {
       "id": "word.story-clear",
       "format": "docx",
-      "scope": "Clear owned default/first/even header/footer content while retaining explicit section references and variant settings; no linkage change or Note.clear.",
+      "scope": "Clear owned header/footer or note content; retain section references/variants or note references/kind/options. No linkage change, semantic note deletion or imported story adoption.",
       "public_members": [
         "Section.header(...).clear()",
-        "Section.footer(...).clear()"
+        "Section.footer(...).clear()",
+        "Note.clear()"
       ],
       "adapter_sources": {
         "rust/src/author_docx.rs": [
           "clear_story",
           "content_usage",
-          "retain_authored_image_media"
+          "retain_authored_image_media",
+          "clear_note",
+          "clear_owned_story_content"
         ],
         "src/doc_ex/_authoring.py": [
           "EditableStory"
@@ -1629,9 +1640,16 @@
           "symbols": [
             "export_layout"
           ]
+        },
+        "note_mark": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/write/mod.rs",
+          "symbols": [
+            "note_blocks"
+          ]
         }
       },
-      "fixture_provenance": "Synthetic paragraph/table/image-first stories include nested tables, shared PNGs, page fields and outgoing bookmark links. Native section XML, ownership, copy isolation, decoded PNG colors and PDF page text are asserted; no arbitrary source stories are edited.",
+      "fixture_provenance": "Synthetic paragraph/table/image-first stories include nested tables, shared PNGs, page fields and outgoing bookmark links. Native section XML, ownership, copy isolation, decoded PNG colors and PDF page text are asserted; no arbitrary source stories are edited. New owned footnote/endnote fixtures verify blank canonical styles/one own mark, unchanged source IDs/options, long-note repagination and retained next counters, copies/no-ops/conversion, fields/outgoing links and actual colored number-mark PNG/PDF pixels. Native-only cleanup fixtures do not certify public rich note insertion.",
       "operations": {
         "read": {
           "status": "unassessed",
@@ -1639,16 +1657,19 @@
         },
         "create": {
           "status": "not_applicable",
-          "scope": "Story creation is covered separately by word.rich-stories; clear reuses an existing owned container."
+          "scope": "Container creation is separate; clear reuses an existing owned header/footer or note."
         },
         "edit_authored": {
           "status": "verified",
-          "scope": "Existing stories clear atomically, invalidate their child handles and reclaim only unreferenced resources. Missing/repeated synthetic-empty clear is a true no-op preserving cached render and range revision; authored empty paragraphs are removed.",
-          "artifact": "ownership-2026-10-20",
+          "scope": "Existing stories clear atomically, invalidate their child handles and reclaim only unreferenced resources. Missing/repeated synthetic-empty clear is a true no-op preserving cached render and range revision; authored empty paragraphs are removed. Owned notes clear to a hidden canonical styled placeholder while retaining the external reference/kind. Original empty note paragraphs clear once; clear-convert-clear is a no-op and re-add uses a fresh child without an extra blank.",
+          "artifact": "note-content-clear-2026-10-20",
           "tests": [
             "tests/test_story_clear.py::StoryClearTests.test_missing_and_repeated_clear_preserve_ranges_and_warmed_cache",
             "tests/test_story_clear.py::StoryClearTests.test_rich_clear_removes_pixels_and_children_and_preserves_body",
-            "tests/test_story_clear.py::StoryClearTests.test_shared_media_reclamation_and_note_lifetime_errors"
+            "tests/test_story_clear.py::StoryClearTests.test_shared_media_reclamation_and_note_lifetime_errors",
+            "tests/test_note_clear.py::NoteClearTests.test_empty_clear_conversion_and_noop_preserve_cache_and_ranges",
+            "tests/test_note_clear.py::NoteClearTests.test_fields_links_nested_body_anchor_and_shared_media_survive_clear",
+            "tests/test_note_clear.py::NoteClearTests.test_note_style_reset_and_closed_owner_keep_rich_profile_explicit"
           ],
           "native": [
             "model",
@@ -1661,25 +1682,33 @@
         },
         "preserve": {
           "status": "partial",
-          "scope": "Section references/flags/distances and unrelated body/other-story handles remain; independent section/document copies retain original content. Actual clear follows the existing global range-revision contract. No general linked-to-previous or unknown-part preservation.",
-          "artifact": "ownership-2026-10-20",
+          "scope": "Section references/flags/distances and unrelated body/other-story handles remain; independent section/document copies retain original content. Actual clear follows the existing global range-revision contract. No general linked-to-previous or unknown-part preservation. Note IDs/kind/options/body references and other notes remain; same-format serialization emits one native own mark. Clearing intentionally discards authored paragraph formatting/content. Protected semantic markers still reject removal.",
+          "artifact": "note-content-clear-2026-10-20",
           "tests": [
             "tests/test_story_clear.py::StoryClearTests.test_rich_clear_removes_pixels_and_children_and_preserves_body",
             "tests/test_story_clear.py::StoryClearTests.test_variants_copied_sections_and_outgoing_links_remain_independent",
-            "tests/test_story_clear.py::StoryClearTests.test_shared_media_reclamation_and_note_lifetime_errors"
+            "tests/test_story_clear.py::StoryClearTests.test_shared_media_reclamation_and_note_lifetime_errors",
+            "tests/test_note_clear.py::NoteClearTests.test_clear_keeps_reference_and_number_with_visible_content_removed",
+            "tests/test_note_clear.py::NoteClearTests.test_long_note_clear_rebuilds_layout_and_recovers_one_paragraph",
+            "tests/test_note_clear.py::NoteClearTests.test_empty_clear_conversion_and_noop_preserve_cache_and_ranges",
+            "tests/test_note_clear.py::NoteClearTests.test_fields_links_nested_body_anchor_and_shared_media_survive_clear"
           ],
           "native": [
             "model",
-            "write"
+            "write",
+            "note_mark"
           ]
         },
         "render": {
           "status": "verified",
-          "scope": "Clearing removes tested story picture pixels while preserving body content and the copied original PNG; no-op clear retains warmed cached output.",
-          "artifact": "ownership-2026-10-20",
+          "scope": "Clearing removes tested story picture pixels while preserving body content and the copied original PNG; no-op clear retains warmed cached output. Cleared footnotes/endnotes remove tested red content, collapse a tested long note to one page, and retain the configured blue/red own-number mark. This does not imply zero-height note removal.",
+          "artifact": "note-content-clear-2026-10-20",
           "tests": [
             "tests/test_story_clear.py::StoryClearTests.test_rich_clear_removes_pixels_and_children_and_preserves_body",
-            "tests/test_story_clear.py::StoryClearTests.test_missing_and_repeated_clear_preserve_ranges_and_warmed_cache"
+            "tests/test_story_clear.py::StoryClearTests.test_missing_and_repeated_clear_preserve_ranges_and_warmed_cache",
+            "tests/test_note_clear.py::NoteClearTests.test_clear_keeps_reference_and_number_with_visible_content_removed",
+            "tests/test_note_clear.py::NoteClearTests.test_long_note_clear_rebuilds_layout_and_recovers_one_paragraph",
+            "tests/test_note_clear.py::NoteClearTests.test_note_style_reset_and_closed_owner_keep_rich_profile_explicit"
           ],
           "native": [
             "layout",
@@ -1688,14 +1717,18 @@
         },
         "export": {
           "status": "partial",
-          "scope": "Native DOCX-to-PDF omits cleared text/pictures and retains tested body/footer and independent copied-section content across four pages. General linked stories and notes are outside the profile.",
-          "artifact": "ownership-2026-10-20",
+          "scope": "Native DOCX-to-PDF omits cleared header/footer and note content, preserves tested remaining content/counters and copied layouts, and retains blank note marks in the configured note style. General linked stories, imported notes and rich-note geometry remain outside this profile.",
+          "artifact": "note-content-clear-2026-10-20",
           "tests": [
             "tests/test_story_clear.py::StoryClearTests.test_rich_clear_removes_pixels_and_children_and_preserves_body",
-            "tests/test_story_clear.py::StoryClearTests.test_variants_copied_sections_and_outgoing_links_remain_independent"
+            "tests/test_story_clear.py::StoryClearTests.test_variants_copied_sections_and_outgoing_links_remain_independent",
+            "tests/test_note_clear.py::NoteClearTests.test_clear_keeps_reference_and_number_with_visible_content_removed",
+            "tests/test_note_clear.py::NoteClearTests.test_long_note_clear_rebuilds_layout_and_recovers_one_paragraph",
+            "tests/test_note_clear.py::NoteClearTests.test_note_style_reset_and_closed_owner_keep_rich_profile_explicit"
           ],
           "native": [
-            "pdf"
+            "pdf",
+            "note_mark"
           ]
         }
       }
@@ -2690,7 +2723,7 @@
       "profiles": [
         "word.story-clear"
       ],
-      "remaining": "Unassessed: General ordered block insertion/move/adoption and remapping beyond owned header/footer clear."
+      "remaining": "Unassessed: general ordered block insertion/move/adoption and remapping beyond owned header/footer and note content clear."
     },
     "DOC6": {
       "profiles": [],
@@ -2882,9 +2915,10 @@
     },
     "LAY7": {
       "profiles": [
-        "word.note-kind-conversion"
+        "word.note-kind-conversion",
+        "word.story-clear"
       ],
-      "remaining": "Unassessed: semantic note deletion, arbitrary fragment reference remapping, rich-note geometry and broader placement/restart fidelity beyond owned kind conversion."
+      "remaining": "Unassessed: semantic note deletion, arbitrary fragment reference remapping, rich-note geometry and broader placement/restart fidelity beyond owned kind conversion and content clearing."
     },
     "LAY8": {
       "profiles": [],
