@@ -1207,4 +1207,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Verify source-only lock delta,264 permissive normal/build packages,55 Word citations across14 files and unchanged bundled assets; keep historical profiles/artifacts/fingerprints exact.
 - [x] Complete locked468 native/fmt/strictClippy/release, clean installed585, typing and exact source/artifact/attribution independent review.
 - [x] Finalize synchronized native/pin/artifact evidence and independent source/focused review.
-- [ ] Complete current-head CI and manual delivery. Python extended mapping147 and broad DOC7/U01 remain separate.
+- [ ] Complete fresh current-head CI and manual delivery after inheriting reviewed spec153. Preserve the original468/585 artifact evidence; Python extended mapping147 and broad DOC7/U01 remain separate.
+
+
+## 153. PDF inferred-table text preservation correction
+
+- [x] Preserve PR 133 failure and distinguish actual visible/native PDF content from normalized omission.
+- [x] Reproduce the defect with standalone builtin-font PDF data; preserve failed old native/public expectations.
+- [x] Review and implement conservative discarded-row admission before any page mutation, retaining the exact existing replacement predicate.
+- [x] Complete focused native/public and independent source/artifact verification, including unchanged tab proofs in both diagnostic font environments.
+- [ ] Complete parent-integrated full artifact, fresh current-head CI and manual review/merge; preserve earlier 146/148 artifacts as historical sources.
