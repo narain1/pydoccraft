@@ -1101,3 +1101,13 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete full 453-native/fmt/Clippy/release, two clean 570-installed corpora, typing and exact artifact/source/attribution/size gates.
 - [x] Complete final synchronized evidence and independent source/artifact/documentation review.
 - [ ] Complete current-head CI/manual merge. No owned None reset or STY2/U02 completion is claimed.
+## Owned PPTX cell line breaks (spec130)
+
+- [x] Review exact cell-only getter/find/replace/setter projection and reuse public native insertion after the separate spec128 correction.
+- [x] Preserve the original desired raw2 proof and implement narrow native/facade behavior without pin, dependency or generic validator changes.
+- [x] Pass five focused native groups, fmt/Clippy/debug, four new public workflows and strict typing; verify one historical page-refusal migration preserves other negatives.
+- [x] Complete 27 related and four independent focused public review and exact source freeze.
+- [x] Complete synchronized documentation review, distinguishing bounded source inventory from generated-cost preflight.
+- [x] Complete combined spec131/spec130 full 458 native, fmt/Clippy/release, clean 574-test installed corpus, independent exact-artifact 185-file/source/typing and four changed plus one inherited workflow review, attribution and size checks.
+- [x] Complete final combined documentation review, including the historical upgrade-only versus current adapter distinction.
+- [ ] Complete current-head CI and manual review/merge. Keep broader TXT1/TXT4/SLIDE3 open.
