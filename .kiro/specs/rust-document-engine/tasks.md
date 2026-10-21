@@ -1139,3 +1139,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete independent final source/AST/strict-consumer/negative-control review.
 - [x] Complete final combined579 installed-artifact validation, preserving the original460-native artifact and separately verified annotation-only repack.
 - [ ] Complete current-main CI and manual merge; keep broader API3 and raw path-command typing open.
+
+
+## Style inheritance acceptance audit (spec138)
+
+- [x] Compare original ece6c85 STY2 clauses with existing style/default/cycle fixtures and reviewed132 reset controls.
+- [x] Complete independent original-clause/source/fixture review; preserve explicit missing-companion and neighboring-feature limitations.
+- [ ] Verify final combined installed-artifact gate, then mark only STY2 and regenerate derived roadmap documentation.
+- [ ] Complete current-main CI and independent manual merge.

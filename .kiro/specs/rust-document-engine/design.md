@@ -889,3 +889,8 @@ The four existing helper parameter annotations become Real | float. This retains
 ## PDF method typing (spec136)
 
 Reuse private source/box/color aliases on the existing PDF methods; point inputs retain tuple/list forms and integer rotation inputs describe the existing index protocol. A private four-key nullable metadata patch schema distinguishes writable inputs from the nonnullable metadata snapshot. Method implementation bodies, native calls and runtime checks remain identical. Heterogeneous raw path-command typing is outside this slice.
+
+
+## Style inheritance acceptance audit (spec138)
+
+The acceptance audit adds clause-to-fixture/native-resolution links to the existing documentation. It reuses the existing TODO ownership and generated support matrix; no runtime manager, new profile, duplicated completion ledger or implementation change is introduced.

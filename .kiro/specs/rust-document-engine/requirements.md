@@ -960,3 +960,8 @@ Keep exported pt/mm/cm/inches usable with ordinary integers/floats and existing 
 ## PDF method typing (spec136)
 
 Existing PDF metadata updates, page rotation, text drawing and image placement must describe their supported inputs and None return values to strict Python consumers. Preserve all runtime validation, defaults, source ownership and error behavior. Type hints do not replace value, size, lifecycle or boolean validation. No new public operation is required.
+
+
+## Style inheritance acceptance audit (spec138)
+
+Judge STY2 against its original base/next/linked/default/effective/cycle/reset clauses. Keep imported editing, theme identity, font contexts and style import under their existing owners. Acceptance requires the reviewed default-size-reset behavior and final installed-artifact validation; source review alone is insufficient.
