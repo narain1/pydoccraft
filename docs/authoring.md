@@ -927,3 +927,7 @@ Type checkers accept these complete snapshots and the existing inline patch dict
 When a DOCX styles part exists but supplies no inherited font size, the selected native engine now preserves that absence and uses its existing 11-point fallback. Earlier builds inserted 10 points while reading. Explicit sizes are unchanged, and documents without a ZIP styles part retain the engine's initialized 12-point defaults. These are native application policies, not a universal Word or OOXML default.
 
 This dependency correction applies to existing import/render/PDF conversion methods. Owned `document.styles.format_defaults(font_size=None)` removes the direct ordinary font size and restores native inheritance (spec132). With no inherited ordinary size, text resolves to 11 points; this does not recreate a new document’s initial 12-point value. Explicit style/run overrides remain intact, and `styles.defaults["font_size"]` reads `None`. Setting an explicit size and the other supported clears retain their existing behavior.
+
+### Conservative PDF table detection
+
+PDF tables are inferred from native reading geometry. If discarded native text overlaps a candidate table's replacement region, extraction retains the original text blocks instead of adopting that candidate. A visually table-like region can therefore remain paragraphs; the check prevents the demonstrated omitted-line case without promising arbitrary PDF table recognition. DOCX/PPTX semantic tables and the public table API are unchanged.

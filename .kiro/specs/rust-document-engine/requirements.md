@@ -1006,3 +1006,11 @@ The existing owned metadata patch and extraction metadata dictionary shall expos
 ## Stable property setter typing (spec142)
 
 Existing authoring properties must describe supported input types and None returns without altering assignments, validation or the public surface. Cover the remaining missing setter annotations for document backgrounds, style relations, ranges, section geometry, table cells and slide shapes. Preserve the distinction between DOCX background-image clearing and PPTX image assignment, and between nullable cell margins and nonnullable direct cell colors. Static types do not certify numeric ranges, sequence lengths, colors, format-specific support or lifetime validity.
+
+## 153. Preserve text when inferred PDF table rows are incomplete
+
+153.1 Retain original normalized PDF blocks when a nonempty native reading block excluded from the candidate table intersects the region whose original blocks would be replaced. Use the same replacement predicate for all block kinds and include the full bounds of selected blocks. This is a conservative admission check within the existing small geometry normalizer, not a new table or reading-order engine.
+
+153.2 Check finite positive computed candidate-envelope, selected-block and discarded-block bounds, map coordinates with native PageInfo conversion, and decide before draining rows or changing page blocks/tables. Partial overlap must decline the candidate. Do not reconstruct missing text, alter font/rendering behavior, relax the original tab-proof multiplicity assertions, or promise arbitrary PDF table recognition.
+
+153.3 Preserve legitimate aligned-table extraction without duplicate text and preserve disjoint surrounding text. Verify interior singleton, partial overlap, extended block and invalid selected-bound controls, rotations, CropBox offsets and UserUnit with original deterministic PDF fixtures. Record the PR 133 failure, original artifacts and font-triggered reproduction separately from the corrected artifact/current-head gates.

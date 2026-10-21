@@ -1198,3 +1198,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Complete independent source, AST, strict positive/negative and nullable-reset review.
 - [x] Complete combined installed-artifact validation and independent artifact review.
 - [ ] Complete current-main CI and manual merge; keep API3 open.
+
+## 153. PDF inferred-table text preservation correction
+
+- [x] Preserve PR 133 failure and distinguish actual visible/native PDF content from normalized omission.
+- [x] Reproduce the defect with standalone builtin-font PDF data; preserve failed old native/public expectations.
+- [x] Review and implement conservative discarded-row admission before any page mutation, retaining the exact existing replacement predicate.
+- [x] Complete focused native/public and independent source/artifact verification, including unchanged tab proofs in both diagnostic font environments.
+- [ ] Complete parent-integrated full artifact, fresh current-head CI and manual review/merge; preserve earlier 146/148 artifacts as historical sources.
