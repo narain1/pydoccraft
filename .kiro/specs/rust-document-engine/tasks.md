@@ -1121,3 +1121,9 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Pass strict typing and independent final two-workflow copied-package/source review; retain every failed fixture premise and unchanged runtime/threshold evidence.
 - [x] Complete synchronized focused documentation and independent review.
 - [ ] Complete combined full installed artifact/native/source/attribution validation and current-head CI/manual merge. Broader STY2/U02 remain open.
+## Unit converter input typing (spec135)
+
+- [x] Reproduce strict rejection of ordinary int/float calls despite existing runtime support.
+- [x] Change only four input annotations and extend the strict consumer; verify annotation-erased whole-facade AST equality.
+- [x] Pass copied-package int/float/Fraction/Real consumers, three intended negative diagnostics and44 runtime conversion/refusal cases.
+- [ ] Complete independent source/focused review and final combined artifact/CI; retain broader API3 open.
