@@ -623,14 +623,13 @@ fn add_table(
             rows.push((block.rect[1], vec![(block.rect[0], block.text, block.rect)]));
         }
     }
-    let mut rows: Vec<Vec<PositionedText>> = rows
+    let (mut rows, discarded): (Vec<Vec<PositionedText>>, Vec<Vec<PositionedText>>) = rows
         .into_iter()
         .map(|(_, mut row)| {
             row.sort_by(|a, b| a.0.total_cmp(&b.0));
             row
         })
-        .filter(|row| row.len() >= 2)
-        .collect();
+        .partition(|row| row.len() >= 2);
     if rows.len() < 2 || rows.iter().any(|row| row.len() != rows[0].len()) {
         return Ok(());
     }
@@ -666,6 +665,60 @@ fn add_table(
         f64::from(a[0].max(b[0])),
         f64::from(a[1].max(b[1])),
     ];
+    let valid_rect = |rect: [f64; 4]| {
+        rect.iter().all(|value| value.is_finite()) && rect[0] < rect[2] && rect[1] < rect[3]
+    };
+    if !valid_rect(table_bbox) {
+        return Ok(());
+    }
+    // Use exactly the existing replacement predicate, for every block kind. A rejected
+    // candidate must leave the original blocks intact, including bounds outside the table.
+    let inside_table = |block: &BlockPayload| {
+        block.bbox.is_some_and(|bbox| {
+            let center_x = (bbox[0] + bbox[2]) / 2.0;
+            let center_y = (bbox[1] + bbox[3]) / 2.0;
+            center_x >= table_bbox[0]
+                && center_x <= table_bbox[2]
+                && center_y >= table_bbox[1]
+                && center_y <= table_bbox[3]
+        })
+    };
+    let mut suppressed_bounds = table_bbox;
+    for block in page.blocks.iter().filter(|block| inside_table(block)) {
+        let Some(rect) = block.bbox else {
+            return Ok(());
+        };
+        if !valid_rect(rect) {
+            return Ok(());
+        }
+        suppressed_bounds = [
+            suppressed_bounds[0].min(rect[0]),
+            suppressed_bounds[1].min(rect[1]),
+            suppressed_bounds[2].max(rect[2]),
+            suppressed_bounds[3].max(rect[3]),
+        ];
+    }
+    for (_, _, rect) in discarded.iter().flatten() {
+        if !valid_rect(*rect) {
+            return Ok(());
+        }
+        let a = info.user_to_view(rect[0] as f32, rect[1] as f32);
+        let b = info.user_to_view(rect[2] as f32, rect[3] as f32);
+        let rect = [
+            f64::from(a[0].min(b[0])),
+            f64::from(a[1].min(b[1])),
+            f64::from(a[0].max(b[0])),
+            f64::from(a[1].max(b[1])),
+        ];
+        if !valid_rect(rect)
+            || (rect[0] < suppressed_bounds[2]
+                && rect[2] > suppressed_bounds[0]
+                && rect[1] < suppressed_bounds[3]
+                && rect[3] > suppressed_bounds[1])
+        {
+            return Ok(());
+        }
+    }
     let table = TablePayload {
         rows: rows
             .drain(..)
@@ -679,15 +732,7 @@ fn add_table(
     let mut insertion = None;
     let mut retained = Vec::with_capacity(page.blocks.len());
     for block in page.blocks.drain(..) {
-        let inside_table = block.bbox.is_some_and(|bbox| {
-            let center_x = (bbox[0] + bbox[2]) / 2.0;
-            let center_y = (bbox[1] + bbox[3]) / 2.0;
-            center_x >= table_bbox[0]
-                && center_x <= table_bbox[2]
-                && center_y >= table_bbox[1]
-                && center_y <= table_bbox[3]
-        });
-        if inside_table {
+        if inside_table(&block) {
             insertion.get_or_insert(retained.len());
         } else {
             retained.push(block);
@@ -2083,3 +2128,7 @@ mod raster_limit_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "pdf_table_preservation_tests.rs"]
+mod table_preservation_tests;
