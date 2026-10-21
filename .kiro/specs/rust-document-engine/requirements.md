@@ -955,3 +955,8 @@ Geometry and raster goldens SHALL name their font input explicitly rather than a
 ## 135. Ordinary numeric unit-converter inputs
 
 Keep exported pt/mm/cm/inches usable with ordinary integers/floats and existing Real values in strict consumers. Preserve the exact runtime Real/finite/bool guards and avoid admitting arbitrary __float__ objects through annotations. No runtime behavior, public name, dependency or native code changes.
+
+
+## PDF method typing (spec136)
+
+Existing PDF metadata updates, page rotation, text drawing and image placement must describe their supported inputs and None return values to strict Python consumers. Preserve all runtime validation, defaults, source ownership and error behavior. Type hints do not replace value, size, lifecycle or boolean validation. No new public operation is required.

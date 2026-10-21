@@ -1127,3 +1127,12 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Change only four input annotations and extend the strict consumer; verify annotation-erased whole-facade AST equality.
 - [x] Pass copied-package int/float/Fraction/Real consumers, three intended negative diagnostics and44 runtime conversion/refusal cases.
 - [ ] Complete independent source/focused review and final combined artifact/CI; retain broader API3 open.
+
+
+## Typed PDF drawing and metadata inputs (spec136)
+
+- [x] Audit existing runtime source/geometry/color/index/metadata contracts and preserve implementation bodies.
+- [x] Verify strict supported-source and tuple/list input consumers, metadata snapshot replay, precise None returns and nine invalid-call diagnostics.
+- [x] Verify whole-facade implementation AST identity and all15 existing underlay/text-box/drawing-ownership workflows against the copied-package candidate.
+- [ ] Complete independent final source/focused review and final combined installed-artifact validation.
+- [ ] Complete current-main CI and manual merge; keep broader API3 and raw path-command typing open.

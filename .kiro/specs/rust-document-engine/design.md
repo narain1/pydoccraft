@@ -884,3 +884,8 @@ New fixtures identify body/header/cell inherited glyphs and fixed/direct overrid
 ## 135. Unit-helper annotations
 
 The four existing helper parameter annotations become Real | float. This retains custom/native Real subclasses while expressing Python's ordinary int-to-float numeric typing relationship. SupportsFloat would falsely admit objects rejected by the actual Real guard, so it is not used. Runtime boolean/nonfinite/Decimal/float-only-object checks remain unchanged.
+
+
+## PDF method typing (spec136)
+
+Reuse private source/box/color aliases on the existing PDF methods; point inputs retain tuple/list forms and integer rotation inputs describe the existing index protocol. A private four-key nullable metadata patch schema distinguishes writable inputs from the nonnullable metadata snapshot. Method implementation bodies, native calls and runtime checks remain identical. Heterogeneous raw path-command typing is outside this slice.
