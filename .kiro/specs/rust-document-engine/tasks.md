@@ -887,3 +887,9 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Pass focused copied-package public/typing checks and independent source/six-workflow review; synchronize documentation with the bounded profile.
 - [ ] Complete integrated full native/installed-wheel corpus, independent artifact review, exact-head CI and manual merge.
 - [ ] Retain broader DOC5 insertion, duplication, adoption and semantic-anchor relocation gaps.
+
+
+## 113. Release compiler selection
+
+- [x] Verify the immutable maturin action declares and uses its toolchain input for both container and host builds; explicitly select CI Rust 1.95.0 in both release steps.
+- [ ] Independently review the workflow-only change, run required current-main CI and merge manually; validate all nine platform/Python wheels at the eventual release gate. No new tag or release is authorized by this task alone.

@@ -799,3 +799,8 @@ Acceptance covers false/true/reset and independent copies; closed/type/revision/
 2. Public native remove_block/insert_block SHALL preserve moved and displaced subtree IDs, all table generations, descendant suffix paths, media and resource counters. Container length and its exact existing final paragraph SHALL remain unchanged. No descendant invalidation, synthetic-tail fabrication or cross-container adoption SHALL occur.
 3. Original bounded source/comment/global registry preflight SHALL precede scans and mutation. Moved note/bookmark/comment anchors and section descendants SHALL reject even for no-op; retained sibling anchors SHALL validate against a fresh exact-candidate inventory. Table PAGE SHALL remain rejected under spec107; count fields retain native evaluation.
 4. Index callbacks SHALL not retarget an owner changed by either callback; stale cells SHALL reject before callbacks. A validated no-op SHALL preserve revision/cache/ranges at revision MAX; actual movement SHALL stage one checked revision increment or atomically reject. Tests SHALL cover malformed associations, ownership, callbacks, copied and held handles, required/authored blanks, source-work boundaries, supported count output and unchanged deletion regressions. DOC5 SHALL remain partial.
+
+
+## 113. Release compiler selection
+
+Every Linux, macOS and Windows release-wheel build must explicitly select the same Rust 1.95.0 toolchain used by required CI. Keep the existing nine-wheel matrix, immutable actions, locked dependency graph and release/publish gates. Selecting a compiler is build configuration, not permission to publish an unfinished feature set.

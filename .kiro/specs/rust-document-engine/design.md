@@ -718,3 +718,8 @@ Same-value assignment follows existing document-setting mutation semantics rathe
 Movement rejects different parents/sections and source semantic anchors before no-op. It removes and reinserts the intact native block at the original destination coordinate, verifies unchanged parent length/final paragraph Arc and section metadata, and rotates only the selected parent coordinate of every locator and hidden blank. Descendant suffixes and every table generation remain intact; auxiliary direct-paragraph IDs are sorted using validated resulting locations. No pruning or new handle allocation occurs. Normal staged commit builds fresh candidate comment proof for retained references, media/navigation and output validation.
 
 The raw gate covers 336 structural and 24 colored-output profiles. A requested PAGE-positive control exposed the native stale table field context; spec107 now rejects owned table PAGE. Revised106 retains that native failure as an explicit diagnostic, pairs it with exact owned rejection, and uses NUMPAGES/SECTIONPAGES for supported movement output. It neither evaluates fields locally nor broadens imported editing. Final table ordinal semantics preserve intervening paragraph order, not reversibility of every interleaved block position.
+
+
+## 113. Release compiler selection
+
+Set the existing pinned maturin action input `rust-toolchain: 1.95.0` on both the Linux container build and the macOS/Windows build. The pinned action resolves this input before toolchain-file/default discovery, installs/selects it inside the Linux build container, and selects it through rustup on host builds. No runtime dependency, API, target, source engine, version or publish condition changes.
