@@ -1,6 +1,6 @@
 # Existing acceptance gates
 
-This 2026-10-21 source/evidence audit closes **API7, QA6 and QA8** as current reporting and representative-corpus criteria. It compares the original reviewed roadmap (`ece6c85`) with the final spec123 source/artifact, not just later backlog summaries. The checklist now has 51 checked and 88 open criteria out of 139. This does not promote an operation support cell or certify full format parity.
+The first 2026-10-21 source/evidence audit closes **API7, QA6 and QA8** as current reporting and representative-corpus criteria. It compares the original reviewed roadmap (`ece6c85`) with the final spec123 source/artifact, not just later backlog summaries, bringing the checklist to 51 checked and 88 open criteria out of 139. The later spec126 audit below covers QA2 separately. These decisions do not promote an operation support cell or certify full format parity.
 
 The exact [spec123 validation](../.kiro/specs/rust-document-engine/validation.md#123-typed-pdf-underlays--combined-installed-artifact) records 452 native tests and two clean installed 568-test passes, with zero failures/errors/skips, immutable dependency pins, source hashes and artifact sizes. This audit reuses that evidence; it does not claim another wheel build or runtime test run. Parent delivery branch source preserves the same reviewed runtime.
 
@@ -28,7 +28,7 @@ Original criterion: document supported operations, upstream blockers and partial
 | Clause | Existing concrete evidence | Remaining clause within this criterion |
 |---|---|---|
 | Supported operations / blockers / partial fidelity | Generated operation matrix, `docs/formats.md`, `docs/authoring.md`, `docs/upstream-roadmap.md` U01–U11 and reference crosswalk distinguish partial/unsupported/blocked/unassessed and authored/imported scope. Every supported ledger cell requires exact tests/native/artifact evidence. Unseeded139criterion joins remain explicitly unassessed. | None as honest reporting. This is not the missing complete QA1 ledger audit. |
-| Runnable vs proposed API | `docs/cookbook.md` links executable examples and states the current owned/unreleased profile. `docs/authoring-api-design.md` begins “historical design direction” and labels sketches PROPOSED. Seven `CookbookTests` execute concrete imported functions/CLIs, reopen DOCX/PDF/PPTX outputs and verify text/table/link/render outcomes. | Resumes/reviews/full representative corpus remain QA2. |
+| Runnable vs proposed API | `docs/cookbook.md` links executable examples and states the current owned/unreleased profile. `docs/authoring-api-design.md` begins “historical design direction” and labels sketches PROPOSED. Seven `CookbookTests` execute concrete imported functions/CLIs, reopen DOCX/PDF/PPTX outputs and verify text/table/link/render outcomes. | Representative document coverage is assessed separately under QA2 below. |
 | No blanket compatibility claim | Formats/cookbook/API direction/operation matrix explicitly disclaim full parity, arbitrary imported preservation and pixel-perfect conversion. Published GitHub Pages is independently recorded in validation website gate; local final123 site has29pages/1,775 local links. | Future features must keep updating these documents; current-main publication is still the ordinary delivery gate. |
 
 The formats guide links to the generated current matrix without a stale profile count. Historical validation counts and earlier QA8-open decisions remain unchanged; this dated acceptance audit supersedes them without rewriting their evidence.
@@ -49,11 +49,28 @@ Original criterion: test malformed source data, invalid edits, stale handles, ex
 
 All named public/native cases are present in the exact final123452-native / two568-installed runs (zero failures/errors/skips). Their178-file build inventory is retained. The later sole documentation profile-count migration20→21 is separate; all27 doc tests then passed. This acceptance audit adds no runtime, fixture, fuzz run, external-validator claim or runtime test count. QA6 completion means the enumerated representative corpus exists and passes; R4/P4/U09 allocation/work guarantees, QA7 platform/performance and broader hostile-input research remain open.
 
+## QA2: representative authored documents
+
+Original criterion: generate letters, resumes, invoices, branded reports, forms, reviews and multilingual documents, including combined tables, backgrounds and headers.
+
+| Required category | Executable example and acceptance fixture |
+|---|---|
+| Letters | `examples/letter.py` and `CookbookTests.test_letter_story_order_links_and_preview`; `template_batch.py` additionally checks two independently filled letters. |
+| Resumes | `representative_documents.build_resume` and `RepresentativeDocumentTests.test_multilingual_resume_combines_stories_table_links_and_diacritics`. |
+| Invoices | `examples/invoice.py` and `CookbookTests.test_invoice_decimal_values_semantic_table_and_fill`. |
+| Branded reports | `examples/branded_report.py` and `CookbookTests.test_report_two_pages_repeated_stories_brand_and_table`; `LetterheadCompositionTests.test_first_logo_tracks_sections_through_reflow_and_numbered_parity` adds combined section/reflow/logo controls. |
+| Forms | `representative_documents.build_intake_form` and `RepresentativeDocumentTests.test_intake_fields_copy_flatten_preserve_visible_appearance_and_links`. |
+| Reviews | `representative_documents.build_review` and `RepresentativeDocumentTests.test_review_preserves_comments_separately_and_exports_clean_body`. |
+| Multilingual documents | The resume contains exact English, French and German Latin text, diacritics and native proofing-language metadata; the same resume fixture checks source and converted output. This does not establish arbitrary-script coverage. |
+
+The three new builders compose existing public operations without another API family. Resume/review documents combine page backgrounds, visible headers/footers, shaded semantic tables, headings, links or comments. The form combines instructions, graphics, a link and owned text/checkbox/choice fields, with copy/flatten controls. The tests reopen outputs, verify exact text and metadata, and check physical dimensions, DPI and visible content at 72/144/300 DPI. Comments remain separate source stories and are deliberately omitted from PDF output; no tracked-revision or imported-editing support is implied.
+
+The [spec126 validation](../.kiro/specs/rust-document-engine/validation.md#126-representative-combined-document-corpus) records retained artifacts and the final exact installed-wheel corpus. Existing runtime, historical support profiles and fixture fingerprints remain unchanged. This closes QA2 and brings the prepared checklist to 52 checked and 87 open of 139 criteria. It fulfills the enumerated representative corpus, not exhaustive combinations, independent viewer conformance, cross-platform fidelity or every authoring operation.
+
 ## Criteria deliberately not promoted
 
 - **API1/QA1**: representative198 reference members/44families and21operation profiles do not complete dispositions/status/native/test joins for every feature; unassessed joins cannot be relabeled verified.
-- **API3**: remaining property annotations and full Word snapshot replay/IDE coverage are explicitly incomplete. Existing common factories/getters/reprs are substantial partial evidence.
-- **QA2**: actual letters/invoices/reports/templates/slides exist, but no complete planned representative resume/review/form/multilingual corpus audit. Small independent feature fixtures are not a complete combined-document claim.
+- **API3**: remaining property annotations, some pretyped border dictionaries and IDE coverage are explicitly incomplete; spec133 covers full Word paragraph snapshot replay. Existing common factories/getters/reprs are substantial partial evidence.
 - **QA3**: broad save/reopen/copy and exact-link/nested-table evidence exists, but “for each operation” is not yet exhaustively mapped; leave open withQA1.
 - **QA4/QA7**: representative DPI/reopen/memory/size gates exist, but platform/font divergence is the separate active120 workstream. Do not claim cross-platform visual baselines from this Linux artifact.
 - **QA5**: repeated reopen and independent same-engine test execution do not establish all independent viewer/schema/conformance evidence.

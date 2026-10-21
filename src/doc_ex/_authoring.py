@@ -197,7 +197,7 @@ class _ParagraphAlignmentSnapshot(TypedDict):
 class _ParagraphSnapshot(_ParagraphAlignmentSnapshot, total=False):
     borders: dict[str, _BorderSnapshot | None] | None
     tabs: list[_TabSnapshot] | None
-    direction: str | None
+    direction: Literal["ltr", "rtl"] | None
     indent_left: float | None
     indent_right: float | None
     indent_first: float | None
@@ -214,7 +214,7 @@ class _ResolvedParagraphSnapshot(TypedDict):
     borders: dict[str, _BorderSnapshot | None] | None
     tabs: list[_TabSnapshot]
     alignment: str
-    direction: str
+    direction: Literal["ltr", "rtl"]
     indent_left: float
     indent_right: float
     indent_first: float
@@ -1237,7 +1237,11 @@ class Paragraph:
         """Paragraph properties resolved through native defaults and styles."""
         return json.loads(self._owner._call("paragraph_formatting", self._id, True))
 
-    def format(self, **formatting: Unpack[ParagraphFormatting]) -> None:
+    @overload
+    def format(self, **formatting: Unpack[ParagraphFormatting]) -> None: ...
+    @overload
+    def format(self, **formatting: Unpack[_ParagraphSnapshot]) -> None: ...
+    def format(self, **formatting: object) -> None:
         """Set paragraph properties; None restores inheritance.
 
         DOCX direction is ltr/rtl; native alignment, indents and tabs are
@@ -3762,7 +3766,11 @@ class _SlideCellParagraph(Paragraph):
     def formatting(self) -> _ParagraphSnapshot:
         return json.loads(self._owner._call("cell_paragraph_formatting", *self._range_args, self._target))
 
-    def format(self, **formatting: Unpack[ParagraphFormatting]) -> None:
+    @overload
+    def format(self, **formatting: Unpack[ParagraphFormatting]) -> None: ...
+    @overload
+    def format(self, **formatting: Unpack[_ParagraphSnapshot]) -> None: ...
+    def format(self, **formatting: object) -> None:
         # Validate the exact target before caller callbacks, then reject
         # reentrant edits after each scalar normalization, before another callback.
         self._owner._call("cell_paragraph_alignment", *self._range_args, self._target)

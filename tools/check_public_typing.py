@@ -10,8 +10,8 @@ from typing import Any, Literal, assert_type
 
 import doc_ex
 from doc_ex._authoring import (
-    Annotation, Bookmark, Comment, Comments, EditableCell, EditableTable, Paragraph, ParagraphFormatting, PdfDocument, PdfField,
-    PdfPage, Picture, Presentation, Shape, SlidePicture, SlideTable, TextRange,
+    Annotation, Bookmark, BorderFormatting, Comment, Comments, EditableCell, EditableTable, Paragraph, ParagraphFormatting, PdfDocument, PdfField,
+    PdfPage, Picture, Presentation, Shape, SlidePicture, SlideTable, TabStop, TextRange,
     WordDocument, _WordShape,
 )
 
@@ -180,6 +180,7 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
                                          space_before=4, space_after=8, line_spacing=1.5), None)
         assert_type(cell_paragraph.formatting["line_spacing"], float | None)
         cell_snapshot = cell_paragraph.formatting
+        assert_type(cell_paragraph.format(**cell_snapshot), None)
         cell_patch: ParagraphFormatting = {
             "alignment": cell_snapshot["alignment"],
             "indent_left": cell_snapshot["indent_left"],
@@ -330,6 +331,8 @@ def verify_formatting_snapshots(word: WordDocument, paragraph: Paragraph) -> Non
     assert_type(defaults["direction"], str | None)
     direct = paragraph.formatting
     assert_type(direct["alignment"], str | None)
+    assert_type(direct.get("direction"), Literal["ltr", "rtl"] | None)
+    paragraph.format(**direct)
     # A Paragraph can be a PPTX cell paragraph with alignment alone.
     assert_type(direct.get("indent_left"), float | None)
     tabs = direct.get("tabs")
@@ -339,6 +342,17 @@ def verify_formatting_snapshots(word: WordDocument, paragraph: Paragraph) -> Non
         assert_type(tabs[0]["leader"], str)
     resolved = paragraph.resolved_formatting  # Successful results are DOCX only.
     assert_type(resolved["alignment"], str)
+    assert_type(resolved["direction"], Literal["ltr", "rtl"])
+    paragraph.format(**resolved)
+    # Existing patch dictionaries keep contextual typing alongside full replay.
+    border: BorderFormatting = {"width": 1, "color": (10, 20, 30)}
+    input_borders: dict[str, BorderFormatting | None] = {"top": border, "bottom": None}
+    stop: TabStop = {"position": 24}
+    paragraph.format(borders={"top": border}, tabs=[stop])
+    paragraph.format(borders=input_borders)
+    paragraph.format(borders={"top": {"width": 1, "color": (10, 20, 30)}})
+    paragraph.format(tabs=[{"position": 24}, {"position": 48, "leader": "dot"}])
+    paragraph.format(direction=None, borders=None, tabs=None)
     assert_type(resolved["indent_left"], float)
     assert_type(resolved["keep_with_next"], bool)
     assert_type(resolved["tabs"][0]["position"], float)

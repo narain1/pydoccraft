@@ -778,6 +778,13 @@ Table/cell descendant invalidation occurs only after source validation or centra
 The first profile caps outlines at100 points (native read/write ceiling) and at min(width,height); full-range corner/outline fidelity is separately gated by spec116 native evidence. The local adapter neither widens upstream clamps nor compensates for cap/join or thick-ellipse differences.
 
 
+## 120. Reuse the release matrix for pre-release evidence
+
+One boolean workflow input, `validation_only`, keeps the existing nine wheel jobs as the single implementation. The existing `release_tag` input accepts a full commit SHA only in this mode. Before builds, the Python guard verifies its syntax and checked-out identity and refuses `publish=true`. Both publication jobs explicitly exclude validation-only dispatches; wheel jobs retain read-only repository permissions. Ordinary release dispatches and tag pushes still require `v<project.version>`. No package API, version, dependency or runtime behavior changes.
+
+The repository text checkout policy uses Git text auto-detection with LF output; binary fixtures remain binary. Roadmap fixture reads name UTF-8. The atomic-save test records the actual mode after chmod, retains exact0640 admission on POSIX, and verifies mode preservation on failure and success on every platform. Runtime save code is unchanged. Its single source fingerprint migration records the deliberate portability correction without rewriting historical wheel artifacts.
+
+
 ## 117. Native PDF budget upgrade without another API
 
 The native contribution checks the widened integer product returned by the existing render_size helper immediately before Pixels::zeroed, using the existing normal error channel. Its allocator-observation harness is entirely upstream cfg(test); no hook, global counter or new renderer enters this package's runtime. Existing local preflight still prevents a native request for the same oversized public operation.
@@ -840,3 +847,14 @@ The reviewed DeckCraft contribution c9c7fff189c808bf7266d0b888c3636a1880080d, di
 All four direct and ten resolved DeckCraft source identities move together. No adapter or facade method changes. The original synthetic imported fixture uses public native model/edit/writer calls, explicit run colors/navigation and a generated one-pixel PNG; no third-party content is introduced. Package regressions verify native readback, normalized LF break offsets, searchable PDF labels and links, image/glyph positives and same-grid 200 DPI output. Lower DPI controls establish visible content/order, not general pixel-perfect parity. Native contribution controls separately cover Unicode fallback fonts, master/notes paths and unchanged no-break PDFs/Busy errors.
 
 Current ledger provenance and source citations follow the selected revision; existing profile scopes, statuses, historical artifacts and fixture fingerprints remain unchanged. Cell add_break and a coherent public LF read projection require their own later bounded adapter review.
+## 126. Composed representative corpus
+
+Three builder functions live in examples, returning ordinary owned documents for caller-selected close/save/render/copy operations. The resume combines named headings, English/French/German Latin content, language metadata, a shaded semantic table and exact hyperlink; the review combines a decision table and stories with whole-paragraph comment/reply metadata; the PDF intake form combines text/graphics/link and existing owned fields. Existing letter/invoice/branded-report/letterhead fixtures supply the other QA2 categories. Source comment display and deliberately clean PDF output remain distinct. No new builder framework, template language, form manager, font registry or optional runtime is introduced.
+
+
+## 133. Paragraph formatting overloads
+
+The shared direct/resolved paragraph output declares direction as the exact native ltr/rtl literal (nullable only for direct inheritance). Existing Paragraph.format and its PPTX cell override expose two typing overloads: the unchanged ParagraphFormatting input patch and the full direct snapshot. The latter also accepts the resolved value set; a redundant third overload is unnecessary. The implementation accepts object-valued keyword arguments internally and retains its exact validation/dispatch body. Defaults/style input/output declarations are unchanged. No public helper, manager, method or general mapping adapter is introduced.
+### Spec120 explicit font inputs for measured fixtures
+
+Existing formatting selects Source Sans3 for the measured decimal-outline, pagination, bookmark and letterhead fixtures. The metadata-field and behind-image positive carriers use its bold face so exact-color checks measure actual solid glyph interiors even at72DPI. The letterhead recipe selects this font through its existing document defaults. Its font-specific golden has four appendix pages and four expanded main-paragraph layout pages; all physical pages still execute the existing logo/header/footer/content/link/table and72/144/300DPI checks. No layout compensation, renderer change, new font registry, test skip or tolerance widening is introduced. Requested family and emitted PDF BaseFont labels do not prove exact selected program bytes or isolate the native global font registry.

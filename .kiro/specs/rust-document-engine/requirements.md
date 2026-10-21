@@ -852,6 +852,13 @@ Existing paragraph, table and row properties must retain concrete successful res
 5. DOCX readback, native PNG and PDF SHALL retain demonstrated source/order/links/tables/notes/images without fake extraction geometry. Line, textbox, rotation, front, groups, effects, auxiliary/cell placement and imported editing SHALL remain explicitly unsupported. MED4 SHALL remain incomplete.
 
 
+## 120. Validate release wheels before publishing
+
+The existing release matrix SHALL support an explicit validation-only dispatch against an exact immutable commit SHA. It SHALL run the same Python 3.11–3.13 Linux, macOS and Windows wheel builds and installed-wheel corpus, retain artifacts and validation evidence, and create neither a GitHub release nor a PyPI publication. Validation-only mode SHALL reject branch names, abbreviated or mismatched commits and simultaneous publication requests. Default tagged and manual release behavior SHALL retain version matching and all existing validation dependencies.
+
+Validation fixtures SHALL read repository UTF-8 explicitly and retain identical LF text bytes across platform checkouts. Save-permission evidence SHALL assert exact POSIX permissions where supported and preservation of the actual platform mode after both failed and successful replacement. Existing rendering and pagination assertions SHALL not be relaxed to make a platform gate pass.
+
+
 ## 117. Native PDF final integer allocation budget
 
 1. All direct and resolved PdfCraft crates SHALL use the same immutable reviewed contribution revision; unrelated packages, engine pins and local vendor source SHALL remain unchanged.
@@ -912,3 +919,14 @@ The pinned reference inventory SHALL distinguish implemented bounded operations 
 2. Native PDF slide and notes/handout master text SHALL use the same logical paragraph coordinate space as native layout, including one character for each explicit break. Preserve selectable Unicode text, hyperlinks, raster output and existing per-call rendering failures; do not repair text with a local parser or layout algorithm.
 3. Add a small original native-generated imported PPTX regression through existing import/render/convert APIs. Prove searchable labels, source break offsets, links and retained image ink, native writer readback and actual PNG/PDF output. Preserve old-pin failure and independent native contribution evidence.
 4. Complete locked native, installed-wheel, independent, typing, attribution, source-citation and artifact-size gates before manual merge. This dedicated upgrade SHALL not enable cell break authoring, change public text projections or close broader TXT1/TXT4/SLIDE3 criteria.
+## 126. Representative combined authored documents
+
+Complete QA2's missing resume, review, form and multilingual examples using existing public operations. Combine tables, backgrounds and stories rather than only testing isolated formatting. Keep the multilingual fixture's Latin glyph/language scope explicit; preserve separate comment metadata and document native PDF review omission. Owned PDF form copies/flattening must retain visible appearances and source independence. No new package API or runtime dependency is required. Acceptance requires exact installed-wheel reuse identity, focused/full corpus results and actual visual inspection of retained source/PDF raster artifacts.
+
+
+## 133. Typed paragraph snapshot replay
+
+Support full existing direct/resolved paragraph snapshot replay in strict consumers while preserving existing inline patch inference, exact native direction literals and all malformed-input refusals. Keep full runtime implementation bodies, native bytes, key sets and method names unchanged. Do not claim full API3 closure or widen runtime acceptance to arbitrary Mapping/Sequence implementations. Preserve separately demonstrated existing border-container typing limitations.
+### Spec120 measured font fixtures
+
+Geometry and raster goldens SHALL name their font input explicitly rather than assume installed font substitution is portable. Positive solid-ink fixtures SHALL use a face/weight that actually contains solid interior ink at the tested DPI; thresholds, source-content checks and export checks SHALL remain intact. Recipe-specific pagination goldens SHALL be measured for the named font, with all additional pages included in existing per-page assertions. Preserve original default-font failures and require actual Windows/macOS evidence before accepting these corrections. This does not establish per-document font isolation or universal raster identity.

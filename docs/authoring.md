@@ -888,3 +888,8 @@ This profile covers direct owned body shapes in horizontal sections. Lines, text
 ### Imported PPTX line breaks and PDF text
 
 The selected DeckCraft contribution preserves searchable text after existing explicit line breaks when an imported PPTX is converted to PDF. Native slide and notes/handout master projections now use the logical paragraph text, retaining break offsets used by layout. This dedicated dependency correction does not add a new authoring method or change Python text getters. Existing owned PPTX cell `add_break` remains unsupported pending its separate bounded adapter. The imported regression checks text, links, retained image ink and representative PNG/PDF output; it is not a claim of general Office or pixel-perfect fidelity.
+### Reusing paragraph formatting
+
+For an owned DOCX paragraph, reuse its full direct formatting with `paragraph.format(**paragraph.formatting)`. To make the currently resolved values explicit, use `paragraph.format(**paragraph.resolved_formatting)`. Direct values retain `None` for inheritance; resolved values make a local copy of the effective formatting, so later style changes can behave differently. Both forms retain the existing validation and mutation rules. The same direct-snapshot call works for the supported PPTX cell paragraph properties; resolved paragraph formatting remains DOCX-only.
+
+Type checkers accept these complete snapshots and the existing inline patch dictionaries. This adds no method or new runtime formatting value. Some separately annotated nonnullable border dictionaries still have standalone border-input typing limitations; explicit nullable input dictionaries follow the existing input contract.
