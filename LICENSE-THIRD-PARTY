@@ -6,6 +6,8 @@ The resolved graph was reviewed for license declarations and compatibility. GPL-
 
 DeckCraft library crates use the reviewed contribution fork at `https://github.com/narain1/deckcraft`, revision `dd4fd70b6347dd2ce782e33f030a2b6c0abb0106`, directly based on upstream `22db9261f9d1a214c296fd390173130c45d76d66`. The contribution changes rendering error propagation only; package versions, license expressions and bundled assets remain unchanged. See NOTICE for upstream attribution.
 
+WordCraft library crates use the reviewed contribution fork at `https://github.com/narain1/wordcraft`, revision `f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef`, directly based on upstream `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`. The contribution changes PDF shape stroke caps/joins only; package versions, license expressions and bundled assets remain unchanged. See NOTICE for upstream attribution.
+
 | Crate | Version | License |
 |---|---:|---|
 | `adler2` | `2.0.1` | 0BSD OR MIT OR Apache-2.0 |
