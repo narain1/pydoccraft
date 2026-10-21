@@ -670,5 +670,6 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Audit selected native getter signatures and nullable JSON fields; retain current factory/copy ownership typing.
 - [x] Annotate existing property access and simple setters without aliases, runtime coercions or dynamic Any placeholders.
 - [x] Extend strict static consumer assertions and verify expected invalid typed uses are rejected; confirm runtime AST is unchanged after removing annotations.
-- [ ] Complete integrated installed-package strict typing, independent review and required exact-head/current-main CI before manual merge.
+- [x] Complete integrated installed-package strict typing, unchanged native-byte verification and independent 481-test package review.
+- [ ] Complete final exact-head/current-main CI and manual merge for property typing.
 - [ ] Retain unreviewed mappings/properties, documentation and IDE coverage under API3.
