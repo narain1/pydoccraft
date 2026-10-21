@@ -893,3 +893,9 @@ The selected DeckCraft contribution preserves searchable text after existing exp
 For an owned DOCX paragraph, reuse its full direct formatting with `paragraph.format(**paragraph.formatting)`. To make the currently resolved values explicit, use `paragraph.format(**paragraph.resolved_formatting)`. Direct values retain `None` for inheritance; resolved values make a local copy of the effective formatting, so later style changes can behave differently. Both forms retain the existing validation and mutation rules. The same direct-snapshot call works for the supported PPTX cell paragraph properties; resolved paragraph formatting remains DOCX-only.
 
 Type checkers accept these complete snapshots and the existing inline patch dictionaries. This adds no method or new runtime formatting value. Some separately annotated nonnullable border dictionaries still have standalone border-input typing limitations; explicit nullable input dictionaries follow the existing input contract.
+
+### Imported DOCX default font sizes
+
+When a DOCX styles part exists but supplies no inherited font size, the selected native engine now preserves that absence and uses its existing 11-point fallback. Earlier builds inserted 10 points while reading. Explicit sizes are unchanged, and documents without a ZIP styles part retain the engine's initialized 12-point defaults. These are native application policies, not a universal Word or OOXML default.
+
+This dependency correction applies to existing import/render/PDF conversion methods. Owned `document.styles.format_defaults(font_size=None)` remains explicitly unsupported pending separate reset validation; setting an explicit size and the other supported clears retain their existing behavior.

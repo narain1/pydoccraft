@@ -930,3 +930,11 @@ Support full existing direct/resolved paragraph snapshot replay in strict consum
 ### Spec120 measured font fixtures
 
 Geometry and raster goldens SHALL name their font input explicitly rather than assume installed font substitution is portable. Positive solid-ink fixtures SHALL use a face/weight that actually contains solid interior ink at the tested DPI; thresholds, source-content checks and export checks SHALL remain intact. Recipe-specific pagination goldens SHALL be measured for the named font, with all additional pages included in existing per-page assertions. Preserve original default-font failures and require actual Windows/macOS evidence before accepting these corrections. This does not establish per-document font isolation or universal raster identity.
+
+
+## 131. Dedicated WordCraft absent-default-size correction upgrade
+
+1. Move every selected WordCraft crate together to the reviewed immutable contribution, preserving all other dependency fields, licenses and assets. Preserve omitted native default size rather than injecting 10; retain existing resolver precedence, explicit sizes and missing-styles-part defaults.
+2. Document imported parsed-but-unsized styles changing from 10pt to the existing 11pt resolver fallback as an intentional compatibility change, not an OOXML-mandated default. Native shared-reader evidence SHALL cover ZIP DOCX, Flat OPC and Word2003 XML without exposing new local XML formats.
+3. Migrate only the existing native mismatch diagnostic to the corrected invariant. Add one installed imported-DOCX regression with an identical old-wheel failure, explicit 10/11/12 and missing-styles12 controls, actual glyph ink at 72/144/300DPI, text/link preservation and PDF reopening.
+4. Complete dedicated locked native, installed, independent, typing, attribution, citation and artifact gates. Preserve the public default-size None refusal and exception class; only correct its obsolete explanation. Owned reset admission remains separate spec132; STY2/U02 remain open.

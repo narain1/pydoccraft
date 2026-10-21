@@ -1091,3 +1091,14 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Record scoped Linux output evidence and migrate only the two affected additional source fingerprints.
 - [x] Complete actual Linux/Windows/macOS candidate full installed corpora: 556 tests each pass against exact retained wheels in run39589067301.
 - [x] Retain default-font/native isolation limitations under existing U02/STY5; broad fidelity and final release remain open.
+
+
+## Dedicated WordCraft absent-default-size correction (spec131)
+
+- [x] Independently review and publish the native contribution to the existing fork; retain baseline failures, explicit-size compatibility, shared-reader controls and scoped native Clippy limitation.
+- [x] Review the dedicated five-direct/nine-resolved pin change, preserved public refusal and intentional native diagnostic migration.
+- [x] Audit source-only lock changes, unchanged 264-package licenses and 55 current Word citations across 14 unchanged native files.
+- [x] Preserve the identical installed old-wheel failure after explicit and missing-styles controls pass.
+- [x] Complete full 453-native/fmt/Clippy/release, two clean 570-installed corpora, typing and exact artifact/source/attribution/size gates.
+- [x] Complete final synchronized evidence and independent source/artifact/documentation review.
+- [ ] Complete current-head CI/manual merge. No owned None reset or STY2/U02 completion is claimed.
