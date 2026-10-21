@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "audited_commit": "282f48995412deba6283cdeaf9a49174ceaf8daf",
+  "audited_commit": "32a3c4da45ae53d3267da2b901b5f5719b85a6fc",
   "references": {
     "pdfcraft": {
       "revision": "516caea956c0aaf15f2bd1f35a15e07c73a9ead6",
@@ -8,7 +8,7 @@
       "repository": "https://github.com/narain1/pdfcraft"
     },
     "wordcraft": {
-      "revision": "5312722fb1cefed837f00227e3afe919a6451b54",
+      "revision": "517637db3caa0dffd1ad5e4e66c9bdd86e908742",
       "kind": "engine",
       "repository": "https://github.com/narain1/wordcraft"
     },

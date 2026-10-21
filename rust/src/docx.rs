@@ -2424,3 +2424,7 @@ mod stroke_regression_tests;
 #[cfg(test)]
 #[path = "docx_closed_shape_proof.rs"]
 mod closed_shape_proof;
+
+#[cfg(test)]
+#[path = "docx/core_language_regression_tests.rs"]
+mod core_language_regression_tests;
