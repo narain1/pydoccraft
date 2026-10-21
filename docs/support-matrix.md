@@ -499,7 +499,7 @@ Owners, roles and checkboxes below come from existing roadmap files. A checked c
 | DOC6: Compose documents. | W04 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | DOC7: Metadata and document properties. | W03 / implementation | open | [word.properties](#wordproperties) | Unassessed: acceptance scope beyond linked profiles. |
 | DOC8: Templates and document variants. | W03 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
-| TXT1: Paragraph/run CRUD. | W04 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
+| TXT1: Paragraph/run CRUD. | W04 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | TXT2: Character formatting. | W04 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | TXT3: Paragraph formatting. | W04 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | TXT4: Tabs and breaks. | W04 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
@@ -508,7 +508,7 @@ Owners, roles and checkboxes below come from existing roadmap files. A checked c
 | TXT7: Find and replace. | W07 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | TXT8: Rich-text ranges. | W07 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | STY1: Named styles. | W04 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
-| STY2: Style inheritance. | W04 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
+| STY2: Style inheritance. | W04 / implementation | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | STY3: Theme colors and fonts. | W04 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | STY4: Reusable style recipes. | W13 / recipe | checked | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |
 | STY5: Font inputs and embedding. | W04 / implementation | open | — | Unassessed: operation evidence or recipe/gate audit not yet entered. |

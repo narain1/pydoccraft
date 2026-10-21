@@ -67,9 +67,9 @@ The three new builders compose existing public operations without another API fa
 
 The [spec126 validation](../.kiro/specs/rust-document-engine/validation.md#126-representative-combined-document-corpus) records retained artifacts and the final exact installed-wheel corpus. Existing runtime, historical support profiles and fixture fingerprints remain unchanged. This closes QA2 and brings the prepared checklist to 52 checked and 87 open of 139 criteria. It fulfills the enumerated representative corpus, not exhaustive combinations, independent viewer conformance, cross-platform fidelity or every authoring operation.
 
-## STY2: style inheritance — acceptance review pending final artifact
+## STY2: style inheritance
 
-The independent spec138 audit compares the unchanged original criterion at `ece6c85`: support base styles, next/linked styles, document defaults and effective formatting inspection through upstream resolution; reject inheritance cycles and distinguish absent properties from explicit false/reset values. The reviewed132 default-size reset closes the last previously recorded behavioral gap. Closure remains conditional on the final combined installed-artifact result; this audit alone does not mark the criterion complete.
+The independent spec138 audit compares the unchanged original criterion at `ece6c85`: support base styles, next/linked styles, document defaults and effective formatting inspection through upstream resolution; reject inheritance cycles and distinguish absent properties from explicit false/reset values. The reviewed132 default-size reset closes the last previously recorded behavioral gap. The final combined 579-test installed-artifact run passes, satisfying the remaining acceptance gate. This closes STY2 within the original clauses; the artifact and independent review are recorded below.
 
 | Original clause | Concrete implementation and acceptance evidence |
 |---|---|
@@ -81,9 +81,9 @@ The independent spec138 audit compares the unchanged original criterion at `ece6
 
 The implementation stays within existing style handles and formatting dictionaries. Missing native built-in linked companions still raise an explicit error and can be cleared or replaced, as `test_undefined_builtin_link_is_explicit_and_repairable` proves; no style is fabricated. The resolver retains its native Normal fallback, and arbitrary default-kind selection is not added. Imported editing, theme identity, font contexts and style import/cleanup remain separate DOC2/STY3/STY5/STY6 criteria. This decision does not promote historical operation cells, claim arbitrary Open XML style parity or add a new completion database.
 
-## TXT1: ordinary DOCX paragraph/run editing — acceptance review pending final artifact
+## TXT1: ordinary DOCX paragraph/run editing
 
-The original `ece6c85` criterion asks for ordered paragraph/run creation and editing, significant whitespace, empty paragraphs, Unicode, tabs and line breaks, and exact reopened text without duplicate table or auxiliary content. The independent spec138 review resolves the earlier interpretation deferral: ordinary same-container editing belongs here; cross-container structural adoption and imported editing remain DOC5/DOC2, while deletion of semantic anchors retains the existing note/bookmark/review owners. No protected operation is silently enabled or reclassified. Final installed-artifact acceptance is still required before changing TXT1's checkbox.
+The original `ece6c85` criterion asks for ordered paragraph/run creation and editing, significant whitespace, empty paragraphs, Unicode, tabs and line breaks, and exact reopened text without duplicate table or auxiliary content. The independent spec138 review resolves the earlier interpretation deferral: ordinary same-container editing belongs here; cross-container structural adoption and imported editing remain DOC5/DOC2, while deletion of semantic anchors retains the existing note/bookmark/review owners. No protected operation is silently enabled or reclassified. The final combined installed-artifact gate now passes, so TXT1 is complete for those original ordinary-text clauses.
 
 | Original clause | Concrete acceptance evidence |
 |---|---|
@@ -92,7 +92,13 @@ The original `ece6c85` criterion asks for ordered paragraph/run creation and edi
 | Significant whitespace, Unicode, tabs and line breaks | `TextSelectionTests.test_unicode_slices_follow_python_bounds_without_mutating_document` reopens the exact string containing leading/trailing spaces, an emoji, a combining mark, HT and LF, comparing its complete block text. Python slice semantics and unchanged source bytes are checked. |
 | No duplicate table/auxiliary text | `TextSelectionTests.test_same_selection_api_in_body_cell_header_and_note_stories` edits each supported scope and checks exactly-once converted labels. `ParagraphMoveTests` checks moved body/story labels once in DOCX/PDF, while `DocxStoriesTests.test_auxiliary_stories_are_owned_and_do_not_repeat_on_pages` checks nested table text once and keeps auxiliary stories separate. |
 
-The native adapter uses existing WordCraft model traversal, span replacement and serialization; the Python surface remains add_paragraph/add_run, paragraph collections and ordinary revision-bound ranges. This does not close TXT8 arbitrary anchors, DOC5 cross-container/cross-section composition, DOC2 imported editing, LAY7 semantic note-reference deletion or other owners' outstanding clauses. No new run manager or duplicate ordered-content API is introduced.
+The native adapter uses existing WordCraft model traversal, Document.delete_range/insert_text and serialization; the Python surface remains add_paragraph/add_run, paragraph collections and ordinary revision-bound ranges. This does not close TXT8 arbitrary anchors, DOC5 cross-container/cross-section composition, DOC2 imported editing, LAY7 semantic note-reference deletion or other owners' outstanding clauses. No new run manager or duplicate ordered-content API is introduced.
+
+### Spec138 artifact and acceptance decision
+
+The earlier TXT1 interpretation deferral is resolved by the independent original-clause/ownership review above; the earlier STY2 default-reset gap is resolved by the tested132 implementation. Final source `282f48995412deba6283cdeaf9a49174ceaf8daf` passes all 579 installed tests in 400.045 seconds (400.186-second wrapper), with zero failures, errors or skips. The exact wheel is SHA256 `0dc0a94d7a852ce9b4426a34782733e4230660e02428596ea0b1b3b44a717476`; the unchanged native build has 460 passing tests. Independent source/artifact, changed-workflow, snapshot and typing review is clear. The original build and annotation-only repack identities remain separate in validation.
+
+Only STY2 and TXT1 change completion state here, bringing the prepared roadmap to **54 checked and 85 open of 139**. Historical operation profiles, statuses, fixtures and artifact references are unchanged. This is acceptance of the original clauses, not an expansion of supported operations. Current-main CI and independent manual merge remain delivery requirements.
 
 ## Criteria deliberately not promoted
 
@@ -101,12 +107,11 @@ The native adapter uses existing WordCraft model traversal, span replacement and
 - **QA3**: broad save/reopen/copy and exact-link/nested-table evidence exists, but “for each operation” is not yet exhaustively mapped; leave open withQA1.
 - **QA4/QA7**: representative DPI/reopen/memory/size gates exist, but platform/font divergence is the separate active120 workstream. Do not claim cross-platform visual baselines from this Linux artifact.
 - **QA5**: repeated reopen and independent same-engine test execution do not establish all independent viewer/schema/conformance evidence.
-- **TXT1**: ordinary owned body/story/cell paragraph movement/deletion and rich ranges are strong evidence, but defer until root/reviewer explicitly reconcile the original DOCX text clause with broader ordered/protected/container coverage. No speculative narrowing or overlap with124PPTX line-break work.
 - **R4/P2/P4**: structured failures/native allocation entrypoints, alpha/background semantics and bounded selective processing remain documented gaps.
 - **C5/FORM2/DOC2/DOC5/DOC6/DOC8**: repeating rich rows/imported Office/template variants/cross-container remapping/duplication remain open; independent whole-document copy does not prove fragment adoption.
 - **DOC7**: core language and typed extended-property access remain absent despite supported core/custom scalars.
 - **E2/E3/E5/LAY8**: exact normalized/source offsets, broader scope geometry/revisions and substitution/omission diagnostics remain incomplete.
-- **STY2/STY3/STY5/STY6/TXT4/TXT5/TXT6/TXT8**: explicit default-size reset, live theme identity, document-scoped fonts, style import/retarget, decimal/bar tabs, custom list/script coverage and arbitrary ranges remain native-backed gaps.
+- **STY3/STY5/STY6/TXT4/TXT5/TXT6/TXT8**: live theme identity, document-scoped fonts, style import/retarget, decimal/bar tabs, custom list/script coverage and arbitrary ranges remain native-backed gaps.
 - **TBL4/TBL6/TBL7/TBL8/TBL10**: complete vertical split reversibility, merged-row overflow, fill/border conflicts, inter-cell spacing/vertical script and captions/accessibility are not supplied by current ordinary-cell/table profiles.
 - **BG2/BG3/BG4/BG7/BG8/LAY3/LAY6/LAY7/LAY10/MED2–MED8**: placement/fills/rotation/linkage/field-context/semantic-note deletion/hyphenation/group/chart/math/caption source contracts are incomplete; new typedPDF underlays do not establish Office watermark parity.
 - **REF2–REF8/FORM3–FORM5/REV1–REV6/PKG1–PKG8/PDF2/PDF3/PDF6–PDF8/SLIDE1–SLIDE6**: their explicit remaining clauses in the reviewed roadmap remain; no nearby successful bounded profile is promoted into full import/preservation/evaluation/appearance/standards support.

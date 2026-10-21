@@ -1146,5 +1146,5 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Compare original ece6c85 STY2 clauses with existing style/default/cycle fixtures and reviewed132 reset controls.
 - [x] Complete independent original-clause/source/fixture review; preserve explicit missing-companion and neighboring-feature limitations.
 - [x] Independently reconcile original TXT1 clauses and existing whitespace/Unicode/order/nonduplication fixtures with neighboring ownership.
-- [ ] Verify final combined installed-artifact gate, then mark only STY2/TXT1 and regenerate derived roadmap documentation.
+- [x] Verify final combined 579-test installed-artifact gate, mark only STY2/TXT1 and regenerate derived roadmap documentation (54 checked/85 open).
 - [ ] Complete current-main CI and independent manual merge.
