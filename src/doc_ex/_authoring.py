@@ -3786,14 +3786,52 @@ class _SlideCellParagraph(Paragraph):
         self._owner._call("cell_paragraph_alignment", *self._range_args, self._target)
         revision = self._owner._call("revision")
         if formatting.keys() - {"alignment", "indent_left", "indent_right", "indent_first",
-                                "space_before", "space_after", "line_spacing"}:
+                                "space_before", "space_after", "line_spacing", "tabs"}:
             self._unsupported()
-        patch = {}
-        for key, value in formatting.items():
-            patch.update(json.loads(_format_patch({key: value})))
+        def check():
             if self._owner._call("revision") != revision:
                 raise ValueError("paragraph formatting is stale after a document change")
             self._owner._call("cell_paragraph_alignment", *self._range_args, self._target)
+
+        patch = {}
+        for key, value in formatting.items():
+            if key == "tabs" and value is not None:
+                if not isinstance(value, (list, tuple)):
+                    raise TypeError("tabs must be a list, tuple or None")
+                sequence = list if isinstance(value, list) else tuple
+                count = sequence.__len__(value)
+                if count > 32:
+                    raise ValueError("PPTX tabs support at most 32 stops")
+                stops = []
+                for index in range(count):
+                    stop = sequence.__getitem__(value, index)
+                    if not isinstance(stop, dict) or dict.__len__(stop) > 3:
+                        raise ValueError("each tab requires position and optional alignment/leader")
+                    # Bypass container/string-subclass hooks; only the existing
+                    # unit conversion may invoke a caller scalar protocol.
+                    item = {}
+                    for name, entry in dict.items(stop):
+                        if not isinstance(name, str):
+                            raise ValueError("tab property names must be strings")
+                        name = str.__str__(name)
+                        if name not in {"position", "alignment", "leader"}:
+                            raise ValueError("unknown tab property")
+                        item[name] = entry
+                    if "position" not in item:
+                        raise ValueError("each tab requires position")
+                    item["position"] = pt(item["position"])
+                    check()
+                    for name in ("alignment", "leader"):
+                        if name in item:
+                            entry = item[name]
+                            if not isinstance(entry, str) or str.__len__(entry) > 32:
+                                raise ValueError("tab alignment and leader must be supported names")
+                            item[name] = str.__str__(entry)
+                    stops.append(item)
+                patch[key] = stops
+            else:
+                patch.update(json.loads(_format_patch({key: value})))
+            check()
         if patch:
             self._owner._call("format_cell_paragraph", *self._range_args, self._target,
                               json.dumps(patch, allow_nan=False), revision, _change=True)

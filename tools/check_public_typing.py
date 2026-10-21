@@ -187,6 +187,9 @@ def verify(document_bytes: bytes, png: bytes, mode: str) -> None:
         assert_type(cell_paragraph[:].format(letter_spacing=None), None)
         assert_type(cell_paragraph.format(indent_left=12, indent_right=None, indent_first=-6,
                                          space_before=4, space_after=8, line_spacing=1.5), None)
+        assert_type(cell_paragraph.format(tabs=[{"position": 72, "alignment": "decimal"}]), None)
+        assert_type(cell_paragraph.format(tabs=[]), None)
+        assert_type(cell_paragraph.format(tabs=None), None)
         assert_type(cell_paragraph.formatting["line_spacing"], float | None)
         cell_snapshot = cell_paragraph.formatting
         assert_type(cell_paragraph.format(**cell_snapshot), None)
