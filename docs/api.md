@@ -2,7 +2,7 @@
 
 `pydoccraft` exposes an eager, PyMuPDF-style API. Opening a document reads the source into memory, invokes the native Rust engine, and returns Python objects that own their extracted text and image bytes.
 
-This page describes the extraction API. The unreleased branch also has [native authoring](authoring.md) through `new`, typed content objects and explicit save/copy operations. The [design crosswalk](authoring-api-design.md) and [feature backlog](../TODO.md) describe broader parity work; unchecked items are not implemented promises.
+This page describes the extraction API. Version 0.3.0 also has [native authoring](authoring.md) through `new`, typed content objects and explicit save/copy operations. The [design crosswalk](authoring-api-design.md) and [feature backlog](../TODO.md) describe broader parity work; unchecked items are not implemented promises.
 
 See the [operation evidence matrix](support-matrix.md) for bounded capability profiles, exact test/native references and remaining audit scope. A supported creation or rendering path does not establish imported-document preservation.
 
@@ -92,7 +92,7 @@ with doc_ex.open("slides.pptx") as document:
 | API | Result |
 |---|---|
 | `document.metadata` | Format and document metadata as `dict` |
-| `document.stories` (unreleased) | Owned DOCX auxiliary stories, separate from computed pages |
+| `document.stories` | Owned DOCX auxiliary stories, separate from computed pages |
 | `document.page_count` | Number of normalized pages |
 | `len(document)` | Same as `page_count` |
 | `document[index]` | `Page`; negative indexes are supported |
@@ -101,7 +101,7 @@ with doc_ex.open("slides.pptx") as document:
 | `document.render_page(index, dpi=144, *, clip=None)` | Rendered page/slide or selected region as PNG `bytes` |
 | `document.convert(output_format)` | Converted document `bytes` |
 | `document.close()` | Idempotently close the document |
-| `document.edit()` (unreleased) | Independent editable PDF; unsupported Office preservation profiles fail explicitly |
+| `document.edit()` | Independent editable PDF; unsupported Office preservation profiles fail explicitly |
 
 Slices are not supported. An out-of-range page raises `IndexError`.
 
@@ -224,7 +224,7 @@ All native failures are mapped to stable Python exceptions:
 
 `ToolNotFoundError` and `ToolExecutionError` remain exported for compatibility with versions before 0.2.0; the in-process engine does not raise them. Ordinary API validation may raise `FileNotFoundError`, `IndexError`, or `ValueError` as described above.
 
-## Auxiliary DOCX stories (unreleased)
+## Auxiliary DOCX stories
 
 `document.stories` is an ordered list of owned `Story(kind, blocks, metadata)` values. Kinds include `header`, `footer`, `footnote`, `endnote`, `comment`, `text_box` and note separators. Blocks reuse existing paragraph/table/link/image values, including nested cell hierarchy. `story.get_text("text" | "markdown" | "dict" | "json")` and `story.to_dict()` expose content without assigning it to an invented page.
 
@@ -232,7 +232,7 @@ Source block order is preserved within each part. Parts use the upstream model's
 
 Body `Document.to_markdown()` retains its existing projection. Comment stories additionally carry `legacy_page_projection=True` because comments remain in the compatibility page output. Callers combining both projections should choose their desired comment scope explicitly. Stories and their model values remain readable after source closure.
 
-## Extraction diagnostics (unreleased)
+## Extraction diagnostics
 
 DOCX/PPTX `document.metadata["diagnostics"]` contains bounded factual notices for constructs observed in the upstream model. Each has `code`, `operation="extract"`, `severity`, `message`, `count` and bounded `sources` locators. Examples distinguish omitted chart data, linearized equations, omitted ruby annotations, cached dirty fields, preview-only embedded objects, unsupported PPTX actions and approximate transformed geometry. Counts remain exact when source examples reach the 100-example total limit.
 
@@ -243,7 +243,7 @@ These notices describe semantic extraction only. They do not claim that renderin
 `document.export_markdown()` returns an owned `dict[str, bytes]` containing body/story Markdown, deduplicated local media and a JSON placement manifest. It reuses existing formatting and leaves `to_markdown()` compatible. See [portable Markdown and media](markdown-assets.md) for the schema, bounds and nested-table behavior.
 
 
-## DOCX source paths and line layout (unreleased)
+## DOCX source paths and line layout
 
 Paragraph and table metadata use `source_path`; paragraphs and their assets also use `segment`, the zero-based explicit page/column-break segment. Paths identify native model blocks: `[block]`, followed by `[row, physical_cell, block]` for each table nesting. Body values use the absence of auxiliary story keys to identify the Body story; no duplicate body tag is added. Auxiliary metadata uses existing `story_part_id` or separator story-kind/role keys. Identity belongs to this extracted snapshot; paths are not XML paths, file offsets or durable IDs across edits/reparse. Legacy aggregate page comments have no invented paragraph path.
 

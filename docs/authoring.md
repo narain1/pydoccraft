@@ -1,6 +1,6 @@
-# Native authoring (unreleased)
+# Native authoring
 
-The branch adds `doc_ex.new("docx" | "pdf" | "pptx")`. Editable documents own the upstream native model; extracted `Document`, `Block`, `Table` and `Cell` values remain snapshots. This page describes the implemented surface, while [the roadmap](../TODO.md) retains broader parity work. These additions are not part of the published 0.2.1 release.
+Version 0.3.0 adds `doc_ex.new("docx" | "pdf" | "pptx")`. Editable documents own the upstream native model; extracted `Document`, `Block`, `Table` and `Cell` values remain snapshots. This page describes the implemented surface, while [the roadmap](../TODO.md) retains broader parity work. These additions are not part of earlier releases such as 0.2.1.
 
 ## Create, save, copy and render
 

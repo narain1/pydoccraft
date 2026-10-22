@@ -84,7 +84,7 @@ Applications should treat all extraction failures as file-local. Do not retry ma
 - Upgrade upstream engines only with corpus tests and a new license audit.
 - Do not expose raw exception details directly to untrusted clients; they may include parser context.
 
-## Input and normalized output boundaries (unreleased)
+## Input and normalized output boundaries
 
 All public native detect/extract/render/convert entry points reject inputs over 128 MiB. Python path and binary-stream reads stop at that limit; bytearray/memoryview inputs are checked by byte size before copying. Caller-owned streams are not closed. The native JSON writer stops at 64 MiB during serialization, including escaped/UTF-8 bytes, instead of allocating the whole oversized result first. Allocation failure maps to a resource-limit error.
 
