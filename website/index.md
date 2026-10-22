@@ -47,7 +47,7 @@ Rendering returns PNG bytes. Page indexes start at zero; negative indexes work a
 
 This is semantic conversion, not pixel-perfect reproduction. PDF table detection is conservative. DOCX pagination follows the upstream layout engine and may differ from Microsoft Word; automatically split paragraphs cannot always be mapped exactly into extracted page slices. PowerPoint actions and complex content have additional limitations. See the [complete format notes](../docs/formats.md) and [operation evidence](../docs/support-matrix.md).
 
-Authoring is documented separately as a **development API**. It is not included in published version 0.2.1. A supported creation workflow does not imply safe editing or preservation of arbitrary imported files. Check the [authoring guide](../docs/authoring.md), [editing readiness](../docs/format-authoring-readiness.md) and [release notes](https://github.com/narain1/pydoccraft/releases) for the version you install.
+Authoring is documented separately and first ships in version 0.3.0. A supported creation workflow does not imply safe editing or preservation of arbitrary imported files. Check the [authoring guide](../docs/authoring.md), [editing readiness](../docs/format-authoring-readiness.md) and [release notes](https://github.com/narain1/pydoccraft/releases) for the version you install.
 
 ## A small interface, native document engines
 

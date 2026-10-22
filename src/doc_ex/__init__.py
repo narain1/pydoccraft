@@ -27,7 +27,7 @@ __all__ = [
     "DocExError", "DocumentClosedError", "MalformedDocumentError", "UnsafeArchiveError",
     "UnsupportedFormatError", "ToolExecutionError", "ToolNotFoundError",
 ]
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 
 _MAX_INPUT_BYTES = 128 * 1024 * 1024

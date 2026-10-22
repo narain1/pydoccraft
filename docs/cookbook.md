@@ -1,6 +1,6 @@
 # Cookbook
 
-These runnable examples use the current authored-document profile. Install a wheel built from this checkout, then run an example from the same checkout. These authoring additions are unreleased and are absent from the published 0.2.1 wheel; see [development instructions](development.md). Each command takes an output directory and an optional `--dpi` (default 96); use a new directory because named outputs may be replaced. No external document applications, downloaded assets or optional Python packages are required.
+These runnable examples use the current authored-document profile. Install a wheel built from this checkout, then run an example from the same checkout. These authoring additions first ship in 0.3.0 and are absent from earlier wheels such as 0.2.1; see [development instructions](development.md). Each command takes an output directory and an optional `--dpi` (default 96); use a new directory because named outputs may be replaced. No external document applications, downloaded assets or optional Python packages are required.
 
 | Workflow | Source and entry point | Outputs |
 |---|---|---|
