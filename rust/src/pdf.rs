@@ -31,52 +31,13 @@ impl PdfSession {
         }
         let cos = pdfcraft_cos::Document::open_with_password(bytes.clone(), password)
             .map_err(|e| EngineError::Malformed(format!("invalid PDF object graph: {e}")))?;
-        let mut renderer = PageRenderer::new(
-            bytes,
-            RenderConfig {
-                password: password.map(Arc::from),
-                reject_oversize: true,
-                ..Default::default()
-            },
-        );
-        let mut pages = Vec::with_capacity(info.pages.len());
-        for (number, page_info) in info.pages.iter().enumerate() {
-            let rendered = renderer.render(RenderRequest {
-                page: number,
-                kind: RequestKind::Text,
-                scale: 1.0,
-                ..Default::default()
-            });
-            check_content_warnings(&rendered.warnings)?;
-            if let Some(e) = rendered.error {
-                return Err(EngineError::Malformed(format!(
-                    "PDF text extraction failed: {e}"
-                )));
-            }
-            let mut page = PagePayload {
-                number,
-                metadata: Map::from_iter([
-                    ("width".into(), json!(page_info.width)),
-                    ("height".into(), json!(page_info.height)),
-                    ("rotation".into(), json!(page_info.rotation)),
-                    ("label".into(), json!(page_info.label)),
-                ]),
-                ..Default::default()
-            };
-            if let Some(text) = &rendered.text {
-                add_text(text, &mut page);
-            }
-            add_table(&cos, page_info, number, &mut page)?;
-            add_links(
-                &info.links,
-                page_info,
-                number,
-                rendered.text.as_deref(),
-                &mut page,
-            )?;
-            add_images(&cos, page_info, number, &mut page)?;
-            pages.push(page);
-        }
+        let config = RenderConfig {
+            password: password.map(Arc::from),
+            reject_oversize: true,
+            ..Default::default()
+        };
+        let mut renderer = PageRenderer::new(bytes.clone(), config.clone());
+        let pages = extract_pages(&mut renderer, &bytes, &config, &cos, &info)?;
         let mut metadata = Map::new();
         for (key, value) in [
             ("title", info.title),
@@ -596,6 +557,117 @@ fn add_text(text: &pdfcraft_render::PageText, page: &mut PagePayload) {
     }
 }
 
+/// Documents below this size are extracted on the calling thread; spawning workers and
+/// opening a second parser per worker would cost more than it saves.
+const PARALLEL_MIN_PAGES: usize = 8;
+const MAX_EXTRACT_WORKERS: usize = 8;
+
+fn extract_page(
+    renderer: &mut PageRenderer,
+    cos: &pdfcraft_cos::Document,
+    info: &pdfcraft_render::DocInfo,
+    number: usize,
+) -> Result<PagePayload, EngineError> {
+    let page_info = &info.pages[number];
+    let rendered = renderer.render(RenderRequest {
+        page: number,
+        kind: RequestKind::Text,
+        scale: 1.0,
+        ..Default::default()
+    });
+    check_content_warnings(&rendered.warnings)?;
+    if let Some(e) = rendered.error {
+        return Err(EngineError::Malformed(format!(
+            "PDF text extraction failed: {e}"
+        )));
+    }
+    let mut page = PagePayload {
+        number,
+        metadata: Map::from_iter([
+            ("width".into(), json!(page_info.width)),
+            ("height".into(), json!(page_info.height)),
+            ("rotation".into(), json!(page_info.rotation)),
+            ("label".into(), json!(page_info.label)),
+        ]),
+        ..Default::default()
+    };
+    if let Some(text) = &rendered.text {
+        add_text(text, &mut page);
+    }
+    add_table(cos, page_info, number, &mut page)?;
+    add_links(
+        &info.links,
+        page_info,
+        number,
+        rendered.text.as_deref(),
+        &mut page,
+    )?;
+    add_images(cos, page_info, number, &mut page)?;
+    Ok(page)
+}
+
+/// Extracts every page in order. Pages are independent, so large documents are spread over a
+/// few workers that each own a renderer. The first error in page order is reported, matching
+/// sequential extraction.
+fn extract_pages(
+    renderer: &mut PageRenderer,
+    bytes: &Arc<Vec<u8>>,
+    config: &RenderConfig,
+    cos: &pdfcraft_cos::Document,
+    info: &pdfcraft_render::DocInfo,
+) -> Result<Vec<PagePayload>, EngineError> {
+    let count = info.pages.len();
+    let workers = std::thread::available_parallelism()
+        .map_or(1, usize::from)
+        .min(MAX_EXTRACT_WORKERS)
+        .min(count);
+    if count < PARALLEL_MIN_PAGES || workers < 2 {
+        return (0..count)
+            .map(|number| extract_page(renderer, cos, info, number))
+            .collect();
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    // Lowest failing page so far; pages below it must still finish to keep error order.
+    let first_error = std::sync::atomic::AtomicUsize::new(usize::MAX);
+    let mut results: Vec<Option<Result<PagePayload, EngineError>>> = Vec::new();
+    results.resize_with(count, || None);
+    let results = Mutex::new(results);
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| {
+                let mut local = PageRenderer::new(bytes.clone(), config.clone());
+                loop {
+                    let number = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if number >= count
+                        || number > first_error.load(std::sync::atomic::Ordering::Relaxed)
+                    {
+                        break;
+                    }
+                    let result = extract_page(&mut local, cos, info, number);
+                    if result.is_err() {
+                        first_error.fetch_min(number, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    results.lock().unwrap_or_else(|e| e.into_inner())[number] = Some(result);
+                }
+            });
+        }
+    });
+    let results = results.into_inner().unwrap_or_else(|e| e.into_inner());
+    let mut pages = Vec::with_capacity(count);
+    for result in results {
+        match result {
+            Some(result) => pages.push(result?),
+            // Workers only skip pages after the lowest failure, which was returned above.
+            None => break,
+        }
+    }
+    if pages.len() != count {
+        return Err(EngineError::Malformed(
+            "PDF page extraction was interrupted".into(),
+        ));
+    }
+    Ok(pages)
+}
 fn add_table(
     cos: &pdfcraft_cos::Document,
     info: &pdfcraft_render::PageInfo,
