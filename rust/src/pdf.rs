@@ -560,7 +560,24 @@ fn add_text(text: &pdfcraft_render::PageText, page: &mut PagePayload) {
 /// Documents below this size are extracted on the calling thread; spawning workers and
 /// opening a second parser per worker would cost more than it saves.
 const PARALLEL_MIN_PAGES: usize = 8;
-const MAX_EXTRACT_WORKERS: usize = 8;
+/// Workers used when `DOC_EX_THREADS` is unset: the available cores, up to this many.
+const DEFAULT_MAX_WORKERS: usize = 8;
+/// Upper bound for an explicit `DOC_EX_THREADS`, so a typo cannot spawn thousands of parsers.
+const MAX_WORKERS: usize = 64;
+const THREADS_ENV: &str = "DOC_EX_THREADS";
+
+/// Worker threads for a document of `pages` pages. `setting` is `DOC_EX_THREADS`: a positive
+/// integer picks the count (`1` disables parallelism); anything else, including an empty or
+/// non-numeric value, uses the default.
+fn worker_count(setting: Option<&str>, cores: usize, pages: usize) -> usize {
+    let requested = setting
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|&n| n > 0)
+        .map(|n| n.min(MAX_WORKERS));
+    requested
+        .unwrap_or_else(|| cores.min(DEFAULT_MAX_WORKERS))
+        .min(pages)
+}
 
 fn extract_page(
     renderer: &mut PageRenderer,
@@ -617,10 +634,11 @@ fn extract_pages(
     info: &pdfcraft_render::DocInfo,
 ) -> Result<Vec<PagePayload>, EngineError> {
     let count = info.pages.len();
-    let workers = std::thread::available_parallelism()
-        .map_or(1, usize::from)
-        .min(MAX_EXTRACT_WORKERS)
-        .min(count);
+    let workers = worker_count(
+        std::env::var(THREADS_ENV).ok().as_deref(),
+        std::thread::available_parallelism().map_or(1, usize::from),
+        count,
+    );
     if count < PARALLEL_MIN_PAGES || workers < 2 {
         return (0..count)
             .map(|number| extract_page(renderer, cos, info, number))
