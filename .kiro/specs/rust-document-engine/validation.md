@@ -2581,3 +2581,15 @@ Open limitations introduced by this change, left as failing tests on purpose:
 - PPTX native and PDF-derived slide renders now differ by up to 4/255 on about 0.011% of channel values; the contract was within 1 (two native `cell_format_proof` tests).
 
 Real-document check on the installed wheel: all five `.test_files` open, extract, render and convert. DOCX and PPTX results equal the baseline. PDF extraction differs slightly from the baseline because PdfCraft's reading order changed (`c-api.pdf` 918,002 to 922,738 characters).
+
+### WordCraft pinned at the merge of storytold/wordcraft#4092 (local macOS run, not a delivery gate)
+
+WordCraft moved from `c524027f` to `a2312a310f016efacde2548eae811807bd3d1e86`, the merge commit of #4092 ("DOCX: write the default font size when the document leaves it unset"). The merge commit was pinned instead of the newer `main` so that no unrelated upstream change was mixed in; 13 upstream commits sit between the two pins and only the merge touched DOCX writing. `Cargo.lock` changed in 9 lines: 248 packages before and after, none added or removed, no third-party version change. `tools/audit_licenses.py` passes on 264 reviewed packages. craft-libs stays at `9f75d3dc`, which this WordCraft revision also pins.
+
+The upstream change makes the writer emit the resolver's 11 pt fallback (`DEFAULT_FONT_SIZE`) when `styles.default_chr.size` is unset. A saved and reopened document therefore keeps its effective default size instead of becoming 10 pt. The reader is unchanged.
+
+Consequence here: the refusal of `styles.format_defaults(font_size=None)` is removed, and the original default-size tests are restored from `main` with only the two expectations the fix moves (the written `w:sz` is `22`, and the reopened default size is `Some(11.0)` instead of `None`). All of the restored assertions about effective sizes in the body, a header, a table cell, a styled paragraph and a direct run pass unchanged, as does `supported_default_clears_preserve_effective_native_readback`, which clears each default key, reopens and compares effective formatting.
+
+Same platform and toolchain as the previous entry (macOS 26.6 arm64, Rust 1.99.1, CPython 3.13). Native: 464 pass, 6 fail, the same six as before (two fail identically on unmodified `main` on this platform; four are the PPTX tests waiting on storytold/deckcraft#1257). Installed wheel: 585 tests, 3 failures, the same three as before.
+
+Still open: an imported DOCX that omits the default size is read as 10 pt while the resolver treats the same omission as 11 pt (`test_docx_default_size_upgrade`); #4092 deliberately left the reader alone because which value Word uses was not established. The two PPTX line-break tests fail until storytold/deckcraft#1257 (or #1192 / #1197) merges.
