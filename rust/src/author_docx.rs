@@ -11885,7 +11885,7 @@ mod tests {
     }
 
     #[test]
-    fn upstream_border_styles_and_widths_are_approximated_in_native_output() {
+    fn upstream_border_styles_and_widths_are_drawn_as_themselves() {
         fn raw_border(style: BorderStyle, width: f32) -> Vec<u8> {
             let mut document = Document::new();
             let mut paragraph = Paragraph::with_text("Raw native border", CharProps::default());
@@ -11901,6 +11901,10 @@ mod tests {
             document.body = vec![Arc::new(Block::Para(paragraph))];
             wordcraft_docx::write(&document).unwrap()
         }
+        // WordCraft 0.8 approximated these by a substitute style and width (triple as double,
+        // dot-dash as dashed, hairline as 0.25 pt, thick as a 1.5 pt single line). WordCraft 0.10
+        // draws triple (#2210) and the dash patterns (#3157) as themselves, so a raw border must
+        // now differ from the old substitute in both outputs.
         for (style, width, substitute, actual_width) in [
             (BorderStyle::Triple, 2.0, BorderStyle::Double, 2.0),
             (BorderStyle::DotDash, 2.0, BorderStyle::Dashed, 2.0),
@@ -11909,21 +11913,23 @@ mod tests {
         ] {
             let raw = raw_border(style, width);
             let substitute = raw_border(substitute, actual_width);
-            assert_eq!(
+            assert_ne!(
                 crate::docx::render(&raw, 0, 144.0, None).unwrap(),
-                crate::docx::render(&substitute, 0, 144.0, None).unwrap()
+                crate::docx::render(&substitute, 0, 144.0, None).unwrap(),
+                "{style:?} {width}"
             );
             let raw_pdf = crate::docx::to_pdf(&raw, None).unwrap();
             let substitute_pdf = crate::docx::to_pdf(&substitute, None).unwrap();
-            assert_eq!(
+            assert_ne!(
                 crate::pdf::render(&raw_pdf, 0, 144.0, None).unwrap(),
-                crate::pdf::render(&substitute_pdf, 0, 144.0, None).unwrap()
+                crate::pdf::render(&substitute_pdf, 0, 144.0, None).unwrap(),
+                "{style:?} {width} in PDF"
             );
         }
     }
 
     #[test]
-    fn upstream_vertical_wave_is_empty_and_double_strokes_overlap() {
+    fn upstream_vertical_wave_draws_and_double_strokes_are_separate() {
         for style in [BorderStyle::Wave, BorderStyle::Double] {
             let mut document = Document::new();
             let mut paragraph = Paragraph::with_text("Vertical border", CharProps::default());
@@ -11957,7 +11963,8 @@ mod tests {
                 .unwrap();
             let png = crate::docx::render(&raw, 0, 144.0, None).unwrap();
             if style == BorderStyle::Wave {
-                assert_eq!(border_pixels(png, 0), 0);
+                // WordCraft 0.8 drew nothing for a vertical wave; 0.10 draws it (#2113).
+                assert!(border_pixels(png, 0) > 0);
                 continue;
             }
             let mut reader = png::Decoder::new(Cursor::new(png)).read_info().unwrap();
@@ -11975,9 +11982,11 @@ mod tests {
                 }
                 previous = red;
             }
+            // WordCraft 0.8 overlapped the two strokes of a vertical double border into one;
+            // 0.10 draws them separately (#2113).
             assert_eq!(
-                runs, 1,
-                "native vertical double produces one overlapping stroke, not two separated strokes"
+                runs, 2,
+                "a vertical double border draws two separate strokes"
             );
         }
     }
@@ -20901,7 +20910,17 @@ mod picture_float_raw_proof {
             let InlineObject::Image { float, media, .. } = &para.objects[0] else {
                 panic!("image")
             };
-            assert_eq!(*float, wanted, "{anchor}");
+            // The writer gives an unstacked float (z = 0) a document-order `relativeHeight`
+            // and WordCraft 0.10 reads it back; every other field must round-trip unchanged.
+            assert!(float.z > 0, "{anchor}");
+            assert_eq!(
+                *float,
+                wordcraft_doc::para::Float {
+                    z: float.z,
+                    ..wanted
+                },
+                "{anchor}"
+            );
             assert_eq!(read.media[media].as_ref(), original.as_slice());
             let layout =
                 wordcraft_layout::layout(&read, &mut Default::default(), &Default::default());
@@ -21083,7 +21102,16 @@ mod picture_float_raw_proof {
         let written = author.to_bytes().unwrap();
         let read = wordcraft_docx::read(&written).unwrap();
         let source = author.document().unwrap().body[0].as_para().unwrap();
-        assert_eq!(read.body[0].as_para().unwrap().objects, source.objects);
+        // The writer adds a document-order stacking number (`relativeHeight`) to a float
+        // authored without one; everything else must round-trip unchanged.
+        let mut restored = read.body[0].as_para().unwrap().objects.clone();
+        for object in &mut restored {
+            if let Some(float) = object.float_mut() {
+                assert!(float.z > 0);
+                float.z = 0;
+            }
+        }
+        assert_eq!(restored, source.objects);
         assert_eq!(author.image_data(id).unwrap(), blue_png());
         assert_eq!(author.image_crop(id).unwrap(), (0.25, 0.0, 0.0, 0.0));
         assert_eq!(author.image_flips(id).unwrap(), (true, true));
