@@ -23,16 +23,24 @@ Keep all crates from each repository on one revision:
 
 | Project | Revision | Purpose |
 |---|---|---|
-| PdfCraft (reviewed contribution fork) | `516caea956c0aaf15f2bd1f35a15e07c73a9ead6` | PDF inspection, text, links, images, rendering, DOCX export |
-| WordCraft | `a57b416783b8ba25ec44e30ee0c3cd8362c44974` | DOCX model, layout, rendering, PDF export |
-| DeckCraft (reviewed contribution fork) | `16de1ca86058a96f1194c2ddc3a090c7f63f2640` | PPTX model, fallible rendering, PDF export |
-| craft-libs | `c3487320b2d1de657b860b3c8abb44e1f2b32bd8` | Shared PDF backend required by WordCraft/DeckCraft |
+| PdfCraft (`storytold/pdfcraft` main) | `0b670caf4a090e9d83a7f41a84b4cb2144a2d33e` | PDF inspection, text, links, images, rendering, DOCX export |
+| WordCraft (`storytold/wordcraft` main) | `c524027f34be2d1322b23064f80662d3638cf880` | DOCX model, layout, rendering, PDF export |
+| DeckCraft (`storytold/deckcraft` main) | `5fadda5ecfda00e11e364f095a31974f54857e21` | PPTX model, rendering, PDF export |
+| craft-libs (`storytold/craft-libs`) | `9f75d3dc19b4b514c4f3d4847ed1ec1b0e86b4ef` | Shared PDF backend and patched Krilla dependency, one rev for all three |
 
-PdfCraft is pinned to the reviewed contribution fork at `https://github.com/narain1/pdfcraft`, derived from upstream `645016addcfb9078c557f0189559ab47cdcee057` through reviewed parent `60a8d7998b64c7718e08e9054e99f1f2eb1eda8d`. It retains the final integer raster-budget correction and adds native typed text/image placement. This upgrade exposes no Python underlay API and does not imply upstream acceptance.
+PdfCraft, WordCraft and DeckCraft are pinned to immutable commits on the `main` branch of their original repositories (`storytold/*`). The pins carry no local patches and no contribution forks. Never pin a branch name; move the pin to a newer `main` commit in a dedicated upgrade.
 
-WordCraft is pinned to the reviewed contribution fork at `https://github.com/narain1/wordcraft`, directly based on upstream `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`. Its PDF shape stroke change does not imply upstream acceptance.
+Behavior the earlier reviewed forks provided is handled in the adapters or is unsupported. Treat these as the current contract:
 
-DeckCraft is pinned to the reviewed contribution fork at `https://github.com/narain1/deckcraft`, derived from upstream `22db9261f9d1a214c296fd390173130c45d76d66` through reviewed parent `c9c7fff189c808bf7266d0b888c3636a1880080d`. It retains fallible rendering/PDF error propagation and logical line-break offsets, and adds bounded native same-presentation slide copying. Public slide-copy authoring requires its separate adapter acceptance. This identifies fork provenance; it does not imply upstream acceptance.
+- **Underlay placement** (`behind=True`): `author_pdf::add_content_with_placement` adds the item with PdfCraft's public API, then moves its stream to the front of the page's `/Contents`.
+- **Render panics:** DeckCraft draws a blank slide and counts the panic. `pptx::try_render_slide` and `pptx::export_pdf` turn that count into an explicit error. It is process-wide, so a panic on another thread can fail a call spuriously, but a panic can never pass silently.
+- **DOCX core `language`:** rejected as an unknown metadata key. WordCraft has no `dc:language`.
+- **Clearing the DOCX default font size:** rejected. The reader reads an omitted default size as 10 pt, but the model resolves it as 11 pt, so a clear would change inherited sizes after reopening.
+- **PDF export of very thick shape strokes:** WordCraft's PDF output uses square joins, so corners differ from the raster by up to the stroke width. Recorded in `docx/stroke_regression_tests.rs`.
+- **Known upstream defect:** DeckCraft's PDF export builds paragraph text without line-break characters, so searchable text is corrupted for PPTX paragraphs containing explicit breaks (`paragraph.add_break()`). Native PDF export of such documents is not supported until upstream fixes it.
+- Slide copy and retained extended document properties are not available and have no production caller.
+
+Use the `update-upstream-crates` skill (`.kiro/skills/update-upstream-crates/SKILL.md`) for upgrades.
 
 An upstream upgrade is a dedicated change: update every crate from that repository together, regenerate `Cargo.lock`, rerun the license audit, run the complete corpus, measure wheel size, and record results in the spec validation file.
 

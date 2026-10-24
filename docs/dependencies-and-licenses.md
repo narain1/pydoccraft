@@ -10,12 +10,22 @@ The package links selected library crates rather than complete ArtCraft applicat
 
 | Project | Pinned revision | Responsibility |
 |---|---|---|
-| [PdfCraft contribution fork](https://github.com/narain1/pdfcraft) | `516caea956c0aaf15f2bd1f35a15e07c73a9ead6` | PDF inspection, reading-order text, links, images, rendering, DOCX export primitives |
-| [WordCraft contribution fork](https://github.com/narain1/wordcraft) | `a57b416783b8ba25ec44e30ee0c3cd8362c44974` | DOCX model, layout, rendering, PDF export |
-| [DeckCraft contribution fork](https://github.com/narain1/deckcraft) | `16de1ca86058a96f1194c2ddc3a090c7f63f2640` | PPTX model, rendering, PDF export |
-| [craft-libs](https://github.com/storytold/craft-libs) | `c3487320b2d1de657b860b3c8abb44e1f2b32bd8` | Shared PDF backend and patched Krilla dependency |
+| [PdfCraft](https://github.com/storytold/pdfcraft) | `0b670caf4a090e9d83a7f41a84b4cb2144a2d33e` | PDF inspection, reading-order text, links, images, rendering, DOCX export primitives |
+| [WordCraft](https://github.com/storytold/wordcraft) | `c524027f34be2d1322b23064f80662d3638cf880` | DOCX model, layout, rendering, PDF export |
+| [DeckCraft](https://github.com/storytold/deckcraft) | `5fadda5ecfda00e11e364f095a31974f54857e21` | PPTX model, rendering, PDF export |
+| [craft-libs](https://github.com/storytold/craft-libs) | `9f75d3dc19b4b514c4f3d4847ed1ec1b0e86b4ef` | Shared PDF backend and patched Krilla dependency |
 
-The PdfCraft fork derives from upstream `645016addcfb9078c557f0189559ab47cdcee057` through reviewed parent `60a8d7998b64c7718e08e9054e99f1f2eb1eda8d`. It retains the final rounded-raster allocation guard and adds placement for native typed text/image content; this dedicated upgrade adds no Python underlay API. WordCraft retains the reviewed stroke-parity and absent-default-size corrections and core language preservation, and adds opt-in typed access to eight retained extended properties. The legacy reader/writer policy stays unchanged; Python extended metadata admission is separate. DeckCraft retains fallible rendering/PDF error propagation and logical break-text correction, and adds bounded native same-presentation slide copying. This dedicated upgrade changes only DeckCraft; public slide-copy admission remains separate. These are contribution forks, not claims of upstream acceptance; root NOTICE records original sources and parents. No bundled assets changed.
+PdfCraft, WordCraft and DeckCraft are pinned to immutable commits on the `main` branch of their original repositories (`storytold/*`). The pins carry no local patches and no contribution forks. Never pin a branch name; move the pin to a newer `main` commit in a dedicated upgrade.
+
+Behavior the earlier reviewed forks provided is handled in the adapters or is unsupported. Treat these as the current contract:
+
+- **Underlay placement** (`behind=True`): `author_pdf::add_content_with_placement` adds the item with PdfCraft's public API, then moves its stream to the front of the page's `/Contents`.
+- **Render panics:** DeckCraft draws a blank slide and counts the panic. `pptx::try_render_slide` and `pptx::export_pdf` turn that count into an explicit error. It is process-wide, so a panic on another thread can fail a call spuriously, but a panic can never pass silently.
+- **DOCX core `language`:** rejected as an unknown metadata key. WordCraft has no `dc:language`.
+- **Clearing the DOCX default font size:** rejected. The reader reads an omitted default size as 10 pt, but the model resolves it as 11 pt, so a clear would change inherited sizes after reopening.
+- **PDF export of very thick shape strokes:** WordCraft's PDF output uses square joins, so corners differ from the raster by up to the stroke width. Recorded in `docx/stroke_regression_tests.rs`.
+- **Known upstream defect:** DeckCraft's PDF export builds paragraph text without line-break characters, so searchable text is corrupted for PPTX paragraphs containing explicit breaks (`paragraph.add_break()`). Native PDF export of such documents is not supported until upstream fixes it.
+- Slide copy and retained extended document properties are not available and have no production caller.
 
 Git dependencies use immutable `rev` values. Do not replace them with branches or floating tags.
 

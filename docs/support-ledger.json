@@ -3,22 +3,22 @@
   "audited_commit": "77cd8c0e00600554f14ea1e9d61a138e9211d8d9",
   "references": {
     "pdfcraft": {
-      "revision": "516caea956c0aaf15f2bd1f35a15e07c73a9ead6",
+      "revision": "0b670caf4a090e9d83a7f41a84b4cb2144a2d33e",
       "kind": "engine",
-      "repository": "https://github.com/narain1/pdfcraft"
+      "repository": "https://github.com/storytold/pdfcraft"
     },
     "wordcraft": {
-      "revision": "a57b416783b8ba25ec44e30ee0c3cd8362c44974",
+      "revision": "c524027f34be2d1322b23064f80662d3638cf880",
       "kind": "engine",
-      "repository": "https://github.com/narain1/wordcraft"
+      "repository": "https://github.com/storytold/wordcraft"
     },
     "deckcraft": {
-      "revision": "16de1ca86058a96f1194c2ddc3a090c7f63f2640",
+      "revision": "5fadda5ecfda00e11e364f095a31974f54857e21",
       "kind": "engine",
-      "repository": "https://github.com/narain1/deckcraft"
+      "repository": "https://github.com/storytold/deckcraft"
     },
     "craft-libs": {
-      "revision": "c3487320b2d1de657b860b3c8abb44e1f2b32bd8",
+      "revision": "9f75d3dc19b4b514c4f3d4847ed1ec1b0e86b4ef",
       "kind": "engine",
       "repository": "https://github.com/storytold/craft-libs"
     },
@@ -151,7 +151,7 @@
     "tests/test_slide_layouts.py": "365028483efdb274afb6b4efc4b3ca8e51a169c879e47f2263b2a435271562f2",
     "tests/test_story_content.py": "c2432ede7ebf0ff0d3b3b5c6cef0729d77e30018f0eb0b576bcd8cd3324e4203",
     "tests/test_line_numbers.py": "b12daf4001b8134b9ae99d981c33c70615c51e3b4301575f2dfc4ea3dc568fdf",
-    "tests/test_direction_language.py": "bc11d3b9f6c0e66e5b8d3337f1308ba3811cff0a6f477e1d035efe6a2a546a38",
+    "tests/test_direction_language.py": "e24c6808ff7a60ee2147f05a70fedec4c78bbe7a69e1a986de39dd1849d46a2e",
     "tests/test_pdf_geometric_annotations.py": "0b61bc426776a8f74c75a2ae364f2e01d3426a7d059b301971dc0dade049f3c8",
     "tests/test_word_bookmarks.py": "6bf22bc916296482ce25100702ae2f5b88f385ece5befb2d20cacb083893a95a",
     "tests/test_story_clear.py": "ea43d861092700d6763636b622d56b261da0803c2d79916d0d8c0a688349d2ce",
