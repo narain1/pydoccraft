@@ -2017,8 +2017,9 @@ mod raster_limit_tests {
     fn linked_native_integer_budget_rejects_before_allocation_and_recovers() {
         // Safety precondition: never issue this large direct request to an older
         // backend. Its original failure is proved upstream with an intercepted
-        // allocator, not by allocating a 256MB raster here. The reviewed typed-placement
-        // descendant retains the exact raster.rs/pixels.rs correction from 60a8d799.
+        // allocator, not by allocating a 256MB raster here. PdfCraft v0.13.0 contains the
+        // exact raster.rs/pixels.rs correction (upstream PR #3948); the reviewed typed-placement
+        // series is rebased onto that release.
         let entries: Vec<_> = include_str!("../../Cargo.lock")
             .split("[[package]]")
             .filter(|entry| {
@@ -2029,7 +2030,7 @@ mod raster_limit_tests {
             .collect();
         assert_eq!(entries.len(), 1);
         assert!(entries[0].lines().any(|line| line.trim() ==
-            "source = \"git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6\""));
+            "source = \"git+https://github.com/narain1/pdfcraft?rev=9195f5d5036774e910512a2fbca9fa177f2a91af#9195f5d5036774e910512a2fbca9fa177f2a91af\""));
         for rotation in [0, 90, 180, 270] {
             let raw = fixture(4000.25, 3999.75, 2.0, rotation);
             for reject_oversize in [false, true] {

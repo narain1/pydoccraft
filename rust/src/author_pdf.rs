@@ -990,6 +990,10 @@ impl EditablePdf {
         } else {
             expected.flags &= !pdfcraft_forms::flags::READ_ONLY;
         }
+        // Each widget also reports the derived field-or-widget read-only state.
+        for widget in &mut expected.widgets {
+            widget.read_only = read_only;
+        }
         let mut edited = self.document()?.clone();
         pdfcraft_forms::set_props(
             &mut edited,
@@ -5491,6 +5495,9 @@ mod tests {
             let actual = document.field_named("field").unwrap();
             let mut expected = original.clone();
             expected.flags |= pdfcraft_forms::flags::READ_ONLY;
+            for widget in &mut expected.widgets {
+                widget.read_only = true;
+            }
             assert_eq!(actual, expected);
             assert_eq!(
                 tooltip_appearance_data(document.document().unwrap(), &actual),

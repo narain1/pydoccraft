@@ -1494,6 +1494,13 @@ impl EditableDocx {
             name: name.into(),
             kind,
             based_on: base,
+            // An unset band size means no bands, as in Word. A new table style bands one row
+            // and one column at a time, like the built-in banded styles.
+            table: (kind == StyleKind::Table).then(|| wordcraft_doc::styles::TableStyleParts {
+                band_size: Some(1),
+                col_band_size: Some(1),
+                ..Default::default()
+            }),
             ..Default::default()
         });
         validate_style_chains(&candidate.styles)?;
@@ -7896,7 +7903,11 @@ fn paragraph_table_context(document: &Document, story: StoryRef, path: &Path) ->
     let current = table.rows.get(row)?.cells.get(cell)?;
     let regions = PartSet::of_cell(
         &table.props.look,
-        style.parts.band_size.unwrap_or(1),
+        (
+            // Word reads an unset band size as zero, which turns the bands off (#3415).
+            style.parts.band_size.unwrap_or(0),
+            style.parts.col_band_size.unwrap_or(0),
+        ),
         (row, table.rows.len()),
         (table.grid_col(row, cell), current.span(), table.cols()),
     );
@@ -11094,12 +11105,14 @@ mod tests {
             .collect();
         assert!(texts[0].contains("Collector begins"));
         assert!(texts[1].contains("Collector second page"));
-        // The intermediate collector spans both pages, but native SECTIONPAGES is 1.
+        // The intermediate collector spans both pages. WordCraft 0.8 reported SECTIONPAGES as 1
+        // here; WordCraft 0.10 counts both pages. Authoring still rejects this field in such
+        // sections until the wider behavior is verified.
         assert!(
             texts[1]
                 .split_whitespace()
                 .collect::<String>()
-                .contains("Deferredcount=1"),
+                .contains("Deferredcount=2"),
             "{:?}",
             texts
         );
@@ -11182,9 +11195,10 @@ mod tests {
             .map(|block| block.text.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        // Section two occupies both physical pages; native reports only its owned last page.
+        // Section two occupies both physical pages. WordCraft 0.8 reported only its owned last
+        // page (1); WordCraft 0.10 reports both (2).
         assert!(
-            text.contains("Second 1") && text.contains("Third 1"),
+            text.contains("Second 2") && text.contains("Third 2"),
             "{text}"
         );
     }
@@ -14955,7 +14969,20 @@ mod tests {
         let generation = document.table_generation(table).unwrap();
         let rows = document.table_rows(table).unwrap();
         assert!(document.insert_row(table, 2).is_err());
-        assert!(document.delete_row(table, 1).is_err());
+        // WordCraft 0.10 promotes the continuation cell when the first row of a vertical merge
+        // is deleted (#2649), so this is no longer an orphan. Prove that on an independent
+        // copy, then leave the original untouched for the remaining orphan-row checks.
+        let mut promoted = document.copy().unwrap();
+        promoted.delete_row(table, 1).unwrap();
+        assert_eq!(promoted.table_rows(table).unwrap().len(), 2);
+        let reopened = wordcraft_docx::read(&promoted.to_bytes().unwrap()).unwrap();
+        validate_editable_grid(
+            reopened
+                .table(StoryRef::Body, &promoted.location(table).unwrap().1)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(document.table_rows(table).unwrap(), rows);
         assert_eq!(document.revision().unwrap(), before);
         assert_eq!(document.table_generation(table).unwrap(), generation);
         assert_eq!(document.table_rows(table).unwrap(), rows);
@@ -17894,7 +17921,7 @@ mod tests {
             },
             Draw::Figure {
                 alt: String::new(),
-                kind: wordcraft_doc::graphic::GraphicKind::Chart,
+                kind: Some(wordcraft_doc::graphic::GraphicKind::Chart),
                 draws: vec![glyph],
             },
         ] {

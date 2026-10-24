@@ -368,8 +368,8 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-anim"
-version = "0.8.0"
-source = "git+https://github.com/narain1/deckcraft?rev=16de1ca86058a96f1194c2ddc3a090c7f63f2640#16de1ca86058a96f1194c2ddc3a090c7f63f2640"
+version = "0.10.0"
+source = "git+https://github.com/narain1/deckcraft?rev=57a9a264346ed9ac443ea6ecbf839a68b50f1f50#57a9a264346ed9ac443ea6ecbf839a68b50f1f50"
 dependencies = [
  "deckcraft-geom",
  "deckcraft-model",
@@ -378,16 +378,16 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-color"
-version = "0.8.0"
-source = "git+https://github.com/narain1/deckcraft?rev=16de1ca86058a96f1194c2ddc3a090c7f63f2640#16de1ca86058a96f1194c2ddc3a090c7f63f2640"
+version = "0.10.0"
+source = "git+https://github.com/narain1/deckcraft?rev=57a9a264346ed9ac443ea6ecbf839a68b50f1f50#57a9a264346ed9ac443ea6ecbf839a68b50f1f50"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "deckcraft-fonts"
-version = "0.8.0"
-source = "git+https://github.com/narain1/deckcraft?rev=16de1ca86058a96f1194c2ddc3a090c7f63f2640#16de1ca86058a96f1194c2ddc3a090c7f63f2640"
+version = "0.10.0"
+source = "git+https://github.com/narain1/deckcraft?rev=57a9a264346ed9ac443ea6ecbf839a68b50f1f50#57a9a264346ed9ac443ea6ecbf839a68b50f1f50"
 dependencies = [
  "epaint_default_fonts",
  "harfrust 0.13.3",
@@ -399,8 +399,8 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-geom"
-version = "0.8.0"
-source = "git+https://github.com/narain1/deckcraft?rev=16de1ca86058a96f1194c2ddc3a090c7f63f2640#16de1ca86058a96f1194c2ddc3a090c7f63f2640"
+version = "0.10.0"
+source = "git+https://github.com/narain1/deckcraft?rev=57a9a264346ed9ac443ea6ecbf839a68b50f1f50#57a9a264346ed9ac443ea6ecbf839a68b50f1f50"
 dependencies = [
  "kurbo",
  "serde",
@@ -408,8 +408,8 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-metafile"
-version = "0.8.0"
-source = "git+https://github.com/narain1/deckcraft?rev=16de1ca86058a96f1194c2ddc3a090c7f63f2640#16de1ca86058a96f1194c2ddc3a090c7f63f2640"
+version = "0.10.0"
+source = "git+https://github.com/narain1/deckcraft?rev=57a9a264346ed9ac443ea6ecbf839a68b50f1f50#57a9a264346ed9ac443ea6ecbf839a68b50f1f50"
 dependencies = [
  "image",
  "kurbo",
@@ -418,8 +418,8 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-model"
-version = "0.8.0"
-source = "git+https://github.com/narain1/deckcraft?rev=16de1ca86058a96f1194c2ddc3a090c7f63f2640#16de1ca86058a96f1194c2ddc3a090c7f63f2640"
+version = "0.10.0"
+source = "git+https://github.com/narain1/deckcraft?rev=57a9a264346ed9ac443ea6ecbf839a68b50f1f50#57a9a264346ed9ac443ea6ecbf839a68b50f1f50"
 dependencies = [
  "deckcraft-color",
  "deckcraft-geom",
@@ -431,8 +431,8 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-pdf"
-version = "0.8.0"
-source = "git+https://github.com/narain1/deckcraft?rev=16de1ca86058a96f1194c2ddc3a090c7f63f2640#16de1ca86058a96f1194c2ddc3a090c7f63f2640"
+version = "0.10.0"
+source = "git+https://github.com/narain1/deckcraft?rev=57a9a264346ed9ac443ea6ecbf839a68b50f1f50#57a9a264346ed9ac443ea6ecbf839a68b50f1f50"
 dependencies = [
  "craft-pdf",
  "deckcraft-fonts",
@@ -448,8 +448,8 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-pptx"
-version = "0.8.0"
-source = "git+https://github.com/narain1/deckcraft?rev=16de1ca86058a96f1194c2ddc3a090c7f63f2640#16de1ca86058a96f1194c2ddc3a090c7f63f2640"
+version = "0.10.0"
+source = "git+https://github.com/narain1/deckcraft?rev=57a9a264346ed9ac443ea6ecbf839a68b50f1f50#57a9a264346ed9ac443ea6ecbf839a68b50f1f50"
 dependencies = [
  "deckcraft-color",
  "deckcraft-geom",
@@ -462,8 +462,8 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-render"
-version = "0.8.0"
-source = "git+https://github.com/narain1/deckcraft?rev=16de1ca86058a96f1194c2ddc3a090c7f63f2640#16de1ca86058a96f1194c2ddc3a090c7f63f2640"
+version = "0.10.0"
+source = "git+https://github.com/narain1/deckcraft?rev=57a9a264346ed9ac443ea6ecbf839a68b50f1f50#57a9a264346ed9ac443ea6ecbf839a68b50f1f50"
 dependencies = [
  "deckcraft-anim",
  "deckcraft-color",
@@ -482,8 +482,8 @@ dependencies = [
 
 [[package]]
 name = "deckcraft-text"
-version = "0.8.0"
-source = "git+https://github.com/narain1/deckcraft?rev=16de1ca86058a96f1194c2ddc3a090c7f63f2640#16de1ca86058a96f1194c2ddc3a090c7f63f2640"
+version = "0.10.0"
+source = "git+https://github.com/narain1/deckcraft?rev=57a9a264346ed9ac443ea6ecbf839a68b50f1f50#57a9a264346ed9ac443ea6ecbf839a68b50f1f50"
 dependencies = [
  "chrono",
  "deckcraft-color",
@@ -834,8 +834,6 @@ checksum = "9f4d0e94ddd48749f06bbe4e5389fb9799a0c45bcaf00495042076ef05e3241a"
 [[package]]
 name = "hayro-cmap"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24d285dc30731c8485de5fa732fbdf2b3affdf01e4da7c2135022ca6fa664bf6"
 dependencies = [
  "brotli",
  "hayro-postscript",
@@ -1225,8 +1223,8 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-annot"
-version = "0.9.0"
-source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
+version = "0.13.0"
+source = "git+https://github.com/narain1/pdfcraft?rev=9195f5d5036774e910512a2fbca9fa177f2a91af#9195f5d5036774e910512a2fbca9fa177f2a91af"
 dependencies = [
  "pdfcraft-cos",
  "pdfcraft-fonts",
@@ -1236,17 +1234,19 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-content"
-version = "0.9.0"
-source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
+version = "0.13.0"
+source = "git+https://github.com/narain1/pdfcraft?rev=9195f5d5036774e910512a2fbca9fa177f2a91af#9195f5d5036774e910512a2fbca9fa177f2a91af"
 dependencies = [
+ "hayro-syntax",
  "pdfcraft-cos",
 ]
 
 [[package]]
 name = "pdfcraft-cos"
-version = "0.9.0"
-source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
+version = "0.13.0"
+source = "git+https://github.com/narain1/pdfcraft?rev=9195f5d5036774e910512a2fbca9fa177f2a91af#9195f5d5036774e910512a2fbca9fa177f2a91af"
 dependencies = [
+ "chrono",
  "pdfcraft-crypt",
  "pdfcraft-filters",
  "thiserror",
@@ -1254,8 +1254,8 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-create"
-version = "0.9.0"
-source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
+version = "0.13.0"
+source = "git+https://github.com/narain1/pdfcraft?rev=9195f5d5036774e910512a2fbca9fa177f2a91af#9195f5d5036774e910512a2fbca9fa177f2a91af"
 dependencies = [
  "encoding_rs",
  "image",
@@ -1270,8 +1270,8 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-crypt"
-version = "0.9.0"
-source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
+version = "0.13.0"
+source = "git+https://github.com/narain1/pdfcraft?rev=9195f5d5036774e910512a2fbca9fa177f2a91af#9195f5d5036774e910512a2fbca9fa177f2a91af"
 dependencies = [
  "aes",
  "md-5",
@@ -1282,8 +1282,8 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-edit"
-version = "0.9.0"
-source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
+version = "0.13.0"
+source = "git+https://github.com/narain1/pdfcraft?rev=9195f5d5036774e910512a2fbca9fa177f2a91af#9195f5d5036774e910512a2fbca9fa177f2a91af"
 dependencies = [
  "kurbo",
  "pdfcraft-annot",
@@ -1297,16 +1297,16 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-export"
-version = "0.9.0"
-source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
+version = "0.13.0"
+source = "git+https://github.com/narain1/pdfcraft?rev=9195f5d5036774e910512a2fbca9fa177f2a91af#9195f5d5036774e910512a2fbca9fa177f2a91af"
 dependencies = [
  "flate2",
 ]
 
 [[package]]
 name = "pdfcraft-filters"
-version = "0.9.0"
-source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
+version = "0.13.0"
+source = "git+https://github.com/narain1/pdfcraft?rev=9195f5d5036774e910512a2fbca9fa177f2a91af#9195f5d5036774e910512a2fbca9fa177f2a91af"
 dependencies = [
  "flate2",
  "thiserror",
@@ -1314,8 +1314,8 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-fonts"
-version = "0.9.0"
-source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
+version = "0.13.0"
+source = "git+https://github.com/narain1/pdfcraft?rev=9195f5d5036774e910512a2fbca9fa177f2a91af#9195f5d5036774e910512a2fbca9fa177f2a91af"
 dependencies = [
  "harfrust 0.12.0",
  "pdfcraft-cos",
@@ -1325,8 +1325,8 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-forms"
-version = "0.9.0"
-source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
+version = "0.13.0"
+source = "git+https://github.com/narain1/pdfcraft?rev=9195f5d5036774e910512a2fbca9fa177f2a91af#9195f5d5036774e910512a2fbca9fa177f2a91af"
 dependencies = [
  "pdfcraft-content",
  "pdfcraft-cos",
@@ -1337,16 +1337,16 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-model"
-version = "0.9.0"
-source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
+version = "0.13.0"
+source = "git+https://github.com/narain1/pdfcraft?rev=9195f5d5036774e910512a2fbca9fa177f2a91af#9195f5d5036774e910512a2fbca9fa177f2a91af"
 dependencies = [
  "pdfcraft-cos",
 ]
 
 [[package]]
 name = "pdfcraft-organize"
-version = "0.9.0"
-source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
+version = "0.13.0"
+source = "git+https://github.com/narain1/pdfcraft?rev=9195f5d5036774e910512a2fbca9fa177f2a91af#9195f5d5036774e910512a2fbca9fa177f2a91af"
 dependencies = [
  "pdfcraft-content",
  "pdfcraft-cos",
@@ -1355,8 +1355,8 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-render"
-version = "0.9.0"
-source = "git+https://github.com/narain1/pdfcraft?rev=516caea956c0aaf15f2bd1f35a15e07c73a9ead6#516caea956c0aaf15f2bd1f35a15e07c73a9ead6"
+version = "0.13.0"
+source = "git+https://github.com/narain1/pdfcraft?rev=9195f5d5036774e910512a2fbca9fa177f2a91af#9195f5d5036774e910512a2fbca9fa177f2a91af"
 dependencies = [
  "bytemuck",
  "getrandom 0.4.3",
@@ -2326,9 +2326,10 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "wordcraft-doc"
-version = "0.8.0"
-source = "git+https://github.com/narain1/wordcraft?rev=a57b416783b8ba25ec44e30ee0c3cd8362c44974#a57b416783b8ba25ec44e30ee0c3cd8362c44974"
+version = "0.10.0"
+source = "git+https://github.com/narain1/wordcraft?rev=f3fd0d92e0404f0b0638ce90e9fa11f016c7db8d#f3fd0d92e0404f0b0638ce90e9fa11f016c7db8d"
 dependencies = [
+ "base64",
  "serde",
  "serde_json",
  "thiserror",
@@ -2338,12 +2339,13 @@ dependencies = [
 
 [[package]]
 name = "wordcraft-docx"
-version = "0.8.0"
-source = "git+https://github.com/narain1/wordcraft?rev=a57b416783b8ba25ec44e30ee0c3cd8362c44974#a57b416783b8ba25ec44e30ee0c3cd8362c44974"
+version = "0.10.0"
+source = "git+https://github.com/narain1/wordcraft?rev=f3fd0d92e0404f0b0638ce90e9fa11f016c7db8d#f3fd0d92e0404f0b0638ce90e9fa11f016c7db8d"
 dependencies = [
  "aes",
  "base64",
  "cfb",
+ "chrono",
  "getrandom 0.3.4",
  "hmac",
  "log",
@@ -2351,6 +2353,7 @@ dependencies = [
  "sha1",
  "sha2",
  "thiserror",
+ "unicode-bidi",
  "wordcraft-doc",
  "wordcraft-geom",
  "zeroize",
@@ -2359,8 +2362,8 @@ dependencies = [
 
 [[package]]
 name = "wordcraft-fonts"
-version = "0.8.0"
-source = "git+https://github.com/narain1/wordcraft?rev=a57b416783b8ba25ec44e30ee0c3cd8362c44974#a57b416783b8ba25ec44e30ee0c3cd8362c44974"
+version = "0.10.0"
+source = "git+https://github.com/narain1/wordcraft?rev=f3fd0d92e0404f0b0638ce90e9fa11f016c7db8d#f3fd0d92e0404f0b0638ce90e9fa11f016c7db8d"
 dependencies = [
  "harfrust 0.13.3",
  "kurbo",
@@ -2373,16 +2376,16 @@ dependencies = [
 
 [[package]]
 name = "wordcraft-geom"
-version = "0.8.0"
-source = "git+https://github.com/narain1/wordcraft?rev=a57b416783b8ba25ec44e30ee0c3cd8362c44974#a57b416783b8ba25ec44e30ee0c3cd8362c44974"
+version = "0.10.0"
+source = "git+https://github.com/narain1/wordcraft?rev=f3fd0d92e0404f0b0638ce90e9fa11f016c7db8d#f3fd0d92e0404f0b0638ce90e9fa11f016c7db8d"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "wordcraft-layout"
-version = "0.8.0"
-source = "git+https://github.com/narain1/wordcraft?rev=a57b416783b8ba25ec44e30ee0c3cd8362c44974#a57b416783b8ba25ec44e30ee0c3cd8362c44974"
+version = "0.10.0"
+source = "git+https://github.com/narain1/wordcraft?rev=f3fd0d92e0404f0b0638ce90e9fa11f016c7db8d#f3fd0d92e0404f0b0638ce90e9fa11f016c7db8d"
 dependencies = [
  "image",
  "js-sys",
@@ -2396,13 +2399,14 @@ dependencies = [
  "wordcraft-doc",
  "wordcraft-fonts",
  "wordcraft-geom",
+ "wordcraft-metafile",
  "wordcraft-proof",
 ]
 
 [[package]]
 name = "wordcraft-metafile"
-version = "0.8.0"
-source = "git+https://github.com/narain1/wordcraft?rev=a57b416783b8ba25ec44e30ee0c3cd8362c44974#a57b416783b8ba25ec44e30ee0c3cd8362c44974"
+version = "0.10.0"
+source = "git+https://github.com/narain1/wordcraft?rev=f3fd0d92e0404f0b0638ce90e9fa11f016c7db8d#f3fd0d92e0404f0b0638ce90e9fa11f016c7db8d"
 dependencies = [
  "kurbo",
  "thiserror",
@@ -2410,9 +2414,10 @@ dependencies = [
 
 [[package]]
 name = "wordcraft-pdf"
-version = "0.8.0"
-source = "git+https://github.com/narain1/wordcraft?rev=a57b416783b8ba25ec44e30ee0c3cd8362c44974#a57b416783b8ba25ec44e30ee0c3cd8362c44974"
+version = "0.10.0"
+source = "git+https://github.com/narain1/wordcraft?rev=f3fd0d92e0404f0b0638ce90e9fa11f016c7db8d#f3fd0d92e0404f0b0638ce90e9fa11f016c7db8d"
 dependencies = [
+ "chrono",
  "craft-pdf",
  "image",
  "js-sys",
@@ -2428,8 +2433,8 @@ dependencies = [
 
 [[package]]
 name = "wordcraft-proof"
-version = "0.8.0"
-source = "git+https://github.com/narain1/wordcraft?rev=a57b416783b8ba25ec44e30ee0c3cd8362c44974#a57b416783b8ba25ec44e30ee0c3cd8362c44974"
+version = "0.10.0"
+source = "git+https://github.com/narain1/wordcraft?rev=f3fd0d92e0404f0b0638ce90e9fa11f016c7db8d#f3fd0d92e0404f0b0638ce90e9fa11f016c7db8d"
 dependencies = [
  "log",
  "miniz_oxide 0.8.9",
@@ -2437,8 +2442,8 @@ dependencies = [
 
 [[package]]
 name = "wordcraft-render"
-version = "0.8.0"
-source = "git+https://github.com/narain1/wordcraft?rev=a57b416783b8ba25ec44e30ee0c3cd8362c44974#a57b416783b8ba25ec44e30ee0c3cd8362c44974"
+version = "0.10.0"
+source = "git+https://github.com/narain1/wordcraft?rev=f3fd0d92e0404f0b0638ce90e9fa11f016c7db8d#f3fd0d92e0404f0b0638ce90e9fa11f016c7db8d"
 dependencies = [
  "image",
  "log",

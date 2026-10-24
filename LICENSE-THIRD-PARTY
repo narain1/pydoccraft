@@ -57,16 +57,16 @@ PdfCraft library crates use the reviewed contribution fork at `https://github.co
 | `crunchy` | `0.2.4` | MIT |
 | `crypto-common` | `0.2.2` | MIT OR Apache-2.0 |
 | `ctutils` | `0.4.3` | Apache-2.0 OR MIT |
-| `deckcraft-anim` | `0.8.0` | MIT OR Apache-2.0 |
-| `deckcraft-color` | `0.8.0` | MIT OR Apache-2.0 |
-| `deckcraft-fonts` | `0.8.0` | MIT OR Apache-2.0 |
-| `deckcraft-geom` | `0.8.0` | MIT OR Apache-2.0 |
-| `deckcraft-metafile` | `0.8.0` | MIT OR Apache-2.0 |
-| `deckcraft-model` | `0.8.0` | MIT OR Apache-2.0 |
-| `deckcraft-pdf` | `0.8.0` | MIT OR Apache-2.0 |
-| `deckcraft-pptx` | `0.8.0` | MIT OR Apache-2.0 |
-| `deckcraft-render` | `0.8.0` | MIT OR Apache-2.0 |
-| `deckcraft-text` | `0.8.0` | MIT OR Apache-2.0 |
+| `deckcraft-anim` | `0.10.0` | MIT OR Apache-2.0 |
+| `deckcraft-color` | `0.10.0` | MIT OR Apache-2.0 |
+| `deckcraft-fonts` | `0.10.0` | MIT OR Apache-2.0 |
+| `deckcraft-geom` | `0.10.0` | MIT OR Apache-2.0 |
+| `deckcraft-metafile` | `0.10.0` | MIT OR Apache-2.0 |
+| `deckcraft-model` | `0.10.0` | MIT OR Apache-2.0 |
+| `deckcraft-pdf` | `0.10.0` | MIT OR Apache-2.0 |
+| `deckcraft-pptx` | `0.10.0` | MIT OR Apache-2.0 |
+| `deckcraft-render` | `0.10.0` | MIT OR Apache-2.0 |
+| `deckcraft-text` | `0.10.0` | MIT OR Apache-2.0 |
 | `derive_arbitrary` | `1.5.0` | MIT OR Apache-2.0 |
 | `digest` | `0.11.3` | MIT OR Apache-2.0 |
 | `displaydoc` | `0.2.7` | MIT OR Apache-2.0 |
@@ -140,19 +140,19 @@ PdfCraft library crates use the reviewed contribution fork at `https://github.co
 | `once_cell` | `1.21.4` | MIT OR Apache-2.0 |
 | `ordered-channel` | `1.2.0` | MIT OR Apache-2.0 |
 | `pdf-writer` | `0.15.0` | MIT OR Apache-2.0 |
-| `pdfcraft-annot` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-content` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-cos` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-create` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-crypt` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-edit` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-export` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-filters` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-fonts` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-forms` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-model` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-organize` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-render` | `0.9.0` | MIT OR Apache-2.0 |
+| `pdfcraft-annot` | `0.13.0` | MIT OR Apache-2.0 |
+| `pdfcraft-content` | `0.13.0` | MIT OR Apache-2.0 |
+| `pdfcraft-cos` | `0.13.0` | MIT OR Apache-2.0 |
+| `pdfcraft-create` | `0.13.0` | MIT OR Apache-2.0 |
+| `pdfcraft-crypt` | `0.13.0` | MIT OR Apache-2.0 |
+| `pdfcraft-edit` | `0.13.0` | MIT OR Apache-2.0 |
+| `pdfcraft-export` | `0.13.0` | MIT OR Apache-2.0 |
+| `pdfcraft-filters` | `0.13.0` | MIT OR Apache-2.0 |
+| `pdfcraft-fonts` | `0.13.0` | MIT OR Apache-2.0 |
+| `pdfcraft-forms` | `0.13.0` | MIT OR Apache-2.0 |
+| `pdfcraft-model` | `0.13.0` | MIT OR Apache-2.0 |
+| `pdfcraft-organize` | `0.13.0` | MIT OR Apache-2.0 |
+| `pdfcraft-render` | `0.13.0` | MIT OR Apache-2.0 |
 | `peniko` | `0.6.1` | Apache-2.0 OR MIT |
 | `phf` | `0.13.1` | MIT |
 | `phf_generator` | `0.13.1` | MIT |
@@ -251,15 +251,15 @@ PdfCraft library crates use the reviewed contribution fork at `https://github.co
 | `windows-result` | `0.4.1` | MIT OR Apache-2.0 |
 | `windows-strings` | `0.5.1` | MIT OR Apache-2.0 |
 | `wit-bindgen` | `0.57.1` | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
-| `wordcraft-doc` | `0.8.0` | MIT OR Apache-2.0 |
-| `wordcraft-docx` | `0.8.0` | MIT OR Apache-2.0 |
-| `wordcraft-fonts` | `0.8.0` | MIT OR Apache-2.0 |
-| `wordcraft-geom` | `0.8.0` | MIT OR Apache-2.0 |
-| `wordcraft-layout` | `0.8.0` | MIT OR Apache-2.0 |
-| `wordcraft-metafile` | `0.8.0` | MIT OR Apache-2.0 |
-| `wordcraft-pdf` | `0.8.0` | MIT OR Apache-2.0 |
-| `wordcraft-proof` | `0.8.0` | MIT OR Apache-2.0 |
-| `wordcraft-render` | `0.8.0` | MIT OR Apache-2.0 |
+| `wordcraft-doc` | `0.10.0` | MIT OR Apache-2.0 |
+| `wordcraft-docx` | `0.10.0` | MIT OR Apache-2.0 |
+| `wordcraft-fonts` | `0.10.0` | MIT OR Apache-2.0 |
+| `wordcraft-geom` | `0.10.0` | MIT OR Apache-2.0 |
+| `wordcraft-layout` | `0.10.0` | MIT OR Apache-2.0 |
+| `wordcraft-metafile` | `0.10.0` | MIT OR Apache-2.0 |
+| `wordcraft-pdf` | `0.10.0` | MIT OR Apache-2.0 |
+| `wordcraft-proof` | `0.10.0` | MIT OR Apache-2.0 |
+| `wordcraft-render` | `0.10.0` | MIT OR Apache-2.0 |
 | `write-fonts` | `0.48.1` | MIT OR Apache-2.0 |
 | `wuff` | `0.2.9` | MIT |
 | `xmp-writer` | `0.3.3` | MIT OR Apache-2.0 |

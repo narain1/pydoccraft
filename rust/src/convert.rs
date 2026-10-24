@@ -93,6 +93,7 @@ pub fn pdf_to_docx(data: &[u8], password: Option<&str>) -> Result<Vec<u8>, Engin
             height: f64::from(page_info.height),
             blocks,
             images,
+            background: None,
         });
     }
 
