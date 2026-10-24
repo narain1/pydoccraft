@@ -38,6 +38,8 @@ For paths, the suffix is checked against the detected content. For bytes, the na
 
 Passwords are supported for encrypted PDF and DOCX input. Encrypted PPTX is rejected by the upstream DeckCraft importer.
 
+Opening a PDF with 8 or more pages extracts pages in parallel. The `DOC_EX_THREADS` environment variable sets the worker count: a positive integer is used as given (capped at 64 and at the page count), and `1` disables parallelism. When it is unset, empty or not a positive integer, the default is the number of available cores, up to 8. The variable is read on each `open()`. It changes only speed, not the extracted result.
+
 ## Fast text extraction
 
 ```python
