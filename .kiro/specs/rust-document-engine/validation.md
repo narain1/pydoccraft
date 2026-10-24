@@ -2558,3 +2558,26 @@ The dedicated Word extended-properties upgrade was manually merged as `abdd2f2f7
 Fresh CI passes 470 native tests in 330.81 seconds and 586 installed-wheel tests in 562.523 seconds (562.929 seconds wrapper), with zero failures/errors/skips. Formatting, strict Clippy, installed typing and the 264-package license audit pass. The CI wheel is 17,741,563 bytes, SHA256 `19233215b44cca247e59417d45ba6021d14783c1f731a991db00bee81e52475c`; its native extension is 41,144,736 bytes. Cargo.lock SHA256 is `662a387b06a4c1fd80c2d8beda41597d3670ea1daa71e5f918523ae834e027d7`. Original native468/installed585 local artifacts remain historical evidence and are not relabeled.
 
 This completes dedicated spec146 delivery without Python extended-property admission or new roadmap promotion. PR135 now incorporates this exact main commit; its reviewed Deck pins, source, tests, attribution and audit baseline remain unchanged. Only synchronized documentation differs from its previously reviewed head7f881ef6. Fresh current-head CI and manual merge for that dedicated upgrade remain pending. No version or release changes.
+
+### Upstream pins moved to the original `main` branches (local macOS run, not a delivery gate)
+
+PdfCraft, WordCraft and DeckCraft now come from `storytold/*` `main` at immutable commits `0b670caf4a090e9d83a7f41a84b4cb2144a2d33e` (PdfCraft), `c524027f34be2d1322b23064f80662d3638cf880` (WordCraft) and `5fadda5ecfda00e11e364f095a31974f54857e21` (DeckCraft), with craft-libs `9f75d3dc19b4b514c4f3d4847ed1ec1b0e86b4ef` shared by all three. The `narain1` contribution forks are no longer used. `Cargo.lock` regenerated: 248 packages before and after, none added or removed, no third-party version change. `tools/audit_licenses.py` passes on 264 reviewed packages and no prohibited crate is linked. `vendor/pdfcraft/` was refreshed from the pinned PdfCraft tree and `hayro-cmap` was added to the root `[patch.crates-io]`.
+
+This run was local, on macOS 26.6 arm64 with Rust 1.99.1 and CPython 3.13, using `maturin build --release --locked`. The wheel is 17,241,542 bytes (baseline `main` 16,546,632) and the extension is 35,881,312 bytes (baseline 34,341,888). It has not run on the CI platforms, in a clean Python 3.11 environment, or through clippy at the 1.95 floor, so it is not a release candidate.
+
+Native: 463 pass, 6 fail. Two failures (`public_native_front_layer_is_sensitive_to_later_paragraph_source_order`, `upstream_section_valign_columns_continuous_and_page_anchor_diagnostics`) fail identically on unmodified `main` on this platform. Installed wheel: 585 tests, 3 failures, 0 errors.
+
+Behavior the earlier reviewed forks provided and how it is now handled:
+
+- Typed underlay placement is reimplemented in `author_pdf::add_content_with_placement` using public PdfCraft APIs.
+- Fallible slide render and PDF export are rebuilt in `pptx::try_render_slide` and `pptx::export_pdf` from DeckCraft's `panics_caught()` counter; a render panic is an error, never a blank slide.
+- DOCX core `language` and clearing the default font size are rejected explicitly. Slide copy and retained extended properties had no production caller; their fork regression tests were removed.
+- WordCraft's PDF export uses square joins on very thick shape strokes; the native raster keeps round corners.
+
+Open limitations introduced by this change, left as failing tests on purpose:
+
+- **Imported DOCX with an omitted default font size renders at 10 pt**, where the baseline rendered 11 pt (byte-identical to an explicit 11 pt document). Affects import, rendering and PDF conversion (`test_docx_default_size_upgrade`).
+- **PPTX to PDF text is corrupted for paragraphs containing explicit line breaks** (for example `BETA` becomes `ETAG`). DeckCraft's PDF export builds paragraph text without break characters, so layout offsets shift. The sample corpus contains no such breaks (`test_pptx_break_export`, `test_slide_cell_breaks`; native `pptx_cell_break_proof`, `break_regression_tests`).
+- PPTX native and PDF-derived slide renders now differ by up to 4/255 on about 0.011% of channel values; the contract was within 1 (two native `cell_format_proof` tests).
+
+Real-document check on the installed wheel: all five `.test_files` open, extract, render and convert. DOCX and PPTX results equal the baseline. PDF extraction differs slightly from the baseline because PdfCraft's reading order changed (`c-api.pdf` 918,002 to 922,738 characters).
