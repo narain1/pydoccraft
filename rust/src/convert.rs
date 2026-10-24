@@ -77,7 +77,7 @@ pub fn pdf_to_docx(data: &[u8], password: Option<&str>) -> Result<Vec<u8>, Engin
             })?;
             images.push(pdfcraft_export::Image {
                 ext: if extension == "jpg" { "jpg" } else { "png" },
-                bytes: data,
+                bytes: data.into(),
                 rect: visible_rect(image.rect),
                 size: [
                     image.matrix[0].hypot(image.matrix[1]) * unit,

@@ -207,7 +207,6 @@ impl EditableDocx {
                 "author" => &mut candidate.core.creator,
                 "subject" => &mut candidate.core.subject,
                 "keywords" => &mut candidate.core.keywords,
-                "language" => &mut candidate.core.language,
                 "description" => &mut candidate.core.description,
                 "category" => &mut candidate.core.category,
                 "last_modified_by" => &mut candidate.core.last_modified_by,
@@ -1452,6 +1451,17 @@ impl EditableDocx {
         paragraph.apply(&mut candidate.styles.default_para);
         if has_paragraph {
             candidate.styles.default_para_present = true;
+        }
+        // WordCraft's reader substitutes 10 pt for an omitted default size, but its model leaves
+        // the size inherited. A cleared size would therefore change every inheriting run on
+        // the next save and reopen, so refuse it instead of changing the document silently.
+        if document.styles.default_chr.size.is_some() && candidate.styles.default_chr.size.is_none()
+        {
+            return Err(EngineError::Unsupported(
+                "clearing the default font size is not supported at this native revision; set a size instead"
+                    .into(),
+            )
+            .into());
         }
         validate_document_tabs(&candidate)?;
         validate_style_tables(document, &candidate)?;
@@ -5477,7 +5487,6 @@ fn core_metadata(document: &Document) -> Value {
         ("author", &core.creator),
         ("subject", &core.subject),
         ("keywords", &core.keywords),
-        ("language", &core.language),
         ("description", &core.description),
         ("category", &core.category),
         ("last_modified_by", &core.last_modified_by),
@@ -10266,7 +10275,7 @@ mod tests {
             .unwrap();
         assert_eq!(document.metadata().unwrap(), r#"{"custom":{}}"#);
         let values = json!({"title":"Report <&> Ω", "author":"Example Author", "subject":"Subject",
-            "keywords":"one;two", "language":"en-GB", "description":"First line\nSecond line", "category":"Review",
+            "keywords":"one;two", "description":"First line\nSecond line", "category":"Review",
             "last_modified_by":"Editor", "created":"2024-02-29T01:02:03Z",
             "modified":"2026-10-20T23:59:59Z", "revision":4294967295u32});
         document.update_metadata(&values.to_string()).unwrap();
@@ -10277,18 +10286,15 @@ mod tests {
         let reopened = wordcraft_docx::read(&bytes).unwrap();
         assert_eq!(document_metadata(&reopened).unwrap().to_string(), expected);
         assert_eq!(reopened.core.creator, "Example Author");
-        assert_eq!(reopened.core.language, "en-GB");
         assert_eq!(reopened.core.created, "2024-02-29T01:02:03Z");
         crate::docx::render(&bytes, 0, 72.0, None).unwrap();
         let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
         crate::pdf::render(&pdf, 0, 72.0, None).unwrap();
         document
-            .update_metadata(
-                r#"{"author":null,"title":"","revision":null,"created":null,"language":null}"#,
-            )
+            .update_metadata(r#"{"author":null,"title":"","revision":null,"created":null}"#)
             .unwrap();
         let updated: Value = serde_json::from_str(&document.metadata().unwrap()).unwrap();
-        for key in ["title", "author", "revision", "created", "language"] {
+        for key in ["title", "author", "revision", "created"] {
             assert!(updated.get(key).is_none());
         }
         assert_eq!(updated["modified"], "2026-10-20T23:59:59Z");
@@ -10298,6 +10304,19 @@ mod tests {
         assert!(document.update_metadata("{}").is_err());
     }
 
+    #[test]
+    fn core_language_is_rejected_explicitly_at_this_native_revision() {
+        pyo3::prepare_freethreaded_python();
+        // WordCraft's CoreProps has no `dc:language` at the pinned upstream revision, so the
+        // key must fail loudly instead of being silently dropped on save.
+        let mut document = EditableDocx::new();
+        let revision = document.revision().unwrap();
+        for update in [r#"{"language":"en-GB"}"#, r#"{"language":null}"#] {
+            let error = document.update_metadata(update).unwrap_err();
+            assert!(error.to_string().contains("unknown metadata key: language"));
+        }
+        assert_eq!(document.revision().unwrap(), revision);
+    }
     #[test]
     fn custom_metadata_scalar_types_clear_and_case_identity_roundtrip() {
         let mut document = EditableDocx::new();
@@ -10428,7 +10447,7 @@ mod tests {
                 .unwrap();
         }
         let revision = document.revision().unwrap();
-        for name in ["keywords", "language"] {
+        for name in ["keywords", "category"] {
             assert!(document
                 .update_metadata(&json!({name:&value}).to_string())
                 .is_err());
@@ -12416,12 +12435,17 @@ mod tests {
             .unwrap();
         assert_eq!(document.default_formatting().unwrap(), before);
         let revision = document.revision().unwrap();
-        document
+        // Clearing the default size is refused (it would change on reopen); nothing else in the
+        // same patch is applied either.
+        assert!(document
             .format_defaults(r#"{"font_size":null,"bold":true}"#)
-            .unwrap();
+            .is_err());
+        assert_eq!(document.revision().unwrap(), revision);
+        assert_eq!(document.default_formatting().unwrap(), before);
+        document.format_defaults(r#"{"bold":true}"#).unwrap();
         assert_eq!(document.revision().unwrap(), revision + 1);
         let reset: Value = serde_json::from_str(&document.default_formatting().unwrap()).unwrap();
-        assert!(reset["font_size"].is_null());
+        assert_eq!(reset["font_size"], 28.0);
         assert_eq!(reset["bold"], true);
         document.format_defaults(&before).unwrap();
         assert_eq!(document.default_formatting().unwrap(), before);
@@ -12440,9 +12464,9 @@ mod tests {
     }
 
     #[test]
-    fn upstream_omitted_default_font_size_preserves_native_resolution() {
-        // The dedicated native upgrade fixes the recorded reader inconsistency.
-        // The owned default patch uses this same native clear/readback policy.
+    fn upstream_omitted_default_font_size_is_read_as_ten_points() {
+        // WordCraft reads an omitted default size as 10 pt although its model resolves the
+        // same omission as 11 pt. Authoring refuses to clear the size for this reason.
         let mut document = Document::new();
         document.styles.default_chr.size = None;
         assert_eq!(
@@ -12452,31 +12476,14 @@ mod tests {
                 .size,
             11.0
         );
-        let bytes = wordcraft_docx::write(&document).unwrap();
-        let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
-        let mut xml = String::new();
-        std::io::Read::read_to_string(&mut archive.by_name("word/styles.xml").unwrap(), &mut xml)
-            .unwrap();
-        let defaults = xml
-            .split("<w:docDefaults>")
-            .nth(1)
-            .unwrap()
-            .split("</w:docDefaults>")
-            .next()
-            .unwrap();
-        assert!(
-            !defaults.contains("<w:sz "),
-            "clearing removes the direct font size"
-        );
-        let reopened = wordcraft_docx::read(&bytes).unwrap();
-        assert!(reopened.styles.default_para_present);
-        assert_eq!(reopened.styles.default_chr.size, None);
+        let reopened = wordcraft_docx::read(&wordcraft_docx::write(&document).unwrap()).unwrap();
+        assert_eq!(reopened.styles.default_chr.size, Some(10.0));
         assert_eq!(
             reopened
                 .styles
                 .resolve_char(None, &CharProps::default())
                 .size,
-            11.0
+            10.0
         );
     }
 
@@ -12487,6 +12494,13 @@ mod tests {
         let keys = serde_json::from_str::<Value>(&original.default_formatting().unwrap()).unwrap();
         for key in keys.as_object().unwrap().keys() {
             let mut document = original.copy().unwrap();
+            if key == "font_size" {
+                // Clearing the size would change inherited sizes on reopen; it is refused.
+                assert!(document
+                    .format_defaults(&json!({key:Value::Null}).to_string())
+                    .is_err());
+                continue;
+            }
             document
                 .format_defaults(&json!({key:Value::Null}).to_string())
                 .unwrap();

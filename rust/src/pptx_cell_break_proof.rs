@@ -467,9 +467,8 @@ fn pptx_cell_break_raw_lines_blank_rows_normalization_links_and_output() {
                     ..Default::default()
                 };
                 let original_image =
-                    deckcraft_render::try_render_slide(owner.document().unwrap(), 0, &opts)
-                        .unwrap();
-                let read_image = deckcraft_render::try_render_slide(&readback, 0, &opts).unwrap();
+                    crate::pptx::try_render_slide(owner.document().unwrap(), 0, &opts).unwrap();
+                let read_image = crate::pptx::try_render_slide(&readback, 0, &opts).unwrap();
                 assert_eq!(
                     (original_image.width, original_image.height),
                     (read_image.width, read_image.height)

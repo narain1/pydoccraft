@@ -1854,12 +1854,12 @@ mod raster_limit_tests {
 
     #[test]
     fn linked_native_typed_placement_preserves_identity_order_and_reopened_paint() {
+        use crate::author_pdf::{add_content_with_placement, Placement};
         use pdfcraft_cos::{
             write_full, write_incremental, Dict, Document, Object, SaveOptions, Stream,
         };
         use pdfcraft_edit::{
-            add_content, add_content_with_placement, delete_content, list_added, update_content,
-            AddedImage, AddedText, Content, Placement,
+            add_content, delete_content, list_added, update_content, AddedImage, AddedText, Content,
         };
         let mut doc = Document::open(Arc::new(fixture(100.0, 120.0, 1.0, 0))).unwrap();
         let image = |doc: &mut Document, rgb: [u8; 3]| {
@@ -2017,9 +2017,8 @@ mod raster_limit_tests {
     fn linked_native_integer_budget_rejects_before_allocation_and_recovers() {
         // Safety precondition: never issue this large direct request to an older
         // backend. Its original failure is proved upstream with an intercepted
-        // allocator, not by allocating a 256MB raster here. PdfCraft v0.13.0 contains the
-        // exact raster.rs/pixels.rs correction (upstream PR #3948); the reviewed typed-placement
-        // series is rebased onto that release.
+        // allocator, not by allocating a 256MB raster here. The pinned upstream commit contains
+        // the exact raster.rs/pixels.rs correction (PR #3948, released in v0.13.0).
         let entries: Vec<_> = include_str!("../../Cargo.lock")
             .split("[[package]]")
             .filter(|entry| {
@@ -2030,7 +2029,7 @@ mod raster_limit_tests {
             .collect();
         assert_eq!(entries.len(), 1);
         assert!(entries[0].lines().any(|line| line.trim() ==
-            "source = \"git+https://github.com/narain1/pdfcraft?rev=9195f5d5036774e910512a2fbca9fa177f2a91af#9195f5d5036774e910512a2fbca9fa177f2a91af\""));
+            "source = \"git+https://github.com/storytold/pdfcraft?rev=0b670caf4a090e9d83a7f41a84b4cb2144a2d33e#0b670caf4a090e9d83a7f41a84b4cb2144a2d33e\""));
         for rotation in [0, 90, 180, 270] {
             let raw = fixture(4000.25, 3999.75, 2.0, rotation);
             for reject_oversize in [false, true] {

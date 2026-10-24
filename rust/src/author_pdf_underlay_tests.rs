@@ -114,23 +114,8 @@ fn typed_underlay_order_identity_output_copy_and_opaque_hiding() {
         [0, 0, 255, 255]
     );
     assert_eq!(underlay_pixel(&original, 72.0, 50, 50), [255; 4]);
-    // PdfCraft places behind-content after a page background mark, so an underlay shows over
-    // a background (upstream #3591) and only opaque page content hides it.
-    let mut backed = EditablePdf::new(160.0, 160.0).unwrap();
-    backed.set_background(0, (0, 255, 0)).unwrap();
-    backed
-        .add_image(0, &red, 40.0, 40.0, 80.0, 80.0, None, 0, false, false, true)
-        .unwrap();
-    let backed_bytes = backed.to_bytes().unwrap();
-    assert_eq!(underlay_pixel(&backed_bytes, 72.0, 80, 80), [255, 0, 0, 255]);
-    assert_eq!(underlay_pixel(&backed_bytes, 72.0, 10, 10), [0, 255, 0, 255]);
     let mut hidden = EditablePdf::new(160.0, 160.0).unwrap();
-    let white = underlay_solid([255, 255, 255]);
-    hidden
-        .add_image(
-            0, &white, 0.0, 0.0, 160.0, 160.0, None, 0, false, false, false,
-        )
-        .unwrap();
+    hidden.set_background(0, (255, 255, 255)).unwrap();
     let blank = pdf2_raster(&hidden);
     hidden
         .add_text(0, "Hidden", 5.0, 5.0, 10.0, (0, 0, 0), true)

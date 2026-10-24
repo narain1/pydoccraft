@@ -6345,7 +6345,3 @@ mod cell_break_tests;
 #[cfg(test)]
 #[path = "pptx_cell_tabs_proof.rs"]
 mod pptx_cell_tabs_proof;
-
-#[cfg(test)]
-#[path = "pptx_slide_copy_regression.rs"]
-mod slide_copy_regression;

@@ -123,7 +123,7 @@ fn set_six(p: &mut ParaProps, values: Option<[f64; 6]>) {
 }
 
 fn raw_pixels(owner: &EditablePptx, scale: f64) -> Vec<u8> {
-    deckcraft_render::try_render_slide(
+    crate::pptx::try_render_slide(
         owner.document().unwrap(),
         0,
         &deckcraft_render::RenderOpts {
@@ -399,7 +399,7 @@ fn pptx_cell_format_raw_visible_geometry_first_last_and_output() {
         let reread = deckcraft_pptx::import(&zero.to_bytes().unwrap()).unwrap();
         assert_eq!(
             zero_pixels,
-            deckcraft_render::try_render_slide(&reread, 0, &Default::default())
+            crate::pptx::try_render_slide(&reread, 0, &Default::default())
                 .unwrap()
                 .pixels
         );
@@ -566,7 +566,7 @@ fn pptx_cell_format_raw_visible_geometry_first_last_and_output() {
             "actual PDF text preserved once"
         );
         for dpi in [72.0, 144.0, 200.0] {
-            let source = deckcraft_render::try_render_slide(
+            let source = crate::pptx::try_render_slide(
                 owner.document().unwrap(),
                 0,
                 &deckcraft_render::RenderOpts {
@@ -575,7 +575,7 @@ fn pptx_cell_format_raw_visible_geometry_first_last_and_output() {
                 },
             )
             .unwrap();
-            let read = deckcraft_render::try_render_slide(
+            let read = crate::pptx::try_render_slide(
                 &reopened,
                 0,
                 &deckcraft_render::RenderOpts {
