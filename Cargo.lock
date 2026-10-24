@@ -2327,7 +2327,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 [[package]]
 name = "wordcraft-doc"
 version = "0.10.0"
-source = "git+https://github.com/storytold/wordcraft?rev=c524027f34be2d1322b23064f80662d3638cf880#c524027f34be2d1322b23064f80662d3638cf880"
+source = "git+https://github.com/storytold/wordcraft?rev=a2312a310f016efacde2548eae811807bd3d1e86#a2312a310f016efacde2548eae811807bd3d1e86"
 dependencies = [
  "base64",
  "serde",
@@ -2340,7 +2340,7 @@ dependencies = [
 [[package]]
 name = "wordcraft-docx"
 version = "0.10.0"
-source = "git+https://github.com/storytold/wordcraft?rev=c524027f34be2d1322b23064f80662d3638cf880#c524027f34be2d1322b23064f80662d3638cf880"
+source = "git+https://github.com/storytold/wordcraft?rev=a2312a310f016efacde2548eae811807bd3d1e86#a2312a310f016efacde2548eae811807bd3d1e86"
 dependencies = [
  "aes",
  "base64",
@@ -2363,7 +2363,7 @@ dependencies = [
 [[package]]
 name = "wordcraft-fonts"
 version = "0.10.0"
-source = "git+https://github.com/storytold/wordcraft?rev=c524027f34be2d1322b23064f80662d3638cf880#c524027f34be2d1322b23064f80662d3638cf880"
+source = "git+https://github.com/storytold/wordcraft?rev=a2312a310f016efacde2548eae811807bd3d1e86#a2312a310f016efacde2548eae811807bd3d1e86"
 dependencies = [
  "harfrust 0.13.3",
  "kurbo",
@@ -2377,7 +2377,7 @@ dependencies = [
 [[package]]
 name = "wordcraft-geom"
 version = "0.10.0"
-source = "git+https://github.com/storytold/wordcraft?rev=c524027f34be2d1322b23064f80662d3638cf880#c524027f34be2d1322b23064f80662d3638cf880"
+source = "git+https://github.com/storytold/wordcraft?rev=a2312a310f016efacde2548eae811807bd3d1e86#a2312a310f016efacde2548eae811807bd3d1e86"
 dependencies = [
  "serde",
 ]
@@ -2385,7 +2385,7 @@ dependencies = [
 [[package]]
 name = "wordcraft-layout"
 version = "0.10.0"
-source = "git+https://github.com/storytold/wordcraft?rev=c524027f34be2d1322b23064f80662d3638cf880#c524027f34be2d1322b23064f80662d3638cf880"
+source = "git+https://github.com/storytold/wordcraft?rev=a2312a310f016efacde2548eae811807bd3d1e86#a2312a310f016efacde2548eae811807bd3d1e86"
 dependencies = [
  "image",
  "js-sys",
@@ -2406,7 +2406,7 @@ dependencies = [
 [[package]]
 name = "wordcraft-metafile"
 version = "0.10.0"
-source = "git+https://github.com/storytold/wordcraft?rev=c524027f34be2d1322b23064f80662d3638cf880#c524027f34be2d1322b23064f80662d3638cf880"
+source = "git+https://github.com/storytold/wordcraft?rev=a2312a310f016efacde2548eae811807bd3d1e86#a2312a310f016efacde2548eae811807bd3d1e86"
 dependencies = [
  "kurbo",
  "thiserror",
@@ -2415,7 +2415,7 @@ dependencies = [
 [[package]]
 name = "wordcraft-pdf"
 version = "0.10.0"
-source = "git+https://github.com/storytold/wordcraft?rev=c524027f34be2d1322b23064f80662d3638cf880#c524027f34be2d1322b23064f80662d3638cf880"
+source = "git+https://github.com/storytold/wordcraft?rev=a2312a310f016efacde2548eae811807bd3d1e86#a2312a310f016efacde2548eae811807bd3d1e86"
 dependencies = [
  "chrono",
  "craft-pdf",
@@ -2434,7 +2434,7 @@ dependencies = [
 [[package]]
 name = "wordcraft-proof"
 version = "0.10.0"
-source = "git+https://github.com/storytold/wordcraft?rev=c524027f34be2d1322b23064f80662d3638cf880#c524027f34be2d1322b23064f80662d3638cf880"
+source = "git+https://github.com/storytold/wordcraft?rev=a2312a310f016efacde2548eae811807bd3d1e86#a2312a310f016efacde2548eae811807bd3d1e86"
 dependencies = [
  "log",
  "miniz_oxide 0.8.9",
@@ -2443,7 +2443,7 @@ dependencies = [
 [[package]]
 name = "wordcraft-render"
 version = "0.10.0"
-source = "git+https://github.com/storytold/wordcraft?rev=c524027f34be2d1322b23064f80662d3638cf880#c524027f34be2d1322b23064f80662d3638cf880"
+source = "git+https://github.com/storytold/wordcraft?rev=a2312a310f016efacde2548eae811807bd3d1e86#a2312a310f016efacde2548eae811807bd3d1e86"
 dependencies = [
  "image",
  "log",

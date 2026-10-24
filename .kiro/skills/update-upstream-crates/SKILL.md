@@ -90,8 +90,9 @@ For every missing capability, choose in this order and write the choice down:
    before and after, so blank output becomes an explicit error.
 3. **Refuse explicitly.** A key or operation that cannot be done faithfully must fail with a
    stable error, never be dropped silently. Pin the refusal with a test and document it.
-   Example: DOCX core `language` has no `dc:language` upstream; clearing the default font size
-   changes inherited sizes on reopen.
+   Example: DOCX core `language` has no `dc:language` upstream. When upstream later fixes the
+   cause (the default-size clear was refused until storytold/wordcraft#4092 merged), lift the
+   refusal, restore the original tests, and update every document that states it.
 4. **Remove the test** only when the code it exercised has no production caller and no public
    API (an upstream contribution's own regression test). Say so in the commit.
 5. **Record a known upstream defect** in docs and a test that asserts the actual behavior, when

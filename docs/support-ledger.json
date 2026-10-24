@@ -8,7 +8,7 @@
       "repository": "https://github.com/storytold/pdfcraft"
     },
     "wordcraft": {
-      "revision": "c524027f34be2d1322b23064f80662d3638cf880",
+      "revision": "a2312a310f016efacde2548eae811807bd3d1e86",
       "kind": "engine",
       "repository": "https://github.com/storytold/wordcraft"
     },

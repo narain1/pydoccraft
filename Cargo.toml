@@ -40,11 +40,11 @@ serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.138"
 skrifa = "=0.44.0"
 thiserror = "=2.0.21"
-wordcraft-doc = { git = "https://github.com/storytold/wordcraft", rev = "c524027f34be2d1322b23064f80662d3638cf880" }
-wordcraft-docx = { git = "https://github.com/storytold/wordcraft", rev = "c524027f34be2d1322b23064f80662d3638cf880" }
-wordcraft-layout = { git = "https://github.com/storytold/wordcraft", rev = "c524027f34be2d1322b23064f80662d3638cf880" }
-wordcraft-pdf = { git = "https://github.com/storytold/wordcraft", rev = "c524027f34be2d1322b23064f80662d3638cf880" }
-wordcraft-render = { git = "https://github.com/storytold/wordcraft", rev = "c524027f34be2d1322b23064f80662d3638cf880" }
+wordcraft-doc = { git = "https://github.com/storytold/wordcraft", rev = "a2312a310f016efacde2548eae811807bd3d1e86" }
+wordcraft-docx = { git = "https://github.com/storytold/wordcraft", rev = "a2312a310f016efacde2548eae811807bd3d1e86" }
+wordcraft-layout = { git = "https://github.com/storytold/wordcraft", rev = "a2312a310f016efacde2548eae811807bd3d1e86" }
+wordcraft-pdf = { git = "https://github.com/storytold/wordcraft", rev = "a2312a310f016efacde2548eae811807bd3d1e86" }
+wordcraft-render = { git = "https://github.com/storytold/wordcraft", rev = "a2312a310f016efacde2548eae811807bd3d1e86" }
 zip = { version = "=2.2.2", default-features = false, features = ["deflate"] }
 
 [patch.crates-io]

@@ -1452,17 +1452,6 @@ impl EditableDocx {
         if has_paragraph {
             candidate.styles.default_para_present = true;
         }
-        // WordCraft's reader substitutes 10 pt for an omitted default size, but its model leaves
-        // the size inherited. A cleared size would therefore change every inheriting run on
-        // the next save and reopen, so refuse it instead of changing the document silently.
-        if document.styles.default_chr.size.is_some() && candidate.styles.default_chr.size.is_none()
-        {
-            return Err(EngineError::Unsupported(
-                "clearing the default font size is not supported at this native revision; set a size instead"
-                    .into(),
-            )
-            .into());
-        }
         validate_document_tabs(&candidate)?;
         validate_style_tables(document, &candidate)?;
         self.commit(candidate)
@@ -12435,17 +12424,12 @@ mod tests {
             .unwrap();
         assert_eq!(document.default_formatting().unwrap(), before);
         let revision = document.revision().unwrap();
-        // Clearing the default size is refused (it would change on reopen); nothing else in the
-        // same patch is applied either.
-        assert!(document
+        document
             .format_defaults(r#"{"font_size":null,"bold":true}"#)
-            .is_err());
-        assert_eq!(document.revision().unwrap(), revision);
-        assert_eq!(document.default_formatting().unwrap(), before);
-        document.format_defaults(r#"{"bold":true}"#).unwrap();
+            .unwrap();
         assert_eq!(document.revision().unwrap(), revision + 1);
         let reset: Value = serde_json::from_str(&document.default_formatting().unwrap()).unwrap();
-        assert_eq!(reset["font_size"], 28.0);
+        assert!(reset["font_size"].is_null());
         assert_eq!(reset["bold"], true);
         document.format_defaults(&before).unwrap();
         assert_eq!(document.default_formatting().unwrap(), before);
@@ -12464,27 +12448,16 @@ mod tests {
     }
 
     #[test]
-    fn upstream_omitted_default_font_size_is_read_as_ten_points() {
-        // WordCraft reads an omitted default size as 10 pt although its model resolves the
-        // same omission as 11 pt. Authoring refuses to clear the size for this reason.
+    fn upstream_unset_default_font_size_is_written_and_keeps_its_resolution() {
+        // WordCraft now writes the resolver's fallback size when the default is unset, so a
+        // save and reopen keeps the effective size (it used to become 10 pt).
         let mut document = Document::new();
         document.styles.default_chr.size = None;
-        assert_eq!(
-            document
-                .styles
-                .resolve_char(None, &CharProps::default())
-                .size,
-            11.0
-        );
+        let resolve = |d: &Document| d.styles.resolve_char(None, &CharProps::default()).size;
+        assert_eq!(resolve(&document), 11.0);
         let reopened = wordcraft_docx::read(&wordcraft_docx::write(&document).unwrap()).unwrap();
-        assert_eq!(reopened.styles.default_chr.size, Some(10.0));
-        assert_eq!(
-            reopened
-                .styles
-                .resolve_char(None, &CharProps::default())
-                .size,
-            10.0
-        );
+        assert_eq!(reopened.styles.default_chr.size, Some(11.0));
+        assert_eq!(resolve(&reopened), 11.0);
     }
 
     #[test]
@@ -12494,13 +12467,6 @@ mod tests {
         let keys = serde_json::from_str::<Value>(&original.default_formatting().unwrap()).unwrap();
         for key in keys.as_object().unwrap().keys() {
             let mut document = original.copy().unwrap();
-            if key == "font_size" {
-                // Clearing the size would change inherited sizes on reopen; it is refused.
-                assert!(document
-                    .format_defaults(&json!({key:Value::Null}).to_string())
-                    .is_err());
-                continue;
-            }
             document
                 .format_defaults(&json!({key:Value::Null}).to_string())
                 .unwrap();

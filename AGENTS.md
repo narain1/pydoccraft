@@ -24,7 +24,7 @@ Keep all crates from each repository on one revision:
 | Project | Revision | Purpose |
 |---|---|---|
 | PdfCraft (`storytold/pdfcraft` main) | `0b670caf4a090e9d83a7f41a84b4cb2144a2d33e` | PDF inspection, text, links, images, rendering, DOCX export |
-| WordCraft (`storytold/wordcraft` main) | `c524027f34be2d1322b23064f80662d3638cf880` | DOCX model, layout, rendering, PDF export |
+| WordCraft (`storytold/wordcraft` main) | `a2312a310f016efacde2548eae811807bd3d1e86` | DOCX model, layout, rendering, PDF export |
 | DeckCraft (`storytold/deckcraft` main) | `5fadda5ecfda00e11e364f095a31974f54857e21` | PPTX model, rendering, PDF export |
 | craft-libs (`storytold/craft-libs`) | `9f75d3dc19b4b514c4f3d4847ed1ec1b0e86b4ef` | Shared PDF backend and patched Krilla dependency, one rev for all three |
 
@@ -35,7 +35,7 @@ Behavior the earlier reviewed forks provided is handled in the adapters or is un
 - **Underlay placement** (`behind=True`): `author_pdf::add_content_with_placement` adds the item with PdfCraft's public API, then moves its stream to the front of the page's `/Contents`.
 - **Render panics:** DeckCraft draws a blank slide and counts the panic. `pptx::try_render_slide` and `pptx::export_pdf` turn that count into an explicit error. It is process-wide, so a panic on another thread can fail a call spuriously, but a panic can never pass silently.
 - **DOCX core `language`:** rejected as an unknown metadata key. WordCraft has no `dc:language`.
-- **Clearing the DOCX default font size:** rejected. The reader reads an omitted default size as 10 pt, but the model resolves it as 11 pt, so a clear would change inherited sizes after reopening.
+- **Clearing the DOCX default font size:** supported. WordCraft writes the resolver's 11 pt fallback when the default is unset (storytold/wordcraft#4092), so the effective size survives a save and reopen. The reader still reads a file that omits the size as 10 pt, so an imported DOCX without a default size renders at 10 pt (an 11 pt document before this change); that reader/resolver mismatch is open upstream.
 - **PDF export of very thick shape strokes:** WordCraft's PDF output uses square joins, so corners differ from the raster by up to the stroke width. Recorded in `docx/stroke_regression_tests.rs`.
 - **Known upstream defect:** DeckCraft's PDF export builds paragraph text without line-break characters, so searchable text is corrupted for PPTX paragraphs containing explicit breaks (`paragraph.add_break()`). Native PDF export of such documents is not supported until upstream fixes it.
 - Slide copy and retained extended document properties are not available and have no production caller.
