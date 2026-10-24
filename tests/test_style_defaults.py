@@ -93,11 +93,15 @@ class StyleDefaultsTests(unittest.TestCase):
                 copied.styles.format_defaults(font_size=18)
                 self.assertEqual(document.styles.defaults["font_size"], 16)
             before = document.to_bytes()
-            document.styles.format_defaults(font_size=None, bold=False)
-            self.assertIsNone(document.styles.defaults["font_size"])
-            self.assertEqual(inherited.resolved_formatting["font_size"], 11)
+            # Clearing the default size is refused (it would change on reopen); the whole patch
+            # is rejected, so the bold change is not applied either.
+            with self.assertRaises(UnsupportedFormatError):
+                document.styles.format_defaults(font_size=None, bold=False)
+            self.assertEqual(document.styles.defaults["font_size"], 16)
+            self.assertEqual(document.to_bytes(), before)
+            document.styles.format_defaults(bold=False)
             self.assertFalse(inherited.resolved_formatting["bold"])
-            document.styles.format_defaults(font_size=16, bold=True)
+            document.styles.format_defaults(bold=True)
             self.assertEqual(document.to_bytes(), before)
             document.styles.format_defaults(bold=None)
             self.assertIsNone(document.styles.defaults["bold"])

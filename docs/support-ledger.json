@@ -142,7 +142,7 @@
     }
   },
   "test_sources": {
-    "tests/test_docx_metadata.py": "67513dfd2a328e219fe6aaf39f898f955a27ec9ebedf901027a224413f0da2a7",
+    "tests/test_docx_metadata.py": "1e287bba90c1df84d6262c0bc623f588c0536de93bc3c3b6faceccafe6e6b2d1",
     "tests/test_field_geometry.py": "3026e1e4f98c56c311f24c76aac8b19e42440a5a38bb6f8fb5da4bdb7e1173c8",
     "tests/test_imported_properties.py": "5c9124db6f5b7e1d23e0986684bd904e71b7a2b8ff8404ab9c1fbcd1202c3954",
     "tests/test_pdf_fields.py": "5298a96956cafac4e90911bbd3ec94a2f6149ef2d09a8c26c18bb506a09f4ea5",
