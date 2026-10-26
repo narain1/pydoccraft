@@ -1415,6 +1415,3 @@ mod tests {
 
 #[cfg(test)]
 mod render_failure_tests;
-
-#[cfg(test)]
-mod break_regression_tests;

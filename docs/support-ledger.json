@@ -3,17 +3,17 @@
   "audited_commit": "77cd8c0e00600554f14ea1e9d61a138e9211d8d9",
   "references": {
     "pdfcraft": {
-      "revision": "0b670caf4a090e9d83a7f41a84b4cb2144a2d33e",
+      "revision": "64e0868b844e0230027a493c90d6e4bdc7af086f",
       "kind": "engine",
       "repository": "https://github.com/storytold/pdfcraft"
     },
     "wordcraft": {
-      "revision": "a2312a310f016efacde2548eae811807bd3d1e86",
+      "revision": "9d1067fc0e7f754978879bfd61351d359c9b39cb",
       "kind": "engine",
       "repository": "https://github.com/storytold/wordcraft"
     },
     "deckcraft": {
-      "revision": "5fadda5ecfda00e11e364f095a31974f54857e21",
+      "revision": "aaf6c1c38aa6c59beda8110bd014cc6c96c6ec74",
       "kind": "engine",
       "repository": "https://github.com/storytold/deckcraft"
     },

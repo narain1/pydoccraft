@@ -173,6 +173,11 @@ pub struct Context<'a> {
     /// a limit was reached, the clip count to return to at its `Q`.
     saved_bytes: usize,
     skipped_saves: Vec<usize>,
+    // PdfCraft patch (63).
+    /// This is the content of a luminosity soft mask whose group colour space is `/DeviceCMYK`,
+    /// so a `/DeviceCMYK` fill or stroke colour paints as its gray (ISO 32000-2 §11.5.3,
+    /// §10.4.2.3) rather than through the CMYK profile used for display.
+    pub(crate) luminosity_in_device_cmyk: bool,
 }
 
 /// PdfCraft patch: most graphics states saved at once. Every `q` copies the current state, dash
@@ -209,6 +214,8 @@ impl<'a> Context<'a> {
         NESTED_PAINTS.with(|n| n.set(0));
         CONTENT_LEFT.with(|c| c.set(MAX_PAGE_CONTENT));
         CONTENT_TRUNCATED.with(|truncated| truncated.set(false));
+        // PdfCraft patch (55): a fallback left over from another page is not this page's.
+        crate::color::take_color_fallback();
         crate::encode::reset_mesh_budget();
 
         Self::new_with(initial_transform, bbox, cache, xref, settings, state, 0)
@@ -249,6 +256,7 @@ impl<'a> Context<'a> {
             nesting_depth,
             saved_bytes: 0,
             skipped_saves: Vec::new(),
+            luminosity_in_device_cmyk: false,
         }
     }
 

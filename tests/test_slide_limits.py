@@ -76,7 +76,9 @@ class SlideLimitTests(unittest.TestCase):
     def test_repeated_source_references_are_counted_before_native_truncation(self):
         accepted = repeated_slides(10_000)
         with doc_ex.open(accepted) as document:
-            self.assertEqual(len(document), 10_000)
+            # DeckCraft deduplicates repeated references to one slide part on import
+            # (storytold/deckcraft#1283), so 10,000 entries for one part read as one slide.
+            self.assertEqual(len(document), 1)
             self.assertEqual(document[-1].get_text().count("Counted once"), 1)
             self.assertTrue(document[-1].get_pixmap(dpi=72).startswith(b"\x89PNG"))
         rejected = repeated_slides(10_001)

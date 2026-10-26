@@ -23,12 +23,14 @@ Keep all crates from each repository on one revision:
 
 | Project | Revision | Purpose |
 |---|---|---|
-| PdfCraft (`storytold/pdfcraft` main) | `0b670caf4a090e9d83a7f41a84b4cb2144a2d33e` | PDF inspection, text, links, images, rendering, DOCX export |
-| WordCraft (`storytold/wordcraft` main) | `a2312a310f016efacde2548eae811807bd3d1e86` | DOCX model, layout, rendering, PDF export |
-| DeckCraft (`storytold/deckcraft` main) | `5fadda5ecfda00e11e364f095a31974f54857e21` | PPTX model, rendering, PDF export |
+| PdfCraft (`storytold/pdfcraft` main) | `64e0868b844e0230027a493c90d6e4bdc7af086f` | PDF inspection, text, links, images, rendering, DOCX export |
+| WordCraft (`storytold/wordcraft` main) | `9d1067fc0e7f754978879bfd61351d359c9b39cb` | DOCX model, layout, rendering, PDF export |
+| DeckCraft (`storytold/deckcraft` main) | `aaf6c1c38aa6c59beda8110bd014cc6c96c6ec74` | PPTX model, rendering, PDF export |
 | craft-libs (`storytold/craft-libs`) | `9f75d3dc19b4b514c4f3d4847ed1ec1b0e86b4ef` | Shared PDF backend and patched Krilla dependency, one rev for all three |
 
 PdfCraft, WordCraft and DeckCraft are pinned to immutable commits on the `main` branch of their original repositories (`storytold/*`). The pins carry no local patches and no contribution forks. Never pin a branch name; move the pin to a newer `main` commit in a dedicated upgrade.
+
+**WordCraft is held back on purpose.** Its `main` has moved craft-libs on from `9f75d3dc` (to `17744430`, then `1e6f1278`, then `b926b5c0`) while DeckCraft `main` still pins `9f75d3dc`. All three engines must share one craft-libs backend, so WordCraft stays at `9d1067fc`, the newest commit that still uses `9f75d3dc` (it includes storytold/wordcraft#4092). Moving WordCraft further needs DeckCraft to move its craft-libs rev first; otherwise the lockfile holds two `craft-pdf` copies. Check this on every upgrade.
 
 Behavior the earlier reviewed forks provided is handled in the adapters or is unsupported. Treat these as the current contract:
 

@@ -46,6 +46,14 @@ must agree on the `krilla`/`craft-pdf` rev, and that rev goes in this repository
 `[patch.crates-io]`. DeckCraft may also pull other craft-libs crates at other revs; Cargo
 resolves those itself.
 
+**They do not always agree.** The three `main` branches can pin different craft-libs revs for
+days. After `cargo update -w`, count `craft-pdf` and `krilla` in `Cargo.lock`: more than one copy
+means a split backend. Do not accept it and do not patch an engine's dependency. Hold the engine
+that moved ahead at its newest commit that still uses the shared rev: walk its first-parent
+history with `git show <commit>:Cargo.toml | grep 'craft-pdf = '` and take the last match (check
+that it still contains the fixes you need with `git merge-base --is-ancestor`). Record the hold
+and its reason in `AGENTS.md`, because it blocks the next upgrade until the other engine catches up.
+
 ## 2. Re-pin in this repository
 
 Branch `deps/upstream-releases` from `main`, then:
@@ -97,7 +105,12 @@ For every missing capability, choose in this order and write the choice down:
    API (an upstream contribution's own regression test). Say so in the commit.
 5. **Record a known upstream defect** in docs and a test that asserts the actual behavior, when
    the effect is cosmetic and bounded.
-6. **Stop and ask** when the defect corrupts user content (for example text lost or misordered
+6. **Set the test aside** when the user asks to keep a failing test for later. Remove only the
+   failing functions, not their files, and then the helpers and imports only they used (compile
+   with warnings visible until none remain). Keep shared fixtures and any module another test
+   imports. Tag the commit before removal (`git tag pending-tests-snapshot`) and list the
+   removed tests, their cause and the upstream fix they wait for in the validation log.
+7. **Stop and ask** when the defect corrupts user content (for example text lost or misordered
    in converted output) or breaks a documented public feature. This is the user's decision.
 
 Do not edit vendored or upstream source to make integration easier.
@@ -136,7 +149,7 @@ For every new failure, in this order:
 4. Classify: stale expectation of a fixed bug (update it, keep intent, rename if the name states
    the old behavior), deliberate change reaching a public feature (update test **and** docs),
    adapter assumption broke (fix the adapter), or real regression (step 3.6: ask).
-5. **Never loosen a tolerance or delete a test to make it green.** A measured gap beyond a
+5. **Never loosen a tolerance or delete a test on your own to make it green.** (Setting a test aside because the user asked, per step 3.6, is different: it is explicit, recoverable and recorded.) A measured gap beyond a
    fidelity contract is a product decision. Quantify it (values over the limit, maximum
    difference), check it against `main`, and bring it to the user.
 6. Remove every probe before committing: `grep -rn PROBE rust/`.
