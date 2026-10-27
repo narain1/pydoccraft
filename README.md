@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/narain1/pydoccraft/actions/workflows/ci.yml/badge.svg)](https://github.com/narain1/pydoccraft/actions/workflows/ci.yml)
 
-`pydoccraft` 0.3.1 is an Apache-2.0 Python/Rust package for eager, in-process structured extraction, rendering, and semantic conversion of PDF, DOCX, and PPTX files. It exposes the compatible `doc_ex` PyMuPDF-style API and uses pinned PdfCraft, WordCraft, and DeckCraft library crates—without external executables, runtime downloads, networking, cloud credentials, or OCR.
+`pydoccraft` 0.3.1 is an Apache-2.0 Python/Rust package for eager, in-process structured extraction, rendering, and semantic conversion of PDF, DOCX, PPTX, and EPUB files. It exposes the compatible `doc_ex` PyMuPDF-style API and uses pinned PdfCraft, WordCraft, and DeckCraft library crates—without external executables, runtime downloads, networking, cloud credentials, or OCR.
 
 ## Install
 

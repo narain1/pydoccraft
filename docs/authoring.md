@@ -931,3 +931,27 @@ This dependency correction applies to existing import/render/PDF conversion meth
 ### Conservative PDF table detection
 
 PDF tables are inferred from native reading geometry. If discarded native text overlaps a candidate table's replacement region, extraction retains the original text blocks instead of adopting that candidate. A visually table-like region can therefore remain paragraphs; the check prevents the demonstrated omitted-line case without promising arbitrary PDF table recognition. DOCX/PPTX semantic tables and the public table API are unchanged.
+
+## EPUB creation (feature branch)
+
+```python
+import doc_ex
+
+with doc_ex.new("epub") as book:
+    book.set_metadata(
+        title="Example book",
+        identifier="urn:example:book",
+        language="en",
+        authors=["Example Author"],
+    )
+    chapter = book.add_chapter("Introduction")
+    chapter.add_heading("Welcome", level=1)
+    chapter.add_paragraph("A reflowable paragraph.")
+    chapter.add_link("Project", "https://example.com")
+    chapter.add_image(png_bytes, media_type="image/png", alt="Diagram")
+    epub_bytes = book.to_bytes()
+```
+
+EPUB creation is append-only and semantic. `EpubDocument` supports the shared `to_bytes`, path/stream `save`, `copy`, context manager and idempotent `close` lifecycle. Required metadata is title, identifier and language. Links are inert ASCII-case-insensitive HTTP(S), mailto or safe fragment targets; remote resources are never fetched. Supported image resources are signature-checked PNG, JPEG and GIF bytes, limited to 16 MiB each and 64 MiB total. SVG authoring is rejected because active content cannot be guaranteed inert.
+
+Callers cannot inject raw XHTML, OPF, CSS, SVG, scripts or archive paths. Existing EPUB editing, fixed-layout content, rendering, conversion, DRM and media overlays are unsupported.
