@@ -1,24 +1,15 @@
 name: Build and publish wheels
 
 on:
-  push:
-    tags: ["v*"]
+  pull_request:
+    types: [closed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing version tag, or exact commit SHA for validation only
+        description: Exact commit SHA to validate
         required: true
         type: string
-      validation_only:
-        description: Validate wheels without a version tag or any publication
-        required: true
-        default: false
-        type: boolean
-      publish:
-        description: Publish wheels to PyPI
-        required: true
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -26,19 +17,24 @@ permissions:
 jobs:
   verify-version:
     name: Verify release version
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.version.outputs.release_tag }}
+      should_build: ${{ steps.version.outputs.should_build }}
     steps:
-      - name: Check out release tag
+      - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event_name == 'push' && github.ref || inputs.release_tag }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || inputs.release_tag }}
 
-      - name: Verify immutable validation source or release version
+      - name: Verify source and detect version change
+        id: version
         shell: python
         env:
-          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
-          VALIDATION_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.validation_only }}
-          PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+          EVENT_NAME: ${{ github.event_name }}
+          SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || inputs.release_tag }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           import os
           import pathlib
@@ -46,22 +42,26 @@ jobs:
           import subprocess
           import tomllib
 
+          source = os.environ["SOURCE_SHA"]
+          if not re.fullmatch(r"[0-9a-f]{40}", source):
+              raise SystemExit("source must be an exact 40-character commit SHA")
+          actual = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          if actual != source:
+              raise SystemExit(f"checked-out commit {actual!r} does not match {source!r}")
           version = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"]
-          tag = os.environ["RELEASE_TAG"]
-          if os.environ["VALIDATION_ONLY"] == "true":
-              if os.environ["PUBLISH"] == "true":
-                  raise SystemExit("validation-only mode cannot publish")
-              if not re.fullmatch(r"[0-9a-f]{40}", tag):
-                  raise SystemExit("validation-only mode requires an exact 40-character commit SHA")
-              actual = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-              if actual != tag:
-                  raise SystemExit(f"checked-out commit {actual!r} does not match {tag!r}")
-          elif tag != f"v{version}":
-              raise SystemExit(f"tag {tag!r} does not match package version {version!r}")
+          should_build = True
+          if os.environ["EVENT_NAME"] == "pull_request":
+              subprocess.run(["git", "fetch", "--no-tags", "origin", os.environ["BASE_SHA"]], check=True)
+              previous = subprocess.check_output(["git", "show", f"{os.environ['BASE_SHA']}:pyproject.toml"], text=True)
+              should_build = tomllib.loads(previous)["project"]["version"] != version
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print(f"release_tag=v{version}", file=output)
+              print(f"should_build={str(should_build).lower()}", file=output)
 
   wheels:
     name: Wheel (${{ matrix.os }}, Python ${{ matrix.python.version }})
     needs: verify-version
+    if: needs.verify-version.outputs.should_build == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
@@ -79,7 +79,7 @@ jobs:
       - name: Check out release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event_name == 'push' && github.ref || inputs.release_tag }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || inputs.release_tag }}
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -119,7 +119,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload wheel
-        if: success() || (failure() && github.event_name == 'workflow_dispatch' && inputs.validation_only)
+        if: success() || (failure() && github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: wheel-${{ matrix.os }}-py${{ matrix.python.version }}
@@ -128,8 +128,8 @@ jobs:
 
   github-release:
     name: Create GitHub release
-    if: github.event_name == 'push' || !inputs.validation_only
-    needs: wheels
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
+    needs: [verify-version, wheels]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -144,19 +144,20 @@ jobs:
       - name: Create or update release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
+          RELEASE_TAG: ${{ needs.verify-version.outputs.release_tag }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         shell: bash
         run: |
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" dist/*.whl --repo "$GITHUB_REPOSITORY" --clobber
-          else
-            gh release create "$RELEASE_TAG" dist/*.whl --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag $RELEASE_TAG already exists; refusing to publish a different commit" >&2
+            exit 1
           fi
+          gh release create "$RELEASE_TAG" dist/*.whl --repo "$GITHUB_REPOSITORY" --target "$MERGE_SHA" --generate-notes
 
   pypi:
     name: Publish to PyPI
-    if: github.event_name == 'push' || (inputs.publish && !inputs.validation_only)
-    needs: wheels
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
+    needs: [verify-version, wheels, github-release]
     runs-on: ubuntu-latest
     environment:
       name: pypi
