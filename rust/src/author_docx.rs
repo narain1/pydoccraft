@@ -207,7 +207,6 @@ impl EditableDocx {
                 "author" => &mut candidate.core.creator,
                 "subject" => &mut candidate.core.subject,
                 "keywords" => &mut candidate.core.keywords,
-                "language" => &mut candidate.core.language,
                 "description" => &mut candidate.core.description,
                 "category" => &mut candidate.core.category,
                 "last_modified_by" => &mut candidate.core.last_modified_by,
@@ -1494,6 +1493,13 @@ impl EditableDocx {
             name: name.into(),
             kind,
             based_on: base,
+            // An unset band size means no bands, as in Word. A new table style bands one row
+            // and one column at a time, like the built-in banded styles.
+            table: (kind == StyleKind::Table).then(|| wordcraft_doc::styles::TableStyleParts {
+                band_size: Some(1),
+                col_band_size: Some(1),
+                ..Default::default()
+            }),
             ..Default::default()
         });
         validate_style_chains(&candidate.styles)?;
@@ -5470,7 +5476,6 @@ fn core_metadata(document: &Document) -> Value {
         ("author", &core.creator),
         ("subject", &core.subject),
         ("keywords", &core.keywords),
-        ("language", &core.language),
         ("description", &core.description),
         ("category", &core.category),
         ("last_modified_by", &core.last_modified_by),
@@ -7896,7 +7901,11 @@ fn paragraph_table_context(document: &Document, story: StoryRef, path: &Path) ->
     let current = table.rows.get(row)?.cells.get(cell)?;
     let regions = PartSet::of_cell(
         &table.props.look,
-        style.parts.band_size.unwrap_or(1),
+        (
+            // Word reads an unset band size as zero, which turns the bands off (#3415).
+            style.parts.band_size.unwrap_or(0),
+            style.parts.col_band_size.unwrap_or(0),
+        ),
         (row, table.rows.len()),
         (table.grid_col(row, cell), current.span(), table.cols()),
     );
@@ -10255,7 +10264,7 @@ mod tests {
             .unwrap();
         assert_eq!(document.metadata().unwrap(), r#"{"custom":{}}"#);
         let values = json!({"title":"Report <&> Ω", "author":"Example Author", "subject":"Subject",
-            "keywords":"one;two", "language":"en-GB", "description":"First line\nSecond line", "category":"Review",
+            "keywords":"one;two", "description":"First line\nSecond line", "category":"Review",
             "last_modified_by":"Editor", "created":"2024-02-29T01:02:03Z",
             "modified":"2026-10-20T23:59:59Z", "revision":4294967295u32});
         document.update_metadata(&values.to_string()).unwrap();
@@ -10266,18 +10275,15 @@ mod tests {
         let reopened = wordcraft_docx::read(&bytes).unwrap();
         assert_eq!(document_metadata(&reopened).unwrap().to_string(), expected);
         assert_eq!(reopened.core.creator, "Example Author");
-        assert_eq!(reopened.core.language, "en-GB");
         assert_eq!(reopened.core.created, "2024-02-29T01:02:03Z");
         crate::docx::render(&bytes, 0, 72.0, None).unwrap();
         let pdf = crate::docx::to_pdf(&bytes, None).unwrap();
         crate::pdf::render(&pdf, 0, 72.0, None).unwrap();
         document
-            .update_metadata(
-                r#"{"author":null,"title":"","revision":null,"created":null,"language":null}"#,
-            )
+            .update_metadata(r#"{"author":null,"title":"","revision":null,"created":null}"#)
             .unwrap();
         let updated: Value = serde_json::from_str(&document.metadata().unwrap()).unwrap();
-        for key in ["title", "author", "revision", "created", "language"] {
+        for key in ["title", "author", "revision", "created"] {
             assert!(updated.get(key).is_none());
         }
         assert_eq!(updated["modified"], "2026-10-20T23:59:59Z");
@@ -10287,6 +10293,19 @@ mod tests {
         assert!(document.update_metadata("{}").is_err());
     }
 
+    #[test]
+    fn core_language_is_rejected_explicitly_at_this_native_revision() {
+        pyo3::prepare_freethreaded_python();
+        // WordCraft's CoreProps has no `dc:language` at the pinned upstream revision, so the
+        // key must fail loudly instead of being silently dropped on save.
+        let mut document = EditableDocx::new();
+        let revision = document.revision().unwrap();
+        for update in [r#"{"language":"en-GB"}"#, r#"{"language":null}"#] {
+            let error = document.update_metadata(update).unwrap_err();
+            assert!(error.to_string().contains("unknown metadata key: language"));
+        }
+        assert_eq!(document.revision().unwrap(), revision);
+    }
     #[test]
     fn custom_metadata_scalar_types_clear_and_case_identity_roundtrip() {
         let mut document = EditableDocx::new();
@@ -10417,7 +10436,7 @@ mod tests {
                 .unwrap();
         }
         let revision = document.revision().unwrap();
-        for name in ["keywords", "language"] {
+        for name in ["keywords", "category"] {
             assert!(document
                 .update_metadata(&json!({name:&value}).to_string())
                 .is_err());
@@ -11094,12 +11113,14 @@ mod tests {
             .collect();
         assert!(texts[0].contains("Collector begins"));
         assert!(texts[1].contains("Collector second page"));
-        // The intermediate collector spans both pages, but native SECTIONPAGES is 1.
+        // The intermediate collector spans both pages. WordCraft 0.8 reported SECTIONPAGES as 1
+        // here; WordCraft 0.10 counts both pages. Authoring still rejects this field in such
+        // sections until the wider behavior is verified.
         assert!(
             texts[1]
                 .split_whitespace()
                 .collect::<String>()
-                .contains("Deferredcount=1"),
+                .contains("Deferredcount=2"),
             "{:?}",
             texts
         );
@@ -11182,9 +11203,10 @@ mod tests {
             .map(|block| block.text.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        // Section two occupies both physical pages; native reports only its owned last page.
+        // Section two occupies both physical pages. WordCraft 0.8 reported only its owned last
+        // page (1); WordCraft 0.10 reports both (2).
         assert!(
-            text.contains("Second 1") && text.contains("Third 1"),
+            text.contains("Second 2") && text.contains("Third 2"),
             "{text}"
         );
     }
@@ -11871,7 +11893,7 @@ mod tests {
     }
 
     #[test]
-    fn upstream_border_styles_and_widths_are_approximated_in_native_output() {
+    fn upstream_border_styles_and_widths_are_drawn_as_themselves() {
         fn raw_border(style: BorderStyle, width: f32) -> Vec<u8> {
             let mut document = Document::new();
             let mut paragraph = Paragraph::with_text("Raw native border", CharProps::default());
@@ -11887,29 +11909,35 @@ mod tests {
             document.body = vec![Arc::new(Block::Para(paragraph))];
             wordcraft_docx::write(&document).unwrap()
         }
+        // WordCraft 0.8 approximated these by a substitute style (triple as double, dot-dash as
+        // dashed). WordCraft 0.10 draws triple (#2210) and the dash patterns (#3157) as
+        // themselves, so a raw border must now differ from the old substitute in both outputs.
+        // Only cases whose line pattern differs are compared. Width-only substitutes (a 0.125 pt
+        // hairline against 0.25 pt, or 1.0 pt against 1.5 pt) differ by less than a pixel at
+        // 144 DPI, so whether they render identically depends on the rasterizer's CPU path.
         for (style, width, substitute, actual_width) in [
             (BorderStyle::Triple, 2.0, BorderStyle::Double, 2.0),
             (BorderStyle::DotDash, 2.0, BorderStyle::Dashed, 2.0),
-            (BorderStyle::Single, 0.125, BorderStyle::Single, 0.25),
-            (BorderStyle::Thick, 1.0, BorderStyle::Single, 1.5),
         ] {
             let raw = raw_border(style, width);
             let substitute = raw_border(substitute, actual_width);
-            assert_eq!(
+            assert_ne!(
                 crate::docx::render(&raw, 0, 144.0, None).unwrap(),
-                crate::docx::render(&substitute, 0, 144.0, None).unwrap()
+                crate::docx::render(&substitute, 0, 144.0, None).unwrap(),
+                "{style:?} {width}"
             );
             let raw_pdf = crate::docx::to_pdf(&raw, None).unwrap();
             let substitute_pdf = crate::docx::to_pdf(&substitute, None).unwrap();
-            assert_eq!(
+            assert_ne!(
                 crate::pdf::render(&raw_pdf, 0, 144.0, None).unwrap(),
-                crate::pdf::render(&substitute_pdf, 0, 144.0, None).unwrap()
+                crate::pdf::render(&substitute_pdf, 0, 144.0, None).unwrap(),
+                "{style:?} {width} in PDF"
             );
         }
     }
 
     #[test]
-    fn upstream_vertical_wave_is_empty_and_double_strokes_overlap() {
+    fn upstream_vertical_wave_draws_and_double_strokes_are_separate() {
         for style in [BorderStyle::Wave, BorderStyle::Double] {
             let mut document = Document::new();
             let mut paragraph = Paragraph::with_text("Vertical border", CharProps::default());
@@ -11943,7 +11971,8 @@ mod tests {
                 .unwrap();
             let png = crate::docx::render(&raw, 0, 144.0, None).unwrap();
             if style == BorderStyle::Wave {
-                assert_eq!(border_pixels(png, 0), 0);
+                // WordCraft 0.8 drew nothing for a vertical wave; 0.10 draws it (#2113).
+                assert!(border_pixels(png, 0) > 0);
                 continue;
             }
             let mut reader = png::Decoder::new(Cursor::new(png)).read_info().unwrap();
@@ -11961,9 +11990,11 @@ mod tests {
                 }
                 previous = red;
             }
+            // WordCraft 0.8 overlapped the two strokes of a vertical double border into one;
+            // 0.10 draws them separately (#2113).
             assert_eq!(
-                runs, 1,
-                "native vertical double produces one overlapping stroke, not two separated strokes"
+                runs, 2,
+                "a vertical double border draws two separate strokes"
             );
         }
     }
@@ -12417,44 +12448,16 @@ mod tests {
     }
 
     #[test]
-    fn upstream_omitted_default_font_size_preserves_native_resolution() {
-        // The dedicated native upgrade fixes the recorded reader inconsistency.
-        // The owned default patch uses this same native clear/readback policy.
+    fn upstream_unset_default_font_size_is_written_and_keeps_its_resolution() {
+        // WordCraft now writes the resolver's fallback size when the default is unset, so a
+        // save and reopen keeps the effective size (it used to become 10 pt).
         let mut document = Document::new();
         document.styles.default_chr.size = None;
-        assert_eq!(
-            document
-                .styles
-                .resolve_char(None, &CharProps::default())
-                .size,
-            11.0
-        );
-        let bytes = wordcraft_docx::write(&document).unwrap();
-        let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
-        let mut xml = String::new();
-        std::io::Read::read_to_string(&mut archive.by_name("word/styles.xml").unwrap(), &mut xml)
-            .unwrap();
-        let defaults = xml
-            .split("<w:docDefaults>")
-            .nth(1)
-            .unwrap()
-            .split("</w:docDefaults>")
-            .next()
-            .unwrap();
-        assert!(
-            !defaults.contains("<w:sz "),
-            "clearing removes the direct font size"
-        );
-        let reopened = wordcraft_docx::read(&bytes).unwrap();
-        assert!(reopened.styles.default_para_present);
-        assert_eq!(reopened.styles.default_chr.size, None);
-        assert_eq!(
-            reopened
-                .styles
-                .resolve_char(None, &CharProps::default())
-                .size,
-            11.0
-        );
+        let resolve = |d: &Document| d.styles.resolve_char(None, &CharProps::default()).size;
+        assert_eq!(resolve(&document), 11.0);
+        let reopened = wordcraft_docx::read(&wordcraft_docx::write(&document).unwrap()).unwrap();
+        assert_eq!(reopened.styles.default_chr.size, Some(11.0));
+        assert_eq!(resolve(&reopened), 11.0);
     }
 
     #[test]
@@ -14955,7 +14958,20 @@ mod tests {
         let generation = document.table_generation(table).unwrap();
         let rows = document.table_rows(table).unwrap();
         assert!(document.insert_row(table, 2).is_err());
-        assert!(document.delete_row(table, 1).is_err());
+        // WordCraft 0.10 promotes the continuation cell when the first row of a vertical merge
+        // is deleted (#2649), so this is no longer an orphan. Prove that on an independent
+        // copy, then leave the original untouched for the remaining orphan-row checks.
+        let mut promoted = document.copy().unwrap();
+        promoted.delete_row(table, 1).unwrap();
+        assert_eq!(promoted.table_rows(table).unwrap().len(), 2);
+        let reopened = wordcraft_docx::read(&promoted.to_bytes().unwrap()).unwrap();
+        validate_editable_grid(
+            reopened
+                .table(StoryRef::Body, &promoted.location(table).unwrap().1)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(document.table_rows(table).unwrap(), rows);
         assert_eq!(document.revision().unwrap(), before);
         assert_eq!(document.table_generation(table).unwrap(), generation);
         assert_eq!(document.table_rows(table).unwrap(), rows);
@@ -17894,7 +17910,7 @@ mod tests {
             },
             Draw::Figure {
                 alt: String::new(),
-                kind: wordcraft_doc::graphic::GraphicKind::Chart,
+                kind: Some(wordcraft_doc::graphic::GraphicKind::Chart),
                 draws: vec![glyph],
             },
         ] {
@@ -20874,7 +20890,17 @@ mod picture_float_raw_proof {
             let InlineObject::Image { float, media, .. } = &para.objects[0] else {
                 panic!("image")
             };
-            assert_eq!(*float, wanted, "{anchor}");
+            // The writer gives an unstacked float (z = 0) a document-order `relativeHeight`
+            // and WordCraft 0.10 reads it back; every other field must round-trip unchanged.
+            assert!(float.z > 0, "{anchor}");
+            assert_eq!(
+                *float,
+                wordcraft_doc::para::Float {
+                    z: float.z,
+                    ..wanted
+                },
+                "{anchor}"
+            );
             assert_eq!(read.media[media].as_ref(), original.as_slice());
             let layout =
                 wordcraft_layout::layout(&read, &mut Default::default(), &Default::default());
@@ -21056,7 +21082,16 @@ mod picture_float_raw_proof {
         let written = author.to_bytes().unwrap();
         let read = wordcraft_docx::read(&written).unwrap();
         let source = author.document().unwrap().body[0].as_para().unwrap();
-        assert_eq!(read.body[0].as_para().unwrap().objects, source.objects);
+        // The writer adds a document-order stacking number (`relativeHeight`) to a float
+        // authored without one; everything else must round-trip unchanged.
+        let mut restored = read.body[0].as_para().unwrap().objects.clone();
+        for object in &mut restored {
+            if let Some(float) = object.float_mut() {
+                assert!(float.z > 0);
+                float.z = 0;
+            }
+        }
+        assert_eq!(restored, source.objects);
         assert_eq!(author.image_data(id).unwrap(), blue_png());
         assert_eq!(author.image_crop(id).unwrap(), (0.25, 0.0, 0.0, 0.0));
         assert_eq!(author.image_flips(id).unwrap(), (true, true));

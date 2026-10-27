@@ -2,7 +2,8 @@ use std::{io::Cursor, sync::Arc};
 
 use pdfcraft_content::{serialize_ops, Op};
 use pdfcraft_cos::{Document, SaveOptions};
-use pdfcraft_edit::{AddedImage, AddedText, Content, Placement};
+use pdfcraft_cos::{ObjRef, Object};
+use pdfcraft_edit::{AddedImage, AddedText, Content, EditError};
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use serde_json::{json, Value};
@@ -989,6 +990,10 @@ impl EditablePdf {
             expected.flags |= pdfcraft_forms::flags::READ_ONLY;
         } else {
             expected.flags &= !pdfcraft_forms::flags::READ_ONLY;
+        }
+        // Each widget also reports the derived field-or-widget read-only state.
+        for widget in &mut expected.widgets {
+            widget.read_only = read_only;
         }
         let mut edited = self.document()?.clone();
         pdfcraft_forms::set_props(
@@ -2107,7 +2112,7 @@ impl EditablePdf {
             .ok_or_else(|| EngineError::Malformed("image has no usable pixel dimensions".into()))?;
         crate::rendering::validate_size(dimensions.0 as f64, dimensions.1 as f64, 16_000)?;
         let rect = [x, page_height - y - height, x + width, page_height - y];
-        pdfcraft_edit::add_content_with_placement(
+        add_content_with_placement(
             &mut edited,
             page,
             &Content::Image(AddedImage {
@@ -2622,7 +2627,7 @@ impl EditablePdf {
             }
         }
         let mut edited = self.document()?.clone();
-        pdfcraft_edit::add_content_with_placement(
+        add_content_with_placement(
             &mut edited,
             page,
             &Content::Text(item),
@@ -3916,6 +3921,65 @@ fn validate_png(data: &[u8]) -> PyResult<()> {
 
 fn creation_error(error: pdfcraft_create::CreateError) -> EngineError {
     EngineError::Conversion(format!("PDF creation failed: {error}"))
+}
+
+/// Where a newly added typed item is drawn relative to the page's existing content.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Placement {
+    /// After the existing content (PdfCraft isolates its graphics state as needed).
+    Overlay,
+    /// Before all existing content, including backgrounds and earlier underlays. Adding A then
+    /// B draws B, A, original.
+    Underlay,
+}
+
+/// Adds typed content with an explicit placement and returns its index among the page's added
+/// items in drawing order.
+///
+/// PdfCraft's public API only appends. An underlay is therefore added normally and its
+/// content stream is then moved to the front of the page's `/Contents`. This adapter
+/// workaround uses only public PdfCraft APIs and leaves its resource naming untouched.
+pub(crate) fn add_content_with_placement(
+    doc: &mut Document,
+    page: usize,
+    content: &Content,
+    placement: Placement,
+) -> Result<usize, EditError> {
+    let appended = pdfcraft_edit::add_content(doc, page, content)?;
+    if placement == Placement::Overlay {
+        return Ok(appended);
+    }
+    let invalid = |message: &str| EditError::Invalid(message.into());
+    let reference: ObjRef = pdfcraft_edit::list_added(doc)
+        .into_iter()
+        .filter(|item| item.page == page)
+        .nth(appended)
+        .map(|item| item.obj)
+        .ok_or_else(|| invalid("could not find the added content"))?;
+    let page_object = pdfcraft_model::pages(doc)
+        .into_iter()
+        .nth(page)
+        .ok_or_else(|| invalid("page does not exist"))?;
+    let mut list: Vec<Object> = page_object
+        .dict
+        .get(b"Contents")
+        .map(|contents| doc.resolve(contents))
+        .and_then(|contents| contents.as_array().cloned())
+        .ok_or_else(|| invalid("page contents are not a stream list"))?;
+    let at = list
+        .iter()
+        .position(|entry| entry.as_ref() == Some(reference))
+        .ok_or_else(|| invalid("added content is missing from the page contents"))?;
+    let entry = list.remove(at);
+    list.insert(0, entry);
+    doc.update_dict(page_object.obj, |dict| {
+        dict.set(b"Contents".to_vec(), Object::Array(list))
+    })?;
+    pdfcraft_edit::list_added(doc)
+        .into_iter()
+        .filter(|item| item.page == page)
+        .position(|item| item.obj == reference)
+        .ok_or_else(|| invalid("could not find the added content"))
 }
 
 fn edit_error(error: pdfcraft_edit::EditError) -> EngineError {
@@ -5491,6 +5555,9 @@ mod tests {
             let actual = document.field_named("field").unwrap();
             let mut expected = original.clone();
             expected.flags |= pdfcraft_forms::flags::READ_ONLY;
+            for widget in &mut expected.widgets {
+                widget.read_only = true;
+            }
             assert_eq!(actual, expected);
             assert_eq!(
                 tooltip_appearance_data(document.document().unwrap(), &actual),

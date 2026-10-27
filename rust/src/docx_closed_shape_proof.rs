@@ -13,7 +13,7 @@ fn shape(kind: ShapeKind, float: Float) -> InlineObject {
         kind,
         w: 40.0,
         h: 20.0,
-        fill: Some(Rgb(255, 0, 0)),
+        fill: Some(wordcraft_doc::fill::Fill::solid(Rgb(255, 0, 0))),
         stroke: Some(Rgb(0, 0, 255)),
         stroke_width: 2.0,
         float,

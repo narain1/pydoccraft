@@ -74,7 +74,9 @@ fn default_size_reset_preserves_native_inheritance_parts_overrides_and_accountin
     assert_eq!(d.stories, independent.stories);
     let bytes = d.to_bytes().unwrap();
     let reopened = wordcraft_docx::read(&bytes).unwrap();
-    assert_eq!(reopened.styles.default_chr.size, None);
+    // WordCraft now writes the resolver's fallback size for an unset default, so the reopened
+    // document carries it explicitly and every inheriting run keeps its effective size.
+    assert_eq!(reopened.styles.default_chr.size, Some(11.0));
     assert_eq!(reopened.styles.default_chr.size_cs, Some(17.0));
     for (index, (story, path)) in locations.iter().enumerate() {
         let size = [11.0, 11.0, 11.0, 18.0, 21.0][index];
@@ -96,7 +98,7 @@ fn default_size_reset_preserves_native_inheritance_parts_overrides_and_accountin
         .split("</w:docDefaults>")
         .next()
         .unwrap();
-    assert!(!defaults.contains("<w:sz "));
+    assert!(defaults.contains(r#"<w:sz w:val="22"/>"#));
     assert!(defaults.contains("<w:szCs "));
     let revision = d.revision;
     d.format_defaults(r#"{"font_size":null}"#).unwrap();

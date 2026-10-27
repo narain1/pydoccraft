@@ -99,7 +99,10 @@ class DefaultSizeResetTests(unittest.TestCase):
             self.assertEqual(media_parts(d), media_before)
             with ZipFile(BytesIO(d.to_bytes())) as archive:
                 styles = ET.fromstring(archive.read("word/styles.xml"))
-                self.assertIsNone(styles.find("w:docDefaults/w:rPrDefault/w:rPr/w:sz", NS))
+                # WordCraft writes the resolver's fallback (11 pt) for an unset default, so the file
+                # states the size the document resolves instead of leaving it to the reader's 10 pt.
+                size = styles.find("w:docDefaults/w:rPrDefault/w:rPr/w:sz", NS)
+                self.assertEqual(size.get(f"{{{NS['w']}}}val"), "22")
                 body = ET.fromstring(archive.read("word/document.xml"))
                 direct = [run for run in body.findall(".//w:r", NS)
                           if run.findtext("w:t", namespaces=NS) == "DIRECTKEEP"]

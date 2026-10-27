@@ -400,7 +400,10 @@ mod tests {
     fn provenance_preserves_native_signed_advances_for_condensed_rtl_text() {
         pyo3::prepare_freethreaded_python();
         let text = "سلام Word";
-        for spacing in [0, 2, -1] {
+        // Condensing must be large enough to make a real glyph advance negative: 24 pt glyphs
+        // here are about 6.7 pt wide, and WordCraft 0.10 no longer emits the zero-width entries
+        // that went negative at -1 under 0.8.
+        for spacing in [0, 2, -12] {
             let mut author = crate::author_docx::EditableDocx::new();
             author
                 .set_section_props(0, r#"{"page_size":[400,250],"margins":[30,30,30,30]}"#)

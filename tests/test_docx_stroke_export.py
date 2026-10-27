@@ -24,12 +24,14 @@ class DocxStrokeExportTests(unittest.TestCase):
                     native = document.render_page(0, dpi=dpi)
                     self.assertEqual(native, reopened.render_page(0, dpi=dpi))
                     self.assertEqual(native, doc_ex._core.render(data, "docx", 0, dpi, None))
-                    for png in (native, pdf.render_page(0, dpi=dpi)):
+                    # The native raster draws round joins. WordCraft's PDF export draws square
+                    # joins, so the pixel just outside the rounded corner is also filled there.
+                    for png, round_join in ((native, True), (pdf.render_page(0, dpi=dpi), False)):
                         width, pixels = rgba_pixels(png_chunks(png))
                         side = math.ceil(440 * dpi / 72)
                         self.assertEqual(width, side)
                         self.assertEqual(len(pixels), side * side * 4)
-                        for point, expected in ((110, True), (95, False)):
+                        for point, expected in ((110, True), (95, not round_join)):
                             center = round(point * dpi / 72)
                             for y in range(center - 1, center + 2):
                                 for x in range(center - 1, center + 2):

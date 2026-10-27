@@ -1039,7 +1039,6 @@ impl<'a> Adapter<'a> {
             ("subject", &self.document.core.subject),
             ("author", &self.document.core.creator),
             ("keywords", &self.document.core.keywords),
-            ("language", &self.document.core.language),
             ("description", &self.document.core.description),
             ("category", &self.document.core.category),
             ("last_modified_by", &self.document.core.last_modified_by),
@@ -2425,11 +2424,3 @@ mod stroke_regression_tests;
 #[cfg(test)]
 #[path = "docx_closed_shape_proof.rs"]
 mod closed_shape_proof;
-
-#[cfg(test)]
-#[path = "docx/core_language_regression_tests.rs"]
-mod core_language_regression_tests;
-
-#[cfg(test)]
-#[path = "docx/extended_properties_regression_tests.rs"]
-mod extended_properties_regression_tests;

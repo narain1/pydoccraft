@@ -328,7 +328,7 @@ fn properties(object: &mut InlineObject, input: &str, require_size: bool) -> PyR
                 let InlineObject::Shape { fill, .. } = object else {
                     unreachable!()
                 };
-                *fill = color(&value)?;
+                *fill = color(&value)?.map(wordcraft_doc::fill::Fill::solid);
             }
             "stroke" => {
                 let InlineObject::Shape {
@@ -389,7 +389,16 @@ pub(super) fn info(owner: &EditableDocx, id: usize) -> PyResult<String> {
         unreachable!()
     };
     let rgb = |c: &Rgb| [c.0, c.1, c.2];
-    Ok(json!({"kind":if *kind==ShapeKind::Rectangle{"rectangle"}else{"ellipse"},"size":[w,h],"fill":fill.as_ref().map(rgb),"stroke":stroke.as_ref().map(|c|(rgb(c),stroke_width))}).to_string())
+    // This API only creates opaque solid fills. Anything else would need a lossy color, so refuse.
+    let fill = match fill {
+        None => None,
+        Some(wordcraft_doc::fill::Fill::Solid {
+            color,
+            transparency,
+        }) if *transparency == 0.0 => Some(color),
+        Some(_) => return Err(unsupported()),
+    };
+    Ok(json!({"kind":if *kind==ShapeKind::Rectangle{"rectangle"}else{"ellipse"},"size":[w,h],"fill":fill.map(rgb),"stroke":stroke.as_ref().map(|c|(rgb(c),stroke_width))}).to_string())
 }
 pub(super) fn formatting(owner: &EditableDocx, id: usize) -> PyResult<String> {
     let (_, _, float) = get(owner, id)?.frame().unwrap();

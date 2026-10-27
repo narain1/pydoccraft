@@ -424,7 +424,10 @@ fn closed_shape_locator_composition_movement_and_unrelated_accounting() {
         };
         assert_eq!(*actual, kind);
         assert_eq!((*w, *h), (40.0, 20.0));
-        assert_eq!(*fill, Some(Rgb(255, 0, 0)));
+        assert_eq!(
+            *fill,
+            Some(wordcraft_doc::fill::Fill::solid(Rgb(255, 0, 0)))
+        );
         assert_eq!(*stroke, Some(Rgb(0, 0, 255)));
         assert_eq!(*stroke_width, 2.0);
         assert_eq!(float.wrap, Wrap::Inline);

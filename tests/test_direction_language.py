@@ -89,7 +89,13 @@ class DirectionLanguageTests(unittest.TestCase):
             parts = xml_parts(document)
             run = next(r for r in parts["word/document.xml"].findall(".//w:r", NS)
                        if "שלום" in "".join(r.itertext()))
-            self.assertIsNone(run.find("w:rPr/w:lang", NS))
+            # The direct language is gone. WordCraft's writer may still tag a right-to-left
+            # segment with the *style's* complex-script language (w:bidi), never the cleared one.
+            lang = run.find("w:rPr/w:lang", NS)
+            if lang is not None:
+                self.assertIsNone(lang.get(f"{{{NS['w']}}}val"))
+                self.assertIsNone(lang.get(f"{{{NS['w']}}}eastAsia"))
+                self.assertEqual(lang.get(f"{{{NS['w']}}}bidi"), "he-IL")
             self.assertEqual(run.find("w:rPr/w:rStyle", NS).get(VAL), style.id)
             self.assertEqual(style.resolved_formatting["language"], "he-IL")
             with document.copy() as copied:

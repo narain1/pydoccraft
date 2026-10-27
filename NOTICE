@@ -49,7 +49,7 @@ Bundled and linked third-party material
 - Inter: The Inter Project Authors. SIL Open Font License 1.1. The unmodified tests/fixtures/fonts/Inter-Regular.ttf fixture comes from the pinned PdfCraft assets/fonts directory; its full license and copyright are retained alongside it as OFL-Inter.txt.
 - JetBrains Mono: The JetBrains Mono Project Authors. SIL Open Font License 1.1.
 - Ubuntu Light: Dalton Maag Ltd for Canonical. Ubuntu Font Licence 1.0.
-- Hack, Noto Emoji, and the egui emoji icon font through epaint_default_fonts: MIT/Bitstream Vera, SIL Open Font License 1.1, and MIT respectively.
+- Hack, Noto Emoji, and the egui emoji icon font through epaint_default_fonts: MIT/Bitstream Vera, SIL Open Font License 1.1, and MIT respectively. Version 0.37 also bundles `egui-icons.ttf`, a five-glyph subset of the same emoji icon font (MIT).
 - WordCraft English hyphenation data derives from Grady Ward's Moby Hyphenator II public-domain list; generated patterns are CC0-1.0.
 - WordCraft Polish and Italian hyphenation patterns are used under MIT; Portuguese patterns are used under BSD-3-Clause. Copyright details remain in the corresponding upstream source files.
 - Krilla 0.8.2 is MIT OR Apache-2.0. Compact ICC Profiles embedded by the PDF backend are by Clinton Ingram and released under CC0-1.0.

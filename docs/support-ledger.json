@@ -3,22 +3,22 @@
   "audited_commit": "77cd8c0e00600554f14ea1e9d61a138e9211d8d9",
   "references": {
     "pdfcraft": {
-      "revision": "516caea956c0aaf15f2bd1f35a15e07c73a9ead6",
+      "revision": "64e0868b844e0230027a493c90d6e4bdc7af086f",
       "kind": "engine",
-      "repository": "https://github.com/narain1/pdfcraft"
+      "repository": "https://github.com/storytold/pdfcraft"
     },
     "wordcraft": {
-      "revision": "a57b416783b8ba25ec44e30ee0c3cd8362c44974",
+      "revision": "9d1067fc0e7f754978879bfd61351d359c9b39cb",
       "kind": "engine",
-      "repository": "https://github.com/narain1/wordcraft"
+      "repository": "https://github.com/storytold/wordcraft"
     },
     "deckcraft": {
-      "revision": "16de1ca86058a96f1194c2ddc3a090c7f63f2640",
+      "revision": "aaf6c1c38aa6c59beda8110bd014cc6c96c6ec74",
       "kind": "engine",
-      "repository": "https://github.com/narain1/deckcraft"
+      "repository": "https://github.com/storytold/deckcraft"
     },
     "craft-libs": {
-      "revision": "c3487320b2d1de657b860b3c8abb44e1f2b32bd8",
+      "revision": "9f75d3dc19b4b514c4f3d4847ed1ec1b0e86b4ef",
       "kind": "engine",
       "repository": "https://github.com/storytold/craft-libs"
     },
@@ -142,7 +142,7 @@
     }
   },
   "test_sources": {
-    "tests/test_docx_metadata.py": "67513dfd2a328e219fe6aaf39f898f955a27ec9ebedf901027a224413f0da2a7",
+    "tests/test_docx_metadata.py": "1e287bba90c1df84d6262c0bc623f588c0536de93bc3c3b6faceccafe6e6b2d1",
     "tests/test_field_geometry.py": "3026e1e4f98c56c311f24c76aac8b19e42440a5a38bb6f8fb5da4bdb7e1173c8",
     "tests/test_imported_properties.py": "5c9124db6f5b7e1d23e0986684bd904e71b7a2b8ff8404ab9c1fbcd1202c3954",
     "tests/test_pdf_fields.py": "5298a96956cafac4e90911bbd3ec94a2f6149ef2d09a8c26c18bb506a09f4ea5",
@@ -151,7 +151,7 @@
     "tests/test_slide_layouts.py": "365028483efdb274afb6b4efc4b3ca8e51a169c879e47f2263b2a435271562f2",
     "tests/test_story_content.py": "c2432ede7ebf0ff0d3b3b5c6cef0729d77e30018f0eb0b576bcd8cd3324e4203",
     "tests/test_line_numbers.py": "b12daf4001b8134b9ae99d981c33c70615c51e3b4301575f2dfc4ea3dc568fdf",
-    "tests/test_direction_language.py": "bc11d3b9f6c0e66e5b8d3337f1308ba3811cff0a6f477e1d035efe6a2a546a38",
+    "tests/test_direction_language.py": "e24c6808ff7a60ee2147f05a70fedec4c78bbe7a69e1a986de39dd1849d46a2e",
     "tests/test_pdf_geometric_annotations.py": "0b61bc426776a8f74c75a2ae364f2e01d3426a7d059b301971dc0dade049f3c8",
     "tests/test_word_bookmarks.py": "6bf22bc916296482ce25100702ae2f5b88f385ece5befb2d20cacb083893a95a",
     "tests/test_story_clear.py": "ea43d861092700d6763636b622d56b261da0803c2d79916d0d8c0a688349d2ce",

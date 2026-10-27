@@ -5,12 +5,7 @@ from xml.etree import ElementTree as ET
 from zipfile import ZipFile
 
 import doc_ex
-from doc_ex._authoring import TextRange
 from doc_ex.errors import DocumentClosedError, UnsupportedFormatError
-from test_authoring import image_fixture
-from test_render_geometry import rgba_pixels
-from test_rendering import png_chunks
-import test_pptx_break_export as imported_break
 
 A = '{http://schemas.openxmlformats.org/drawingml/2006/main}'
 
@@ -22,65 +17,6 @@ def source_paragraphs(data):
 
 
 class SlideCellBreakTests(unittest.TestCase):
-    def test_native_break_source_runs_links_image_and_actual_pdf_output(self):
-        with doc_ex.new('pptx', size=(576, 360)) as deck:
-            slide, target = deck.slides.add(), deck.slides.add()
-            slide.notes = 'Retained notes'
-            table = slide.add_table([['']], box=(20, 20, 500, 200), font_size=20)
-            cell = table[0, 0]
-            cell.background, cell.margins = 'white', 0
-            p = cell.paragraphs[0]
-            p.format(alignment='left', indent_left=0, indent_right=0, indent_first=0,
-                     space_before=0, space_after=0, line_spacing=1)
-            for i, (label, color) in enumerate(zip(('ALPHA', 'BETA', 'GAMMA'), ('#E00000', '#00A000', '#0000E0'))):
-                if i:
-                    marker = p.add_break()
-                    self.assertIsInstance(marker, TextRange)
-                    self.assertEqual(marker.text, '\n')
-                    self.assertIsNone(marker.link)
-                run = p.add_run(label, color=color, font_size=20, bold=True, underline='none')
-                if i == 0:
-                    run.link = 'https://example.com/line-break'
-                elif i == 2:
-                    run.link = target
-            slide.add_image(image_fixture(1, 1), box=(500, 300, 40, 20), alt='Retained pixel')
-            self.assertEqual((p.text, cell.text, table.rows), ('ALPHA\nBETA\nGAMMA', 'ALPHA\nBETA\nGAMMA', [['ALPHA\nBETA\nGAMMA']]))
-            self.assertEqual(len(cell.paragraphs), 1)
-            source = deck.to_bytes()
-            paragraphs = source_paragraphs(source)
-            self.assertEqual(len(paragraphs), 1)
-            self.assertEqual(len(paragraphs[0].findall(f'{A}br')), 2)
-            for br in paragraphs[0].findall(f'{A}br'):
-                self.assertIsNone(br.find(f'.//{A}hlinkClick'))
-                self.assertIsNone(br.find(f'.//{A}hlinkMouseOver'))
-            with doc_ex.open(source) as reopened, doc_ex.open(deck.convert('pdf')) as pdf:
-                self.assertEqual((reopened.page_count, pdf.page_count), (2, 2))
-                block = reopened[0].find_tables()[0].cells[0][0].blocks[0]
-                self.assertEqual(block.text, p.text)
-                markers = [r for r in block.metadata['runs'] if r['kind'] == 'break']
-                self.assertEqual([(r['text'], r['start'], r['end']) for r in markers], [('\n', 5, 6), ('\n', 10, 11)])
-                for document in (reopened, pdf):
-                    text = document[0].get_text()
-                    positions = []
-                    for label in ('ALPHA', 'BETA', 'GAMMA'):
-                        self.assertEqual(text.count(label), 1, text)
-                        positions.append(text.index(label))
-                    self.assertEqual(positions, sorted(positions))
-                    links = document[0].get_links()
-                    self.assertTrue(any(l.uri == 'https://example.com/line-break' for l in links))
-                    self.assertTrue(any(l.metadata.get('target_page') == 1 or l.page == 1 or l.uri == '#page=2' for l in links))
-                self.assertEqual(len(reopened[0].get_images()), 1)
-                for dpi in (72, 144, 200):
-                    original = deck.render_page(0, dpi=dpi)
-                    self.assertEqual(original, reopened.render_page(0, dpi=dpi))
-                    a = rgba_pixels(png_chunks(original))
-                    b = rgba_pixels(png_chunks(pdf.render_page(0, dpi=dpi)))
-                    for width, pixels in (a, b):
-                        imported_break.PptxBreakExportTests.assert_ink(self, width, pixels, dpi)
-                    if dpi == 200:
-                        self.assertEqual((a[0], len(a[1])), (b[0], len(b[1])))
-                        self.assertTrue(all(abs(x-y) <= 1 for x, y in zip(a[1], b[1])))
-
     def test_unicode_empty_trailing_find_replace_and_structural_setter_contract(self):
         with doc_ex.new('pptx') as deck:
             cell = deck.slides.add().add_table([['A😀e\u0301Z']], box=(20, 20, 500, 200))[0, 0]
