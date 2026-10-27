@@ -60,11 +60,11 @@ Branch `deps/upstream-releases` from `main`, then:
 
 1. Replace every old revision in `Cargo.toml` (the repository URL too). All crates of one
    repository move together. Count occurrences to confirm, and confirm no `narain1` remains.
-2. **Refresh `vendor/pdfcraft/`.** It is a byte-identical copy of the pinned PdfCraft `vendor/`
-   tree (`hayro`, `hayro-cmap`, `hayro-interpret`, `hayro-jbig2`, `hayro-syntax`, `lopdf`).
-   Verify that at the old pin, then replace those directories from the new commit with
-   `git archive <sha> vendor | tar -x`. Do not vendor `winit`, `egui-wgpu` or `vello_common`:
-   they belong to the desktop app we must not link.
+2. **Move the PdfCraft `[patch.crates-io]` entries.** `hayro`, `hayro-cmap`, `hayro-interpret`,
+   `hayro-jbig2`, `hayro-postscript`, `hayro-syntax` and `lopdf` are git patches on the PdfCraft
+   repository with the same `rev` as the PdfCraft engine crates; step 1 updates them. Check that
+   PdfCraft's own `vendor/` still holds the same set. Do not patch `winit`, `egui-wgpu` or
+   `vello_common`: they belong to the desktop app we must not link.
 3. **Diff the upstream `[patch]` sections** between old and new. Root-workspace patches do not
    propagate, so copy new entries that our graph needs into this `Cargo.toml`.
 4. `cargo update -w`, then `cargo metadata --locked` must succeed.
