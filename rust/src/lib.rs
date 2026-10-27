@@ -41,6 +41,8 @@ pub enum EngineError {
     Encrypted,
     #[error("conversion_failure:{0}")]
     Conversion(String),
+    #[error("rendering_failure:{0}")]
+    Rendering(String),
 }
 
 impl From<EngineError> for PyErr {
@@ -67,6 +69,18 @@ impl NativePdfSession {
             rendering::validate_clip(clip)?;
         }
         self.inner.render(page, dpi, clip).map_err(Into::into)
+    }
+
+    fn search_for(&self, page: usize, text: &str) -> PyResult<Vec<(f32, f32, f32, f32)>> {
+        self.inner
+            .search_for(page, text)
+            .map(|rects| {
+                rects
+                    .into_iter()
+                    .map(|[x0, y0, x1, y1]| (x0, y0, x1, y1))
+                    .collect()
+            })
+            .map_err(Into::into)
     }
 
     fn close(&self) -> PyResult<()> {

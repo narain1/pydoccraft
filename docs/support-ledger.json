@@ -1,24 +1,24 @@
 {
   "schema_version": 1,
-  "audited_commit": "5236ab12c9e136a8abbc675331370e6fbfd3ac99",
+  "audited_commit": "77cd8c0e00600554f14ea1e9d61a138e9211d8d9",
   "references": {
     "pdfcraft": {
-      "revision": "645016addcfb9078c557f0189559ab47cdcee057",
+      "revision": "64e0868b844e0230027a493c90d6e4bdc7af086f",
       "kind": "engine",
       "repository": "https://github.com/storytold/pdfcraft"
     },
     "wordcraft": {
-      "revision": "f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22",
+      "revision": "9d1067fc0e7f754978879bfd61351d359c9b39cb",
       "kind": "engine",
       "repository": "https://github.com/storytold/wordcraft"
     },
     "deckcraft": {
-      "revision": "22db9261f9d1a214c296fd390173130c45d76d66",
+      "revision": "aaf6c1c38aa6c59beda8110bd014cc6c96c6ec74",
       "kind": "engine",
       "repository": "https://github.com/storytold/deckcraft"
     },
     "craft-libs": {
-      "revision": "c3487320b2d1de657b860b3c8abb44e1f2b32bd8",
+      "revision": "9f75d3dc19b4b514c4f3d4847ed1ec1b0e86b4ef",
       "kind": "engine",
       "repository": "https://github.com/storytold/craft-libs"
     },
@@ -34,16 +34,139 @@
       "kind": "artifact",
       "source_commit": "f713bb191781ae18226f25d2f98f8e08c7db5cf6",
       "date": "2026-10-20"
+    },
+    "stories-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#2026-10-20-headerfooter-rich-content",
+      "wheel_sha256": "fe069561df57ea88495deadff69e4d05a19c0ae395f80f2937aeae09ab48c356",
+      "kind": "artifact",
+      "source_commit": "dd34deda1df340098a9799ffc76a8e7d2999753c",
+      "date": "2026-10-20"
+    },
+    "lines-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#2026-10-20-bounded-native-line-numbering",
+      "wheel_sha256": "69b9da8f4227e2e2efe02ada4c9f94b3ee7275ff17c22accb2cdbe870c2fe114",
+      "kind": "artifact",
+      "source_commit": "17482eb76c264e5c4303b34cf8d7d1b62287e656",
+      "date": "2026-10-20"
+    },
+    "direction-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#2026-10-20-native-paragraph-direction-and-run-language",
+      "wheel_sha256": "6f4f6d5ac0fae778490b20edd13dd224eafca5e221af27ad5938155e9f45db71",
+      "kind": "artifact",
+      "source_commit": "59ed29c65e73952a325fb59053a2e325d536b1b5",
+      "date": "2026-10-20"
+    },
+    "ellipse-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#2026-10-20-geometric-annotation-vocabulary-review-and-replacement-artifact",
+      "wheel_sha256": "c668514ce02ec8cd94e7056aa21970e7331eacb7e20bd17763a79b377086cf31",
+      "kind": "artifact",
+      "source_commit": "8949ec6c5c920fb4cea5244c2d75706647fde601",
+      "date": "2026-10-20"
+    },
+    "ownership-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#presentationrange-callback-ownership--complete-local-wheel",
+      "wheel_sha256": "56fec6ff5490415b8230dbf22dd391890061ca5e04fb8f9d7f65734cfb07290f",
+      "kind": "artifact",
+      "source_commit": "a94a5ba65d332e5cc897cb19fd368d771b911d0b",
+      "date": "2026-10-20"
+    },
+    "field-tooltips-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#owned-pdf-field-tooltips--complete-local-artifact",
+      "wheel_sha256": "850d56884901018551cecea6beb1e741023ab4c01f444c286c539acee1c20f37",
+      "kind": "artifact",
+      "source_commit": "b3917b84379a356f2b7a00d36b757d5bf66d4550",
+      "date": "2026-10-20"
+    },
+    "comment-locks-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#annotation-editing-locks--complete-local-artifact",
+      "wheel_sha256": "2c54fbb1b41472fd5a07e7ba8e9019c91bdfa125eebc45c4bb770203cb759d5f",
+      "kind": "artifact",
+      "source_commit": "a21fc5c80abe556ac03b471f1906a7ec6b6a3f16",
+      "date": "2026-10-20"
+    },
+    "field-read-only-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#owned-pdf-field-read-only-state--complete-local-artifact",
+      "wheel_sha256": "52d36a6006b504e2de511846845e77705abe5228db89ac6472c6fbe8f65466c4",
+      "kind": "artifact",
+      "source_commit": "6af0b8d313fd585dcdedf138aad27f3205b76873",
+      "date": "2026-10-20"
+    },
+    "note-conversion-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#owned-note-conversion--complete-local-artifact",
+      "wheel_sha256": "01ca47af4beb9a6e0f01b75a4fca5e7158cfe610260f339cb14ebc97787554bc",
+      "kind": "artifact",
+      "source_commit": "c2e64845c52dcc72204b13a58c725f3f3810e349",
+      "date": "2026-10-20"
+    },
+    "slide-background-reset-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#slide-background-reset--complete-local-artifact",
+      "wheel_sha256": "e084a6f29a4346eaeeaf67ca151475d1a4d35c4e2d8cdaf9ca40d47a5fd980c5",
+      "kind": "artifact",
+      "source_commit": "58c1eaa53f5b37bb167958d8d6a059c2c9603a7c",
+      "date": "2026-10-20"
+    },
+    "outline-raster-ci-2026-10-20": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#decimal-outline-raster-comparison--corrected-ci-artifact",
+      "wheel_sha256": "016327f2fbb8f0a55634dfb3ed9e700e6be92e4a548358a1e23e03801a6b3816",
+      "kind": "artifact",
+      "source_commit": "d5912b9aad74520b13a9753e6b6ee4b27c2caa3d",
+      "date": "2026-10-20"
+    },
+    "note-content-clear-2026-10-20": {
+      "kind": "artifact",
+      "validation": ".kiro/specs/rust-document-engine/validation.md#owned-note-content-clear--artifact-evidence",
+      "wheel_sha256": "73ab05afb724346031146a0eaf2d3f6c9b63cabf31330ead8540a1b446af60d8",
+      "source_commit": "fecebc36f13a2e7ae7912f4e6ca28a25400f6124",
+      "date": "2026-10-20"
+    },
+    "annotation-opacity-2026-10-21": {
+      "validation": ".kiro/specs/rust-document-engine/validation.md#native-annotation-opacity--artifact-evidence",
+      "wheel_sha256": "d33da01deced89b8e954ea0c64ab0da1d90cd0b9f949ccb0587e41382ff266cc",
+      "kind": "artifact",
+      "source_commit": "5ec49683832754faa5d1f5200108995077b2500b",
+      "date": "2026-10-21"
+    },
+    "word-closed-shapes-2026-10-21": {
+      "kind": "artifact",
+      "validation": ".kiro/specs/rust-document-engine/validation.md#corrected-closed-shape-integration-artifact--final-installed-acceptance",
+      "wheel_sha256": "fa92abce09a6bb4af09c3ba2ae802ff9e57e3ab99249ffb933c5be8c8e5673fa",
+      "source_commit": "b23d8954d1e75e041add8473b8b56662614b66ae",
+      "date": "2026-10-21"
+    },
+    "pdf-typed-underlays-2026-10-21": {
+      "kind": "artifact",
+      "validation": ".kiro/specs/rust-document-engine/validation.md#123-typed-pdf-underlays--combined-installed-artifact",
+      "wheel_sha256": "190705742de9657b7463911af38019688d8b268e2dbc40347fb50f73b35896f1",
+      "source_commit": "50220d770c2a6aefb64c41ce15cfc6df039dcf6b",
+      "date": "2026-10-21"
     }
   },
   "test_sources": {
-    "tests/test_docx_metadata.py": "4b39224ca5d51ccf8c80c62225ed3232aacc26b691efba5ac6164a6302966b21",
+    "tests/test_docx_metadata.py": "1e287bba90c1df84d6262c0bc623f588c0536de93bc3c3b6faceccafe6e6b2d1",
     "tests/test_field_geometry.py": "3026e1e4f98c56c311f24c76aac8b19e42440a5a38bb6f8fb5da4bdb7e1173c8",
     "tests/test_imported_properties.py": "5c9124db6f5b7e1d23e0986684bd904e71b7a2b8ff8404ab9c1fbcd1202c3954",
     "tests/test_pdf_fields.py": "5298a96956cafac4e90911bbd3ec94a2f6149ef2d09a8c26c18bb506a09f4ea5",
     "tests/test_pdf_outline_import.py": "50c265c647416f2b53b3bf4a7228b11ce09b3292810f5f1f30b66a2758ed1d64",
     "tests/test_render_clipping.py": "367107aecedb72184ee304cd673dc0d2498c1041e9f85d459ab0be14d6ff914a",
-    "tests/test_slide_layouts.py": "365028483efdb274afb6b4efc4b3ca8e51a169c879e47f2263b2a435271562f2"
+    "tests/test_slide_layouts.py": "365028483efdb274afb6b4efc4b3ca8e51a169c879e47f2263b2a435271562f2",
+    "tests/test_story_content.py": "c2432ede7ebf0ff0d3b3b5c6cef0729d77e30018f0eb0b576bcd8cd3324e4203",
+    "tests/test_line_numbers.py": "b12daf4001b8134b9ae99d981c33c70615c51e3b4301575f2dfc4ea3dc568fdf",
+    "tests/test_direction_language.py": "e24c6808ff7a60ee2147f05a70fedec4c78bbe7a69e1a986de39dd1849d46a2e",
+    "tests/test_pdf_geometric_annotations.py": "0b61bc426776a8f74c75a2ae364f2e01d3426a7d059b301971dc0dade049f3c8",
+    "tests/test_word_bookmarks.py": "6bf22bc916296482ce25100702ae2f5b88f385ece5befb2d20cacb083893a95a",
+    "tests/test_story_clear.py": "ea43d861092700d6763636b622d56b261da0803c2d79916d0d8c0a688349d2ce",
+    "tests/test_pdf_output_options.py": "e970107c4245f335c301a2bc4012e107ac04fde60c5adce0d1d2e5d74c5e1bb5",
+    "tests/test_pdf_search.py": "58fef2f3633a8578ceff0f2c5494f19c5cc8980bc6a3a6d1c154cf8134b4df29",
+    "tests/test_decimal_outline.py": "2133398d5fdfcaf6545afb87e90aa276904b55c2ee6ed1c36b0f209342749b56",
+    "tests/test_field_tooltips.py": "569ecc1cfbc33a6a22f32fe456639a7c2560ff11c0af1cecfcc9b22bf56f28f4",
+    "tests/test_annotation_lock.py": "b1720ec43863e426bce8bff198270f7f89d21b93a8b15a2748cb8f573c5232ad",
+    "tests/test_field_read_only.py": "f3055f423c0f98cd9eb02bfc21927a7b251bed81da2764c4d765bb2d36108cb7",
+    "tests/test_note_conversion.py": "4d9fbcb9330d703c8643e42fdcbce9d72126d0a16ecf3df91533f771a281dbd0",
+    "tests/test_slide_background_reset.py": "a76f9249da5695435353315417936c88c3a4ebf209ec41a7bf20e24af1c1f7f1",
+    "tests/test_note_clear.py": "c1db35d457f3a637cf6e9e85d7faad86e49614796702224e0870d51264e5c10c",
+    "tests/test_annotation_opacity.py": "2f94b75b40b1b720a3ee1b5be9afce7ae84f8ecf3cdf32353c0db85f2f97d5bd",
+    "tests/test_word_shapes.py": "ecd2a290b72931b53022ebfe5076503f032508a72ebd3ee25daaf3cbb3b9ebc1",
+    "tests/test_pdf_underlays.py": "73f5d254623dcbd70a452edcd8e82f76ba3eff667a79988c0f6e89ba77f4e225"
   },
   "profiles": [
     {
@@ -439,11 +562,13 @@
     {
       "id": "pdf.owned-fields",
       "format": "pdf",
-      "scope": "Owned single-widget text/checkbox/choice fields with fixed appearances; no radio/script/multiline profile.",
+      "scope": "Owned single-widget text/checkbox/choice fields with fixed appearances and bounded Unicode tooltip metadata and native read-only state; no radio/script/multiline profile.",
       "public_members": [
         "new(\"pdf\").pages[0].fields.add(...)",
         "field.value",
         "field.box",
+        "field.tooltip",
+        "field.read_only",
         "pdf.fields.flatten()"
       ],
       "native_sources": {
@@ -479,21 +604,51 @@
             "PageRenderer",
             "RenderRequest"
           ]
+        },
+        "tooltip": {
+          "reference": "pdfcraft",
+          "path": "crates/forms/src/author.rs",
+          "symbols": [
+            "FieldProps",
+            "set_props"
+          ]
+        },
+        "tooltip_read": {
+          "reference": "pdfcraft",
+          "path": "crates/forms/src/lib.rs",
+          "symbols": [
+            "Field"
+          ]
+        },
+        "read_only": {
+          "reference": "pdfcraft",
+          "path": "crates/forms/src/lib.rs",
+          "symbols": [
+            "flags::READ_ONLY",
+            "Field::read_only",
+            "set_value_with"
+          ]
         }
       },
       "operations": {
         "read": {
           "status": "partial",
-          "scope": "Owned field handles expose bounded values/options and current-view geometry. This is not imported AcroForm extraction.",
+          "scope": "Owned field handles expose bounded values/options, current-view geometry and Unicode tooltip metadata; absent/cleared tooltips read as empty strings. This is not imported AcroForm extraction. Owned handles also expose strict boolean read-only state, preserved across copied/page-organized owned models; saved editable AcroForm reopening remains rejected.",
           "tests": [
             "tests/test_pdf_fields.py::PdfFieldTests.test_owned_forms_render_copy_and_flatten",
-            "tests/test_field_geometry.py::FieldGeometryTests.test_rotated_cropped_userunit_pages_use_display_coordinates"
+            "tests/test_field_geometry.py::FieldGeometryTests.test_rotated_cropped_userunit_pages_use_display_coordinates",
+            "tests/test_field_tooltips.py::FieldTooltipTests.test_metadata_preserves_all_kinds_rotated_geometry_pixels_and_followup_edits",
+            "tests/test_field_read_only.py::FieldReadOnlyTests.test_all_kinds_preserve_four_view_pixels_metadata_copy_and_allowed_edits",
+            "tests/test_field_read_only.py::FieldReadOnlyTests.test_strict_bool_and_closed_stale_removed_identity"
           ],
-          "artifact": "cookbook-2026-10-20",
+          "artifact": "field-read-only-2026-10-20",
           "native": [
             "author",
             "inspect",
-            "flatten"
+            "flatten",
+            "tooltip",
+            "tooltip_read",
+            "read_only"
           ]
         },
         "create": {
@@ -511,16 +666,27 @@
         },
         "edit_authored": {
           "status": "verified",
-          "scope": "Fill, resize/move, delete and flatten the supported owned profile atomically; preserve widget orientation when pages rotate.",
+          "scope": "Fill, resize/move, delete and flatten the supported owned profile atomically; preserve widget orientation when pages rotate. Set/clear bounded Unicode tooltips with strict type/Unicode/4096-byte checks and subclass/lifetime guards; this does not add multiline painted values. Set/unset READ_ONLY only. Native filling refuses valid identical, different and clear values while set; unsetting restores filling. Tooltip/box edits, field/page deletion and flattening remain allowed. Invalid bool and stale/closed identity failures are atomic; no security or AP-reference-preserving claim.",
           "tests": [
             "tests/test_pdf_fields.py::PdfFieldTests.test_owned_forms_render_copy_and_flatten",
-            "tests/test_field_geometry.py::FieldGeometryTests.test_rotated_cropped_userunit_pages_use_display_coordinates"
+            "tests/test_field_geometry.py::FieldGeometryTests.test_rotated_cropped_userunit_pages_use_display_coordinates",
+            "tests/test_field_tooltips.py::FieldTooltipTests.test_metadata_preserves_all_kinds_rotated_geometry_pixels_and_followup_edits",
+            "tests/test_field_tooltips.py::FieldTooltipTests.test_utf8_limits_bad_values_and_warm_cache_are_atomic",
+            "tests/test_field_tooltips.py::FieldTooltipTests.test_subclasses_cannot_run_callbacks_or_hide_size",
+            "tests/test_field_tooltips.py::FieldTooltipTests.test_closed_stale_deleted_and_copied_handles_keep_identity",
+            "tests/test_field_read_only.py::FieldReadOnlyTests.test_all_kinds_preserve_four_view_pixels_metadata_copy_and_allowed_edits",
+            "tests/test_field_read_only.py::FieldReadOnlyTests.test_programmatic_same_different_and_clear_values_fail_atomically",
+            "tests/test_field_read_only.py::FieldReadOnlyTests.test_strict_bool_and_closed_stale_removed_identity",
+            "tests/test_field_read_only.py::FieldReadOnlyTests.test_read_only_deletion_and_page_deletion_remain_available"
           ],
-          "artifact": "cookbook-2026-10-20",
+          "artifact": "field-read-only-2026-10-20",
           "native": [
             "author",
             "inspect",
-            "flatten"
+            "flatten",
+            "tooltip",
+            "tooltip_read",
+            "read_only"
           ]
         },
         "edit_imported": {
@@ -529,28 +695,38 @@
         },
         "preserve": {
           "status": "partial",
-          "scope": "Owned copies/page organization retain tested values/widgets. This does not establish arbitrary field-dictionary or imported form preservation.",
+          "scope": "Owned copies/page organization retain tested values/widgets and tooltip metadata; later widget geometry/value edits retain tooltips. Saved outputs preserve tested pixels, but this is not arbitrary field-dictionary or imported-form metadata preservation. Read-only updates preserve tested values/options/tooltip/box and exact fixture pixels; independent copies can clear the flag and fill without changing the source. Same-format source readback of Ff has separate native artifact evidence, not imported Python inventory.",
           "tests": [
             "tests/test_pdf_fields.py::PdfFieldTests.test_owned_forms_render_copy_and_flatten",
-            "tests/test_pdf_fields.py::PdfFieldTests.test_fields_follow_page_organization"
+            "tests/test_pdf_fields.py::PdfFieldTests.test_fields_follow_page_organization",
+            "tests/test_field_tooltips.py::FieldTooltipTests.test_metadata_preserves_all_kinds_rotated_geometry_pixels_and_followup_edits",
+            "tests/test_field_read_only.py::FieldReadOnlyTests.test_all_kinds_preserve_four_view_pixels_metadata_copy_and_allowed_edits",
+            "tests/test_field_read_only.py::FieldReadOnlyTests.test_programmatic_same_different_and_clear_values_fail_atomically"
           ],
-          "artifact": "cookbook-2026-10-20",
+          "artifact": "field-read-only-2026-10-20",
           "native": [
             "author",
             "inspect",
-            "flatten"
+            "flatten",
+            "tooltip",
+            "tooltip_read",
+            "read_only"
           ]
         },
         "render": {
           "status": "verified",
-          "scope": "Visible text/checkbox/choice appearances and tested flattening render as expected, including rotated/cropped/UserUnit geometry.",
+          "scope": "Visible text/checkbox/choice appearances and tested flattening render as expected, including rotated/cropped/UserUnit geometry. Tooltip-only updates/clear preserve exact fixture PNG bytes; flatten output matches the same control without tooltip metadata. Read-only updates preserve exact PNGs for all three field kinds/four rotated CropBox/UserUnit views; flattened output matches the same flag-cleared control. Native set_props may regenerate appearance references.",
           "tests": [
             "tests/test_pdf_fields.py::PdfFieldTests.test_owned_forms_render_copy_and_flatten",
-            "tests/test_field_geometry.py::FieldGeometryTests.test_rotated_cropped_userunit_pages_use_display_coordinates"
+            "tests/test_field_geometry.py::FieldGeometryTests.test_rotated_cropped_userunit_pages_use_display_coordinates",
+            "tests/test_field_tooltips.py::FieldTooltipTests.test_metadata_preserves_all_kinds_rotated_geometry_pixels_and_followup_edits",
+            "tests/test_field_read_only.py::FieldReadOnlyTests.test_all_kinds_preserve_four_view_pixels_metadata_copy_and_allowed_edits"
           ],
-          "artifact": "cookbook-2026-10-20",
+          "artifact": "field-read-only-2026-10-20",
           "native": [
-            "raster"
+            "raster",
+            "tooltip",
+            "read_only"
           ]
         },
         "export": {
@@ -563,10 +739,13 @@
           "checked_owned_fields",
           "add_field",
           "set_field_box",
-          "flatten_fields"
+          "flatten_fields",
+          "field_payload",
+          "set_field_tooltip",
+          "set_field_read_only"
         ]
       },
-      "fixture_provenance": "Synthetic PDFs authored in test_pdf_fields.py and test_field_geometry.py; the latter uses local PDF geometry fixtures with rotation/CropBox/UserUnit. Assertions inspect actual PNG pixels, metadata, owned copy independence and flattening results."
+      "fixture_provenance": "Synthetic PDFs authored in test_pdf_fields.py and test_field_geometry.py; the latter uses local PDF geometry fixtures with rotation/CropBox/UserUnit. Assertions inspect actual PNG pixels, metadata, owned copy independence and flattening results. Tooltip fixtures additionally author all three kinds on four rotated CropBox/UserUnit pages, assert owned metadata/copy/readback/clear/resize/value behavior and exact PNG/flatten-control equality. Saved AcroForms still reject editable reopening; native TU roundtrip has separate artifact-level Rust evidence, not an imported-field Python certification. Read-only fixtures cover the same three kinds/four rotated page views, exact render and flatten-control equality, native programmatic same/different/clear refusal with warm-cache rollback, copied/unset recovery, permitted box/tooltip/delete behavior and strict-bool/stale identity."
     },
     {
       "id": "slides.layouts",
@@ -607,7 +786,7 @@
           "reference": "deckcraft",
           "path": "crates/render/src/lib.rs",
           "symbols": [
-            "render_slide"
+            "try_render_slide"
           ]
         },
         "pdf": {
@@ -705,10 +884,1663 @@
           "shape_placeholder"
         ],
         "rust/src/pptx.rs": [
-          "render_slide"
+          "try_render_slide"
         ]
       },
       "fixture_provenance": "Synthetic DeckCraft default layouts reached through public Python authoring; tests fill every placeholder and inspect the authored PPTX ZIP parts. They reopen PPTX and exported PDF and inspect actual label text/PNG pixels; this is not independent PowerPoint validation."
+    },
+    {
+      "id": "word.rich-stories",
+      "format": "docx",
+      "scope": "Owned header/footer tables and inline PNG pictures, direct child collections and native repeated placement; linkage and rich notes are excluded.",
+      "public_members": [
+        "Section.header(...).add_table(...)",
+        "Section.footer(...).add_image(...)",
+        "EditableStory.tables/images/paragraphs"
+      ],
+      "adapter_sources": {
+        "rust/src/author_docx.rs": [
+          "story_add_table",
+          "story_add_image",
+          "validate_rich_story_page_bounds"
+        ],
+        "rust/src/docx.rs": [
+          "render_with"
+        ],
+        "src/doc_ex/_authoring.py": [
+          "EditableStory"
+        ]
+      },
+      "native_sources": {
+        "write": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/write/mod.rs",
+          "symbols": [
+            "write"
+          ]
+        },
+        "render": {
+          "reference": "wordcraft",
+          "path": "crates/render/src/lib.rs",
+          "symbols": [
+            "RenderOptions",
+            "render_page"
+          ]
+        },
+        "pdf": {
+          "reference": "wordcraft",
+          "path": "crates/pdf/src/lib.rs",
+          "symbols": [
+            "export",
+            "export_layout"
+          ]
+        },
+        "model": {
+          "reference": "wordcraft",
+          "path": "crates/doc/src/edit.rs",
+          "symbols": [
+            "insert_block"
+          ]
+        },
+        "layout": {
+          "reference": "wordcraft",
+          "path": "crates/layout/src/lib.rs",
+          "symbols": [
+            "Placed",
+            "layout"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic native authored DOCX; XML assertions inspect part order, independent variants/copies and retained anchors. PNG tests compare saturated source colors with PDF and prove intentional exact-height clipping. No external corpus or arbitrary imported source editing is certified.",
+      "operations": {
+        "read": {
+          "status": "unassessed",
+          "scope": "Broader auxiliary-story semantic extraction is not certified by this profile; reopened source/render behavior is scoped under preserve/render."
+        },
+        "create": {
+          "status": "verified",
+          "scope": "Direct tables/pictures and rich cells in owned default/first/even headers/footers, preserving explicit empty paragraphs.",
+          "artifact": "stories-2026-10-20",
+          "tests": [
+            "tests/test_story_content.py::StoryContentTests.test_table_and_picture_first_preserve_order_rich_cells_and_native_output",
+            "tests/test_story_content.py::StoryContentTests.test_variants_and_copied_sections_keep_independent_handles_and_placeholders"
+          ],
+          "native": [
+            "model",
+            "write"
+          ]
+        },
+        "edit_authored": {
+          "status": "partial",
+          "scope": "Existing handles edit/copy rich content and remove pictures while retaining anchors; inactive variants may lack nested geometry. Clear is assessed separately in word.story-clear; arbitrary block movement/linkage remains excluded.",
+          "artifact": "stories-2026-10-20",
+          "tests": [
+            "tests/test_story_content.py::StoryContentTests.test_media_replacement_deletion_and_cache_keep_other_references_alive",
+            "tests/test_story_content.py::StoryContentTests.test_inactive_variant_measurement_and_invalid_operations_are_atomic"
+          ],
+          "native": [
+            "model",
+            "layout"
+          ]
+        },
+        "edit_imported": {
+          "status": "unsupported",
+          "scope": "The editable DOCX lifecycle does not expose arbitrary imported Office editing."
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Owned source order, explicit empty paragraphs and independent section/document copies; not preservation of unknown imported parts.",
+          "artifact": "stories-2026-10-20",
+          "tests": [
+            "tests/test_story_content.py::StoryContentTests.test_table_and_picture_first_preserve_order_rich_cells_and_native_output",
+            "tests/test_story_content.py::StoryContentTests.test_variants_and_copied_sections_keep_independent_handles_and_placeholders"
+          ],
+          "native": [
+            "model",
+            "write"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "Actual source colors in full/region and retained/one-shot PNG, repeated variant selection and physical table/picture-frame checks. No full text-ink containment guarantee.",
+          "artifact": "stories-2026-10-20",
+          "tests": [
+            "tests/test_story_content.py::StoryContentTests.test_export_colors_match_pdf_full_region_sessions_and_mixed_page_sizes",
+            "tests/test_story_content.py::StoryContentTests.test_physical_overflow_rejects_output_and_recovers_after_later_edits"
+          ],
+          "native": [
+            "layout",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "partial",
+          "scope": "Native PDF retains tested story text and visible media. Off-page frames fail before output; no general linked-story or rich-note support.",
+          "artifact": "stories-2026-10-20",
+          "tests": [
+            "tests/test_story_content.py::StoryContentTests.test_table_and_picture_first_preserve_order_rich_cells_and_native_output",
+            "tests/test_story_content.py::StoryContentTests.test_physical_overflow_rejects_output_and_recovers_after_later_edits"
+          ],
+          "native": [
+            "write",
+            "pdf"
+          ]
+        }
+      }
+    },
+    {
+      "id": "word.line-numbers",
+      "format": "docx",
+      "scope": "Owned single-column section decimal line numbering through native page/section/continuous counters; known native configurations are rejected.",
+      "public_members": [
+        "Section.line_numbers"
+      ],
+      "adapter_sources": {
+        "rust/src/author_docx.rs": [
+          "validate_line_number_work",
+          "validate_line_number_bounds",
+          "native_cell_widths"
+        ],
+        "src/doc_ex/_authoring.py": [
+          "line_numbers"
+        ]
+      },
+      "native_sources": {
+        "write": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/write/mod.rs",
+          "symbols": [
+            "write"
+          ]
+        },
+        "render": {
+          "reference": "wordcraft",
+          "path": "crates/render/src/lib.rs",
+          "symbols": [
+            "RenderOptions",
+            "render_page"
+          ]
+        },
+        "pdf": {
+          "reference": "wordcraft",
+          "path": "crates/pdf/src/lib.rs",
+          "symbols": [
+            "export",
+            "export_layout"
+          ]
+        },
+        "model": {
+          "reference": "wordcraft",
+          "path": "crates/doc/src/section.rs",
+          "symbols": [
+            "LineNumbering",
+            "LineNumberRestart"
+          ]
+        },
+        "layout": {
+          "reference": "wordcraft",
+          "path": "crates/layout/src/lib.rs",
+          "symbols": [
+            "DECOR_STORY",
+            "layout"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic native authored DOCX with automatic and explicit pages, mixed sections, fields and rich stories. Exact source numbering properties, native label values and visible margin ink are asserted; PDF ordering remains native. Raw model defect repros are retained in Rust tests.",
+      "operations": {
+        "read": {
+          "status": "unsupported",
+          "scope": "Read-only Document does not expose a section line-number configuration inventory. DOCX semantic text omits layout decorations."
+        },
+        "create": {
+          "status": "verified",
+          "scope": "Bounded single-column native settings with representable starts/intervals/distances and page/section/continuous restart.",
+          "artifact": "lines-2026-10-20",
+          "tests": [
+            "tests/test_line_numbers.py::LineNumberTests.test_source_png_pdf_copy_and_clear_use_native_labels",
+            "tests/test_line_numbers.py::LineNumberTests.test_restart_intervals_sections_and_fields_remain_native"
+          ],
+          "native": [
+            "model",
+            "write",
+            "layout"
+          ]
+        },
+        "edit_authored": {
+          "status": "partial",
+          "scope": "Copy/reset and later changes preserve atomic limits. Multi-column labels and affected continuous each_page resumes are rejected before commit.",
+          "artifact": "lines-2026-10-20",
+          "tests": [
+            "tests/test_line_numbers.py::LineNumberTests.test_invalid_configuration_column_edits_and_work_limits_are_atomic",
+            "tests/test_line_numbers.py::LineNumberTests.test_each_page_reenable_after_unnumbered_pages_is_explicitly_unsupported"
+          ],
+          "native": [
+            "model",
+            "layout"
+          ]
+        },
+        "edit_imported": {
+          "status": "unsupported",
+          "scope": "The editable DOCX lifecycle does not expose arbitrary imported Office editing."
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Owned settings survive native write/read and copies; reset disables labels. No arbitrary imported section-property preservation claim.",
+          "artifact": "lines-2026-10-20",
+          "tests": [
+            "tests/test_line_numbers.py::LineNumberTests.test_source_png_pdf_copy_and_clear_use_native_labels"
+          ],
+          "native": [
+            "model",
+            "write"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "Native margin labels on automatic pages with actual logical-bound checks and conservative authored label-work cap. No total-memory/imported-source/glyph-ink guarantee.",
+          "artifact": "lines-2026-10-20",
+          "tests": [
+            "tests/test_line_numbers.py::LineNumberTests.test_automatic_multipage_restart_and_continuation",
+            "tests/test_line_numbers.py::LineNumberTests.test_actual_extent_guard_allows_default_margins_and_rejects_offpage_output",
+            "tests/test_line_numbers.py::LineNumberTests.test_line_labels_and_rich_story_geometry_share_output_validation"
+          ],
+          "native": [
+            "layout",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "partial",
+          "scope": "Native PDF label values and ink are verified in the bounded profile; reading order/classification may differ from numeric order.",
+          "artifact": "lines-2026-10-20",
+          "tests": [
+            "tests/test_line_numbers.py::LineNumberTests.test_restart_intervals_sections_and_fields_remain_native",
+            "tests/test_line_numbers.py::LineNumberTests.test_automatic_multipage_restart_and_continuation"
+          ],
+          "native": [
+            "write",
+            "pdf"
+          ]
+        }
+      }
+    },
+    {
+      "id": "word.direction-language",
+      "format": "docx",
+      "scope": "Owned paragraph bidi direction and bounded literal run-language metadata; no full shaping, font fallback or language-processing conformance claim.",
+      "public_members": [
+        "Paragraph.format(direction=...)",
+        "TextRange.format(language=...)",
+        "Style.format(...)",
+        "Styles.format_defaults(...)"
+      ],
+      "adapter_sources": {
+        "rust/src/author_docx.rs": [
+          "format_paragraph",
+          "char_snapshot",
+          "para_snapshot"
+        ],
+        "src/doc_ex/_authoring.py": [
+          "CharacterFormatting",
+          "ParagraphFormatting"
+        ]
+      },
+      "native_sources": {
+        "properties": {
+          "reference": "wordcraft",
+          "path": "crates/doc/src/props.rs",
+          "symbols": [
+            "CharProps",
+            "ParaProps"
+          ]
+        },
+        "write": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/write/mod.rs",
+          "symbols": [
+            "write"
+          ]
+        },
+        "layout": {
+          "reference": "wordcraft",
+          "path": "crates/layout/src/lib.rs",
+          "symbols": [
+            "layout"
+          ]
+        },
+        "render": {
+          "reference": "wordcraft",
+          "path": "crates/render/src/lib.rs",
+          "symbols": [
+            "RenderOptions",
+            "render_page"
+          ]
+        },
+        "pdf": {
+          "reference": "wordcraft",
+          "path": "crates/pdf/src/lib.rs",
+          "symbols": [
+            "export",
+            "export_layout"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic mixed Persian/Latin/digit paragraphs and Unicode source ranges, using bundled native fonts. Visible colored extents test native PNG/PDF agreement; Hebrew/emoji/combining range preservation alone does not prove glyph coverage.",
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "Owned direct/effective formatting snapshots distinguish explicit LTR/RTL and inherited reset. No imported run-language inventory is implied.",
+          "artifact": "direction-2026-10-20",
+          "tests": [
+            "tests/test_direction_language.py::DirectionLanguageTests.test_direction_inheritance_reset_and_visible_native_pdf_alignment",
+            "tests/test_direction_language.py::DirectionLanguageTests.test_language_character_style_clear_unicode_and_owned_ranges"
+          ],
+          "native": [
+            "properties"
+          ]
+        },
+        "create": {
+          "status": "partial",
+          "scope": "Existing formatting methods write native direction and 1..63-byte ASCII language tags in body, nested cells, headers, footnotes and endnotes.",
+          "artifact": "direction-2026-10-20",
+          "tests": [
+            "tests/test_direction_language.py::DirectionLanguageTests.test_body_nested_cell_header_footer_and_note_scope_roundtrip",
+            "tests/test_direction_language.py::DirectionLanguageTests.test_table_direction_and_conditional_language_leave_column_order"
+          ],
+          "native": [
+            "properties",
+            "write"
+          ]
+        },
+        "edit_authored": {
+          "status": "partial",
+          "scope": "Direct/style/default inheritance and clearing, copies and atomic invalid patches; conditional table paragraph direction remains unavailable.",
+          "artifact": "direction-2026-10-20",
+          "tests": [
+            "tests/test_direction_language.py::DirectionLanguageTests.test_direction_inheritance_reset_and_visible_native_pdf_alignment",
+            "tests/test_direction_language.py::DirectionLanguageTests.test_language_character_style_clear_unicode_and_owned_ranges",
+            "tests/test_direction_language.py::DirectionLanguageTests.test_invalid_tags_directions_and_callback_changes_are_atomic"
+          ],
+          "native": [
+            "properties",
+            "write"
+          ]
+        },
+        "edit_imported": {
+          "status": "unsupported",
+          "scope": "Arbitrary imported DOCX editing is not exposed by the current lifecycle."
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Authored language/direction serialization, source Unicode, scope and copy independence. Unknown source markup and broad multilingual fidelity are unassessed.",
+          "artifact": "direction-2026-10-20",
+          "tests": [
+            "tests/test_direction_language.py::DirectionLanguageTests.test_language_character_style_clear_unicode_and_owned_ranges",
+            "tests/test_direction_language.py::DirectionLanguageTests.test_body_nested_cell_header_footer_and_note_scope_roundtrip"
+          ],
+          "native": [
+            "properties",
+            "write"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "Native logical-start alignment and tested mixed-script colored extents, with LTR override and reset. No arbitrary font/script coverage guarantee.",
+          "artifact": "direction-2026-10-20",
+          "tests": [
+            "tests/test_direction_language.py::DirectionLanguageTests.test_direction_inheritance_reset_and_visible_native_pdf_alignment"
+          ],
+          "native": [
+            "layout",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "partial",
+          "scope": "Native PDF retains tested visible geometry within two pixels at 144 DPI and text across auxiliary scopes; source language metadata is not claimed as PDF tagging.",
+          "artifact": "direction-2026-10-20",
+          "tests": [
+            "tests/test_direction_language.py::DirectionLanguageTests.test_direction_inheritance_reset_and_visible_native_pdf_alignment",
+            "tests/test_direction_language.py::DirectionLanguageTests.test_body_nested_cell_header_footer_and_note_scope_roundtrip"
+          ],
+          "native": [
+            "layout",
+            "pdf"
+          ]
+        }
+      }
+    },
+    {
+      "id": "pdf.geometric-comments",
+      "format": "pdf",
+      "scope": "Native rectangle/ellipse outlines with fixed solid unfilled two-user-unit stroke and at least three-unit dimensions; existing comment opacity property also covers canonical notes and four markup kinds. Creation evidence remains rectangle/ellipse only; no page-content drawing or secure redaction certification.",
+      "public_members": [
+        "page.annotations.add(\"rectangle\" | \"ellipse\", ...)",
+        "annotation.box",
+        "annotation.color",
+        "annotation.update(...)",
+        "annotation.opacity"
+      ],
+      "adapter_sources": {
+        "rust/src/author_pdf.rs": [
+          "add_annotation",
+          "geometric_dict_peak",
+          "validate_geometric_rect",
+          "annotation_opacity",
+          "update_annotation",
+          "checked_lock_target"
+        ],
+        "src/doc_ex/_authoring.py": [
+          "Annotations",
+          "Annotation"
+        ]
+      },
+      "native_sources": {
+        "annot": {
+          "reference": "pdfcraft",
+          "path": "crates/annot/src/lib.rs",
+          "symbols": [
+            "Shape",
+            "add_annotation",
+            "summaries",
+            "set_rect",
+            "set_style"
+          ]
+        },
+        "render": {
+          "reference": "pdfcraft",
+          "path": "crates/render/src/raster.rs",
+          "symbols": [
+            "PageRenderer",
+            "RenderRequest"
+          ]
+        },
+        "cos": {
+          "reference": "pdfcraft",
+          "path": "crates/cos/src/document.rs",
+          "symbols": [
+            "Document"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic native shapes and minimal imported annotation fixtures; actual outline pixels, empty centers, saved PNG equality, rotations and CropBox/UserUnit. A separate direct-native tiny-oval regression motivates the conservative minimum. Opacity controls use seven native-authored kinds on white/colored backgrounds at 72/144 DPI, both writer representations and saved native readback. Hand-built fractional-CA imported acceptance is rectangle only.",
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "Existing annotation handles report ellipse/rectangle, geometry and metadata. Global inventory/initial inspection allocations remain an upstream gap. Read native opacity for seven native-authored comment kinds within the canonical target profile.",
+          "artifact": "annotation-opacity-2026-10-21",
+          "tests": [
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_visible_shapes_resize_recolor_reopen_copy_delete",
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_rotated_crop_userunit_and_page_organization",
+            "tests/test_annotation_opacity.py::AnnotationOpacityTests.test_all_kinds_native_alpha_roundtrip_and_copy"
+          ],
+          "native": [
+            "annot"
+          ]
+        },
+        "create": {
+          "status": "partial",
+          "scope": "Native fixed-profile outline comments reuse add and comment metadata; text is not a visible FreeText appearance.",
+          "artifact": "annotation-opacity-2026-10-21",
+          "tests": [
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_visible_shapes_resize_recolor_reopen_copy_delete",
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_three_user_unit_minimum_is_visible_at_fixture_dpi"
+          ],
+          "native": [
+            "annot"
+          ]
+        },
+        "edit_authored": {
+          "status": "partial",
+          "scope": "Native move/resize/recolor, metadata, compound updates, deletion and callback/stale ownership checks. Set finite opacity from 0 to 1 for seven native-authored comment kinds; invalid, locked and callback-driven stale edits fail in the stated fixtures.",
+          "artifact": "annotation-opacity-2026-10-21",
+          "tests": [
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_visible_shapes_resize_recolor_reopen_copy_delete",
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_argument_callbacks_cannot_retarget_annotation_or_page",
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_stale_or_closed_handles_fail_before_argument_callbacks",
+            "tests/test_annotation_opacity.py::AnnotationOpacityTests.test_all_kinds_native_alpha_roundtrip_and_copy",
+            "tests/test_annotation_opacity.py::AnnotationOpacityTests.test_invalid_values_locked_combined_updates_and_link",
+            "tests/test_annotation_opacity.py::AnnotationOpacityTests.test_float_callbacks_cannot_retarget_stale_handles"
+          ],
+          "native": [
+            "annot"
+          ]
+        },
+        "edit_imported": {
+          "status": "partial",
+          "scope": "Only canonical bounded solid unfilled geometry/metadata dictionaries. Unsupported styles/extensions fail atomically; foreign appearance bytes are not decoded by target validation. Canonical direct finite 0\u20131 CA is accepted on the hand-built rectangle control; seven-kind readback comes from native-authored output, not arbitrary foreign comments.",
+          "artifact": "annotation-opacity-2026-10-21",
+          "tests": [
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_visible_shapes_resize_recolor_reopen_copy_delete",
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_imported_profile_rejections_preserve_foreign_appearance",
+            "tests/test_annotation_opacity.py::AnnotationOpacityTests.test_canonical_imports_accept_fractional_scalar_only"
+          ],
+          "native": [
+            "annot",
+            "cos"
+          ]
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Copies, saved/reopened shapes and existing page text/vector content retain tested values/pixels. Geometry/style edits regenerate standard appearances and do not promise custom-appearance preservation. Both PDF writer representations, saved native readback and independent copies retain the tested seven-kind opacity and pixels. Style/opacity redraws replace custom appearances; imported note artwork is not certified.",
+          "artifact": "annotation-opacity-2026-10-21",
+          "tests": [
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_visible_shapes_resize_recolor_reopen_copy_delete",
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_rotated_crop_userunit_and_page_organization",
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_imported_profile_rejections_preserve_foreign_appearance",
+            "tests/test_annotation_opacity.py::AnnotationOpacityTests.test_all_kinds_native_alpha_roundtrip_and_copy"
+          ],
+          "native": [
+            "annot",
+            "cos"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "Real colored outlines and empty centers at tested DPI, including all rotations/CropBox/UserUnit and native minimum-size controls. No arbitrary-low-DPI visibility guarantee. Seven native-authored comment kinds show monotonic alpha attenuation and zero-opacity invisibility on white/colored fixture backgrounds at 72 DPI, with saved/reopened PNG equality also checked at 144 DPI; no arbitrary foreign-appearance fidelity is claimed.",
+          "artifact": "annotation-opacity-2026-10-21",
+          "tests": [
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_visible_shapes_resize_recolor_reopen_copy_delete",
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_rotated_crop_userunit_and_page_organization",
+            "tests/test_pdf_geometric_annotations.py::PdfGeometricAnnotationTests.test_three_user_unit_minimum_is_visible_at_fixture_dpi",
+            "tests/test_annotation_opacity.py::AnnotationOpacityTests.test_all_kinds_native_alpha_roundtrip_and_copy"
+          ],
+          "native": [
+            "annot",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "not_applicable",
+          "scope": "This is same-format PDF annotation authoring. PDF serialization/reopen is covered under preserve; no new conversion pair is introduced."
+        }
+      }
+    },
+    {
+      "id": "word.bookmark-navigation",
+      "format": "docx",
+      "scope": "Named whole-paragraph or paragraph-endpoint body targets and internal range links; horizontal nested-body cells only within the checked native layout profile.",
+      "public_members": [
+        "WordDocument.bookmarks[name] = paragraph[:]",
+        "WordDocument.bookmarks[name]",
+        "del WordDocument.bookmarks[name]",
+        "TextRange.link = \"#name\""
+      ],
+      "adapter_sources": {
+        "rust/src/author_docx.rs": [
+          "set_bookmark",
+          "bookmark_range",
+          "delete_bookmark",
+          "validate_bookmark_links",
+          "validate_bookmark_layout"
+        ],
+        "src/doc_ex/_authoring.py": [
+          "_WordBookmarks"
+        ]
+      },
+      "native_sources": {
+        "model": {
+          "reference": "wordcraft",
+          "path": "crates/doc/src/para.rs",
+          "symbols": [
+            "InlineObject::BookmarkStart",
+            "InlineObject::BookmarkEnd",
+            "Paragraph::insert_object"
+          ]
+        },
+        "write": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/write/mod.rs",
+          "symbols": [
+            "write"
+          ]
+        },
+        "layout": {
+          "reference": "wordcraft",
+          "path": "crates/layout/src/lib.rs",
+          "symbols": [
+            "DocLayout",
+            "Placed",
+            "layout"
+          ]
+        },
+        "render": {
+          "reference": "wordcraft",
+          "path": "crates/render/src/lib.rs",
+          "symbols": [
+            "render_page"
+          ]
+        },
+        "pdf": {
+          "reference": "wordcraft",
+          "path": "crates/pdf/src/lib.rs",
+          "symbols": [
+            "export_layout"
+          ]
+        },
+        "read": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/lib.rs",
+          "symbols": [
+            "read_with_password"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic authored DOCX with Unicode/combining/emoji, mixed run sizes, Latin ligatures and Arabic shaping, independent nested cells and header/footer/note references. Tests inspect native XML, normalized links, native PDF destinations and fixture-specific decoded pixels; no imported bookmark inventory or general exact-ink promise.",
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "Fresh authored mapping lookup/ordered iteration is tested. Frozen open() tests assert internal hyperlink labels/offsets, not a general source bookmark inventory; imported bookmark discovery is unassessed.",
+          "artifact": "ownership-2026-10-20",
+          "tests": [
+            "tests/test_word_bookmarks.py::WordBookmarkTests.test_mapping_unicode_move_point_delete_and_native_roundtrip",
+            "tests/test_word_bookmarks.py::WordBookmarkTests.test_internal_label_destination_repagination_and_references_across_stories"
+          ],
+          "native": [
+            "model",
+            "write",
+            "read"
+          ]
+        },
+        "create": {
+          "status": "verified",
+          "scope": "Assign named targets only to a whole paragraph or endpoint point, preserving paired native markers; restricted ASCII names and semantic-anchor/geometry/work guards. Interior and cross-paragraph targets are unsupported.",
+          "artifact": "ownership-2026-10-20",
+          "tests": [
+            "tests/test_word_bookmarks.py::WordBookmarkTests.test_mapping_unicode_move_point_delete_and_native_roundtrip",
+            "tests/test_word_bookmarks.py::WordBookmarkTests.test_endpoint_profile_preserves_shaping_and_later_edits_are_atomic"
+          ],
+          "native": [
+            "model",
+            "write"
+          ]
+        },
+        "edit_authored": {
+          "status": "verified",
+          "scope": "Relocation, fresh self-assignment and checked deletion reuse revision-bound ranges. Reject dangling links, foreign/stale/callback-mutated selections and unsupported marker edits; copies retain independent targets.",
+          "artifact": "ownership-2026-10-20",
+          "tests": [
+            "tests/test_word_bookmarks.py::WordBookmarkTests.test_same_paragraph_relocation_and_fresh_self_assignment",
+            "tests/test_word_bookmarks.py::WordBookmarkTests.test_horizontal_nested_cell_link_box_and_grid_generation",
+            "tests/test_word_bookmarks.py::WordBookmarkTests.test_callback_stale_and_closed_selections_do_not_apply_extra_edits",
+            "tests/test_word_bookmarks.py::WordBookmarkTests.test_repeated_long_target_lookup_work_rejects_atomically_and_recovers"
+          ],
+          "native": [
+            "model",
+            "layout"
+          ]
+        },
+        "edit_imported": {
+          "status": "unsupported",
+          "scope": "Arbitrary imported DOCX editing and imported target adoption are not exposed."
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Named owned marker pairs, text/run formatting and media/field/note references survive same-format serialization and copies. This is not arbitrary source-part or interior-marker preservation.",
+          "artifact": "ownership-2026-10-20",
+          "tests": [
+            "tests/test_word_bookmarks.py::WordBookmarkTests.test_mapping_unicode_move_point_delete_and_native_roundtrip",
+            "tests/test_word_bookmarks.py::WordBookmarkTests.test_media_fields_notes_and_bookmark_operations_preserve_references"
+          ],
+          "native": [
+            "model",
+            "write"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "Whole-paragraph/endpoint markers preserve tested Unicode/mixed-size paragraph PNGs. Nested horizontal link boxes contain the tested red label ink; turned/clipped/over-budget contexts fail. No universal shaping or pixel identity claim.",
+          "artifact": "ownership-2026-10-20",
+          "tests": [
+            "tests/test_word_bookmarks.py::WordBookmarkTests.test_endpoint_profile_preserves_shaping_and_later_edits_are_atomic",
+            "tests/test_word_bookmarks.py::WordBookmarkTests.test_horizontal_nested_cell_link_box_and_grid_generation",
+            "tests/test_word_bookmarks.py::WordBookmarkTests.test_bounds_scope_wrapped_links_rollback_and_existing_path_save"
+          ],
+          "native": [
+            "layout",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "partial",
+          "scope": "Native DOCX-to-PDF retains tested internal labels and target pages after repagination, including links from auxiliary stories to supported body targets. Missing/transformed/clipped/over-budget targets are rejected; heading outlines and general cross-references are excluded.",
+          "artifact": "ownership-2026-10-20",
+          "tests": [
+            "tests/test_word_bookmarks.py::WordBookmarkTests.test_internal_label_destination_repagination_and_references_across_stories",
+            "tests/test_word_bookmarks.py::WordBookmarkTests.test_horizontal_nested_cell_link_box_and_grid_generation",
+            "tests/test_word_bookmarks.py::WordBookmarkTests.test_bounds_scope_wrapped_links_rollback_and_existing_path_save"
+          ],
+          "native": [
+            "layout",
+            "pdf"
+          ]
+        }
+      }
+    },
+    {
+      "id": "word.story-clear",
+      "format": "docx",
+      "scope": "Clear owned header/footer or note content; retain section references/variants or note references/kind/options. No linkage change, semantic note deletion or imported story adoption.",
+      "public_members": [
+        "Section.header(...).clear()",
+        "Section.footer(...).clear()",
+        "Note.clear()"
+      ],
+      "adapter_sources": {
+        "rust/src/author_docx.rs": [
+          "clear_story",
+          "content_usage",
+          "retain_authored_image_media",
+          "clear_note",
+          "clear_owned_story_content"
+        ],
+        "src/doc_ex/_authoring.py": [
+          "EditableStory"
+        ]
+      },
+      "native_sources": {
+        "model": {
+          "reference": "wordcraft",
+          "path": "crates/doc/src/edit.rs",
+          "symbols": [
+            "Document::set_story"
+          ]
+        },
+        "write": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/write/mod.rs",
+          "symbols": [
+            "write"
+          ]
+        },
+        "layout": {
+          "reference": "wordcraft",
+          "path": "crates/layout/src/lib.rs",
+          "symbols": [
+            "DocLayout",
+            "Placed",
+            "layout"
+          ]
+        },
+        "render": {
+          "reference": "wordcraft",
+          "path": "crates/render/src/lib.rs",
+          "symbols": [
+            "render_page"
+          ]
+        },
+        "pdf": {
+          "reference": "wordcraft",
+          "path": "crates/pdf/src/lib.rs",
+          "symbols": [
+            "export_layout"
+          ]
+        },
+        "note_mark": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/write/mod.rs",
+          "symbols": [
+            "note_blocks"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic paragraph/table/image-first stories include nested tables, shared PNGs, page fields and outgoing bookmark links. Native section XML, ownership, copy isolation, decoded PNG colors and PDF page text are asserted; no arbitrary source stories are edited. New owned footnote/endnote fixtures verify blank canonical styles/one own mark, unchanged source IDs/options, long-note repagination and retained next counters, copies/no-ops/conversion, fields/outgoing links and actual colored number-mark PNG/PDF pixels. Native-only cleanup fixtures do not certify public rich note insertion.",
+      "operations": {
+        "read": {
+          "status": "unassessed",
+          "scope": "This mutation profile does not certify complete auxiliary-story extraction or an imported story inventory."
+        },
+        "create": {
+          "status": "not_applicable",
+          "scope": "Container creation is separate; clear reuses an existing owned header/footer or note."
+        },
+        "edit_authored": {
+          "status": "verified",
+          "scope": "Existing stories clear atomically, invalidate their child handles and reclaim only unreferenced resources. Missing/repeated synthetic-empty clear is a true no-op preserving cached render and range revision; authored empty paragraphs are removed. Owned notes clear to a hidden canonical styled placeholder while retaining the external reference/kind. Original empty note paragraphs clear once; clear-convert-clear is a no-op and re-add uses a fresh child without an extra blank.",
+          "artifact": "note-content-clear-2026-10-20",
+          "tests": [
+            "tests/test_story_clear.py::StoryClearTests.test_missing_and_repeated_clear_preserve_ranges_and_warmed_cache",
+            "tests/test_story_clear.py::StoryClearTests.test_rich_clear_removes_pixels_and_children_and_preserves_body",
+            "tests/test_story_clear.py::StoryClearTests.test_shared_media_reclamation_and_note_lifetime_errors",
+            "tests/test_note_clear.py::NoteClearTests.test_empty_clear_conversion_and_noop_preserve_cache_and_ranges",
+            "tests/test_note_clear.py::NoteClearTests.test_fields_links_nested_body_anchor_and_shared_media_survive_clear",
+            "tests/test_note_clear.py::NoteClearTests.test_note_style_reset_and_closed_owner_keep_rich_profile_explicit"
+          ],
+          "native": [
+            "model",
+            "write"
+          ]
+        },
+        "edit_imported": {
+          "status": "unsupported",
+          "scope": "The editable DOCX lifecycle does not adopt arbitrary imported stories."
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Section references/flags/distances and unrelated body/other-story handles remain; independent section/document copies retain original content. Actual clear follows the existing global range-revision contract. No general linked-to-previous or unknown-part preservation. Note IDs/kind/options/body references and other notes remain; same-format serialization emits one native own mark. Clearing intentionally discards authored paragraph formatting/content. Protected semantic markers still reject removal.",
+          "artifact": "note-content-clear-2026-10-20",
+          "tests": [
+            "tests/test_story_clear.py::StoryClearTests.test_rich_clear_removes_pixels_and_children_and_preserves_body",
+            "tests/test_story_clear.py::StoryClearTests.test_variants_copied_sections_and_outgoing_links_remain_independent",
+            "tests/test_story_clear.py::StoryClearTests.test_shared_media_reclamation_and_note_lifetime_errors",
+            "tests/test_note_clear.py::NoteClearTests.test_clear_keeps_reference_and_number_with_visible_content_removed",
+            "tests/test_note_clear.py::NoteClearTests.test_long_note_clear_rebuilds_layout_and_recovers_one_paragraph",
+            "tests/test_note_clear.py::NoteClearTests.test_empty_clear_conversion_and_noop_preserve_cache_and_ranges",
+            "tests/test_note_clear.py::NoteClearTests.test_fields_links_nested_body_anchor_and_shared_media_survive_clear"
+          ],
+          "native": [
+            "model",
+            "write",
+            "note_mark"
+          ]
+        },
+        "render": {
+          "status": "verified",
+          "scope": "Clearing removes tested story picture pixels while preserving body content and the copied original PNG; no-op clear retains warmed cached output. Cleared footnotes/endnotes remove tested red content, collapse a tested long note to one page, and retain the configured blue/red own-number mark. This does not imply zero-height note removal.",
+          "artifact": "note-content-clear-2026-10-20",
+          "tests": [
+            "tests/test_story_clear.py::StoryClearTests.test_rich_clear_removes_pixels_and_children_and_preserves_body",
+            "tests/test_story_clear.py::StoryClearTests.test_missing_and_repeated_clear_preserve_ranges_and_warmed_cache",
+            "tests/test_note_clear.py::NoteClearTests.test_clear_keeps_reference_and_number_with_visible_content_removed",
+            "tests/test_note_clear.py::NoteClearTests.test_long_note_clear_rebuilds_layout_and_recovers_one_paragraph",
+            "tests/test_note_clear.py::NoteClearTests.test_note_style_reset_and_closed_owner_keep_rich_profile_explicit"
+          ],
+          "native": [
+            "layout",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "partial",
+          "scope": "Native DOCX-to-PDF omits cleared header/footer and note content, preserves tested remaining content/counters and copied layouts, and retains blank note marks in the configured note style. General linked stories, imported notes and rich-note geometry remain outside this profile.",
+          "artifact": "note-content-clear-2026-10-20",
+          "tests": [
+            "tests/test_story_clear.py::StoryClearTests.test_rich_clear_removes_pixels_and_children_and_preserves_body",
+            "tests/test_story_clear.py::StoryClearTests.test_variants_copied_sections_and_outgoing_links_remain_independent",
+            "tests/test_note_clear.py::NoteClearTests.test_clear_keeps_reference_and_number_with_visible_content_removed",
+            "tests/test_note_clear.py::NoteClearTests.test_long_note_clear_rebuilds_layout_and_recovers_one_paragraph",
+            "tests/test_note_clear.py::NoteClearTests.test_note_style_reset_and_closed_owner_keep_rich_profile_explicit"
+          ],
+          "native": [
+            "pdf",
+            "note_mark"
+          ]
+        }
+      }
+    },
+    {
+      "id": "pdf.object-stream-output",
+      "format": "pdf",
+      "scope": "PDF full-writer object_streams=True/False representation policy on existing serialization/save; no incremental save, version downgrade, general compression or archival conformance.",
+      "public_members": [
+        "PdfDocument.to_bytes(object_streams=True)",
+        "PdfDocument.save(destination, object_streams=False)"
+      ],
+      "adapter_sources": {
+        "rust/src/author_pdf.rs": [
+          "to_bytes_with_options",
+          "serialize_with_limit"
+        ],
+        "src/doc_ex/_authoring.py": [
+          "object_streams"
+        ]
+      },
+      "native_sources": {
+        "writer": {
+          "reference": "pdfcraft",
+          "path": "crates/cos/src/writer.rs",
+          "symbols": [
+            "SaveOptions",
+            "write_full"
+          ]
+        },
+        "read": {
+          "reference": "pdfcraft",
+          "path": "crates/cos/src/document.rs",
+          "symbols": [
+            "Document"
+          ]
+        },
+        "render": {
+          "reference": "pdfcraft",
+          "path": "crates/render/src/raster.rs",
+          "symbols": [
+            "PageRenderer",
+            "RenderRequest"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic authored text, PNG, vector path, links, geometric annotation, outlines, metadata and fields plus conservative CropBox/Rotate/UserUnit imports. Test-only raw startxref inspection distinguishes modes; no public mode-inventory accessor is implied.",
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "Native reopening reads tested content, metadata, images and links from both full-writer modes without a repair workflow. This does not expose object-stream mode through public metadata or certify arbitrary malformed inputs.",
+          "artifact": "ownership-2026-10-20",
+          "tests": [
+            "tests/test_pdf_output_options.py::PdfOutputOptionsTests.test_rich_both_modes_roundtrip_and_owner_cache_are_unchanged",
+            "tests/test_pdf_output_options.py::PdfOutputOptionsTests.test_conservative_imports_subsets_and_geometry_both_modes"
+          ],
+          "native": [
+            "read"
+          ]
+        },
+        "create": {
+          "status": "not_applicable",
+          "scope": "This option chooses serialization of an existing model; document/page creation is not assessed here."
+        },
+        "edit_authored": {
+          "status": "not_applicable",
+          "scope": "Selecting output representation does not mutate the authored document."
+        },
+        "edit_imported": {
+          "status": "not_applicable",
+          "scope": "Selecting output representation does not expand the conservative imported editing profile."
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Same-format serialization/save retains tested meaningful content and supported fields/copies; deterministic repeats and default packed output, strict bool options, atomic destination replacement and callback/close ordering are tested. Bounds check the complete returned vector, not peak writer allocation; arbitrary unknown parts/encryption/signatures remain unassessed.",
+          "artifact": "ownership-2026-10-20",
+          "tests": [
+            "tests/test_pdf_output_options.py::PdfOutputOptionsTests.test_rich_both_modes_roundtrip_and_owner_cache_are_unchanged",
+            "tests/test_pdf_output_options.py::PdfOutputOptionsTests.test_conservative_imports_subsets_and_geometry_both_modes",
+            "tests/test_pdf_output_options.py::PdfOutputOptionsTests.test_save_path_stream_atomicity_permissions_and_default",
+            "tests/test_pdf_output_options.py::PdfOutputOptionsTests.test_callback_order_and_closed_type_precedence"
+          ],
+          "native": [
+            "writer",
+            "read"
+          ]
+        },
+        "render": {
+          "status": "verified",
+          "scope": "Both representations reopen with the same PNG for the synthetic rich-content and rotated/CropBox/UserUnit fixtures, including flattened tested fields. This fixture-specific equality is not a general pixel-perfect conversion promise.",
+          "artifact": "ownership-2026-10-20",
+          "tests": [
+            "tests/test_pdf_output_options.py::PdfOutputOptionsTests.test_rich_both_modes_roundtrip_and_owner_cache_are_unchanged",
+            "tests/test_pdf_output_options.py::PdfOutputOptionsTests.test_conservative_imports_subsets_and_geometry_both_modes"
+          ],
+          "native": [
+            "writer",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "not_applicable",
+          "scope": "PDF-to-PDF save/serialization belongs to preserve, not conversion to another format."
+        }
+      }
+    },
+    {
+      "id": "pdf.native-search",
+      "format": "pdf",
+      "scope": "Read-only bounded native PDF text rectangles from existing page handles, retaining native text order; rectangles are not normalized block offsets or guaranteed visible-ink regions.",
+      "public_members": [
+        "Page.search_for(text)",
+        "PdfPage.search_for(text)"
+      ],
+      "adapter_sources": {
+        "rust/src/pdf.rs": [
+          "search_for",
+          "search_text",
+          "search_rectangles"
+        ],
+        "src/doc_ex/_document.py": [
+          "search_for"
+        ],
+        "src/doc_ex/_authoring.py": [
+          "search_for"
+        ]
+      },
+      "native_sources": {
+        "text": {
+          "reference": "pdfcraft",
+          "path": "crates/render/src/text.rs",
+          "symbols": [
+            "PageText",
+            "PageText::find_opts_limited",
+            "PageText::line_rects"
+          ]
+        },
+        "render": {
+          "reference": "pdfcraft",
+          "path": "crates/render/src/raster.rs",
+          "symbols": [
+            "PageRenderer",
+            "RenderRequest"
+          ]
+        }
+      },
+      "fixture_provenance": "Original small PDF byte fixtures define ToUnicode ligatures, ActualText, two columns, reversed text scales and invisible/clipped text; authored Unicode text uses the existing attributed font fixture. Tests inspect native rectangle coordinates/decoded pixels and owned-result/cache lifetimes, not OCR.",
+      "operations": {
+        "read": {
+          "status": "verified",
+          "scope": "Case-insensitive literal native matching with normalized whitespace, ligature/ActualText mapping and native column order; CropBox/rotation/UserUnit view boxes. Query limit 4,096 UTF-8 bytes and bounded post-interpretation glyph/match/rectangle work fail rather than truncate. Hidden/clipped text remains searchable; no regex, OCR, visible-only search or Office search.",
+          "artifact": "ownership-2026-10-20",
+          "tests": [
+            "tests/test_pdf_search.py::PdfSearchTests.test_ligature_rectangles_rotation_crop_userunit_and_visible_overlap",
+            "tests/test_pdf_search.py::PdfSearchTests.test_multiline_normalized_whitespace_and_literal_matching",
+            "tests/test_pdf_search.py::PdfSearchTests.test_actualtext_replacement_and_native_column_order_are_preserved",
+            "tests/test_pdf_search.py::PdfSearchTests.test_negative_text_scale_keeps_ordered_native_rectangles",
+            "tests/test_pdf_search.py::PdfSearchTests.test_clipped_and_invisible_text_is_searchable_without_visible_ink",
+            "tests/test_pdf_search.py::PdfSearchTests.test_query_limits_empty_and_session_statistics",
+            "tests/test_pdf_search.py::PdfSearchTests.test_snapshots_cache_mutation_copy_stale_and_failed_queries",
+            "tests/test_pdf_search.py::PdfSearchTests.test_office_unsupported_even_empty_and_manually_attached_pdf"
+          ],
+          "native": [
+            "text",
+            "render"
+          ]
+        },
+        "create": {
+          "status": "not_applicable",
+          "scope": "Search returns owned tuples without creating document content."
+        },
+        "edit_authored": {
+          "status": "not_applicable",
+          "scope": "Search observes an authored PDF snapshot; it does not edit text or geometry."
+        },
+        "edit_imported": {
+          "status": "not_applicable",
+          "scope": "Search is a read-only operation on the retained source session."
+        },
+        "preserve": {
+          "status": "not_applicable",
+          "scope": "Search does not serialize a document or establish source preservation."
+        },
+        "render": {
+          "status": "not_applicable",
+          "scope": "Search requests native text interpretation, not PNG rasterization. Visible-overlap controls substantiate only the read rectangles for those fixtures."
+        },
+        "export": {
+          "status": "not_applicable",
+          "scope": "Search has no format conversion output."
+        }
+      }
+    },
+    {
+      "id": "word.decimal-outline",
+      "format": "docx",
+      "scope": "Nine-level native decimal hierarchy using existing list assignment, limited to horizontal top-level body paragraphs in unambiguous single-column sections.",
+      "public_members": [
+        "Paragraph.set_list(\"decimal_outline\", level=0, restart=False, start=None)",
+        "Paragraph.list_style"
+      ],
+      "adapter_sources": {
+        "rust/src/author_docx.rs": [
+          "supported_list_kind",
+          "outline_targets",
+          "validate_outline_layout",
+          "set_paragraph_list"
+        ],
+        "rust/src/docx.rs": [
+          "numbering"
+        ]
+      },
+      "native_sources": {
+        "numbering": {
+          "reference": "wordcraft",
+          "path": "crates/doc/src/numbering.rs",
+          "symbols": [
+            "ListKind::Legal",
+            "levels_for",
+            "Numbering::try_add_list",
+            "Numbering::level",
+            "Num::start_overrides"
+          ]
+        },
+        "write": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/write/mod.rs",
+          "symbols": [
+            "write"
+          ]
+        },
+        "layout": {
+          "reference": "wordcraft",
+          "path": "crates/layout/src/lib.rs",
+          "symbols": [
+            "DocLayout",
+            "Placed",
+            "layout"
+          ]
+        },
+        "render": {
+          "reference": "wordcraft",
+          "path": "crates/render/src/lib.rs",
+          "symbols": [
+            "render_page"
+          ]
+        },
+        "pdf": {
+          "reference": "wordcraft",
+          "path": "crates/pdf/src/lib.rs",
+          "symbols": [
+            "export_layout"
+          ]
+        },
+        "read": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/lib.rs",
+          "symbols": [
+            "read_with_password"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic interleaved numbered/outline hierarchies, all nine levels, explicit starts up to 32767, RTL and empty labels, wrapped paragraphs and failed narrow geometry. Native numbering XML/read metadata is tested separately from PDF labels and decoded source/PDF label-ink bounds. No auxiliary counter or custom-template conformance is claimed.",
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "Reopened authored fixtures expose native numbering IDs, templates and evaluated labels, separately from source text. This narrow E3 evidence does not certify auxiliary lists, arbitrary imported definitions or ambiguous label placement.",
+          "artifact": "outline-raster-ci-2026-10-20",
+          "tests": [
+            "tests/test_decimal_outline.py::DecimalOutlineTests.test_hierarchy_interleaved_kinds_start_restart_xml_and_pdf",
+            "tests/test_decimal_outline.py::DecimalOutlineTests.test_all_nine_levels_maximum_start_have_visible_native_pdf_ink"
+          ],
+          "native": [
+            "numbering",
+            "layout",
+            "read"
+          ]
+        },
+        "create": {
+          "status": "verified",
+          "scope": "Native Legal preset creates nine-level decimal outlines; full nine-effective-level identity separates ordinary numbered lists and preserves supplied start overrides. Top-level start 1..32767, levels 0..8, restart and continuation use native counters.",
+          "artifact": "outline-raster-ci-2026-10-20",
+          "tests": [
+            "tests/test_decimal_outline.py::DecimalOutlineTests.test_hierarchy_interleaved_kinds_start_restart_xml_and_pdf",
+            "tests/test_decimal_outline.py::DecimalOutlineTests.test_all_nine_levels_maximum_start_have_visible_native_pdf_ink"
+          ],
+          "native": [
+            "numbering",
+            "write"
+          ]
+        },
+        "edit_authored": {
+          "status": "verified",
+          "scope": "Assignment/clear, restart and independent copies preserve existing sequence identity; cells, parts, multicolumn and adjacent-continuous scopes reject. Scope/matching/layout budgets, stale/callback ownership and later font/margin/indent overflow checks remain explicit.",
+          "artifact": "outline-raster-ci-2026-10-20",
+          "tests": [
+            "tests/test_decimal_outline.py::DecimalOutlineTests.test_copy_rtl_empty_items_warm_cache_and_range_lifetime",
+            "tests/test_decimal_outline.py::DecimalOutlineTests.test_scope_and_section_transitions_reject_without_mutation",
+            "tests/test_decimal_outline.py::DecimalOutlineTests.test_geometry_assignment_and_later_output_fail_safely_then_recover",
+            "tests/test_decimal_outline.py::DecimalOutlineTests.test_validation_budgets_and_reentrant_callbacks_preserve_targets"
+          ],
+          "native": [
+            "numbering",
+            "layout"
+          ]
+        },
+        "edit_imported": {
+          "status": "unsupported",
+          "scope": "No arbitrary imported DOCX edit/adoption profile."
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Owned same-format XML definitions, sequence IDs, labels and independent copies survive the tested mutations. Arbitrary custom templates/picture bullets and imported numbering are excluded.",
+          "artifact": "outline-raster-ci-2026-10-20",
+          "tests": [
+            "tests/test_decimal_outline.py::DecimalOutlineTests.test_hierarchy_interleaved_kinds_start_restart_xml_and_pdf",
+            "tests/test_decimal_outline.py::DecimalOutlineTests.test_copy_rtl_empty_items_warm_cache_and_range_lifetime"
+          ],
+          "native": [
+            "numbering",
+            "write"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "All nine maximum-start levels show native source/PDF ink in fitting LTR/RTL fixtures at 72/144 DPI, with exact image dimensions and ink bounds and every RGBA channel differing by at most one quantization value. Invalid label/first-line logical bounds fail before output. This is not a universal exact font-ink containment guarantee.",
+          "artifact": "outline-raster-ci-2026-10-20",
+          "tests": [
+            "tests/test_decimal_outline.py::DecimalOutlineTests.test_all_nine_levels_maximum_start_have_visible_native_pdf_ink",
+            "tests/test_decimal_outline.py::DecimalOutlineTests.test_geometry_assignment_and_later_output_fail_safely_then_recover"
+          ],
+          "native": [
+            "layout",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "partial",
+          "scope": "Native DOCX-to-PDF retains tested hierarchy labels and wrapped item content with one marker across pages; unsupported scopes or geometry fail. Broader list layout and custom styles remain open.",
+          "artifact": "outline-raster-ci-2026-10-20",
+          "tests": [
+            "tests/test_decimal_outline.py::DecimalOutlineTests.test_hierarchy_interleaved_kinds_start_restart_xml_and_pdf",
+            "tests/test_decimal_outline.py::DecimalOutlineTests.test_wrapped_item_has_one_native_marker_across_pages",
+            "tests/test_decimal_outline.py::DecimalOutlineTests.test_all_nine_levels_maximum_start_have_visible_native_pdf_ink"
+          ],
+          "native": [
+            "numbering",
+            "layout",
+            "pdf"
+          ]
+        }
+      }
+    },
+    {
+      "id": "pdf.comment-locks",
+      "format": "pdf",
+      "scope": "Strict boolean native editing lock for canonical notes, four text-markup kinds, rectangles and ellipses. Flag mutation only; no general annotation creation/style or security certification.",
+      "public_members": [
+        "annotation.locked"
+      ],
+      "adapter_sources": {
+        "rust/src/author_pdf.rs": [
+          "annotations",
+          "set_annotation_locked",
+          "checked_lock_target",
+          "geometric_dict_peak"
+        ],
+        "src/doc_ex/_authoring.py": [
+          "Annotation"
+        ]
+      },
+      "native_sources": {
+        "lock": {
+          "reference": "pdfcraft",
+          "path": "crates/annot/src/lib.rs",
+          "symbols": [
+            "Summary",
+            "summaries",
+            "set_locked",
+            "set_contents",
+            "set_info",
+            "move_annotation",
+            "set_rect",
+            "set_style",
+            "delete_annotation"
+          ]
+        },
+        "cos": {
+          "reference": "pdfcraft",
+          "path": "crates/cos/src/document.rs",
+          "symbols": [
+            "Document",
+            "update_dict"
+          ]
+        },
+        "raster": {
+          "reference": "pdfcraft",
+          "path": "crates/render/src/raster.rs",
+          "symbols": [
+            "PageRenderer",
+            "RenderRequest"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic native-created seven-kind comments use the local rotated CropBox/UserUnit PDF fixture and exact pre/post PNG comparisons, saved reopen, copies and blocked mutation controls. Imported acceptance separately uses the existing minimal canonical rectangle fixture plus saved/reopened native seven-kind output. Malformed/unsupported imported rectangle variants assert unchanged bytes/warm cache. No new geometric creation or foreign appearance regeneration certification.",
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "Read the native Locked bit for the seven supported comment kinds through existing handles, including stale/closed identity checks. Global imported summaries/initial inspection remain bounded-inventory upstream work; permissive native flag interpretation is not canonical-profile certification.",
+          "artifact": "annotation-opacity-2026-10-21",
+          "tests": [
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_all_kinds_preserve_pixels_and_metadata_in_rotated_crop_userunit_views",
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_strict_bool_lifetime_and_page_identity",
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_imported_profiles_link_exclusion_and_warm_cache_rollback"
+          ],
+          "native": [
+            "lock"
+          ]
+        },
+        "create": {
+          "status": "not_applicable",
+          "scope": "This profile mutates an existing comment flag. Fixture creation does not certify a new annotation creation API; geometric creation evidence remains in pdf.geometric-comments."
+        },
+        "edit_authored": {
+          "status": "verified",
+          "scope": "Toggle the strict boolean within the canonical target profile. Text remains editable; box/color/author/deletion and compound blocked updates fail atomically while locked, then work after unlock. Non-bool inputs never run truth-value callbacks; this does not inhibit document-level operations or grant security. A locked rectangle additionally rejects compound text/opacity updates without mutation.",
+          "artifact": "annotation-opacity-2026-10-21",
+          "tests": [
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_locked_text_is_editable_but_geometry_style_author_delete_are_atomic",
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_strict_bool_lifetime_and_page_identity",
+            "tests/test_annotation_opacity.py::AnnotationOpacityTests.test_invalid_values_locked_combined_updates_and_link"
+          ],
+          "native": [
+            "lock",
+            "cos"
+          ]
+        },
+        "edit_imported": {
+          "status": "partial",
+          "scope": "Toggle only the tested canonical imported rectangle and saved/reopened native seven-kind outputs. Malformed flags, nested extensions, replies and noncanonical geometry styles fail atomically in tested rectangle variants; links reject this property. No arbitrary imported note/markup/thread certification.",
+          "artifact": "annotation-opacity-2026-10-21",
+          "tests": [
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_all_kinds_preserve_pixels_and_metadata_in_rotated_crop_userunit_views",
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_imported_profiles_link_exclusion_and_warm_cache_rollback"
+          ],
+          "native": [
+            "lock",
+            "cos"
+          ]
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Flag toggles retain tested metadata/geometry and exact fixture pixels through saved reopen and independent copies; rejected updates retain bytes/cache. Page organization invalidates old handles and retains the flag on the fresh handle. No generic foreign-dictionary, descendant-lock or custom-appearance preservation claim. A locked rectangle additionally rejects compound text/opacity updates without mutation.",
+          "artifact": "annotation-opacity-2026-10-21",
+          "tests": [
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_all_kinds_preserve_pixels_and_metadata_in_rotated_crop_userunit_views",
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_locked_text_is_editable_but_geometry_style_author_delete_are_atomic",
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_strict_bool_lifetime_and_page_identity",
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_imported_profiles_link_exclusion_and_warm_cache_rollback",
+            "tests/test_annotation_opacity.py::AnnotationOpacityTests.test_invalid_values_locked_combined_updates_and_link"
+          ],
+          "native": [
+            "lock",
+            "cos"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "Toggling/clearing the lock leaves actual seven-kind fixture ink byte-identical at 144 DPI across all four rotations with CropBox/UserUnit. This does not certify arbitrary foreign appearance rendering or annotation drawing/style features.",
+          "artifact": "annotation-opacity-2026-10-21",
+          "tests": [
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_all_kinds_preserve_pixels_and_metadata_in_rotated_crop_userunit_views",
+            "tests/test_annotation_lock.py::AnnotationLockTests.test_locked_text_is_editable_but_geometry_style_author_delete_are_atomic"
+          ],
+          "native": [
+            "lock",
+            "raster"
+          ]
+        },
+        "export": {
+          "status": "not_applicable",
+          "scope": "Lock mutation adds no conversion pair. Same-format save/reopen evidence is under preserve; no lock-preservation claim for PDF-to-DOCX."
+        }
+      }
+    },
+    {
+      "id": "word.note-kind-conversion",
+      "format": "docx",
+      "scope": "Convert all owned footnotes/endnotes to one kind, preserving note identities; this is a semantic edit, not a format-conversion API. No note deletion, rich-note adoption or general imported editing.",
+      "public_members": [
+        "new(\"docx\").notes.convert(kind=\"footnote\" | \"endnote\")",
+        "note.kind",
+        "note.paragraphs"
+      ],
+      "adapter_sources": {
+        "rust/src/author_docx.rs": [
+          "convert_notes",
+          "validate_note_conversion_work",
+          "validate_note_conversion_anchors",
+          "commit_with_note_conversion"
+        ],
+        "src/doc_ex/_authoring.py": [
+          "Notes"
+        ]
+      },
+      "native_sources": {
+        "edit": {
+          "reference": "wordcraft",
+          "path": "crates/doc/src/edit.rs",
+          "symbols": [
+            "Document::convert_notes"
+          ]
+        },
+        "model": {
+          "reference": "wordcraft",
+          "path": "crates/doc/src/lib.rs",
+          "symbols": [
+            "Document::para_paths",
+            "PartKind"
+          ]
+        },
+        "write": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/write/mod.rs",
+          "symbols": [
+            "write"
+          ]
+        },
+        "layout": {
+          "reference": "wordcraft",
+          "path": "crates/layout/src/lib.rs",
+          "symbols": [
+            "layout",
+            "note_info"
+          ]
+        },
+        "render": {
+          "reference": "wordcraft",
+          "path": "crates/render/src/lib.rs",
+          "symbols": [
+            "render_page"
+          ]
+        },
+        "pdf": {
+          "reference": "wordcraft",
+          "path": "crates/pdf/src/lib.rs",
+          "symbols": [
+            "export_layout"
+          ]
+        },
+        "read": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/lib.rs",
+          "symbols": [
+            "read_with_password"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic authored body/nested-table note references, custom and standard styles, link targets, existing mixed note kinds, configured destination counters,45-paragraph continuation and unsafe continuous-section field scopes. Tests assert source references/styles, separate reopened note text, native PNG/PDF colored placement, exact counts, handle/copy/no-op behavior and shared-style guard recovery. Native artifact tests separately verify work-bound/+1 and exact semantic-anchor rejection.",
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "Owned note.kind and paragraph handles observe destination kind and content; reopened DOCX retains separate note stories with tested text exactly once. This is not complete arbitrary imported-note/comment inventory.",
+          "artifact": "note-conversion-2026-10-20",
+          "tests": [
+            "tests/test_note_conversion.py::NoteConversionTests.test_conversion_moves_numbered_visible_notes_and_preserves_cache_on_noop",
+            "tests/test_note_conversion.py::NoteConversionTests.test_nested_references_styles_media_links_and_copy_keep_their_handles"
+          ],
+          "native": [
+            "model",
+            "read"
+          ]
+        },
+        "create": {
+          "status": "not_applicable",
+          "scope": "This profile evaluates mutation of existing owned notes. Creation/same-format serialization must not be confused with Notes.convert or a new writer certification."
+        },
+        "edit_authored": {
+          "status": "verified",
+          "scope": "Convert the complete owned collection to footnote/endnote, retaining stable IDs/paragraph handles and destination section options. Actual conversion invalidates ranges/cache; no-op preserves both. Shared standard-style runs with unrelated content and unsafe destination field scopes fail atomically, with tested custom-style/section recovery and bounded callback-free kind validation.",
+          "artifact": "note-conversion-2026-10-20",
+          "tests": [
+            "tests/test_note_conversion.py::NoteConversionTests.test_conversion_moves_numbered_visible_notes_and_preserves_cache_on_noop",
+            "tests/test_note_conversion.py::NoteConversionTests.test_nested_references_styles_media_links_and_copy_keep_their_handles",
+            "tests/test_note_conversion.py::NoteConversionTests.test_long_notes_keep_every_paragraph_and_visible_continuation",
+            "tests/test_note_conversion.py::NoteConversionTests.test_unsafe_field_destination_rolls_back_all_notes_and_can_recover",
+            "tests/test_note_conversion.py::NoteConversionTests.test_shared_standard_style_runs_are_guarded_with_custom_style_recovery",
+            "tests/test_note_conversion.py::NoteConversionTests.test_kind_validation_is_bounded_callback_free_and_closed_first"
+          ],
+          "native": [
+            "edit",
+            "model"
+          ]
+        },
+        "edit_imported": {
+          "status": "unsupported",
+          "scope": "Current editable DOCX lifecycle does not adopt arbitrary source Office documents or imported note graphs."
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Retain tested body/nested references, note text/custom styles, the tested external URL link, independent copies and saved source reference/style kinds. Native standard note styles intentionally change; arbitrary imported parts, semantic deletion and fragment remapping are outside this profile.",
+          "artifact": "note-conversion-2026-10-20",
+          "tests": [
+            "tests/test_note_conversion.py::NoteConversionTests.test_conversion_moves_numbered_visible_notes_and_preserves_cache_on_noop",
+            "tests/test_note_conversion.py::NoteConversionTests.test_nested_references_styles_media_links_and_copy_keep_their_handles",
+            "tests/test_note_conversion.py::NoteConversionTests.test_unsafe_field_destination_rolls_back_all_notes_and_can_recover",
+            "tests/test_note_conversion.py::NoteConversionTests.test_shared_standard_style_runs_are_guarded_with_custom_style_recovery"
+          ],
+          "native": [
+            "edit",
+            "write"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "Native DOCX PNG moves tested colored note text between footnote/endnote destinations, retains complete long-note continuation and restores the original fixture on reverse conversion. Destination options are native; no general pagination equivalence or rich-note geometry certification.",
+          "artifact": "note-conversion-2026-10-20",
+          "tests": [
+            "tests/test_note_conversion.py::NoteConversionTests.test_conversion_moves_numbered_visible_notes_and_preserves_cache_on_noop",
+            "tests/test_note_conversion.py::NoteConversionTests.test_long_notes_keep_every_paragraph_and_visible_continuation",
+            "tests/test_note_conversion.py::NoteConversionTests.test_shared_standard_style_runs_are_guarded_with_custom_style_recovery"
+          ],
+          "native": [
+            "layout",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "partial",
+          "scope": "The separate existing document.convert(\"pdf\") path produces the tested destination counters, note text exactly once, retained URL link and colored note placement/continuation. Notes.convert itself changes note kind; it does not export a format.",
+          "artifact": "note-conversion-2026-10-20",
+          "tests": [
+            "tests/test_note_conversion.py::NoteConversionTests.test_conversion_moves_numbered_visible_notes_and_preserves_cache_on_noop",
+            "tests/test_note_conversion.py::NoteConversionTests.test_nested_references_styles_media_links_and_copy_keep_their_handles",
+            "tests/test_note_conversion.py::NoteConversionTests.test_long_notes_keep_every_paragraph_and_visible_continuation"
+          ],
+          "native": [
+            "layout",
+            "pdf"
+          ]
+        }
+      }
+    },
+    {
+      "id": "slides.background-reset",
+      "format": "pptx",
+      "scope": "Remove an explicit owned solid/PNG slide background override through Slide.background=None; the getter reports direct state, not resolved inherited color. No master/theme editor or generic imported-media preservation.",
+      "public_members": [
+        "slide.background = None",
+        "slide.background",
+        "slide.background_image"
+      ],
+      "adapter_sources": {
+        "rust/src/author_pptx.rs": [
+          "clear_background",
+          "slide_background",
+          "prune_media"
+        ],
+        "src/doc_ex/_authoring.py": [
+          "Slide"
+        ]
+      },
+      "native_sources": {
+        "model": {
+          "reference": "deckcraft",
+          "path": "crates/model/src/lib.rs",
+          "symbols": [
+            "Slide",
+            "Background"
+          ]
+        },
+        "resolve": {
+          "reference": "deckcraft",
+          "path": "crates/model/src/resolve.rs",
+          "symbols": [
+            "background"
+          ]
+        },
+        "write": {
+          "reference": "deckcraft",
+          "path": "crates/pptx/src/lib.rs",
+          "symbols": [
+            "export",
+            "import"
+          ]
+        },
+        "render": {
+          "reference": "deckcraft",
+          "path": "crates/render/src/lib.rs",
+          "symbols": [
+            "try_render_slide"
+          ]
+        },
+        "pdf": {
+          "reference": "deckcraft",
+          "path": "crates/pdf/src/lib.rs",
+          "symbols": [
+            "export"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic public solid/PNG slide backgrounds with text/link shapes, shared picture/second-slide assets, independent copies and normalization callbacks. Assertions inspect absent p:bg, direct getter None, actual PNG/PDF output, retained text/links and final media reclamation. Native artifact tests separately inject master/layout color/gradient/picture controls, compare exact before/after PNG and exported-PDF PNG, and reject explicit-picture removal with direct inherited-picture assets before authored-only pruning.",
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "After reset the explicit background and explicit background_image getters return None; explicit picture override still makes the color getter unsupported. Native inherited-image/gradient getter controls belong to artifact-level tests, not arbitrary imported Python inventory.",
+          "artifact": "slide-background-reset-2026-10-20",
+          "tests": [
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_reset_restores_native_background_source_pixels_pdf_and_copy"
+          ],
+          "native": [
+            "model",
+            "resolve"
+          ]
+        },
+        "create": {
+          "status": "not_applicable",
+          "scope": "This row evaluates removing an existing override, not presentation creation or a new background writer."
+        },
+        "edit_authored": {
+          "status": "verified",
+          "scope": "Set None on the existing property, preserving normal revision/cache behavior and stable targets across color-normalization reorder callbacks. Invalid inputs/closed/deleted handles fail explicitly. Shared authored image assets remain live and final-reference removal reclaims them; no cache-preserving repeated-reset guarantee.",
+          "artifact": "slide-background-reset-2026-10-20",
+          "tests": [
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_reset_restores_native_background_source_pixels_pdf_and_copy",
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_shared_media_retained_then_reclaimed_after_last_reference",
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_stable_identity_callbacks_invalid_input_closed_deleted_and_copies"
+          ],
+          "native": [
+            "model",
+            "resolve"
+          ]
+        },
+        "edit_imported": {
+          "status": "unsupported",
+          "scope": "Arbitrary imported PPTX master/layout/theme/media graphs are not adopted for editing. Raw inherited-picture combinations requiring unavailable media accounting are explicitly outside reset reclamation."
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Retain tested shape text/link/identity, unaffected slide background pixels, shared picture data/alt, independent copies and saved p:bg absence. General imported master-shape/theme references and inherited-media reclamation are excluded.",
+          "artifact": "slide-background-reset-2026-10-20",
+          "tests": [
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_reset_restores_native_background_source_pixels_pdf_and_copy",
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_shared_media_retained_then_reclaimed_after_last_reference",
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_stable_identity_callbacks_invalid_input_closed_deleted_and_copies"
+          ],
+          "native": [
+            "model",
+            "write"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "Reset restores exact original native PNG for the public solid/PNG override fixture, preserving unaffected slide pixels. Artifact-level native controls exercise inherited colors/gradient/image; no general theme fidelity or transparent output claim.",
+          "artifact": "slide-background-reset-2026-10-20",
+          "tests": [
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_reset_restores_native_background_source_pixels_pdf_and_copy",
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_shared_media_retained_then_reclaimed_after_last_reference"
+          ],
+          "native": [
+            "resolve",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "partial",
+          "scope": "Existing PPTX-to-PDF export after reset retains tested text/URL annotation and white background pixels. Exact before/after inherited native PDF PNG controls are separate artifact-level evidence. This is not hidden-slide policy or arbitrary theme export certification.",
+          "artifact": "slide-background-reset-2026-10-20",
+          "tests": [
+            "tests/test_slide_background_reset.py::SlideBackgroundResetTests.test_reset_restores_native_background_source_pixels_pdf_and_copy"
+          ],
+          "native": [
+            "resolve",
+            "pdf"
+          ]
+        }
+      }
     },
     {
       "id": "pdf.vertical-redaction",
@@ -780,6 +2612,369 @@
       },
       "adapter_sources": {},
       "fixture_provenance": "No local package fixture because the operation is absent. Native source fixture crates/redact/src/tests.rs::vertical_writing_text_under_a_mark_fails_closed constructs the failure case; inspected at the pinned revision, not rerun by this ledger validation."
+    },
+    {
+      "id": "word.closed-shapes",
+      "format": "docx",
+      "scope": "owned direct-body unrotated Rectangle/Ellipse in horizontal sections. Dimensions1\u20134000pt in0.05pt increments; outline0.25\u2013100pt and no wider than min(width,height); full outline must fit its physical page and inline width its column. Only native inline/square/top-bottom/behind placement with exact Page/Page, Margin/Margin or Column/Paragraph anchors. No imported editing, lines, textboxes, rotation/front/groups/effects or auxiliary/cell shapes. Existing non-top alignment and rendering resource limits remain.",
+      "public_members": [
+        "WordDocument.add_shape",
+        "WordDocument.shapes",
+        "shape.kind",
+        "shape.size",
+        "shape.fill",
+        "shape.stroke",
+        "shape.format",
+        "shape.formatting",
+        "del word.shapes[index]"
+      ],
+      "adapter_sources": {
+        "src/doc_ex/_authoring.py": [
+          "WordDocument",
+          "_WordShapes",
+          "_WordShape",
+          "_format_placement"
+        ],
+        "rust/src/author_docx_shapes.rs": [
+          "supported",
+          "inventory",
+          "registry",
+          "add",
+          "update",
+          "remove",
+          "page_bounds"
+        ],
+        "rust/src/author_docx.rs": [
+          "commit_validated",
+          "validate_unsplittable_page_bounds_with_comments"
+        ],
+        "rust/src/author_docx_styles.rs": [
+          "shapes"
+        ]
+      },
+      "native_sources": {
+        "model": {
+          "reference": "wordcraft",
+          "path": "crates/doc/src/para.rs",
+          "symbols": [
+            "InlineObject",
+            "ShapeKind",
+            "Float",
+            "Paragraph::insert_object",
+            "Paragraph::delete"
+          ]
+        },
+        "edit": {
+          "reference": "wordcraft",
+          "path": "crates/doc/src/edit.rs",
+          "symbols": [
+            "Document::insert_block",
+            "Document::remove_block"
+          ]
+        },
+        "layout": {
+          "reference": "wordcraft",
+          "path": "crates/layout/src/lib.rs",
+          "symbols": [
+            "layout",
+            "Placed::Object"
+          ]
+        },
+        "display": {
+          "reference": "wordcraft",
+          "path": "crates/layout/src/display.rs",
+          "symbols": [
+            "Draw::Shape",
+            "page_display"
+          ]
+        },
+        "read": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/read/story.rs",
+          "symbols": [
+            "read_wsp"
+          ]
+        },
+        "write": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/write/mod.rs",
+          "symbols": [
+            "write"
+          ]
+        },
+        "write_shape": {
+          "reference": "wordcraft",
+          "path": "crates/docx/src/write/story.rs",
+          "symbols": [
+            "Writer::object",
+            "shape_name"
+          ]
+        },
+        "render": {
+          "reference": "wordcraft",
+          "path": "crates/render/src/lib.rs",
+          "symbols": [
+            "render_page"
+          ]
+        },
+        "pdf": {
+          "reference": "wordcraft",
+          "path": "crates/pdf/src/lib.rs",
+          "symbols": [
+            "export_layout"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic public authored rectangle/ellipse and native coupled-anchor/primitive fixtures. Exact source/handle/copy/deletion/callback controls, DOCX ZIP/native readback,2pt outline/fill native-versus-PDF full-page colors at72/144/300DPI, body links/table/note-story/image preservation, document shape_geometry_omitted diagnostic and native malformed/budget/locator tests. Separate116 native upgrade evidence supplies0.25/2/100pt corners/outlines and bounded min-dimension ratio cases; it must be cited as native evidence, not described as public full-range tests. No independent Microsoft Word acceptance or arbitrary imported-shape preservation.",
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "owned handles read supported properties; reopened semantic extraction omits shape geometry with its existing document diagnostic and does not fabricate image/text geometry. Native DOCX readback checks selected properties; this is not general shape extraction.",
+          "artifact": "word-closed-shapes-2026-10-21",
+          "tests": [
+            "tests/test_word_shapes.py::WordShapeTests.test_source_order_exact_handles_copy_deletion_and_closed_owner",
+            "tests/test_word_shapes.py::WordShapeTests.test_inline_and_native_placement_docx_png_pdf_at_three_dpis",
+            "tests/test_word_shapes.py::WordShapeTests.test_composition_tables_styles_links_notes_images_and_source_identity"
+          ],
+          "native": [
+            "model",
+            "read"
+          ]
+        },
+        "create": {
+          "status": "partial",
+          "scope": "append native inline rectangles/ellipses with optional solid fill/outline, serialized through native DOCX writer; bounded factory/placeholder/resource checks. Other shape kinds/contexts remain excluded.",
+          "artifact": "word-closed-shapes-2026-10-21",
+          "tests": [
+            "tests/test_word_shapes.py::WordShapeTests.test_source_order_exact_handles_copy_deletion_and_closed_owner",
+            "tests/test_word_shapes.py::WordShapeTests.test_inline_and_native_placement_docx_png_pdf_at_three_dpis",
+            "tests/test_word_shapes.py::WordShapeTests.test_strict_values_failed_mutations_cache_revision_and_full_stroke"
+          ],
+          "native": [
+            "model",
+            "edit",
+            "write",
+            "write_shape"
+          ]
+        },
+        "edit_authored": {
+          "status": "partial",
+          "scope": "resize/recolor/change solid outline or shared placement, delete one shape retaining its paragraph/section, and retain surviving identities around body table/paragraph edits. Exact ownership, callback revision, full-outline and orientation guards reject unsafe changes atomically. No movement/text/rotation manager.",
+          "artifact": "word-closed-shapes-2026-10-21",
+          "tests": [
+            "tests/test_word_shapes.py::WordShapeTests.test_source_order_exact_handles_copy_deletion_and_closed_owner",
+            "tests/test_word_shapes.py::WordShapeTests.test_strict_values_failed_mutations_cache_revision_and_full_stroke",
+            "tests/test_word_shapes.py::WordShapeTests.test_conversion_callbacks_cannot_retarget_or_delete_changed_owner",
+            "tests/test_word_shapes.py::WordShapeTests.test_composition_tables_styles_links_notes_images_and_source_identity",
+            "tests/test_word_shapes.py::WordShapeTests.test_paragraph_anchor_wrap_mirroring_columns_and_section_rejection"
+          ],
+          "native": [
+            "model",
+            "edit",
+            "layout"
+          ]
+        },
+        "edit_imported": {
+          "status": "unsupported",
+          "scope": "Owned Office models do not adopt arbitrary imported shape graphs, stories or relationship identities."
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "retain demonstrated body text/external URL/bookmark/table/note story/image, unrelated handles, copies and empty section anchors through supported edits. Do not claim opaque/imported shape parts or arbitrary rich-text-box preservation.",
+          "artifact": "word-closed-shapes-2026-10-21",
+          "tests": [
+            "tests/test_word_shapes.py::WordShapeTests.test_source_order_exact_handles_copy_deletion_and_closed_owner",
+            "tests/test_word_shapes.py::WordShapeTests.test_composition_tables_styles_links_notes_images_and_source_identity",
+            "tests/test_word_shapes.py::WordShapeTests.test_conversion_callbacks_cannot_retarget_or_delete_changed_owner"
+          ],
+          "native": [
+            "model",
+            "edit",
+            "read",
+            "write"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "native PNG of supported source/reopened rectangles/ellipses;2pt public outline/fill placement controls at72/144/300DPI. Separate116 native cap/join+ratio evidence required for bounded outline range. Finite exact dimension/cardinality/full-outline guards and output limits remain; no pixel-perfect claim.",
+          "artifact": "word-closed-shapes-2026-10-21",
+          "tests": [
+            "tests/test_word_shapes.py::WordShapeTests.test_inline_and_native_placement_docx_png_pdf_at_three_dpis",
+            "tests/test_word_shapes.py::WordShapeTests.test_strict_values_failed_mutations_cache_revision_and_full_stroke",
+            "tests/test_word_shapes.py::WordShapeTests.test_paragraph_anchor_wrap_mirroring_columns_and_section_rejection"
+          ],
+          "native": [
+            "layout",
+            "display",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "partial",
+          "scope": "native DOCX-to-PDF export, reopened PDF text/links/table/note and selected color geometry compared to source PNG. Same bounded range and116 native evidence prerequisite; no new conversion pair or general drawing fidelity guarantee.",
+          "artifact": "word-closed-shapes-2026-10-21",
+          "tests": [
+            "tests/test_word_shapes.py::WordShapeTests.test_inline_and_native_placement_docx_png_pdf_at_three_dpis",
+            "tests/test_word_shapes.py::WordShapeTests.test_composition_tables_styles_links_notes_images_and_source_identity",
+            "tests/test_word_shapes.py::WordShapeTests.test_paragraph_anchor_wrap_mirroring_columns_and_section_rejection"
+          ],
+          "native": [
+            "pdf",
+            "layout",
+            "render"
+          ]
+        }
+      }
+    },
+    {
+      "id": "pdf.typed-underlays",
+      "format": "pdf",
+      "scope": "Built-in point/boxed text and PNG/JPEG underlays via behind=True on existing PdfPage.draw_text/add_image. Strict bool defaults False; native typed placement only. No supplied-font/raw-path underlay, added-item handles, replacement/removal or general layer manager. Existing resource collisions refuse atomically.",
+      "public_members": [
+        "PdfPage.draw_text(..., behind=True)",
+        "PdfPage.add_image(..., behind=True)"
+      ],
+      "adapter_sources": {
+        "src/doc_ex/_authoring.py": [
+          "PdfPage",
+          "draw_text",
+          "add_image"
+        ],
+        "rust/src/author_pdf.rs": [
+          "add_text",
+          "add_text_box",
+          "add_text_layout",
+          "add_image",
+          "preserve_drawing_resources"
+        ]
+      },
+      "native_sources": {
+        "placement": {
+          "reference": "pdfcraft",
+          "path": "crates/edit/src/added.rs",
+          "symbols": [
+            "Placement",
+            "Content",
+            "add_content_with_placement"
+          ]
+        },
+        "image": {
+          "reference": "pdfcraft",
+          "path": "crates/create/src/lib.rs",
+          "symbols": [
+            "image_xobject"
+          ]
+        },
+        "save": {
+          "reference": "pdfcraft",
+          "path": "crates/cos/src/writer.rs",
+          "symbols": [
+            "SaveOptions",
+            "write_full"
+          ]
+        },
+        "render": {
+          "reference": "pdfcraft",
+          "path": "crates/render/src/raster.rs",
+          "symbols": [
+            "PageRenderer",
+            "RenderRequest",
+            "render"
+          ]
+        }
+      },
+      "fixture_provenance": "Synthetic owned and imported offset-CropBox/UserUnit PDFs with original opaque content, built-in text/links, PNG/JPEG bytes, copies and callback controls. Four page rotations are paired with four explicit image transform profiles; full page extents at72DPI and80pt image regions at72/144/300DPI. Owned160pt pages have full-page color/text controls at72/144/300DPI. Hidden and revealed content use separate owners; no background reset is introduced. Exact native typed models/source pixels and both save modes supplement visual tests. This is a finite matrix, not every parameter combination or pixel-perfect PDF composition.",
+      "operations": {
+        "read": {
+          "status": "partial",
+          "scope": "Reopened extraction retains tested original/added labels, link targets, decoded PNG source pixels and exact JPEG bytes, including hidden source text; extraction is independent of ink visibility. No underlay inspection or added-item handle API.",
+          "artifact": "pdf-typed-underlays-2026-10-21",
+          "tests": [
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_owned_layering_text_images_copy_reopen_and_hidden_source",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_imported_view_and_representative_image_transform_profiles"
+          ],
+          "native": [
+            "placement",
+            "image",
+            "save"
+          ]
+        },
+        "create": {
+          "status": "partial",
+          "scope": "Insert built-in point/box text and PNG/JPEG below all existing content; later underlays paint beneath earlier ones. Existing layout, font-size, alignment, image crop/quarter-turn/flips and geometry/resource limits remain.",
+          "artifact": "pdf-typed-underlays-2026-10-21",
+          "tests": [
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_owned_layering_text_images_copy_reopen_and_hidden_source",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_imported_view_and_representative_image_transform_profiles",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_strict_boolean_font_read_and_callback_lifetimes"
+          ],
+          "native": [
+            "placement",
+            "image"
+          ]
+        },
+        "edit_authored": {
+          "status": "partial",
+          "scope": "Add typed underlays to owned PDFs using staged native placement, with exact bool checks, callback target guards, copy independence and failure rollback. Ordinary callback content edits preserve prior semantics. Supplied-font text refuses before font reads.",
+          "artifact": "pdf-typed-underlays-2026-10-21",
+          "tests": [
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_owned_layering_text_images_copy_reopen_and_hidden_source",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_strict_boolean_font_read_and_callback_lifetimes",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_default_overlay_equivalence_and_failed_underlay_atomicity"
+          ],
+          "native": [
+            "placement",
+            "image"
+          ]
+        },
+        "edit_imported": {
+          "status": "partial",
+          "scope": "Insert into the tested imported page views with offset crop, UserUnit1.25 and four rotations; inherited/direct resource collisions refuse atomically. This does not certify arbitrary original graphics states, content replacement/removal or collision-safe resource remapping.",
+          "artifact": "pdf-typed-underlays-2026-10-21",
+          "tests": [
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_imported_view_and_representative_image_transform_profiles",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_default_overlay_equivalence_and_failed_underlay_atomicity"
+          ],
+          "native": [
+            "placement",
+            "image",
+            "save"
+          ]
+        },
+        "preserve": {
+          "status": "partial",
+          "scope": "Preserve tested original text/links and uncovered ink, exact stored PNG pixels/JPEG bytes, copies, source independence, defaultfalse output and failed-edit cached bytes/counters. An opaque original may hide a successful underlay.",
+          "artifact": "pdf-typed-underlays-2026-10-21",
+          "tests": [
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_owned_layering_text_images_copy_reopen_and_hidden_source",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_imported_view_and_representative_image_transform_profiles",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_strict_boolean_font_read_and_callback_lifetimes",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_default_overlay_equivalence_and_failed_underlay_atomicity"
+          ],
+          "native": [
+            "placement",
+            "image",
+            "save"
+          ]
+        },
+        "render": {
+          "status": "partial",
+          "scope": "Actual revealed and opaque-hidden source/PDF pixels, full owned pages at72/144/300DPI, and imported image regions at those DPIs with full-page72extent controls; finite representative transform combinations only.",
+          "artifact": "pdf-typed-underlays-2026-10-21",
+          "tests": [
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_owned_layering_text_images_copy_reopen_and_hidden_source",
+            "tests/test_pdf_underlays.py::PdfUnderlayTests.test_imported_view_and_representative_image_transform_profiles"
+          ],
+          "native": [
+            "placement",
+            "render"
+          ]
+        },
+        "export": {
+          "status": "not_applicable",
+          "scope": "This edits and saves PDFs through existing native serialization; no new cross-format export/conversion pair."
+        }
+      }
     }
   ],
   "coverage": {
@@ -824,12 +3019,17 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "E2": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "pdf.native-search"
+      ],
+      "remaining": "Unassessed: Source paths/exact normalized offsets and broader Office grounding; native PDF search rectangles do not imply visible-only matches."
     },
     "E3": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "word.decimal-outline",
+        "word.note-kind-conversion"
+      ],
+      "remaining": "Unassessed: broader auxiliary Office extraction, review/comment anchors and arbitrary source semantic coverage beyond linked body-list and owned note-kind profiles."
     },
     "E4": {
       "profiles": [],
@@ -889,7 +3089,7 @@
     },
     "API7": {
       "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "remaining": "Unassessed: complete reference/member and operation dispositions remain under API1/QA1. The current one-ledger/reporting/error mechanism is accepted by spec125; this does not certify additional operations."
     },
     "API8": {
       "profiles": [],
@@ -920,8 +3120,10 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "DOC5": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "word.story-clear"
+      ],
+      "remaining": "Unassessed: general ordered block insertion/move/adoption and remapping beyond owned header/footer and note content clear."
     },
     "DOC6": {
       "profiles": [],
@@ -954,12 +3156,16 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "TXT5": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "word.decimal-outline"
+      ],
+      "remaining": "Unassessed: Custom markers/templates/picture bullets, auxiliary and cell/column scopes, and broader list formatting."
     },
     "TXT6": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "word.direction-language"
+      ],
+      "remaining": "Unassessed: acceptance scope beyond linked profiles, including native fidelity and diagnostic limitations."
     },
     "TXT7": {
       "profiles": [],
@@ -1060,8 +3266,11 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "BG5": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "word.rich-stories",
+        "word.story-clear"
+      ],
+      "remaining": "Unassessed: linked-to-previous headers, continuous-section first-page guarantees, floating header artwork and section fills. The owned next-page inline-letterhead repagination recipe is accepted in spec105; these older operation profiles are not extended by that recipe evidence."
     },
     "BG6": {
       "profiles": [],
@@ -1084,8 +3293,11 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "LAY3": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "word.rich-stories",
+        "word.story-clear"
+      ],
+      "remaining": "Unassessed: Link-to-previous/unlink, arbitrary block movement, rich notes and broader variant layout fidelity."
     },
     "LAY4": {
       "profiles": [],
@@ -1096,12 +3308,17 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "LAY6": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "word.line-numbers"
+      ],
+      "remaining": "Unassessed: broader page-field evidence inventory, nondecimal formats and full numbering parity; native multi-column/continuous-resume defects remain explicit limitations."
     },
     "LAY7": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "word.note-kind-conversion",
+        "word.story-clear"
+      ],
+      "remaining": "Unassessed: semantic note deletion, arbitrary fragment reference remapping, rich-note geometry and broader placement/restart fidelity beyond owned kind conversion and content clearing."
     },
     "LAY8": {
       "profiles": [],
@@ -1128,8 +3345,10 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "MED4": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "word.closed-shapes"
+      ],
+      "remaining": "Unassessed: lines, rich textboxes/source coverage, front/rotated/group/effect geometry, auxiliary/cell/imported editing, general fill/border/parity and arbitrary native drawing preservation. Bounded direct-body Rectangle/Ellipse does not close MED4."
     },
     "MED5": {
       "profiles": [],
@@ -1148,12 +3367,16 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "REF1": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "word.bookmark-navigation"
+      ],
+      "remaining": "Unassessed: External-link/tooltips and transformed contexts beyond this internal-link profile."
     },
     "REF2": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "word.bookmark-navigation"
+      ],
+      "remaining": "Unassessed: Interior/cross-paragraph/imported targets, general cross-references and marker-transparent shaping."
     },
     "REF3": {
       "profiles": [],
@@ -1176,8 +3399,10 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "REF8": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "word.bookmark-navigation"
+      ],
+      "remaining": "Unassessed: Heading outlines, non-body targets and broader navigation conversion fidelity."
     },
     "FORM1": {
       "profiles": [],
@@ -1228,8 +3453,10 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "PKG1": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "pdf.object-stream-output"
+      ],
+      "remaining": "Unassessed: Meaningful no-op fidelity for arbitrary imported document graphs/unknown parts beyond the tested conservative PDF profile."
     },
     "PKG2": {
       "profiles": [],
@@ -1252,8 +3479,10 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "PKG7": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "pdf.object-stream-output"
+      ],
+      "remaining": "Unassessed: Aggregate authoring/output limits and deterministic IDs/metadata across all formats; this profile only records repeatable PDF modes and atomic save behavior, not a peak-allocation bound."
     },
     "PKG8": {
       "profiles": [],
@@ -1270,8 +3499,10 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "PDF3": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "pdf.typed-underlays"
+      ],
+      "remaining": "Unassessed: supplied-font/raw-path underlays, collision-safe composition and bounded raw-stream admission under U10. The partial built-in text/PNG/JPEG profile does not close PDF3."
     },
     "PDF4": {
       "profiles": [],
@@ -1283,9 +3514,11 @@
     },
     "PDF6": {
       "profiles": [
-        "pdf.owned-fields"
+        "pdf.owned-fields",
+        "pdf.geometric-comments",
+        "pdf.comment-locks"
       ],
-      "remaining": "Unassessed: acceptance scope beyond linked profiles."
+      "remaining": "Unassessed: broader imported annotation/form inventories, radio/widget lifecycle, replies, arbitrary appearances and remaining PDF6 acceptance beyond the bounded linked profiles."
     },
     "PDF7": {
       "profiles": [
@@ -1294,8 +3527,10 @@
       "remaining": "Unassessed: acceptance scope beyond linked profiles."
     },
     "PDF8": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "pdf.object-stream-output"
+      ],
+      "remaining": "Unassessed: General compression/encryption/incremental save, attachments and archival/accessibility conformance."
     },
     "SLIDE1": {
       "profiles": [],
@@ -1312,8 +3547,10 @@
       "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
     },
     "SLIDE4": {
-      "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "profiles": [
+        "slides.background-reset"
+      ],
+      "remaining": "Unassessed: master/theme editing, general layered marks and imported asset preservation beyond explicit owned background reset."
     },
     "SLIDE5": {
       "profiles": [],
@@ -1329,7 +3566,7 @@
     },
     "QA2": {
       "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "remaining": "Unassessed: broader scripts, platforms, preservation and exhaustive operation coverage remain under their existing criteria. The seven-category representative corpus is accepted by spec126 and docs/acceptance-audit.md#qa2-representative-authored-documents; no operation profile is promoted."
     },
     "QA3": {
       "profiles": [],
@@ -1345,7 +3582,7 @@
     },
     "QA6": {
       "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "remaining": "Unassessed: exhaustive hostile-input/allocation/platform guarantees remain separate. The representative malformed/invalid/stale/nesting/media/save-failure corpus is accepted by spec125."
     },
     "QA7": {
       "profiles": [],
@@ -1353,7 +3590,7 @@
     },
     "QA8": {
       "profiles": [],
-      "remaining": "Unassessed: operation evidence or recipe/gate audit not yet entered."
+      "remaining": "Unassessed: wider format/member parity remains open. Current honest reporting, explicit partial/unassessed scope and runnable-versus-proposed documentation are accepted by spec125."
     }
   }
 }

@@ -17,6 +17,15 @@ use crate::model::{
 use crate::EngineError;
 
 #[cfg(test)]
+#[path = "docx_mirror_proof.rs"]
+mod mirror_proof;
+#[path = "docx_provenance.rs"]
+mod provenance;
+#[cfg(test)]
+#[path = "docx_provenance_proof.rs"]
+mod provenance_proof;
+
+#[cfg(test)]
 thread_local! {
     static SESSION_BUILDS: Cell<(u64, u64)> = const { Cell::new((0, 0)) };
 }
@@ -190,6 +199,9 @@ fn render_with(
         .get(page)
         .ok_or_else(|| EngineError::Unsupported(format!("page {page} does not exist")))?;
     let scale = (dpi / 72.0) as f32;
+    // Document output must not use the editor's inactive header/footer dimming.
+    let mut options = wordcraft_render::RenderOptions::default();
+    options.display.dim_header = false;
     let rendered = if let Some(clip) = clip {
         let region = crate::rendering::RasterRegion::new(
             clip,
@@ -214,7 +226,7 @@ fn render_with(
                 -f64::from(region.x),
                 -f64::from(region.y),
             ]),
-            &wordcraft_render::RenderOptions::default(),
+            &options,
         );
         region.validate_result(rendered.width, rendered.height)?;
         rendered
@@ -225,12 +237,7 @@ fn render_with(
             f64::from(page.h * scale),
             wordcraft_render::MAX_SIDE,
         )?;
-        wordcraft_render::render_page(
-            document,
-            page,
-            scale,
-            &wordcraft_render::RenderOptions::default(),
-        )
+        wordcraft_render::render_page(document, page, scale, &options)
     };
     crate::rendering::encode_png(rendered.width, rendered.height, &rendered.pixels, dpi)
 }
@@ -247,6 +254,7 @@ struct Adapter<'a> {
     pages: Vec<PagePayload>,
     comment_pages: HashMap<u32, usize>,
     numbering: HashMap<(StoryRef, Path), NumberingObservation>,
+    provenance: provenance::Provenance,
     numbering_bytes: Cell<usize>,
     numbering_definitions: RefCell<HashMap<(u32, u8), NumberingDefinition<'a>>>,
     numbering_lookup_work: Cell<usize>,
@@ -887,7 +895,7 @@ impl<'a> Adapter<'a> {
                     let numbering =
                         self.segment_numbering(paragraph, &path, native_story, &segments);
                     for (segment_index, mut segment) in segments.into_iter().enumerate() {
-                        segment.set_source(&path.0, segment_index);
+                        self.set_source(&mut segment, &path, segment_index);
                         let mut payload = BlockPayload::paragraph(segment.text);
                         payload.style = paragraph.props.style.clone();
                         if let Some(value) = numbering[segment_index].clone() {
@@ -908,7 +916,11 @@ impl<'a> Adapter<'a> {
                         }
                         payload.links = segment.links;
                         payload.images = segment.images;
-                        payload.metadata.insert("source_path".into(), json!(path.0));
+                        payload.metadata.extend(self.provenance.metadata(
+                            &path,
+                            Some(segment_index),
+                            native_story,
+                        ));
                         if !segment.story_refs.is_empty() {
                             payload
                                 .metadata
@@ -937,6 +949,13 @@ impl<'a> Adapter<'a> {
                 }
                 Block::Table(table) => output.push(BlockPayload {
                     kind: "table".into(),
+                    metadata: {
+                        let mut metadata = self.provenance.metadata(&path, None, native_story);
+                        if let Some(story) = story {
+                            metadata.extend(story.clone());
+                        }
+                        metadata
+                    },
                     table: Some(
                         self.table_payload(
                             table,
@@ -955,6 +974,7 @@ impl<'a> Adapter<'a> {
     }
 
     fn new(document: &'a Document, layout: &'a DocLayout) -> Result<Self, EngineError> {
+        let provenance = provenance::Provenance::new(document, layout)?;
         let page_count = layout.pages.len().max(1);
         let pages = (0..page_count)
             .map(|number| {
@@ -962,6 +982,17 @@ impl<'a> Adapter<'a> {
                 if let Some(page) = layout.pages.get(number) {
                     metadata.insert("width".into(), json!(page.w));
                     metadata.insert("height".into(), json!(page.h));
+                    metadata.insert(
+                        "body_bbox".into(),
+                        json!([
+                            page.body.x,
+                            page.body.y,
+                            page.body.right(),
+                            page.body.bottom()
+                        ]),
+                    );
+                    metadata.insert("section".into(), json!(page.section));
+                    metadata.insert("display_number".into(), json!(page.number));
                 }
                 PagePayload {
                     number,
@@ -976,6 +1007,7 @@ impl<'a> Adapter<'a> {
             pages,
             comment_pages: HashMap::new(),
             numbering: numbering_observations(layout)?,
+            provenance,
             numbering_bytes: Cell::new(0),
             numbering_definitions: RefCell::new(HashMap::new()),
             numbering_lookup_work: Cell::new(0),
@@ -1025,6 +1057,7 @@ impl<'a> Adapter<'a> {
             Value::String("wordcraft-layout; blocks assigned to their first computed page".into()),
         );
         let stories = self.stories();
+        self.provenance.finish()?;
         let mut diagnostics = Diagnostics::default();
         metadata.insert(
             "custom".into(),
@@ -1056,17 +1089,30 @@ impl<'a> Adapter<'a> {
         }
     }
 
+    fn set_source(&self, segment: &mut Segment, path: &Path, index: usize) {
+        if self.provenance.charge_sources(
+            &path.0,
+            segment.links.len().saturating_add(segment.images.len()),
+        ) {
+            segment.set_source(&path.0, index);
+        }
+    }
+
     fn add_paragraph(&mut self, paragraph: &Paragraph, path: &Path) {
         let page_indexes = self.paragraph_pages(path);
         let segments = self.paragraph_segments(paragraph, &page_indexes);
         let segment_pages = self.paragraph_segment_pages(path, &segments, page_indexes[0]);
         let numbering = self.segment_numbering(paragraph, path, Some(StoryRef::Body), &segments);
-        for (segment_index, segment) in segments.into_iter().enumerate() {
+        for (segment_index, mut segment) in segments.into_iter().enumerate() {
+            self.set_source(&mut segment, path, segment_index);
             let page_number = segment_pages[segment_index].min(self.pages.len() - 1);
             for (id, _) in &segment.comments {
                 self.comment_pages.entry(*id).or_insert(page_number);
             }
             let mut block = BlockPayload::paragraph(segment.text);
+            block.metadata =
+                self.provenance
+                    .metadata(path, Some(segment_index), Some(StoryRef::Body));
             if let Some(value) = numbering[segment_index].clone() {
                 block.metadata.insert("numbering".into(), value);
             }
@@ -1128,6 +1174,7 @@ impl<'a> Adapter<'a> {
         page.tables.push(table.clone());
         page.blocks.push(BlockPayload {
             kind: "table".into(),
+            metadata: self.provenance.metadata(path, None, Some(StoryRef::Body)),
             table: Some(table),
             ..BlockPayload::default()
         });
@@ -1184,7 +1231,11 @@ impl<'a> Adapter<'a> {
             cells.push(output_row);
             active_merges = next_merges;
         }
-        let mut metadata = Map::from_iter([("column_widths".into(), json!(table.grid))]);
+        let mut metadata = self.provenance.metadata(path, None, native_story);
+        if let Some(story) = story {
+            metadata.extend(story.clone());
+        }
+        metadata.insert("column_widths".into(), json!(table.grid));
         for (key, value) in [
             ("title", &table.props.caption),
             ("description", &table.props.description),
@@ -1223,7 +1274,7 @@ impl<'a> Adapter<'a> {
                     let segment_pages =
                         self.paragraph_segment_pages(&native_path, &segments, page_indexes[0]);
                     for (segment_index, mut segment) in segments.into_iter().enumerate() {
-                        segment.set_source(&path, segment_index);
+                        self.set_source(&mut segment, &native_path, segment_index);
                         let page_number = segment_pages[segment_index].min(self.pages.len() - 1);
                         for (id, _) in segment.comments {
                             self.comment_pages.entry(id).or_insert(page_number);
@@ -2365,3 +2416,11 @@ mod imported_property_tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "docx/stroke_regression_tests.rs"]
+mod stroke_regression_tests;
+
+#[cfg(test)]
+#[path = "docx_closed_shape_proof.rs"]
+mod closed_shape_proof;

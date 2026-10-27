@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "pydoccraft"
-version = "0.2.1"
+version = "0.3.1"
 description = "Compact in-process PDF and OOXML document extraction"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -23,7 +23,7 @@ classifiers = [
 
 [project.urls]
 Repository = "https://github.com/narain1/pydoccraft"
-Documentation = "https://github.com/narain1/pydoccraft/tree/main/docs"
+Documentation = "https://narain1.github.io/pydoccraft/"
 Issues = "https://github.com/narain1/pydoccraft/issues"
 Changelog = "https://github.com/narain1/pydoccraft/releases"
 Security = "https://github.com/narain1/pydoccraft/security/policy"

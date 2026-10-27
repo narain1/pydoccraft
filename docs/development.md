@@ -85,6 +85,14 @@ The canonical comparison is [PDF performance versus PyMuPDF](pdf-performance.md)
 
 The tagged release workflow builds wheels for Python 3.11–3.13 on Linux, macOS, and Windows. Each matrix job runs the installed-wheel corpus and uploads validation evidence before its wheel can be published. A local Linux pass does not establish that those remote jobs have passed.
 
+To validate the same nine jobs before creating a version tag, dispatch `release.yml` with `validation_only=true`, `publish=false`, and `release_tag` set to the exact 40-character commit SHA. Validation mode refuses branches, abbreviated SHAs and a simultaneous publication request. It builds and tests that source, uploads wheel/evidence artifacts, and skips both GitHub release creation and PyPI publication. Use the recorded commit and per-job validation results as evidence; a dispatched or successful build alone does not establish a passing corpus. The final tagged release still runs the matrix on the versioned source.
+
+```bash
+gh workflow run release.yml --ref main \
+  -f release_tag=FULL_REVIEWED_COMMIT_SHA \
+  -f validation_only=true -f publish=false
+```
+
 ## Release checklist
 
 1. Set matching versions in `Cargo.toml`, `pyproject.toml`, and `src/doc_ex/__init__.py`.
@@ -105,3 +113,9 @@ The tagged release workflow builds wheels for Python 3.11–3.13 on Linux, macOS
 ## Upstream changes
 
 Upstream engine upgrades deserve isolated pull requests. Keep each project's crates on one revision, preserve root patches, rerun the whole corpus, compare size and licenses, and document intentional output changes. Never track an upstream branch.
+
+## Documentation website
+
+The [GitHub Pages site](documentation-site.md) builds directly from these Markdown guides. Use the documented build and local-link check before changing site navigation or publishing configuration.
+
+Validation-only runs also retain built wheels when the installed corpus fails, alongside the failed validation record. These diagnostic artifacts are not release artifacts; inspect the job outcome and validation JSON before using them. Ordinary release runs continue to upload wheels only after successful tests.

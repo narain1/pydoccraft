@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use deckcraft_model::style::PictureFill;
 use deckcraft_model::text::{
-    Action, Align, Anchor, AutoFit, Hyperlink, RunProps, Strike, TextBody,
+    Action, Align, Anchor, AutoFit, Hyperlink, ListStyle, ParaProps, RunProps, Spacing, Strike,
+    TabStop, TextBody,
 };
 use deckcraft_model::{
     Background, ColorBase, ColorRef, Fill, Geom, LayoutType, Line, Presentation, Rgba, Shape,
@@ -28,6 +29,9 @@ const MAX_PROPERTIES: usize = 16 * 1024 * 1024;
 const MAX_PATCH: usize = 16 * 1024;
 const MAX_CELLS: usize = 100_000;
 const MIN_GRID: f64 = 0.05;
+const MAX_TABS: usize = 32;
+const MAX_TAB_POSITION: f64 = 2_147_483_647.0;
+const MAX_TAB_WORK: usize = 2_000_000;
 
 type TextFormat = (
     Option<f64>,
@@ -113,6 +117,7 @@ impl EditablePptx {
         &mut self,
         operation: impl FnOnce(&mut Presentation) -> PyResult<T>,
     ) -> PyResult<T> {
+        tab_inventory(self.document()?, MAX_TAB_WORK)?;
         let mut staged = self.document()?.clone();
         let result = operation(&mut staged)?;
         content_budget(&staged)?;
@@ -340,7 +345,7 @@ impl EditablePptx {
     }
 
     pub fn copy(&self) -> PyResult<Self> {
-        self.document()?;
+        tab_inventory(self.document()?, MAX_TAB_WORK)?;
         Ok(self.clone())
     }
 
@@ -449,6 +454,7 @@ impl EditablePptx {
 
     pub fn to_bytes(&self) -> PyResult<Vec<u8>> {
         let document = self.document()?;
+        tab_inventory(document, MAX_TAB_WORK)?;
         if document.slides.is_empty() {
             return Err(PyValueError::new_err(
                 "add at least one slide before saving",
@@ -581,6 +587,47 @@ impl EditablePptx {
                 fill: Fill::solid(ColorRef::rgb(Rgba::rgb(color.0, color.1, color.2))),
             });
             prune_media(document);
+            Ok(())
+        })?;
+        self.refresh_budgets()
+    }
+
+    pub fn clear_background(&mut self, slide: usize) -> PyResult<()> {
+        self.check_slide(slide)?;
+        let document = self.document()?;
+        let picture = |background: &Option<Background>| {
+            matches!(
+                background,
+                Some(Background::Fill {
+                    fill: Fill::Picture(_)
+                })
+            )
+        };
+        if picture(&document.slides[slide].background)
+            && document.masters.iter().any(|master| {
+                picture(&master.background)
+                    || master
+                        .layouts
+                        .iter()
+                        .any(|layout| picture(&layout.background))
+            })
+        {
+            return Err(EngineError::Unsupported(
+                "removing a picture background with inherited picture assets requires native referenced-media accounting".into(),
+            ).into());
+        }
+        self.mutate(|document| {
+            let removed = Arc::make_mut(&mut document.slides[slide]).background.take();
+            // Only an explicit picture override can release owned media. Inherited
+            // layout/master backgrounds are resolved by the native engine unchanged.
+            if matches!(
+                removed,
+                Some(Background::Fill {
+                    fill: Fill::Picture(_)
+                })
+            ) {
+                prune_media(document);
+            }
             Ok(())
         })?;
         self.refresh_budgets()
@@ -871,7 +918,7 @@ impl EditablePptx {
     pub fn shape_text(&self, slide: usize, id: u32, cell: Option<CellTarget>) -> PyResult<String> {
         let body = self.target_body(slide, id, cell)?;
         Ok(match cell {
-            Some((_, _, paragraph, _, _)) => body.paragraphs[paragraph].text(),
+            Some((_, _, paragraph, _, _)) => cell_public_text(body.paragraphs[paragraph].text()),
             None => body.text(),
         })
     }
@@ -887,7 +934,15 @@ impl EditablePptx {
     ) -> PyResult<(String, u64)> {
         let body = self.target_body(slide, id, cell)?;
         let (a, b) = target_positions(body, start, end, cell.map(|target| target.2))?;
-        Ok((deckcraft_model::edit::text_range(body, a, b), self.revision))
+        let text = deckcraft_model::edit::text_range(body, a, b);
+        Ok((
+            if cell.is_some() {
+                cell_public_text(text)
+            } else {
+                text
+            },
+            self.revision,
+        ))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1192,7 +1247,7 @@ impl EditablePptx {
                         if cell.is_covered() {
                             String::new()
                         } else {
-                            cell.text.text()
+                            cell_public_text(cell.text.text())
                         }
                     })
                     .collect()
@@ -1312,7 +1367,9 @@ impl EditablePptx {
     }
 
     pub fn cell_text(&self, slide: usize, id: u32, row: usize, col: usize) -> PyResult<String> {
-        Ok(table_cell(self.table(slide, id)?, row, col)?.text.text())
+        Ok(cell_public_text(
+            table_cell(self.table(slide, id)?, row, col)?.text.text(),
+        ))
     }
 
     pub fn cell_margins(
@@ -1563,6 +1620,82 @@ impl EditablePptx {
         ))
     }
 
+    pub fn move_cell_paragraph(
+        &mut self,
+        slide: usize,
+        id: u32,
+        source: CellTarget,
+        destination: CellTarget,
+        revision: u64,
+    ) -> PyResult<bool> {
+        self.check_revision(revision)?;
+        self.target_body(slide, id, Some(source))?;
+        self.target_body(slide, id, Some(destination))?;
+        if (source.0, source.1, source.3, source.4)
+            != (destination.0, destination.1, destination.3, destination.4)
+        {
+            return Err(PyValueError::new_err(
+                "paragraph movement requires the same canonical cell",
+            ));
+        }
+        // Validate the bounded source even for a no-op. Ordinal equality must
+        // not make stale or malformed selections appear successful.
+        content_budget(self.document()?)?;
+        let errors = self.document()?.validate();
+        if !errors.is_empty() {
+            return Err(EngineError::Malformed(format!(
+                "invalid authored presentation: {}",
+                errors.join("; ")
+            ))
+            .into());
+        }
+        if source.2 == destination.2 {
+            return Ok(false);
+        }
+        let generation = source
+            .4
+            .checked_add(1)
+            .ok_or_else(|| EngineError::ResourceLimit("cell generation limit reached".into()))?;
+        self.mutate(|document| {
+            let paragraphs = &mut cell_mut(document, slide, id, source.0, source.1)?
+                .text
+                .paragraphs;
+            let paragraph = paragraphs.remove(source.2);
+            paragraphs.insert(destination.2, paragraph);
+            Ok(())
+        })?;
+        self.cell_generations
+            .insert((id, source.0, source.1), generation);
+        // Reordering intact values changes no live text, media, shape or
+        // property budget; retain the existing counters and grid generation.
+        Ok(true)
+    }
+
+    pub fn remove_cell_paragraph(
+        &mut self,
+        slide: usize,
+        id: u32,
+        cell: CellTarget,
+    ) -> PyResult<()> {
+        self.target_body(slide, id, Some(cell))?;
+        let (row, col, paragraph, _, old_generation) = cell;
+        let generation = old_generation
+            .checked_add(1)
+            .ok_or_else(|| EngineError::ResourceLimit("cell generation limit reached".into()))?;
+        self.mutate(|document| {
+            // Remove the intact public model value. Text-range deletion joins
+            // paragraphs and can transfer the removed paragraph's properties.
+            // The native writer supplies a required blank when the body is empty.
+            cell_mut(document, slide, id, row, col)?
+                .text
+                .paragraphs
+                .remove(paragraph);
+            Ok(())
+        })?;
+        self.cell_generations.insert((id, row, col), generation);
+        self.refresh_budgets()
+    }
+
     pub fn cell_add_paragraph(
         &mut self,
         slide: usize,
@@ -1583,10 +1716,11 @@ impl EditablePptx {
                 text: text.len(),
                 paragraphs: 1,
                 runs: usize::from(!text.is_empty()),
+                properties: list_tabs_cost(&original.list_style)?,
                 ..Default::default()
             };
             content_budget(self.document()?)?
-                .replacing(body_budget(original), projected)
+                .replacing(body_budget(original)?, projected)
                 .check()?;
             let mut body = original.clone();
             deckcraft_model::edit::insert(&mut body, (0, 0), text, None);
@@ -1613,6 +1747,64 @@ impl EditablePptx {
         Ok((row, col, count, grid, generation))
     }
 
+    pub fn cell_add_break(
+        &mut self,
+        slide: usize,
+        id: u32,
+        cell: CellTarget,
+        kind: &str,
+        revision: u64,
+    ) -> PyResult<(usize, usize, u64)> {
+        self.check_revision(revision)?;
+        let original = self.target_body(slide, id, Some(cell))?;
+        match kind {
+            "line" => (),
+            "page" | "column" => {
+                return Err(EngineError::Unsupported(
+                    "PPTX cell paragraphs support line breaks only".into(),
+                )
+                .into())
+            }
+            _ => {
+                return Err(PyValueError::new_err(
+                    "break kind must be line, page or column",
+                ))
+            }
+        }
+        // Validate bounded source before cloning inherited properties or the body.
+        let mut projected = content_budget(self.document()?)?;
+        let start = original.paragraphs[cell.2].char_len();
+        let end = start.checked_add(1).ok_or_else(|| {
+            EngineError::ResourceLimit("cell paragraph character limit reached".into())
+        })?;
+        let mut props = deckcraft_model::edit::props_at(original, (cell.2, start));
+        props.link = None;
+        props.hover = None;
+        // Append-only native VT adds at most one run and one logical byte;
+        // an empty stored Break.text still contributes one content() byte.
+        projected.add(ContentBudget {
+            text: 1,
+            runs: 1,
+            properties: props_cost(&props),
+            ..Default::default()
+        });
+        projected.check()?;
+        let mut body = original.clone();
+        let caret = deckcraft_model::edit::insert(&mut body, (cell.2, start), "\u{b}", Some(props));
+        if caret != (cell.2, end) || body.paragraphs.len() != original.paragraphs.len() {
+            return Err(EngineError::Malformed(
+                "native line-break insertion changed paragraph scope".into(),
+            )
+            .into());
+        }
+        self.mutate(|document| {
+            *target_body_mut(document, slide, id, Some(cell))? = body;
+            Ok(())
+        })?;
+        self.refresh_budgets()?;
+        Ok((start, end, self.revision))
+    }
+
     pub fn cell_paragraph_alignment(
         &self,
         slide: usize,
@@ -1630,6 +1822,60 @@ impl EditablePptx {
                 Align::JustLow => "justify_low",
                 Align::Distributed => "distributed",
             }))
+    }
+
+    pub fn cell_paragraph_formatting(
+        &self,
+        slide: usize,
+        id: u32,
+        cell: CellTarget,
+    ) -> PyResult<String> {
+        let props = &self.target_body(slide, id, Some(cell))?.paragraphs[cell.2].props;
+        tabs_cost(&props.tabs)?;
+        let tabs = props.tabs.as_ref().map(|stops| stops.iter().map(|stop| {
+            let alignment = match stop.align.as_str() { "ctr" => "center", "r" => "right", "dec" => "decimal", _ => "left" };
+            serde_json::json!({"position": stop.pos, "alignment": alignment, "leader": "none"})
+        }).collect::<Vec<_>>());
+        let scalar = |value: Option<Spacing>, percent: bool| -> PyResult<Option<f64>> {
+            match value {
+                None => Ok(None),
+                Some(Spacing::Pct(value)) if percent => Ok(Some(value)),
+                Some(Spacing::Pts(value)) if !percent => Ok(Some(value)),
+                _ => Err(EngineError::Unsupported(
+                    "PPTX paragraph spacing uses an unsupported native unit".into(),
+                )
+                .into()),
+            }
+        };
+        Ok(serde_json::json!({
+            "alignment": self.cell_paragraph_alignment(slide, id, cell)?,
+            "indent_left": props.margin_left,
+            "indent_right": props.margin_right,
+            "indent_first": props.indent,
+            "space_before": scalar(props.space_before, false)?,
+            "space_after": scalar(props.space_after, false)?,
+            "line_spacing": scalar(props.line_spacing, true)?,
+            "tabs": tabs,
+        })
+        .to_string())
+    }
+
+    pub fn format_cell_paragraph(
+        &mut self,
+        slide: usize,
+        id: u32,
+        cell: CellTarget,
+        patch: &str,
+        revision: u64,
+    ) -> PyResult<()> {
+        self.check_revision(revision)?;
+        let original = &self.target_body(slide, id, Some(cell))?.paragraphs[cell.2].props;
+        tab_inventory(self.document()?, MAX_TAB_WORK)?;
+        let props = cell_paragraph_patch(original, patch)?;
+        self.mutate(|document| {
+            target_body_mut(document, slide, id, Some(cell))?.paragraphs[cell.2].props = props;
+            Ok(())
+        })
     }
 
     #[pyo3(signature = (slide, id, cell, alignment=None))]
@@ -1680,22 +1926,30 @@ impl EditablePptx {
         let cell = table_cell(self.table(slide, id)?, row, col)?;
         text_value(text)?;
         let count = paragraph_count(text);
+        let total = content_budget(self.document()?)?;
         let props = deckcraft_model::edit::props_at(&cell.text, (0, 0));
         let defaults = cell
             .text
             .paragraphs
             .first()
-            .map_or(0, |p| props_cost(&p.def_props) + props_cost(&p.end_props));
+            .map(|p| {
+                Ok::<_, PyErr>(
+                    props_cost(&p.def_props) + props_cost(&p.end_props) + tabs_cost(&p.props.tabs)?,
+                )
+            })
+            .transpose()?
+            .unwrap_or(0);
         let projected = ContentBudget {
             text: text.len(),
             paragraphs: count,
             runs: count,
             properties: count
-                .saturating_mul(defaults.saturating_add(props_cost(&props).saturating_mul(2))),
+                .saturating_mul(defaults.saturating_add(props_cost(&props).saturating_mul(2)))
+                .saturating_add(list_tabs_cost(&cell.text.list_style)?),
             ..Default::default()
         };
-        content_budget(self.document()?)?
-            .replacing(body_budget(&cell.text), projected)
+        total
+            .replacing(body_budget(&cell.text)?, projected)
             .check()?;
         self.mutate(|document| {
             let cell = cell_mut(document, slide, id, row, col)?;
@@ -1833,7 +2087,7 @@ impl EditablePptx {
             }
         };
         let body = self.text_body(slide, id)?;
-        let old = body_budget(body);
+        let old = body_budget(body)?;
         let mut projected = old;
         for paragraph in &body.paragraphs {
             for props in paragraph
@@ -2138,10 +2392,90 @@ impl EditablePptx {
     }
 }
 
+// DrawingML point/percentage properties stay native model values. The reader
+// caps percentages at 100; normal-height multipliers below 1 are excluded because
+// overlapping glyphs can be lost by normalized PDF text extraction.
+fn cell_paragraph_patch(original: &ParaProps, source: &str) -> PyResult<ParaProps> {
+    if source.len() > MAX_PATCH {
+        return Err(EngineError::ResourceLimit("format patch exceeds 16 KiB".into()).into());
+    }
+    let value: serde_json::Value = serde_json::from_str(source)
+        .map_err(|_| PyValueError::new_err("format patch must be a JSON object"))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| PyValueError::new_err("format patch must be a flat object"))?;
+    let mut props = original.clone();
+    for (key, value) in object {
+        if key == "tabs" {
+            props.tabs = parse_tabs(value)?;
+            continue;
+        }
+        if key == "alignment" {
+            props.align = match value {
+                serde_json::Value::Null => None,
+                serde_json::Value::String(value) => Some(match value.as_str() {
+                    "left" => Align::Left,
+                    "center" => Align::Center,
+                    "right" => Align::Right,
+                    "justify" => Align::Justify,
+                    _ => {
+                        return Err(PyValueError::new_err(
+                            "alignment must be left, center, right, justify or None",
+                        ))
+                    }
+                }),
+                _ => {
+                    return Err(PyValueError::new_err(
+                        "alignment must be left, center, right, justify or None",
+                    ))
+                }
+            };
+            continue;
+        }
+        let (min, max) = match key.as_str() {
+            "indent_left" | "indent_right" => (0.0, 4032.0),
+            "indent_first" => (-4032.0, 4032.0),
+            "space_before" | "space_after" => (0.0, 1584.0),
+            "line_spacing" => (1.0, 100.0),
+            _ => {
+                return Err(EngineError::Unsupported(format!(
+                    "PPTX cell paragraph formatting property {key} is unavailable"
+                ))
+                .into())
+            }
+        };
+        let scalar = if value.is_null() {
+            None
+        } else {
+            let invalid = || {
+                PyValueError::new_err(format!(
+                    "{key} must be finite and between {min} and {max}, or None"
+                ))
+            };
+            let value = value.as_f64().ok_or_else(invalid)?;
+            if !value.is_finite() || !(min..=max).contains(&value) {
+                return Err(invalid());
+            }
+            Some(value)
+        };
+        match key.as_str() {
+            "indent_left" => props.margin_left = scalar,
+            "indent_right" => props.margin_right = scalar,
+            "indent_first" => props.indent = scalar,
+            "space_before" => props.space_before = scalar.map(Spacing::Pts),
+            "space_after" => props.space_after = scalar.map(Spacing::Pts),
+            "line_spacing" => props.line_spacing = scalar.map(Spacing::Pct),
+            _ => unreachable!(),
+        }
+    }
+    Ok(props)
+}
+
 enum FormatChange {
     Bold(Option<bool>),
     Italic(Option<bool>),
     Size(Option<f64>),
+    Spacing(Option<f64>),
     Font(Option<String>),
     Color(Option<ColorRef>),
     Underline(Option<String>),
@@ -2174,6 +2508,27 @@ const UNDERLINES: &[(&str, &str)] = &[
     ("thick_wave", "wavyHeavy"),
 ];
 
+// Keep the initial cross-format contract at one twip even though DrawingML
+// supports hundredths of a point. Canonicalize ordinary f64 arithmetic before
+// the native writer rounds to its integer hundredths; no f32 conversion here.
+fn letter_spacing(value: &serde_json::Value) -> PyResult<f64> {
+    let points = value
+        .as_f64()
+        .ok_or_else(|| PyValueError::new_err("letter_spacing must be a number or None"))?;
+    if !points.is_finite() || !(-100.0..=100.0).contains(&points) {
+        return Err(PyValueError::new_err(
+            "letter_spacing must be finite and between -100 and 100 points",
+        ));
+    }
+    let canonical = (points * 20.0).round() / 20.0;
+    if (canonical - points).abs() > 4.0 * f64::EPSILON * points.abs().max(1.0) {
+        return Err(PyValueError::new_err(
+            "letter_spacing requires 0.05-point (one-twip) increments",
+        ));
+    }
+    Ok(canonical)
+}
+
 impl FormatPatch {
     fn parse(source: &str) -> PyResult<Self> {
         if source.len() > MAX_PATCH {
@@ -2201,6 +2556,11 @@ impl FormatPatch {
                         FormatChange::Italic(v)
                     }
                 }
+                "letter_spacing" => FormatChange::Spacing(if value.is_null() {
+                    None
+                } else {
+                    Some(letter_spacing(value)?)
+                }),
                 "font_size" => {
                     let v = if value.is_null() {
                         None
@@ -2290,6 +2650,7 @@ impl FormatPatch {
                 FormatChange::Bold(v) => props.bold = *v,
                 FormatChange::Italic(v) => props.italic = *v,
                 FormatChange::Size(v) => props.size = *v,
+                FormatChange::Spacing(v) => props.spacing = *v,
                 FormatChange::Font(v) => props.font = v.clone(),
                 FormatChange::Color(v) => props.fill = v.clone().map(Fill::solid),
                 FormatChange::Underline(v) => props.underline = v.clone(),
@@ -2373,6 +2734,12 @@ fn target_body_mut(
             .as_mut()
             .ok_or_else(|| PyValueError::new_err("shape has no text body"))
     }
+}
+
+// Native VT and public LF are both one Unicode character/UTF-8 byte. Keep
+// paragraph/range coordinates unchanged without changing native model content.
+fn cell_public_text(text: String) -> String {
+    text.replace('\u{b}', "\n")
 }
 
 fn paragraph_text_value(text: &str) -> PyResult<()> {
@@ -2543,31 +2910,268 @@ fn props_cost(props: &RunProps) -> usize {
     .saturating_add(link_cost(&props.hover))
 }
 
-fn body_budget(body: &TextBody) -> ContentBudget {
+// These are source/serialization limits, not a promise that every stop fits a
+// particular cell. DeckCraft owns tab positioning, fallback and wrapping.
+fn tabs_cost(tabs: &Option<Vec<TabStop>>) -> PyResult<usize> {
+    let Some(tabs) = tabs else { return Ok(0) };
+    if tabs.len() > MAX_TABS {
+        return Err(
+            EngineError::ResourceLimit("PPTX tab sources support at most 32 stops".into()).into(),
+        );
+    }
+    let mut previous = None;
+    let mut cost = 0usize;
+    for stop in tabs {
+        if !stop.pos.is_finite() || stop.pos.abs() > MAX_TAB_POSITION {
+            return Err(PyValueError::new_err(
+                "tab position must be finite and between -2147483647 and 2147483647 points",
+            ));
+        }
+        // Match the public native writer's EMU rounding solely to reject
+        // duplicate/reversed serialized positions; do not perform layout.
+        let emu = (stop.pos * 12700.0).round();
+        if previous.is_some_and(|value| value >= emu) {
+            return Err(PyValueError::new_err("tab positions must increase and remain distinct after native 1/12700-point rounding"));
+        }
+        previous = Some(emu);
+        if !matches!(stop.align.as_str(), "l" | "ctr" | "r" | "dec") {
+            return Err(
+                EngineError::Unsupported("PPTX tab alignment is unavailable".into()).into(),
+            );
+        }
+        cost += std::mem::size_of::<TabStop>() + stop.align.len();
+    }
+    Ok(cost)
+}
+
+fn list_tabs_cost(style: &ListStyle) -> PyResult<usize> {
+    if style.levels.len() > 9 {
+        return Err(
+            EngineError::ResourceLimit("PPTX list styles support at most 9 levels".into()).into(),
+        );
+    }
+    style
+        .levels
+        .iter()
+        .flatten()
+        .try_fold(0usize, |sum, level| {
+            Ok(sum.saturating_add(tabs_cost(&level.para.tabs)?))
+        })
+}
+
+fn parse_tabs(value: &serde_json::Value) -> PyResult<Option<Vec<TabStop>>> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    let values = value
+        .as_array()
+        .ok_or_else(|| PyValueError::new_err("tabs must be an array or None"))?;
+    if values.len() > MAX_TABS {
+        return Err(EngineError::ResourceLimit("PPTX tabs support at most 32 stops".into()).into());
+    }
+    let mut tabs = Vec::with_capacity(values.len());
+    for value in values {
+        let item = value
+            .as_object()
+            .ok_or_else(|| PyValueError::new_err("each tab must be a mapping"))?;
+        if item
+            .keys()
+            .any(|key| !matches!(key.as_str(), "position" | "alignment" | "leader"))
+        {
+            return Err(PyValueError::new_err("unknown tab property"));
+        }
+        let pos = item
+            .get("position")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| PyValueError::new_err("tab position must be a number"))?;
+        let alignment = match item.get("alignment") {
+            None => "left",
+            Some(value) => value
+                .as_str()
+                .ok_or_else(|| PyValueError::new_err("tab alignment must be a string"))?,
+        };
+        let align = match alignment {
+            "left" => "l",
+            "center" => "ctr",
+            "right" => "r",
+            "decimal" => "dec",
+            _ => {
+                return Err(EngineError::Unsupported(
+                    "PPTX tabs support left, center, right or decimal alignment".into(),
+                )
+                .into())
+            }
+        };
+        if item
+            .get("leader")
+            .is_some_and(|value| value.as_str() != Some("none"))
+        {
+            return Err(EngineError::Unsupported("PPTX tab leaders are unavailable".into()).into());
+        }
+        tabs.push(TabStop {
+            pos,
+            align: align.into(),
+        });
+    }
+    let tabs = Some(tabs);
+    tabs_cost(&tabs)?;
+    Ok(tabs)
+}
+
+// One bounded inventory covers every public native source reached by text-style
+// resolution. Direct slide/notes bodies are charged by body_budget; auxiliary
+// master/layout/default sources are returned separately to avoid double charging.
+struct TabInventory {
+    work: usize,
+    limit: usize,
+    total: usize,
+}
+impl TabInventory {
+    fn charge(&mut self, count: usize) -> PyResult<()> {
+        self.work = self
+            .work
+            .checked_add(count)
+            .filter(|n| *n <= self.limit)
+            .ok_or_else(|| {
+                EngineError::ResourceLimit("PPTX tab source work limit exceeded".into())
+            })?;
+        Ok(())
+    }
+    fn props(&mut self, props: &ParaProps) -> PyResult<usize> {
+        self.charge(1)?;
+        if let Some(stops) = &props.tabs {
+            self.charge(stops.len())?;
+        }
+        let cost = tabs_cost(&props.tabs)?;
+        self.total = self.total.saturating_add(cost);
+        if self.total > MAX_PROPERTIES {
+            return Err(
+                EngineError::ResourceLimit("PPTX tab properties exceed 16 MiB".into()).into(),
+            );
+        }
+        Ok(cost)
+    }
+    fn list(&mut self, style: &ListStyle) -> PyResult<usize> {
+        self.charge(style.levels.len())?;
+        if style.levels.len() > 9 {
+            return Err(EngineError::ResourceLimit(
+                "PPTX list styles support at most 9 levels".into(),
+            )
+            .into());
+        }
+        style
+            .levels
+            .iter()
+            .flatten()
+            .try_fold(0usize, |sum, level| {
+                Ok(sum.saturating_add(self.props(&level.para)?))
+            })
+    }
+    fn body(&mut self, body: &TextBody) -> PyResult<usize> {
+        self.charge(body.paragraphs.len())?;
+        let mut cost = self.list(&body.list_style)?;
+        for paragraph in &body.paragraphs {
+            self.charge(paragraph.runs.len())?;
+            cost = cost.saturating_add(self.props(&paragraph.props)?);
+        }
+        Ok(cost)
+    }
+    fn shapes(&mut self, shapes: &[Shape]) -> PyResult<usize> {
+        self.charge(shapes.len())?;
+        let mut cost = 0usize;
+        visit_shapes(shapes, &mut |shape| {
+            if let ShapeKind::Group { children, .. } = &shape.kind {
+                self.charge(children.len())?;
+            }
+            if let Some(body) = &shape.text {
+                cost = cost.saturating_add(self.body(body)?);
+            }
+            if let ShapeKind::Table(table) = &shape.kind {
+                self.charge(table.rows.len())?;
+                for row in &table.rows {
+                    self.charge(row.cells.len())?;
+                    for cell in &row.cells {
+                        cost = cost.saturating_add(self.body(&cell.text)?);
+                    }
+                }
+            }
+            Ok(())
+        })?;
+        Ok(cost)
+    }
+}
+
+fn tab_inventory(document: &Presentation, work_limit: usize) -> PyResult<usize> {
+    let mut inventory = TabInventory {
+        work: 0,
+        limit: work_limit,
+        total: 0,
+    };
+    inventory.charge(document.slides.len())?;
+    for slide in &document.slides {
+        inventory.body(&slide.notes)?;
+        inventory.shapes(&slide.shapes)?;
+    }
+    let mut auxiliary = inventory.list(&document.default_text_style)?;
+    inventory.charge(document.masters.len())?;
+    for master in document
+        .masters
+        .iter()
+        .map(Arc::as_ref)
+        .chain(document.notes_master.as_deref())
+        .chain(document.handout_master.as_deref())
+    {
+        inventory.charge(1)?;
+        auxiliary = auxiliary
+            .saturating_add(inventory.list(&master.title_style)?)
+            .saturating_add(inventory.list(&master.body_style)?)
+            .saturating_add(inventory.list(&master.other_style)?)
+            .saturating_add(inventory.shapes(&master.shapes)?);
+        inventory.charge(master.layouts.len())?;
+        for layout in &master.layouts {
+            auxiliary = auxiliary.saturating_add(inventory.shapes(&layout.shapes)?);
+        }
+    }
+    Ok(auxiliary)
+}
+
+fn body_budget(body: &TextBody) -> PyResult<ContentBudget> {
+    if body.paragraphs.len() > MAX_PARAGRAPHS {
+        return Err(
+            EngineError::ResourceLimit("presentation paragraph limit exceeded".into()).into(),
+        );
+    }
     let mut budget = ContentBudget {
         paragraphs: body.paragraphs.len(),
         text: body.paragraphs.len().saturating_sub(1),
+        properties: list_tabs_cost(&body.list_style)?,
         ..Default::default()
     };
     for paragraph in &body.paragraphs {
         budget.properties = budget
             .properties
             .saturating_add(props_cost(&paragraph.def_props))
-            .saturating_add(props_cost(&paragraph.end_props));
+            .saturating_add(props_cost(&paragraph.end_props))
+            .saturating_add(tabs_cost(&paragraph.props.tabs)?);
         budget.runs = budget.runs.saturating_add(paragraph.runs.len());
+        budget.check()?;
         for run in &paragraph.runs {
             budget.text = budget.text.saturating_add(run.content().len());
             budget.properties = budget.properties.saturating_add(props_cost(&run.props));
         }
     }
-    budget
+    budget.check()
 }
 
 fn content_budget(document: &Presentation) -> PyResult<ContentBudget> {
-    let mut budget = ContentBudget::default();
+    let auxiliary_tabs = tab_inventory(document, MAX_TAB_WORK)?;
+    let mut budget = ContentBudget {
+        properties: auxiliary_tabs,
+        ..Default::default()
+    };
     for slide in &document.slides {
         budget.text = budget.text.saturating_add(slide.name.len());
-        budget.add(body_budget(&slide.notes));
+        budget.add(body_budget(&slide.notes)?);
         visit_shapes(&slide.shapes, &mut |shape| {
             budget.text = budget.text.saturating_add(shape.descr.len());
             budget.properties = budget
@@ -2575,7 +3179,7 @@ fn content_budget(document: &Presentation) -> PyResult<ContentBudget> {
                 .saturating_add(link_cost(&shape.click))
                 .saturating_add(link_cost(&shape.hover));
             if let Some(body) = &shape.text {
-                budget.add(body_budget(body));
+                budget.add(body_budget(body)?);
             }
             if let ShapeKind::Table(table) = &shape.kind {
                 validate_table_grid(table)?;
@@ -2583,7 +3187,7 @@ fn content_budget(document: &Presentation) -> PyResult<ContentBudget> {
                     .cells
                     .saturating_add(table.n_rows().saturating_mul(table.n_cols()));
                 for cell in table.rows.iter().flat_map(|row| &row.cells) {
-                    budget.add(body_budget(&cell.text));
+                    budget.add(body_budget(&cell.text)?);
                 }
             }
             budget.check().map(|_| ())
@@ -2639,6 +3243,7 @@ fn edited_body(
     } else {
         a
     };
+    let total = content_budget(document)?;
     let mut props = deckcraft_model::edit::props_at(body, props_position);
     if let Some(patch) = patch {
         // Appending inherits appearance, not an adjacent label's navigation target.
@@ -2646,8 +3251,7 @@ fn edited_body(
         props.hover = None;
         patch.apply(&mut props);
     }
-    let total = content_budget(document)?;
-    let old = body_budget(body);
+    let old = body_budget(body)?;
     let removed = deckcraft_model::edit::text_range(body, a, b).len();
     if total
         .text
@@ -2659,7 +3263,7 @@ fn edited_body(
     }
     let mut edited = body.clone();
     deckcraft_model::edit::delete(&mut edited, a, b);
-    let mut projected = body_budget(&edited);
+    let mut projected = body_budget(&edited)?;
     let added_paragraphs = paragraph_count(text) - 1;
     // Preflight cloning of insertion and paragraph properties before upstream insert.
     projected.paragraphs = projected.paragraphs.saturating_add(added_paragraphs);
@@ -2671,14 +3275,20 @@ fn edited_body(
     let paragraph_defaults = edited
         .paragraphs
         .get(a.0)
-        .map_or(0, |p| props_cost(&p.def_props) + props_cost(&p.end_props));
+        .map(|p| {
+            Ok::<_, PyErr>(
+                props_cost(&p.def_props) + props_cost(&p.end_props) + tabs_cost(&p.props.tabs)?,
+            )
+        })
+        .transpose()?
+        .unwrap_or(0);
     projected.properties = projected
         .properties
         .saturating_add((added_paragraphs + 3).saturating_mul(props_cost(&props)))
         .saturating_add(added_paragraphs.saturating_mul(paragraph_defaults));
     total.replacing(old, projected).check()?;
     deckcraft_model::edit::insert(&mut edited, a, text, Some(props));
-    total.replacing(old, body_budget(&edited)).check()?;
+    total.replacing(old, body_budget(&edited)?).check()?;
     Ok(edited)
 }
 
@@ -2690,7 +3300,7 @@ fn preflight_format(
     apply: &impl Fn(&mut RunProps),
     preserve_ends: bool,
 ) -> PyResult<()> {
-    let old = body_budget(body);
+    let old = body_budget(body)?;
     let mut projected = old;
     for (pi, paragraph) in body.paragraphs.iter().enumerate().take(b.0 + 1).skip(a.0) {
         let from = if pi == a.0 { a.1 } else { 0 };
@@ -5223,4 +5833,515 @@ mod tests {
         assert_eq!(author.table(0, ids[0]).unwrap().n_rows(), 100);
         assert_eq!(author.table(0, ids[1]).unwrap().n_cols(), 500);
     }
+    #[test]
+    fn background_reset_inherits_native_master_layout_and_theme_with_pixels() {
+        pyo3::prepare_freethreaded_python();
+        for target in ["theme", "master", "layout", "gradient", "picture"] {
+            let mut author = EditablePptx::new(160.0, 160.0).unwrap();
+            author.add_slide("blank").unwrap();
+            let mut raw = author.document().unwrap().clone();
+            let layout_id = raw.slides[0].layout;
+            let inherited = match target {
+                "gradient" => Fill::Gradient(deckcraft_model::style::Gradient {
+                    stops: vec![
+                        deckcraft_model::style::GradientStop {
+                            pos: 0.0,
+                            color: color_ref((255, 0, 0)),
+                        },
+                        deckcraft_model::style::GradientStop {
+                            pos: 1.0,
+                            color: color_ref((0, 0, 255)),
+                        },
+                    ],
+                    shape: deckcraft_model::style::GradientShape::Linear {
+                        angle: 0.0,
+                        scaled: false,
+                    },
+                    rotate_with_shape: true,
+                    tile: [0.0; 4],
+                }),
+                "picture" => {
+                    let media = raw
+                        .add_media("inherited.png", "image/png", picture_quadrants())
+                        .unwrap();
+                    Fill::Picture(PictureFill {
+                        media,
+                        ..Default::default()
+                    })
+                }
+                _ => solid((12, 34, 56)),
+            };
+            if target != "theme" {
+                let master = Arc::make_mut(&mut raw.masters[0]);
+                if target == "master" {
+                    master.background = Some(Background::Fill { fill: inherited });
+                } else {
+                    master
+                        .layouts
+                        .iter_mut()
+                        .find(|layout| layout.id == layout_id)
+                        .unwrap()
+                        .background = Some(Background::Fill { fill: inherited });
+                }
+            }
+            author.presentation = Some(raw);
+            let baseline = crate::pptx::render(&author.to_bytes().unwrap(), 0, 72.0).unwrap();
+            let baseline_pdf = crate::pdf::render(
+                &crate::pptx::to_pdf(&author.to_bytes().unwrap()).unwrap(),
+                0,
+                72.0,
+                None,
+            )
+            .unwrap();
+            // Raw fixture injection retains inherited assets; ordinary public authoring
+            // has no imported master/layout picture graph.
+            Arc::make_mut(&mut author.presentation.as_mut().unwrap().slides[0]).background =
+                Some(Background::Fill {
+                    fill: solid((0, 255, 0)),
+                });
+            assert_eq!(author.slide_background(0).unwrap(), Some((0, 255, 0)));
+            assert_ne!(
+                crate::pptx::render(&author.to_bytes().unwrap(), 0, 72.0).unwrap(),
+                baseline
+            );
+            let before = author.document().unwrap().clone();
+            author.clear_background(0).unwrap();
+            assert_eq!(author.slide_background(0).unwrap(), None);
+            assert_eq!(author.background_image(0).unwrap(), None);
+            assert_eq!(author.document().unwrap().masters, before.masters);
+            assert_eq!(author.document().unwrap().media, before.media);
+            let bytes = author.to_bytes().unwrap();
+            let reopened = deckcraft_pptx::import(&bytes).unwrap();
+            assert_eq!(reopened.slides[0].background, None);
+            assert_eq!(crate::pptx::render(&bytes, 0, 72.0).unwrap(), baseline);
+            let pdf = crate::pptx::to_pdf(&bytes).unwrap();
+            assert_eq!(
+                crate::pdf::render(&pdf, 0, 72.0, None).unwrap(),
+                baseline_pdf,
+                "{target}"
+            );
+            let (width, pixels) = picture_pixels(&baseline);
+            let at = (20 * width + 20) * 4;
+            match target {
+                "theme" => assert_eq!(&pixels[at..at + 4], &[255, 255, 255, 255]),
+                "master" | "layout" => assert_eq!(&pixels[at..at + 4], &[12, 34, 56, 255]),
+                "picture" => assert_eq!(&pixels[at..at + 4], &[255, 0, 0, 255]),
+                "gradient" => {
+                    // Native interpolation at these fixture positions yielded
+                    // [250,0,62,255] and [60,0,250,255], not a linear byte blend.
+                    // Check actual gradient direction here; before/after PNG and
+                    // PDF pixels above must remain exactly identical.
+                    assert!(pixels[at] > pixels[at + 2]);
+                    assert_eq!((pixels[at + 1], pixels[at + 3]), (0, 255));
+                    let other = (20 * width + 140) * 4;
+                    assert!(pixels[other] < pixels[other + 2]);
+                    assert_eq!((pixels[other + 1], pixels[other + 3]), (0, 255));
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[test]
+    fn background_reset_reclaims_only_unreferenced_owned_media_and_rolls_back() {
+        pyo3::prepare_freethreaded_python();
+        let image = picture_quadrants();
+        let mut author = EditablePptx::new(160.0, 160.0).unwrap();
+        author.add_slide("blank").unwrap();
+        author.add_slide("blank").unwrap();
+        author.set_background_image(0, &image).unwrap();
+        author.set_background_image(1, &image).unwrap();
+        let picture = author
+            .add_image(0, &image, 20.0, 20.0, 40.0, 40.0, "shared")
+            .unwrap();
+        let copied = author.copy().unwrap();
+        author.clear_background(0).unwrap();
+        assert_eq!(author.picture_data(0, picture).unwrap(), image);
+        assert_eq!(author.background_image(1).unwrap(), Some(image.clone()));
+        assert_eq!(copied.background_image(0).unwrap(), Some(image.clone()));
+        assert_eq!(author.media_bytes, image.len());
+        author.clear_background(1).unwrap();
+        assert_eq!(author.media_bytes, image.len());
+        author.delete_shape(0, picture).unwrap();
+        assert_eq!(author.media_bytes, 0);
+        author.set_background_image(0, &image).unwrap();
+        author.clear_background(0).unwrap();
+        assert_eq!(author.media_bytes, 0);
+        assert!(author.document().unwrap().media.is_empty());
+        author.background(0, (255, 0, 0)).unwrap();
+        author.revision = u64::MAX;
+        let before = author.document().unwrap().clone();
+        assert!(author.clear_background(0).is_err());
+        assert_eq!(author.document().unwrap(), &before);
+        assert!(author.clear_background(2).is_err());
+        author.close();
+        assert!(author.clear_background(0).is_err());
+    }
+
+    #[test]
+    fn background_reset_rejects_picture_reclamation_with_inherited_picture_assets() {
+        pyo3::prepare_freethreaded_python();
+        for master_background in [false, true] {
+            let mut author = EditablePptx::new(160.0, 160.0).unwrap();
+            author.add_slide("blank").unwrap();
+            author
+                .set_background_image(0, &picture_quadrants())
+                .unwrap();
+            let mut raw = author.document().unwrap().clone();
+            let inherited = raw.slides[0].background.clone();
+            let layout_id = raw.slides[0].layout;
+            let master = Arc::make_mut(&mut raw.masters[0]);
+            if master_background {
+                master.background = inherited;
+            } else {
+                master
+                    .layouts
+                    .iter_mut()
+                    .find(|layout| layout.id == layout_id)
+                    .unwrap()
+                    .background = inherited;
+            }
+            author.presentation = Some(raw.clone());
+            let bytes = author.to_bytes().unwrap();
+            let revision = author.revision;
+            // Existing authored-only pruning does not understand inherited assets.
+            Arc::make_mut(&mut raw.slides[0]).background = None;
+            prune_media(&mut raw);
+            assert!(raw.media.is_empty());
+            assert!(author
+                .clear_background(0)
+                .unwrap_err()
+                .to_string()
+                .contains("referenced-media"));
+            assert_eq!(author.to_bytes().unwrap(), bytes);
+            assert_eq!(author.revision, revision);
+        }
+    }
 }
+
+#[cfg(test)]
+mod letter_spacing_tests {
+    use super::*;
+    use deckcraft_model::text::Run;
+    use serde_json::json;
+
+    fn setup(text: &str) -> (EditablePptx, u32) {
+        pyo3::prepare_freethreaded_python();
+        let mut d = EditablePptx::new(1584.0, 288.0).unwrap();
+        d.add_slide("blank").unwrap();
+        let id = d
+            .add_text(0, text, 800.0, 30.0, 770.0, 220.0, 24.0)
+            .unwrap();
+        (d, id)
+    }
+
+    #[test]
+    fn pptx_spacing_all_twips_roundtrip_and_scalar_boundary() {
+        let (mut d, id) = setup("x");
+        let body = target_body_mut(d.presentation.as_mut().unwrap(), 0, id, None).unwrap();
+        body.paragraphs[0].runs = (-2000..=2000)
+            .map(|twip| {
+                let value = f64::from(twip) / 20.0;
+                let mut props = RunProps::default();
+                FormatPatch::parse(&json!({"letter_spacing":value}).to_string())
+                    .unwrap()
+                    .apply(&mut props);
+                assert_eq!(props.spacing, Some(value));
+                Run::with("x", props)
+            })
+            .collect();
+        let reopened = deckcraft_pptx::import(&d.to_bytes().unwrap()).unwrap();
+        let body = reopened.slides[0].shapes[0].text.as_ref().unwrap();
+        assert_eq!(body.paragraphs[0].runs.len(), 4001);
+        for (run, twip) in body.paragraphs[0].runs.iter().zip(-2000..=2000) {
+            assert_eq!(run.props.spacing, Some(f64::from(twip) / 20.0));
+        }
+        assert_eq!(letter_spacing(&json!(0.1_f64 + 0.2)).unwrap(), 0.3);
+        assert_eq!(letter_spacing(&json!(-0.1_f64 - 0.2)).unwrap(), -0.3);
+        for bad in [
+            json!(true),
+            json!("1"),
+            json!(100.05),
+            json!(-100.05),
+            json!(0.301),
+            json!(-0.001),
+        ] {
+            assert!(letter_spacing(&bad).is_err());
+        }
+    }
+
+    #[test]
+    fn pptx_spacing_native_inheritance_zero_reset_and_autofit() {
+        let (mut d, id) = setup("Inheritance");
+        let body = target_body_mut(d.presentation.as_mut().unwrap(), 0, id, None).unwrap();
+        body.paragraphs[0].def_props.spacing = Some(2.0);
+        body.paragraphs[0].runs[0].props.spacing = None;
+        let resolved = |d: &EditablePptx| {
+            let pres = d.document().unwrap();
+            let shape = &pres.slides[0].shapes[0];
+            let p = &shape.text.as_ref().unwrap().paragraphs[0];
+            deckcraft_model::resolve::run(
+                &deckcraft_model::resolve::Ctx::for_slide(pres, &pres.slides[0]).unwrap(),
+                shape,
+                p,
+                &p.runs[0].props,
+            )
+            .spacing
+        };
+        assert_eq!(resolved(&d), Some(2.0));
+        for (patch, expected) in [
+            (r#"{"letter_spacing":0}"#, Some(0.0)),
+            (r#"{"letter_spacing":null}"#, Some(2.0)),
+        ] {
+            d.format_range_patch(0, id, 0, 11, d.revision().unwrap(), patch, None)
+                .unwrap();
+            assert_eq!(resolved(&d), expected);
+        }
+        let raw = d.to_bytes().unwrap();
+        let reopened = deckcraft_pptx::import(&raw).unwrap();
+        assert_eq!(
+            reopened.slides[0].shapes[0]
+                .text
+                .as_ref()
+                .unwrap()
+                .paragraphs[0]
+                .runs[0]
+                .props
+                .spacing,
+            None
+        );
+        assert_eq!(
+            reopened.slides[0].shapes[0]
+                .text
+                .as_ref()
+                .unwrap()
+                .paragraphs[0]
+                .def_props
+                .spacing,
+            Some(2.0)
+        );
+        let source = deckcraft_render::place_slide(d.document().unwrap(), 0);
+        let original = &source.texts[0].layout;
+        let body = target_body_mut(d.presentation.as_mut().unwrap(), 0, id, None).unwrap();
+        body.body.autofit = Some(AutoFit::Shrink {
+            font_scale: Some(0.5),
+            line_reduction: 0.0,
+        });
+        let shrunk = deckcraft_render::place_slide(d.document().unwrap(), 0);
+        let half = &shrunk.texts[0].layout;
+        assert_eq!(half.font_scale, 0.5);
+        assert_eq!(original.runs[0].glyphs.len(), half.runs[0].glyphs.len());
+        let half_width =
+            half.runs[0].glyphs.last().unwrap().1 - half.runs[0].glyphs.first().unwrap().1;
+        let original_width =
+            original.runs[0].glyphs.last().unwrap().1 - original.runs[0].glyphs.first().unwrap().1;
+        assert!((half_width * 2.0 - original_width).abs() < 0.0001);
+    }
+
+    #[test]
+    fn pptx_spacing_shape_cell_atomicity_budgets_and_generations() {
+        let (mut d, id) = setup("Text");
+        let table = d
+            .add_table(0, vec![vec!["Cell".into()]], 20.0, 20.0, 500.0, 80.0, 24.0)
+            .unwrap();
+        let (_, _, grid, generation, _) = d.cell_paragraph_info(0, table, 0, 0).unwrap();
+        let cell = Some((0, 0, 0, grid, generation));
+        for (shape, target) in [(id, None), (table, cell)] {
+            d.format_range_patch(
+                0,
+                shape,
+                0,
+                4,
+                d.revision().unwrap(),
+                r#"{"letter_spacing":0.3}"#,
+                target,
+            )
+            .unwrap();
+            let before = d.document().unwrap().clone();
+            let revision = d.revision().unwrap();
+            for bad in [
+                r#"{"bold":true,"letter_spacing":true}"#,
+                r#"{"letter_spacing":0.301}"#,
+                r#"{"letter_spacing":100.05}"#,
+            ] {
+                assert!(d
+                    .format_range_patch(0, shape, 0, 4, revision, bad, target)
+                    .is_err());
+                assert!(d.add_run_patch(0, shape, "x", bad, target).is_err());
+                assert_eq!(d.document().unwrap(), &before);
+                assert_eq!(d.revision().unwrap(), revision);
+            }
+        }
+        d.set_cell_text(0, table, 0, 0, "Reset").unwrap();
+        assert!(d
+            .format_range_patch(
+                0,
+                table,
+                0,
+                4,
+                d.revision().unwrap(),
+                r#"{"letter_spacing":1}"#,
+                cell
+            )
+            .is_err());
+        d.revision = u64::MAX;
+        let before = d.document().unwrap().clone();
+        assert!(d
+            .format_range_patch(0, id, 0, 4, u64::MAX, r#"{"letter_spacing":1}"#, None)
+            .unwrap_err()
+            .to_string()
+            .contains("resource_limit"));
+        assert_eq!(d.document().unwrap(), &before);
+        assert_eq!(d.revision, u64::MAX);
+    }
+
+    #[test]
+    fn pptx_spacing_native_glyphs_source_pixels_and_pdf_output() {
+        let pixels = |data: Vec<u8>| {
+            let mut r = png::Decoder::new(Cursor::new(data)).read_info().unwrap();
+            let mut data = vec![0; r.output_buffer_size().unwrap()];
+            let info = r.next_frame(&mut data).unwrap();
+            assert_eq!(info.color_type, png::ColorType::Rgba);
+            data.truncate(info.buffer_size());
+            (info.width, info.height, data)
+        };
+        for text in ["office", "e\u{301} A", "سلام"] {
+            let mut baseline_glyphs = None;
+            for spacing in [-100.0, -0.05, 0.0, 2.0, 100.0] {
+                let (mut d, id) = setup(text);
+                d.format_range_patch(
+                    0,
+                    id,
+                    0,
+                    text.chars().count(),
+                    d.revision().unwrap(),
+                    &json!({"letter_spacing":spacing}).to_string(),
+                    None,
+                )
+                .unwrap();
+                let placed = deckcraft_render::place_slide(d.document().unwrap(), 0);
+                let glyphs: Vec<_> = placed
+                    .texts
+                    .iter()
+                    .flat_map(|p| &p.layout.runs)
+                    .flat_map(|r| r.glyphs.iter().map(|g| g.0))
+                    .collect();
+                if let Some(previous) = &baseline_glyphs {
+                    assert_eq!(&glyphs, previous);
+                } else {
+                    baseline_glyphs = Some(glyphs);
+                }
+                assert!(placed
+                    .texts
+                    .iter()
+                    .flat_map(|p| &p.layout.runs)
+                    .flat_map(|r| &r.glyphs)
+                    .all(|g| g.1.is_finite() && g.2.is_finite()));
+                let raw = d.to_bytes().unwrap();
+                let reopened = deckcraft_pptx::import(&raw).unwrap();
+                assert_eq!(
+                    reopened.slides[0].shapes[0].text.as_ref().unwrap().text(),
+                    text
+                );
+                let before =
+                    deckcraft_render::render_slide(d.document().unwrap(), 0, &Default::default());
+                let after = deckcraft_render::render_slide(&reopened, 0, &Default::default());
+                assert_eq!(before.pixels, after.pixels);
+                assert!(after.pixels.chunks_exact(4).filter(|p| p[0] < 128).count() > 20);
+                let source = pixels(crate::pptx::render(&raw, 0, 200.0).unwrap());
+                let pdf = crate::pptx::to_pdf(&raw).unwrap();
+                let exported = pixels(crate::pdf::render(&pdf, 0, 200.0, None).unwrap());
+                assert_eq!((source.0, source.1), (exported.0, exported.1));
+                assert!(source
+                    .2
+                    .iter()
+                    .zip(&exported.2)
+                    .all(|(a, b)| a.abs_diff(*b) <= 1));
+            }
+        }
+    }
+    #[test]
+    fn pptx_spacing_pdf_invisible_glyph_origins_follow_native_layout() {
+        let mut baseline: Option<(Vec<f64>, Vec<f32>)> = None;
+        for spacing in [0.0, 2.0, -1.0, -100.0, 100.0] {
+            let (mut d, id) = setup("ABC");
+            d.format_range_patch(
+                0,
+                id,
+                0,
+                3,
+                d.revision().unwrap(),
+                &json!({"letter_spacing": spacing}).to_string(),
+                None,
+            )
+            .unwrap();
+            let placed = deckcraft_render::place_slide(d.document().unwrap(), 0);
+            let text = &placed.texts[0];
+            let origins: Vec<f64> = text
+                .layout
+                .runs
+                .iter()
+                .flat_map(|run| &run.glyphs)
+                .map(|g| (text.transform * kurbo::Point::new(g.1, g.2)).x)
+                .collect();
+            assert_eq!(origins.len(), 3);
+            let pdf = crate::pptx::to_pdf(&d.to_bytes().unwrap()).unwrap();
+            let mut renderer =
+                pdfcraft_render::PageRenderer::new(Arc::new(pdf), Default::default());
+            let rendered = renderer.render(pdfcraft_render::RenderRequest {
+                page: 0,
+                kind: pdfcraft_render::RequestKind::Text,
+                ..Default::default()
+            });
+            assert!(rendered.error.is_none());
+            let text = rendered.text.unwrap();
+            let pdf_x: Vec<f32> = ["A", "B", "C"]
+                .into_iter()
+                .map(|label| {
+                    let found: Vec<_> = text.glyphs.iter().filter(|g| g.text == label).collect();
+                    assert_eq!(found.len(), 1);
+                    found[0].rect[0]
+                })
+                .collect();
+            if let Some((base_origins, base_pdf)) = &baseline {
+                for i in 0..3 {
+                    // Font-box bearings are constant for the same glyph. Compare
+                    // displacement from baseline, rather than advance vs ink width.
+                    let native_delta = origins[i] - base_origins[i];
+                    let pdf_delta = f64::from(pdf_x[i] - base_pdf[i]);
+                    assert!(
+                        (native_delta - pdf_delta).abs() < 0.002,
+                        "spacing={spacing} glyph={i} native={native_delta} pdf={pdf_delta}"
+                    );
+                    assert!((native_delta - spacing * i as f64).abs() < 0.0001);
+                }
+            } else {
+                baseline = Some((origins, pdf_x));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "pptx_cell_delete_proof.rs"]
+mod cell_delete_proof;
+
+#[cfg(test)]
+#[path = "pptx_cell_move_proof.rs"]
+mod cell_move_proof;
+
+#[cfg(test)]
+#[path = "pptx_cell_format_proof.rs"]
+mod cell_format_proof;
+
+#[cfg(test)]
+#[path = "pptx_cell_break_proof.rs"]
+mod cell_break_proof;
+
+#[cfg(test)]
+#[path = "pptx_cell_break_tests.rs"]
+mod cell_break_tests;
+
+#[cfg(test)]
+#[path = "pptx_cell_tabs_proof.rs"]
+mod pptx_cell_tabs_proof;

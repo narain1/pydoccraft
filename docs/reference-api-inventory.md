@@ -4,7 +4,7 @@
 
 This comparison groups related reference members under existing Python handles and formatting properties. It is not an exhaustive member inventory, implementation test, or format-conformance claim. Open XML schema/model APIs do not establish pagination or rendering. Reference products are not runtime dependencies.
 
-Audited local surface: `52d1d9d055413a9a076eab85ae3e90d2f13144c2`. The inventory contains 44 families and 194 representative members from 17 pinned source files. Later implementation changes require review.
+Audited local surface: `50220d770c2a6aefb64c41ce15cfc6df039dcf6b`. The inventory contains 44 families and 198 representative members from 17 pinned source files. Later implementation changes require review.
 
 - [dotnet/Open-XML-SDK v3.5.1](https://github.com/dotnet/Open-XML-SDK/tree/3139fdfd27414548a41555f7848d5728f6e71a42) — `3139fdfd27414548a41555f7848d5728f6e71a42`
 - [pymupdf/PyMuPDF 2.0](https://github.com/pymupdf/PyMuPDF/tree/b8904b27efa0c4e2258f0e46ab4498a6173ffa22) — `b8904b27efa0c4e2258f0e46ab4498a6173ffa22`
@@ -37,9 +37,9 @@ Ordered body/rich text and editing.
 
 **Criteria / owners:** DOC5 (W04), TXT1 (W04), TXT4 (W04), TXT7 (W07), TXT8 (W07), FORM1 (W13), FORM2 (W13), C5 (W13)
 
-**Audited local surface:** Paragraph.text/add_run/find/replace_text/slices; native explicit breaks; ordinary recipes.
+**Audited local surface:** Paragraph.text/add_run/find/replace_text/slices; native explicit breaks; bounded owned DOCX paragraph deletion and same-container movement; PPTX same-cell paragraph deletion/movement reuse the collection.
 
-**Disposition:** `implemented_subset`. **Remaining:** Top-level insertion/deletion/move needs stable locator redesign; cross-document Fragment does not remap the complete resource/semantic graph. Decimal/bar tabs remain rejected.
+**Disposition:** `implemented_subset`. **Remaining:** Append+move composes bounded paragraph insertion; arbitrary block-gap insertion and cross-container adoption remain unavailable. Cross-document Fragment does not remap the complete resource/semantic graph. DOCX movement retains stable paragraph identities, while PPTX movement invalidates ordinal handles in the changed cell. Decimal/bar tabs remain rejected.
 
 **Upstream candidates:** [U02](upstream-roadmap.md)
 
@@ -51,11 +51,13 @@ Character and paragraph properties.
 
 **Criteria / owners:** TXT2 (W04), TXT3 (W04), TXT6 (W04), LAY5 (W06), API4 (W01)
 
-**Audited local surface:** Paragraph.format and TextRange.format; keep/spacing/borders through common patches.
+**Audited local surface:** Paragraph/TextRange/Style formatting and shared defaults; direction and language reuse native properties.
 
-**Disposition:** `implemented_subset`. **Remaining:** Complex-script/language/typography conformance requires fixtures; do not create one wrapper per XML property. Native vertical/border styles have explicit supported subset.
+**Disposition:** `implemented_subset`. **Remaining:** Bounded direction/language evidence covers selected mixed-script layout. Broader complex-script/CJK typography, font controls and diagnostics remain open; no wrapper per XML property.
 
 **Upstream candidates:** [U02](upstream-roadmap.md), [U04](upstream-roadmap.md)
+
+**Evidence profiles:** [word.direction-language](support-matrix.md#worddirection-language)
 
 ## REF-OX-STYLES
 
@@ -67,7 +69,7 @@ Named styles and inheritance.
 
 **Audited local surface:** styles.add/style.format/based_on/next/linked/defaults; recipes use existing handles.
 
-**Disposition:** `implemented_subset`. **Remaining:** Default font-size clear differs between model11pt and reader10pt; arbitrary default-style selection resolves via Normal; next-style-on-enter is editor-only; style import/remapping unassessed.
+**Disposition:** `implemented_subset`. **Remaining:** Native absent-size readback and owned default font-size clear are available; arbitrary default-style selection resolves via Normal; next-style-on-enter is editor-only; style import/remapping unassessed.
 
 **Upstream candidates:** [U02](upstream-roadmap.md)
 
@@ -79,11 +81,13 @@ Number definitions, levels and sequence starts.
 
 **Criteria / owners:** TXT5 (W04), E3 (W09)
 
-**Audited local surface:** Paragraph.set_list(kind,level,restart,start); extracted numbering metadata/native labels.
+**Audited local surface:** Paragraph.set_list(kind,level,restart,start) includes native nine-level decimal_outline in checked top-level body scope; extracted definitions and evaluated labels are tested separately.
 
-**Disposition:** `implemented_subset`. **Remaining:** Full custom level formats/templates/picture bullets not authorable. Header/footer nondefault starts have native fidelity failure; source templates truncate64characters.
+**Disposition:** `implemented_subset`. **Remaining:** Custom definitions/picture bullets, auxiliary/cell/multicolumn outline placement and broader counters remain open; source templates retain native 64-character truncation limits.
 
 **Upstream candidates:** [U02](upstream-roadmap.md)
+
+**Evidence profiles:** [word.decimal-outline](support-matrix.md#worddecimal-outline)
 
 ## REF-OX-TABLE-GRID
 
@@ -151,9 +155,9 @@ Page dimensions, margins, columns and section transitions.
 
 **Criteria / owners:** LAY1 (W06), LAY2 (W06), LAY4 (W06), LAY8 (W06)
 
-**Audited local surface:** Section page_size/margins/gutter/columns/column_widths/start; stable sections collection.
+**Audited local surface:** Section page_size/margins/gutter/columns/column_widths/start; stable sections collection; document-wide mirror_margins and bounded section vertical_alignment reuse native layout.
 
-**Disposition:** `implemented_subset`. **Remaining:** Per-column gap control, mirrored/top gutters and detailed layout inspection are not covered by current profile; avoid redundant orientation API.
+**Disposition:** `implemented_subset`. **Remaining:** Per-column gap and top-gutter controls, broader vertical-alignment contexts and detailed layout inspection remain open. Mirrored margins are document-wide, not a section override; no redundant orientation API is needed.
 
 **Upstream candidates:** [U04](upstream-roadmap.md), [U05](upstream-roadmap.md)
 
@@ -165,25 +169,29 @@ Headers, footers and page-specific linkage.
 
 **Criteria / owners:** LAY3 (W06), BG5 (W13)
 
-**Audited local surface:** Section.header/footer(default/first/even) reuse Paragraph/TextRange; section copies own independent parts.
+**Audited local surface:** Section.header/footer(default/first/even) reuse paragraphs/tables/pictures and owned clear(); bounded paragraph/table deletion and movement reuse existing collections; copies retain independent parts.
 
-**Disposition:** `local_candidate`. **Remaining:** Header/footer tables and pictures can reuse existing owned content handles with explicit synthetic-placeholder tracking and native geometry guards. Link-to-previous/unlink/clear remain separate acceptance requiring stable story IDs and field-scope checks.
+**Disposition:** `implemented_subset`. **Remaining:** Link-to-previous/unlink, cross-story adoption and general block movement remain open. Missing/repeated clear is a true no-op; inactive variants may lack measured cell geometry. Rich notes retain their separate profile.
 
 **Upstream candidates:** [U02](upstream-roadmap.md), [U04](upstream-roadmap.md)
 
+**Evidence profiles:** [word.rich-stories](support-matrix.md#wordrich-stories), [word.story-clear](support-matrix.md#wordstory-clear)
+
 ## REF-OX-PAGE-FIELDS
 
-Page/count fields and refresh semantics.
+Page/count fields, line numbering and refresh semantics.
 
-**Reference members:** [PageNumberType](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L22787), [SimpleField](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L17739), [FieldChar](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L4518), [FieldCode](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L3885), [UpdateFieldsOnOpen](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L2297)
+**Reference members:** [PageNumberType](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L22787), [SimpleField](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L17739), [FieldChar](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L4518), [FieldCode](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L3885), [UpdateFieldsOnOpen](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L2297), [LineNumberType](https://github.com/dotnet/Open-XML-SDK/blob/3139fdfd27414548a41555f7848d5728f6e71a42/data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json#L22696)
 
 **Criteria / owners:** LAY6 (W08), REF3 (W08), REF4 (W08)
 
-**Audited local surface:** Paragraph.add_field(page/page_count/section_page_count), Section.page_number_start.
+**Audited local surface:** Paragraph.add_field(page/page_count/section_page_count), Section.page_number_start; Section.line_numbers reuses native decimal counters.
 
-**Disposition:** `implemented_subset`. **Remaining:** Explicit Arabic supported. Continuous SECTIONPAGES/restarts are rejected; implicit numeral context differs across body/stories; no general field evaluator.
+**Disposition:** `implemented_subset`. **Remaining:** Explicit Arabic supported. Continuous SECTIONPAGES/restarts are rejected; implicit numeral context differs across body/stories; no general field evaluator. Numbered sections are single-column; affected continuous each_page resumes are rejected. Line-label bounds/work do not imply complete numbering parity.
 
 **Upstream candidates:** [U07](upstream-roadmap.md)
+
+**Evidence profiles:** [word.line-numbers](support-matrix.md#wordline-numbers)
 
 ## REF-OX-NOTES
 
@@ -193,11 +201,13 @@ Footnotes and endnotes.
 
 **Criteria / owners:** LAY7 (W07), E3 (W09), REF8 (W07)
 
-**Audited local surface:** Notes collection plus shared Paragraph handles; section note_options/configure_notes.
+**Audited local surface:** Notes collection plus shared Paragraph handles; section note_options/configure_notes; notes.convert changes owned kind through the native semantic operation; Note.clear removes owned content while retaining reference/kind/options and a native styled number mark.
 
-**Disposition:** `implemented_subset`. **Remaining:** Full continuation/section placement and unsupported custom styles remain bounded by existing native acceptance. Endnote collector field scopes already guarded.
+**Disposition:** `implemented_subset`. **Remaining:** Semantic note deletion, fragment graph remapping, rich-note geometry and broader placement/restart fidelity remain open. Shared standard-style runs fail if native conversion would restyle unrelated content; custom-style identity is preserved. This edit is separate from existing DOCX-to-PDF export.
 
 **Upstream candidates:** [U02](upstream-roadmap.md), [U07](upstream-roadmap.md)
+
+**Evidence profiles:** [word.note-kind-conversion](support-matrix.md#wordnote-kind-conversion), [word.story-clear](support-matrix.md#wordstory-clear)
 
 ## REF-OX-NAVIGATION
 
@@ -207,11 +217,13 @@ Hyperlinks, bookmarks and cross-references.
 
 **Criteria / owners:** REF1 (W07), REF2 (W07), REF8 (W07), E4 (W09)
 
-**Audited local surface:** TextRange.link covers supported external URLs; imported source anchor metadata; PDF/slide navigation separate native profiles.
+**Audited local surface:** TextRange.link supports external URLs and internal links; whole-paragraph/endpoint body bookmark mapping reuses existing ranges, with checked horizontal nested-cell targets and tested PDF destinations.
 
-**Disposition:** `local_candidate`. **Remaining:** DOCX bookmark CRUD/internal links is a candidate over existing native anchors; must preserve paired IDs/offsets and marker-edit guards. Cross-reference evaluation is separate.
+**Disposition:** `implemented_subset`. **Remaining:** Interior/cross-paragraph/imported targets, non-body bookmark targets and general cross-reference evaluation remain unsupported or unassessed.
 
 **Upstream candidates:** [U02](upstream-roadmap.md), [U07](upstream-roadmap.md)
+
+**Evidence profiles:** [word.bookmark-navigation](support-matrix.md#wordbookmark-navigation)
 
 ## REF-OX-REFERENCES
 
@@ -249,9 +261,9 @@ Inline/floating images and anchor positioning.
 
 **Criteria / owners:** MED1 (W06), MED2 (W06), MED3 (W06), MED8 (W06)
 
-**Audited local surface:** Owned Picture data/size/alt/crop/flips; related SlidePicture uses native placement.
+**Audited local surface:** Owned Picture data/size/alt/crop/flips; direct-body DOCX pictures reuse Picture.format/formatting for bounded page/margin/paragraph anchors and square/top_bottom/behind wrapping; SlidePicture uses native placement.
 
-**Disposition:** `implemented_subset`. **Remaining:** DOCX rotation has native ink loss. Floating positioning/wrapping needs native geometry/copy/serialization proof; opacity not inferred from transform fields.
+**Disposition:** `implemented_subset`. **Remaining:** DOCX rotation has native ink loss. Front layering has a reproduced native paint-order defect and is rejected. Floating cell/header/footer/note pictures, independent stacking/overlap/layout-in-cell controls, rotation and opacity remain unavailable in the owned DOCX profile.
 
 **Upstream candidates:** [U04](upstream-roadmap.md)
 
@@ -263,11 +275,13 @@ Drawing fills, shapes, text boxes and groups.
 
 **Criteria / owners:** MED4 (W06), MED5 (W06), BG7 (W06), PDF3 (W10), SLIDE3 (W11)
 
-**Audited local surface:** Existing PDF path primitives and PPTX shapes/text/backgrounds; no duplicate shape-building framework.
+**Audited local surface:** Existing PDF path primitives and PPTX shapes/text/backgrounds; bounded owned DOCX rectangle/ellipse creator and private handle reuse Picture placement vocabulary without a second geometry framework..
 
-**Disposition:** `implemented_subset`. **Remaining:** DOCX arbitrary drawing/textbox/group editing unassessed; PDF underlay API lacks public placement option; render-transparent backdrop differs from authored fill.
+**Disposition:** `implemented_subset`. **Remaining:** DOCX lines/textboxes/group/rotation/front/auxiliary/imported editing and rich-text visible coverage remain unavailable or unassessed; typed PDF text/image underlays use behind=True, while supplied-font/raw-path underlays remain unavailable; render-transparent backdrop differs from authored fill.
 
 **Upstream candidates:** [U04](upstream-roadmap.md), [U10](upstream-roadmap.md), [U11](upstream-roadmap.md)
+
+**Evidence profiles:** [word.closed-shapes](support-matrix.md#wordclosed-shapes)
 
 ## REF-OX-THEMES
 
@@ -333,9 +347,9 @@ Comments and revision representation/resolution.
 
 **Criteria / owners:** REV1 (W07), REV2 (W07), REV3 (W07), REV4 (W07), REV5 (W07), REV6 (W13), E3 (W09)
 
-**Audited local surface:** Imported bounded stories/anchors/diagnostics only; no review editor API.
+**Audited local surface:** Owned document.comments provides plain-text root/direct-reply CRUD with author/date/resolved properties and fresh range navigation for bounded whole body-paragraph anchors, including supported body cells; imported stories retain separate extraction snapshots.
 
-**Disposition:** `upstream_or_unassessed`. **Remaining:** Formatting revision resolution is located in excluded application engine; move/re-export pure library operation upstream. Comment anchor editing needs balanced-ID proof.
+**Disposition:** `upstream_or_unassessed`. **Remaining:** Interior/cross-paragraph/imported anchors, rich comment stories and nested replies remain unsupported. Native interior markers change shaping. Tracked-change transformations remain separate; formatting revision resolution lives in the excluded application engine and needs a public library contribution.
 
 **Upstream candidates:** [U06](upstream-roadmap.md)
 
@@ -365,7 +379,7 @@ Extended application properties.
 
 **Audited local surface:** No new parallel metadata collection.
 
-**Disposition:** `upstream_or_unassessed`. **Remaining:** Pinned WordCraft app_xml passthrough uses private kept-property policy, not a public editable model; language/app metadata remain DOC7 gaps.
+**Disposition:** `upstream_or_unassessed`. **Remaining:** Selected WordCraft now exposes strict typed access to eight retained extended properties (spec143/146); Python mapping admission remains separate147. Core language is already exposed; source completeness, computed producer/statistics and broader application properties remain DOC7 gaps.
 
 **Upstream candidates:** [U02](upstream-roadmap.md)
 
@@ -391,13 +405,13 @@ Slides, layouts, masters, notes and navigation.
 
 **Criteria / owners:** SLIDE1 (W11), SLIDE2 (W11), SLIDE3 (W11), SLIDE4 (W11), SLIDE5 (W11), SLIDE6 (W11)
 
-**Audited local surface:** Slides/layouts/typed shapes/text/tables/images/notes/internal links with stable IDs.
+**Audited local surface:** Slides/layouts/typed shapes/text/tables/images/notes/internal links with stable IDs; Slide.background=None removes an owned override; same-cell paragraphs.move reuses native paragraph values and existing collection semantics.
 
-**Disposition:** `implemented_subset`. **Remaining:** Whole-slide import/copy needs public graph re-ID/remapping; comments lose shape anchors/deep replies; PDF artwork rasterized; imported preservation unassessed.
+**Disposition:** `implemented_subset`. **Remaining:** Whole-slide import/copy needs public graph re-ID/remapping; comments lose shape anchors/deep replies; PDF artwork is rasterized; imported preservation remains unassessed. Cell paragraph handles are ordinal and become stale after a real reorder. Background reset reports direct state rather than effective inherited color.
 
 **Upstream candidates:** [U11](upstream-roadmap.md)
 
-**Evidence profiles:** [slides.layouts](support-matrix.md#slideslayouts)
+**Evidence profiles:** [slides.layouts](support-matrix.md#slideslayouts), [slides.background-reset](support-matrix.md#slidesbackground-reset)
 
 ## REF-OX-VALIDATION
 
@@ -421,11 +435,13 @@ PDF opening, creating, saving and serialization.
 
 **Criteria / owners:** API2 (W01), API3 (W01), DOC1 (W03), DOC2 (W03), DOC3 (W03), DOC4 (W03), PDF1 (W10), PKG7 (W03)
 
-**Audited local surface:** new/open/edit/copy/save/to_bytes/close; PDF-only existing-source edit profile.
+**Audited local surface:** new/open/edit/copy/save/to_bytes/close; PDF-only conservative source editing; object_streams selects native full-writer representation on serialization.
 
-**Disposition:** `implemented_subset`. **Remaining:** Incremental/encryption/repair/save profiles remain independent policy gaps; do not mirror numeric save flags.
+**Disposition:** `implemented_subset`. **Remaining:** Incremental/encryption/repair and broader preservation profiles remain independent gaps; representation selection does not expand imported editing.
 
 **Upstream candidates:** [U10](upstream-roadmap.md)
+
+**Evidence profiles:** [pdf.object-stream-output](support-matrix.md#pdfobject-stream-output)
 
 ## REF-PM-PAGE-ASSEMBLY
 
@@ -479,9 +495,9 @@ Image insertion, replacement and removal.
 
 **Criteria / owners:** PDF2 (W10), MED1 (W06), MED3 (W06), BG4 (W13)
 
-**Audited local surface:** Existing owned Office picture operations and PDF add_image use native media APIs.
+**Audited local surface:** Existing owned Office picture operations and PDF PNG/JPEG add_image use native media APIs; PDF behind=True reuses the existing crop/quarter-turn/flip controls.
 
-**Disposition:** `implemented_subset`. **Remaining:** Source PDF image replacement/removal, arbitrary alpha/blends/underlays and non-PNG authored profiles require separate native acceptance.
+**Disposition:** `implemented_subset`. **Remaining:** Source PDF image replacement/removal and broader alpha/blend profiles require separate native acceptance. DOCX/PPTX authored picture formats remain limited to their existing PNG profiles; PDF accepts PNG/JPEG.
 
 **Upstream candidates:** [U10](upstream-roadmap.md)
 
@@ -493,9 +509,9 @@ Vector paths, fills and paint ordering.
 
 **Criteria / owners:** PDF3 (W10), MED4 (W06), BG7 (W06)
 
-**Audited local surface:** PdfPage.draw_path; typed PPTX shape properties.
+**Audited local surface:** PdfPage.draw_path; built-in PdfPage.draw_text and PNG/JPEG add_image reuse behind=True for typed native underlays; typed PPTX shape properties.
 
-**Disposition:** `implemented_subset`. **Remaining:** Native public stamping forces overlay; private prepend support must be exposed upstream. Do not wrap every draw in an adapter-built Form/layer system.
+**Disposition:** `implemented_subset`. **Remaining:** Raw draw_path and supplied-font text remain overlay-only. Resource-collision-safe composition and bounded raw-stream admission remain open; existing resource collisions fail atomically. No adapter-built Form/layer system is introduced.
 
 **Upstream candidates:** [U10](upstream-roadmap.md)
 
@@ -521,9 +537,9 @@ DPI rasterization, clipping and alpha behavior.
 
 **Criteria / owners:** R1 (W02), R2 (W02), R3 (W02), R4 (W02), P1 (W02), P2 (W02), API9 (W13), QA4 (W14), QA7 (W14)
 
-**Audited local surface:** render_page/get_pixmap return encoded PNG; region clip; private retained native sessions.
+**Audited local surface:** render_page/get_pixmap return encoded PNG; region clip and private retained native sessions; selected DeckCraft PNG/PDF paths use fallible per-call APIs; PDF checks final rounded integer allocation dimensions.
 
-**Disposition:** `implemented_subset`. **Remaining:** Explicit output alpha/backdrop replacement is not proven; DeckCraft can return blank fallback after panic; do not add Pixmap wrapper.
+**Disposition:** `implemented_subset`. **Remaining:** Explicit output alpha/backdrop replacement remains unproven. Broader upstream allocation/work limits, structured errors and other rendering entry points remain open. A real blank slide is still valid; no Pixmap wrapper is introduced.
 
 **Upstream candidates:** [U09](upstream-roadmap.md)
 
@@ -537,11 +553,13 @@ Text geometry, links, tables and source grounding.
 
 **Criteria / owners:** E1 (W09), E2 (W09), E4 (W09), P4 (W02), LAY8 (W06), REF8 (W07)
 
-**Audited local surface:** Owned normalized blocks/cells/links and source metadata; eager open plus selected extract_text.
+**Audited local surface:** Owned normalized blocks/cells/links and source metadata; eager open, selected extract_text and retained native PDF Page.search_for with bounded ordered rectangles.
 
-**Disposition:** `implemented_subset`. **Remaining:** Native PDF table detector is pub(crate); need bounded public detector+consumed mask. Exact automatic Office line slices/geometry remain bounded provenance gaps.
+**Disposition:** `implemented_subset`. **Remaining:** Native PDF table detector remains private. Exact Office line slices and broader provenance are open; search is not OCR, regex, visible-only matching or normalized-offset reconstruction.
 
 **Upstream candidates:** [U05](upstream-roadmap.md), [U10](upstream-roadmap.md)
+
+**Evidence profiles:** [pdf.native-search](support-matrix.md#pdfnative-search)
 
 ## REF-PM-MARKDOWN
 
@@ -575,27 +593,29 @@ Links, outlines, metadata and page labels.
 
 Annotation operations and appearances.
 
-**Reference members:** [update](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L41), [set_colors](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L30), [set_opacity](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L35), [set_border](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L28)
+**Reference members:** [update](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L41), [set_colors](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L30), [set_opacity](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L35), [set_border](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L28), [set_flags](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/annot.rst#L301)
 
 **Criteria / owners:** PDF6 (W10), REV1 (W07), REV6 (W13)
 
-**Audited local surface:** Owned note/highlight/link/markup annotation subset and typed properties.
+**Audited local surface:** Existing note/markup/link and bounded rectangle/ellipse annotation handles and typed properties; strict boolean lock for seven canonical comment kinds.
 
-**Disposition:** `implemented_subset`. **Remaining:** Do not call PDF annotations equivalent to tracked DOCX review. Broader appearances/quads/replies/rotation require native fixtures.
+**Disposition:** `implemented_subset`. **Remaining:** Fixed-profile geometric comments do not establish opacity/fill/reply or arbitrary appearance support. Caller-bounded native inventories remain upstream work; PDF annotations are distinct from tracked DOCX review. Local locked exposes only the native editing-lock bit, excludes links, and is not arbitrary flag editing or access control.
 
 **Upstream candidates:** [U10](upstream-roadmap.md)
+
+**Evidence profiles:** [pdf.geometric-comments](support-matrix.md#pdfgeometric-comments), [pdf.comment-locks](support-matrix.md#pdfcomment-locks)
 
 ## REF-PM-FORMS
 
 Interactive widgets and field values.
 
-**Reference members:** [field_name](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L92), [field_value](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L104), [field_type](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L114), [rect](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L134), [choice_values](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L88), [update](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L58)
+**Reference members:** [field_name](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L92), [field_value](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L104), [field_type](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L114), [rect](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L134), [choice_values](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L88), [update](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L58), [field_label](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L100), [field_flags](https://github.com/pymupdf/PyMuPDF/blob/b8904b27efa0c4e2258f0e46ab4498a6173ffa22/docs/widget.rst#L110)
 
 **Criteria / owners:** PDF6 (W10), FORM3 (W08), PKG5 (W03)
 
-**Audited local surface:** PdfFields/PdfField owned text/checkbox/choice profile with geometry/value updates.
+**Audited local surface:** PdfFields/PdfField owned text/checkbox/choice profile with geometry/value updates and bounded Unicode tooltip metadata and strict read_only state.
 
-**Disposition:** `implemented_subset`. **Remaining:** Imported enumeration silently truncates/loses widgets/unknown kinds; require public fallible bounded inventory before safe general source-form editing. Script/signature behavior is excluded.
+**Disposition:** `implemented_subset`. **Remaining:** Imported enumeration silently truncates/loses widgets/unknown kinds; require public fallible bounded inventory before safe general source-form editing. Script/signature behavior is excluded. The local tooltip is an empty string when absent; this is not a promise to match the reference field-label fallback or imported metadata behavior. Local read_only exposes only READ_ONLY and native filling refusal, including identical/clear assignments; it is not arbitrary flags, widget synchronization or security parity.
 
 **Upstream candidates:** [U10](upstream-roadmap.md)
 
@@ -625,11 +645,13 @@ Cleanup, encryption, incremental save and embedded files.
 
 **Criteria / owners:** PDF8 (W10), PKG1 (W03), PKG2 (W03), PKG5 (W03), PKG6 (W03), PKG7 (W03), PKG8 (W03), REV6 (W13)
 
-**Audited local surface:** Conservative PDF edit/save rejects unsupported preservation profiles.
+**Audited local surface:** PDF save/to_bytes select object streams or classic cross-reference full output; neither is a new conversion pair or archival profile.
 
-**Disposition:** `upstream_or_unassessed`. **Remaining:** Attachment API fixed1GiB decode limit and no suitable bounded writer; arbitrary encryption/active-content/PDF-A/UA profiles unassessed. No raw PDF object escape hatch.
+**Disposition:** `implemented_subset`. **Remaining:** General cleanup/compression and incremental/encrypted output remain unassessed. Page FileAttachment creation is public; document EmbeddedFiles mutation remains private. Native strict caller-limited full-chain decoding exists; bounded complete attachment inventory, unambiguous identity and integrated bounded extraction remain upstream work. Arbitrary encryption/active-content/PDF-A/UA profiles are unassessed. No raw PDF object escape hatch.
 
 **Upstream candidates:** [U10](upstream-roadmap.md)
+
+**Evidence profiles:** [pdf.object-stream-output](support-matrix.md#pdfobject-stream-output)
 
 ## REF-PM-OFFICE
 

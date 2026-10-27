@@ -22,7 +22,7 @@ The original checklist above records the engine implementation. Track subsequent
 | P0 | R2, R4 | Dimensions, visible output and limit validation | Partial; broader geometry corpus and upstream failure reporting remain |
 | P1 | C1–C5 | Authoring contract, DOCX/PDF creation, reports, templates | Initial native creation/edit/save profile verified; broader criteria remain open |
 | P1 | E1–E6 | Structured tables, source locators, Office semantics, PDF links, diagnostics, Markdown assets | E1 DOCX/PPTX recursive cells/spans and unambiguous E4 PDF link offsets verified; E6 portable media export is verified; broader E1 and E2–E5 remain open |
-| P2 | P1–P4 | Parse/layout reuse, region rendering, PDF assembly, bounded extraction | Basic native PDF assembly verified; complete preservation and performance criteria remain open |
+| P2 | P1–P4 | Parse/layout reuse, region rendering, PDF assembly, bounded extraction | Basic native PDF assembly and bounded parse/layout reuse verified; complete preservation and broader performance criteria remain open |
 
 Completion criteria live with each roadmap item. Update requirements/design and record installed-wheel evidence in `validation.md` as features are implemented; existing rendering signature tests do not complete R2–R4.
 
@@ -316,3 +316,919 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Derive ownership/reverse joins and connect the operation matrix without copying tested behavior statuses.
 - [x] Verify source hashes/member lines, malformed-reference regressions and complete installed-wheel corpus; record evidence.
 - [ ] Retain full member disposition, richer native operation audits and broader API1/QA1 parity work.
+
+
+## Header/footer rich content
+
+- [x] Reuse story/table/cell/picture handles for native header/footer rich content and direct collections.
+- [x] Preserve synthetic anchors, authored empty paragraphs, deleted-picture anchors and independent section/document copies.
+- [x] Share native placed-frame validation and disable editor-only story dimming for document PNG output.
+- [x] Verify the complete locked/native and clean installed-wheel corpus and record artifact evidence.
+- [ ] Retain header/footer linkage, general movement, rich notes and unmeasured inactive-variant geometry as broader open work; owned clear is tracked separately below.
+
+
+## Bounded native line numbering
+
+- [x] Add Section.line_numbers through existing native section patches and readable restart names.
+- [x] Preserve native multi-column and continuous-resume defect repros, rejecting affected authored configurations atomically.
+- [x] Preflight label work before both authored full-layout validation paths and share the existing physical-bound validation pass.
+- [x] Verify complete locked/native and clean installed-wheel acceptance; record artifact and upstream evidence.
+- [ ] Retain multi-column labels, affected continuous page restarts and broader LAY6 numbering fidelity as upstream work.
+
+
+## Incremental story and numbering evidence
+
+- [x] Add bounded story/line operation cells with distinct artifacts, exact fixture fingerprints and existing roadmap/reference joins.
+- [x] Keep unsupported imported edits, unassessed semantic extraction and broader native fidelity gaps explicit.
+- [x] Verify cached reference locations, generated guides and installed-wheel development checks; record unchanged runtime evidence.
+
+
+## Native direction and language formatting
+
+- [x] Reuse existing DOCX format parsers, native properties, inheritance and direct/effective snapshots for direction/language.
+- [x] Validate native mixed-script geometry, conditional table-language precedence and explicit unsupported paragraph-region direction.
+- [x] Verify complete locked/native and clean installed-wheel corpus plus typed consumers; record artifact evidence.
+- [ ] Retain broader complex-script/CJK font controls, missing-glyph diagnostics and TXT6 parity as open work.
+
+
+## Bounded PDF geometric comments
+
+- [x] Reuse rectangle/ellipse native annotations, existing handles and native geometry/style mutation.
+- [x] Bound canonical target dictionaries and generated appearances, charging compound intermediate streams; retain tiny-path native repro.
+- [x] Preserve initial closed/stale checks and add final post-normalization checks with callback regressions.
+- [x] Verify complete locked/native and clean installed-wheel corpus; record artifact evidence and separate existing inventory limitations.
+- [ ] Retain broader annotation/reply/form fidelity and caller-bounded upstream inventories as open work.
+
+
+## PDF inventory allocation upstream evidence
+
+- [x] Record exact pinned summary/initial-inspection allocation paths and deterministic import-safe synthetic input reproductions.
+- [x] Verify fixture offsets, native repeated-reference identity and probe argument bounds against an installed wheel without changing runtime behavior.
+- [ ] Add upstream fallible caller-bounded annotation inventories and strict initial inspection results, including preallocation/occurrence budgets and explicit incompleteness errors.
+- [ ] Verify native at-limit/+1 and fallback propagation before claiming bounded imported inventory; preserve the separate parser/decompression scope and broader PDF6 work.
+
+
+## Direction and geometric-comment operation evidence
+
+- [x] Review concrete assertions and native symbols for two bounded profiles; connect exact historical artifacts and existing reference families/criteria.
+- [x] Regenerate both development guides, verify cached reference sources and all existing ownership joins, and run the installed-wheel corpus.
+- [ ] Retain broader typography, imported annotations/appearance, upstream inventory and full parity audits as open work.
+
+
+## Owned DOCX bookmarks and internal links
+
+- [x] Reuse named mapping operations, TextRange and range.link with bounded native paired markers and all-story reference validation.
+- [x] Preserve generic semantic/media safeguards and exact own-pair deletion/relocation, fresh grid lookup, copies and stale-range behavior.
+- [x] Share native layout checks and prove conservative link-batch counting; retain native missing/auxiliary target, clipped hit-area, vertical-link and export-cap regressions.
+- [x] Complete locked full native/release/installed-wheel validation and record exact artifact evidence.
+- [ ] Retain interior targets pending upstream marker-transparent shaping, general cross-references, imported/multi-paragraph targets, tooltips, heading outlines and arbitrary transformed navigation as open work.
+
+
+## PDF object-stream output choice
+
+- [x] Reuse native SaveOptions.object_streams through existing PDF serialization methods with strict bool/default compatibility.
+- [x] Keep one atomic save implementation and verify both-mode representation, content, pixels, fields, ownership, callbacks and limit behavior.
+- [x] Complete the local locked native/release/clean-wheel corpus and record the new artifact.
+- [x] Integrate the reviewed bookmark shaping correction and verify the complete local corpus with exact safe-profile PNG assertions.
+- [x] Pass independent review and corrected prerequisite/current-main CI before merge.
+- [ ] Retain optimization, version/conformance profiles, incremental writing and broader PDF8 preservation as open work.
+
+
+## Owned header/footer clearing
+
+- [x] Reuse native set_story with strict ownership and conditional no-op/cache behavior.
+- [x] Preserve section references/settings and invalidate only removed child handles; reclaim exact text/cell/media usage through existing commit guards.
+- [x] Verify focused rich-content, copy, no-op, rollback, semantic-anchor and boundary regressions in isolation.
+- [x] Complete integrated locked native/release/installed-wheel validation after the reviewed bookmark corrections.
+- [x] Pass independent review and exact current-main CI before merge.
+- [ ] Retain general block movement/adoption, note removal, header linkage and broader DOC5/LAY3 parity as open work.
+
+
+## Bounded native PDF text search
+
+- [x] Reuse native matching/line geometry through existing read/editable page handles and retained sessions.
+- [x] Bound query, normalization, hit and geometry work with explicit errors and preserve owner/cache semantics.
+- [x] Verify focused native/public geometry, ActualText, ligature, column, Unicode, callback and exact-limit regressions in isolation.
+- [x] Complete integrated locked native/release/clean-wheel validation after prerequisite bookmark fixes (276 Rust / 379 Python).
+- [x] Complete independent review and exact-head/current-main CI before manual merge.
+- [ ] Retain Office search geometry, normalized source offsets and broad E2 grounding parity as open work.
+
+## PDF3 native drawing-style boundary audit
+
+- [x] Recheck pinned public/private placement and style-writing boundaries against existing drawing APIs; retain existing U10/PDF3 ownership.
+- [ ] Request typed native path painting/fill rules, collision-safe opacity resources and public native placement; do not extend local PDF operator construction.
+- [ ] Verify stroke work/bounds, contour pixels, rotated CropBox/UserUnit geometry, resource preservation and default compatibility before exposing additional drawing keywords. PDF3 remains open.
+
+
+## PDF mutation ownership after caller normalization
+
+- [x] Reproduce page retargeting through numeric/color/stream/iterable callbacks and reuse existing page-generation checks in six mutation methods.
+- [x] Verify focused move/delete/close/error/copy routes, native boolean rejection and integer rotation compatibility against a copied installed extension.
+- [x] Complete clean installed-wheel validation (386 tests), strict typing and structural checks.
+- [x] Complete independent review/current-main CI before manual merge.
+
+
+## Native decimal-outline list option
+
+- [x] Reuse Legal numbering through existing paragraph list methods with full-level identity, starts/restarts and bounded continuation lookup.
+- [x] Gate top-level body/section scope and reuse shared native layout for bounded logical label geometry, malformed geometry and later output refusal/recovery.
+- [x] Verify isolated native/public hierarchy, nine-level maximum-start LTR/RTL ink, source/PDF output, copy/wrapping/callback and compatibility regressions.
+- [x] Complete integrated locked native/release/installed-wheel validation (280 Rust / 393 Python).
+- [x] Complete independent manual review/current-main CI: corrected 280 Rust / 393 Python head passed; PR71 manually merged as e402268f5bc33f756f34587594761c41308a2a1e.
+- [ ] Keep broader custom list definitions, cell/auxiliary outline placement and TXT5 completion open.
+
+
+## Presentation and range callback ownership
+
+- [x] Reproduce wrong-slide background updates and stale-ordinal shape failures, then resolve stable target IDs after normalization.
+- [x] Verify focused stable-ID/control-output, early/late invalidation, copy and appended-range regressions; retain native final checks.
+- [x] Complete early stale-range normalization guard and DOCX/PPTX shape/cell controls.
+- [x] Complete integrated clean-wheel validation (402 tests), strict typing and structural checks.
+- [x] Complete independent review and exact-head/current-main CI: 280 Rust / 402 Python tests; manually merged as d0a8ec6de3e72f2472d411a7fe9577f638af8ad2.
+
+
+## Conditional table-border fidelity correction
+
+- [x] Audit existing border APIs to avoid duplication; reproduce native conditional interior-vertical loss and nil-suppression loss.
+- [x] Reject affected assignments in the existing staged parser; preserve resets and supported direct/whole-table/outer-edge controls.
+- [x] Retain raw-native source/readback/placed-rule/PNG/PDF repros and focused public atomicity/inheritance/cache/copy checks.
+- [x] Complete integrated locked native/release/installed-wheel validation (282 Rust / 405 Python).
+- [x] Complete independent manual review/current-main CI; PR73 merged after 282 Rust / 405 installed-wheel Python tests and all required checks.
+- [ ] Keep native conditional-edge selection, patterned shading and full shared-edge conflict resolution under existing U02/TBL7.
+
+
+## Owned PDF field tooltip metadata
+
+- [x] Reuse native FieldProps.tooltip and existing field handles/payloads with strict bounded Unicode strings and empty clearing.
+- [x] Stage complete expected-field comparison and charge regenerated appearances plus tooltip bytes under existing budgets.
+- [x] Verify focused native/public roundtrip, all kinds/transformed pages, pixels/copy/resize/value/flatten and atomic limit/lifetime controls.
+- [x] Complete integrated locked native/release/installed-wheel validation (285 Rust / 409 Python).
+- [x] Complete independent manual review/current-main CI; PR74 manually merged after 285 Rust / 409 installed-wheel Python tests and all required checks.
+- [ ] Retain owned radio groups, imported forms and reply identity/appearance/lifecycle as separate existing PDF6/U10 gaps.
+
+
+## Incremental navigation, lifecycle and output evidence
+
+- [x] Add five scoped profiles with reviewed fingerprints and the exact complete a94a5ba artifact; preserve the seven-operation distinction and unsupported redaction evidence.
+- [x] Connect existing roadmap/reference families and remove stale claims that owned clear, bookmarks or native search are absent; do not close broader criteria or duplicate ownership.
+- [x] Validate generated guides, offline evidence checks and focused tests against the existing installed wheel; record the documentation-only result without claiming a new release artifact.
+
+
+## Bounded PDF comment editing locks
+
+- [x] Audit native flag semantics, reference/dictionary clone behavior and link incompatibility; reuse the existing Annotation handle.
+- [x] Stage canonical flag-only mutations with bounded borrowed preflight and unchanged-appearance/target postconditions.
+- [x] Complete focused native/public fidelity, boundary, rollback and lifetime checks.
+- [x] Complete integrated locked native/release/installed-wheel validation (288 Rust / 413 Python).
+- [x] Complete independent review and exact-head/current-main CI before manual merge.
+- [ ] Keep PDF6/U10 broader imported inventory, reply-thread and annotation capabilities open.
+
+
+## Field-tooltip and comment-lock evidence followup
+
+- [x] Review actual tooltip/lock assertions and source fingerprints against their exact validated artifacts; retain historical scopes and geometric creation evidence.
+- [x] Reuse owned-fields and one orthogonal comment-lock profile with existing PDF6/reference joins and explicit imported limits.
+- [x] Validate the 17-profile/119-cell generated guides, cached immutable reference citations and existing offline drift checks.
+- [x] Complete independent evidence review; keep broader PDF6/API1/API7/QA1/QA8 acceptance open.
+
+
+## Native owned-note conversion
+
+- [x] Probe public semantic conversion for stable IDs/paths/styles, source readback, native placement/counters and complete long-note continuation.
+- [x] Add Notes.convert through bounded native work and exact conversion-specific anchor validation, preserving no-op ranges/cache and ordinary commit guards.
+- [x] Retain raw native shared-reference-run color-loss evidence; reject unsafe mixed runs with custom-style/marker-only recovery controls.
+- [x] Run five focused native groups, all-targets Clippy/debug build and six new public workflows within a 64-test related regression suite in isolation.
+- [x] Complete integrated locked native/release/clean installed-wheel validation: 293 Rust / 419 Python tests, strict typing and unchanged license audit.
+- [x] Complete independent review/current-main CI after resolving prerequisite PR71 raster discrepancy.
+- [ ] Retain semantic note deletion and arbitrary anchored-fragment remapping under existing LAY7/U02/U07 ownership.
+
+
+## Owned PDF field read-only state
+
+- [x] Verify native READ_ONLY/set_props/set_value contracts and reuse existing owned-field accounting and postconditions.
+- [x] Permit only READ_ONLY in addition to existing kind flags; preserve imported/multiwidget/script restrictions and native filling refusal.
+- [x] Complete focused native/public/typing tests for fidelity, saved flags, allowed edits, recovery and atomic bounds/lifetime errors.
+- [x] Complete integrated locked native/release/installed-wheel checks: 296 Rust / 423 Python tests, strict typing and unchanged license audit.
+- [x] Complete independent review and fresh current-main CI before manual merge.
+- [ ] Keep broader PDF6/U10 field/widget capabilities open.
+
+
+## Native slide background inheritance reset
+
+- [x] Audit existing hidden/navigation/background overlaps and pinned native inheritance, writer, renderer and PDF paths.
+- [x] Extend only Slide.background=None, with explicit getter semantics, stable ownership and bounded authored-media reclamation.
+- [x] Complete focused native/public/typing inheritance, output, sharing, rollback and lifetime evidence.
+- [x] Complete integrated release/clean installed-wheel validation: 299 Rust / 426 Python tests, strict typing and unchanged license audit.
+- [x] Complete independent review and fresh current-main CI before manual merge.
+- [ ] Retain broader SLIDE4/master/theme/imported-media preservation work.
+
+
+## Field-state, note-kind and slide-reset evidence followup
+
+- [x] Audit exact 419/423/426 runtime assertions and module fingerprints; separate note-kind mutation, same-format persistence and format export.
+- [x] Extend owned-fields and add two scoped mutation profiles, reusing current criteria/reference families without changing feature completion or unrelated historical profiles.
+- [x] Validate 19-profile/133-cell generated guides, cached immutable sources and offline evidence drift checks; preserve independently corrected outline evidence.
+- [x] Complete independent evidence review; broader feature/API/QA acceptance remains open.
+
+
+## Native DOCX character spacing
+
+- [x] Probe native cluster advances, expanded/condensed PNG/PDF output and twip write/read semantics without a local positioning algorithm.
+- [x] Reuse CharPatch, snapshots, existing style/default/region dispatch and public typing; retain explicit PPTX rejection and all existing guards.
+- [x] Add three focused native groups and six public workflows covering precision, output, scopes, inheritance, callbacks, ownership and atomic failures; run related regressions and strict copied-package typing.
+- [x] Complete integrated locked native/release/clean installed-wheel validation: 302 Rust / 432 Python tests, strict typing and unchanged license audit.
+- [x] Complete independent review and exact-head/current-main CI before manual merge.
+- [ ] Keep broader TXT6 font/shaping controls and diagnostics under their existing owner.
+
+
+## Shared PPTX character spacing
+
+- [x] Audit public native storage/inheritance/tracking/autofit/PDF paths and reuse the existing format key with the shared bounded precision profile.
+- [x] Add five native groups and five public workflows for storage, output, invisible text positions, shape/cell ownership, links and atomic failures; explicitly retire the obsolete negative-PPTX group.
+- [x] Complete 33 related Python regressions and strict copied-package typing.
+- [x] Complete integrated locked release/installed-wheel validation: 307 Rust / 436 Python tests, strict typing and unchanged license audit.
+- [x] Complete independent review/current-main CI; broader SLIDE3/TXT6 acceptance remains open.
+
+
+## Slide-cell append lifetime checks
+
+- [x] Reproduce the preexisting callback-before-closed-check behavior with the supported font key.
+- [x] Add a narrow initial target lookup while retaining final native validation; verify invalid targets, live reorder, deletion/reset/close and caller exceptions.
+- [x] Complete integrated installed-wheel regression validation: 439 Python tests and strict typing, with the byte-identical native extension retaining the preceding 307-test validation.
+- [x] Complete independent review and exact-head/current-main CI before manual merge.
+
+
+## Owned note content clearing
+
+- [x] Audit public native set_story, note own-mark writing and canonical style behavior; distinguish clearing from reference deletion.
+- [x] Reuse existing Note.clear, ordinary commit checks and staged story-local resource/identity cleanup without changing header/footer policies.
+- [x] Add three native groups and five public workflows covering blank/long/converted notes, actual mark/content ink, exact accounting, ownership/no-op/cache and protected-anchor rollback; run related story/note/field regressions.
+- [x] Complete integrated locked release/clean installed-wheel validation: 310 Rust / 444 Python tests, strict typing and unchanged license audit; refresh only affected story-clear evidence.
+- [x] Complete independent review and exact-head/current-main CI before manual merge.
+- [ ] Retain broader DOC5/LAY7 imported note, semantic deletion and fragment-remapping work.
+
+
+## PDF integer raster preallocation boundary
+
+- [x] Audit all-format output preflight and prove the native continuous-area/integer-rounding gap without a large allocation.
+- [x] Reuse native device-pixel rounding in the common PDF full-page renderer; preserve native oversize and region checks.
+- [x] Add safe arithmetic, request-counter, view geometry and thin-raster regressions; complete focused native and public checks.
+- [x] Complete integrated release/installed-wheel validation: 312 Rust / 446 Python tests, strict typing and unchanged license audit.
+- [x] Complete independent review and exact-head/current-main CI before manual merge.
+- [ ] Keep R4/U09 open for upstream fallible per-call renderer failures and broader resource guarantees.
+
+
+## PDF field creation callback ownership
+
+- [x] Reproduce existing coordinate callback retargeting on the reviewed installed 439-test release using supported text-field creation.
+- [x] Retain initial validation and add final original-page resolution after options/coordinate normalization.
+- [x] Validate coordinate/iterator reordering, deletion, close, early-invalid precedence, callback exceptions, copies and exact callback-state source/PNG preservation.
+- [x] Complete integrated installed-wheel validation: 449 Python tests, strict typing and native extension identity with the 312-test artifact.
+- [x] Complete independent review and exact-head/current-main CI; radio support remains separate.
+
+
+## Owned auxiliary paragraph deletion
+
+- [x] Audit public native remove_block/sentinel behavior and distinguish adapter locator maintenance from semantic-reference remapping.
+- [x] Reuse integer collection deletion for owned direct header/footer/note paragraphs, with staged identity/accounting changes, bounds and ordinary semantic guards.
+- [x] Add three native groups and five public workflows for actual output, surviving nested ownership, sentinel/note behavior and atomic callback/scope/resource failures; run 41 related tests and strict copied-package typing.
+- [x] Complete integrated locked release/clean installed-wheel artifact: 315 Rust / 454 Python tests, strict typing and unchanged license audit.
+- [x] Complete independent review and exact-head/current-main CI before manual merge.
+- [ ] Retain body identity migration, cell/PPTX deletion and broader DOC5/TXT1 insertion/movement/adoption work.
+
+
+## Cumulative owned PDF field appearance accounting
+
+- [x] Reproduce undercharged repeated text/choice fills and initial/configured creation generations with small native owned fixtures; distinguish checkbox state reuse and already-accounted property redraws.
+- [x] Add shared appearance work reservation, both creation-generation charges, value-generation charges and successful-fill item accounting without runtime object scans.
+- [x] Add native count/byte/copy/boundary/rotation controls and public repeated-write/source/PNG/copy/flatten coverage; run related field regressions.
+- [x] Complete integrated locked release/clean installed-wheel validation: 318 Rust / 455 Python tests, strict typing and unchanged license audit.
+- [x] Complete independent package review and exact-head/current-main CI before manual merge; radio expansion remains separate.
+- [ ] Keep broader PDF6/U10 imported-form and multiwidget acceptance open.
+
+
+## PDF field value normalization and ownership
+
+- [x] Reproduce overridden encode replacing a field and accepting a stale write on the installed story-deletion release.
+- [x] Normalize actual string content with base operations, retain initial lifetime precedence and recheck identity after payload construction.
+- [x] Validate three focused public groups and fifteen related field tests against an isolated copied installed package.
+- [x] Complete integrated installed-wheel validation: 458 Python tests, strict typing and byte-identical native extension from the 318-test artifact.
+- [x] Complete independent review and exact-head/current-main CI before manual merge.
+
+
+## Owned DOCX body identity separation
+
+- [x] Audit every body allocation/enumeration/placeholder consumer, distinguish physical section/layout paths from editable IDs, and retain pinned native behavior.
+- [x] Reuse the existing checked monotonic registry allocator; stage body publication and bound temporary reverse views without introducing public body operations.
+- [x] Update classified native test paths without relaxing format/geometry/output assertions, and add focused native/public identity, section and rollback coverage.
+- [x] Complete three focused native groups, four new public workflows, 59 related public workflows, formatter/Clippy/debug build and strict copied-package consumer typing.
+- [x] Complete the integrated local artifact and independent review: 321 recorded native tests and 462 clean installed-wheel tests; all 462 tests independently rerun with matching wheel bytes, typing and the locked license audit.
+- [x] Complete final exact-head/current-main CI and manual merge: PR93, run39530041981.
+- [ ] Retain separately scoped body section/semantic deletion, cell/PPTX deletion and broader DOC5/TXT1 insertion/movement/adoption work. The historical spec78 identity-migration prerequisite is superseded by this internal change.
+
+
+## Bounded owned PDF radio groups
+
+- [x] Probe public native group creation, canonical Unicode/hash identities, clear/read-only behavior, fixed vector appearances and retained generation counts.
+- [x] Integrate immutable same-page groups through existing field containers/properties with independent field/widget bounds and cumulative preflight/accounting.
+- [x] Add native and public source/pixel/geometry/flatten/callback/identity/budget tests and consumer typing assertions.
+- [x] Complete integrated release/clean installed-wheel corpus: 326 native and 467 Python tests, typing and unchanged license audit.
+- [x] Complete independent exact-head/current-main review and manual merge: PR94, run39548202131.
+- [ ] Retain imported inventory, arbitrary mutable/multi-page groups and broader PDF6/U10 appearance work.
+
+
+## Owned body paragraph deletion
+
+- [x] Prove the native final-section tail case and one-blank preservation with exact section values, DOCX readback, PNG dimensions and PDF page geometry.
+- [x] Extend existing staged collection deletion to ordinary direct body paragraphs; retain section/semantic guards, bounded locator updates and existing auxiliary behavior.
+- [x] Add four native groups and five public workflows for output, identity, section starts/restarts, protected anchors, callbacks, placeholder reuse and rollback; deliberately update obsolete body-Unsupported assertions while preserving cell/PPTX/section checks.
+- [x] Complete focused native tests, fmt/Clippy/debug build and copied-package public/related checks; record exact results below.
+- [x] Complete integrated locked release and clean installed-wheel corpus: 330 native/472 Python tests, strict typing, license audit and independent472-test review.
+- [x] Complete final exact-head/current-main CI and manual merge for body paragraph deletion: PR96, run39549509766.
+- [ ] Keep section-boundary/semantic deletion, cell/PPTX deletion and broader DOC5/TXT1 insertion/movement/adoption open.
+
+
+## Native PDF comment opacity
+
+- [x] Audit pinned native Style/set_style and AP-local ExtGState generation; retain the seven existing comment kinds and canonical metadata profile.
+- [x] Reuse Annotation property/update, bounded target validation and staged native appearance/accounting.
+- [x] Complete three focused native groups plus six related native groups, 19 copied-package public tests (four new plus 15 related), formatter/Clippy/debug build and strict consumer typing.
+- [x] Migrate only the geometric-comment and lock evidence affected by intentional fractional-CA fixture changes to the exact new integrated artifact.
+- [x] Complete locked full native/release/installed corpus and independent artifact review: 333 native and 476 installed Python tests.
+- [x] Complete final exact-head/current-main CI and manual merge for annotation opacity: PR97, run39550636008.
+- [ ] Retain broader PDF6 imported-inventory/reply and PDF8 encryption/profile work.
+
+
+## Owned paragraph movement
+
+- [x] Audit public native removal/insertion and execute raw table-tail/singleton/section-destination proofs before implementation.
+- [x] Reuse the existing paragraph collection move spelling and native staged transaction, bounded stable-ID/root-path updates, section/semantic guards and callback revision checks.
+- [x] Add six native groups and five public workflows for native padding, identity, rollback, output, auxiliary stories, no-ops, copies, iteration and callbacks; retain all existing tests unchanged.
+- [x] Complete six focused native groups, fmt/Clippy/debug build, five new plus 25 related copied-package workflows, final media/field checks and strict consumer typing; record exact local results below.
+- [x] Complete integrated locked release/installed-wheel corpus and independent review: 339 native and 481 installed Python tests.
+- [x] Complete final exact-head/current-main CI and manual merge for paragraph movement: PR99, run39551991262.
+- [ ] Keep anchored/cross-section/cross-container/cell/PPTX movement, imported preservation and broader DOC5/TXT1 parity open.
+
+
+## Native-backed everyday property types
+
+- [x] Audit selected native getter signatures and nullable JSON fields; retain current factory/copy ownership typing.
+- [x] Annotate existing property access and simple setters without aliases, runtime coercions or dynamic Any placeholders.
+- [x] Extend strict static consumer assertions and verify expected invalid typed uses are rejected; confirm runtime AST is unchanged after removing annotations.
+- [x] Complete integrated installed-package strict typing, unchanged native-byte verification and independent 481-test package review.
+- [x] Complete final exact-head/current-main CI and manual merge for property typing: PR100, run39553367804.
+- [ ] Retain unreviewed mappings/properties, documentation and IDE coverage under API3.
+
+
+## Reproducible Office workload measurements
+
+- [x] Preserve the default 20-page generator and add bounded 200-page/image-heavy configurations plus source manifests.
+- [x] Add ordered all-page PNG and input hashes to the existing benchmark, retaining explicit process-memory/cache caveats.
+- [x] Verify new image fixtures reopen, cached/one-shot smoke parity, four pre-creation budget rejections and existing-directory protection.
+- [x] Complete 36 sequential fresh-process measurements across six inputs and two modes, with three alternating-order repetitions and all-page byte/counter parity.
+- [x] Record exact source/tool/wheel identities, timings, memory ranges and limitations; independent benchmark source review found no blocker.
+- [x] Complete independent verification of all 36 samples, source/tool/artifact hashes, page digests, counters, table medians/ratios and memory ranges.
+- [x] Complete required current-main CI and manual merge for Office benchmark evidence: PR101, run39554746117.
+- [x] Supply the independently reproducible PDF memory/full-document counterpart in spec92; retain broader real-input/platform QA7 work.
+
+
+## Native title and author fields
+
+- [x] Execute two raw native all-story evaluation, empty/nonempty cache and atomic-width proofs before adapter implementation.
+- [x] Extend existing add_field with title/author, every-commit expansion limits and bounded native placement preflight; retain the existing API surface and numeric-field behavior.
+- [x] Verify four new native groups, 28 related field groups, 13 copied-package public workflows, fmt/Clippy/debug build, strict typing and 19 support/reference documentation tests; record artifact scope.
+- [x] Complete integrated locked release/corpus, strict typing, license audit and independent artifact review: 343 native and 484 installed Python tests.
+- [x] Complete final exact-head/current-main CI and manual merge for title/author fields. Completed through reviewed aggregate PR112, run39563664023.
+- [ ] Keep general REF3 field kinds, REF4 refresh and imported preservation open.
+
+
+## Guarded native DOCX picture placement
+
+- [x] Audit pinned native Float/read/write/layout APIs and execute four raw fixture groups before implementing the passing direct-body subset.
+- [x] Reuse Picture.format/formatting with bounded native patching, canonical lengths, ownership/revision callbacks and existing one-layout geometry preflight.
+- [x] Add focused native/public workflows for output, wrapping, transforms, identity, reset, rollback, later geometry and callbacks; document upstream front paint-order and overlap/layoutInCell prerequisites.
+- [x] Complete six native groups, five new plus28 related copied-package tests, fmt/Clippy/debug build, strict typing and static-site/roadmap checks; record exact artifact evidence.
+- [x] Complete integrated locked full native/release/installed-wheel corpus and independent artifact review: 349 native and 490 installed Python tests.
+- [x] Complete final exact-head/current-main CI and manual merge for picture placement. Completed through reviewed aggregate PR112, run39563664023.
+- [ ] Keep full MED2/BG2–BG4/BG8, front/contours/nested scope, opacity/rotation and independent layering/overlap controls open. BG5 later closes only its bounded section-first letterhead criterion under spec105.
+
+
+## Cross-format render-session evidence
+
+- [x] Extend the shared development benchmark to PDF while preserving the old Office CLI/counter field; add optional native PDF fixture export and reopened counts.
+- [x] Verify two-page native report/deck PDF smoke parity and legacy Office counter compatibility.
+- [x] Complete30 sequential fresh-process PDF samples across five inputs/two modes/three repetitions, checking source identity, all-page byte parity and exact retained renderer counters.
+- [x] Independently verify all samples, timings, memory ranges and hashes; retain the slower small-PDF case and separate eager-extraction counter limits.
+- [x] Combine spec91/spec92 evidence to close bounded P1 reuse, retaining QA7 real-input/platform and P4 allocation work.
+- [x] Complete final documentation/source checks and independent final evidence review: 19 documentation tests and a 29-page/1,716-link site.
+- [x] Complete required exact-head/current-main CI and manual merge. Completed through reviewed aggregate PR112, run39563664023.
+
+
+## Combined native DOCX cell layout acceptance
+
+- [x] Audit existing padding/orientation/RTL/alignment native paths; prove six combined public matrix profiles before final acceptance.
+- [x] Add a separate test module for the orientation/alignment matrix, independent paragraph/table direction and empty-cell copy/reset geometry; preserve historical fingerprinted fixtures and runtime APIs.
+- [x] Complete final three-workflow multi-DPI DOCX/PDF acceptance, including absolute native row geometry, static-site links and roadmap consistency.
+- [x] Complete independent final source review and all three workflows against the exact installed picture release wheel, including an independent rerun.
+- [x] Complete required exact-head/current-main CI and manual merge for the combined cell-layout corpus. Completed through reviewed aggregate PR112, run39563664023.
+- [ ] Keep native inter-cell spacing, full vertical-script fidelity and complete TBL8 open.
+
+
+## Owned DOCX cell paragraph deletion
+
+- [x] Execute raw native body/header/footer, merged/nested, required-blank and authored-empty identity/output proofs before adapter implementation.
+- [x] Extend existing deletion with container-relative locator/sentinel maintenance and unchanged section/reference/resource guards; verify four focused native groups.
+- [x] Complete 13 related native tests, fmt/Clippy/debug build, 19 copied-package public deletion/identity workflows and 27 support/reference/roadmap checks; record exact evidence.
+- [x] Complete integrated locked release/full corpus and independent artifact review: 355 native and 498 installed Python tests.
+- [x] Complete final exact-head/current-main CI and manual merge for cell paragraph deletion. Completed through reviewed aggregate PR112, run39563664023.
+- [ ] Keep broader DOC5/TXT1 composition, cell movement, imported editing and PPTX deletion open.
+
+
+## Native slide duplication prerequisite (spec96)
+
+- [x] Audit pinned public model and private editor copying/remapping; record basic-validation and owned-generation identity distinction.
+- [x] Specify same-deck native copy prerequisite and concrete reference/media/layout/limits fixture plan without expanding the API.
+- [ ] Obtain and verify a public bounded native copy operation before implementing owned slide duplication; keep cross-presentation import separate and SLIDE1 open.
+
+
+## Native-backed snapshot output types
+
+- [x] Inventory exact native keys, omission/nullability and list/tuple shapes for five existing metadata/formatting getters; identify polymorphic snapshots separately.
+- [x] Add private output TypedDict declarations and strict consumer assertions without changing accepted runtime inputs, public exports or method bodies/defaults; correct only existing cell-list/border-replay annotations.
+- [x] Verify positive mypy, ten intended negative diagnostics, old-facade sensitivity, runtime snapshot/key introspection and annotation/type-declaration-erased AST equality; complete independent source/static review.
+- [x] Verify the exact installed candidate, unchanged native bytes/runtime bodies, strict positive/negative consumers and runtime snapshot probes, including independent review.
+- [x] Complete fresh full installed-corpus current-main CI and manual merge for snapshot typing. Completed through reviewed aggregate PR112, run39563664023.
+- [ ] Keep polymorphic paragraph/style/default snapshots and broader API3 discoverability open.
+
+
+## Same-cell paragraph movement (spec97)
+
+- [x] Prove native remove/insert behavior in ordinary/nested body/header/footer cells and merged aliases before implementation.
+- [x] Extend existing move transaction and preserve parent-local identity/sentinel/accounting guards without a new API.
+- [x] Complete focused public/native/typing/documentation evidence, including cell anchor/alias/resource guards.
+- [x] Complete independent final source review and focused replay (four workflows,24.049s).
+- [x] Complete integrated locked release/full corpus and independent artifact review: 361 native and 502 installed Python tests.
+- [x] Complete exact-head/current-main CI and manual merge; retain broader DOC5/TXT1 work. Completed through reviewed aggregate PR112, run39563664023.
+
+
+## Owned DOCX theme source audit (spec99)
+
+- [x] Trace pinned theme Settings, property read/write, inheritance, layout and PDF; distinguish metadata preservation from live theme identity.
+- [x] Connect the verified prerequisite to existing U02/STY3 and specify native fixtures without adding a speculative API/test.
+- [x] Independently review pinned source findings and validate documentation links.
+- [ ] Obtain native theme-reference/resolution support and execute the proposed save/render/export fixtures before implementing theme changes; leave STY3 open.
+
+
+## Owned PPTX cell paragraph deletion (spec101)
+
+- [x] Prove intact native model deletion, survivor properties, ordinary/horizontal/vertical/rectangular merges and final-blank writer behavior before integration: two raw groups pass, 30.86 s; fmt/Clippy pass.
+- [x] Integrate existing collection syntax with canonical generations, staged resource/revision guards and preserved DOCX callback behavior; source review clear.
+- [x] Verify native/public rollback, copies, empty append, invalidation and actual PPTX/PNG/PDF output; independent source and exact-wheel review pass.
+- [x] Complete locked full corpus: 366 native tests and two independent 506-test installed-wheel runs pass.
+- [x] Complete exact-head/current-main CI and manual merge; retain broader DOC5/TXT1/SLIDE3 work. Completed through reviewed aggregate PR112, run39563664023.
+
+
+## Bounded owned DOCX comments (spec98)
+
+- [x] Execute raw native storage, metadata, durable-ID, endpoint/interior shaping, overlapping shading, multiline/split-page and ordinary/merged/nested cell controls before adapter implementation.
+- [x] Reuse one collection/add operation and existing ranges for plain-text root/direct-reply CRUD and typed metadata/navigation properties.
+- [x] Stage private locator/block/text accounting, monotonic IDs and exact-candidate inventory; reuse the proof in navigation/media/output without relaxing other anchors.
+- [x] Add native exact/+1, malformed topology/registry, revision/allocator exhaustion, Unicode author, media/reference and rollback controls; retain all historical fixtures unchanged.
+- [x] Complete exact integrated native/installed-wheel corpus and independent final review: 379 native tests and two clean 512-test installed runs pass.
+- [x] Complete exact-head/current-main CI and manual merge before merge acceptance. Completed through reviewed aggregate PR112, run39563664023.
+- [ ] Retain arbitrary interior/cross-paragraph roots, rich comment stories, nested replies, imported editing and review-display selection under existing REV1/TXT8/REV5 and U02 ownership.
+
+
+## DOCX extraction provenance (spec100)
+
+- [x] Audit pinned source/path/layout/normalization boundaries and independently review the bounded proposal.
+- [x] Execute three raw native groups for exact source intervals, selection helper parity, repeated/turned/clipped cells, story collisions and PNG/PDF location controls; fmt/Clippy pass.
+- [x] Complete bounded adapter/schema, source/copy/resource/malformed geometry and public compatibility acceptance, including the measured retained-allocation correction.
+- [x] Complete independent frozen-source/profile review and final four-workflow replay, including the exact known 200-page fixture.
+- [x] Complete integrated full corpus and independent artifact review: 387 native tests and two clean 516-test installed-wheel runs pass, including the caught and corrected signed-advance regression.
+- [x] Complete exact-head/current-main CI and manual merge. Completed through reviewed aggregate PR112, run39563664023.
+- [ ] Retain E2/LAY8/U05 normalized slicing, auxiliary/object/table geometry and broader parity scope.
+
+
+## Office caller-font source audit (spec103)
+
+- [x] Separate existing PDF supplied-font support and STY3 theme identity from remaining Office STY5 acceptance.
+- [x] Trace pinned public font storage/admission, global selection, face lifetime and native PDF export behavior; connect precise prerequisites to U02/U11.
+- [x] Complete independent pinned-source review and documentation/link checks.
+- [ ] Obtain native document-scoped resolution/embedding contracts and execute the proposed valid-font isolation/save/render/export fixture gate before adding Office caller-font inputs; STY5 remains open.
+
+
+## Formatting snapshot annotations (spec104)
+
+- [x] Audit exact native direct/resolved/default/region serializers and PPTX alignment-only behavior before selecting conservative private output schemas.
+- [x] Annotate existing getters without new exports, input changes, runtime branching or native changes; preserve behavior with a normalized AST comparison.
+- [x] Check strict copied-package consumer, deliberate invalid assignments/keys and populated/default snapshot shapes across all native kinds.
+- [x] Complete independent final source/serializer review and replay positive/negative typing, runtime-key/schema and AST checks.
+- [x] Complete exact installed-wheel/source/native verification and agreed corpus: repacked annotation-only artifact and subsequent 395-native/523-Python integration pass.
+- [x] Complete current-main CI and manual merge. Completed through reviewed aggregate PR112, run39563664023.
+- [ ] Retain remaining API3 property/documentation/IDE work; do not claim full-package strict typing.
+
+
+## Owned DOCX table deletion (spec102)
+
+- [x] Execute two raw native structure/output groups before integration, distinguishing required and authored blanks and retaining orphan/protected-reference diagnostics.
+- [x] Implement whole-table deletion through existing body/story/cell collections and public native remove_block with exact-parent shifts, preserved tail identity and subtree invalidation.
+- [x] Preflight bounded source/global associations, stage checked resource reclamation and retain semantic, section, comment/navigation/media and callback guards.
+- [x] Pass six focused native groups, formatting, all-target Clippy and a debug build after final tail-invariant review corrections.
+- [x] Pass six focused public workflows and independent replay, strict positive/four-negative typing checks and synchronized roadmap/support/reference/site checks; final source review clear.
+- [x] Complete exact integrated corpus and independent artifact review: 395 native tests and two clean 523-test installed runs pass.
+- [x] Complete current-head CI and manual merge. Completed through reviewed aggregate PR112, run39563664023.
+- [ ] Retain broader DOC5 movement, duplication, insertion and cross-container/reference adoption work.
+
+
+## Section-first letterhead composition (spec105)
+
+- [x] Audit existing cookbook/story/section tests and preserve their historical sources/fingerprints.
+- [x] Probe native reflow/variant/numbering behavior through the installed fixed-provenance wheel; replace the proposed +1 shift assumption with the observed exact +2 parity-preserving shift.
+- [x] Add one ordinary caller-PNG example and one combined fixture with exact body/link/table preservation, independent sections, filler checks and bounded three-DPI appearance controls.
+- [x] Complete independent source/replay review and documentation checks: one independently replayed workflow passes, with 19 support/reference tests and the site/roadmap checks passing.
+- [x] Complete integrated corpus and independent review: both 523-test installed runs pass; BG5 satisfies its original bounded section/header-anchor and repagination criterion.
+- [x] Complete exact-head/current-main CI and manual merge; retain BG8 and documented broader limitations. Completed through reviewed aggregate PR112, run39563664023.
+- [ ] Keep BG8 and broader section-fill/linkage/continuous/floating/watermark coverage open.
+
+
+## Owned table PAGE guard (spec107)
+
+- [x] Reproduce stale table PAGE context independently of movement/cache with native direct/nested fresh and read/write controls; retain correct direct PAGE and table count behavior.
+- [x] Reuse one private scope check for upfront field insertion, candidate editing and defensive serialization after bounded source inventory; allow unsupported-object removal as recovery.
+- [x] Pass two focused native groups, related field and affected accounting controls, formatting, all-target Clippy and a frozen debug build.
+- [x] Pass 21 focused public/field/lifecycle tests and 27 roadmap/support/reference checks; final runtime/native/public source review clear.
+- [x] Complete independent exact copied-extension replay: 18 tests pass; preserve deliberate fixture corrections and unchanged ledger fingerprints.
+- [x] Complete final docs review, 397-native validation and corrected integrated acceptance: both clean 528-test installed runs pass; failed 524-test evidence and deliberate sixth fixture correction remain recorded.
+- [x] Complete exact-head/current-main CI and manual merge. Completed through reviewed aggregate PR112, run39563664023.
+- [ ] Retain native table field-context repair under U07/LAY6/REF3; spec106 movement separately passes its revised raw gate with supported count fields and the PAGE guard retained.
+
+
+## Page and slide index callbacks (spec109)
+
+- [x] Reproduce wrong-target PDF delete/move/lookup and slide deletion on the installed pre-correction artifact.
+- [x] Reuse existing PDF generation/count and native slide-ID sequence snapshots; guard every mutation argument and PDF handle construction without new public APIs.
+- [x] Pass four focused workflows and 22 combined related workflows, strict typing and independent source/four-workflow replay.
+- [x] Complete exact combined installed artifact/corpus alongside the corrected spec107 fixture: two clean 528-test installed runs pass with unchanged tested native bytes.
+- [x] Complete current-main CI and manual merge. Completed through reviewed aggregate PR112, run39563664023.
+
+
+
+## Mirrored DOCX margins (spec108)
+
+- [x] Audit pinned public model/read/write/layout; independently clear a two-group raw gate without adapter coordinate logic.
+- [x] Execute raw asymmetric geometry, displayed/physical parity, header inheritance, native selection and source/PDF pixel tests; document corrected part-ID and filler assumptions.
+- [x] Add one typed document-wide boolean using explicit existing geometry preflight and ordinary commit; preserve all semantic/resource/output guards.
+- [x] Add three native adapter groups and four public workflows for revision/copy/reset, strict bool/lifetime, geometry/cache rollback, section/header/table output, line labels, columns and natural growth; strict consumer and deliberate typing negatives pass.
+- [x] Complete independent frozen code/docs and four-workflow replay review; documentation/site checks pass.
+- [x] Complete integrated corpus and independent artifact review: 410 native tests and two clean 538-test installed runs pass.
+- [x] Complete current-head CI and manual merge through reviewed PR118, run39566211261.
+- [ ] Retain broader LAY10 settings and existing unsupported layout combinations under their current owners.
+
+
+## Same-parent owned DOCX table movement (spec106)
+
+- [x] Preserve original failed native PAGE proof, add spec107 rejection, and pass revised raw2 with 336 structural/24 output profiles and supported native count values.
+- [x] Implement only existing table collection movement with exact-parent coordinate rotation, stable descendant/generation identity and normal candidate guards.
+- [x] Share narrow spec102 preflight while retaining all deletion behavior; pass movement6, unchanged deletion6 and PAGE-guard2 native groups, formatting and all-target Clippy.
+- [x] Pass focused copied-package public/typing checks and independent source/six-workflow review; synchronize documentation with the bounded profile.
+- [x] Complete integrated full native/installed-wheel corpus and independent artifact review: 410 native tests and two clean 538-test installed runs pass.
+- [x] Complete exact-head CI and manual merge through reviewed PR118, run39566211261.
+- [ ] Retain broader DOC5 insertion, duplication, adoption and semantic-anchor relocation gaps.
+
+
+## 113. Release compiler selection
+
+- [x] Verify the immutable maturin action declares and uses its toolchain input for both container and host builds; explicitly select CI Rust 1.95.0 in both release steps.
+- [x] Independently review the exact pinned action input/source and verify only the two compiler-selection keys change the workflow.
+- [x] Complete required current-main CI and manual merge through reviewed PR118/PR119.
+- [ ] Validate all nine platform/Python wheels at the eventual release gate. No new tag or release is authorized by this task alone.
+
+
+## Section vertical alignment (spec111)
+
+- [x] Audit native model/read/write/layout/PDF and run three raw groups; retain desired-geometry failures and precise note/readback drift separately from accepted note-free controls.
+- [x] Add one typed Section property, strict native enum parsing, central candidate/output profile checks and vertical-only existing-layout bounds.
+- [x] Pass five native adapter groups, unchanged raw replay, four public workflows, strict consumer, formatting and Clippy; verify solid/PNG backgrounds explicitly.
+- [x] Resolve the reviewed rotated-cell coordinate gap with central horizontal section/cell admission and defensive output refusal; pass corrected independent four-workflow replay and documentation/site checks.
+- [x] Complete frozen documentation/source review and integrated425-native/two547-test clean installed-wheel corpora.
+- [x] Complete final exact-head/current-main CI and manual merge through reviewed PR120, run39569285162.
+- [ ] Retain broader LAY10 settings and excluded native compositions under existing U02; do not mark the roadmap criterion complete.
+
+
+## Unused owned DOCX styles (spec 110)
+
+- [x] Independently review pinned remove/find/get/new_id/reference-carrier premises and pass two raw groups structural/readback/PNG/PDF/identity proof.
+- [x] Add only existing-collection single-item deletion, complete bounded reference refusal and exact handle identity with atomic bounded retirement/native allocation.
+- [x] Pass five native adapter groups, all 26 selected style regressions, formatting/all-target Clippy/debug build, five copied-package public workflows,14 historical style/note workflows and strict consumer typing with three intended negative key diagnostics.
+- [x] Complete independent frozen source and five-workflow replay review (2.250s).
+- [x] Complete synchronized documentation review.
+- [x] Complete integrated425-native/release and two547-test clean installed-wheel corpora with independent artifact review.
+- [x] Complete final exact-head/current-main CI and manual merge through reviewed PR120, run39569285162.
+- [ ] Keep STY6 open for style import, collision policy and general cleanup; no batch prune or automatic restyling.
+
+
+## Existing layout value annotations (spec115)
+
+- [x] Review native successful result signatures and retain iterable widths, tuple/list forms and nullable resets; preserve runtime unsupported-format checks.
+- [x] Annotate 17 existing signatures and independently prove annotation-erased AST identity with the prior facade.
+- [x] Pass the strict installed consumer, ten intentional negative typing diagnostics and four unchanged DOCX/PPTX layout workflows against an explicitly repacked wheel with identical tested native bytes.
+- [x] Complete independent artifact/static/probe/documentation review and final547-test installed corpus against the explicit Python-only repack.
+- [x] Complete final exact-head/current-main CI and manual merge through reviewed PR120, run39569285162.
+- [ ] Keep broader API3 discoverability and IDE coverage open.
+
+
+## Fallible PPTX rendering integration (spec114)
+
+- [x] Independently review the separate native renderer/PDF contribution, actual panic/Busy/thread/recovery evidence, original successful byte comparisons and unchanged upstream baseline limitations.
+- [x] Publish the reviewed six-file contribution to an explicitly identified fork; verify exact parent and patch identity without claiming upstream acceptance.
+- [x] Integrate all DeckCraft pins together, retain other engine revisions, use one fallible native PNG call and existing Python exception/PDF conversion mapping.
+- [x] Add actual production-path native Busy/preflight/recovery controls and explicitly scoped Python boundary/blank workflows.
+- [x] Complete final locked native/fmt/Clippy/release, clean installed corpus, independent exact artifact, typing, license/size and current source-ledger checks.
+- [x] Complete exact-head/current-main CI and manual merge through reviewed PR121, required CI39572467318 and documentation CI39572467390.
+- [ ] Retain broad R4/U09 limits and other native entry points; no version/tag/release before overall completion gates.
+
+
+## Native WordCraft PDF shape stroke upgrade (spec116)
+
+- [x] Review and publish the five-file native contribution with exact parent/diff identity; preserve baseline failures and package-scoped evidence without claiming upstream acceptance.
+- [x] Preserve original shape matrix and additional ratio/refusal diagnostics; retain a conservative future profile without creating a new API here.
+- [x] Update every WordCraft source together and add one native plus one public imported-document regression using the original generated fixture and explicit provenance.
+- [x] Complete final428-native/full550-installed independent artifact, fmt/Clippy/typing/license/size and current source/ledger/documentation checks.
+- [x] Complete exact-head/current-main CI and independent manual merge through PR122 and required CI39575658890.
+- [ ] Keep shape authoring and broader MED4/U04 work separate; no version/tag/release before overall completion gates.
+
+
+## Owned DOCX closed shapes (spec112)
+
+- [x] Independently review historical shape/textbox raw2 and additional native primitive/coupled-anchor raw2; preserve rejected Line/overflow/rotation cases without relaxing pixel tolerances.
+- [x] Add one creator/collection/private handle, shared Picture placement parsing, exact ownership/reference profile and candidate/output full-outline/cardinality checks.
+- [x] Pass six native adapter groups, raw2, copied-package six public workflows,14 historical picture/media/style regressions and strict typing with six intended negative diagnostics.
+- [x] Complete final horizontal-section defensive guard native/public replay.
+- [x] Complete independent frozen source/public review (six workflows15.775s).
+- [x] Complete spec116 native closed-shape corner/outline parity gate, including min/max width and stroke-to-dimension boundaries; preserve 200-point/native-clamp diagnostics.
+- [x] Complete corrected436-native and two clean556-test installed corpora, exact-artifact/source review, strict typing and synchronized bounded support documentation.
+- [x] Complete closed-shape exact-head/current-main CI and independent manual merge through PR123, required CI39578015883 and documentation CI39578015866.
+- [ ] Keep MED4 open for lines/textboxes and excluded contexts; no new U-owner or broad shape-parity claim.
+
+
+## Pre-release platform validation (spec120)
+
+- [x] Add explicit validation-only dispatch to the existing matrix with exact-commit and conflicting-publication guards.
+- [x] Run actionlint and execute the actual workflow guard for accepted and refused inputs.
+- [x] Complete independent guard, publication-gating, privilege and unchanged matrix review.
+- [x] Complete current-main CI and independent manual merge through PR128, required CI39594229122 and documentation CI39594229092.
+- [x] Dispatch initial immutable baseline39580637011 without publication; preserve actual Windows/macOS failures.
+- [x] Independently review UTF-8/LF/actual-mode portability corrections and deliberately migrate only the affected save-test fingerprint.
+- [x] Execute corrected portability tests on Windows; retain measured native font/raster/pagination diagnostics and reviewed fixture changes.
+- [ ] Inspect every platform/Python corpus and fix failures before treating cross-platform validation as complete.
+- [ ] Retain final versioned release validation; this infrastructure change does not complete QA7 or authorize a premature release.
+
+
+## PdfCraft final integer raster allocation budget (spec117)
+
+- [x] Review source and safe actual-allocator originalFAIL/candidatePASS proof, exact-cap admission, complete tiny output/tile controls and test-only RAII restoration.
+- [x] Publish the reviewed two-file native contribution on an explicitly identified fork; verify exact parent/commit/files without claiming upstream acceptance.
+- [x] Move all11 direct/13 resolved PdfCraft source identities together; preserve other engine/dependency versions and audit264 permissive packages and23 current citations across11 native files.
+- [x] Preserve the existing two public raster-limit workflows and record their successful baseline behavior; add one linked-native guard/recovery test with exact-source safety precondition.
+- [x] Complete focused/full437-native, formatting, Clippy and locked release build.
+- [x] Complete clean installed556 workflows, independent artifact/corpus/typing/reopen checks, measured sizes and final source-ledger/documentation validation.
+- [x] Complete current-head CI and manual merge through PR124, required CI39580088971 and documentation CI39580088936; retain broad U09/R4 limits and separate release gates.
+
+
+## Same-cell owned PPTX paragraph movement (spec118)
+
+- [x] Review public native model capability and raw two-group gate; preserve first fixture-color failure and unmoved source diagnostic separately.
+- [x] Pass100 raw intact permutations and8 native/source/readback PNG/PDF output profiles, fmt and locked all-target Clippy.
+- [x] Implement and validate existing collection dispatch, canonical/generation/no-op/callback guards and atomic boundary controls.
+- [x] Complete focused native/public, unchanged deletion regressions, strict typing and independent source/copied-artifact review.
+- [x] Complete integrated 443-native/release, two clean 560-test installed-wheel corpora and independent exact-artifact gates.
+- [x] Complete current-head CI and manual merge through PR125, required CI39583701211 and documentation CI39583701226.
+- [ ] Keep broader DOC5/TXT1/SLIDE3 adoption, duplication and shape-content work open; no version release before overall completion gates.
+
+
+## Reference disposition corrections (spec122)
+
+- [x] Compare seven stale family summaries with existing source, guides and accepted corpus modules.
+- [x] Correct bounded operation descriptions and regenerate the existing reference page without promoting feature status.
+- [x] Complete independent documentation and exact inventory-delta review.
+- [x] Complete current-main CI/manual merge through PR125, required CI39583701211 and documentation CI39583701226.
+- [ ] Keep exhaustive member dispositions and broad API1/QA1 acceptance open.
+
+
+## Native typed PDF content placement (spec119)
+
+- [x] Independently review native exact-object placement, four new edit groups, original170/candidate174 package gates, real paint/text/link controls and the forced-overlay negative control.
+- [x] Verify128 original/candidate legacy-overlay artifacts,102 incremental/full raster pairs and204 independent render outputs without changing native manifests, lock or assets.
+- [x] Publish the exact reviewed three-file contribution fork and verify its parent/files/diff; do not claim upstream acceptance.
+- [x] Upgrade all11 direct/13 resolved PdfCraft pins only; audit264 permissive packages and23 existing citations across11 files, including unchanged raster allocation correction.
+- [x] Add one linked native identity/order/save/reopen/visible-output regression and retain existing allocation safety precondition and unchanged public tests.
+- [x] Complete locked444-native, fmt, Clippy, release build, two clean installed560 corpora, independent exact-artifact replay, typing and size gates.
+- [x] Complete current-head CI and independent manual merge through PR126, required CI39586980360 and documentation CI39586980370. Python underlays, resource collisions and broader PDF3/U10 remain separately tracked.
+
+
+## Direct PPTX cell paragraph spacing and indentation (spec121)
+
+- [x] Audit pinned public model/writer/reader/layout APIs and obtain raw-only scope review.
+- [x] Preserve first low-DPI decoration failure and zero/tight-overlap extraction failure; use native layout and actual PDF operators to distinguish export preservation from normalized extraction loss.
+- [x] Approve normal-height multiplier 1..100/None and the native point-bound domains without new layout algorithms or dependencies.
+- [x] Complete final raw/adapter native controls, four public workflows, precise historical fixture migrations and strict seven-key snapshot replay typing; independently replay the four public workflows.
+- [x] Complete combined 119/121 full 449-native/release and two clean 564-test installed-wheel corpora, attribution/size and independent source/artifact review.
+- [x] Complete synchronized documentation and final independent review, retaining all historical evidence and scoped upstream findings.
+- [x] Complete current-head CI and independent manual merge through PR127, required CI39590739971 and documentation CI39590739952. Broader TXT1/SLIDE3 and overall release gates remain open.
+
+
+## Typed PDF underlays (spec123)
+
+- [x] Review the compact one-keyword surface, native typed placement route and preserved callback/resource rules after dedicated spec119 acceptance.
+- [x] Implement built-in point/box text and PNG/JPEG placement through existing methods, with strict flag and supplied-font refusal before reads.
+- [x] Pass three new native groups, all72 PDF native authoring tests, fmt/Clippy/debug and all19 new/related public workflows. Audit53 mechanical legacy Rust call migrations without changing assertions.
+- [x] Pass strict positive typing and two expected negative boolean diagnostics.
+- [x] Complete independent focused source/artifact/public review and combined 452-native, fmt/Clippy/release gates, exact artifact/attribution/source checks and measured sizes.
+- [x] Complete both clean installed 568-test combined artifact runs, with zero failures/errors/skips.
+- [x] Promote only verified partial typed-underlay operation evidence; preserve historical fingerprints and separately verify the documentation-only profile-count migration.
+- [x] Complete current-head CI/manual merge through PR128, required CI39594229122 and documentation CI39594229092. Raw-path/supplied-font underlays and broader PDF3/U10 remain open.
+
+
+## Existing reporting and error-corpus gates (spec125)
+
+- [x] Compare all139 criteria and original ece6c85 clauses with reviewed source; independently review API7/QA6/QA8 candidate mappings. Defer TXT1 and all other incomplete criteria.
+- [x] Link exact existing representative error/ownership/budget/save fixtures and452-native/two568-installed evidence without inventing new runtime acceptance.
+- [x] Mark only the three reporting/corpus gates, preserve original clauses, correct stale current profile prose and retain all historical operation evidence.
+- [x] Pass27documentation tests, exact464-file source/test/vendor/attribution comparison, existing inventory checks and30pages/1,850site links.
+- [x] Complete final independent original-clause/checklist/JSON/source/documentation review.
+- [x] Complete current-head CI/manual merge through PR128, required CI39594229122 and documentation CI39594229092. No runtime/fixture/dependency change is part of this slice.
+
+
+## Dedicated DeckCraft break-text correction (spec128)
+
+- [x] Review and publish the narrow native contribution to the existing fork, preserving original baseline failures, exact no-break compatibility and independent native replay. No upstream pull request or message was sent.
+- [x] Approve the dedicated all-Deck pin upgrade and original imported-fixture regression without facade changes.
+- [x] Audit ten source-identity-only lock changes, unchanged 264-package license inventory and current source citations.
+- [x] Complete original fixture/native/public regression and preserved old installed-artifact failure.
+- [x] Complete full453-native, fmt/Clippy/release, two clean569-installed corpora, typing, source/artifact/size checks and independent review.
+- [x] Complete synchronized final evidence and independent documentation review.
+- [x] Complete current-head CI and manual merge through PR129, required CI39598137797 and documentation CI39598137783. Cell break authoring and broad TXT1/TXT4/SLIDE3 remain separately tracked.
+## Representative authored-document corpus (spec126)
+
+- [x] Independently review original QA2 categories and the three-builder composition proposal; retain existing cookbook fixtures unchanged.
+- [x] Add resume/review/PDF-form examples and three focused installed-package workflows; inspect retained 144-DPI native artifacts.
+- [x] Complete independent source/focused/visual review and full retained-wheel corpus with exact source/artifact identity: final 571 tests pass with zero failures/errors/skips.
+- [x] Record seven-category evidence and close QA2; keep broader typography/review/forms/platform/preservation criteria open.
+- [x] Complete current-main CI and independent manual merge through PR128, required CI39594229122 and documentation CI39594229092.
+
+
+## Typed full paragraph snapshot replay (spec133)
+
+- [x] Reproduce eight strict-consumer gaps against the installed baseline while verifying existing native full replay.
+- [x] Reject input-union approaches that regress inline dictionaries; preserve their diagnostics and unchanged preexisting border-container limitations.
+- [x] Add two overloads on each existing paragraph formatter and exact native direction output literals, with unchanged implementation bodies and input TypedDict.
+- [x] Verify strict installed consumer, five intended negative cases, runtime direct/resolved body/header/cell replay, exact native/wheel facade identity and independent review.
+- [x] Complete full exact installed-wheel corpus and synchronized documentation:571 tests pass; keep broader API3 open.
+- [x] Complete combined current-main CI and independent manual merge through PR128, required CI39594229122 and documentation CI39594229092.
+
+
+### Spec120 measured-font fixture gates
+
+- [x] Preserve original cross-platform failures and execute separate original/named-font diagnostic controls.
+- [x] Independently review explicit-font/positive-ink fixture changes and deliberate letterhead golden updates with unchanged thresholds.
+- [x] Record scoped Linux output evidence and migrate only the two affected additional source fingerprints.
+- [x] Complete actual Linux/Windows/macOS candidate full installed corpora: 556 tests each pass against exact retained wheels in run39589067301.
+- [x] Retain default-font/native isolation limitations under existing U02/STY5; broad fidelity and final release remain open.
+
+
+## Dedicated WordCraft absent-default-size correction (spec131)
+
+- [x] Independently review and publish the native contribution to the existing fork; retain baseline failures, explicit-size compatibility, shared-reader controls and scoped native Clippy limitation.
+- [x] Review the dedicated five-direct/nine-resolved pin change, preserved public refusal and intentional native diagnostic migration.
+- [x] Audit source-only lock changes, unchanged 264-package licenses and 55 current Word citations across 14 unchanged native files.
+- [x] Preserve the identical installed old-wheel failure after explicit and missing-styles controls pass.
+- [x] Complete full 453-native/fmt/Clippy/release, two clean 570-installed corpora, typing and exact artifact/source/attribution/size gates.
+- [x] Complete final synchronized evidence and independent source/artifact/documentation review.
+- [x] Complete current-head CI/manual merge through PR130, required CI39602725245 and documentation CI39602726203. Owned None reset and broader acceptance remain separate feature gates.
+## Owned PPTX cell line breaks (spec130)
+
+- [x] Review exact cell-only getter/find/replace/setter projection and reuse public native insertion after the separate spec128 correction.
+- [x] Preserve the original desired raw2 proof and implement narrow native/facade behavior without pin, dependency or generic validator changes.
+- [x] Pass five focused native groups, fmt/Clippy/debug, four new public workflows and strict typing; verify one historical page-refusal migration preserves other negatives.
+- [x] Complete 27 related and four independent focused public review and exact source freeze.
+- [x] Complete synchronized documentation review, distinguishing bounded source inventory from generated-cost preflight.
+- [x] Complete combined spec131/spec130 full 458 native, fmt/Clippy/release, clean 574-test installed corpus, independent exact-artifact 185-file/source/typing and four changed plus one inherited workflow review, attribution and size checks.
+- [x] Complete final combined documentation review, including the historical upgrade-only versus current adapter distinction.
+- [x] Complete current-head CI and manual review/merge. Keep broader TXT4/SLIDE3 open; TXT1 acceptance is recorded separately in spec138.
+
+
+## Owned default-size reset (spec132)
+
+- [x] Review source/native correction and the existing parser/application path; retain dedicated131 dependency acceptance and no-new-method scope.
+- [x] Implement only the obsolete refusal removal/docstring change; deliberately migrate two old null-refusal assertions and expand the existing supported-clear loop after fingerprint audit.
+- [x] Pass two new native groups, all nine default-filter groups, fmt/strict Clippy/debug and seven new/related public workflows including unchanged131 imported regression.
+- [x] Pass strict typing and independent final two-workflow copied-package/source review; retain every failed fixture premise and unchanged runtime/threshold evidence.
+- [x] Complete synchronized focused documentation and independent review.
+- [x] Complete combined460 native and final579 installed-artifact/source/attribution validation, with independent changed-workflow, typing and exact-artifact review.
+- [x] Complete current-head CI/manual merge; separate acceptance audits govern broader roadmap criteria.
+## Unit converter input typing (spec135)
+
+- [x] Reproduce strict rejection of ordinary int/float calls despite existing runtime support.
+- [x] Change only four input annotations and extend the strict consumer; verify annotation-erased whole-facade AST equality.
+- [x] Pass copied-package int/float/Fraction/Real consumers, three intended negative diagnostics and44 runtime conversion/refusal cases.
+- [x] Complete independent source/focused review and final combined579 installed-artifact validation.
+- [x] Complete current-head CI/manual merge; retain broader API3 open.
+
+
+## Typed PDF drawing and metadata inputs (spec136)
+
+- [x] Audit existing runtime source/geometry/color/index/metadata contracts and preserve implementation bodies.
+- [x] Verify strict supported-source and tuple/list input consumers, metadata snapshot replay, precise None returns and nine invalid-call diagnostics.
+- [x] Verify whole-facade implementation AST identity and all15 existing underlay/text-box/drawing-ownership workflows against the copied-package candidate.
+- [x] Complete independent final source/AST/strict-consumer/negative-control review.
+- [x] Complete final combined579 installed-artifact validation, preserving the original460-native artifact and separately verified annotation-only repack.
+- [x] Complete current-main CI and manual merge; keep broader API3 and raw path-command typing open.
+
+
+## Style and ordinary-text acceptance audit (spec138)
+
+- [x] Compare original ece6c85 STY2 clauses with existing style/default/cycle fixtures and reviewed132 reset controls.
+- [x] Complete independent original-clause/source/fixture review; preserve explicit missing-companion and neighboring-feature limitations.
+- [x] Independently reconcile original TXT1 clauses and existing whitespace/Unicode/order/nonduplication fixtures with neighboring ownership.
+- [x] Verify final combined 579-test installed-artifact gate, mark only STY2/TXT1 and regenerate derived roadmap documentation (54 checked/85 open).
+- [x] Complete current-main CI and independent manual merge.
+
+
+## Native core language and dedicated upgrade (spec139/140)
+
+- [x] Review, validate and publish the bounded native contribution517637db on5312722; retain original failures, selected native suites,144 comparisons per revision,24 exact cross-version rasters and existing strict-lint limitations.
+- [x] Review the dedicated five-direct/nine-resolved Word upgrade and native-only regression plan; retain every Python inventory/test and other engine pin.
+- [x] Audit source-only lock changes,264 permissive runtime/build packages and55 Word citations across14 files; update current attribution while preserving historical artifacts/fingerprints.
+- [x] Finish linked baseline/candidate regression and full461-native/fmt/strictClippy/release; clean579 installed corpus, typing, exact artifact/source and independent review.
+- [x] Finalize synchronized native/pin/artifact evidence and independent source/focused review.
+- [x] Complete current-head CI and manual merge through PR132, required CI39610487130 and documentation CI39610487137. Python language admission141 and broader DOC7/U01 remain separately tracked.
+
+
+## DOCX core-language metadata (spec141)
+
+- [x] Independently review the compact existing-dictionary API, native inventories, bounds and metadata/run-language distinction.
+- [x] Prepare the adapter and focused output/UTF-8/aggregate/rollback controls; retain intended baseline unsupported-key failures.
+- [x] Integrate after the independently reviewed native contribution139 and dedicated upgrade140 local acceptance.
+- [x] Pass native and installed focused controls, then explicitly record the sole reviewed metadata-test fingerprint migration without relabeling historical evidence.
+- [x] Pass full locked native/installed corpus, independent source/artifact/focused review, license/size checks and synchronized bounded documentation.
+- [x] Complete fresh current-main CI and manual merge. Keep extended-property and broader DOC7 work open. Completed through PR133, required CI39615420262 and documentation CI39615420264.
+
+
+## 134. PPTX cell paragraph direction investigation
+
+- [x] Execute and preserve the failed raw gate; distinguish invalid visual/CMap test assumptions from separately measured normalized text differences.
+- [x] Review four diagnostic controls and native source ownership under existing U10 without claiming direction support.
+- [ ] Prove a reviewed native semantic solution and complete the originally requested source/readback/PNG/PDF acceptance before admitting the existing-format direction control.
+
+
+## 137. PPTX cell tab stops
+
+- [x] Audit native writer/reader/layout/default inheritance and run the reviewed raw two-group gate; retain original failure and separate reading-order/endpoint diagnostics.
+- [x] Implement existing cell formatting/snapshot projection and bounded direct/inherited source/property accounting with callback and lifetime validation.
+- [x] Run focused six native groups and fmt/locked all-target Clippy; preserve the original raw source and explicit native-only malformed controls.
+- [x] Run copied-package public workflows and strict consumer.
+- [x] Complete independent source/accounting and exact copied-package focused review.
+- [x] Complete synchronized documentation review, including held134 evidence.
+- [x] Complete final full native/release/installed corpus and independent exact-artifact/source/focused verification.
+- [x] Complete required current-head CI and manual PR review/merge. No release or broad TXT4/SLIDE3 completion is implied. Completed through PR133, required CI39615420262 and documentation CI39615420264.
+
+
+## Stable property setter typing (spec142)
+
+- [x] Audit remaining missing property setter input/return annotations against existing Python and native dispatch.
+- [x] Annotate 28 existing setters without changing bodies, schemas, aliases or public methods; verify whole-facade AST equality after removing annotations.
+- [x] Pass valid strict consumer controls and reject exactly 13 invalid assignments previously accepted by the baseline.
+- [x] Pass all 37 existing authoring, section geometry, background, table formatting and style-default workflows against the copied-package candidate.
+- [x] Complete independent source, AST, strict positive/negative and nullable-reset review.
+- [x] Complete combined installed-artifact validation and independent artifact review.
+- [x] Complete current-main CI and manual merge; keep API3 open. Completed through PR133, required CI39615420262 and documentation CI39615420264.
+
+
+## Typed retained extended properties and dedicated upgrade (spec143/146)
+
+- [x] Review/publish native a57b4167 on517637db; retain old API-availability failure,460/465 native suites, six exact legacy artifacts, independent six new tests and final output144/144 comparisons.
+- [x] Review the dedicated five-direct/nine-resolved Word-only upgrade and one linked-native regression, preserving all585 historical Python tests and other pins.
+- [x] Verify source-only lock delta,264 permissive normal/build packages,55 Word citations across14 files and unchanged bundled assets; keep historical profiles/artifacts/fingerprints exact.
+- [x] Complete locked468 native/fmt/strictClippy/release, clean installed585, typing and exact source/artifact/attribution independent review.
+- [x] Finalize synchronized native/pin/artifact evidence and independent source/focused review.
+- [x] Complete fresh current-head CI and manual delivery through PR134, required CI39620404796 and documentation CI39620404631, after inheriting reviewed spec153. Preserve the original468/585 artifact evidence; Python extended mapping147 and broad DOC7/U01 remain separate.
+
+
+## 153. PDF inferred-table text preservation correction
+
+- [x] Preserve PR 133 failure and distinguish actual visible/native PDF content from normalized omission.
+- [x] Reproduce the defect with standalone builtin-font PDF data; preserve failed old native/public expectations.
+- [x] Review and implement conservative discarded-row admission before any page mutation, retaining the exact existing replacement predicate.
+- [x] Complete focused native/public and independent source/artifact verification, including unchanged tab proofs in both diagnostic font environments.
+- [x] Complete corrected parent-integrated469-native/586-installed artifact, strict typing and independent source/artifact review; preserve earlier failures and146/148 artifacts as historical sources.
+- [x] Complete fresh current-head CI, actual-main synchronization and manual review/merge. Completed through PR133, required CI39615420262 and documentation CI39615420264.
+
+## 144/148. Native slide-copy prerequisite and dedicated pin integration
+
+- [x] Implement/review bounded native copy inventory, local reference remapping, atomic limits and ordinary-profile refusals; retain unchanged-native Clone/ID diagnostics.
+- [x] Validate selected native84 and source/readback/output2, independent replays and seven exact baseline compatibility artifacts; publish reviewed five-file contribution to the existing fork without an upstream PR.
+- [x] Update all four direct/ten resolved Deck pins only; audit attribution, immutable lock/source identities and current citation links without changing historical support profiles.
+- [x] Preserve the first linked-test overlapping-label premise failure and separately review the corrected exact-link plus URI-only acceptance control.
+- [x] Complete final471 native/release, clean installed586/typing/license/size/source identity and independent focused/artifact review.
+- [ ] Complete current-head CI/manual delivery; keep Python slide-copy admission separate149 and broader SLIDE1/U11 work open.

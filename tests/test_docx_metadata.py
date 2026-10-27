@@ -94,7 +94,10 @@ class DocxMetadataTests(unittest.TestCase):
             selected = paragraph.find("Stable")[0]
             before = document.to_bytes()
             bad_updates = [
-                {"title": "Changed", "language": "en"}, {"title": " leading"},
+                {"title": "Changed", "unknown_property": "en"},
+                {"title": "Changed", "language": 42}, {"language": " en"},
+                {"language": "en "}, {"language": "bad\x00value"},
+                {"language": "Ω" * 32769}, {"title": " leading"},
                 {"title": "trailing "}, {"title": "bad\rline"}, {"title": "bad\x00value"},
                 {"revision": True}, {"revision": -1}, {"revision": 2**32}, {"revision": 1.0},
                 {"created": "2023-02-29T00:00:00Z"}, {"modified": "2024-01-01T24:00:00Z"},
@@ -115,6 +118,21 @@ class DocxMetadataTests(unittest.TestCase):
                         document.update_metadata(**update)
                     self.assertEqual(document.to_bytes(), before)
                     self.assertEqual(selected.text, "Stable")
+
+    def test_core_language_is_rejected_explicitly_and_leaves_the_document_unchanged(self):
+        # WordCraft has no dc:language at the pinned upstream revision, so the key must fail
+        # loudly instead of being silently dropped when the document is saved.
+        with doc_ex.new("docx") as document:
+            paragraph = document.add_paragraph("Retained body")
+            selected = paragraph[:]
+            before = document.to_bytes()
+            for update in ({"language": "en-GB"}, {"language": None}, {"title": "Kept out", "language": "fr"}):
+                with self.assertRaises(ValueError) as caught:
+                    document.update_metadata(**update)
+                self.assertIn("language", str(caught.exception))
+                self.assertEqual(document.to_bytes(), before)
+                self.assertEqual(selected.text, "Retained body")
+            self.assertNotIn("language", document.metadata)
 
     def test_property_budgets_can_be_reused_after_clear(self):
         with doc_ex.new("docx") as document:

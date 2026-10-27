@@ -334,7 +334,7 @@ fn render_with(
             deckcraft_render::MAX_SIDE,
         )?;
     }
-    let image = deckcraft_render::render_slide(
+    let image = try_render_slide(
         presentation,
         page,
         &deckcraft_render::RenderOpts {
@@ -345,7 +345,8 @@ fn render_with(
             size: region.map(|region| (region.width, region.height)),
             ..deckcraft_render::RenderOpts::default()
         },
-    );
+    )
+    .map_err(|error| EngineError::Rendering(format!("PPTX rendering failed: {error}")))?;
     if let Some(region) = region {
         region.validate_result(image.width, image.height)?;
     }
@@ -357,10 +358,69 @@ fn render_with(
     Ok(png)
 }
 
+/// Why a guarded DeckCraft call failed.
+#[derive(Debug)]
+pub enum GuardedError {
+    /// DeckCraft caught a rendering panic and substituted blank artwork.
+    Panicked,
+    /// The slide index is outside the presentation.
+    InvalidSlide,
+}
+impl std::fmt::Display for GuardedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Panicked => "slide rendering panicked",
+            Self::InvalidSlide => "slide index is outside the presentation",
+        })
+    }
+}
+#[cfg(test)]
+static TEST_SERIAL: Mutex<()> = Mutex::new(());
+/// Runs `render` and fails if DeckCraft caught a render panic meanwhile.
+///
+/// DeckCraft draws a panicked slide as a blank image and only counts it. The count is
+/// process-wide, so a panic on another thread can fail this call spuriously, but a panic in
+/// this call can never pass silently.
+fn guard_panics<T>(render: impl FnOnce() -> T) -> Result<T, GuardedError> {
+    // Unit tests deliberately cause render panics; keep the others from observing them.
+    #[cfg(test)]
+    let _serial = TEST_SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let before = deckcraft_render::panics_caught();
+    let value = render();
+    if deckcraft_render::panics_caught() == before {
+        Ok(value)
+    } else {
+        Err(GuardedError::Panicked)
+    }
+}
+/// Render a slide, returning an error instead of blank artwork when rendering panicked.
+pub fn try_render_slide(
+    presentation: &Presentation,
+    page: usize,
+    options: &deckcraft_render::RenderOpts,
+) -> Result<deckcraft_render::Image, GuardedError> {
+    if page >= presentation.slides.len() {
+        return Err(GuardedError::InvalidSlide);
+    }
+    guard_panics(|| deckcraft_render::render_slide(presentation, page, options))
+}
+/// Export a presentation to PDF, failing if any slide was replaced by blank artwork.
+pub fn export_pdf(
+    presentation: &Presentation,
+    options: &deckcraft_pdf::PdfOptions,
+) -> Result<Vec<u8>, EngineError> {
+    let failed = |error: &dyn std::fmt::Display| {
+        EngineError::Conversion(format!("PPTX to PDF conversion failed: {error}"))
+    };
+    guard_panics(|| deckcraft_pdf::export(presentation, options))
+        .map_err(|error| failed(&error))?
+        .map_err(|error| failed(&error))
+}
 pub fn to_pdf(data: &[u8]) -> Result<Vec<u8>, EngineError> {
     let presentation = read(data)?;
-    deckcraft_pdf::export(&presentation, &deckcraft_pdf::PdfOptions::default())
-        .map_err(|error| EngineError::Conversion(format!("PPTX to PDF conversion failed: {error}")))
+    export_pdf(&presentation, &deckcraft_pdf::PdfOptions::default())
 }
 
 #[derive(Clone, Copy)]
@@ -1352,3 +1412,6 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod render_failure_tests;

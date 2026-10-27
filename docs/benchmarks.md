@@ -1,6 +1,6 @@
 # Performance benchmarks
 
-This page records a reproducible synthetic baseline for the published `pydoccraft` 0.2.1 wheel. It is not a claim that one library is universally faster, and it does not measure the unreleased authoring work currently on `main`.
+This page records a reproducible synthetic baseline for the published `pydoccraft` 0.2.1 wheel. It is not a claim that one library is universally faster, and it does not measure the authoring work added in 0.3.0.
 
 ## Headline result
 

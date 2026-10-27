@@ -2,7 +2,7 @@
 
 `pydoccraft` exposes an eager, PyMuPDF-style API. Opening a document reads the source into memory, invokes the native Rust engine, and returns Python objects that own their extracted text and image bytes.
 
-This page describes the extraction API. The unreleased branch also has [native authoring](authoring.md) through `new`, typed content objects and explicit save/copy operations. The [design crosswalk](authoring-api-design.md) and [feature backlog](../TODO.md) describe broader parity work; unchecked items are not implemented promises.
+This page describes the extraction API. Version 0.3.0 also has [native authoring](authoring.md) through `new`, typed content objects and explicit save/copy operations. The [design crosswalk](authoring-api-design.md) and [feature backlog](../TODO.md) describe broader parity work; unchecked items are not implemented promises.
 
 See the [operation evidence matrix](support-matrix.md) for bounded capability profiles, exact test/native references and remaining audit scope. A supported creation or rendering path does not establish imported-document preservation.
 
@@ -92,7 +92,7 @@ with doc_ex.open("slides.pptx") as document:
 | API | Result |
 |---|---|
 | `document.metadata` | Format and document metadata as `dict` |
-| `document.stories` (unreleased) | Owned DOCX auxiliary stories, separate from computed pages |
+| `document.stories` | Owned DOCX auxiliary stories, separate from computed pages |
 | `document.page_count` | Number of normalized pages |
 | `len(document)` | Same as `page_count` |
 | `document[index]` | `Page`; negative indexes are supported |
@@ -101,7 +101,7 @@ with doc_ex.open("slides.pptx") as document:
 | `document.render_page(index, dpi=144, *, clip=None)` | Rendered page/slide or selected region as PNG `bytes` |
 | `document.convert(output_format)` | Converted document `bytes` |
 | `document.close()` | Idempotently close the document |
-| `document.edit()` (unreleased) | Independent editable PDF; unsupported Office preservation profiles fail explicitly |
+| `document.edit()` | Independent editable PDF; unsupported Office preservation profiles fail explicitly |
 
 Slices are not supported. An out-of-range page raises `IndexError`.
 
@@ -224,7 +224,7 @@ All native failures are mapped to stable Python exceptions:
 
 `ToolNotFoundError` and `ToolExecutionError` remain exported for compatibility with versions before 0.2.0; the in-process engine does not raise them. Ordinary API validation may raise `FileNotFoundError`, `IndexError`, or `ValueError` as described above.
 
-## Auxiliary DOCX stories (unreleased)
+## Auxiliary DOCX stories
 
 `document.stories` is an ordered list of owned `Story(kind, blocks, metadata)` values. Kinds include `header`, `footer`, `footnote`, `endnote`, `comment`, `text_box` and note separators. Blocks reuse existing paragraph/table/link/image values, including nested cell hierarchy. `story.get_text("text" | "markdown" | "dict" | "json")` and `story.to_dict()` expose content without assigning it to an invented page.
 
@@ -232,7 +232,7 @@ Source block order is preserved within each part. Parts use the upstream model's
 
 Body `Document.to_markdown()` retains its existing projection. Comment stories additionally carry `legacy_page_projection=True` because comments remain in the compatibility page output. Callers combining both projections should choose their desired comment scope explicitly. Stories and their model values remain readable after source closure.
 
-## Extraction diagnostics (unreleased)
+## Extraction diagnostics
 
 DOCX/PPTX `document.metadata["diagnostics"]` contains bounded factual notices for constructs observed in the upstream model. Each has `code`, `operation="extract"`, `severity`, `message`, `count` and bounded `sources` locators. Examples distinguish omitted chart data, linearized equations, omitted ruby annotations, cached dirty fields, preview-only embedded objects, unsupported PPTX actions and approximate transformed geometry. Counts remain exact when source examples reach the 100-example total limit.
 
@@ -241,3 +241,35 @@ These notices describe semantic extraction only. They do not claim that renderin
 ## Portable Markdown
 
 `document.export_markdown()` returns an owned `dict[str, bytes]` containing body/story Markdown, deduplicated local media and a JSON placement manifest. It reuses existing formatting and leaves `to_markdown()` compatible. See [portable Markdown and media](markdown-assets.md) for the schema, bounds and nested-table behavior.
+
+
+## DOCX source paths and line layout
+
+Paragraph and table metadata use `source_path`; paragraphs and their assets also use `segment`, the zero-based explicit page/column-break segment. Paths identify native model blocks: `[block]`, followed by `[row, physical_cell, block]` for each table nesting. Body values use the absence of auxiliary story keys to identify the Body story; no duplicate body tag is added. Auxiliary metadata uses existing `story_part_id` or separator story-kind/role keys. Identity belongs to this extracted snapshot; paths are not XML paths, file offsets or durable IDs across edits/reparse. Legacy aggregate page comments have no invented paragraph path.
+
+`Page.metadata` additionally exposes native `body_bbox`, zero-based `section` and `display_number`; existing `width` and `height` remain in points. The body box describes a layout frame.
+
+Supported Body paragraphs, including native indexed table-cell placements, have `block.metadata["layout"]`:
+
+```python
+{
+    "coordinate_space": "page-points",
+    "offset_space": "paragraph-utf8",
+    "geometry": "native-selection",
+    "lines": [
+        {"page": 0, "source_range": [0, 19], "rects": [[36, 36, 130, 50]]}
+    ],
+}
+```
+
+The example illustrates the shape, not fixed geometry. Each half-open source range refers to the native paragraph's UTF-8 bytes, including inline-object placeholder bytes; it is **not an offset into `block.text`**. Page/column-break tokens are excluded from their adjacent explicit segment ranges. Ordered line records retain actual pages and repeated table-header occurrences. Whole automatically split paragraph text still appears once on its first assigned page; later line records do not invent normalized page text slices.
+
+Rectangles are native logical selection extents. They can extend outside paint clipping and do not include every object, list label, drop cap or visible glyph overhang. Empty rectangles can accompany valid zero-width source evidence. Condensed text can have finite signed cluster advances. The projection follows native positive-span behavior and preserves source line records; it does not turn advances into glyph-ink bounds. Missing layout means this projection is unavailable: auxiliary stories and nested native Clip placements are not inferred. `Block.bbox`/`Table.bbox` remain `None` for DOCX; no union box is invented for multi-page/disjoint content. Existing extracted values and metadata are mutable owned snapshots and remain readable after closure; changing them does not change native document content.
+
+Additional extraction limits are 100,000 line observations, 200,000 rectangles, 8,000,000 conservative native work units and 128 MiB conservative retained-provenance allocation allowance, including copied output representations. The allocation allowance can bind well before the count caps: the measured 200-page synthetic report charges 132,081,792 bytes, close to 128 MiB. This is not a general 200-page guarantee. A separate 16 MiB conservative native temporary-memory allowance bounds selection buffers/sort scratch. Limits fail with `UnsafeArchiveError`; malformed native geometry fails with `MalformedDocumentError`. The existing 64 MiB normalized JSON boundary still applies.
+
+
+Owned DOCX style collections also support `del document.styles[name_or_id]` and integer-index deletion of one unused custom definition. Deleted handles stay invalid; builtin/default and referenced definitions refuse deletion. The 1024 lifetime named-ID budget includes builtin and retired IDs. See [unused-style deletion](authoring.md#delete-an-unused-docx-style) for ownership, callback and capacity behavior. No batch/import API is implied.
+
+
+Existing paragraph/table/row layout values retain concrete Python types for IDEs and static consumers: spacing is a three-float tuple, column widths a list, uniform borders a nullable color/width tuple, and row height a tuple containing a nullable height plus its rule. Assignments retain accepted tuple/list inputs and iterable column widths. These annotations do not broaden format capabilities; PPTX row height still requires `at_least`, and DOCX-only row flags retain their explicit refusal.

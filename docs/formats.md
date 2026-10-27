@@ -1,8 +1,8 @@
 # Formats, rendering, and conversion
 
-This document describes the current source tree, including unreleased improvements since `pydoccraft` 0.2.1. See the [validation record](../.kiro/specs/rust-document-engine/validation.md) for tested artifacts.
+This document describes `pydoccraft` 0.3.1, including improvements since 0.2.1. See the [validation record](../.kiro/specs/rust-document-engine/validation.md) for tested artifacts.
 
-The [operation evidence matrix](support-matrix.md) separates reading, creation, authored/imported editing, preservation, rendering and export for seven initially audited profiles. It links all roadmap criteria and records historical artifact evidence without claiming complete parity.
+The [operation evidence matrix](support-matrix.md) separates reading, creation, authored/imported editing, preservation, rendering and export for explicitly audited profiles. It links all roadmap criteria and records historical artifact evidence without claiming complete parity.
 
 ## Capability matrix
 

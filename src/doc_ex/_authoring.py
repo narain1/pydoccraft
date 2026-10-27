@@ -8,7 +8,7 @@ import reprlib
 import os
 import stat
 import tempfile
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from numbers import Real
 from pathlib import Path
 from typing import Any, BinaryIO, Generic, Literal, Self, SupportsIndex, TYPE_CHECKING, TypeVar, TypedDict, Unpack, overload
@@ -32,6 +32,8 @@ class _CharacterProperties(TypedDict, total=False):
     italic: bool | None
     font_size: float | None
     font: str | None
+    language: str | None
+    letter_spacing: float | None
     color: str | tuple[int, int, int] | None
     underline: bool | str | None
     strike: bool | str | None
@@ -50,7 +52,15 @@ class TabStop(TypedDict, total=False):
     leader: str
 
 
+class PictureFormatting(TypedDict, total=False):
+    wrap: Literal["inline", "square", "top_bottom", "behind"]
+    anchor: Literal["page", "margin", "paragraph"]
+    position: tuple[float, float]
+    distance: float | tuple[float, float, float, float]
+
+
 class ParagraphFormatting(TypedDict, total=False):
+    direction: Literal["ltr", "rtl"] | None
     borders: dict[str, BorderFormatting | None] | None
     tabs: list[TabStop] | None
     alignment: str | None
@@ -110,17 +120,188 @@ class TableFormatting(TypedDict, total=False):
     rtl: bool
     title: str | None
     description: str | None
-    borders: dict[str, BorderFormatting | None] | None
+    borders: dict[str, BorderFormatting | None] | dict[str, _BorderSnapshot | None] | None
 
 
 class CellFormatting(TypedDict, total=False):
     background: str | tuple[int, int, int] | None
-    margins: float | tuple[float, float, float, float] | None
+    margins: float | tuple[float, float, float, float] | list[float] | None
     alignment: str | None
     vertical_alignment: str | None
     text_direction: str | None
     no_wrap: bool
-    borders: dict[str, BorderFormatting | None] | None
+    borders: dict[str, BorderFormatting | None] | dict[str, _BorderSnapshot | None] | None
+
+
+# Snapshots describe returned values; input patches retain their existing contracts.
+class _PdfMetadata(TypedDict, total=False):
+    title: str
+    author: str
+    subject: str
+    keywords: str
+
+
+class _PdfMetadataPatch(TypedDict, total=False):
+    title: str | None
+    author: str | None
+    subject: str | None
+    keywords: str | None
+
+
+class _WordCoreMetadata(_PdfMetadata, total=False):
+    language: str
+    description: str
+    category: str
+    last_modified_by: str
+    created: str
+    modified: str
+    revision: int
+
+
+class _WordMetadata(_WordCoreMetadata):
+    custom: dict[str, str | bool | int | float]
+
+
+class _PictureSnapshot(TypedDict):
+    wrap: Literal["inline", "square", "top_bottom", "behind"]
+    anchor: Literal["page", "margin", "paragraph"]
+    position: tuple[float, float]
+    distance: tuple[float, float, float, float]
+
+
+class _BorderSnapshot(TypedDict):
+    style: str
+    color: str | None
+    width: float
+
+
+# Owned output snapshots. Optional keys describe native-kind differences, not
+# optional input patches; table style resolution can still retain None values.
+class _TabSnapshot(TypedDict):
+    position: float
+    alignment: str
+    leader: str
+
+
+class _CharacterSnapshot(TypedDict):
+    bold: bool | None
+    italic: bool | None
+    font: str | None
+    language: str | None
+    letter_spacing: float | None
+    font_size: float | None
+    color: str | None
+    underline: str | None
+    strike: bool | str | None
+    script: str | None
+    highlight: str | None
+    background: str | None
+
+
+class _ParagraphAlignmentSnapshot(TypedDict):
+    alignment: str | None
+
+
+class _ParagraphSnapshot(_ParagraphAlignmentSnapshot, total=False):
+    borders: dict[str, _BorderSnapshot | None] | None
+    tabs: list[_TabSnapshot] | None
+    direction: Literal["ltr", "rtl"] | None
+    indent_left: float | None
+    indent_right: float | None
+    indent_first: float | None
+    space_before: float | None
+    space_after: float | None
+    line_spacing: float | None
+    keep_with_next: bool | None
+    keep_together: bool | None
+    widow_control: bool | None
+    page_break_before: bool | None
+    background: str | None
+
+class _ResolvedParagraphSnapshot(TypedDict):
+    borders: dict[str, _BorderSnapshot | None] | None
+    tabs: list[_TabSnapshot]
+    alignment: str
+    direction: Literal["ltr", "rtl"]
+    indent_left: float
+    indent_right: float
+    indent_first: float
+    space_before: float
+    space_after: float
+    line_spacing: float
+    keep_with_next: bool
+    keep_together: bool
+    widow_control: bool
+    page_break_before: bool
+    background: str | None
+
+
+class _DefaultsSnapshot(_CharacterSnapshot):
+    borders: dict[str, _BorderSnapshot | None] | None
+    tabs: list[_TabSnapshot] | None
+    alignment: str | None
+    direction: str | None
+    indent_left: float | None
+    indent_right: float | None
+    indent_first: float | None
+    space_before: float | None
+    space_after: float | None
+    line_spacing: float | None
+    keep_with_next: bool | None
+    keep_together: bool | None
+    widow_control: bool | None
+    page_break_before: bool | None
+
+
+class _TableRegionSnapshot(_CharacterSnapshot):
+    alignment: str | None
+    vertical_alignment: str | None
+    borders: dict[str, _BorderSnapshot | None] | None
+
+
+class _StyleSnapshot(_CharacterSnapshot, total=False):
+    borders: dict[str, _BorderSnapshot | None] | None
+    tabs: list[_TabSnapshot] | None
+    alignment: str | None
+    direction: str | None
+    indent_left: float | None
+    indent_right: float | None
+    indent_first: float | None
+    space_before: float | None
+    space_after: float | None
+    line_spacing: float | None
+    keep_with_next: bool | None
+    keep_together: bool | None
+    widow_control: bool | None
+    page_break_before: bool | None
+    vertical_alignment: str | None
+    margins: list[float] | None
+    row_band_size: int | None
+    regions: dict[str, _TableRegionSnapshot]
+
+
+class _TableSnapshot(TypedDict):
+    alignment: str | None
+    indent: float | None
+    width: float | None
+    width_percent: float | None
+    layout: Literal["fixed", "autofit"]
+    rtl: bool
+    title: str | None
+    description: str | None
+    borders: dict[str, _BorderSnapshot | None] | None
+    style: str | None
+    look: TableLook
+
+
+class _CellSnapshot(TypedDict):
+    background: str | None
+    margins: list[float] | None
+    alignment: str | None
+    vertical_alignment: str | None
+    text_direction: str | None
+    no_wrap: bool
+    borders: dict[str, _BorderSnapshot | None] | None
 
 
 def _table_format_patch(values, *, cell: bool = False) -> str:
@@ -245,12 +426,22 @@ def _style_reference(value, owner):
     if isinstance(value, Style):
         if value._owner is not owner:
             raise ValueError("style must belong to this document")
-        value = value.id
+        value = json.loads(owner._call("style_info_exact", value._id))["id"]
     if value is not None and not isinstance(value, str):
         raise TypeError("style must be a name, ID or Style from this document")
     return value
 
-def pt(value: Real) -> float:
+def _style_guard(owner, revision, *references) -> None:
+    if owner._call("revision") != revision:
+        raise ValueError("style operation is stale after a document mutation")
+    for reference in references:
+        if isinstance(reference, Style):
+            _style_reference(reference, owner)
+    if owner._call("revision") != revision:
+        raise ValueError("style operation is stale after a document mutation")
+
+
+def pt(value: Real | float) -> float:
     """Return a finite length in points (1/72 inch)."""
     if isinstance(value, bool) or not isinstance(value, Real):
         raise TypeError("length must be a number in points")
@@ -260,17 +451,17 @@ def pt(value: Real) -> float:
     return result
 
 
-def inches(value: Real) -> float:
+def inches(value: Real | float) -> float:
     """Convert inches to points."""
     return pt(pt(value) * 72)
 
 
-def mm(value: Real) -> float:
+def mm(value: Real | float) -> float:
     """Convert millimeters to points."""
     return pt(pt(value) * 72 / 25.4)
 
 
-def cm(value: Real) -> float:
+def cm(value: Real | float) -> float:
     """Convert centimeters to points."""
     return pt(pt(value) * 72 / 2.54)
 
@@ -468,16 +659,21 @@ class EditableDocument:
 
     def save(self, destination: str | Path | BinaryIO) -> None:
         """Save the native format; path replacement is atomic, stream writes are not."""
+        self._save(destination, self.to_bytes)
+
+    def _save(self, destination: str | Path | BinaryIO, serialize: Callable[[], bytes]) -> None:
+        # One filesystem/stream implementation; format-specific options only select the
+        # serialization callback. It runs after destination normalization, as before.
         self._ensure_open()
         if hasattr(destination, "write"):
-            data = self.to_bytes()
+            data = serialize()
             if destination.write(data) != len(data):
                 raise OSError("destination did not accept the complete document")
             return
         path = Path(destination).expanduser()
         if path.suffix and path.suffix.lower() != "." + self._format:
             raise ValueError(f"save writes {self._format}; use convert() to change formats")
-        data = self.to_bytes()
+        data = serialize()
         previous_mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else None
         temporary = None
         try:
@@ -554,17 +750,96 @@ class _Collection(Sequence[_Item], Generic[_Item]):
         return self._factory(self._owner, ids[_index(index, len(ids))])
 
 
+class _Tables(_Collection["EditableTable"]):
+    """Ordered owned DOCX tables with subtree deletion and same-container movement."""
+    def __delitem__(self, index: int) -> None:
+        self._owner._ensure_open()
+        if isinstance(index, slice):
+            raise TypeError("table deletion requires an integer index")
+        identifiers = self._ids()  # Resolve stale parent-cell generations before callbacks.
+        selected = operator.index(index)
+        self._owner._ensure_open()
+        self._owner._call("remove_table", identifiers[_index(selected, len(identifiers))], _change=True)
+
+    def move(self, index: int, destination: int) -> None:
+        """Move an owned DOCX table to its final index in the same container and section."""
+        self._owner._ensure_open()
+        if not isinstance(self._owner, WordDocument):
+            raise UnsupportedFormatError("PPTX table movement is not supported")
+        revision = self._owner._call("revision")
+        identifiers = self._ids()
+        selected = operator.index(index)
+        self._owner._ensure_open()
+        if self._owner._call("revision") != revision:
+            raise ValueError("table selection is stale after a document mutation")
+        target = operator.index(destination)
+        self._owner._ensure_open()
+        if self._owner._call("revision") != revision:
+            raise ValueError("table selection is stale after a document mutation")
+        identifier = identifiers[_index(selected, len(identifiers))]
+        target_id = identifiers[_index(target, len(identifiers))]
+        if self._owner._call("move_table", identifier, target_id, revision):
+            self._owner._invalidate()
+
+
+class _Paragraphs(_Collection["Paragraph"]):
+    """Ordered paragraphs; deletion supports DOCX containers and PPTX cells."""
+    def __delitem__(self, index: int) -> None:
+        self._owner._ensure_open()
+        if isinstance(index, slice):
+            raise TypeError("paragraph deletion requires an integer index")
+        revision = (None if isinstance(self._owner, WordDocument)
+                    else self._owner._call("revision"))
+        identifiers = self._ids()
+        selected = operator.index(index)
+        self._owner._ensure_open()
+        if revision is not None and self._owner._call("revision") != revision:
+            raise ValueError("paragraph selection is stale after a document mutation")
+        identifier = identifiers[_index(selected, len(identifiers))]
+        if isinstance(self._owner, WordDocument):
+            self._owner._call("remove_paragraph", identifier, _change=True)
+        else:
+            paragraph = self._factory(self._owner, identifier)
+            self._owner._call("remove_cell_paragraph", *paragraph._range_args,
+                              paragraph._target, _change=True)
+
+    def move(self, index: int, destination: int) -> None:
+        """Move to the final index within one DOCX container/section or PPTX cell."""
+        self._owner._ensure_open()
+        revision = self._owner._call("revision")
+        identifiers = self._ids()
+        selected = operator.index(index)
+        self._owner._ensure_open()
+        if self._owner._call("revision") != revision:
+            raise ValueError("paragraph selection is stale after a document mutation")
+        target = operator.index(destination)
+        self._owner._ensure_open()
+        if self._owner._call("revision") != revision:
+            raise ValueError("paragraph selection is stale after a document mutation")
+        identifier = identifiers[_index(selected, len(identifiers))]
+        target_id = identifiers[_index(target, len(identifiers))]
+        if isinstance(self._owner, WordDocument):
+            changed = self._owner._call("move_paragraph", identifier, target_id, revision)
+        else:
+            paragraph = self._factory(self._owner, identifier)
+            destination_paragraph = self._factory(self._owner, target_id)
+            changed = self._owner._call("move_cell_paragraph", *paragraph._range_args,
+                                        paragraph._target, destination_paragraph._target, revision)
+        if changed:
+            self._owner._invalidate()
+
+
 class WordDocument(EditableDocument):
     _format = "docx"
 
     @property
-    def metadata(self) -> dict:
+    def metadata(self) -> _WordMetadata:
         """Owned core properties and a nested mapping of typed custom properties."""
         return json.loads(self._call("metadata"))
 
     def update_metadata(self, **values) -> None:
         """Patch supported properties; None clears a field or custom entry."""
-        allowed = {"title", "author", "subject", "keywords", "description", "category",
+        allowed = {"title", "author", "subject", "keywords", "language", "description", "category",
                    "last_modified_by", "created", "modified", "revision", "custom"}
         if values.keys() - allowed:
             raise ValueError("unsupported DOCX metadata key")
@@ -615,6 +890,15 @@ class WordDocument(EditableDocument):
         self._call("update_metadata", "".join(chunks), _change=True)
 
     @property
+    def bookmarks(self) -> _WordBookmarks:
+        """Named body ranges; lookup returns a fresh revision-bound TextRange."""
+        return _WordBookmarks(self)
+
+    @property
+    def comments(self) -> Comments:
+        return Comments(self)
+
+    @property
     def notes(self) -> Notes:
         return Notes(self)
 
@@ -623,12 +907,12 @@ class WordDocument(EditableDocument):
         return Styles(self)
 
     @property
-    def paragraphs(self) -> _Collection[Paragraph]:
-        return _Collection(self, lambda: self._call("paragraph_ids"), Paragraph)
+    def paragraphs(self) -> _Paragraphs:
+        return _Paragraphs(self, lambda: self._call("paragraph_ids"), Paragraph)
 
     @property
-    def tables(self) -> _Collection[EditableTable]:
-        return _Collection(self, lambda: self._call("table_ids"), EditableTable)
+    def tables(self) -> _Tables:
+        return _Tables(self, lambda: self._call("table_ids"), EditableTable)
 
     @property
     def sections(self) -> Sections:
@@ -639,11 +923,56 @@ class WordDocument(EditableDocument):
         return Pictures(self, lambda: self._call("image_ids"))
 
     @property
+    def shapes(self) -> _WordShapes:
+        """Owned direct-body rectangles and ellipses in source order."""
+        return _WordShapes(self)
+
+    def add_shape(self, kind: Literal["rectangle", "ellipse"], *, width: float,
+                  height: float, fill: _Color | None = None,
+                  stroke: _Color | None = None, stroke_width: float = 1) -> _WordShape:
+        """Append an inline native closed shape; use format() for floating placement."""
+        revision = self._call("revision")
+        if not isinstance(kind, str):
+            raise TypeError("shape kind must be rectangle or ellipse")
+        if str.__len__(kind) > 32:
+            raise ValueError("shape kind must be rectangle or ellipse")
+        kind = str.__str__(kind)
+        def guard():
+            self._ensure_open()
+            if self._call("revision") != revision:
+                raise ValueError("document changed while converting shape values")
+        outline_width = pt(stroke_width)
+        guard()
+        if not 0.25 <= outline_width <= 100 or not math.isclose(outline_width * 20, round(outline_width * 20), rel_tol=0, abs_tol=1e-10):
+            raise ValueError("stroke width requires 0.25 to 100 points in 0.05-point increments")
+        properties = _shape_properties({"size": (width, height), "fill": fill,
+                                        "stroke": None if stroke is None else (stroke, outline_width)}, guard)
+        identifier = self._call("add_shape", kind, properties, revision, _change=True)
+        return _WordShape(self, identifier)
+
+    @property
+    def mirror_margins(self) -> bool:
+        """Mirror inside/outside margins by displayed page-number parity.
+
+        This document-wide setting uses each section's existing left margin
+        plus gutter as inside and right margin as outside. It does not change
+        even/odd header selection or add next-page restart filler pages.
+        """
+        return self._call("mirror_margins")
+
+    @mirror_margins.setter
+    def mirror_margins(self, value: bool) -> None:
+        self._ensure_open()
+        if type(value) is not bool:
+            raise TypeError("mirror_margins must be a bool")
+        self._call("set_mirror_margins", value, _change=True)
+
+    @property
     def background(self) -> str | None:
         return self._call("background")
 
     @background.setter
-    def background(self, color):
+    def background(self, color: _Color | None) -> None:
         self._call("set_background", None if color is None else _hex_color(color), _change=True)
 
     @property
@@ -653,7 +982,7 @@ class WordDocument(EditableDocument):
         return None if value is None else bytes(value)
 
     @background_image.setter
-    def background_image(self, source) -> None:
+    def background_image(self, source: _Source | None) -> None:
         """Set a stretched PNG, or clear only the image with None."""
         self._ensure_open()
         from . import _read
@@ -664,7 +993,10 @@ class WordDocument(EditableDocument):
 
     def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
         """Append a paragraph with an optional named style and return its editable handle."""
+        revision = self._call("revision")
+        original_style = style
         style = _style_reference(style, self)
+        _style_guard(self, revision, original_style)
         if style is None:
             identifier = self._call("add_paragraph", text, _change=True)
         else:
@@ -707,17 +1039,35 @@ class Styles(_Collection["Style"]):
             return Style(self._owner, json.loads(self._owner._call("style_info", key))["id"])
         return super().__getitem__(key)
 
+    def __delitem__(self, key: str | int) -> None:
+        """Delete one unused owned custom style; builtin/default styles are protected."""
+        revision = self._owner._call("revision")
+        if isinstance(key, slice):
+            raise TypeError("style deletion requires a name, ID or integer index")
+        if isinstance(key, str):
+            identifier = json.loads(self._owner._call("style_info", key))["id"]
+        else:
+            identifiers = self._ids()
+            selected = operator.index(key)
+            _style_guard(self._owner, revision)
+            identifier = identifiers[_index(selected, len(identifiers))]
+        _style_guard(self._owner, revision)
+        self._owner._call("remove_style", identifier, revision, _change=True)
+
     def add(self, name: str, *, kind: str = "paragraph", based_on: str | Style | None = None) -> Style:
-        identifier = self._owner._call("add_style", name, kind, _style_reference(based_on, self._owner), _change=True)
+        revision = self._owner._call("revision")
+        reference = _style_reference(based_on, self._owner)
+        _style_guard(self._owner, revision, based_on)
+        identifier = self._owner._call("add_style", name, kind, reference, _change=True)
         return Style(self._owner, identifier)
 
     @property
-    def defaults(self) -> dict:
+    def defaults(self) -> _DefaultsSnapshot:
         """Direct native document character and paragraph defaults."""
         return json.loads(self._owner._call("default_formatting"))
 
     def format_defaults(self, **formatting: Unpack[_StyleProperties]) -> None:
-        """Update defaults; None clears properties except unsupported font-size reset."""
+        """Update defaults; None removes the direct property and restores native inheritance."""
         self._owner._call("format_defaults", _style_format_patch(formatting), _change=True)
 
 
@@ -727,7 +1077,7 @@ class Style:
         self._owner, self._id = owner, identifier
 
     def _info(self):
-        return json.loads(self._owner._call("style_info", self._id))
+        return json.loads(self._owner._call("style_info_exact", self._id))
 
     @property
     def id(self) -> str:
@@ -751,15 +1101,22 @@ class Style:
         return None if identifier is None else Style(self._owner, identifier)
 
     @based_on.setter
-    def based_on(self, value: str | Style | None):
-        self._owner._call("set_style_base", self._id, _style_reference(value, self._owner), _change=True)
+    def based_on(self, value: str | Style | None) -> None:
+        revision = self._owner._call("revision")
+        self._info()
+        reference = _style_reference(value, self._owner)
+        _style_guard(self._owner, revision, self, value)
+        self._owner._call("set_style_base", self._id, reference, _change=True)
 
     def _set_relation(self, key: str, value: str | Style | None) -> None:
+        revision = self._owner._call("revision")
+        self._info()
         target = _style_reference(value, self._owner)
         if target is not None and len(target) > 1024:
             raise ValueError("style relation must be a bounded style name/ID or None")
-        self._owner._call("style_relations_patch", self._id,
-                          json.dumps({key: target}, ensure_ascii=False), _change=True)
+        patch = json.dumps({key: target}, ensure_ascii=False)
+        _style_guard(self._owner, revision, self, value)
+        self._owner._call("style_relations_patch", self._id, patch, _change=True)
 
     @property
     def next(self) -> Style | None:
@@ -768,7 +1125,7 @@ class Style:
         return None if identifier is None else Style(self._owner, identifier)
 
     @next.setter
-    def next(self, value: str | Style | None):
+    def next(self, value: str | Style | None) -> None:
         self._set_relation("next", value)
 
     @property
@@ -782,24 +1139,28 @@ class Style:
         return Style(self._owner, identifier)
 
     @linked.setter
-    def linked(self, value: str | Style | None):
+    def linked(self, value: str | Style | None) -> None:
         self._set_relation("linked", value)
 
     @property
-    def formatting(self) -> dict:
+    def formatting(self) -> _StyleSnapshot:
         """Direct properties; None denotes inheritance."""
         return json.loads(self._owner._call("style_formatting", self._id))
 
     @property
-    def resolved_formatting(self) -> dict:
+    def resolved_formatting(self) -> _StyleSnapshot:
         """Formatting resolved through the native style inheritance chain."""
         return json.loads(self._owner._call("style_formatting", self._id, True))
 
     def format(self, *, region: str | None = None, **formatting: Unpack[StyleFormatting]) -> None:
         """Set direct properties; an optional region selects table-style formatting."""
+        revision = self._owner._call("revision")
+        self._info()
         if region is not None and (not isinstance(region, str) or len(region) > 32):
             raise ValueError("region must be a supported table-style region name or None")
-        self._owner._call("format_style", self._id, _style_format_patch(formatting), region, _change=True)
+        patch = _style_format_patch(formatting)
+        _style_guard(self._owner, revision, self)
+        self._owner._call("format_style", self._id, patch, region, _change=True)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(id={reprlib.repr(self._id)}, closed={self._owner.closed})"
@@ -814,7 +1175,7 @@ class Paragraph:
         return self._owner._call("paragraph_text", self._id)
 
     @text.setter
-    def text(self, value: str):
+    def text(self, value: str) -> None:
         self._owner._call("set_paragraph_text", self._id, value, _change=True)
 
     @property
@@ -822,25 +1183,33 @@ class Paragraph:
         return self._owner._call("paragraph_style", self._id)
 
     @style.setter
-    def style(self, value: str | Style):
-        self._owner._call("set_paragraph_style", self._id, _style_reference(value, self._owner), _change=True)
+    def style(self, value: str | Style) -> None:
+        revision = self._owner._call("revision")
+        reference = _style_reference(value, self._owner)
+        _style_guard(self._owner, revision, value)
+        self._owner._call("set_paragraph_style", self._id, reference, _change=True)
 
     @property
     def alignment(self) -> str:
         return self._owner._call("paragraph_alignment", self._id)
 
     @alignment.setter
-    def alignment(self, value: str):
+    def alignment(self, value: str) -> None:
         self._owner._call("set_paragraph_alignment", self._id, value, _change=True)
 
     @property
-    def list_style(self):
+    def list_style(self) -> tuple[str, int] | None:
         """The direct list kind/level, or None for an ordinary paragraph."""
         return self._owner._call("paragraph_list", self._id)
 
     def set_list(self, kind: str | None = None, *, level: int = 0, restart: bool = False,
-                 start: int | None = None):
-        """Set list membership; start creates a new top-level numbered sequence."""
+                 start: int | None = None) -> None:
+        """Set bullet, numbered, or decimal_outline membership; None clears it.
+
+        ``start`` creates an independent numbered or decimal outline sequence.
+        Decimal outlines require top-level body text in an unambiguous single-
+        column section; native label/body geometry is checked before output.
+        """
         level = operator.index(level)
         if start is not None:
             if isinstance(start, bool):
@@ -851,20 +1220,20 @@ class Paragraph:
         self._owner._call("set_paragraph_list", self._id, kind, level, restart, start, _change=True)
 
     @property
-    def page_break_before(self):
+    def page_break_before(self) -> bool:
         return self._owner._call("page_break_before", self._id)
 
     @page_break_before.setter
-    def page_break_before(self, value: bool):
+    def page_break_before(self, value: bool) -> None:
         self._owner._call("set_page_break_before", self._id, value, _change=True)
 
     @property
-    def spacing(self):
+    def spacing(self) -> tuple[float, float, float]:
         """Spacing before/after in points and line-spacing multiplier."""
         return self._owner._call("paragraph_spacing", self._id)
 
     @spacing.setter
-    def spacing(self, value):
+    def spacing(self, value: tuple[float, float, float] | list[float]) -> None:
         if not isinstance(value, (tuple, list)) or len(value) != 3:
             raise TypeError("spacing must be (before, after, line_spacing)")
         self._owner._call("set_paragraph_spacing", self._id, *map(pt, value), _change=True)
@@ -874,17 +1243,25 @@ class Paragraph:
         return (self._id,)
 
     @property
-    def formatting(self) -> dict:
+    def formatting(self) -> _ParagraphSnapshot:
         """Direct paragraph properties; None denotes inheritance."""
         return json.loads(self._owner._call("paragraph_formatting", self._id))
 
     @property
-    def resolved_formatting(self) -> dict:
+    def resolved_formatting(self) -> _ResolvedParagraphSnapshot:
         """Paragraph properties resolved through native defaults and styles."""
         return json.loads(self._owner._call("paragraph_formatting", self._id, True))
 
-    def format(self, **formatting: Unpack[ParagraphFormatting]) -> None:
-        """Set paragraph properties; None restores inheritance."""
+    @overload
+    def format(self, **formatting: Unpack[ParagraphFormatting]) -> None: ...
+    @overload
+    def format(self, **formatting: Unpack[_ParagraphSnapshot]) -> None: ...
+    def format(self, **formatting: object) -> None:
+        """Set paragraph properties; None restores inheritance.
+
+        DOCX direction is ltr/rtl; native alignment, indents and tabs are
+        measured from the paragraph start edge.
+        """
         self._owner._call("format_paragraph", self._id, _format_patch(formatting), _change=True)
 
     def add_run(self, text: str, **formatting: Unpack[CharacterFormatting]) -> TextRange:
@@ -893,10 +1270,11 @@ class Paragraph:
         return TextRange(self, start, end, revision)
 
     def add_field(self, kind: str) -> TextRange:
-        """Append a decimal page, page_count or section_page_count field.
+        """Append a page/count field, or a title/author metadata field.
 
         The returned range contains one object marker. Native rendering evaluates
-        the number; source extraction retains the empty stored field result.
+        its value; source extraction retains the empty stored field result.
+        Metadata fields are indivisible and must fit their native line box.
         """
         start, end, revision = self._owner._call("add_paragraph_field", self._id, kind, _change=True)
         return TextRange(self, start, end, revision)
@@ -939,7 +1317,7 @@ class TextRange:
         return paragraph._owner._call("range_text", *paragraph._range_args, self._start, self._end, self._revision, **getattr(paragraph, "_range_kwargs", {}))
 
     @text.setter
-    def text(self, value: str):
+    def text(self, value: str) -> None:
         paragraph = self._paragraph
         self._start, self._end, self._revision = paragraph._owner._call("replace_range", *paragraph._range_args, self._start, self._end, self._revision, value, _change=True, **getattr(paragraph, "_range_kwargs", {}))
 
@@ -949,13 +1327,21 @@ class TextRange:
         return paragraph._owner._call("range_link", *paragraph._range_args, self._start, self._end, self._revision, **getattr(paragraph, "_range_kwargs", {}))
 
     @link.setter
-    def link(self, url: str | None):
+    def link(self, url: str | None) -> None:
         paragraph = self._paragraph
         self._revision = paragraph._owner._call("set_range_link", *paragraph._range_args, self._start, self._end, self._revision, url, _change=True, **getattr(paragraph, "_range_kwargs", {}))
 
     def format(self, **formatting: Unpack[CharacterFormatting]) -> None:
-        """Set character properties; omitted values stay and None inherits."""
+        """Set character properties; omitted values stay and None inherits.
+
+        DOCX language is a literal ASCII alphanumeric/hyphen tag of at most
+        63 bytes, not a complete BCP47 validator or font-selection guarantee.
+        letter_spacing adjusts native text advances by -100..100 points in
+        0.05-point increments; 0 cancels inheritance and None restores it.
+        """
         paragraph = self._paragraph
+        if paragraph._owner._call("revision") != self._revision:
+            raise ValueError("text range is stale after a document mutation")
         self._revision = paragraph._owner._call("format_range_patch", *paragraph._range_args, self._start, self._end, self._revision, _format_patch(formatting, rgb_highlight=paragraph._owner._format == "pptx"), _change=True, **getattr(paragraph, "_range_kwargs", {}))
 
 
@@ -1049,7 +1435,7 @@ class _SlideTextRange(TextRange):
         return _slide_link_value(self._paragraph._owner, self._link_info())
 
     @link.setter
-    def link(self, target: str | Slide | None):
+    def link(self, target: str | Slide | None) -> None:
         content = self._paragraph
         url, slide_id = _slide_link_target(content._owner, target)
         previous = self._link_info(allow_mixed=True)
@@ -1062,7 +1448,7 @@ class _SlideTextRange(TextRange):
         return "" if value is None else value[2]
 
     @link_tooltip.setter
-    def link_tooltip(self, value: str):
+    def link_tooltip(self, value: str) -> None:
         info = self._link_info()
         if info is None:
             raise ValueError("set a link before setting its tooltip")
@@ -1095,8 +1481,52 @@ class Section:
         return self._props()["start"]
 
     @start.setter
-    def start(self, value: str):
+    def start(self, value: str) -> None:
         self._set(start=value)
+
+    @property
+    def vertical_alignment(self) -> Literal["top", "center", "bottom", "justify"]:
+        """Native page-body alignment; non-top requires the documented simple profile."""
+        return self._props()["vertical_alignment"]
+
+    @vertical_alignment.setter
+    def vertical_alignment(self, value: Literal["top", "center", "bottom", "justify"]) -> None:
+        self._owner._ensure_open()
+        if type(value) is not str:
+            raise TypeError("vertical_alignment must be a string")
+        if value not in ("top", "center", "bottom", "justify"):
+            raise ValueError("vertical_alignment must be top, center, bottom or justify")
+        self._set(vertical_alignment=value)
+
+    @property
+    def line_numbers(self) -> tuple[int, int, float, str] | None:
+        """(count_by, start, distance_pt, restart), or None; single columns only.
+
+        Restart is each_page, each_section or continuous. Distance zero uses
+        the native 18pt default; (1, 1, 0, "each_page") numbers every body line.
+        """
+        value = self._props()["line_numbers"]
+        return None if value is None else tuple(value)
+
+    @line_numbers.setter
+    def line_numbers(self, value: tuple[int, int, float, str] | None) -> None:
+        if value is None:
+            self._set(line_numbers=None)
+            return
+        if not isinstance(value, (tuple, list)) or len(value) != 4:
+            raise TypeError("line_numbers must be (count_by, start, distance, restart), or None")
+        count_by, start, distance, restart = value
+        if isinstance(count_by, bool) or isinstance(start, bool):
+            raise TypeError("line-number count_by and start must be integers, not booleans")
+        count_by, start = operator.index(count_by), operator.index(start)
+        if not 1 <= count_by <= 100 or not 1 <= start <= 32768:
+            raise ValueError("line-number count_by must be 1..100 and start must be 1..32768")
+        distance = pt(distance)
+        if not 0 <= distance <= 1584:
+            raise ValueError("line-number distance must be between 0 and 1584 points")
+        if restart not in ("each_page", "each_section", "continuous"):
+            raise ValueError("line-number restart must be each_page, each_section or continuous")
+        self._set(line_numbers=[count_by, start, distance, restart])
 
     @property
     def page_number_start(self) -> int | None:
@@ -1118,7 +1548,7 @@ class Section:
         return tuple(self._props()["page_size"])
 
     @page_size.setter
-    def page_size(self, value):
+    def page_size(self, value: _Size) -> None:
         self._set(page_size=_size(value))
 
     @property
@@ -1127,7 +1557,7 @@ class Section:
         return tuple(self._props()["margins"])
 
     @margins.setter
-    def margins(self, value):
+    def margins(self, value: Real | float | tuple[float, float, float, float] | list[float]) -> None:
         self._set(margins=_margins(value))
 
     @property
@@ -1136,7 +1566,7 @@ class Section:
         return self._props()["gutter"]
 
     @gutter.setter
-    def gutter(self, value):
+    def gutter(self, value: Real | float) -> None:
         self._set(gutter=pt(value))
 
     @property
@@ -1144,7 +1574,7 @@ class Section:
         return self._props()["distances"][0]
 
     @header_distance.setter
-    def header_distance(self, value):
+    def header_distance(self, value: Real | float) -> None:
         self._set(distances=[pt(value), self.footer_distance])
 
     @property
@@ -1152,7 +1582,7 @@ class Section:
         return self._props()["distances"][1]
 
     @footer_distance.setter
-    def footer_distance(self, value):
+    def footer_distance(self, value: Real | float) -> None:
         self._set(distances=[self.header_distance, pt(value)])
 
     @property
@@ -1161,7 +1591,7 @@ class Section:
         return tuple(self._props()["columns"])
 
     @columns.setter
-    def columns(self, value):
+    def columns(self, value: tuple[SupportsIndex, float, bool] | list[SupportsIndex | float | bool]) -> None:
         if not isinstance(value, (tuple, list)) or len(value) != 3:
             raise TypeError("columns must be (count, gap, separator)")
         count, gap, separator = value
@@ -1176,7 +1606,7 @@ class Section:
         return None if widths is None else tuple(widths)
 
     @column_widths.setter
-    def column_widths(self, value):
+    def column_widths(self, value: tuple[float, ...] | list[float] | None) -> None:
         if value is None:
             self._set(column_widths=None)
             return
@@ -1232,15 +1662,75 @@ class EditableStory:
         return native.ensure_story(self._kind, self._variant, self._section)
 
     @property
-    def paragraphs(self) -> _Collection[Paragraph]:
+    def paragraphs(self) -> _Paragraphs:
         def identifiers():
             identifier = self._identifier()
             return [] if identifier is None else self._owner._call("story_paragraph_ids", identifier)
-        return _Collection(self._owner, identifiers, Paragraph)
+        return _Paragraphs(self._owner, identifiers, Paragraph)
+
+    def _check_rich_content(self):
+        self._owner._ensure_open()
+        if isinstance(self, Note):
+            raise UnsupportedFormatError("rich note content requires native note-container geometry support")
+
+    @property
+    def tables(self) -> _Tables:
+        """Direct header/footer tables, sharing the normal table and cell API."""
+        self._check_rich_content()
+        def identifiers():
+            self._check_rich_content()
+            identifier = self._identifier()
+            return [] if identifier is None else self._owner._call("story_table_ids", identifier)
+        return _Tables(self._owner, identifiers, EditableTable)
+
+    @property
+    def images(self) -> Pictures:
+        """Direct inline pictures; nested cell pictures belong to cell.images."""
+        self._check_rich_content()
+        def identifiers():
+            self._check_rich_content()
+            identifier = self._identifier()
+            return [] if identifier is None else self._owner._call("story_image_ids", identifier)
+        return Pictures(self._owner, identifiers)
+
+    def clear(self) -> None:
+        """Clear owned story content; a note retains its reference, kind and numbering.
+
+        Existing child handles are invalidated. Repeated clears of the synthetic
+        empty story preserve ranges and render caches.
+        """
+        self._owner._ensure_open()
+        changed = (self._owner._call("clear_note", self._id) if isinstance(self, Note)
+                   else self._owner._call("clear_story", self._kind, self._variant, self._section))
+        if changed:
+            self._owner._invalidate()
+
+    def add_table(self, rows: _Rows, *, columns: SupportsIndex | None = None) -> EditableTable:
+        """Append a header/footer table from string rows or row/column counts."""
+        self._check_rich_content()
+        values = _rows(rows, columns)
+        self._check_rich_content()
+        def append(native):
+            return native.story_add_table(self._ensure_identifier(native), values)
+        return EditableTable(self._owner, self._owner._atomic(append))
+
+    def add_image(self, source: _Source, *, width: float | None = None, height: float | None = None, alt: str = "") -> Picture:
+        """Append an inline PNG in points, preserving aspect when one dimension is omitted."""
+        from . import _read
+        self._check_rich_content()
+        width, height = None if width is None else pt(width), None if height is None else pt(height)
+        data, _ = _read(source, limit=16 * 1024 * 1024)
+        self._check_rich_content()
+        def append(native):
+            return native.story_add_image(self._ensure_identifier(native), data, width, height, alt)
+        return Picture(self._owner, self._owner._atomic(append))
 
     def add_paragraph(self, text: str = "", *, style: str | Style | None = None) -> Paragraph:
         """Append a paragraph with an optional named style and return its editable handle."""
+        revision = self._owner._call("revision")
+        original_style = style
         style = _style_reference(style, self._owner)
+        _style_guard(self._owner, revision, original_style)
         def append(native):
             story = self._ensure_identifier(native)
             identifier = native.story_add_paragraph(story, text)
@@ -1250,10 +1740,134 @@ class EditableStory:
         return Paragraph(self._owner, self._owner._atomic(append))
 
 
+def _comment_string(value: str, limit: int, name: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"comment {name} must be a string")
+    if str.__len__(value) > limit or len(str.encode(value, "utf-8")) > limit:
+        raise ValueError(f"comment {name} exceeds {limit} UTF-8 bytes")
+    return str.__str__(value)
+
+
+class Comments(_Collection["Comment"]):
+    """Owned whole-paragraph DOCX comments and direct replies in creation order."""
+    def __init__(self, owner: WordDocument):
+        super().__init__(owner, lambda: owner._call("comment_ids"), Comment)
+
+    def add(self, reference: TextRange | Comment, text: str = "", *,
+            author: str = "Unknown", date: str = "") -> Comment:
+        """Anchor a whole body paragraph, or reply to an existing root comment.
+
+        Interior/empty ranges, rotated or exact-height cells and nested replies
+        are unsupported. The date is empty or a valid UTC YYYY-MM-DDTHH:MM:SSZ.
+        """
+        self._owner._ensure_open()
+        text = _comment_string(text, 1024 * 1024, "text")
+        author = _comment_string(author, 1024, "author")
+        date = _comment_string(date, 20, "date")
+        if isinstance(reference, TextRange) and isinstance(reference._paragraph, Paragraph):
+            paragraph = reference._paragraph
+            if paragraph._owner is not self._owner:
+                raise ValueError("comment range must belong to this document")
+            args = (paragraph._id, reference._start, reference._end, reference._revision, None)
+        elif isinstance(reference, Comment):
+            if reference._owner is not self._owner:
+                raise ValueError("parent comment must belong to this document")
+            args = (None, 0, 0, 0, reference._id)
+        else:
+            raise TypeError("comment reference must be a DOCX paragraph TextRange or root Comment")
+        identifier = self._owner._call("add_comment", *args, text, author, date, _change=True)
+        return Comment(self._owner, identifier)
+
+    def __delitem__(self, index: int) -> None:
+        self._owner._ensure_open()
+        if isinstance(index, slice):
+            raise TypeError("comment deletion requires an integer index")
+        ids = self._ids()
+        selected = operator.index(index)
+        self._owner._ensure_open()
+        self._owner._call("remove_comment", ids[_index(selected, len(ids))], _change=True)
+
+
+class Comment:
+    """An owned comment; text is separate from its body range and direct replies."""
+    def __init__(self, owner: WordDocument, identifier: int):
+        self._owner, self._id = owner, identifier
+
+    @property
+    def range(self) -> TextRange:
+        identifier, start, end, revision = self._owner._call("comment_range", self._id)
+        return TextRange(Paragraph(self._owner, identifier), start, end, revision)
+
+    @property
+    def parent(self) -> Comment | None:
+        parent = json.loads(self._owner._call("comment_info", self._id))["parent"]
+        return None if parent is None else Comment(self._owner, parent)
+
+    @property
+    def text(self) -> str:
+        return json.loads(self._owner._call("comment_info", self._id))["text"]
+
+    @text.setter
+    def text(self, value: str) -> None:
+        self._owner._ensure_open()
+        value = _comment_string(value, 1024 * 1024, "text")
+        self._owner._call("update_comment", self._id, json.dumps({"text": value}, ensure_ascii=False), _change=True)
+
+    @property
+    def author(self) -> str:
+        return json.loads(self._owner._call("comment_info", self._id))["author"]
+
+    @author.setter
+    def author(self, value: str) -> None:
+        self._owner._ensure_open()
+        value = _comment_string(value, 1024, "author")
+        self._owner._call("update_comment", self._id, json.dumps({"author": value}, ensure_ascii=False), _change=True)
+
+    @property
+    def date(self) -> str:
+        return json.loads(self._owner._call("comment_info", self._id))["date"]
+
+    @date.setter
+    def date(self, value: str) -> None:
+        self._owner._ensure_open()
+        value = _comment_string(value, 20, "date")
+        self._owner._call("update_comment", self._id, json.dumps({"date": value}), _change=True)
+
+    @property
+    def resolved(self) -> bool:
+        return json.loads(self._owner._call("comment_info", self._id))["resolved"]
+
+    @resolved.setter
+    def resolved(self, value: bool) -> None:
+        self._owner._ensure_open()
+        if not isinstance(value, bool):
+            raise TypeError("comment resolved must be a bool")
+        self._owner._call("update_comment", self._id, json.dumps({"resolved": value}), _change=True)
+
+
 class Notes(_Collection["Note"]):
     """Native footnote/endnote stories in creation order."""
     def __init__(self, owner: WordDocument):
         super().__init__(owner, lambda: owner._call("note_ids"), Note)
+
+    def convert(self, *, kind: Literal["footnote", "endnote"]) -> int:
+        """Convert all notes to one kind; return the count changed, retaining handles.
+
+        Destination numbering and placement follow section.note_options(). A no-op
+        keeps ranges and render caches valid; actual conversion invalidates ranges.
+        """
+        self._owner._ensure_open()
+        if not isinstance(kind, str):
+            raise TypeError("note kind must be a string")
+        if str.__len__(kind) > 8:
+            raise ValueError("note kind must be footnote or endnote")
+        kind = str.__str__(kind)
+        if kind not in {"footnote", "endnote"}:
+            raise ValueError("note kind must be footnote or endnote")
+        changed = self._owner._call("convert_notes", kind)
+        if changed:
+            self._owner._invalidate()
+        return changed
 
     def add(self, reference: TextRange, text: str = "", *, kind: str = "footnote") -> Note:
         """Attach a note at a same-document body range's end, retaining its text."""
@@ -1285,8 +1899,48 @@ class Note(EditableStory):
         return json.loads(self._owner._call("note_info", self._id))["kind"]
 
 
+def _format_placement(owner, identifier, snapshot, operation, formatting):
+    """Shared conversion and callback guard for native Word object placement."""
+    label = "picture" if snapshot == "image_formatting" else "shape"
+    owner._call(snapshot, identifier)
+    revision = owner._call("revision")
+    if not formatting:
+        return
+    if formatting.keys() - PictureFormatting.__annotations__.keys():
+        raise ValueError(f"unsupported {label} formatting property")
+    def length(value):
+        result = pt(value)
+        owner._call(snapshot, identifier)
+        if owner._call("revision") != revision:
+            raise ValueError(f"document changed while converting {label} formatting")
+        return result
+
+    patch = {}
+    for key, value in formatting.items():
+        if key in {"wrap", "anchor"}:
+            if not isinstance(value, str) or len(value) > 32:
+                raise TypeError(f"{label} wrap and anchor require supported names")
+            patch[key] = value
+        elif key == "position":
+            if not isinstance(value, (tuple, list)) or len(value) != 2:
+                raise TypeError("position must be an (x, y) pair in points")
+            patch[key] = tuple(map(length, value))
+        else:
+            if isinstance(value, Real):
+                value = (value,) * 4
+            if not isinstance(value, (tuple, list)) or len(value) != 4:
+                raise TypeError("distance must be a number or (top, right, bottom, left) in points")
+            patch[key] = tuple(map(length, value))
+    # Numeric conversions may execute caller code: never retarget a changed owner.
+    owner._call(snapshot, identifier)
+    if owner._call("revision") != revision:
+        raise ValueError(f"document changed while converting {label} formatting")
+    encoded = json.dumps(patch, allow_nan=False)
+    owner._call(operation, identifier, encoded, revision, _change=True)
+
+
 class Pictures(_Collection["Picture"]):
-    """Ordered inline pictures; deletion removes the selected placement."""
+    """Ordered pictures; deletion removes the selected placement."""
     def __init__(self, owner, ids):
         super().__init__(owner, ids, Picture)
 
@@ -1300,30 +1954,48 @@ class Picture:
         self._owner, self._id = owner, identifier
 
     @property
+    def formatting(self) -> _PictureSnapshot:
+        """Owned placement snapshot; lengths are points and distance is top/right/bottom/left."""
+        result = json.loads(self._owner._call("image_formatting", self._id))
+        result["position"] = tuple(result["position"])
+        result["distance"] = tuple(result["distance"])
+        return result
+
+    def format(self, **formatting: Unpack[PictureFormatting]) -> None:
+        """Set native wrapping and placement for direct body pictures.
+
+        Floating wraps are square, top_bottom and behind. Page/margin offsets
+        refer to the anchor paragraph's laid-out page; paragraph offsets follow
+        that paragraph. Lengths use 0.05-point increments. Horizontal distances
+        must match. Front layering and floating nested/story pictures are unavailable.
+        """
+        _format_placement(self._owner, self._id, "image_formatting", "format_image", formatting)
+
+    @property
     def data(self) -> bytes:
         """Owned PNG bytes; assigning a source preserves size and alternative text."""
         return bytes(self._owner._call("image_data", self._id))
 
     @data.setter
-    def data(self, source) -> None:
+    def data(self, source: _Source) -> None:
         from . import _read
         data, _ = _read(source)
         self._owner._call("set_image_data", self._id, data, _change=True)
 
     @property
-    def size(self):
+    def size(self) -> tuple[float, float]:
         return self._owner._call("image_size", self._id)
 
     @size.setter
-    def size(self, value):
+    def size(self, value: _Size) -> None:
         self._owner._call("set_image_size", self._id, *_size(value), _change=True)
 
     @property
-    def alt(self):
+    def alt(self) -> str:
         return self._owner._call("image_alt", self._id)
 
     @alt.setter
-    def alt(self, value: str):
+    def alt(self, value: str) -> None:
         self._owner._call("set_image_alt", self._id, value, _change=True)
 
     @property
@@ -1331,7 +2003,7 @@ class Picture:
         return self._owner._call("image_crop", self._id)
 
     @crop.setter
-    def crop(self, value) -> None:
+    def crop(self, value: tuple[float, float, float, float] | list[float] | None) -> None:
         values = _picture_crop(value)
         self._owner._call("set_image_crop", self._id, values, _change=True)
 
@@ -1354,6 +2026,112 @@ class Picture:
         if not isinstance(value, bool):
             raise TypeError("flip_v must be a boolean")
         self._owner._call("set_image_flips", self._id, flip_v=value, _change=True)
+
+
+def _shape_properties(values, guard):
+    patch = {}
+    for key, value in values.items():
+        if key == "size":
+            if not isinstance(value, (tuple, list)) or len(value) != 2:
+                raise TypeError("shape size requires a (width, height) pair in points")
+            pair = []
+            for item in value:
+                pair.append(pt(item))
+                guard()
+            patch[key] = pair
+        elif key == "fill":
+            patch[key] = None if value is None else _color(value)
+            guard()
+        else:
+            if value is None:
+                patch[key] = None
+            else:
+                if not isinstance(value, (tuple, list)) or len(value) != 2:
+                    raise TypeError("stroke requires (color, width) or None")
+                color = _color(value[0])
+                guard()
+                width = pt(value[1])
+                guard()
+                patch[key] = (color, width)
+    encoded = json.dumps(patch, allow_nan=False)
+    guard()
+    return encoded
+
+
+class _WordShapes(_Collection["_WordShape"]):
+    def __init__(self, owner: WordDocument):
+        super().__init__(owner, lambda: owner._call("shape_ids"), _WordShape)
+
+    def __delitem__(self, index: int) -> None:
+        revision = self._owner._call("revision")
+        identifiers = self._ids()
+        if isinstance(index, slice):
+            raise TypeError("shape deletion requires an integer index")
+        selected = _index(index, len(identifiers))
+        self._owner._ensure_open()
+        if self._owner._call("revision") != revision:
+            raise ValueError("document changed while converting shape index")
+        self._owner._call("remove_shape", identifiers[selected], revision, _change=True)
+
+
+class _WordShape:
+    """An exact owned native rectangle/ellipse placement, independent of PPTX shapes."""
+    def __init__(self, owner: WordDocument, identifier: int):
+        self._owner, self._id = owner, identifier
+
+    def _info(self):
+        return json.loads(self._owner._call("shape_info", self._id))
+
+    def _set(self, key, value):
+        self._info()
+        revision = self._owner._call("revision")
+        def guard():
+            self._info()
+            if self._owner._call("revision") != revision:
+                raise ValueError("document changed while converting shape values")
+        properties = _shape_properties({key: value}, guard)
+        self._owner._call("update_shape", self._id, properties, revision, _change=True)
+
+    @property
+    def kind(self) -> Literal["rectangle", "ellipse"]:
+        return self._info()["kind"]
+
+    @property
+    def size(self) -> tuple[float, float]:
+        return tuple(self._info()["size"])
+
+    @size.setter
+    def size(self, value: tuple[float, float] | list[float]) -> None:
+        self._set("size", value)
+
+    @property
+    def fill(self) -> str | None:
+        value = self._info()["fill"]
+        return None if value is None else _hex_color(value)
+
+    @fill.setter
+    def fill(self, value: _Color | None) -> None:
+        self._set("fill", value)
+
+    @property
+    def stroke(self) -> tuple[str, float] | None:
+        value = self._info()["stroke"]
+        return None if value is None else (_hex_color(value[0]), value[1])
+
+    @stroke.setter
+    def stroke(self, value: tuple[_Color, float] | None) -> None:
+        self._set("stroke", value)
+
+    @property
+    def formatting(self) -> _PictureSnapshot:
+        result = json.loads(self._owner._call("shape_formatting", self._id))
+        result["position"] = tuple(result["position"])
+        result["distance"] = tuple(result["distance"])
+        return result
+
+    def format(self, **formatting: Unpack[PictureFormatting]) -> None:
+        """Apply the same native placement vocabulary as direct-body pictures."""
+        _format_placement(self._owner, self._id, "shape_formatting", "format_shape", formatting)
 
 
 class EditableTable:
@@ -1406,26 +2184,30 @@ class EditableTable:
         return self._id
 
     @property
-    def formatting(self) -> dict:
+    def formatting(self) -> _TableSnapshot:
         """A snapshot of direct native table formatting."""
         return json.loads(self._owner._call("table_formatting", self._word_id()))
 
     def format(self, **formatting: Unpack[TableFormatting]) -> None:
+        identifier = self._word_id()
+        revision = self._owner._call("revision")
+        reference = formatting.get("style")
         if "style" in formatting:
-            formatting["style"] = _style_reference(formatting["style"], self._owner)
-        self._owner._call("table_format_patch", self._word_id(),
-                          _table_format_patch(formatting), _change=True)
+            formatting["style"] = _style_reference(reference, self._owner)
+        patch = _table_format_patch(formatting)
+        _style_guard(self._owner, revision, reference)
+        self._owner._call("table_format_patch", identifier, patch, _change=True)
 
     def fit(self) -> list[float]:
         """Measure native cell content and apply checked column widths."""
         return self._owner._call("fit_table", self._word_id(), _change=True)
 
     @property
-    def column_widths(self):
+    def column_widths(self) -> list[float]:
         return self._owner._call("column_widths", *self._args)
 
     @column_widths.setter
-    def column_widths(self, widths):
+    def column_widths(self, widths: Iterable[float]) -> None:
         values = []
         for width in widths:
             if len(values) >= 1000:
@@ -1434,11 +2216,11 @@ class EditableTable:
         self._owner._call("set_column_widths", *self._args, values, _change=True)
 
     @property
-    def borders(self):
+    def borders(self) -> tuple[str, float] | None:
         return self._owner._call("table_borders", *self._args)
 
     @borders.setter
-    def borders(self, value):
+    def borders(self, value: tuple[_Color, float] | list[_Color | float] | None) -> None:
         if value is None:
             self._owner._call("clear_table_borders", *self._args, _change=True)
         elif isinstance(value, (tuple, list)) and len(value) == 2:
@@ -1507,12 +2289,12 @@ class EditableRow:
 
 
     @property
-    def height(self):
+    def height(self) -> tuple[float | None, str]:
         """(height in points or None, rule): auto, at_least or exact."""
         return self._table._owner._call("row_height", *self._args)
 
     @height.setter
-    def height(self, value):
+    def height(self, value: tuple[float | None, str] | list[float | str | None] | None) -> None:
         if value is None:
             height, rule = None, "auto"
         elif isinstance(value, (tuple, list)) and len(value) == 2:
@@ -1522,22 +2304,22 @@ class EditableRow:
         self._table._owner._call("set_row_height", *self._args, height, rule, _change=True)
 
     @property
-    def repeat_header(self):
+    def repeat_header(self) -> bool:
         self._check()
         return self._table._owner._call("row_repeat_header", self._table._word_id(), self._index)
 
     @repeat_header.setter
-    def repeat_header(self, value: bool):
+    def repeat_header(self, value: bool) -> None:
         self._check()
         self._table._owner._call("set_row_repeat_header", self._table._word_id(), self._index, value, _change=True)
 
     @property
-    def allow_split(self):
+    def allow_split(self) -> bool:
         self._check()
         return self._table._owner._call("row_allow_split", self._table._word_id(), self._index)
 
     @allow_split.setter
-    def allow_split(self, value: bool):
+    def allow_split(self, value: bool) -> None:
         self._check()
         self._table._owner._call("set_row_allow_split", self._table._word_id(), self._index, value, _change=True)
 
@@ -1564,7 +2346,7 @@ class EditableCell:
         return table._owner._call("cell_text", *self._args)
 
     @text.setter
-    def text(self, value: str):
+    def text(self, value: str) -> None:
         table = self._table
         table._owner._call("set_cell_text", *self._args, value, _change=True)
 
@@ -1577,20 +2359,20 @@ class EditableCell:
 
     def _children(self, kind, factory):
         owner = self._table._owner
-        return _Collection(owner, lambda: owner._call(f"cell_{kind}_ids", *self._content_args()), factory)
+        return _Tables(owner, lambda: owner._call(f"cell_{kind}_ids", *self._content_args()), factory)
 
     @property
-    def paragraphs(self) -> _Collection[Paragraph]:
+    def paragraphs(self) -> _Paragraphs:
         if self._table._slide is not None:
             owner = self._table._owner
             def targets():
                 row, column, grid, body, count = owner._call("cell_paragraph_info", *self._args)
                 return [(row, column, index, grid, body) for index in range(count)]
-            return _Collection(owner, targets, lambda owner, target: _SlideCellParagraph(self, target))
-        return self._children("paragraph", Paragraph)
+            return _Paragraphs(owner, targets, lambda owner, target: _SlideCellParagraph(self, target))
+        return _Paragraphs(self._table._owner, lambda: self._table._owner._call("cell_paragraph_ids", *self._content_args()), Paragraph)
 
     @property
-    def tables(self) -> _Collection[EditableTable]:
+    def tables(self) -> _Tables:
         return self._children("table", EditableTable)
 
     @property
@@ -1606,8 +2388,12 @@ class EditableCell:
                 raise UnsupportedFormatError("named paragraph styles are unavailable in PPTX cells")
             target = self._table._owner._call("cell_add_paragraph", *self._args, text, _change=True)
             return _SlideCellParagraph(self, target)
-        style = _style_reference(style, self._table._owner)
+        owner = self._table._owner
+        revision = owner._call("revision")
+        original_style = style
+        style = _style_reference(style, owner)
         args = self._content_args()
+        _style_guard(owner, revision, original_style)
         def append(native):
             identifier = native.cell_add_paragraph(*args, text)
             if style is not None:
@@ -1639,7 +2425,7 @@ class EditableCell:
         table._owner._call("split_cell", *self._args, columns, _change=True)
 
     @property
-    def formatting(self) -> dict:
+    def formatting(self) -> _CellSnapshot:
         """A snapshot of direct native cell formatting."""
         self._check()
         return json.loads(self._table._owner._call("cell_formatting", self._table._word_id(), self._row, self._column))
@@ -1654,7 +2440,7 @@ class EditableCell:
         return self._table._owner._call("cell_margins", *self._args)
 
     @margins.setter
-    def margins(self, value):
+    def margins(self, value: Real | float | tuple[float, float, float, float] | list[float] | None) -> None:
         self._table._owner._call("set_cell_margins", *self._args, None if value is None else _margins(value), _change=True)
 
     @property
@@ -1662,27 +2448,27 @@ class EditableCell:
         return self._table._owner._call("cell_alignment", *self._args)
 
     @alignment.setter
-    def alignment(self, value: str | None):
+    def alignment(self, value: str | None) -> None:
         self._table._owner._call("set_cell_alignment", *self._args, value, _change=True)
 
     @property
-    def background(self):
+    def background(self) -> str | None:
         table = self._table
         value = table._owner._call("cell_background", *self._args)
         return None if value is None else _hex_color(value)
 
     @background.setter
-    def background(self, value):
+    def background(self, value: _Color) -> None:
         table = self._table
         table._owner._call("set_cell_background", *self._args, _hex_color(value) if table._slide is None else _color(value), _change=True)
 
     @property
-    def vertical_alignment(self):
+    def vertical_alignment(self) -> str | None:
         table = self._table
         return table._owner._call("cell_vertical_alignment", *self._args)
 
     @vertical_alignment.setter
-    def vertical_alignment(self, value: str):
+    def vertical_alignment(self, value: str) -> None:
         table = self._table
         table._owner._call("set_cell_vertical_alignment", *self._args, value, _change=True)
 
@@ -1690,16 +2476,30 @@ class EditableCell:
 class PdfDocument(EditableDocument):
     _format = "pdf"
 
+    def to_bytes(self, *, object_streams: bool = True) -> bytes:
+        """Serialize PDF; false selects classic xref tables without object-stream packing."""
+        self._ensure_open()
+        if type(object_streams) is not bool:
+            raise TypeError("object_streams must be a bool")
+        return bytes(self._call("to_bytes", object_streams))
+
+    def save(self, destination: str | Path | BinaryIO, *, object_streams: bool = True) -> None:
+        """Save PDF with the selected object representation; path replacement is atomic."""
+        self._ensure_open()
+        if type(object_streams) is not bool:
+            raise TypeError("object_streams must be a bool")
+        self._save(destination, lambda: self.to_bytes(object_streams=object_streams))
+
     @property
     def fields(self) -> PdfFields:
         return PdfFields(self)
 
     @property
-    def metadata(self):
+    def metadata(self) -> _PdfMetadata:
         """A snapshot of supported document-info fields."""
         return json.loads(self._call("metadata"))
 
-    def update_metadata(self, **values):
+    def update_metadata(self, **values: Unpack[_PdfMetadataPatch]) -> None:
         """Update title/author/subject/keywords; None or empty strings clear fields."""
         if values.keys() - {"title", "author", "subject", "keywords"}:
             raise ValueError("metadata keys must be title, author, subject or keywords")
@@ -1715,7 +2515,7 @@ class PdfDocument(EditableDocument):
         return Bookmarks(self)
 
     @property
-    def page_count(self):
+    def page_count(self) -> int:
         return self._call("page_count")
 
     @property
@@ -1775,25 +2575,56 @@ class PdfFields:
         self._owner._field_generation += 1
         self._owner._annotation_generations[page] = self._owner._annotation_generations.get(page, 0) + 1
 
-    def add(self, name: str, box, *, kind: str = "text", options=()) -> PdfField:
-        """Create one text, checkbox or choice widget on this page."""
+    def add(self, name: str, box=None, *, kind: str = "text", options=(), boxes=None) -> PdfField:
+        """Create one widget, or an immutable same-page radio group using boxes and options."""
         if self._page is None:
             raise ValueError("add fields through page.fields")
-        page = self._page_number()
-        if not isinstance(box, (tuple, list)) or len(box) != 4:
+        self._page_number()
+        if not isinstance(kind, str):
+            raise TypeError("field kind must be a string")
+        kind = str.__str__(kind)
+        radio = kind == "radio"
+        if radio:
+            if box is not None or boxes is None:
+                raise ValueError("radio groups require boxes instead of box")
+        elif boxes is not None:
+            raise ValueError("boxes is only supported for radio groups")
+        elif not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in top-left points")
         if isinstance(options, (str, bytes)):
-            raise TypeError("options must be a sequence of choice strings")
+            raise TypeError("options must be a sequence of strings")
         values = []
+        maximum = 32 if radio else 256
         for value in options:
-            if len(values) >= 256:
-                raise ValueError("choice fields must not exceed 256 options")
+            if len(values) >= maximum:
+                raise ValueError(f"field must not exceed {maximum} options")
             if not isinstance(value, str):
-                raise TypeError("choice options must be strings")
-            if len(value) > 4096 or len(value.encode("utf-8")) > 4096:
-                raise ValueError("choice options must not exceed 4096 bytes")
-            values.append(value)
-        identifier = self._owner._call("add_field", page, name, kind, tuple(map(pt, box)), values, _change=True)
+                raise TypeError("field options must be strings")
+            if str.__len__(value) > 4096:
+                raise ValueError("field options must not exceed 4096 bytes")
+            try:
+                encoded = str.encode(value, "utf-8")
+            except UnicodeEncodeError as error:
+                raise ValueError("field options must be valid Unicode") from error
+            if len(encoded) > 4096:
+                raise ValueError("field options must not exceed 4096 bytes")
+            values.append(encoded.decode("utf-8"))
+        if radio:
+            coordinates = []
+            for item in boxes:
+                if len(coordinates) >= 32:
+                    raise ValueError("radio groups must not exceed 32 boxes")
+                if not isinstance(item, (tuple, list)) or len(item) != 4:
+                    raise TypeError("each box must be (x, y, width, height) in top-left points")
+                coordinates.append(tuple(map(pt, item)))
+            payload = json.dumps(coordinates, allow_nan=False)
+            # All caller iteration/conversion is complete before resolving the original page.
+            page = self._page_number()
+            identifier = self._owner._call("add_radio_field", page, name, payload, values, _change=True)
+        else:
+            coordinates = tuple(map(pt, box))
+            page = self._page_number()
+            identifier = self._owner._call("add_field", page, name, kind, coordinates, values, _change=True)
         self._owner._field_generation += 1
         return PdfField(self._owner, identifier)
 
@@ -1842,12 +2673,20 @@ class PdfField:
         return PdfPage(self._owner, self._info()["widgets"][0]["page"])
 
     @property
+    def boxes(self) -> tuple[tuple[float, float, float, float], ...]:
+        """Owned widget boxes in page view points; radio group geometry is immutable."""
+        return tuple(tuple(widget["box"]) for widget in self._info()["widgets"])
+
+    @property
     def box(self) -> tuple[float, float, float, float]:
         """Widget (x, y, width, height) in current page view points."""
-        return tuple(self._info()["widgets"][0]["box"])
+        info = self._info()
+        if info["kind"] == "radio":
+            raise UnsupportedFormatError("radio groups have multiple boxes; use field.boxes")
+        return tuple(info["widgets"][0]["box"])
 
     @box.setter
-    def box(self, value) -> None:
+    def box(self, value: _Box) -> None:
         if not isinstance(value, (tuple, list)) or len(value) != 4:
             raise TypeError("box must be (x, y, width, height) in top-left points")
         coordinates = tuple(map(pt, value))
@@ -1856,18 +2695,89 @@ class PdfField:
         self._owner._call("set_field_box", self._name, coordinates, _change=True)
 
     @property
+    def read_only(self) -> bool:
+        """Whether native filling is disabled, including assignments through value."""
+        return self._info()["read_only"]
+
+    @read_only.setter
+    def read_only(self, value: bool) -> None:
+        self._check()
+        if type(value) is not bool:
+            raise TypeError("field read_only must be a bool")
+        self._owner._call("set_field_read_only", self._name, value, _change=True)
+
+    @property
+    def tooltip(self) -> str:
+        """Owned field help text; an empty string clears it without changing its value."""
+        return self._info()["tooltip"]
+
+    @tooltip.setter
+    def tooltip(self, value: str) -> None:
+        self._check()
+        if not isinstance(value, str):
+            raise TypeError("field tooltip must be a string")
+        if str.__len__(value) > 4096:
+            raise ValueError("field tooltip must not exceed 4096 UTF-8 bytes")
+        text = str.__str__(value)
+        try:
+            encoded = str.encode(text, "utf-8")
+        except UnicodeEncodeError:
+            raise ValueError("field tooltip must contain valid Unicode") from None
+        if len(encoded) > 4096:
+            raise ValueError("field tooltip must not exceed 4096 UTF-8 bytes")
+        if "\0" in text:
+            raise ValueError("field tooltip must not contain NUL")
+        self._check()
+        self._owner._call("set_field_tooltip", self._name, text, _change=True)
+
+    @property
     def value(self) -> str | bool | None:
         return self._info()["value"]
 
     @value.setter
-    def value(self, value: str | bool | None):
+    def value(self, value: str | bool | None) -> None:
         self._check()
         if value is not None and not isinstance(value, (str, bool)):
-            raise TypeError("field values must be text, a checkbox bool or None for a choice")
-        if isinstance(value, str) and (len(value) > 4096 or len(value.encode("utf-8")) > 4096):
-            raise ValueError("field values must not exceed 4096 bytes")
-        self._owner._call("set_field_value", self._name,
-                          json.dumps(value, ensure_ascii=False, allow_nan=False), _change=True)
+            raise TypeError("field values must be text, a checkbox bool or None for a choice or radio")
+        if isinstance(value, str):
+            if str.__len__(value) > 4096:
+                raise ValueError("field values must not exceed 4096 UTF-8 bytes")
+            value = str.__str__(value)
+            try:
+                encoded = str.encode(value, "utf-8")
+            except UnicodeEncodeError:
+                raise ValueError("field values must contain valid Unicode") from None
+            if len(encoded) > 4096:
+                raise ValueError("field values must not exceed 4096 UTF-8 bytes")
+        payload = json.dumps(value, ensure_ascii=False, allow_nan=False)
+        self._check()
+        self._owner._call("set_field_value", self._name, payload, _change=True)
+
+
+class _WordBookmarks:
+    """DOCX whole-paragraph or endpoint targets; PDF bookmarks are outlines."""
+    def __init__(self, owner: WordDocument):
+        self._owner = owner
+
+    def __len__(self) -> int:
+        return len(self._owner._call("bookmark_names"))
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._owner._call("bookmark_names"))
+
+    def __getitem__(self, name: str) -> TextRange:
+        identifier, start, end, revision = self._owner._call("bookmark_range", name)
+        return TextRange(Paragraph(self._owner, identifier), start, end, revision)
+
+    def __setitem__(self, name: str, selection: TextRange) -> None:
+        self._owner._ensure_open()
+        if not isinstance(selection, TextRange) or selection._paragraph._owner is not self._owner:
+            raise ValueError("bookmark selection must be a TextRange from this document")
+        self._owner._call("set_bookmark", name, selection._paragraph._id,
+                          selection._start, selection._end, selection._revision, _change=True)
+
+    def __delitem__(self, name: str) -> None:
+        self._owner._call("delete_bookmark", name, _change=True)
 
 
 class Bookmarks(_Collection["Bookmark"]):
@@ -1945,34 +2855,34 @@ class Bookmark:
         raise ValueError("bookmark no longer exists")
 
     @property
-    def children(self):
+    def children(self) -> Bookmarks:
         self._check()
         return Bookmarks(self._owner, self._path, self)
 
     @property
-    def title(self):
+    def title(self) -> str:
         return self._value()["title"]
 
     @title.setter
-    def title(self, value: str):
+    def title(self, value: str) -> None:
         self._check()
         self._owner._call("update_bookmark", list(self._path), title=value, _change=True)
 
     @property
-    def page(self):
+    def page(self) -> int | None:
         return self._value()["page"]
 
     @page.setter
-    def page(self, value: int):
+    def page(self, value: int) -> None:
         self._check()
         self._owner._call("update_bookmark", list(self._path), page=_index(value, self._owner.page_count), _change=True)
 
     @property
-    def expanded(self):
+    def expanded(self) -> bool:
         return self._value()["open"]
 
     @expanded.setter
-    def expanded(self, value: bool):
+    def expanded(self, value: bool) -> None:
         self._check()
         self._owner._call("update_bookmark", list(self._path), open=value, _change=True)
 
@@ -1986,12 +2896,42 @@ class PdfPages(_Collection["PdfPage"]):
         identifier = self._owner._call("add_page", *_size(size), _change=True)
         return PdfPage(self._owner, identifier)
 
+    def _selection(self):
+        self._owner._ensure_open()
+        return self._owner._page_generation, self._owner.page_count
+
+    def _selected_index(self, index, selection):
+        value = operator.index(index)
+        if self._selection() != selection:
+            raise ValueError("page selection is stale after page organization")
+        return _index(value, selection[1])
+
+    @overload
+    def __getitem__(self, index: int) -> PdfPage: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> list[PdfPage]: ...
+
+    def __getitem__(self, index):
+        selection = self._selection()
+        if isinstance(index, slice):
+            indices = list(range(selection[1]))[index]
+            if self._selection() != selection:
+                raise ValueError("page selection is stale after page organization")
+            return [PdfPage(self._owner, value) for value in indices]
+        return PdfPage(self._owner, self._selected_index(index, selection))
+
     def __delitem__(self, index):
-        self._owner._call("delete_page", _index(index, len(self)), _change=True)
+        selection = self._selection()
+        index = self._selected_index(index, selection)
+        self._owner._call("delete_page", index, _change=True)
         self._owner._page_generation += 1
 
     def move(self, index: int, destination: int) -> None:
-        self._owner._call("move_page", _index(index, len(self)), _index(destination, len(self)), _change=True)
+        selection = self._selection()
+        index = self._selected_index(index, selection)
+        destination = self._selected_index(destination, selection)
+        self._owner._call("move_page", index, destination, _change=True)
         self._owner._page_generation += 1
 
     def insert(self, index: int, source: _Source | EditableDocument | Document, *, pages: Iterable[SupportsIndex] | None = None, password: str | None = None, outline_title: str | None = None) -> list[PdfPage]:
@@ -2037,12 +2977,12 @@ class PdfPage:
             raise ValueError("page handle is stale after page organization; retrieve it again")
 
     @property
-    def number(self):
+    def number(self) -> int:
         self._check()
         return self._id
 
     @property
-    def size(self):
+    def size(self) -> tuple[float, float]:
         self._check()
         return self._owner._call("page_size", self._id)
 
@@ -2059,22 +2999,27 @@ class PdfPage:
             if not isinstance(box, (tuple, list)) or len(box) != 4:
                 raise TypeError("box must be (x, y, width, height) in current view points")
             box = tuple(map(pt, box))
+        self._check()
         self._owner._call("set_page_box", self._id, kind, box, _change=True)
         self._owner._page_generation += 1
         self._generation = self._owner._page_generation
 
     @property
-    def background(self):
+    def background(self) -> str | None:
         self._check()
         value = self._owner._call("background", self._id)
         return None if value is None else _hex_color(value)
 
     @background.setter
-    def background(self, value):
+    def background(self, value: _Color) -> None:
         self._check()
-        self._owner._call("set_background", self._id, _color(value), _change=True)
+        rgb = _color(value)
+        self._check()
+        self._owner._call("set_background", self._id, rgb, _change=True)
 
-    def rotate(self, degrees: int):
+    def rotate(self, degrees: SupportsIndex) -> None:
+        self._check()
+        degrees = operator.index(degrees)
         self._check()
         self._owner._call("rotate_page", self._id, degrees, _change=True)
         self._owner._page_generation += 1
@@ -2090,15 +3035,23 @@ class PdfPage:
         self._check()
         return Annotations(self)
 
-    def draw_text(self, text: str, *, at: tuple[float, float] | None = None,
-                  box: tuple[float, float, float, float] | None = None,
-                  font_size: float = 12, font=None, color="black", align: str = "left"):
+    def draw_text(self, text: str, *, at: tuple[float, float] | list[float] | None = None,
+                  box: _Box | None = None,
+                  font_size: float = 12, font: _Source | None = None,
+                  color: _Color = "black", align: str = "left",
+                  behind: bool = False) -> None:
         """Draw searchable text at a point or inside a bounded top-left box.
 
         Built-in fonts wrap within boxes; supplied fonts require explicit lines.
         Overflow fails atomically. Alignment applies only to boxes.
+        behind=True prepends built-in text beneath existing page content; supplied
+        fonts are unavailable there. Later underlays paint beneath earlier ones.
         """
         self._check()
+        if not isinstance(behind, bool):
+            raise TypeError("behind must be a boolean")
+        if behind and font is not None:
+            raise UnsupportedFormatError("PDF underlays with supplied fonts are unavailable")
         if (at is None) == (box is None):
             raise ValueError("provide exactly one of at or box")
         if not isinstance(align, str) or align not in {"left", "center", "right", "justify"}:
@@ -2111,19 +3064,25 @@ class PdfPage:
             if font is not None:
                 from . import _read
                 data, _ = _read(font, limit=16 * 1024 * 1024)
-            self._owner._call("add_text_box", self._id, text, rect, pt(font_size),
-                              _color(color), align, data, _change=True)
+            size, rgb = pt(font_size), _color(color)
+            self._check()
+            self._owner._call("add_text_box", self._id, text, rect, size,
+                              rgb, align, data, behind, _change=True)
             return
         if align != "left":
             raise ValueError("alignment requires a text box")
         if not isinstance(at, (tuple, list)) or len(at) != 2:
             raise TypeError("at must be an (x, y) pair in top-left points")
-        if font is None:
-            self._owner._call("add_text", self._id, text, pt(at[0]), pt(at[1]), pt(font_size), _color(color), _change=True)
-        else:
+        data = None
+        if font is not None:
             from . import _read
             data, _ = _read(font, limit=16 * 1024 * 1024)
-            self._owner._call("add_text_with_font", self._id, text, pt(at[0]), pt(at[1]), pt(font_size), data, _color(color), _change=True)
+        x, y, size, rgb = pt(at[0]), pt(at[1]), pt(font_size), _color(color)
+        self._check()
+        if font is None:
+            self._owner._call("add_text", self._id, text, x, y, size, rgb, behind, _change=True)
+        else:
+            self._owner._call("add_text_with_font", self._id, text, x, y, size, data, rgb, _change=True)
 
     def draw_path(self, commands, *, stroke="black", fill=None, width: float = 1, close: bool = False):
         """Draw move/line/curve commands in top-left points through the native writer."""
@@ -2141,16 +3100,25 @@ class PdfPage:
         payload = json.dumps(normalized, separators=(",", ":"), allow_nan=False)
         if len(payload) > 262144:
             raise ValueError("path commands exceed 256 KiB")
-        self._owner._call("draw_path", self._id, payload, None if stroke is None else _color(stroke), None if fill is None else _color(fill), pt(width), close, _change=True)
+        stroke_rgb = None if stroke is None else _color(stroke)
+        fill_rgb = None if fill is None else _color(fill)
+        stroke_width = pt(width)
+        self._check()
+        self._owner._call("draw_path", self._id, payload, stroke_rgb, fill_rgb, stroke_width, close, _change=True)
 
-    def add_image(self, source, *, box, crop=None, rotation: int = 0,
-                  flip_h: bool = False, flip_v: bool = False):
+    def add_image(self, source: _Source, *, box: _Box, crop: _Box | None = None,
+                  rotation: SupportsIndex = 0, flip_h: bool = False,
+                  flip_v: bool = False, behind: bool = False) -> None:
         """Place an image with optional visual crop, quarter-turn and flips.
 
         Crop is (left, top, right, bottom), each a fraction from 0 to 0.45.
         Rotation is counterclockwise. Original embedded pixels are retained.
+        behind=True prepends beneath existing content, which may hide the image.
+        Later underlays paint beneath earlier ones.
         """
         self._check()
+        if not isinstance(behind, bool):
+            raise TypeError("behind must be a boolean")
         from . import _read
         if not isinstance(box, (tuple, list)) or len(box) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
@@ -2168,12 +3136,24 @@ class PdfPage:
         if not isinstance(flip_h, bool) or not isinstance(flip_v, bool):
             raise TypeError("flip_h and flip_v must be booleans")
         data, _ = _read(source)
-        self._owner._call("add_image", self._id, data, *map(pt, box), crop,
-                          rotation, flip_h, flip_v, _change=True)
+        rect = tuple(map(pt, box))
+        self._check()
+        self._owner._call("add_image", self._id, data, *rect, crop,
+                          rotation, flip_h, flip_v, behind, _change=True)
 
     def get_pixmap(self, dpi: float = 144, *, clip: tuple[float, float, float, float] | None = None) -> bytes:
         self._check()
         return self._owner.render_page(self._id, dpi, clip=clip)
+
+    def search_for(self, text: str) -> list[tuple[float, float, float, float]]:
+        """Find native PDF text geometry in the current read snapshot; see Page.search_for."""
+        self._check()
+        from ._document import _search_empty, _search_query
+        text = _search_query(text)
+        self._check()
+        if _search_empty(text):
+            return []
+        return self._owner._snapshot()[self._id].search_for(text)
 
     @overload
     def get_text(self, option: Literal["text", "markdown", "json"] = "text") -> str: ...
@@ -2210,14 +3190,18 @@ class Annotations(_Collection["Annotation"]):
     def add(self, kind: str, *, box: _Box, text: str = "", author: str = "", color: _Color = "#FFD200") -> Annotation:
         """Add a supported annotation in a top-left (x, y, width, height) point box."""
         self._page._check()
-        identifier = self._owner._call("add_annotation", self._page.number, kind, _annotation_rect(box), text, author, _color(color), _change=True)
+        rect, rgb = _annotation_rect(box), _color(color)
+        self._page._check()
+        identifier = self._owner._call("add_annotation", self._page.number, kind, rect, text, author, rgb, _change=True)
         return Annotation(self._page, identifier)
 
     def add_link(self, *, box: _Box, uri: str | None = None, page: int | None = None) -> Annotation:
         """Add a URL or zero-based page link in a top-left point box."""
         self._page._check()
+        rect = _annotation_rect(box)
         target = None if page is None else _index(page, self._owner.page_count)
-        identifier = self._owner._call("add_link", self._page.number, _annotation_rect(box), uri, target, _change=True)
+        self._page._check()
+        identifier = self._owner._call("add_link", self._page.number, rect, uri, target, _change=True)
         return Annotation(self._page, identifier)
 
     def __delitem__(self, index):
@@ -2250,66 +3234,102 @@ class Annotation:
                 return value
         raise ValueError("annotation no longer exists")
 
-    def update(self, *, text: str | None = None, box=None, color=None, uri: str | None = None, page: int | None = None, author: str | None = None):
+    def update(self, *, text: str | None = None, box: _Box | None = None, color: _Color | None = None, uri: str | None = None, page: int | None = None, author: str | None = None, opacity: float | None = None) -> None:
+        self._check()
+        rect = None if box is None else _annotation_rect(box)
+        rgb = None if color is None else _color(color)
+        target = None if page is None else _index(page, self._page._owner.page_count)
+        if opacity is not None:
+            if isinstance(opacity, (bool, str, bytes)):
+                raise TypeError("annotation opacity must be a number")
+            opacity = float(opacity)
+            if not math.isfinite(opacity) or not 0 <= opacity <= 1:
+                raise ValueError("annotation opacity must be finite and between 0 and 1")
         self._check()
         self._page._owner._call("update_annotation", self._page.number, self._id,
-            text=text, rect=None if box is None else _annotation_rect(box),
-            color=None if color is None else _color(color), uri=uri,
-            target_page=None if page is None else _index(page, self._page._owner.page_count),
-            author=author, _change=True)
+            text=text, rect=rect, color=rgb, uri=uri, target_page=target,
+            author=author, opacity=opacity, _change=True)
 
     @property
-    def kind(self):
+    def opacity(self) -> float:
+        """Native comment opacity from 0 (transparent) to 1 (opaque)."""
+        self._check()
+        return self._page._owner._call("annotation_opacity", self._page.number, self._id)
+
+    @opacity.setter
+    def opacity(self, value: float) -> None:
+        if value is None:
+            self._check()
+            raise TypeError("annotation opacity must be a number")
+        self.update(opacity=value)
+
+    @property
+    def locked(self) -> bool:
+        """Whether native comment editing is locked; this is not access control."""
+        value = self._value()
+        if value["kind"] not in ("note", "highlight", "underline", "strikeout", "squiggly", "rectangle", "ellipse"):
+            raise UnsupportedFormatError("locking this annotation kind is not available")
+        return value["locked"]
+
+    @locked.setter
+    def locked(self, value: bool) -> None:
+        self._check()
+        if type(value) is not bool:
+            raise TypeError("annotation locked must be a bool")
+        self._page._owner._call("set_annotation_locked", self._page.number, self._id, value, _change=True)
+
+    @property
+    def kind(self) -> str:
         return self._value()["kind"]
 
     @property
-    def box(self):
+    def box(self) -> tuple[float, float, float, float]:
         x0, y0, x1, y1 = self._value()["rect"]
         return x0, y0, x1 - x0, y1 - y0
 
     @box.setter
-    def box(self, value):
+    def box(self, value: _Box) -> None:
         self.update(box=value)
 
     @property
-    def text(self):
+    def text(self) -> str:
         return self._value()["text"]
 
     @text.setter
-    def text(self, value: str):
+    def text(self, value: str) -> None:
         self.update(text=value)
 
     @property
-    def author(self):
+    def author(self) -> str:
         return self._value()["author"]
 
     @author.setter
-    def author(self, value: str):
+    def author(self, value: str) -> None:
         self.update(author=value)
 
     @property
-    def color(self):
+    def color(self) -> str | None:
         value = self._value()["color"]
         return None if value is None else _hex_color(value)
 
     @color.setter
-    def color(self, value):
+    def color(self, value: _Color | None) -> None:
         self.update(color=value)
 
     @property
-    def uri(self):
+    def uri(self) -> str | None:
         return self._value()["uri"]
 
     @uri.setter
-    def uri(self, value: str):
+    def uri(self, value: str) -> None:
         self.update(uri=value)
 
     @property
-    def target_page(self):
+    def target_page(self) -> int | None:
         return self._value()["target_page"]
 
     @target_page.setter
-    def target_page(self, value: int):
+    def target_page(self, value: int) -> None:
         self.update(page=value)
 
 
@@ -2317,7 +3337,7 @@ class Presentation(EditableDocument):
     _format = "pptx"
 
     @property
-    def page_count(self):
+    def page_count(self) -> int:
         return self._call("slide_count")
 
     @property
@@ -2334,11 +3354,25 @@ class Slides(_Collection["Slide"]):
         index = self._owner._call("add_slide", layout, _change=True)
         return Slide(self._owner, self._owner._call("slide_id", index))
 
+    def _selected_index(self, index, identifiers):
+        value = operator.index(index)
+        self._owner._ensure_open()
+        if tuple(self._ids()) != identifiers:
+            raise ValueError("slide selection is stale after slide organization")
+        return _index(value, len(identifiers))
+
     def __delitem__(self, index):
-        self._owner._call("remove_slide", _index(index, len(self)), _change=True)
+        self._owner._ensure_open()
+        identifiers = tuple(self._ids())
+        index = self._selected_index(index, identifiers)
+        self._owner._call("remove_slide", index, _change=True)
 
     def move(self, index: int, destination: int) -> None:
-        self._owner._call("move_slide", _index(index, len(self)), _index(destination, len(self)), _change=True)
+        self._owner._ensure_open()
+        identifiers = tuple(self._ids())
+        index = self._selected_index(index, identifiers)
+        destination = self._selected_index(destination, identifiers)
+        self._owner._call("move_slide", index, destination, _change=True)
 
 
 class Slide:
@@ -2346,58 +3380,64 @@ class Slide:
         self._owner, self._id = owner, identifier
 
     @property
-    def number(self):
+    def number(self) -> int:
         return self._owner._call("slide_index", self._id)
 
     @property
-    def size(self):
+    def size(self) -> tuple[float, float]:
         self.number
         return self._owner._call("slide_size")
 
     @property
-    def name(self):
+    def name(self) -> str:
         return self._owner._call("slide_name", self.number)
 
     @name.setter
-    def name(self, value):
+    def name(self, value: str) -> None:
         self._owner._call("set_slide_name", self.number, value, _change=True)
 
     @property
-    def hidden(self):
+    def hidden(self) -> bool:
         return self._owner._call("slide_hidden", self.number)
 
     @hidden.setter
-    def hidden(self, value):
+    def hidden(self, value: bool) -> None:
         self._owner._call("set_slide_hidden", self.number, value, _change=True)
 
     @property
-    def notes(self):
+    def notes(self) -> str:
         return self._owner._call("slide_notes", self.number)
 
     @notes.setter
-    def notes(self, value):
+    def notes(self, value: str) -> None:
         self._owner._call("set_slide_notes", self.number, value, _change=True)
 
     @property
-    def background(self):
+    def background(self) -> str | None:
+        """Explicit solid color, or None when the slide inherits its background."""
         value = self._owner._call("slide_background", self.number)
         return None if value is None else _hex_color(value)
 
     @background.setter
-    def background(self, color):
-        self._owner._call("background", self.number, _color(color), _change=True)
+    def background(self, color: _Color | None) -> None:
+        self.number  # Reject a deleted slide or closed owner before caller callbacks.
+        if color is None:
+            self._owner._call("clear_background", self.number, _change=True)
+        else:
+            rgb = _color(color)
+            self._owner._call("background", self.number, rgb, _change=True)
 
     @property
     def shapes(self) -> Shapes:
         return Shapes(self)
 
     @property
-    def background_image(self):
+    def background_image(self) -> bytes | None:
         value = self._owner._call("background_image", self.number)
         return None if value is None else bytes(value)
 
     @background_image.setter
-    def background_image(self, source):
+    def background_image(self, source: _Source) -> None:
         from . import _read
         data, _ = _read(source)
         self._owner._call("set_background_image", self.number, data, _change=True)
@@ -2485,6 +3525,10 @@ class Shape:
     def __init__(self, owner: Presentation, slide: int, identifier: int):
         self._owner, self._slide, self._id = owner, slide, identifier
 
+    def _check(self):
+        # A cheap native lookup validates both the stable slide and shape IDs.
+        self._owner._call("shape_placeholder", self._slide_number, self._id)
+
     @property
     def placeholder(self) -> str | None:
         """Native inherited placeholder role, or None for an ordinary shape."""
@@ -2505,7 +3549,9 @@ class Shape:
         return _slice_range(self, key, _SlideTextRange)
 
     def add_run(self, text: str, **formatting: Unpack[CharacterFormatting]) -> _SlideTextRange:
-        start, end, revision = self._owner._call("add_run_patch", *self._range_args, text, _format_patch(formatting, rgb_highlight=True), _change=True)
+        self._check()
+        patch = _format_patch(formatting, rgb_highlight=True)
+        start, end, revision = self._owner._call("add_run_patch", *self._range_args, text, patch, _change=True)
         return _SlideTextRange(self, start, end, revision)
 
     def find(self, text: str) -> list[_SlideTextRange]:
@@ -2524,7 +3570,7 @@ class Shape:
         return _slide_link_value(self._owner, self._link_info())
 
     @link.setter
-    def link(self, target: str | Slide | None):
+    def link(self, target: str | Slide | None) -> None:
         url, slide_id = _slide_link_target(self._owner, target)
         previous = self._link_info()
         tooltip = previous[2] if previous is not None and target is not None else ""
@@ -2536,36 +3582,40 @@ class Shape:
         return "" if info is None else info[2]
 
     @link_tooltip.setter
-    def link_tooltip(self, value: str):
+    def link_tooltip(self, value: str) -> None:
         info = self._link_info()
         if info is None:
             raise ValueError("set a link before setting its tooltip")
         self._owner._call("set_shape_link", self._slide_number, self._id, info[0], info[1], value, _change=True)
 
     @property
-    def rotation(self):
+    def rotation(self) -> float:
         return self._owner._call("shape_rotation", self._slide_number, self._id)
 
     @rotation.setter
-    def rotation(self, degrees):
-        self._owner._call("set_shape_rotation", self._slide_number, self._id, pt(degrees), _change=True)
+    def rotation(self, degrees: float) -> None:
+        self._check()
+        angle = pt(degrees)
+        self._owner._call("set_shape_rotation", self._slide_number, self._id, angle, _change=True)
 
     @property
-    def fill(self):
+    def fill(self) -> str | None:
         value = self._owner._call("shape_fill", self._slide_number, self._id)
         return None if value is None else _hex_color(value)
 
     @fill.setter
-    def fill(self, color):
-        self._owner._call("set_shape_fill", self._slide_number, self._id, None if color is None else _color(color), _change=True)
+    def fill(self, color: _Color | None) -> None:
+        self._check()
+        rgb = None if color is None else _color(color)
+        self._owner._call("set_shape_fill", self._slide_number, self._id, rgb, _change=True)
 
     @property
-    def stroke(self):
+    def stroke(self) -> tuple[str, float] | None:
         value = self._owner._call("shape_stroke", self._slide_number, self._id)
         return None if value is None else (_hex_color(value[0]), value[1])
 
     @stroke.setter
-    def stroke(self, value):
+    def stroke(self, value: tuple[_Color, float] | list[_Color | float] | None) -> None:
         if value is None:
             color, width = None, 1
         elif isinstance(value, (tuple, list)) and len(value) == 2:
@@ -2575,62 +3625,68 @@ class Shape:
         self._owner._call("set_shape_stroke", self._slide_number, self._id, color, width, _change=True)
 
     @property
-    def box(self):
+    def box(self) -> tuple[float, float, float, float]:
         return self._owner._call("shape_box", self._slide_number, self._id)
 
     @box.setter
-    def box(self, value):
+    def box(self, value: _Box) -> None:
+        self._check()
         if not isinstance(value, (tuple, list)) or len(value) != 4:
             raise TypeError("box must be (x, y, width, height) in points")
-        self._owner._call("set_shape_box", self._slide_number, self._id, *map(pt, value), _change=True)
+        coordinates = tuple(map(pt, value))
+        self._owner._call("set_shape_box", self._slide_number, self._id, *coordinates, _change=True)
 
     @property
-    def text(self):
+    def text(self) -> str:
         return self._owner._call("shape_text", self._slide_number, self._id)
 
     @text.setter
-    def text(self, value):
+    def text(self, value: str) -> None:
         self._owner._call("set_shape_text", self._slide_number, self._id, value, _change=True)
 
     @property
-    def color(self):
+    def color(self) -> str | None:
         value = self._owner._call("text_format", self._slide_number, self._id)[1]
         return None if value is None else _hex_color(value)
 
     @color.setter
-    def color(self, value):
-        self._owner._call("set_text_format", self._slide_number, self._id, color=_color(value), _change=True)
+    def color(self, value: _Color) -> None:
+        self._check()
+        rgb = _color(value)
+        self._owner._call("set_text_format", self._slide_number, self._id, color=rgb, _change=True)
 
     @property
-    def font_size(self):
+    def font_size(self) -> float | None:
         return self._owner._call("text_format", self._slide_number, self._id)[0]
 
     @font_size.setter
-    def font_size(self, value):
-        self._owner._call("set_text_format", self._slide_number, self._id, size=pt(value), _change=True)
+    def font_size(self, value: float) -> None:
+        self._check()
+        size = pt(value)
+        self._owner._call("set_text_format", self._slide_number, self._id, size=size, _change=True)
 
     @property
-    def bold(self):
+    def bold(self) -> bool | None:
         return self._owner._call("text_format", self._slide_number, self._id)[2]
 
     @bold.setter
-    def bold(self, value: bool):
+    def bold(self, value: bool) -> None:
         self._owner._call("set_text_format", self._slide_number, self._id, bold=value, _change=True)
 
     @property
-    def italic(self):
+    def italic(self) -> bool | None:
         return self._owner._call("text_format", self._slide_number, self._id)[3]
 
     @italic.setter
-    def italic(self, value: bool):
+    def italic(self, value: bool) -> None:
         self._owner._call("set_text_format", self._slide_number, self._id, italic=value, _change=True)
 
     @property
-    def font(self):
+    def font(self) -> str | None:
         return self._owner._call("text_format", self._slide_number, self._id)[4]
 
     @font.setter
-    def font(self, value: str):
+    def font(self, value: str) -> None:
         self._owner._call("set_text_format", self._slide_number, self._id, font=value, _change=True)
 
 
@@ -2642,7 +3698,7 @@ class SlidePicture(Shape):
         return bytes(self._owner._call("picture_data", self._slide_number, self._id))
 
     @data.setter
-    def data(self, source) -> None:
+    def data(self, source: _Source) -> None:
         from . import _read
         self._owner._ensure_open()
         data, _ = _read(source, limit=16 * 1024 * 1024)
@@ -2661,7 +3717,7 @@ class SlidePicture(Shape):
         return self._owner._call("picture_crop", self._slide_number, self._id)
 
     @crop.setter
-    def crop(self, value) -> None:
+    def crop(self, value: tuple[float, float, float, float] | list[float] | None) -> None:
         values = _picture_crop(value)
         self._owner._call("set_picture_crop", self._slide_number, self._id, values, _change=True)
 
@@ -2754,7 +3810,7 @@ class _SlideCellParagraph(Paragraph):
         return self._owner._call("shape_text", *self._range_args, **self._range_kwargs)
 
     @text.setter
-    def text(self, value):
+    def text(self, value: str) -> None:
         self[:].text = value
 
     @property
@@ -2762,22 +3818,77 @@ class _SlideCellParagraph(Paragraph):
         return self._owner._call("cell_paragraph_alignment", *self._range_args, self._target)
 
     @alignment.setter
-    def alignment(self, value):
+    def alignment(self, value: str | None) -> None:
         self._owner._call("set_cell_paragraph_alignment", *self._range_args, self._target, value, _change=True)
 
     @property
-    def formatting(self):
-        return {"alignment": self.alignment}
+    def formatting(self) -> _ParagraphSnapshot:
+        return json.loads(self._owner._call("cell_paragraph_formatting", *self._range_args, self._target))
 
-    def format(self, **formatting):
-        if formatting.keys() - {"alignment"}:
+    @overload
+    def format(self, **formatting: Unpack[ParagraphFormatting]) -> None: ...
+    @overload
+    def format(self, **formatting: Unpack[_ParagraphSnapshot]) -> None: ...
+    def format(self, **formatting: object) -> None:
+        # Validate the exact target before caller callbacks, then reject
+        # reentrant edits after each scalar normalization, before another callback.
+        self._owner._call("cell_paragraph_alignment", *self._range_args, self._target)
+        revision = self._owner._call("revision")
+        if formatting.keys() - {"alignment", "indent_left", "indent_right", "indent_first",
+                                "space_before", "space_after", "line_spacing", "tabs"}:
             self._unsupported()
-        if "alignment" in formatting:
-            self.alignment = formatting["alignment"]
-        else:
-            _ = self.text  # Empty patches still validate the owner and handle.
+        def check():
+            if self._owner._call("revision") != revision:
+                raise ValueError("paragraph formatting is stale after a document change")
+            self._owner._call("cell_paragraph_alignment", *self._range_args, self._target)
+
+        patch = {}
+        for key, value in formatting.items():
+            if key == "tabs" and value is not None:
+                if not isinstance(value, (list, tuple)):
+                    raise TypeError("tabs must be a list, tuple or None")
+                sequence = list if isinstance(value, list) else tuple
+                count = sequence.__len__(value)
+                if count > 32:
+                    raise ValueError("PPTX tabs support at most 32 stops")
+                stops = []
+                for index in range(count):
+                    stop = sequence.__getitem__(value, index)
+                    if not isinstance(stop, dict) or dict.__len__(stop) > 3:
+                        raise ValueError("each tab requires position and optional alignment/leader")
+                    # Bypass container/string-subclass hooks; only the existing
+                    # unit conversion may invoke a caller scalar protocol.
+                    item = {}
+                    for name, entry in dict.items(stop):
+                        if not isinstance(name, str):
+                            raise ValueError("tab property names must be strings")
+                        name = str.__str__(name)
+                        if name not in {"position", "alignment", "leader"}:
+                            raise ValueError("unknown tab property")
+                        item[name] = entry
+                    if "position" not in item:
+                        raise ValueError("each tab requires position")
+                    item["position"] = pt(item["position"])
+                    check()
+                    for name in ("alignment", "leader"):
+                        if name in item:
+                            entry = item[name]
+                            if not isinstance(entry, str) or str.__len__(entry) > 32:
+                                raise ValueError("tab alignment and leader must be supported names")
+                            item[name] = str.__str__(entry)
+                    stops.append(item)
+                patch[key] = stops
+            else:
+                patch.update(json.loads(_format_patch({key: value})))
+            check()
+        if patch:
+            self._owner._call("format_cell_paragraph", *self._range_args, self._target,
+                              json.dumps(patch, allow_nan=False), revision, _change=True)
 
     def add_run(self, text, **formatting):
+        # Validate the exact paragraph target before caller formatting callbacks;
+        # final target validation still runs after normalization in add_run_patch.
+        self._owner._call("cell_paragraph_alignment", *self._range_args, self._target)
         patch = _format_patch(formatting, rgb_highlight=True)
         start, end, revision = self._owner._call("add_run_patch", *self._range_args, text, patch,
                                                _change=True, **self._range_kwargs)
@@ -2800,4 +3911,13 @@ class _SlideCellParagraph(Paragraph):
     resolved_formatting = property(_unsupported)
     set_list = _unsupported
     add_field = _unsupported
-    add_break = _unsupported
+    def add_break(self, kind: str = "line") -> TextRange:
+        """Append a line break; the returned range reads one LF character."""
+        self._owner._call("cell_paragraph_alignment", *self._range_args, self._target)
+        revision = self._owner._call("revision")
+        if not isinstance(kind, str):
+            raise TypeError("break kind must be a string")
+        kind = str.__str__(kind)
+        start, end, revision = self._owner._call("cell_add_break", *self._range_args,
+                                               self._target, kind, revision, _change=True)
+        return _SlideTextRange(self, start, end, revision)

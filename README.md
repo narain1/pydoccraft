@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/narain1/pydoccraft/actions/workflows/ci.yml/badge.svg)](https://github.com/narain1/pydoccraft/actions/workflows/ci.yml)
 
-`pydoccraft` 0.2.1 is an Apache-2.0 Python/Rust package for eager, in-process structured extraction, rendering, and semantic conversion of PDF, DOCX, and PPTX files. The unreleased EPUB branch adds chapter-ordered semantic extraction and native reflowable EPUB creation without claiming physical pagination. It exposes the compatible `doc_ex` PyMuPDF-style API and uses pinned PdfCraft, WordCraft, and DeckCraft library crates—without external executables, runtime downloads, networking, cloud credentials, or OCR.
+`pydoccraft` 0.3.1 is an Apache-2.0 Python/Rust package for eager, in-process structured extraction, rendering, and semantic conversion of PDF, DOCX, PPTX, and EPUB files. EPUB support (chapter-ordered semantic extraction and native reflowable creation, without physical pagination) is unreleased. It exposes the compatible `doc_ex` PyMuPDF-style API and uses pinned PdfCraft, WordCraft, and DeckCraft library crates—without external executables, runtime downloads, networking, cloud credentials, or OCR.
 
 ## Install
 
@@ -43,7 +43,7 @@ Path("slides.pdf").write_bytes(doc_ex.convert("slides.pptx", "pdf"))
 | Convert to DOCX | Yes | — | No |
 | Password input | Yes | Yes | Encrypted PPTX unsupported |
 | OCR | No | — | — |
-| Create a new document from scratch (unreleased branch) | Basic | Basic | Basic |
+| Create a new document from scratch | Basic | Basic | Basic |
 
 PDF table detection is conservative. PDF links retain destinations and geometry; unambiguous single-line and contiguous multiline labels have exact character offsets. Ambiguous regions remain unresolved. DOCX computed pagination cannot split one automatically wrapped paragraph into exact normalized page slices. PPTX exposes URL links but not every PowerPoint action. Conversion uses upstream semantic exporters and is not pixel-perfect.
 
@@ -63,7 +63,7 @@ with doc_ex.open("report.docx") as document:  # also .pdf or .pptx
 
 Indexes are zero-based; negative indexes are supported. DPI defaults to 144 and must be finite and between 1 and 1200, subject to output-size limits. Both methods return PNG bytes. Optional `clip=(x, y, width, height)` selects a region in displayed-page points. DOCX pagination follows WordCraft layout and may differ from Microsoft Word. See [rendering details](docs/formats.md#rendering).
 
-The unreleased branch adds native authoring through `doc_ex.new("docx" | "pdf" | "pptx")`, including text, tables, images, backgrounds, explicit saving and independent copies. See [the authoring API](docs/authoring.md) for examples, the supported edit profile and current limits. Published 0.2.1 does not include these additions.
+Version 0.3.0 adds native authoring through `doc_ex.new("docx" | "pdf" | "pptx")`, including text, tables, images, backgrounds, explicit saving and independent copies. See [the authoring API](docs/authoring.md) for examples, the supported edit profile and current limits. Earlier releases, such as 0.2.1, do not include these additions.
 
 The expanded [roadmap](TODO.md) covers Open XML feature parity, styles, sections, templates, review features and safe editing. The [design and reference crosswalk](docs/authoring-api-design.md) keeps ArtCraft libraries as the only document backend. Unchecked coverage remains incomplete even where an initial slice is implemented.
 
@@ -73,8 +73,10 @@ Track the work in the [GitHub Roadmap project](https://github.com/users/narain1/
 
 ## Documentation
 
+Browse the [documentation website](https://narain1.github.io/pydoccraft/) for guides, examples and the roadmap. It follows `main`; unreleased features remain labeled separately from published packages.
+
 - [Python API](docs/api.md)
-- [Native authoring (unreleased)](docs/authoring.md)
+- [Native authoring](docs/authoring.md)
 - [Six runnable cookbook workflows](docs/cookbook.md)
 - [Formats, rendering, and conversion](docs/formats.md)
 - [Safety and resource behavior](docs/safety.md)

@@ -4,6 +4,12 @@ Generated from the committed `Cargo.lock` using `cargo metadata --locked`. This 
 
 The resolved graph was reviewed for license declarations and compatibility. GPL-, AGPL-, and LGPL-only dependencies are prohibited; SPDX `OR` expressions remain acceptable when they provide a permissive alternative. Every package in this inventory declares a license, and no GPL-, AGPL-, or LGPL-only dependency was found.
 
+DeckCraft library crates use the reviewed contribution fork at `https://github.com/narain1/deckcraft`, revision `dd4fd70b6347dd2ce782e33f030a2b6c0abb0106`, directly based on upstream `22db9261f9d1a214c296fd390173130c45d76d66`. The contribution changes rendering error propagation only; package versions, license expressions and bundled assets remain unchanged. See NOTICE for upstream attribution.
+
+WordCraft library crates use the reviewed contribution fork at `https://github.com/narain1/wordcraft`, revision `f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef`, directly based on upstream `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`. The contribution changes PDF shape stroke caps/joins only; package versions, license expressions and bundled assets remain unchanged. See NOTICE for upstream attribution.
+
+PdfCraft library crates use the reviewed contribution fork at `https://github.com/narain1/pdfcraft`, revision `516caea956c0aaf15f2bd1f35a15e07c73a9ead6`, based on reviewed contribution `60a8d7998b64c7718e08e9054e99f1f2eb1eda8d` and original upstream `645016addcfb9078c557f0189559ab47cdcee057`. The contributions retain the final integer raster allocation-budget check and add typed native content placement; package versions, license expressions and bundled assets remain unchanged. See NOTICE for upstream attribution.
+
 | Crate | Version | License |
 |---|---:|---|
 | `adler2` | `2.0.1` | 0BSD OR MIT OR Apache-2.0 |
@@ -48,7 +54,7 @@ The resolved graph was reviewed for license declarations and compatibility. GPL-
 | `cpubits` | `0.1.1` | MIT OR Apache-2.0 |
 | `cpufeatures` | `0.3.1` | MIT OR Apache-2.0 |
 | `craft-pdf` | `0.1.0` | MIT OR Apache-2.0 |
-| `crc32fast` | `1.5.3` | MIT OR Apache-2.0 |
+| `crc32fast` | `1.5.2` | MIT OR Apache-2.0 |
 | `crossbeam-channel` | `0.5.17` | MIT OR Apache-2.0 |
 | `crossbeam-deque` | `0.8.8` | MIT OR Apache-2.0 |
 | `crossbeam-epoch` | `0.9.21` | MIT OR Apache-2.0 |
@@ -56,16 +62,16 @@ The resolved graph was reviewed for license declarations and compatibility. GPL-
 | `crunchy` | `0.2.4` | MIT |
 | `crypto-common` | `0.2.2` | MIT OR Apache-2.0 |
 | `ctutils` | `0.4.3` | Apache-2.0 OR MIT |
-| `deckcraft-anim` | `0.8.0` | MIT OR Apache-2.0 |
-| `deckcraft-color` | `0.8.0` | MIT OR Apache-2.0 |
-| `deckcraft-fonts` | `0.8.0` | MIT OR Apache-2.0 |
-| `deckcraft-geom` | `0.8.0` | MIT OR Apache-2.0 |
-| `deckcraft-metafile` | `0.8.0` | MIT OR Apache-2.0 |
-| `deckcraft-model` | `0.8.0` | MIT OR Apache-2.0 |
-| `deckcraft-pdf` | `0.8.0` | MIT OR Apache-2.0 |
-| `deckcraft-pptx` | `0.8.0` | MIT OR Apache-2.0 |
-| `deckcraft-render` | `0.8.0` | MIT OR Apache-2.0 |
-| `deckcraft-text` | `0.8.0` | MIT OR Apache-2.0 |
+| `deckcraft-anim` | `0.11.1` | MIT OR Apache-2.0 |
+| `deckcraft-color` | `0.11.1` | MIT OR Apache-2.0 |
+| `deckcraft-fonts` | `0.11.1` | MIT OR Apache-2.0 |
+| `deckcraft-geom` | `0.11.1` | MIT OR Apache-2.0 |
+| `deckcraft-metafile` | `0.11.1` | MIT OR Apache-2.0 |
+| `deckcraft-model` | `0.11.1` | MIT OR Apache-2.0 |
+| `deckcraft-pdf` | `0.11.1` | MIT OR Apache-2.0 |
+| `deckcraft-pptx` | `0.11.1` | MIT OR Apache-2.0 |
+| `deckcraft-render` | `0.11.1` | MIT OR Apache-2.0 |
+| `deckcraft-text` | `0.11.1` | MIT OR Apache-2.0 |
 | `deflate64` | `0.1.12` | MIT |
 | `derive_arbitrary` | `1.5.0` | MIT OR Apache-2.0 |
 | `digest` | `0.11.3` | MIT OR Apache-2.0 |
@@ -76,7 +82,7 @@ The resolved graph was reviewed for license declarations and compatibility. GPL-
 | `ecb` | `0.2.1` | MIT OR Apache-2.0 |
 | `either` | `1.19.0` | MIT OR Apache-2.0 |
 | `encoding_rs` | `0.8.42` | (Apache-2.0 OR MIT) AND BSD-3-Clause |
-| `epaint_default_fonts` | `0.36.2` | (MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0 |
+| `epaint_default_fonts` | `0.37.0` | (MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0 |
 | `equivalent` | `1.0.3` | Apache-2.0 OR MIT |
 | `euclid` | `0.22.14` | MIT OR Apache-2.0 |
 | `fastrand` | `2.5.0` | Apache-2.0 OR MIT |
@@ -154,19 +160,19 @@ The resolved graph was reviewed for license declarations and compatibility. GPL-
 | `ordered-channel` | `1.2.0` | MIT OR Apache-2.0 |
 | `parking` | `2.2.1` | Apache-2.0 OR MIT |
 | `pdf-writer` | `0.15.0` | MIT OR Apache-2.0 |
-| `pdfcraft-annot` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-content` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-cos` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-create` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-crypt` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-edit` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-export` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-filters` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-fonts` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-forms` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-model` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-organize` | `0.9.0` | MIT OR Apache-2.0 |
-| `pdfcraft-render` | `0.9.0` | MIT OR Apache-2.0 |
+| `pdfcraft-annot` | `0.14.0` | MIT OR Apache-2.0 |
+| `pdfcraft-content` | `0.14.0` | MIT OR Apache-2.0 |
+| `pdfcraft-cos` | `0.14.0` | MIT OR Apache-2.0 |
+| `pdfcraft-create` | `0.14.0` | MIT OR Apache-2.0 |
+| `pdfcraft-crypt` | `0.14.0` | MIT OR Apache-2.0 |
+| `pdfcraft-edit` | `0.14.0` | MIT OR Apache-2.0 |
+| `pdfcraft-export` | `0.14.0` | MIT OR Apache-2.0 |
+| `pdfcraft-filters` | `0.14.0` | MIT OR Apache-2.0 |
+| `pdfcraft-fonts` | `0.14.0` | MIT OR Apache-2.0 |
+| `pdfcraft-forms` | `0.14.0` | MIT OR Apache-2.0 |
+| `pdfcraft-model` | `0.14.0` | MIT OR Apache-2.0 |
+| `pdfcraft-organize` | `0.14.0` | MIT OR Apache-2.0 |
+| `pdfcraft-render` | `0.14.0` | MIT OR Apache-2.0 |
 | `peniko` | `0.6.1` | Apache-2.0 OR MIT |
 | `percent-encoding` | `2.3.2` | MIT OR Apache-2.0 |
 | `phf` | `0.13.1` | MIT |
@@ -240,9 +246,9 @@ The resolved graph was reviewed for license declarations and compatibility. GPL-
 | `tiny-skia-path` | `0.12.0` | BSD-3-Clause |
 | `tinyvec` | `1.13.3` | Zlib OR Apache-2.0 OR MIT |
 | `tl` | `0.7.8` | MIT |
-| `tokio` | `1.54.0` | MIT |
+| `tokio` | `1.54.1` | MIT |
 | `ttf-parser` | `0.25.1` | MIT OR Apache-2.0 |
-| `typed-path` | `0.12.4` | MIT OR Apache-2.0 |
+| `typed-path` | `0.13.0` | MIT OR Apache-2.0 |
 | `typenum` | `1.20.1` | MIT OR Apache-2.0 |
 | `unicode-bidi` | `0.3.18` | MIT OR Apache-2.0 |
 | `unicode-bidi-mirroring` | `0.4.0` | MIT/Apache-2.0 |
@@ -276,16 +282,17 @@ The resolved graph was reviewed for license declarations and compatibility. GPL-
 | `windows-link` | `0.2.1` | MIT OR Apache-2.0 |
 | `windows-result` | `0.4.1` | MIT OR Apache-2.0 |
 | `windows-strings` | `0.5.1` | MIT OR Apache-2.0 |
+| `windows-sys` | `0.61.2` | MIT OR Apache-2.0 |
 | `wit-bindgen` | `0.57.1` | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
-| `wordcraft-doc` | `0.8.0` | MIT OR Apache-2.0 |
-| `wordcraft-docx` | `0.8.0` | MIT OR Apache-2.0 |
-| `wordcraft-fonts` | `0.8.0` | MIT OR Apache-2.0 |
-| `wordcraft-geom` | `0.8.0` | MIT OR Apache-2.0 |
-| `wordcraft-layout` | `0.8.0` | MIT OR Apache-2.0 |
-| `wordcraft-metafile` | `0.8.0` | MIT OR Apache-2.0 |
-| `wordcraft-pdf` | `0.8.0` | MIT OR Apache-2.0 |
-| `wordcraft-proof` | `0.8.0` | MIT OR Apache-2.0 |
-| `wordcraft-render` | `0.8.0` | MIT OR Apache-2.0 |
+| `wordcraft-doc` | `0.10.0` | MIT OR Apache-2.0 |
+| `wordcraft-docx` | `0.10.0` | MIT OR Apache-2.0 |
+| `wordcraft-fonts` | `0.10.0` | MIT OR Apache-2.0 |
+| `wordcraft-geom` | `0.10.0` | MIT OR Apache-2.0 |
+| `wordcraft-layout` | `0.10.0` | MIT OR Apache-2.0 |
+| `wordcraft-metafile` | `0.10.0` | MIT OR Apache-2.0 |
+| `wordcraft-pdf` | `0.10.0` | MIT OR Apache-2.0 |
+| `wordcraft-proof` | `0.10.0` | MIT OR Apache-2.0 |
+| `wordcraft-render` | `0.10.0` | MIT OR Apache-2.0 |
 | `write-fonts` | `0.48.1` | MIT OR Apache-2.0 |
 | `wuff` | `0.2.9` | MIT |
 | `xmp-writer` | `0.3.3` | MIT OR Apache-2.0 |
@@ -298,7 +305,7 @@ The resolved graph was reviewed for license declarations and compatibility. GPL-
 | `zeroize` | `1.9.1` | Apache-2.0 OR MIT |
 | `zip` | `2.2.2` | MIT |
 | `zip` | `3.0.0` | MIT |
-| `zip` | `9.0.5` | MIT |
+| `zip` | `9.1.3` | MIT |
 | `zlib-rs` | `0.6.8` | Zlib |
 | `zmij` | `1.0.23` | MIT |
 | `zopfli` | `0.8.4` | Apache-2.0 |

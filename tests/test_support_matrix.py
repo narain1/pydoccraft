@@ -33,7 +33,7 @@ class SupportMatrixTests(unittest.TestCase):
         self.assertEqual(checker.validate(ROOT, self.ledger), [])
         self.assertEqual(self.ledger, self.original)
         self.assertEqual(len(self.ledger['coverage']), 139)
-        self.assertEqual(len(self.ledger['profiles']), 7)
+        self.assertEqual(len(self.ledger['profiles']), 21)
         self.assertEqual(checker.generate(ROOT, self.ledger), (ROOT / 'docs/support-matrix.md').read_text(encoding='utf-8'))
 
     def test_missing_unknown_coverage_and_unknown_profile_are_rejected(self):
@@ -86,7 +86,8 @@ class SupportMatrixTests(unittest.TestCase):
                     'tests must be a list', 'blocker must be an object')
 
     def test_upstream_blocker_needs_real_register_and_native_citation(self):
-        cell = self.ledger['profiles'][-1]['operations']['edit_authored']
+        profile = next(p for p in self.ledger['profiles'] if p['id'] == 'pdf.vertical-redaction')
+        cell = profile['operations']['edit_authored']
         cell['blocker'].update(id='U999', native=['invented'])
         self.errors('unknown upstream blocker', 'unknown blocker native source')
 
@@ -120,7 +121,7 @@ class SupportMatrixTests(unittest.TestCase):
     def test_cli_checks_exact_generated_output_and_write_is_explicit(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for name in ('docs', 'tests', 'tools', 'rust', '.kiro'):
+            for name in ('docs', 'tests', 'tools', 'rust', 'src', '.kiro'):
                 shutil.copytree(ROOT / name, root / name, ignore=shutil.ignore_patterns('__pycache__'))
             for name in ('TODO.md', 'Cargo.toml'):
                 shutil.copy(ROOT / name, root / name)

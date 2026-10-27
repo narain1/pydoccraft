@@ -7,21 +7,33 @@ pydoccraft links selected library crates from the following ArtCraft projects. T
 PdfCraft
 Copyright (c) 2026 ArtCraft Team and the PdfCraft contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option.
-Source: https://github.com/storytold/pdfcraft
-Pinned revision: 645016addcfb9078c557f0189559ab47cdcee057
+Upstream source: https://github.com/storytold/pdfcraft
+Reviewed contribution fork: https://github.com/narain1/pdfcraft
+Pinned revision: 516caea956c0aaf15f2bd1f35a15e07c73a9ead6
+Reviewed contribution parent: 60a8d7998b64c7718e08e9054e99f1f2eb1eda8d
+Original upstream base: 645016addcfb9078c557f0189559ab47cdcee057
+The reviewed contributions retain the final integer raster allocation check and add explicit placement for native typed text/image content. Generic raw-stream underlay and collision-safe resource allocation are not added. It changes no bundled assets or licensing and is not represented as upstream acceptance.
 The selected PdfCraft library crates include pdfcraft-organize for page insertion and organization, pdfcraft-annot for annotations and links, pdfcraft-forms for bounded creation and filling of native form fields, and pdfcraft-model for native inherited page-resource inspection.
 
 WordCraft
 Copyright (c) 2026 ArtCraft Team and the WordCraft contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option.
-Source: https://github.com/storytold/wordcraft
-Pinned revision: f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22
+Upstream source: https://github.com/storytold/wordcraft
+Reviewed contribution fork: https://github.com/narain1/wordcraft
+Pinned revision: a57b416783b8ba25ec44e30ee0c3cd8362c44974
+Reviewed contribution parent: 517637db3caa0dffd1ad5e4e66c9bdd86e908742
+Original upstream base: f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22
+The reviewed contributions align native PDF shape stroke caps and joins with native raster output, preserve absent character-default sizes, retain typed core document language through DOCX and Flat OPC read/write, and expose strict opt-in typed access to eight retained extended properties without changing legacy read/write policy. It changes no bundled assets or licensing and is not represented as upstream acceptance.
 
 DeckCraft
 Copyright (c) 2026 ArtCraft Team and the DeckCraft contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option.
-Source: https://github.com/storytold/deckcraft
-Pinned revision: 22db9261f9d1a214c296fd390173130c45d76d66
+Upstream source: https://github.com/storytold/deckcraft
+Reviewed contribution fork: https://github.com/narain1/deckcraft
+Pinned revision: 16de1ca86058a96f1194c2ddc3a090c7f63f2640
+Reviewed contribution parent: c9c7fff189c808bf7266d0b888c3636a1880080d
+Original upstream base: 22db9261f9d1a214c296fd390173130c45d76d66
+The reviewed contributions retain fallible slide rendering and PDF error propagation, preserve logical line-break offsets in selectable slide text and notes/handout master text, and add bounded native same-presentation slide copying with fresh identities and explicit unsupported-profile refusal. It changes no bundled assets or licensing and is not represented as upstream acceptance.
 
 craft-libs PDF backend
 Copyright (c) 2026 ArtCraft Team and craft-libs contributors.
@@ -51,7 +63,7 @@ Bundled and linked third-party material
 - Inter: The Inter Project Authors. SIL Open Font License 1.1. The unmodified tests/fixtures/fonts/Inter-Regular.ttf fixture comes from the pinned PdfCraft assets/fonts directory; its full license and copyright are retained alongside it as OFL-Inter.txt.
 - JetBrains Mono: The JetBrains Mono Project Authors. SIL Open Font License 1.1.
 - Ubuntu Light: Dalton Maag Ltd for Canonical. Ubuntu Font Licence 1.0.
-- Hack, Noto Emoji, and the egui emoji icon font through epaint_default_fonts: MIT/Bitstream Vera, SIL Open Font License 1.1, and MIT respectively.
+- Hack, Noto Emoji, and the egui emoji icon font through epaint_default_fonts: MIT/Bitstream Vera, SIL Open Font License 1.1, and MIT respectively. Version 0.37 also bundles `egui-icons.ttf`, a five-glyph subset of the same emoji icon font (MIT).
 - WordCraft English hyphenation data derives from Grady Ward's Moby Hyphenator II public-domain list; generated patterns are CC0-1.0.
 - WordCraft Polish and Italian hyphenation patterns are used under MIT; Portuguese patterns are used under BSD-3-Clause. Copyright details remain in the corresponding upstream source files.
 - Krilla 0.8.2 is MIT OR Apache-2.0. Compact ICC Profiles embedded by the PDF backend are by Clinton Ingram and released under CC0-1.0.

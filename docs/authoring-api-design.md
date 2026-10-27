@@ -1,6 +1,6 @@
 # Python authoring API direction
 
-The [pinned reference-family inventory](reference-api-inventory.md) now groups 194 representative members into 44 families and links existing criteria and evidence profiles. It remains a bounded discovery crosswalk, not complete SDK or PyMuPDF conformance.
+The [pinned reference-family inventory](reference-api-inventory.md) now groups 198 representative members into 44 families and links existing criteria and evidence profiles. It remains a bounded discovery crosswalk, not complete SDK or PyMuPDF conformance.
 
 Status: historical design direction. The implemented subset is documented in [the authoring guide](authoring.md); sketches below may include future operations. The [feature roadmap](../TODO.md) tracks implementation. Existing `doc_ex.open`, extraction, conversion, and PNG-returning rendering methods keep their contracts.
 
@@ -188,3 +188,18 @@ For each feature, record the reference concept, public Python operation, format,
 “Feature parity” targets document operations rather than every SDK class, overload, packaging primitive, or XML escape hatch. A broad inventory must still list unimplemented feature families; they cannot disappear from the matrix. Microsoft Word layout equivalence, complete Office field calculation, macro execution, signatures, and arbitrary embedded programs are not implied by a schema match.
 
 Readiness needs an installed-wheel test that creates or edits, saves, reopens, extracts, renders and exports each advertised feature as applicable. Schema validity alone is insufficient. No .NET or Office component becomes a required test or runtime dependency. Independent viewer comparisons can be recorded as optional manual evidence, with redistributable baselines for normal CI.
+
+
+### Everyday property typing
+
+The facade annotates native-backed PDF annotation geometry/text/color/targets, outline child collections and nullable destinations, page/slide identity and size, DOCX picture size/alternative text, and PPTX shape geometry/style properties. Existing factory/context/copy and collection chains retain their concrete handle types. Types describe the current runtime: an outline destination can be absent, cell vertical alignment can be inherited, and mixed or unset slide text formatting can return `None`. A nullable getter does not imply that every setter accepts `None`; runtime validation and the documented clear/reset operations still apply.
+
+`tools/check_public_typing.py` checks these existing properties and representative chained access with strict mypy against the package. This adds annotations, not new public aliases, managers, conversions or runtime coercion. Dynamic metadata/formatting mappings and other unreviewed properties remain separate API3 work; this consumer check does not certify every IDE or full static typing of the implementation.
+
+
+Spec 110 reuses collection deletion for unused owned DOCX styles. There is no remove/prune manager or automatic fallback style. Native exact-ID handle targets are distinct from intentional collection/string name lookup; bounded retirement and native new_id reservation preserve identity across same-name recreation. Reference preflight inspects raw public typed storage, including unrendered parts and definitions, before native remove. The 1024 lifetime-ID limit is explicit and copied with owners. STY6 remains partial for import and broader cleanup.
+
+
+### Property assignment hints
+
+The existing authoring setters now describe background colors and image sources, section geometry, cell formatting and shape strokes to static consumers. DOCX background images accept None to clear; PPTX background images require a source. Direct cell background colors remain nonnullable, while cell margins accept None to inherit. These are annotations on ordinary assignments, not new API families. Shape/length/range, format-specific behavior and lifetime checks remain runtime responsibilities.

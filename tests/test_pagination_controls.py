@@ -6,11 +6,16 @@ import doc_ex
 from test_rendering import has_visible_content, png_chunks
 
 
+# Source Sans 3 at 12 pt has a measured native 15.912-pt line box.
+# A 342-pt page with 30-pt margins fits 17 complete lines, preserving the
+# explicit 17/1 versus 16/2 widow and 7/3 table-split acceptance boundaries.
+# The separate overflow guards retain their original 300-pt page.
 class PaginationControlTests(unittest.TestCase):
     def prepare(self, document, filler=0):
         document.sections[0].margins = 30
+        document.styles["Normal"].format(font="Source Sans 3")
         style = document.styles.add("Measured lines")
-        style.format(font_size=12, line_spacing=1, space_before=0, space_after=0)
+        style.format(font="Source Sans 3", font_size=12, line_spacing=1, space_before=0, space_after=0)
         for index in range(filler):
             document.add_paragraph(f"Filler{index:02}", style=style)
         return style
@@ -37,7 +42,7 @@ class PaginationControlTests(unittest.TestCase):
 
     def test_keep_with_next_moves_heading_with_following_table(self):
         for keep in (False, True):
-            with self.subTest(keep=keep), doc_ex.new("docx", size=(300, 300)) as document:
+            with self.subTest(keep=keep), doc_ex.new("docx", size=(300, 342)) as document:
                 style = self.prepare(document, filler=16)
                 heading = document.add_paragraph("TableHeading", style=style)
                 heading.format(keep_with_next=keep)
@@ -53,7 +58,7 @@ class PaginationControlTests(unittest.TestCase):
     def test_keep_together_moves_a_paragraph_that_fits_on_a_fresh_page(self):
         labels = [f"LongLine{index:02}" for index in range(6)]
         for keep in (False, True):
-            with self.subTest(keep=keep), doc_ex.new("docx", size=(300, 300)) as document:
+            with self.subTest(keep=keep), doc_ex.new("docx", size=(300, 342)) as document:
                 style = self.prepare(document, filler=14)
                 paragraph = document.add_paragraph("\n".join(labels), style=style)
                 paragraph.format(keep_together=keep, widow_control=False)
@@ -67,7 +72,7 @@ class PaginationControlTests(unittest.TestCase):
                                                        (16, 4, [1, 3], [0, 4])):
             labels = [f"LongLine{index:02}" for index in range(count)]
             for enabled in (False, True):
-                with self.subTest(filler=filler, widow_control=enabled), doc_ex.new("docx", size=(300, 300)) as document:
+                with self.subTest(filler=filler, widow_control=enabled), doc_ex.new("docx", size=(300, 342)) as document:
                     style = self.prepare(document, filler=filler)
                     paragraph = document.add_paragraph("\n".join(labels), style=style)
                     paragraph.format(keep_together=False, widow_control=enabled)
@@ -76,7 +81,7 @@ class PaginationControlTests(unittest.TestCase):
                                      protected if enabled else unprotected)
 
     def test_page_break_before_moves_short_content_and_can_be_cleared(self):
-        with doc_ex.new("docx", size=(300, 300)) as document:
+        with doc_ex.new("docx", size=(300, 342)) as document:
             style = self.prepare(document)
             document.add_paragraph("BeforeBreak", style=style)
             paragraph = document.add_paragraph("AfterBreak", style=style)
@@ -92,7 +97,7 @@ class PaginationControlTests(unittest.TestCase):
     def test_one_cell_paragraph_splits_or_moves_intact_according_to_row_control(self):
         labels = [f"CellLine{index:02}" for index in range(10)]
         for split in (True, False):
-            with self.subTest(allow_split=split), doc_ex.new("docx", size=(300, 300)) as document:
+            with self.subTest(allow_split=split), doc_ex.new("docx", size=(300, 342)) as document:
                 style = self.prepare(document, filler=10)
                 table = document.add_table([["\n".join(labels)]])
                 paragraph = table[0, 0].paragraphs[0]
@@ -108,7 +113,7 @@ class PaginationControlTests(unittest.TestCase):
 
     def test_splittable_cell_taller_than_a_page_keeps_all_content_visible(self):
         labels = [f"CellLine{index:02}" for index in range(24)]
-        with doc_ex.new("docx", size=(300, 300)) as document:
+        with doc_ex.new("docx", size=(300, 342)) as document:
             style = self.prepare(document)
             table = document.add_table([["\n".join(labels)]])
             paragraph = table[0, 0].paragraphs[0]
@@ -120,7 +125,7 @@ class PaginationControlTests(unittest.TestCase):
 
     def test_oversized_unsplittable_cell_is_rejected_before_publication_and_recovers(self):
         labels = [f"CellLine{index:02}" for index in range(24)]
-        with doc_ex.new("docx", size=(300, 300)) as document:
+        with doc_ex.new("docx", size=(300, 342)) as document:
             style = self.prepare(document)
             table = document.add_table([["\n".join(labels)]])
             paragraph = table[0, 0].paragraphs[0]

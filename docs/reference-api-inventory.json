@@ -233,8 +233,8 @@
         "FORM2",
         "C5"
       ],
-      "local_surface": "Paragraph.text/add_run/find/replace_text/slices; native explicit breaks; ordinary recipes",
-      "remaining": "Top-level insertion/deletion/move needs stable locator redesign; cross-document Fragment does not remap the complete resource/semantic graph. Decimal/bar tabs remain rejected.",
+      "local_surface": "Paragraph.text/add_run/find/replace_text/slices; native explicit breaks; bounded owned DOCX paragraph deletion and same-container movement; PPTX same-cell paragraph deletion/movement reuse the collection",
+      "remaining": "Append+move composes bounded paragraph insertion; arbitrary block-gap insertion and cross-container adoption remain unavailable. Cross-document Fragment does not remap the complete resource/semantic graph. DOCX movement retains stable paragraph identities, while PPTX movement invalidates ordinal handles in the changed cell. Decimal/bar tabs remain rejected.",
       "upstream_candidates": [
         "U02"
       ],
@@ -283,13 +283,15 @@
         "LAY5",
         "API4"
       ],
-      "local_surface": "Paragraph.format and TextRange.format; keep/spacing/borders through common patches",
-      "remaining": "Complex-script/language/typography conformance requires fixtures; do not create one wrapper per XML property. Native vertical/border styles have explicit supported subset.",
+      "local_surface": "Paragraph/TextRange/Style formatting and shared defaults; direction and language reuse native properties",
+      "remaining": "Bounded direction/language evidence covers selected mixed-script layout. Broader complex-script/CJK typography, font controls and diagnostics remain open; no wrapper per XML property.",
       "upstream_candidates": [
         "U02",
         "U04"
       ],
-      "profiles": [],
+      "profiles": [
+        "word.direction-language"
+      ],
       "disposition": "implemented_subset"
     },
     {
@@ -330,7 +332,7 @@
         "BG6"
       ],
       "local_surface": "styles.add/style.format/based_on/next/linked/defaults; recipes use existing handles",
-      "remaining": "Default font-size clear differs between model11pt and reader10pt; arbitrary default-style selection resolves via Normal; next-style-on-enter is editor-only; style import/remapping unassessed.",
+      "remaining": "Native absent-size readback and owned default font-size clear are available; arbitrary default-style selection resolves via Normal; next-style-on-enter is editor-only; style import/remapping unassessed.",
       "upstream_candidates": [
         "U02"
       ],
@@ -376,12 +378,14 @@
         "TXT5",
         "E3"
       ],
-      "local_surface": "Paragraph.set_list(kind,level,restart,start); extracted numbering metadata/native labels",
-      "remaining": "Full custom level formats/templates/picture bullets not authorable. Header/footer nondefault starts have native fidelity failure; source templates truncate64characters.",
+      "local_surface": "Paragraph.set_list(kind,level,restart,start) includes native nine-level decimal_outline in checked top-level body scope; extracted definitions and evaluated labels are tested separately",
+      "remaining": "Custom definitions/picture bullets, auxiliary/cell/multicolumn outline placement and broader counters remain open; source templates retain native 64-character truncation limits.",
       "upstream_candidates": [
         "U02"
       ],
-      "profiles": [],
+      "profiles": [
+        "word.decimal-outline"
+      ],
       "disposition": "implemented_subset"
     },
     {
@@ -611,8 +615,8 @@
         "LAY4",
         "LAY8"
       ],
-      "local_surface": "Section page_size/margins/gutter/columns/column_widths/start; stable sections collection",
-      "remaining": "Per-column gap control, mirrored/top gutters and detailed layout inspection are not covered by current profile; avoid redundant orientation API.",
+      "local_surface": "Section page_size/margins/gutter/columns/column_widths/start; stable sections collection; document-wide mirror_margins and bounded section vertical_alignment reuse native layout",
+      "remaining": "Per-column gap and top-gutter controls, broader vertical-alignment contexts and detailed layout inspection remain open. Mirrored margins are document-wide, not a section override; no redundant orientation API is needed.",
       "upstream_candidates": [
         "U04",
         "U05"
@@ -649,18 +653,21 @@
         "LAY3",
         "BG5"
       ],
-      "local_surface": "Section.header/footer(default/first/even) reuse Paragraph/TextRange; section copies own independent parts",
-      "remaining": "Header/footer tables and pictures can reuse existing owned content handles with explicit synthetic-placeholder tracking and native geometry guards. Link-to-previous/unlink/clear remain separate acceptance requiring stable story IDs and field-scope checks.",
+      "local_surface": "Section.header/footer(default/first/even) reuse paragraphs/tables/pictures and owned clear(); bounded paragraph/table deletion and movement reuse existing collections; copies retain independent parts",
+      "remaining": "Link-to-previous/unlink, cross-story adoption and general block movement remain open. Missing/repeated clear is a true no-op; inactive variants may lack measured cell geometry. Rich notes retain their separate profile.",
       "upstream_candidates": [
         "U02",
         "U04"
       ],
-      "profiles": [],
-      "disposition": "local_candidate"
+      "profiles": [
+        "word.rich-stories",
+        "word.story-clear"
+      ],
+      "disposition": "implemented_subset"
     },
     {
       "id": "REF-OX-PAGE-FIELDS",
-      "title": "Page/count fields and refresh semantics",
+      "title": "Page/count fields, line numbering and refresh semantics",
       "reference_members": [
         {
           "name": "PageNumberType",
@@ -686,6 +693,11 @@
           "name": "UpdateFieldsOnOpen",
           "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
           "line": 2297
+        },
+        {
+          "name": "LineNumberType",
+          "source": "ox:data/schemas/schemas_openxmlformats_org_wordprocessingml_2006_main.json",
+          "line": 22696
         }
       ],
       "coverage": [
@@ -693,12 +705,14 @@
         "REF3",
         "REF4"
       ],
-      "local_surface": "Paragraph.add_field(page/page_count/section_page_count), Section.page_number_start",
-      "remaining": "Explicit Arabic supported. Continuous SECTIONPAGES/restarts are rejected; implicit numeral context differs across body/stories; no general field evaluator.",
+      "local_surface": "Paragraph.add_field(page/page_count/section_page_count), Section.page_number_start; Section.line_numbers reuses native decimal counters",
+      "remaining": "Explicit Arabic supported. Continuous SECTIONPAGES/restarts are rejected; implicit numeral context differs across body/stories; no general field evaluator. Numbered sections are single-column; affected continuous each_page resumes are rejected. Line-label bounds/work do not imply complete numbering parity.",
       "upstream_candidates": [
         "U07"
       ],
-      "profiles": [],
+      "profiles": [
+        "word.line-numbers"
+      ],
       "disposition": "implemented_subset"
     },
     {
@@ -731,13 +745,16 @@
         "E3",
         "REF8"
       ],
-      "local_surface": "Notes collection plus shared Paragraph handles; section note_options/configure_notes",
-      "remaining": "Full continuation/section placement and unsupported custom styles remain bounded by existing native acceptance. Endnote collector field scopes already guarded.",
+      "local_surface": "Notes collection plus shared Paragraph handles; section note_options/configure_notes; notes.convert changes owned kind through the native semantic operation; Note.clear removes owned content while retaining reference/kind/options and a native styled number mark",
+      "remaining": "Semantic note deletion, fragment graph remapping, rich-note geometry and broader placement/restart fidelity remain open. Shared standard-style runs fail if native conversion would restyle unrelated content; custom-style identity is preserved. This edit is separate from existing DOCX-to-PDF export.",
       "upstream_candidates": [
         "U02",
         "U07"
       ],
-      "profiles": [],
+      "profiles": [
+        "word.note-kind-conversion",
+        "word.story-clear"
+      ],
       "disposition": "implemented_subset"
     },
     {
@@ -766,14 +783,16 @@
         "REF8",
         "E4"
       ],
-      "local_surface": "TextRange.link covers supported external URLs; imported source anchor metadata; PDF/slide navigation separate native profiles",
-      "remaining": "DOCX bookmark CRUD/internal links is a candidate over existing native anchors; must preserve paired IDs/offsets and marker-edit guards. Cross-reference evaluation is separate.",
+      "local_surface": "TextRange.link supports external URLs and internal links; whole-paragraph/endpoint body bookmark mapping reuses existing ranges, with checked horizontal nested-cell targets and tested PDF destinations",
+      "remaining": "Interior/cross-paragraph/imported targets, non-body bookmark targets and general cross-reference evaluation remain unsupported or unassessed.",
       "upstream_candidates": [
         "U02",
         "U07"
       ],
-      "profiles": [],
-      "disposition": "local_candidate"
+      "profiles": [
+        "word.bookmark-navigation"
+      ],
+      "disposition": "implemented_subset"
     },
     {
       "id": "REF-OX-REFERENCES",
@@ -894,8 +913,8 @@
         "MED3",
         "MED8"
       ],
-      "local_surface": "Owned Picture data/size/alt/crop/flips; related SlidePicture uses native placement",
-      "remaining": "DOCX rotation has native ink loss. Floating positioning/wrapping needs native geometry/copy/serialization proof; opacity not inferred from transform fields.",
+      "local_surface": "Owned Picture data/size/alt/crop/flips; direct-body DOCX pictures reuse Picture.format/formatting for bounded page/margin/paragraph anchors and square/top_bottom/behind wrapping; SlidePicture uses native placement",
+      "remaining": "DOCX rotation has native ink loss. Front layering has a reproduced native paint-order defect and is rejected. Floating cell/header/footer/note pictures, independent stacking/overlap/layout-in-cell controls, rotation and opacity remain unavailable in the owned DOCX profile.",
       "upstream_candidates": [
         "U04"
       ],
@@ -944,14 +963,16 @@
         "PDF3",
         "SLIDE3"
       ],
-      "local_surface": "Existing PDF path primitives and PPTX shapes/text/backgrounds; no duplicate shape-building framework",
-      "remaining": "DOCX arbitrary drawing/textbox/group editing unassessed; PDF underlay API lacks public placement option; render-transparent backdrop differs from authored fill.",
+      "local_surface": "Existing PDF path primitives and PPTX shapes/text/backgrounds; bounded owned DOCX rectangle/ellipse creator and private handle reuse Picture placement vocabulary without a second geometry framework.",
+      "remaining": "DOCX lines/textboxes/group/rotation/front/auxiliary/imported editing and rich-text visible coverage remain unavailable or unassessed; typed PDF text/image underlays use behind=True, while supplied-font/raw-path underlays remain unavailable; render-transparent backdrop differs from authored fill.",
       "upstream_candidates": [
         "U04",
         "U10",
         "U11"
       ],
-      "profiles": [],
+      "profiles": [
+        "word.closed-shapes"
+      ],
       "disposition": "implemented_subset"
     },
     {
@@ -1169,8 +1190,8 @@
         "REV6",
         "E3"
       ],
-      "local_surface": "Imported bounded stories/anchors/diagnostics only; no review editor API",
-      "remaining": "Formatting revision resolution is located in excluded application engine; move/re-export pure library operation upstream. Comment anchor editing needs balanced-ID proof.",
+      "local_surface": "Owned document.comments provides plain-text root/direct-reply CRUD with author/date/resolved properties and fresh range navigation for bounded whole body-paragraph anchors, including supported body cells; imported stories retain separate extraction snapshots",
+      "remaining": "Interior/cross-paragraph/imported anchors, rich comment stories and nested replies remain unsupported. Native interior markers change shaping. Tracked-change transformations remain separate; formatting revision resolution lives in the excluded application engine and needs a public library contribution.",
       "upstream_candidates": [
         "U06"
       ],
@@ -1235,7 +1256,7 @@
         "DOC8"
       ],
       "local_surface": "No new parallel metadata collection",
-      "remaining": "Pinned WordCraft app_xml passthrough uses private kept-property policy, not a public editable model; language/app metadata remain DOC7 gaps.",
+      "remaining": "Selected WordCraft now exposes strict typed access to eight retained extended properties (spec143/146); Python mapping admission remains separate147. Core language is already exposed; source completeness, computed producer/statistics and broader application properties remain DOC7 gaps.",
       "upstream_candidates": [
         "U02"
       ],
@@ -1335,13 +1356,14 @@
         "SLIDE5",
         "SLIDE6"
       ],
-      "local_surface": "Slides/layouts/typed shapes/text/tables/images/notes/internal links with stable IDs",
-      "remaining": "Whole-slide import/copy needs public graph re-ID/remapping; comments lose shape anchors/deep replies; PDF artwork rasterized; imported preservation unassessed.",
+      "local_surface": "Slides/layouts/typed shapes/text/tables/images/notes/internal links with stable IDs; Slide.background=None removes an owned override; same-cell paragraphs.move reuses native paragraph values and existing collection semantics",
+      "remaining": "Whole-slide import/copy needs public graph re-ID/remapping; comments lose shape anchors/deep replies; PDF artwork is rasterized; imported preservation remains unassessed. Cell paragraph handles are ordinal and become stale after a real reorder. Background reset reports direct state rather than effective inherited color.",
       "upstream_candidates": [
         "U11"
       ],
       "profiles": [
-        "slides.layouts"
+        "slides.layouts",
+        "slides.background-reset"
       ],
       "disposition": "implemented_subset"
     },
@@ -1415,12 +1437,14 @@
         "PDF1",
         "PKG7"
       ],
-      "local_surface": "new/open/edit/copy/save/to_bytes/close; PDF-only existing-source edit profile",
-      "remaining": "Incremental/encryption/repair/save profiles remain independent policy gaps; do not mirror numeric save flags.",
+      "local_surface": "new/open/edit/copy/save/to_bytes/close; PDF-only conservative source editing; object_streams selects native full-writer representation on serialization",
+      "remaining": "Incremental/encryption/repair and broader preservation profiles remain independent gaps; representation selection does not expand imported editing.",
       "upstream_candidates": [
         "U10"
       ],
-      "profiles": [],
+      "profiles": [
+        "pdf.object-stream-output"
+      ],
       "disposition": "implemented_subset"
     },
     {
@@ -1581,8 +1605,8 @@
         "MED3",
         "BG4"
       ],
-      "local_surface": "Existing owned Office picture operations and PDF add_image use native media APIs",
-      "remaining": "Source PDF image replacement/removal, arbitrary alpha/blends/underlays and non-PNG authored profiles require separate native acceptance.",
+      "local_surface": "Existing owned Office picture operations and PDF PNG/JPEG add_image use native media APIs; PDF behind=True reuses the existing crop/quarter-turn/flip controls",
+      "remaining": "Source PDF image replacement/removal and broader alpha/blend profiles require separate native acceptance. DOCX/PPTX authored picture formats remain limited to their existing PNG profiles; PDF accepts PNG/JPEG.",
       "upstream_candidates": [
         "U10"
       ],
@@ -1624,8 +1648,8 @@
         "MED4",
         "BG7"
       ],
-      "local_surface": "PdfPage.draw_path; typed PPTX shape properties",
-      "remaining": "Native public stamping forces overlay; private prepend support must be exposed upstream. Do not wrap every draw in an adapter-built Form/layer system.",
+      "local_surface": "PdfPage.draw_path; built-in PdfPage.draw_text and PNG/JPEG add_image reuse behind=True for typed native underlays; typed PPTX shape properties",
+      "remaining": "Raw draw_path and supplied-font text remain overlay-only. Resource-collision-safe composition and bounded raw-stream admission remain open; existing resource collisions fail atomically. No adapter-built Form/layer system is introduced.",
       "upstream_candidates": [
         "U10"
       ],
@@ -1677,8 +1701,8 @@
         "QA4",
         "QA7"
       ],
-      "local_surface": "render_page/get_pixmap return encoded PNG; region clip; private retained native sessions",
-      "remaining": "Explicit output alpha/backdrop replacement is not proven; DeckCraft can return blank fallback after panic; do not add Pixmap wrapper.",
+      "local_surface": "render_page/get_pixmap return encoded PNG; region clip and private retained native sessions; selected DeckCraft PNG/PDF paths use fallible per-call APIs; PDF checks final rounded integer allocation dimensions",
+      "remaining": "Explicit output alpha/backdrop replacement remains unproven. Broader upstream allocation/work limits, structured errors and other rendering entry points remain open. A real blank slide is still valid; no Pixmap wrapper is introduced.",
       "upstream_candidates": [
         "U09"
       ],
@@ -1720,13 +1744,15 @@
         "LAY8",
         "REF8"
       ],
-      "local_surface": "Owned normalized blocks/cells/links and source metadata; eager open plus selected extract_text",
-      "remaining": "Native PDF table detector is pub(crate); need bounded public detector+consumed mask. Exact automatic Office line slices/geometry remain bounded provenance gaps.",
+      "local_surface": "Owned normalized blocks/cells/links and source metadata; eager open, selected extract_text and retained native PDF Page.search_for with bounded ordered rectangles",
+      "remaining": "Native PDF table detector remains private. Exact Office line slices and broader provenance are open; search is not OCR, regex, visible-only matching or normalized-offset reconstruction.",
       "upstream_candidates": [
         "U05",
         "U10"
       ],
-      "profiles": [],
+      "profiles": [
+        "pdf.native-search"
+      ],
       "disposition": "implemented_subset"
     },
     {
@@ -1829,6 +1855,11 @@
           "name": "set_border",
           "source": "pm:docs/annot.rst",
           "line": 28
+        },
+        {
+          "name": "set_flags",
+          "source": "pm:docs/annot.rst",
+          "line": 301
         }
       ],
       "coverage": [
@@ -1836,12 +1867,15 @@
         "REV1",
         "REV6"
       ],
-      "local_surface": "Owned note/highlight/link/markup annotation subset and typed properties",
-      "remaining": "Do not call PDF annotations equivalent to tracked DOCX review. Broader appearances/quads/replies/rotation require native fixtures.",
+      "local_surface": "Existing note/markup/link and bounded rectangle/ellipse annotation handles and typed properties; strict boolean lock for seven canonical comment kinds",
+      "remaining": "Fixed-profile geometric comments do not establish opacity/fill/reply or arbitrary appearance support. Caller-bounded native inventories remain upstream work; PDF annotations are distinct from tracked DOCX review. Local locked exposes only the native editing-lock bit, excludes links, and is not arbitrary flag editing or access control.",
       "upstream_candidates": [
         "U10"
       ],
-      "profiles": [],
+      "profiles": [
+        "pdf.geometric-comments",
+        "pdf.comment-locks"
+      ],
       "disposition": "implemented_subset"
     },
     {
@@ -1877,6 +1911,16 @@
           "name": "update",
           "source": "pm:docs/widget.rst",
           "line": 58
+        },
+        {
+          "name": "field_label",
+          "source": "pm:docs/widget.rst",
+          "line": 100
+        },
+        {
+          "name": "field_flags",
+          "source": "pm:docs/widget.rst",
+          "line": 110
         }
       ],
       "coverage": [
@@ -1884,8 +1928,8 @@
         "FORM3",
         "PKG5"
       ],
-      "local_surface": "PdfFields/PdfField owned text/checkbox/choice profile with geometry/value updates",
-      "remaining": "Imported enumeration silently truncates/loses widgets/unknown kinds; require public fallible bounded inventory before safe general source-form editing. Script/signature behavior is excluded.",
+      "local_surface": "PdfFields/PdfField owned text/checkbox/choice profile with geometry/value updates and bounded Unicode tooltip metadata and strict read_only state",
+      "remaining": "Imported enumeration silently truncates/loses widgets/unknown kinds; require public fallible bounded inventory before safe general source-form editing. Script/signature behavior is excluded. The local tooltip is an empty string when absent; this is not a promise to match the reference field-label fallback or imported metadata behavior. Local read_only exposes only READ_ONLY and native filling refusal, including identical/clear assignments; it is not arbitrary flags, widget synchronization or security parity.",
       "upstream_candidates": [
         "U10"
       ],
@@ -1963,13 +2007,15 @@
         "PKG8",
         "REV6"
       ],
-      "local_surface": "Conservative PDF edit/save rejects unsupported preservation profiles",
-      "remaining": "Attachment API fixed1GiB decode limit and no suitable bounded writer; arbitrary encryption/active-content/PDF-A/UA profiles unassessed. No raw PDF object escape hatch.",
+      "local_surface": "PDF save/to_bytes select object streams or classic cross-reference full output; neither is a new conversion pair or archival profile",
+      "remaining": "General cleanup/compression and incremental/encrypted output remain unassessed. Page FileAttachment creation is public; document EmbeddedFiles mutation remains private. Native strict caller-limited full-chain decoding exists; bounded complete attachment inventory, unambiguous identity and integrated bounded extraction remain upstream work. Arbitrary encryption/active-content/PDF-A/UA profiles are unassessed. No raw PDF object escape hatch.",
       "upstream_candidates": [
         "U10"
       ],
-      "profiles": [],
-      "disposition": "upstream_or_unassessed"
+      "profiles": [
+        "pdf.object-stream-output"
+      ],
+      "disposition": "implemented_subset"
     },
     {
       "id": "REF-PM-OFFICE",
@@ -1996,5 +2042,5 @@
       "disposition": "reference_comparison"
     }
   ],
-  "audited_commit": "52d1d9d055413a9a076eab85ae3e90d2f13144c2"
+  "audited_commit": "50220d770c2a6aefb64c41ce15cfc6df039dcf6b"
 }

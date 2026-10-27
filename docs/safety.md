@@ -35,7 +35,7 @@ The check scans eligible members regardless of their path or extension, so reloc
 
 - DPI must be finite and between 1 and 1200 inclusive.
 - Python rejects out-of-range page indexes.
-- PdfCraft rendering uses upstream oversize rejection.
+- Full-page PDF rendering checks the public native rounded pixel dimensions before requesting a raster, and retains native oversize rejection. Valid CropBox, rotation and UserUnit use native inspected display dimensions; clipped requests keep their separate region preflight.
 - WordCraft and DeckCraft dimensions are checked against their upstream maximum-side constants before raster allocation.
 - Each raster is limited to 64 million pixels (256 MB for one RGBA buffer). Encoding and renderer intermediates can require additional memory; this is not a total process-memory budget.
 - RGBA buffers must have exactly the expected length before PNG encoding.
@@ -84,8 +84,33 @@ Applications should treat all extraction failures as file-local. Do not retry ma
 - Upgrade upstream engines only with corpus tests and a new license audit.
 - Do not expose raw exception details directly to untrusted clients; they may include parser context.
 
-## Input and normalized output boundaries (unreleased)
+## Input and normalized output boundaries
 
 All public native detect/extract/render/convert entry points reject inputs over 128 MiB. Python path and binary-stream reads stop at that limit; bytearray/memoryview inputs are checked by byte size before copying. Caller-owned streams are not closed. The native JSON writer stops at 64 MiB during serialization, including escaped/UTF-8 bytes, instead of allocating the whole oversized result first. Allocation failure maps to a resource-limit error.
 
 This is not a streaming document parser or a total process-memory guarantee: upstream parsing/layout and owned models have separate limits and allocations. DOCX auxiliary traversal bounds parts, blocks/objects, text, referenced media and nested grids. Source examples in diagnostic notices are bounded independently from total occurrence counts. All existing archive and raster guards remain in force.
+
+
+## Owned PDF form appearance history
+
+The existing authoring input/generated-byte and mutation budgets include both appearance generations during owned text/checkbox/choice creation and every subsequent generated appearance. Repeated unchanged/empty text or choice values consume generated-byte and mutation budgets; canonical checkbox values reuse existing appearances and consume input/mutation budgets. The adapter measures known newly generated raw AP streams without decoding foreign appearances or scanning the document object store. Copies retain the counters, and deletion does not refund native-retained obsolete streams.
+
+These limits bound appearance-generation work/count and retained raw appearance bytes within the supported owned profile. They do not bound all PDF objects or total process memory, including native field inventories, clones, compression or serialized output allocation. The profile also includes immutable same-page radio groups with 2–32 widgets: creation reserves every initial/member redraw generation and metadata/value updates count each member. Initial pairs replaced inside the native call are charged conservatively at 64 KiB each; final generated AP streams are charged by raw bytes. The 128 MiB history/10,000 work-unit ceilings can precede the independently enforced 1,000-widget cap. Imported AcroForms, scripts and arbitrary mutable or multi-page widget groups remain outside this profile.
+
+
+Comment-opacity edits reuse the bounded canonical lock target profile before native property inspection or mutation. Only the accepted `/CA` scalar expands to finite `[0,1]`; direct geometry, metadata, reference-only annotation arrays and appearance restrictions remain. Notes reserve 64 KiB for native appearance work, for both opacity and color-only changes under the same canonical note target guard. All supported style/shape-resize redraws charge observed AP stream bytes plus a fixed 512-byte resource allowance for each generation. Compound shape resize/style edits charge both retained native streams. These are local operation budgets, not a process-wide allocation guarantee or general imported-comment inventory bound.
+
+
+### Owned paragraph movement
+
+Direct DOCX paragraph reordering is one staged transaction through public native block removal/insertion. Existing bounds cover 100,000 owned locators, 100,000 cell placeholders and 49-component/16-table paths. Native required tail padding is retained once and counted against the physical block cap; moves consume no editable identity or text/cell budget. Existing body section invariants and normal bookmark/media/field/list/semantic commit checks remain. A move cannot select a section boundary, cross sections/containers, move protected semantic anchors or mutate an aliased header/footer. Python index callbacks are followed by lifetime/revision checks before native dispatch; callback edits are not rolled back. No-op movement of a supported paragraph preserves revision and cached output.
+
+
+Unused DOCX style deletion checks raw incoming references before cloning/removing a definition. The scan charges records and reference UTF-8 bytes against 2,000,000 units, at most 100,000 blocks/cells and 16 nested table levels; opaque/history carriers outside the owned profile reject explicitly. Live plus retired style IDs are capped at 1024 including builtins, with 259-byte IDs and duplicate/disjoint checks before reservation copying. Allocation uses the native generator on temporary ID reservations; returned collisions never recycle an ID. Retirement is prepared before ordinary commit and published only after success. Exact handle lookup and revision/identity checks across caller conversion prevent stale style aliases. Limits retain the existing resource_limit-to-UnsafeArchiveError mapping.
+
+
+### Owned DOCX closed shapes
+
+Owned rectangles/ellipses use at most 1000 live shape IDs independently of picture count, the existing monotonic block allocator, 100000 block/cell limits, 16 table levels and 128 sections. Shape property patches are at most 1 KiB; a separately charged source walk is bounded at 2000000 work units. Native pagination retains the existing 10000-page/2000000-item limits. These bounds are not a process-memory guarantee. Complete source traversal rejects auxiliary/nested/opaque shapes rather than adopting unowned parts.
+
+A single exact native shape predicate is shared with media cleanup and style/reference validation; it admits no text-box story, group, connector/effect or hidden reference carrier. Candidate commits and outputs verify the shape registry, horizontal sections, exact native placement cardinality, requested dimensions and the full centered outline against finite physical-page bounds. Outlines are at most 100 points and at most the smaller shape dimension. Normal semantic-reference, media, field, bookmark and section guards remain in force. Staged creation/deletion publishes model and identity together; callback-capable numeric/color/index conversions recheck lifetime, revision and exact handle identity. Caller callback edits remain visible when the requested operation is rejected.

@@ -139,6 +139,39 @@ impl PdfSession {
         )
     }
 
+    pub fn search_for(&self, page: usize, query: &str) -> Result<Vec<[f32; 4]>, EngineError> {
+        let mut guard = self
+            .renderer
+            .lock()
+            .map_err(|_| EngineError::Malformed("PDF search session is unavailable".into()))?;
+        let renderer = guard
+            .as_mut()
+            .ok_or_else(|| EngineError::Closed("PDF render session is closed".into()))?;
+        if page >= self.page_sizes.len() {
+            return Err(EngineError::PageIndex("page index is out of range".into()));
+        }
+        check_search_query(query)?;
+        if query.chars().all(char::is_whitespace) {
+            return Ok(Vec::new());
+        }
+        let rendered = renderer.render(RenderRequest {
+            page,
+            kind: RequestKind::Text,
+            scale: 1.0,
+            ..Default::default()
+        });
+        check_content_warnings(&rendered.warnings)?;
+        if let Some(error) = rendered.error {
+            return Err(EngineError::Malformed(format!(
+                "PDF search text extraction failed: {error}"
+            )));
+        }
+        let text = rendered.text.ok_or_else(|| {
+            EngineError::Malformed("PDF search text extraction returned no text".into())
+        })?;
+        search_text(&text, query)
+    }
+
     pub fn stats(&self) -> Result<pdfcraft_render::RenderStats, EngineError> {
         let renderer = self
             .renderer
@@ -157,6 +190,139 @@ impl PdfSession {
             .take();
         Ok(())
     }
+}
+
+const MAX_SEARCH_QUERY_BYTES: usize = 4096;
+const MAX_SEARCH_GLYPHS: usize = 1_000_000;
+const MAX_SEARCH_SOURCE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_SEARCH_WORK: usize = 1_000_000;
+const MAX_SEARCH_RESULTS: usize = 10_000;
+
+fn search_limit(message: &str) -> EngineError {
+    EngineError::ResourceLimit(format!("PDF search {message}"))
+}
+
+fn check_search_query(query: &str) -> Result<(), EngineError> {
+    if query.len() > MAX_SEARCH_QUERY_BYTES {
+        return Err(search_limit("query exceeds 4096 UTF-8 bytes"));
+    }
+    Ok(())
+}
+
+fn check_search_indexes(count: usize, lines: usize, spaces: usize) -> Result<(), EngineError> {
+    if count > MAX_SEARCH_GLYPHS {
+        return Err(search_limit("glyph count exceeds 1000000"));
+    }
+    if lines != count || spaces != count {
+        return Err(EngineError::Malformed(
+            "PDF search glyph indexes are inconsistent".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn check_search_text(text: &pdfcraft_render::PageText) -> Result<(), EngineError> {
+    let count = text.glyphs.len();
+    check_search_indexes(count, text.line_of.len(), text.space_before.len())?;
+    // Bound the whole UTF-8 scan before visiting any glyph characters. The original
+    // native text is already interpreted; this bounds subsequent search work only.
+    let mut bytes = 0usize;
+    for glyph in &text.glyphs {
+        bytes = bytes
+            .checked_add(glyph.text.len())
+            .ok_or_else(|| search_limit("source byte count overflow"))?;
+        if bytes > MAX_SEARCH_SOURCE_BYTES {
+            return Err(search_limit("source text exceeds 4 MiB"));
+        }
+    }
+    // Native KMP is linear in folded characters plus query length, but allocates
+    // its entire normalized character buffer before honoring the result limit.
+    // Native Turkish-I/sigma substitutions cannot exceed this lowercase bound.
+    // Include one possible inserted separator per glyph; UTF-8 folding can grow
+    // bytes even when scalar count is unchanged (at most four bytes per scalar).
+    let mut work = count.saturating_sub(1);
+    for glyph in &text.glyphs {
+        for c in glyph.text.chars() {
+            work = work
+                .checked_add(c.to_lowercase().count())
+                .ok_or_else(|| search_limit("normalization work overflow"))?;
+            if work > MAX_SEARCH_WORK {
+                return Err(search_limit("normalization exceeds 1000000 scalar slots"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn valid_search_rectangle(rect: &[f32; 4]) -> bool {
+    rect.iter().all(|value| value.is_finite()) && rect[0] <= rect[2] && rect[1] <= rect[3]
+}
+
+fn search_rectangles(
+    text: &pdfcraft_render::PageText,
+    hits: &[std::ops::Range<usize>],
+) -> Result<Vec<[f32; 4]>, EngineError> {
+    if hits.len() > MAX_SEARCH_RESULTS {
+        return Err(search_limit("matches exceed 10000"));
+    }
+    let mut work = 0usize;
+    let mut rectangles = 0usize;
+    // Preflight the full result before asking line_rects to allocate any geometry.
+    for hit in hits {
+        if hit.start >= hit.end || hit.end > text.glyphs.len() {
+            return Err(EngineError::Malformed(
+                "PDF search returned an invalid glyph range".into(),
+            ));
+        }
+        work = work
+            .checked_add(hit.len())
+            .ok_or_else(|| search_limit("geometry work overflow"))?;
+        if work > MAX_SEARCH_WORK {
+            return Err(search_limit("geometry exceeds 1000000 glyph visits"));
+        }
+        let mut previous = None;
+        for i in hit.clone() {
+            let line = text
+                .line_of
+                .get(i)
+                .ok_or_else(|| EngineError::Malformed("PDF search line index is missing".into()))?;
+            if previous != Some(line) {
+                rectangles += 1;
+                if rectangles > MAX_SEARCH_RESULTS {
+                    return Err(search_limit("rectangles exceed 10000"));
+                }
+            }
+            previous = Some(line);
+            if !valid_search_rectangle(&text.glyphs[i].rect) {
+                return Err(EngineError::Malformed(
+                    "PDF search glyph rectangle is non-finite or reversed".into(),
+                ));
+            }
+        }
+    }
+    let mut result = Vec::with_capacity(rectangles);
+    for hit in hits {
+        result.extend(text.line_rects(hit.clone()));
+    }
+    if result.len() != rectangles || result.iter().any(|rect| !valid_search_rectangle(rect)) {
+        return Err(EngineError::Malformed(
+            "PDF search rectangle projection is inconsistent".into(),
+        ));
+    }
+    Ok(result)
+}
+
+fn search_text(
+    text: &pdfcraft_render::PageText,
+    query: &str,
+) -> Result<Vec<[f32; 4]>, EngineError> {
+    check_search_query(query)?;
+    if query.chars().all(char::is_whitespace) {
+        return Ok(Vec::new());
+    }
+    check_search_text(text)?;
+    let hits = text.find_opts_limited(query, false, false, MAX_SEARCH_RESULTS + 1);
+    search_rectangles(text, &hits)
 }
 
 pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, EngineError> {
@@ -353,6 +519,16 @@ fn render_with(
             Ok(region)
         })
         .transpose()?;
+    if region.is_none() {
+        // Keep local rejection before any native request, independently of the
+        // upstream final-allocation guard. Continuous scale limits can round
+        // above the pixel budget; retain strict scale rejection as well.
+        crate::rendering::validate_size(
+            f64::from(pdfcraft_render::device_pixels(size[0], scale)),
+            f64::from(pdfcraft_render::device_pixels(size[1], scale)),
+            pdfcraft_render::MAX_SIDE as u32,
+        )?;
+    }
     let rendered = renderer.render(RenderRequest {
         page,
         kind: RequestKind::Pixels,
@@ -447,14 +623,13 @@ fn add_table(
             rows.push((block.rect[1], vec![(block.rect[0], block.text, block.rect)]));
         }
     }
-    let mut rows: Vec<Vec<PositionedText>> = rows
+    let (mut rows, discarded): (Vec<Vec<PositionedText>>, Vec<Vec<PositionedText>>) = rows
         .into_iter()
         .map(|(_, mut row)| {
             row.sort_by(|a, b| a.0.total_cmp(&b.0));
             row
         })
-        .filter(|row| row.len() >= 2)
-        .collect();
+        .partition(|row| row.len() >= 2);
     if rows.len() < 2 || rows.iter().any(|row| row.len() != rows[0].len()) {
         return Ok(());
     }
@@ -490,6 +665,60 @@ fn add_table(
         f64::from(a[0].max(b[0])),
         f64::from(a[1].max(b[1])),
     ];
+    let valid_rect = |rect: [f64; 4]| {
+        rect.iter().all(|value| value.is_finite()) && rect[0] < rect[2] && rect[1] < rect[3]
+    };
+    if !valid_rect(table_bbox) {
+        return Ok(());
+    }
+    // Use exactly the existing replacement predicate, for every block kind. A rejected
+    // candidate must leave the original blocks intact, including bounds outside the table.
+    let inside_table = |block: &BlockPayload| {
+        block.bbox.is_some_and(|bbox| {
+            let center_x = (bbox[0] + bbox[2]) / 2.0;
+            let center_y = (bbox[1] + bbox[3]) / 2.0;
+            center_x >= table_bbox[0]
+                && center_x <= table_bbox[2]
+                && center_y >= table_bbox[1]
+                && center_y <= table_bbox[3]
+        })
+    };
+    let mut suppressed_bounds = table_bbox;
+    for block in page.blocks.iter().filter(|block| inside_table(block)) {
+        let Some(rect) = block.bbox else {
+            return Ok(());
+        };
+        if !valid_rect(rect) {
+            return Ok(());
+        }
+        suppressed_bounds = [
+            suppressed_bounds[0].min(rect[0]),
+            suppressed_bounds[1].min(rect[1]),
+            suppressed_bounds[2].max(rect[2]),
+            suppressed_bounds[3].max(rect[3]),
+        ];
+    }
+    for (_, _, rect) in discarded.iter().flatten() {
+        if !valid_rect(*rect) {
+            return Ok(());
+        }
+        let a = info.user_to_view(rect[0] as f32, rect[1] as f32);
+        let b = info.user_to_view(rect[2] as f32, rect[3] as f32);
+        let rect = [
+            f64::from(a[0].min(b[0])),
+            f64::from(a[1].min(b[1])),
+            f64::from(a[0].max(b[0])),
+            f64::from(a[1].max(b[1])),
+        ];
+        if !valid_rect(rect)
+            || (rect[0] < suppressed_bounds[2]
+                && rect[2] > suppressed_bounds[0]
+                && rect[1] < suppressed_bounds[3]
+                && rect[3] > suppressed_bounds[1])
+        {
+            return Ok(());
+        }
+    }
     let table = TablePayload {
         rows: rows
             .drain(..)
@@ -503,15 +732,7 @@ fn add_table(
     let mut insertion = None;
     let mut retained = Vec::with_capacity(page.blocks.len());
     for block in page.blocks.drain(..) {
-        let inside_table = block.bbox.is_some_and(|bbox| {
-            let center_x = (bbox[0] + bbox[2]) / 2.0;
-            let center_y = (bbox[1] + bbox[3]) / 2.0;
-            center_x >= table_bbox[0]
-                && center_x <= table_bbox[2]
-                && center_y >= table_bbox[1]
-                && center_y <= table_bbox[3]
-        });
-        if inside_table {
+        if inside_table(&block) {
             insertion.get_or_insert(retained.len());
         } else {
             retained.push(block);
@@ -1193,3 +1414,721 @@ mod selective_open_tests {
         ));
     }
 }
+
+// Original synthetic fixtures verify the pinned native search semantics.
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+    use pdfcraft_render::{PageText, TextGlyph};
+    use std::io::Cursor;
+
+    fn synthetic(lines: &[&[&str]]) -> PageText {
+        let mut page = PageText::default();
+        for (line, words) in lines.iter().enumerate() {
+            for (column, value) in words.iter().enumerate() {
+                let x = column as f32 * 10.0;
+                let y = line as f32 * 20.0;
+                page.glyphs.push(TextGlyph {
+                    text: (*value).into(),
+                    rect: [x, y, x + 10.0, y + 10.0],
+                    quad: [[x, y + 10.0], [x + 10.0, y + 10.0], [x + 10.0, y], [x, y]],
+                    direction: [1.0, 0.0],
+                });
+                page.line_of.push(line as u32);
+                page.space_before.push(false);
+            }
+        }
+        page
+    }
+
+    #[test]
+    fn search_normalization_and_ligature_ownership() {
+        let text = synthetic(&[&["Quick  brown"], &["fox", " STRAẞE İıI Σσς"]]);
+        assert_eq!(
+            text.find_opts_limited("QUICK\t brown\nfox", false, false, 10),
+            vec![0..2]
+        );
+        assert_eq!(
+            text.line_rects(0..2),
+            vec![[0.0, 0.0, 10.0, 10.0], [0.0, 20.0, 10.0, 30.0]]
+        );
+        assert_eq!(
+            text.find_opts_limited("straße", false, false, 10),
+            vec![2..3]
+        );
+        assert!(text
+            .find_opts_limited("strasse", false, false, 10)
+            .is_empty());
+        assert_eq!(
+            text.find_opts_limited("iii σσσ", false, false, 10),
+            vec![2..3]
+        );
+        assert!(text.find_opts_limited("", false, false, 10).is_empty());
+        assert!(text.find_opts_limited("\t\n ", false, false, 10).is_empty());
+        let text = synthetic(&[&["o", "ffi", "c", "e"]]);
+        assert_eq!(
+            text.find_opts_limited("f", false, false, 10),
+            vec![1..2, 1..2]
+        );
+        assert_eq!(text.find_opts_limited("ffi", false, false, 10), vec![1..2]);
+        assert_eq!(text.find_opts_limited("of", false, false, 10), vec![0..2]);
+        let text = synthetic(&[&["aaaaa"]]);
+        assert_eq!(
+            text.find_opts_limited("aa", false, false, 10),
+            vec![0..1, 0..1]
+        );
+        assert_eq!(text.find_opts_limited("a", false, false, 3).len(), 3);
+        eprintln!("search probe: normalized whitespace/case; no ss/ß expansion; ligature duplicate geometry; nonoverlapping hits verified");
+    }
+
+    #[test]
+    fn search_case_expansion_accounting_exhaustive_unicode() {
+        let mut expansion_scalars = 0;
+        let mut largest_native = 0;
+        for value in 0..=0x10ffff {
+            let Some(c) = char::from_u32(value) else {
+                continue;
+            };
+            let source = c.to_string();
+            let native = pdfcraft_render::text::fold_case(&source);
+            let lower_bound = c.to_lowercase().count();
+            assert!(native.chars().count() <= lower_bound, "U+{value:04X}");
+            largest_native = largest_native.max(native.chars().count());
+            if lower_bound > 1 {
+                expansion_scalars += 1;
+            }
+            // UTF-8 can grow even when the folded scalar count does not (e.g. U+023A).
+            assert!(native.len() <= 4 * lower_bound);
+        }
+        eprintln!("Unicode lowercase expanding scalars={expansion_scalars}, largest native fold scalar count={largest_native}");
+        assert_eq!(pdfcraft_render::text::fold_case("Ⱥ"), "ⱥ");
+        assert_eq!(pdfcraft_render::text::fold_case("İ"), "i");
+    }
+
+    // Original synthetic PDF fixture; the only handwritten serialization is test data.
+    fn fixture(content: &str, rotation: u16, cmap: &str) -> Vec<u8> {
+        let cmap = format!("/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def /CMapName /Probe def /CMapType 2 def 1 begincodespacerange <00> <FF> endcodespacerange {cmap} endcmap CMapName currentdict /CMap defineresource pop end end");
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_owned(),
+            format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /CropBox [20 30 220 330] /Rotate {rotation} /UserUnit 1.25 /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 6 0 R >>".to_owned(),
+            format!("<< /Length {} >>\nstream\n{content}\nendstream",content.len()),
+            format!("<< /Length {} >>\nstream\n{cmap}\nendstream",cmap.len()),
+        ];
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offsets = vec![0];
+        for (i, object) in objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = out.len();
+        out.extend_from_slice(
+            format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len()).as_bytes(),
+        );
+        for offset in offsets.into_iter().skip(1) {
+            out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(
+            format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+        );
+        out
+    }
+
+    fn text(bytes: &[u8]) -> Arc<PageText> {
+        let mut renderer = PageRenderer::new(Arc::new(bytes.to_vec()), RenderConfig::default());
+        let rendered = renderer.render(RenderRequest {
+            page: 0,
+            kind: RequestKind::Text,
+            scale: 1.0,
+            ..Default::default()
+        });
+        check_content_warnings(&rendered.warnings).unwrap();
+        assert!(rendered.error.is_none(), "{:?}", rendered.error);
+        rendered.text.unwrap()
+    }
+
+    fn raster(bytes: &[u8]) -> (usize, usize, Vec<u8>) {
+        let png = render(bytes, 0, 144.0, None).unwrap();
+        let mut reader = png::Decoder::new(Cursor::new(png)).read_info().unwrap();
+        let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+        let frame = reader.next_frame(&mut pixels).unwrap();
+        assert_eq!(frame.color_type, png::ColorType::Rgba);
+        pixels.truncate(frame.buffer_size());
+        (frame.width as usize, frame.height as usize, pixels)
+    }
+
+    #[test]
+    fn search_native_pdf_ligature_geometry_and_visible_pixels_all_rotations() {
+        for rotation in [0, 90, 180, 270] {
+            let bytes = fixture(
+                "BT /F1 20 Tf 1 0 0 1 60 260 Tm (oWce) Tj ET",
+                rotation,
+                "1 beginbfchar <57> <006600660069> endbfchar",
+            );
+            let control = fixture("BT /F1 20 Tf 1 0 0 1 60 260 Tm (oWce) Tj ET", rotation, "");
+            let native = text(&bytes);
+            assert_eq!(native.plain_text(), "office");
+            assert_eq!(
+                native.find_opts_limited("F", false, false, 10),
+                vec![1..2, 1..2]
+            );
+            let rects =
+                native.line_rects(native.find_opts_limited("ffi", false, false, 10)[0].clone());
+            assert_eq!(rects.len(), 1);
+            assert_eq!(rects, text(&control).line_rects(1..2));
+            let info = inspect(Arc::new(bytes.clone()), None).unwrap();
+            // Native glyph-em rectangle in PDF user units is [71.12,256,90.0,276].
+            // Compare public user-to-view projection, including crop origin, rotation and UserUnit.
+            let page = &info.pages[0];
+            let points = [[71.12, 256.0], [90.0, 256.0], [71.12, 276.0], [90.0, 276.0]];
+            let view: Vec<_> = points
+                .into_iter()
+                .map(|p| page.user_to_view(p[0], p[1]))
+                .collect();
+            let expected = [
+                view.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min),
+                view.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min),
+                view.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max),
+                view.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max),
+            ];
+            for (actual, want) in rects[0].into_iter().zip(expected) {
+                assert!(
+                    (actual - want).abs() < 0.03,
+                    "rotation {rotation}: {rects:?} expected {expected:?}"
+                );
+            }
+            let (width, height, pixels) = raster(&bytes);
+            assert_eq!(raster(&control), (width, height, pixels.clone()));
+            let r = rects[0];
+            let mut ink = 0;
+            for y in
+                (r[1] * 2.0).floor().max(0.0) as usize..((r[3] * 2.0).ceil() as usize).min(height)
+            {
+                for x in (r[0] * 2.0).floor().max(0.0) as usize
+                    ..((r[2] * 2.0).ceil() as usize).min(width)
+                {
+                    let p = &pixels[(y * width + x) * 4..(y * width + x) * 4 + 4];
+                    if p[0] < 100 && p[1] < 100 && p[2] < 100 && p[3] > 0 {
+                        ink += 1;
+                    }
+                }
+            }
+            assert!(
+                ink > 20,
+                "rotation {rotation}: {ink} visible pixels in {r:?}"
+            );
+            eprintln!("rotation={rotation} ffi rectangle={r:?}, visible dark pixels={ink}");
+        }
+    }
+
+    #[test]
+    fn search_clipped_and_invisible_text_is_still_searchable() {
+        let clipped = fixture(
+            "q 0 0 1 1 re W n BT /F1 20 Tf 1 0 0 1 60 260 Tm (Hidden) Tj ET Q",
+            0,
+            "",
+        );
+        let invisible = fixture("BT /F1 20 Tf 3 Tr 1 0 0 1 60 260 Tm (Hidden) Tj ET", 0, "");
+        let blank = fixture("", 0, "");
+        for bytes in [&clipped, &invisible] {
+            assert_eq!(
+                text(bytes).find_opts_limited("hidden", false, false, 10),
+                vec![0..6]
+            );
+            assert_eq!(raster(bytes), raster(&blank));
+        }
+    }
+    #[test]
+    fn search_real_multiline_native_order_and_empty_page() {
+        for rotation in [0, 90, 180, 270] {
+            let bytes = fixture(
+                "BT /F1 16 Tf 1 0 0 1 60 260 Tm (Quick  brown) Tj 0 -24 Td (fox) Tj ET",
+                rotation,
+                "",
+            );
+            let native = text(&bytes);
+            assert_eq!(native.plain_text(), "Quick  brown\nfox");
+            let hits = native.find_opts_limited("QUICK\tbrown\nfox", false, false, 10);
+            assert_eq!(hits.len(), 1);
+            let rects = native.line_rects(hits[0].clone());
+            assert_eq!(rects.len(), 2, "rotation {rotation}: {rects:?}");
+            eprintln!("multiline rotation={rotation}: {rects:?}");
+        }
+        let blank = text(&fixture("", 0, ""));
+        assert!(blank.find_opts_limited("any", false, false, 10).is_empty());
+    }
+    #[test]
+    fn search_preflights_query_source_indexes_and_normalized_work() {
+        assert!(check_search_query(&"a".repeat(MAX_SEARCH_QUERY_BYTES)).is_ok());
+        assert!(matches!(
+            check_search_query(&"a".repeat(MAX_SEARCH_QUERY_BYTES + 1)),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        assert!(check_search_query(&"α".repeat(MAX_SEARCH_QUERY_BYTES / 2)).is_ok());
+        assert!(check_search_query(&"α".repeat(MAX_SEARCH_QUERY_BYTES / 2 + 1)).is_err());
+        assert!(
+            check_search_indexes(MAX_SEARCH_GLYPHS, MAX_SEARCH_GLYPHS, MAX_SEARCH_GLYPHS).is_ok()
+        );
+        assert!(matches!(
+            check_search_indexes(MAX_SEARCH_GLYPHS + 1, 0, 0),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        assert!(matches!(
+            check_search_indexes(1, 0, 1),
+            Err(EngineError::Malformed(_))
+        ));
+        let text = synthetic(&[&[&"a".repeat(MAX_SEARCH_WORK)]]);
+        assert!(check_search_text(&text).is_ok());
+        assert_eq!(
+            search_text(&text, &format!("{}b", "a".repeat(4095))).unwrap(),
+            Vec::<[f32; 4]>::new()
+        );
+        let over = synthetic(&[&[&"a".repeat(MAX_SEARCH_WORK + 1)]]);
+        assert!(
+            matches!(check_search_text(&over),Err(EngineError::ResourceLimit(message)) if message.contains("normalization"))
+        );
+        // The byte scan must win over normalization failure once the raw cap is crossed.
+        for extra in [0, 1] {
+            let text = synthetic(&[&[&"a".repeat(MAX_SEARCH_SOURCE_BYTES + extra)]]);
+            let Err(EngineError::ResourceLimit(message)) = check_search_text(&text) else {
+                panic!("expected budget failure")
+            };
+            assert!(message.contains(if extra == 0 {
+                "normalization"
+            } else {
+                "source text"
+            }));
+        }
+        let mut malformed = synthetic(&[&["a"]]);
+        malformed.line_of.clear();
+        assert!(matches!(
+            search_text(&malformed, "a"),
+            Err(EngineError::Malformed(_))
+        ));
+        let separators = synthetic(&[&["a"], &["a"]]);
+        assert_eq!(search_text(&separators, "a a").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn search_result_rectangle_and_geometry_work_limits_do_not_truncate() {
+        let text = synthetic(&[&[&"a".repeat(MAX_SEARCH_RESULTS)]]);
+        assert_eq!(search_text(&text, "a").unwrap().len(), MAX_SEARCH_RESULTS);
+        let over = synthetic(&[&[&"a".repeat(MAX_SEARCH_RESULTS + 1)]]);
+        assert!(
+            matches!(search_text(&over,"a"),Err(EngineError::ResourceLimit(message)) if message.contains("matches"))
+        );
+        let values = vec!["a"; MAX_SEARCH_RESULTS + 1];
+        let mut text = synthetic(&[&values]);
+        text.line_of = (0..=MAX_SEARCH_RESULTS as u32).collect();
+        assert_eq!(
+            search_rectangles(&text, std::slice::from_ref(&(0..MAX_SEARCH_RESULTS)))
+                .unwrap()
+                .len(),
+            MAX_SEARCH_RESULTS
+        );
+        assert!(
+            matches!(search_rectangles(&text,std::slice::from_ref(&(0..MAX_SEARCH_RESULTS+1))),Err(EngineError::ResourceLimit(message)) if message.contains("rectangles"))
+        );
+        let values = vec!["a"; 1001];
+        let text = synthetic(&[&values]);
+        let mut hits = vec![0..1000; 1000];
+        assert_eq!(search_rectangles(&text, &hits).unwrap().len(), 1000);
+        hits[999] = 0..1001;
+        assert!(
+            matches!(search_rectangles(&text,&hits),Err(EngineError::ResourceLimit(message)) if message.contains("glyph visits"))
+        );
+        assert!(matches!(
+            search_rectangles(&text, std::slice::from_ref(&(0..1002))),
+            Err(EngineError::Malformed(_))
+        ));
+        let mut invalid = synthetic(&[&["a"]]);
+        for rect in [
+            [f32::INFINITY, 0.0, 10.0, 10.0],
+            [10.0, 0.0, 0.0, 10.0],
+            [0.0, 10.0, 10.0, 0.0],
+        ] {
+            invalid.glyphs[0].rect = rect;
+            assert!(matches!(
+                search_text(&invalid, "a"),
+                Err(EngineError::Malformed(_))
+            ));
+        }
+        invalid.glyphs[0].rect = [-30.0, -20.0, -10.0, -10.0];
+        assert_eq!(
+            search_text(&invalid, "a").unwrap(),
+            vec![invalid.glyphs[0].rect]
+        );
+    }
+
+    #[test]
+    fn search_session_preserves_parser_and_avoids_raster_or_blank_interpretation() {
+        let bytes = fixture("BT /F1 20 Tf 1 0 0 1 60 260 Tm (Search) Tj ET", 0, "");
+        let (session, _) = PdfSession::open(&bytes, None).unwrap();
+        let before = session.stats().unwrap();
+        assert!(session.search_for(0, "\t\n ").unwrap().is_empty());
+        assert!(matches!(
+            session.search_for(1, ""),
+            Err(EngineError::PageIndex(_))
+        ));
+        assert!(matches!(
+            session.search_for(0, &"x".repeat(4097)),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        assert_eq!(
+            session.stats().unwrap().render_requests,
+            before.render_requests
+        );
+        let first = session.search_for(0, "SEARCH").unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(session.search_for(0, "search").unwrap(), first);
+        let after = session.stats().unwrap();
+        assert_eq!(after.parser_builds, before.parser_builds);
+        assert_eq!(after.rasterizations, before.rasterizations);
+        assert_eq!(after.render_requests, before.render_requests + 2);
+        session.close().unwrap();
+        assert!(matches!(
+            session.search_for(0, ""),
+            Err(EngineError::Closed(_))
+        ));
+        assert_eq!(first.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod raster_limit_tests {
+    use super::*;
+
+    fn fixture(width: f32, height: f32, unit: f32, rotation: u16) -> Vec<u8> {
+        // Original empty-page fixture; offset CropBox is smaller than MediaBox.
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_owned(),
+            format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] /CropBox [10 20 {} {}] /UserUnit {unit} /Rotate {rotation} /Resources << >> /Contents 4 0 R >>", width + 20.0, height + 40.0, width + 10.0, height + 20.0),
+            "<< /Length 0 >>\nstream\n\nendstream".to_owned(),
+        ];
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, object) in objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = out.len();
+        out.extend_from_slice(b"xref\n0 5\n0000000000 65535 f \n");
+        for offset in offsets {
+            out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(
+            format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+        );
+        out
+    }
+
+    #[test]
+    fn native_continuous_area_can_round_above_integer_pixel_budget() {
+        // Arithmetic only: never allocate a 64-million-pixel acceptance fixture.
+        let (w, h) = (8000.5_f32, 7999.5_f32);
+        assert_eq!(w * h, 64_000_000.0);
+        assert_eq!(pdfcraft_render::effective_scale(w, h, 1.0), 1.0);
+        let width = pdfcraft_render::device_pixels(w, 1.0);
+        let height = pdfcraft_render::device_pixels(h, 1.0);
+        assert_eq!((width, height), (8001, 8000));
+        assert_eq!(u64::from(width) * u64::from(height), 64_008_000);
+        assert!(matches!(
+            crate::rendering::validate_size(
+                f64::from(width),
+                f64::from(height),
+                pdfcraft_render::MAX_SIDE as u32
+            ),
+            Err(EngineError::ResourceLimit(_))
+        ));
+        // Exact cap remains accepted by the pure helper without rasterization.
+        assert!(
+            crate::rendering::validate_size(8000.0, 8000.0, pdfcraft_render::MAX_SIDE as u32)
+                .is_ok()
+        );
+        assert!(
+            crate::rendering::validate_size(8192.0, 1.0, pdfcraft_render::MAX_SIDE as u32).is_ok()
+        );
+    }
+
+    #[test]
+    fn linked_native_typed_placement_preserves_identity_order_and_reopened_paint() {
+        use crate::author_pdf::{add_content_with_placement, Placement};
+        use pdfcraft_cos::{
+            write_full, write_incremental, Dict, Document, Object, SaveOptions, Stream,
+        };
+        use pdfcraft_edit::{
+            add_content, delete_content, list_added, update_content, AddedImage, AddedText, Content,
+        };
+        let mut doc = Document::open(Arc::new(fixture(100.0, 120.0, 1.0, 0))).unwrap();
+        let image = |doc: &mut Document, rgb: [u8; 3]| {
+            let mut dict = Dict::new();
+            dict.set(b"Type".to_vec(), Object::name("XObject"));
+            dict.set(b"Subtype".to_vec(), Object::name("Image"));
+            dict.set(b"Width".to_vec(), Object::Int(1));
+            dict.set(b"Height".to_vec(), Object::Int(1));
+            dict.set(b"ColorSpace".to_vec(), Object::name("DeviceRGB"));
+            dict.set(b"BitsPerComponent".to_vec(), Object::Int(8));
+            doc.add(Object::Stream(Stream::from_raw(dict, rgb.to_vec())))
+        };
+        let text = |label: &str, rect| {
+            Content::Text(AddedText {
+                text: label.into(),
+                rect,
+                bold: true,
+                ..AddedText::default()
+            })
+        };
+        let blue = image(&mut doc, [0, 0, 255]);
+        let blue_item = Content::Image(AddedImage::new([40.0, 40.0, 80.0, 80.0], blue));
+        assert_eq!(add_content(&mut doc, 0, &blue_item).unwrap(), 0);
+        assert_eq!(
+            add_content(&mut doc, 0, &text("Original", [5.0, 96.0, 95.0, 112.0])).unwrap(),
+            1
+        );
+        let original_refs: Vec<_> = list_added(&doc).iter().map(|a| a.obj).collect();
+        pdfcraft_annot::links::add(
+            &mut doc,
+            0,
+            [15.0, 25.0, 45.0, 35.0],
+            &pdfcraft_annot::links::LinkAction::Uri("https://example.com/retained".into()),
+            &pdfcraft_annot::links::LinkStyle::default(),
+        )
+        .unwrap();
+        let red = image(&mut doc, [255, 0, 0]);
+        let red_item = Content::Image(AddedImage::new([20.0, 20.0, 90.0, 90.0], red));
+        assert_eq!(
+            add_content_with_placement(&mut doc, 0, &red_item, Placement::Underlay).unwrap(),
+            0
+        );
+        let red_ref = list_added(&doc)[0].obj;
+        assert_eq!(
+            add_content_with_placement(
+                &mut doc,
+                0,
+                &text("New", [5.0, 0.0, 95.0, 16.0]),
+                Placement::Underlay
+            )
+            .unwrap(),
+            0
+        );
+        let text_ref = list_added(&doc)[0].obj;
+        let expected = [text_ref, red_ref, original_refs[0], original_refs[1]];
+        assert_eq!(
+            list_added(&doc).iter().map(|a| a.obj).collect::<Vec<_>>(),
+            expected
+        );
+        update_content(&mut doc, 0, 0, &text("Updated", [5.0, 0.0, 95.0, 16.0])).unwrap();
+        update_content(&mut doc, 0, 3, &text("Original", [5.0, 96.0, 95.0, 112.0])).unwrap();
+        assert_eq!(
+            list_added(&doc).iter().map(|a| a.obj).collect::<Vec<_>>(),
+            expected
+        );
+
+        let verify = |doc: &Document, overlay: bool, labels: bool| {
+            for (incremental, bytes) in [
+                (
+                    true,
+                    write_incremental(doc, &SaveOptions::default()).unwrap(),
+                ),
+                (false, write_full(doc, &SaveOptions::default()).unwrap()),
+            ] {
+                let reopened = Document::open(Arc::new(bytes.clone())).unwrap();
+                let items = list_added(&reopened);
+                assert_eq!(items.len(), if labels { 4 } else { 3 });
+                if incremental && labels {
+                    assert_eq!(items.iter().map(|a| a.obj).collect::<Vec<_>>(), expected);
+                }
+                let info = pdfcraft_render::inspect(Arc::new(bytes.clone()), None).unwrap();
+                assert_eq!(info.links.len(), 1);
+                assert_eq!(
+                    info.links[0].target,
+                    pdfcraft_render::LinkTarget::Uri("https://example.com/retained".into())
+                );
+                let mut renderer = PageRenderer::new(Arc::new(bytes), RenderConfig::default());
+                let extracted = renderer
+                    .filtered_text(0, Default::default())
+                    .unwrap()
+                    .plain_text();
+                assert_eq!(extracted.matches("Original").count(), usize::from(labels));
+                assert_eq!(extracted.matches("Updated").count(), usize::from(labels));
+                assert!(!extracted.contains("New"));
+                for scale in [1.0_f32, 2.0] {
+                    let rendered = renderer.render(RenderRequest {
+                        scale,
+                        ..Default::default()
+                    });
+                    assert!(rendered.error.is_none(), "{:?}", rendered.error);
+                    assert_eq!(
+                        (rendered.width, rendered.height),
+                        ((100.0 * scale) as u32, (120.0 * scale) as u32)
+                    );
+                    assert_eq!(
+                        rendered.rgba.len(),
+                        rendered.width as usize * rendered.height as usize * 4
+                    );
+                    let pixel = |x: usize, y: usize| {
+                        let factor = scale as usize;
+                        let at = (((120 - y) * factor) * rendered.width as usize + x * factor) * 4;
+                        &rendered.rgba[at..at + 4]
+                    };
+                    assert_eq!(pixel(30, 30), &[255, 0, 0, 255]);
+                    assert_eq!(
+                        pixel(60, 60),
+                        if overlay {
+                            &[255, 0, 0, 255]
+                        } else {
+                            &[0, 0, 255, 255]
+                        }
+                    );
+                    assert_eq!(pixel(5, 60), &[255, 255, 255, 255]);
+                    if labels {
+                        for (top, bottom) in [(8, 22), (102, 119)] {
+                            let mut ink = 0;
+                            for y in top * scale as usize..bottom * scale as usize {
+                                for x in 5 * scale as usize..95 * scale as usize {
+                                    let at = (y * rendered.width as usize + x) * 4;
+                                    ink += usize::from(
+                                        rendered.rgba[at..at + 3].iter().all(|v| *v < 80),
+                                    );
+                                }
+                            }
+                            assert!(ink > 20, "actual label ink must survive save and reopen");
+                        }
+                    }
+                }
+            }
+        };
+        verify(&doc, false, true);
+        delete_content(&mut doc, 0, 3).unwrap();
+        delete_content(&mut doc, 0, 0).unwrap();
+        assert_eq!(
+            list_added(&doc).iter().map(|a| a.obj).collect::<Vec<_>>(),
+            [red_ref, original_refs[0]]
+        );
+        assert_eq!(add_content(&mut doc, 0, &red_item).unwrap(), 2);
+        assert_eq!(list_added(&doc)[0].obj, red_ref);
+        assert_eq!(list_added(&doc)[1].obj, original_refs[0]);
+        verify(&doc, true, false);
+    }
+
+    #[test]
+    fn linked_native_integer_budget_rejects_before_allocation_and_recovers() {
+        // Safety precondition: never issue this large direct request to an older
+        // backend. Its original failure is proved upstream with an intercepted
+        // allocator, not by allocating a 256MB raster here. The pinned upstream commit contains
+        // the exact raster.rs/pixels.rs correction (PR #3948, released in v0.13.0).
+        let entries: Vec<_> = include_str!("../../Cargo.lock")
+            .split("[[package]]")
+            .filter(|entry| {
+                entry
+                    .lines()
+                    .any(|line| line.trim() == "name = \"pdfcraft-render\"")
+            })
+            .collect();
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].lines().any(|line| line.trim() ==
+            "source = \"git+https://github.com/storytold/pdfcraft?rev=64e0868b844e0230027a493c90d6e4bdc7af086f#64e0868b844e0230027a493c90d6e4bdc7af086f\""));
+        for rotation in [0, 90, 180, 270] {
+            let raw = fixture(4000.25, 3999.75, 2.0, rotation);
+            for reject_oversize in [false, true] {
+                let mut renderer = PageRenderer::new(
+                    Arc::new(raw.clone()),
+                    RenderConfig {
+                        reject_oversize,
+                        ..Default::default()
+                    },
+                );
+                assert_eq!(renderer.page_count(), 1);
+                let dimensions = if rotation % 180 == 0 {
+                    "8001x8000"
+                } else {
+                    "8000x8001"
+                };
+                let expected =
+                    format!("page 1 raster size {dimensions} exceeds renderer pixel limit");
+                let request = RenderRequest {
+                    scale: 1.0,
+                    ..Default::default()
+                };
+                let failed = renderer.render(request);
+                assert_eq!(failed.error.as_deref(), Some(expected.as_str()));
+                assert_eq!((failed.width, failed.height), (0, 0));
+                assert!(failed.rgba.is_empty());
+                assert_eq!(renderer.stats().render_requests, 1);
+                assert_eq!(renderer.stats().parser_builds, 1);
+                let tile = renderer.render(RenderRequest {
+                    tile: Some(pdfcraft_render::Tile {
+                        x: 0,
+                        y: 0,
+                        w: 3,
+                        h: 2,
+                    }),
+                    ..request
+                });
+                assert!(tile.error.is_none(), "{:?}", tile.error);
+                assert_eq!((tile.width, tile.height), (3, 2));
+                assert_eq!(&*tile.rgba, &[255; 24]);
+                let repeated = renderer.render(request);
+                assert_eq!(repeated.error.as_deref(), Some(expected.as_str()));
+                assert_eq!((repeated.width, repeated.height), (0, 0));
+                assert!(repeated.rgba.is_empty());
+                assert_eq!(renderer.stats().render_requests, 3);
+                assert_eq!(renderer.stats().parser_builds, 1);
+            }
+            let (session, _) = PdfSession::open(&raw, None).unwrap();
+            let before = session.stats().unwrap();
+            assert!(matches!(
+                session.render(0, 72.0, None),
+                Err(EngineError::ResourceLimit(_))
+            ));
+            assert_eq!(session.stats().unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn rounded_full_raster_rejects_before_native_request_after_small_cached_render() {
+        for rotation in [0, 90, 180, 270] {
+            // UserUnit 2 produces the same 8000.5 x 7999.5 displayed-point dimensions;
+            // only the 1 DPI control and 1x1/17x17 clips below are actually rasterized.
+            let raw = fixture(4000.25, 3999.75, 2.0, rotation);
+            let (session, payload) = PdfSession::open(&raw, None).unwrap();
+            let expected = if rotation % 180 == 0 {
+                [8000.5, 7999.5]
+            } else {
+                [7999.5, 8000.5]
+            };
+            assert_eq!(session.page_sizes[0], expected);
+            assert_eq!(payload.pages.len(), 1);
+            assert!(session.render(0, 1.0, None).is_ok());
+            let before = session.stats().unwrap();
+            for _ in 0..2 {
+                assert!(matches!(
+                    session.render(0, 72.0, None),
+                    Err(EngineError::ResourceLimit(_))
+                ));
+                let after = session.stats().unwrap();
+                assert_eq!(after.render_requests, before.render_requests);
+                assert_eq!(after.rasterizations, before.rasterizations);
+            }
+            assert!(matches!(
+                render(&raw, 0, 72.0, None),
+                Err(EngineError::ResourceLimit(_))
+            ));
+            assert!(session.render(0, 72.0, Some((0.0, 0.0, 1.0, 1.0))).is_ok());
+            assert!(session
+                .render(0, 1200.0, Some((0.0, 0.0, 1.0, 1.0)))
+                .is_ok());
+            session.close().unwrap();
+            assert!(matches!(
+                session.render(0, 72.0, None),
+                Err(EngineError::Closed(_))
+            ));
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "pdf_table_preservation_tests.rs"]
+mod table_preservation_tests;

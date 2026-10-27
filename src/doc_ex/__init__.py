@@ -27,7 +27,7 @@ __all__ = [
     "DocExError", "DocumentClosedError", "MalformedDocumentError", "UnsafeArchiveError",
     "UnsupportedFormatError", "ToolExecutionError", "ToolNotFoundError",
 ]
-__version__ = "0.2.1"
+__version__ = "0.3.1"
 
 
 _MAX_INPUT_BYTES = 128 * 1024 * 1024
@@ -181,6 +181,7 @@ def _native(operation):
             "index": IndexError,
             "encrypted": MalformedDocumentError,
             "conversion_failure": DocExError,
+            "rendering_failure": DocExError,
             "closed": DocumentClosedError,
         }.get(category, DocExError)
         raise exception(message or str(error)) from None

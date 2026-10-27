@@ -49,6 +49,12 @@ pub fn pdf_to_docx(data: &[u8], password: Option<&str>) -> Result<Vec<u8>, Engin
             .filter(|block| !block.text.trim().is_empty())
             .map(|block| {
                 let font = block.base_font.to_ascii_lowercase();
+                // The export trims block text, so it needs to know whether the source had a word
+                // space at either end to join neighbouring blocks of one paragraph correctly.
+                let space_around = [
+                    block.editor_text.starts_with(char::is_whitespace),
+                    block.editor_text.ends_with(char::is_whitespace),
+                ];
                 pdfcraft_export::Block {
                     text: block.text,
                     rect: visible_rect(block.rect),
@@ -57,6 +63,7 @@ pub fn pdf_to_docx(data: &[u8], password: Option<&str>) -> Result<Vec<u8>, Engin
                     italic: font.contains("italic") || font.contains("oblique"),
                     color: block.color,
                     rotation: block.rotation - f64::from(page_info.rotation),
+                    space_around,
                 }
             })
             .collect();
@@ -77,7 +84,7 @@ pub fn pdf_to_docx(data: &[u8], password: Option<&str>) -> Result<Vec<u8>, Engin
             })?;
             images.push(pdfcraft_export::Image {
                 ext: if extension == "jpg" { "jpg" } else { "png" },
-                bytes: data,
+                bytes: data.into(),
                 rect: visible_rect(image.rect),
                 size: [
                     image.matrix[0].hypot(image.matrix[1]) * unit,
@@ -93,6 +100,7 @@ pub fn pdf_to_docx(data: &[u8], password: Option<&str>) -> Result<Vec<u8>, Engin
             height: f64::from(page_info.height),
             blocks,
             images,
+            background: None,
         });
     }
 
