@@ -153,6 +153,15 @@ HTML sanitizer; apply your application's security policy before publishing it.
 
 ### Structured content
 
+`get_text("dict")` and `get_text("json")` serialize the extracted snapshot;
+they are not an editable document or a round-trip serialization format. No
+versioned normalized-output schema or reconstruction API is currently promised.
+Fields and metadata vary by format and extraction profile. Treat absent keys,
+`None` and empty collections as distinct, and check for optional metadata before
+using it. See [coordinates and offsets](coordinates.md) for geometry and range
+conventions and [Markdown assets](markdown-assets.md) for the export manifest.
+
+
 ```python
 blocks = page.blocks
 links = page.get_links()
@@ -215,11 +224,11 @@ from the extracted structured text above.*
 ### Rendering
 
 ```python
-png = page.get_pixmap(dpi=144)
-detail = page.get_pixmap(dpi=300, clip=(36, 36, 144, 72))
+png = document.render_page(page.number, dpi=144)
+detail = document.render_page(page.number, dpi=300, clip=(36, 36, 144, 72))
 ```
 
-The result is encoded PNG bytes, not a PyMuPDF `Pixmap` object. DPI must be finite and between 1 and 1200. PNG physical-resolution metadata records the requested DPI, rounded to integer pixels per meter. Rendering behavior and limits are described in [Formats and fidelity](formats.md) and [Safety](safety.md).
+`page.get_pixmap()` is a compatibility-oriented alias returning the same encoded PNG bytes; it does not return a PyMuPDF `Pixmap` object. DPI must be finite and between 1 and 1200. PNG physical-resolution metadata records the requested DPI, rounded to integer pixels per meter. Rendering behavior and limits are described in [Formats and fidelity](formats.md) and [Safety](safety.md).
 
 ## Data models
 
@@ -313,7 +322,18 @@ Body `Document.to_markdown()` retains its existing projection. Comment stories a
 
 DOCX/PPTX `document.metadata["diagnostics"]` contains bounded factual notices for constructs observed in the upstream model. Each has `code`, `operation="extract"`, `severity`, `message`, `count` and bounded `sources` locators. Examples distinguish omitted chart data, linearized equations, omitted ruby annotations, cached dirty fields, preview-only embedded objects, unsupported PPTX actions and approximate transformed geometry. Counts remain exact when source examples reach the 100-example total limit.
 
-These notices describe semantic extraction only. They do not claim that rendering/export is correct, that all unsupported source markup is detectable, or that a document is safe for lossless editing. Parser, encryption, conversion and resource failures remain errors; a notice never replaces them. Native normalized JSON output stops at 64 MiB before its output buffer exceeds that budget.
+Inspect notices before relying on extracted content:
+
+```python
+with doc_ex.open("report.docx") as document:
+    for notice in document.metadata.get("diagnostics", []):
+        print(notice["code"], notice["count"], notice["message"])
+    text = document.to_markdown()
+```
+
+A missing or empty diagnostics list does not establish completeness. Applications
+can decide which known codes need review; do not assume future versions cannot
+introduce additional codes. These notices describe semantic extraction only. They do not claim that rendering/export is correct, that all unsupported source markup is detectable, or that a document is safe for lossless editing. Parser, encryption, conversion and resource failures remain errors; a notice never replaces them. Native normalized JSON output stops at 64 MiB before its output buffer exceeds that budget.
 
 ## Portable Markdown
 

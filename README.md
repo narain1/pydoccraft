@@ -10,6 +10,8 @@
 python -m pip install pydoccraft
 ```
 
+The distribution is named `pydoccraft`; use `import doc_ex` in Python. See [installation, version and deployment guidance](docs/installation.md).
+
 The wheel contains the private `doc_ex._core` native extension. No office suite, Pandoc, or Craft CLI is required.
 
 ## Quick start

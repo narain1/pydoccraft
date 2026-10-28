@@ -28,19 +28,18 @@ PAGES = {Path("website/index.md"): Path("index.html"),
 PAGES.update({p.relative_to(ROOT): p.relative_to(ROOT).with_suffix(".html")
               for p in sorted((ROOT / "docs").glob("*.md"))})
 NAV = [
-    ("Start here", [("Home", "index.html"), ("Python API", "docs/api.html"),
-                    ("Formats & rendering", "docs/formats.html")]),
-    ("Create & compose", [("Authoring · development", "docs/authoring.html"),
-                          ("Cookbook", "docs/cookbook.html"),
-                          ("Markdown & assets", "docs/markdown-assets.html")]),
-    ("Understand support", [("Operation matrix", "docs/support-matrix.html"),
-                            ("Editing readiness", "docs/format-authoring-readiness.html"),
-                            ("Safety & limits", "docs/safety.html"),
-                            ("Licenses & dependencies", "docs/dependencies-and-licenses.html")]),
-    ("Build with us", [("Feature roadmap", "roadmap.html"),
-                       ("Workstreams", "docs/roadmap-workstreams.html"),
-                       ("Upstream work", "docs/upstream-roadmap.html"),
-                       ("Development", "docs/development.html")]),
+    ("Get started", [("Home", "index.html"), ("Installation & deployment", "docs/installation.html"),
+                     ("Python API", "docs/api.html"), ("Troubleshooting", "docs/troubleshooting.html")]),
+    ("Work with documents", [("Formats, rendering & conversion", "docs/formats.html"),
+                             ("Create & edit", "docs/authoring.html"), ("Cookbook", "docs/cookbook.html"),
+                             ("Markdown & assets", "docs/markdown-assets.html"),
+                             ("Coordinates & offsets", "docs/coordinates.html")]),
+    ("Support & safety", [("Operation matrix", "docs/support-matrix.html"),
+                           ("Safety & limits", "docs/safety.html"),
+                           ("Licenses & dependencies", "docs/dependencies-and-licenses.html")]),
+    ("Contributors", [("Development & validation", "docs/development.html"),
+                       ("Feature roadmap", "roadmap.html"), ("Workstreams", "docs/roadmap-workstreams.html"),
+                       ("Acceptance audit", "docs/acceptance-audit.html")]),
 ]
 
 
@@ -109,6 +108,8 @@ class Links(HTMLParser):
 
 def build(output: Path) -> None:
     output.mkdir(parents=True, exist_ok=True)
+    build_sha = os.environ.get("GITHUB_SHA", "")
+    build_label = f" · build {html.escape(build_sha[:12])}" if re.fullmatch(r"[0-9a-fA-F]{40}", build_sha) else " · local build"
     for source, destination in PAGES.items():
         text = (ROOT / source).read_text()
         title = text.splitlines()[0].removeprefix("# ")
@@ -126,7 +127,7 @@ def build(output: Path) -> None:
             nav += "</div>"
         other = [(p.stem.replace("-", " ").capitalize(), dest) for p, dest in PAGES.items()
                  if str(dest) not in {item[1] for _, group in NAV for item in group}]
-        nav += '<details class="more-guides"><summary>More guides</summary>'
+        nav += '<details class="more-guides"><summary>More contributor and reference guides</summary>'
         nav += "".join(f'<a href="{relative(dest, destination)}">{name}</a>' for name, dest in other)
         nav += '</details>'
         home = relative(Path("index.html"), destination)
@@ -139,7 +140,7 @@ def build(output: Path) -> None:
 <header><a class="brand" href="{home}"><span class="mark" aria-hidden="true">p</span>pydoccraft<span class="docs-label">/ docs</span></a>
 <a class="github" href="{REPO}">GitHub ↗</a></header>
 <div class="layout"><nav aria-label="Documentation">{nav}</nav>
-<main id="content"><div class="version-note">Development documentation · Features marked unreleased require a build from source. <a href="{REPO}/releases">Check releases →</a></div>
+<main id="content"><div class="version-note">Development documentation{build_label} · Unreleased features require a source build. <a href="{relative(Path("docs/installation.html"), destination)}">Installation and version guidance</a> · <a href="{REPO}/releases">Release documentation and tags →</a></div>
 <article>{''.join(content.parts)}</article>
 <footer><a href="{REPO}/blob/main/{source}">View this page on GitHub</a><span>Apache-2.0 · Offline document processing</span></footer></main>
 <aside aria-label="On this page"><p>On this page</p>{renderer.toc}</aside></div></body></html>'''

@@ -1,5 +1,7 @@
 # Format authoring readiness
 
+> Historical planning and upstream audit. Some proposals and pinned-source references are superseded; use the [operation support matrix](support-matrix.md) and [authoring guide](authoring.md) for current behavior. For the current PPTX render-panic contract, see [rendering](formats.md#rendering).
+
 Historical source audit: 2026-10-20. Subsequent implementations are recorded in [the authoring guide](authoring.md), [format support](formats.md) and the [validation ledger](../.kiro/specs/rust-document-engine/validation.md). The sequencing below records the initial plan, not current release status. This records implementation entry points for [W06](https://github.com/narain1/pydoccraft/issues/8), [W10](https://github.com/narain1/pydoccraft/issues/12), and [W11](https://github.com/narain1/pydoccraft/issues/13). It does not mark their authoring features implemented. The common editable lifecycle and preservation baseline in [W03](https://github.com/narain1/pydoccraft/issues/5) comes first; W06 also needs the W04 text/style baseline. Follow the [compact API design](authoring-api-design.md) and [upstream register](upstream-roadmap.md).
 
 All symbols below were inspected at the repository's pinned revisions. Availability of a public model or writer establishes an integration route, not complete rendering fidelity or safe arbitrary-file round trips.

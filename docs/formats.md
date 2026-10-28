@@ -1,6 +1,6 @@
 # Formats, rendering, and conversion
 
-This document describes `pydoccraft` 0.3.1, including improvements since 0.2.1. See the [validation record](../.kiro/specs/rust-document-engine/validation.md) for tested artifacts.
+This development guide describes the 0.3.1 baseline and explicitly marked unreleased work. EPUB support is unreleased. See the [validation record](../.kiro/specs/rust-document-engine/validation.md) for tested artifacts.
 
 The [operation evidence matrix](support-matrix.md) separates reading, creation, authored/imported editing, preservation, rendering and export for explicitly audited profiles. It links all roadmap criteria and records historical artifact evidence without claiming complete parity.
 
@@ -130,7 +130,7 @@ Both methods return encoded PNG bytes.
 
 DPI controls raster scale and embedded PNG resolution metadata for all three formats. Pixel dimensions follow each engine's rounding; physical resolution uses integer pixels per meter. The multi-DPI corpus checks dimensions, metadata, decoded PNG data and visible content. PDF rotation, crop offsets and UserUnit are covered by the geometry corpus; broader cross-format fidelity remains in the [rendering validation TODOs](../TODO.md#p0--rendering-at-a-requested-dpi).
 
-Each output is bounded to 64 million RGBA pixels in addition to upstream maximum-side limits. DOCX/PPTX dimensions are checked before rasterization; PDF uses upstream oversize rejection. DeckCraft can internally replace a rendering panic with a blank image: this remains a documented upstream blocker, because an intentionally blank slide is also valid output.
+Each output is bounded to 64 million RGBA pixels in addition to upstream maximum-side limits. DOCX/PPTX dimensions are checked before rasterization; PDF uses upstream oversize rejection. DeckCraft can internally replace a rendering panic with a blank slide. The adapter checks its process-wide panic counter and reports a detected panic as an error for rendering and PDF export. A panic on another thread can cause a spurious error; see the [upstream contract](../AGENTS.md).
 
 Optional `clip=(x, y, width, height)` is available on both methods, including editable document/page/slide wrappers. Coordinates use displayed-page points with a top-left origin; PDF rotation, CropBox and UserUnit are already applied. The rectangle is intersected with the displayed page and snapped outward to its native pixel grid at the requested DPI. Empty intersections, nonfinite values and nonpositive dimensions raise `ValueError`. At page edges, each backend retains its full-page rounding convention; fractional boundaries can add an edge pixel.
 

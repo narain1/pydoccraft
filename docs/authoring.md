@@ -1,6 +1,16 @@
 # Native authoring
 
-Version 0.3.0 adds `doc_ex.new("docx" | "pdf" | "pptx" | "epub")`. Editable documents own the upstream native model; extracted `Document`, `Block`, `Table` and `Cell` values remain snapshots. This page describes the implemented surface, while [the roadmap](../TODO.md) retains broader parity work. These additions are not part of earlier releases such as 0.2.1.
+Version 0.3.0 adds `doc_ex.new("docx" | "pdf" | "pptx")`. EPUB authoring is unreleased. Editable documents own the upstream native model; extracted `Document`, `Block`, `Table` and `Cell` values remain snapshots. This page describes the implemented surface, while [the roadmap](../TODO.md) retains broader parity work. These additions are not part of earlier releases such as 0.2.1.
+
+## Find the right starting point
+
+- New to authoring: start with the example below and the [cookbook](cookbook.md).
+- Format-specific operations: [DOCX](#docx-text-and-page-layout), [PDF](#pdf-pages-and-assembly), [PPTX](#pptx-slides-and-typed-shapes), or [EPUB (unreleased)](#epub-creation-unreleased).
+- Editing an existing file: check the [operation support matrix](support-matrix.md) before relying on preservation.
+- Handle lifetimes, geometry and invalidation: see [units and collections](#units-colors-and-collections) and [coordinates](coordinates.md).
+
+The sections after the quickstart include detailed profile and failure contracts;
+read the ones relevant to your operations before deploying them.
 
 ## Create, save, copy and render
 
