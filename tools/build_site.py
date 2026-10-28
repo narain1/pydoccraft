@@ -71,6 +71,9 @@ class Links(HTMLParser):
         if not target.is_relative_to(ROOT) or not target.exists():
             raise ValueError(f"Missing repository target in {self.source}: {value}")
         key = target.relative_to(ROOT)
+        if key.is_relative_to(Path("website/assets")):
+            asset = Path("assets") / key.relative_to(Path("website/assets"))
+            return urlunsplit(("", "", relative(asset, self.destination), url.query, url.fragment))
         if key in PAGES:
             path = relative(PAGES[key], self.destination)
             return urlunsplit(("", "", path, url.query, url.fragment))

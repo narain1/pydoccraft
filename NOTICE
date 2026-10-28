@@ -55,6 +55,8 @@ Source: https://github.com/DevinSterling/rbook
 Crate: rbook 0.7.12; crates.io package source corresponds to tag revision c62988a09e5043444392fe998d5103821f545991.
 Only the `write` feature is enabled. It provides in-memory EPUB package, manifest, spine, navigation, MIME and ZIP serialization; pydoccraft does not use its filesystem writer.
 
+Documentation image: website/assets/irs-1040-page-1.png is rendered from the U.S. Internal Revenue Service 2025 Form 1040 (https://www.irs.gov/pub/irs-prior/f1040--2025.pdf), a U.S. government work.
+
 Bundled and linked third-party material
 
 - Foxit standard-14 substitute fonts: Copyright 2014 PDFium Authors; original code copyright 2014 Foxit Software Inc. BSD-3-Clause.

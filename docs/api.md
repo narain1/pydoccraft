@@ -163,6 +163,55 @@ tables = page.find_tables()
 
 `get_links()`, `get_images()`, and `find_tables()` return new lists containing the underlying model objects. `get_images(full=True)` returns one-based `(ordinal, Image)` tuples for loose PyMuPDF compatibility.
 
+### Example: inspect structured text and render the same PDF page
+
+This example uses the first page of the [IRS 2025 Form 1040](https://www.irs.gov/pub/irs-prior/f1040--2025.pdf). Download it as `f1040--2025.pdf` and run:
+
+```python
+import json
+from pathlib import Path
+import doc_ex
+
+with doc_ex.open("f1040--2025.pdf") as document:
+    page = document[0]
+    # Select a few fields from the owned Block objects for a compact display.
+    summary = [
+        {
+            "kind": block.kind,
+            "text": block.text.strip(),
+            "bbox": [round(value, 1) for value in block.bbox] if block.bbox else None,
+        }
+        for block in page.blocks[:3]
+    ]
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
+    Path("form-page-1.png").write_bytes(page.get_pixmap(dpi=96))
+```
+
+The beginning of the output on this sample is:
+
+```json
+[
+  {"kind": "paragraph", "text": "1040", "bbox": [43.2, 24.7, 97.1, 48.7]},
+  {"kind": "paragraph", "text": "Department of the Treasury—Internal Revenue Service", "bbox": [97.6, 26.5, 245.4, 32.5]},
+  {"kind": "paragraph", "text": "U.S. Individual Income Tax Return", "bbox": [97.6, 34.6, 283.8, 46.6]}
+]
+```
+
+This is a shortened projection of the first three blocks, not the entire page.
+`page.get_text("dict")` returns the complete normalized page, including blocks,
+links, image metadata, tables and page metadata. Geometry and reading order
+come from the PDF engine and can differ across documents; table detection is
+conservative. For this example, the form's visible grid is not extracted as a
+semantic table. Use `page.find_tables()` to inspect tables that were detected.
+
+The same page rendered at 96 DPI looks like this:
+
+![Rendered first page of the 2025 IRS Form 1040](../website/assets/irs-1040-page-1.png)
+
+*Source: U.S. Internal Revenue Service, 2025 Form 1040. The illustration is a
+PNG rendered from the linked PDF with pydoccraft. Its visual layout is separate
+from the extracted structured text above.*
+
 ### Rendering
 
 ```python
