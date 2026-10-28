@@ -60,11 +60,12 @@ render. See [troubleshooting](troubleshooting.md) for other common symptoms.
 ## Containers, memory and concurrency
 
 Install a wheel matching the container's OS, architecture, Python ABI and libc;
-run the smoke test in the final image. Bundle inputs and any application-specific
-fonts before deployment. Rendering depends on available fonts and unsupported
-fonts may be substituted, changing layout; test representative documents in the
-actual environment. The package includes required assets, not every font used
-by arbitrary documents. See [formats and rendering](formats.md) and
+run the smoke test in the final image. Provide inputs in the final environment. Rendering depends on font availability
+and substitutions can change layout; test representative documents in the actual
+environment. The package includes required assets, not every font used by
+arbitrary documents. General application font discovery and configuration are
+not established uniformly across formats; placing a font in a container does
+not guarantee that an engine will use it. See [formats and rendering](formats.md) and
 [dependency attribution](dependencies-and-licenses.md).
 
 Document parsing is eager and image-heavy files can use much more memory than

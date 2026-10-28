@@ -154,6 +154,8 @@ Path("page.png").write_bytes(document[0].get_pixmap())
 | DOCX | PDF | WordCraft layout and PDF export | Supports Unicode and tested explicit empty pages |
 | PPTX | PDF | DeckCraft PDF export | Slides become PDF pages with a searchable text layer where supported |
 
+DeckCraft PDF export corrupts searchable text for PPTX paragraphs containing explicit breaks; native PDF export of those documents is unsupported until the upstream defect is fixed. A visually correct slide is not evidence that its PDF text layer is correct.
+
 Every other pair—including identity conversions, PDF→PPTX, DOCX→PPTX, and PPTX→DOCX—is rejected explicitly.
 
 ```python

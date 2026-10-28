@@ -931,7 +931,8 @@ This profile covers direct owned body shapes in horizontal sections. Lines, text
 
 ### Imported PPTX line breaks and PDF text
 
-The selected DeckCraft contribution preserves searchable text after existing explicit line breaks when an imported PPTX is converted to PDF. Native slide and notes/handout master projections now use the logical paragraph text, retaining break offsets used by layout. That dedicated dependency correction alone added no authoring method or Python getter change. The separate [owned cell paragraph adapter](#rich-pptx-cell-paragraphs) now supports `add_break("line")` with one-character LF reads; PPTX page/column breaks remain unsupported. The imported regression checks text, links, retained image ink and representative PNG/PDF output; it is not a claim of general Office or pixel-perfect fidelity.
+The current upstream DeckCraft PDF exporter omits explicit paragraph break characters from the searchable text layer. Native PDF export of PPTX documents containing explicit paragraph breaks is not supported until upstream fixes this; rendered slide appearance does not establish searchable-text correctness. The [owned cell paragraph adapter](#rich-pptx-cell-paragraphs) supports `add_break("line")` for PPTX content, but that does not establish PDF export fidelity. PPTX page/column breaks remain unsupported.
+
 ### Reusing paragraph formatting
 
 For an owned DOCX paragraph, reuse its full direct formatting with `paragraph.format(**paragraph.formatting)`. To make the currently resolved values explicit, use `paragraph.format(**paragraph.resolved_formatting)`. Direct values retain `None` for inheritance; resolved values make a local copy of the effective formatting, so later style changes can behave differently. Both forms retain the existing validation and mutation rules. The same direct-snapshot call works for the supported PPTX cell paragraph properties; resolved paragraph formatting remains DOCX-only.
@@ -940,9 +941,9 @@ Type checkers accept these complete snapshots and the existing inline patch dict
 
 ### Imported DOCX default font sizes
 
-When a DOCX styles part exists but supplies no inherited font size, the selected native engine now preserves that absence and uses its existing 11-point fallback. Earlier builds inserted 10 points while reading. Explicit sizes are unchanged, and documents without a ZIP styles part retain the engine's initialized 12-point defaults. These are native application policies, not a universal Word or OOXML default.
+For an imported DOCX that omits the default size, the current WordCraft reader supplies 10 points; this differs from the resolver's 11-point fallback. Explicit sizes are unchanged. This reader/resolver mismatch remains open upstream.
 
-This dependency correction applies to existing import/render/PDF conversion methods. Owned `document.styles.format_defaults(font_size=None)` removes the direct ordinary font size and restores native inheritance (spec132). With no inherited ordinary size, text resolves to 11 points; this does not recreate a new document’s initial 12-point value. Explicit style/run overrides remain intact, and `styles.defaults["font_size"]` reads `None`. Setting an explicit size and the other supported clears retain their existing behavior.
+Owned `document.styles.format_defaults(font_size=None)` clears the ordinary default font size. WordCraft writes the resolver's 11-point fallback when saving an unset default, so that effective size survives save and reopen. This does not recreate a new document's initial default, and explicit style/run overrides remain intact. These are engine policies, not a universal Word or OOXML default.
 
 ### Conservative PDF table detection
 
