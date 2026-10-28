@@ -33,8 +33,9 @@ Recognized explicit `filetype` values are:
 | PDF | `pdf`, `.pdf` |
 | Word | `docx`, `.docx`, `word` |
 | PowerPoint | `pptx`, `.pptx`, `powerpoint` |
+| EPUB (unreleased) | `epub`, `.epub`, `ebook` |
 
-For paths, the suffix is checked against the detected content. For bytes, the native detector identifies PDF and OOXML content. A mismatched explicit type raises `UnsupportedFormatError`.
+For paths, the suffix is checked against the detected content. For bytes, the native detector identifies PDF, OOXML and EPUB content. A mismatched explicit type raises `UnsupportedFormatError`.
 
 Passwords are supported for encrypted PDF and DOCX input. Encrypted PPTX is rejected by the upstream DeckCraft importer.
 
@@ -109,7 +110,7 @@ After `close()`, document operations raise `DocumentClosedError`. Previously obt
 
 ## `Page`
 
-`Page.number` is always zero-based. DOCX pages are WordCraft layout pages, PDF pages retain source order, and PPTX pages correspond one-to-one with slides.
+`Page.number` is always zero-based. DOCX pages are WordCraft layout pages, PDF pages retain source order, PPTX pages correspond one-to-one with slides, and unreleased EPUB support maps each spine chapter to a page without physical pagination.
 
 ### Text
 
@@ -117,11 +118,38 @@ After `close()`, document operations raise `DocumentClosedError`. Previously obt
 page.get_text()             # plain text
 page.get_text("text")       # plain text
 page.get_text("markdown")   # conventional Markdown
+page.get_text("html")       # semantic HTML fragment (unreleased)
 page.get_text("dict")       # structured dictionary
 page.get_text("json")       # JSON string
 ```
 
 An unknown option raises `ValueError`. Plain text preserves table rows using tabs between cells. Markdown emits headings, inline links when exact offsets are known, pipe tables, images, notes, comments, and a final link list for unmatched links.
+
+### Export a page as HTML (unreleased)
+
+```python
+from pathlib import Path
+import doc_ex
+
+with doc_ex.open("report.docx") as document:
+    fragment = document[0].get_text("html")
+    Path("page-1.html").write_text(
+        "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\">"
+        "<title>Extracted page</title><body>" + fragment + "</body></html>",
+        encoding="utf-8",
+    )
+```
+
+The result is an HTML fragment, not a full document. It includes headings,
+paragraphs, semantic tables (including nested and merged cells), links with
+known text offsets, and embedded image data. Source ordering is retained where
+available. It does not reproduce fonts, positioning, or page layout; use
+`get_pixmap()` when visual appearance matters. Links without matched text
+are available through `get_links()` and are not added to the fragment. Unsafe
+link schemes are rendered as text. Images with missing data or unsupported
+media types raise `MalformedDocumentError`; excessive content raises
+`UnsafeArchiveError`. HTML reflects untrusted input and is not a general-purpose
+HTML sanitizer; apply your application's security policy before publishing it.
 
 ### Structured content
 

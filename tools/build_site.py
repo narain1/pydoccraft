@@ -144,6 +144,7 @@ def build(output: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(page)
     shutil.copytree(ROOT / "website/assets", output / "assets", dirs_exist_ok=True)
+    shutil.copyfile(ROOT / "llms.txt", output / "llms.txt")
     (output / ".nojekyll").touch()
     print(f"Built {len(PAGES)} pages in {output}")
 

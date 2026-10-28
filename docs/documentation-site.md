@@ -4,7 +4,7 @@ The project documentation is published at [narain1.github.io/pydoccraft](https:/
 
 ## Edit and preview
 
-Keep API and support details in the existing `docs/*.md` files. The builder renders those files directly; do not maintain a second copy for the website. The landing page and presentation assets live in `website/`. The root README, roadmap, contribution guide, security policy and support guide are also included. Source-code links and other repository files point back to GitHub.
+Keep API and support details in the existing `docs/*.md` files. The builder renders those files directly; do not maintain a second copy for the website. The landing page and presentation assets live in `website/`. Root `llms.txt` is copied to the site root at build time. The root README, roadmap, contribution guide, security policy and support guide are also included. Source-code links and other repository files point back to GitHub.
 
 ```console
 python -m venv /tmp/pydoccraft-docs

@@ -24,6 +24,42 @@ class PageHtmlTests(unittest.TestCase):
         link = Link('javascript:alert(1)', 'click', metadata={'start': 0, 'end': 5})
         self.assertEqual(Page(0, [Block('paragraph', 'click', links=[link])]).get_text('html'), '<p>click</p>')
 
+class PageHtmlDocumentTests(unittest.TestCase):
+    def test_extraction_from_document_files(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        import doc_ex
+        from fixtures import pdf_fixture, docx_fixture, pptx_fixture
+        from test_epub import epub_fixture
+
+        with TemporaryDirectory() as directory:
+            for extension, fixture, expected in (
+                ('pdf', pdf_fixture, 'Page one'),
+                ('docx', docx_fixture, 'Example heading'),
+                ('pptx', pptx_fixture, 'Second paragraph'),
+                ('epub', epub_fixture, 'First chapter'),
+            ):
+                with self.subTest(format=extension):
+                    path = Path(directory) / ('document.' + extension)
+                    path.write_bytes(fixture())
+                    with doc_ex.open(path) as document:
+                        html = document[0].get_text('html')
+                        self.assertIn(expected, html)
+                        if extension != 'epub':
+                            self.assertIn('<table>', html)
+
+    def test_checked_in_presentation(self):
+        from pathlib import Path
+        import doc_ex
+
+        path = Path(__file__).parent / 'data' / 'deckcraft-table-line-breaks.pptx'
+        with doc_ex.open(path) as document:
+            html = document[0].get_text('html')
+            self.assertIn('ALPHA', html)
+            self.assertIn('BETA', html)
+            self.assertIn('<table>', html)
+            self.assertIn('data:image/png;base64,', html)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -22,6 +22,7 @@ with doc_ex.open("report.pdf") as document:
     print(document.page_count)
     print(document[0].get_text())
     print(document[0].get_text("markdown"))
+    # On the development branch: document[0].get_text("html")
     print(document[0].get_links())
     print(document[0].find_tables())
     Path("page.png").write_bytes(document[0].get_pixmap(dpi=144))
@@ -113,7 +114,4 @@ Release validation must install the built wheel into a clean environment and run
 
 The source repository is [`narain1/pydoccraft`](https://github.com/narain1/pydoccraft). PyPI trusted publishing is configured for project `pydoccraft`, repository `pydoccraft`, workflow `release.yml`, and environment `pypi`.
 
-`page.get_text("html")` returns a self-contained semantic HTML fragment with embedded
-images and structured tables. It represents extracted content, not the original page
-layout; use `page.get_pixmap()` for visual rendering. Links retain HTTP, HTTPS,
-mailto, and relative targets. Treat the fragment as untrusted document content.
+For the unreleased semantic HTML export, see the [HTML example and limitations](docs/api.md#export-a-page-as-html-unreleased).
