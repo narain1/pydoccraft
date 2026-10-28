@@ -70,7 +70,7 @@ PDF image export may skip unsupported image encodings or grouped Form artwork. D
 
 Native panics are not an accepted error path. Format adapters convert upstream errors into stable native categories, which Python maps to public exceptions. Resource-limit errors currently map to `UnsafeArchiveError`, including render limits that are not archive-specific.
 
-Region rendering validates finite positive clip dimensions, page intersection, quantized pixel size and returned raster dimensions. Invalid clip arguments raise `ValueError`; oversized valid regions retain `UnsafeArchiveError`. PDF tile requests reject native side clamping and imprecise large offsets. Office regions use native transforms instead of rendering and cropping a full-page buffer. Existing input/parser/layout limits still apply, and DeckCraft's upstream blank-image panic fallback remains unresolved.
+Region rendering validates finite positive clip dimensions, page intersection, quantized pixel size and returned raster dimensions. Invalid clip arguments raise `ValueError`; oversized valid regions retain `UnsafeArchiveError`. PDF tile requests reject native side clamping and imprecise large offsets. Office regions use native transforms instead of rendering and cropping a full-page buffer. Existing input/parser/layout limits still apply, and DeckCraft's upstream blank-slide panic fallback is checked by the adapter's process-wide counter. A detected panic raises an error, though a panic in another thread can cause a spurious failure.
 
 Applications should treat all extraction failures as file-local. Do not retry malformed or unsupported files indefinitely.
 

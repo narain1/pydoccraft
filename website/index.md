@@ -7,6 +7,8 @@ Extract structured content, render pages at your chosen DPI, and convert PDF, DO
 <a class="button secondary" href="../docs/cookbook.md">Build with examples</a>
 </div>
 
+This site follows development. For a released installation, check the matching [release tag and installation guidance](../docs/installation.md); EPUB and HTML extraction are unreleased.
+
 ## Start with a page
 
 ```console
@@ -37,6 +39,8 @@ Rendering returns PNG bytes. Page indexes start at zero; negative indexes work a
 | Compose reports, templates, watermarks and batches | [Six runnable cookbook workflows](../docs/cookbook.md) |
 | Export Markdown with its referenced images | [Markdown and assets](../docs/markdown-assets.md) |
 | Check a specific operation before adopting it | [Operation support matrix](../docs/support-matrix.md) |
+
+Need help with a result? See [troubleshooting](../docs/troubleshooting.md), [coordinates and offsets](../docs/coordinates.md), and [deployment guidance](../docs/installation.md#containers-memory-and-concurrency).
 
 ## Know what is supported
 

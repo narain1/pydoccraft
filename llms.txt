@@ -4,6 +4,10 @@
 
 ## Documentation
 
+- [Installation and deployment](https://narain1.github.io/pydoccraft/docs/installation.html): release boundaries, wheels, smoke test and deployment.
+- [Troubleshooting](https://narain1.github.io/pydoccraft/docs/troubleshooting.html): common extraction, rendering and ownership symptoms.
+- [Coordinates and offsets](https://narain1.github.io/pydoccraft/docs/coordinates.html): boxes, points and text ranges.
+
 - [Python API](https://narain1.github.io/pydoccraft/docs/api.html): opening documents, extracting pages, models, rendering and conversion.
 - [Formats and fidelity](https://narain1.github.io/pydoccraft/docs/formats.html): supported formats, conversions and known limitations.
 - [Cookbook](https://narain1.github.io/pydoccraft/docs/cookbook.html): practical authoring workflows.

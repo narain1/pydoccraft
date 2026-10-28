@@ -2645,3 +2645,5 @@ Page HTML formatter: two isolated Python tests passed for escaped text, links, m
 Page HTML integration: exercised on disk PDF, DOCX, PPTX and EPUB fixtures and the checked-in DeckCraft PPTX, using the existing EPUB build native extension; HTML text, tables, links and embedded image output were checked. The full corpus was not run for this change.
 
 Documentation PDF example: extracted the first three blocks and rendered page one at 96 DPI from the IRS 2025 Form 1040 using the existing 0.3.1 EPUB-build native wheel. Built the documentation site and checked 30 pages and 1,880 local links/assets/fragments.
+
+Documentation adoption pass: built 33 development-site pages, checked 2,160 local links/assets/fragments and verified the site llms.txt matches its source. An installed 0.3.1 EPUB-build wheel opened the public IRS Form 1040, extracted text and rendered a PNG. This is not cross-platform or release validation.
