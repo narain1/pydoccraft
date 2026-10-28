@@ -564,14 +564,17 @@ def new(filetype: Literal["pdf"], *, size: _Size | None = None) -> PdfDocument: 
 def new(filetype: Literal["pptx", "powerpoint"], *, size: _Size | None = None) -> Presentation: ...
 
 @overload
+def new(filetype: Literal["epub", "ebook"], *, size: None = None) -> EpubDocument: ...
+
+@overload
 def new(filetype: str, *, size: _Size | None = None) -> EditableDocument: ...
 
 
 def new(filetype: str, *, size: _Size | None = None) -> EditableDocument:
-    """Create a native DOCX, PDF or PPTX document; dimensions use points."""
+    """Create a native DOCX, PDF, PPTX or EPUB document; dimensions use points."""
     from . import _native
     kind = filetype.lower().lstrip(".")
-    kind = {"word": "docx", "powerpoint": "pptx"}.get(kind, kind)
+    kind = {"word": "docx", "powerpoint": "pptx", "ebook": "epub"}.get(kind, kind)
     if kind == "docx":
         native = _native(_core.EditableDocx)
         if size is not None:
@@ -581,6 +584,10 @@ def new(filetype: str, *, size: _Size | None = None) -> EditableDocument:
         return PdfDocument(_native(lambda: _core.EditablePdf(*_size("Letter" if size is None else size))))
     if kind == "pptx":
         return Presentation(_native(lambda: _core.EditablePptx(*_size((720, 540) if size is None else size))))
+    if kind == "epub":
+        if size is not None:
+            raise ValueError("EPUB is reflowable and does not accept a page size")
+        return EpubDocument(_native(_core.EditableEpub))
     raise UnsupportedFormatError(f"Cannot create file type: {filetype}")
 
 
@@ -3737,6 +3744,48 @@ class SlidePicture(Shape):
 
 class SlideTable(EditableTable, Shape):
     """A placed semantic table with the same cell access as a DOCX table."""
+
+
+class EpubDocument(EditableDocument):
+    """Owned reflowable EPUB 3 authoring model."""
+    _format = "epub"
+
+    def set_metadata(self, *, title: str, identifier: str, language: str = "en", authors=()) -> None:
+        if not all(isinstance(value, str) for value in (title, identifier, language)):
+            raise TypeError("EPUB title, identifier and language must be strings")
+        authors = list(authors)
+        if any(not isinstance(author, str) for author in authors):
+            raise TypeError("EPUB authors must be strings")
+        self._call("set_metadata", title, identifier, language, authors, _change=True)
+
+    def add_chapter(self, title: str) -> EpubChapter:
+        if not isinstance(title, str):
+            raise TypeError("EPUB chapter title must be a string")
+        return EpubChapter(self, self._call("add_chapter", title, _change=True))
+
+    @property
+    def chapter_count(self) -> int:
+        return self._call("chapter_count")
+
+
+class EpubChapter:
+    """Stable append-only chapter handle owned by an EPUB document."""
+    def __init__(self, owner: EpubDocument, identifier: int):
+        self._owner, self._id = owner, identifier
+
+    def add_heading(self, text: str, *, level: int = 1) -> None:
+        self._owner._call("add_heading", self._id, text, operator.index(level), _change=True)
+
+    def add_paragraph(self, text: str) -> None:
+        self._owner._call("add_paragraph", self._id, text, _change=True)
+
+    def add_link(self, text: str, href: str) -> None:
+        self._owner._call("add_link", self._id, text, href, _change=True)
+
+    def add_image(self, source, *, media_type: str, alt: str = "") -> None:
+        from . import _read
+        data, _ = _read(source)
+        self._owner._call("add_image", self._id, data, media_type, alt, _change=True)
 
 
 class _SlideCellParagraph(Paragraph):

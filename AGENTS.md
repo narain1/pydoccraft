@@ -6,7 +6,7 @@ The active feature specification is [`.kiro/specs/rust-document-engine/`](.kiro/
 
 ## Non-negotiables
 
-- **Use upstream format engines rather than reimplementing document standards.** PDF behavior belongs in PdfCraft adapters, DOCX behavior in WordCraft adapters, and PPTX behavior in DeckCraft adapters.
+- **Use upstream format engines rather than reimplementing document standards.** PDF behavior belongs in PdfCraft adapters, DOCX behavior in WordCraft adapters, PPTX behavior in DeckCraft adapters, and EPUB behavior in the selected permissive LexePub adapter.
 - **Do not link complete applications.** Never add ArtCraft desktop UI, CLI, MCP, automation server, updater, networking, printing, JavaScript, OCR-model, signing, or editor-state crates unless a reviewed requirement explicitly needs one.
 - **Pin upstream Git dependencies to immutable commit revisions.** Never track `main`, a floating branch, or an unpinned tag.
 - **Keep the runtime license graph permissive.** GPL, AGPL, and LGPL-only runtime dependencies are prohibited. Regenerate and review `THIRD_PARTY_LICENSES.md` whenever `Cargo.lock` changes.
@@ -44,6 +44,8 @@ Behavior the earlier reviewed forks provided is handled in the adapters or is un
 
 Use the `update-upstream-crates` skill (`.kiro/skills/update-upstream-crates/SKILL.md`) for upgrades.
 
+The EPUB scope is tracked separately in [`.kiro/specs/epub-support/`](.kiro/specs/epub-support/). LexePub `0.1.2` is pinned by crates.io checksum for EPUB parsing; its optional CLI/C-FFI/WASM/Embassy features remain disabled. The GPL `epub` crate is prohibited.
+
 An upstream upgrade is a dedicated change: update every crate from that repository together, regenerate `Cargo.lock`, rerun the license audit, run the complete corpus, measure wheel size, and record results in the spec validation file.
 
 ## Architecture
@@ -60,6 +62,7 @@ rust/src/
   pdf.rs            Thin PdfCraft adapter
   docx.rs           Thin WordCraft adapter
   pptx.rs           Thin DeckCraft adapter
+  epub.rs           Thin LexePub adapter
   convert.rs        Upstream-backed conversion dispatch
 ```
 

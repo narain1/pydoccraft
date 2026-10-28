@@ -349,6 +349,9 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 2. Before caller-controlled index conversion, source reads or selection iteration, each operation SHALL capture the destination page generation and count. After normalization it SHALL recheck open state and reject structural changes before subset/import dispatch. Source snapshots SHALL remain usable if a distinct source subsequently closes; ordinary content/metadata edits SHALL not be rejected as page organization. Caller callback effects cannot be rolled back, but the outer operation SHALL perform no additional subset/import.
 3. Tests SHALL cover finite/infinite selections, the exact cap and unconverted excess item, invalid/oversized integers, ordered duplicate/negative selections, callback mutations/close and unchanged output after rejected operations. No new public selection API or local PDF algorithm SHALL be introduced.
 
+## EPUB extension profile
+
+EPUB 2/3 extraction and append-only EPUB 3 creation are authorized through the dedicated [EPUB support specification](../epub-support/requirements.md). This format has no ArtCraft engine; the implementation SHALL use the permissively licensed, exact-locked LexePub extraction engine and rbook writer rather than handwritten EPUB package generation. EPUB rendering, conversion, CSS fidelity, SVG authoring, fixed layout, DRM, scripts, and editing existing books remain unsupported.
 ## 45. Executable usability cookbook
 
 1. Six short workflows SHALL demonstrate a letter, invoice, branded report, authored template filling, PDF assembly and slide previews through the existing public API. Examples SHALL be import-safe, accept explicit output directories and selectable DPI, use ordinary Python value formatting, and require no runtime document executables, downloads or optional dependencies.
