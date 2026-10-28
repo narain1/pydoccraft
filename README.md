@@ -112,3 +112,8 @@ Release validation must install the built wheel into a clean environment and run
 `pydoccraft` is licensed under Apache-2.0. Distributions include [`LICENSE`](LICENSE), [`NOTICE`](NOTICE), and the wheel-compatible [`LICENSE-THIRD-PARTY`](LICENSE-THIRD-PARTY) copy of the audited [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md) inventory. Upstream dependency names identify their source and are not `pydoccraft` branding.
 
 The source repository is [`narain1/pydoccraft`](https://github.com/narain1/pydoccraft). PyPI trusted publishing is configured for project `pydoccraft`, repository `pydoccraft`, workflow `release.yml`, and environment `pypi`.
+
+`page.get_text("html")` returns a self-contained semantic HTML fragment with embedded
+images and structured tables. It represents extracted content, not the original page
+layout; use `page.get_pixmap()` for visual rendering. Links retain HTTP, HTTPS,
+mailto, and relative targets. Treat the fragment as untrusted document content.

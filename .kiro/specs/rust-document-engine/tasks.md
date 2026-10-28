@@ -1227,3 +1227,5 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Preserve the first linked-test overlapping-label premise failure and separately review the corrected exact-link plus URI-only acceptance control.
 - [x] Complete final471 native/release, clean installed586/typing/license/size/source identity and independent focused/artifact review.
 - [ ] Complete current-head CI/manual delivery; keep Python slide-copy admission separate149 and broader SLIDE1/U11 work open.
+
+- [x] Add semantic page HTML extraction with embedded images, structured tables and bounded output.

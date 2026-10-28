@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import math
 import operator
 from numbers import Real
+from html import escape
+from types import SimpleNamespace
 from typing import Any, Callable, Iterator, Literal, TYPE_CHECKING, overload
 
 from .errors import DocumentClosedError, MalformedDocumentError, UnsafeArchiveError
-from .models import Block, Image, Link, Story, Table
+from .models import Block, Image, Link, Story, Table, _html_text
 
 if TYPE_CHECKING:
     from ._authoring import PdfDocument
@@ -215,7 +218,7 @@ class Page:
                 _native(session.close)
 
     @overload
-    def get_text(self, option: Literal["text", "markdown", "json"] = "text") -> str: ...
+    def get_text(self, option: Literal["text", "markdown", "html", "json"] = "text") -> str: ...
 
     @overload
     def get_text(self, option: Literal["dict"]) -> dict[str, Any]: ...
@@ -224,7 +227,7 @@ class Page:
     def get_text(self, option: str) -> str | dict[str, Any]: ...
 
     def get_text(self, option: str = "text") -> str | dict[str, Any]:
-        """Return text, Markdown or JSON as a string; dict returns normalized content data."""
+        """Return text, Markdown, HTML or JSON; dict returns normalized content data."""
         if option == "text":
             parts: list[str] = []
             for block in self.blocks:
@@ -235,11 +238,13 @@ class Page:
             return "\n".join(parts).strip()
         if option == "markdown":
             return self._markdown()
+        if option == "html":
+            return self._html()
         if option == "dict":
             return self.to_dict()
         if option == "json":
             return json.dumps(self.to_dict(), ensure_ascii=False)
-        raise ValueError("option must be 'text', 'markdown', 'dict', or 'json'")
+        raise ValueError("option must be 'text', 'markdown', 'html', 'dict', or 'json'")
 
     def get_links(self) -> list[Link]:
         return list(self._links)
@@ -328,6 +333,46 @@ class Page:
         if remaining:
             parts.append("**Links:**\n" + "\n".join(f"- [{link.text or link.uri}]({link.uri})" for link in remaining))
         return "\n\n".join(part for part in parts if part).strip()
+
+    def _html(self) -> str:
+        # Apply the same structure and expansion limits as Markdown export.
+        _check_export_structure(SimpleNamespace(_pages=[self], stories=[]))
+        parts: list[str] = []
+        placements: dict[tuple, int] = {}
+        image_bytes = 0
+
+        def image_reference(image: Image, path: tuple) -> str:
+            nonlocal image_bytes
+            if image.media_type not in _MEDIA_EXTENSIONS or not image.data:
+                raise MalformedDocumentError("HTML export image has missing data or unsupported media type")
+            image_bytes += ((len(image.data) + 2) // 3) * 4
+            if image_bytes > _MAX_EXPORT_BYTES:
+                raise UnsafeArchiveError("HTML export images exceed the formatting budget")
+            key = _image_placement(image)
+            placements[key] = placements.get(key, 0) + 1
+            return "data:" + image.media_type + ";base64," + base64.b64encode(image.data).decode("ascii")
+
+        def image_html(image: Image, path: tuple) -> str:
+            return f'<img src="{escape(image_reference(image, path), quote=True)}" alt="{escape(image.alt, quote=True)}">'
+
+        for number, block in enumerate(self.blocks):
+            if block.table:
+                parts.append(block.table._to_html(image_reference, ("blocks", number, "table")))
+            elif block.text:
+                tag = f"h{max(1, min(block.level or 1, 6))}" if block.kind == "heading" else "p"
+                parts.append(f"<{tag}>{_html_text(block.text, block.links)}</{tag}>")
+            for index, image in enumerate(block.images):
+                parts.append(image_html(image, ("blocks", number, "images", index)))
+        for index, image in enumerate(self._images):
+            key = _image_placement(image)
+            if placements.get(key, 0):
+                placements[key] -= 1
+            else:
+                parts.append(image_html(image, ("images", index)))
+        result = "\n".join(parts)
+        if len(result.encode("utf-8")) > _MAX_EXPORT_BYTES:
+            raise UnsafeArchiveError("HTML export exceeds the formatting budget")
+        return result
 
     def to_dict(self) -> dict[str, Any]:
         return {"number": self.number, "blocks": [block.to_dict() for block in self.blocks], "links": [link.to_dict() for link in self._links], "images": [image.to_dict() for image in self._images], "tables": [table.to_dict() for table in self._tables], "metadata": self.metadata}

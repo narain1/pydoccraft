@@ -1037,3 +1037,5 @@ Existing authoring properties must describe supported input types and None retur
 148.1 Move every direct/resolved Deck dependency together to reviewed published16de1ca, retaining all other locked versions, sources, edges and assets. Preserve historical native144, package146 and153 prerequisite evidence. Add one actual linked native source/copy/readback/render/PDF regression and no Python API or public-test delta.
 
 148.2 Complete471 native, unchanged586 installed Python, strict typing, attribution/license/citation audit, artifact size/identity and independent focused review before current-head CI/manual delivery. The original146468/585 artifact and later153 source integration remain distinct; no broad SLIDE1/U11 closure is implied.
+
+Page HTML extraction SHALL return a bounded semantic HTML fragment with escaped text, structured tables and embedded referenced images; it SHALL not claim layout fidelity.
