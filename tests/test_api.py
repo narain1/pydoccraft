@@ -265,8 +265,8 @@ class ApiTests(unittest.TestCase):
             doc_ex.open(b"%PDF-broken")
 
     def test_malformed_xml_zip_relationships_and_media_fail_safely(self) -> None:
-        docx_types = '<Types>wordprocessingml.document.main+xml</Types>'
-        pptx_types = '<Types>presentationml.presentation.main+xml</Types>'
+        docx_types = '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'
+        pptx_types = '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/></Types>'
         cases = [
             package({"[Content_Types].xml": docx_types, "word/document.xml": "<w:document><"}),
             package({
@@ -274,12 +274,13 @@ class ApiTests(unittest.TestCase):
                 "ppt/presentation.xml": '<p:presentation xmlns:p="p" xmlns:r="r"><p:sldId r:id="missing"/></p:presentation>',
                 "ppt/_rels/presentation.xml.rels": "<Relationships/>",
             }),
-            package({"[Content_Types].xml": docx_types}),
         ]
         for data in cases:
             with self.subTest(size=len(data)):
                 with self.assertRaises(MalformedDocumentError):
                     doc_ex.open(data)
+        with self.assertRaises(UnsupportedFormatError):
+            doc_ex.open(package({"[Content_Types].xml": docx_types}))
 
         malformed_media = package({
             "[Content_Types].xml": docx_types,

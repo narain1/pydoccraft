@@ -268,6 +268,11 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 - [x] Reuse bounded integer selection for PDF copy/import and reject callback-driven page organization before native dispatch.
 - [x] Verify limits, ownership, callback behavior and selected output in the complete installed-wheel corpus; record artifact evidence.
 
+## EPUB extension
+
+- [x] Authorize and link the dedicated EPUB extraction/creation spec.
+- [x] Add exact-locked permissive LexePub/rbook adapters, synchronized license evidence, and generated tests.
+- [ ] Track upstream bounded traversal/writer sinks before claiming hard intermediate-allocation ceilings.
 ## Executable usability cookbook
 
 - [x] Compose six runnable workflows using the existing public surface and explicit output directories/DPI.

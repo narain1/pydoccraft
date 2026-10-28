@@ -1,6 +1,6 @@
 # Native authoring
 
-Version 0.3.0 adds `doc_ex.new("docx" | "pdf" | "pptx")`. Editable documents own the upstream native model; extracted `Document`, `Block`, `Table` and `Cell` values remain snapshots. This page describes the implemented surface, while [the roadmap](../TODO.md) retains broader parity work. These additions are not part of earlier releases such as 0.2.1.
+Version 0.3.0 adds `doc_ex.new("docx" | "pdf" | "pptx" | "epub")`. Editable documents own the upstream native model; extracted `Document`, `Block`, `Table` and `Cell` values remain snapshots. This page describes the implemented surface, while [the roadmap](../TODO.md) retains broader parity work. These additions are not part of earlier releases such as 0.2.1.
 
 ## Create, save, copy and render
 
@@ -27,9 +27,15 @@ with doc_ex.new("docx") as report:
 
 A new PDF starts with one Letter page unless `size` is supplied. `pdf.pages.add()` defaults to Letter independently of the first page; pass `size` explicitly for another size. A new DOCX has a default section and styles; its required blank paragraph is omitted from the user paragraph collection. An explicitly inserted empty paragraph is retained. A presentation starts with no slides and must have at least one slide before serialization.
 
+### EPUB reflowable books
+
+`doc_ex.new("epub" | "ebook")` creates an append-only EPUB 3 book. Set required title, identifier, and language metadata, add ordered chapters, then append headings, paragraphs, HTTP(S)/mailto/fragment links, and PNG/JPEG/GIF images. Text must be valid XML 1.0. Images are signature checked, limited to 16 MiB each and 64 MiB total; authored content is limited to 64 MiB and estimated/actual output to 128 MiB. SVG is rejected because arbitrary SVG cannot be guaranteed inert. `copy()`, bytes/path/stream save, context management, and close follow the lifecycle above.
+
+EPUB rendering, conversion, CSS, raw XHTML/OPF, scripts, fixed layout, editing an existing book, and physical pagination are unavailable. The extraction API maps each spine chapter to one compatibility page.
+
 ## Typing and inspection
 
-The package ships `py.typed`. Literal `new("docx")`, `new("pdf")` and `new("pptx")` calls retain the matching document type through context managers and copies. Common creation methods return typed handles; collections and table slices retain their element types. `get_text("dict")` returns a dictionary, while text/Markdown/JSON modes return strings. A dynamic mode string retains the union. These hints describe successful results; existing format, ownership and value checks still apply.
+The package ships `py.typed`. Literal `new("docx")`, `new("pdf")`, `new("pptx")` and `new("epub")` calls retain the matching document type through context managers and copies. Common creation methods return typed handles; collections and table slices retain their element types. `get_text("dict")` returns a dictionary, while text/Markdown/JSON modes return strings. A dynamic mode string retains the union. These hints describe successful results; existing format, ownership and value checks still apply.
 
 Owned Word/PDF metadata and DOCX picture/table/cell `.formatting` snapshots also have precise output type hints. Unset metadata keys are absent; Word's `custom` mapping is always present and contains strings, booleans, integers or floats. Direct formatting values may be `None`; cell margin snapshots remain lists, while picture position/distance remain tuples. These hints describe existing snapshot values and do not change runtime input validation or make edits to the returned dictionary affect the document. Cell margins already accept lists; table/cell border hints also accept their exact snapshot dictionaries. Static compatibility does not bypass runtime combination rules: an inline picture snapshot includes derived position/distance fields that cannot be submitted as floating parameters with inline wrapping. Supported floating-picture and table/cell snapshots can be passed to their existing format method within the normal scope guards. Reset a picture with `picture.format(wrap="inline")`. Paragraph/style/default output hints also describe their existing native values. Paragraph direct formatting guarantees the alignment key; Word-only keys should be read with `snapshot.get(...)` because DOCX-only properties are absent from PPTX cell snapshots. A PPTX cell paragraph reports alignment, six nullable direct indentation/spacing values and nullable direct tab stops; their supported direct snapshot replay is also typed. Assigning its returned tab list separately to an input-only ParagraphFormatting TypedDict can still encounter TypedDict list invariance; the full-snapshot overload avoids that unrelated assignment. Successful resolved paragraph snapshots are Word-only and contain concrete paragraph defaults except nullable borders/background. Style snapshots guarantee shared character keys, with paragraph/table keys present only for their native kind; `Style.kind` is not a static type discriminator. Resolved style hints remain conservatively nullable because table inheritance can retain unset values. Table regions have no nested regions or paragraph-only properties. Whole-table style margin values remain lists. Document defaults contain the character/paragraph keys and no table-only fields. Language and strike retain their native nullable/boolean/string types. These are private output schemas, not new exported classes or a promise that every snapshot can be unpacked as a formatting input.
 
@@ -931,3 +937,26 @@ This dependency correction applies to existing import/render/PDF conversion meth
 ### Conservative PDF table detection
 
 PDF tables are inferred from native reading geometry. If discarded native text overlaps a candidate table's replacement region, extraction retains the original text blocks instead of adopting that candidate. A visually table-like region can therefore remain paragraphs; the check prevents the demonstrated omitted-line case without promising arbitrary PDF table recognition. DOCX/PPTX semantic tables and the public table API are unchanged.
+## EPUB creation (unreleased)
+
+```python
+import doc_ex
+
+with doc_ex.new("epub") as book:
+    book.set_metadata(
+        title="Example book",
+        identifier="urn:example:book",
+        language="en",
+        authors=["Example Author"],
+    )
+    chapter = book.add_chapter("Introduction")
+    chapter.add_heading("Welcome", level=1)
+    chapter.add_paragraph("A reflowable paragraph.")
+    chapter.add_link("Project", "https://example.com")
+    chapter.add_image(png_bytes, media_type="image/png", alt="Diagram")
+    epub_bytes = book.to_bytes()
+```
+
+EPUB creation is append-only and semantic. `EpubDocument` supports the shared `to_bytes`, path/stream `save`, `copy`, context manager and idempotent `close` lifecycle. Required metadata is title, identifier and language. Links are inert ASCII-case-insensitive HTTP(S), mailto or safe fragment targets; remote resources are never fetched. Supported image resources are signature-checked PNG, JPEG and GIF bytes, limited to 16 MiB each and 64 MiB total. SVG authoring is rejected because active content cannot be guaranteed inert.
+
+Callers cannot inject raw XHTML, OPF, CSS, SVG, scripts or archive paths. Existing EPUB editing, fixed-layout content, rendering, conversion, DRM and media overlays are unsupported.

@@ -284,6 +284,9 @@ A private strict native-property-to-JSON scalar helper is shared by the existing
 
 PDF copy/subset and page insertion reuse the private `_selected_pages` facade helper already used by selective text extraction. Bounded integer collection precedes native dispatch; copy resolves valid negative indexes against one stable final count. Destination page generation plus count detects incompatible callback mutations, including append-only page additions that preserve existing positional handles. Open-state validation runs before stale-selection validation. Native PdfCraft remains responsible for page import/subset semantics and preservation restrictions; source bytes are snapshotted before consuming selection callbacks.
 
+## EPUB extension architecture
+
+`rust/src/epub.rs` is a narrow LexePub adapter with shared ZIP and strict package/XML preflight; `rust/src/author_epub.rs` is a bounded semantic adapter over rbook. Python retains compatibility objects and save/lifecycle behavior. These exact-locked Apache-2.0 backends are explicitly authorized by the [EPUB design](../epub-support/design.md) because the selected ArtCraft repositories do not provide an EPUB engine. They do not authorize local reimplementation of EPUB packaging, rendering, conversion, CSS, DRM, or fixed-layout behavior.
 ## Executable usability cookbook
 
 Five new standalone example modules plus the existing template recipe compose native authoring and PNG-byte rendering. Each exposes a normal function with an explicit output directory and a guarded argparse entry point. They format domain data with Python/Decimal, preserve native document ownership and write returned conversion/render bytes explicitly. No example implementation enters the public doc_ex surface. Installed-wheel acceptance imports the actual modules and runs their CLIs in temporary directories; shared PNG decoders verify artwork and requested resolution without requiring Pillow.
