@@ -22,6 +22,7 @@ with doc_ex.open("report.pdf") as document:
     print(document.page_count)
     print(document[0].get_text())
     print(document[0].get_text("markdown"))
+    # On the development branch: document[0].get_text("html")
     print(document[0].get_links())
     print(document[0].find_tables())
     Path("page.png").write_bytes(document[0].get_pixmap(dpi=144))
@@ -112,3 +113,5 @@ Release validation must install the built wheel into a clean environment and run
 `pydoccraft` is licensed under Apache-2.0. Distributions include [`LICENSE`](LICENSE), [`NOTICE`](NOTICE), and the wheel-compatible [`LICENSE-THIRD-PARTY`](LICENSE-THIRD-PARTY) copy of the audited [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md) inventory. Upstream dependency names identify their source and are not `pydoccraft` branding.
 
 The source repository is [`narain1/pydoccraft`](https://github.com/narain1/pydoccraft). PyPI trusted publishing is configured for project `pydoccraft`, repository `pydoccraft`, workflow `release.yml`, and environment `pypi`.
+
+For the unreleased semantic HTML export, see the [HTML example and limitations](docs/api.md#export-a-page-as-html-unreleased).

@@ -311,3 +311,5 @@ PdfCraft library crates use the reviewed contribution fork at `https://github.co
 | `zopfli` | `0.8.4` | Apache-2.0 |
 | `zune-core` | `0.5.3` | MIT OR Apache-2.0 OR Zlib |
 | `zune-jpeg` | `0.5.15` | MIT OR Apache-2.0 OR Zlib |
+
+Documentation image: `website/assets/irs-1040-page-1.png` is rendered from the U.S. Internal Revenue Service 2025 Form 1040 (https://www.irs.gov/pub/irs-prior/f1040--2025.pdf), a U.S. government work.

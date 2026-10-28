@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from html import escape
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 BBox = tuple[float, float, float, float]
 
@@ -146,7 +147,15 @@ def _html_text(text: str, links: list[Link]) -> str:
         last_start = start
     for start, end, link in reversed(selected):
         output.append(escape(text[position:start]))
-        output.append(f'<a href="{escape(link.uri, quote=True)}">{escape(text[start:end])}</a>')
+        uri = link.uri
+        try:
+            safe_scheme = urlsplit(uri).scheme.lower() in ("", "http", "https", "mailto")
+        except ValueError:
+            safe_scheme = False
+        if any(ord(char) < 32 or ord(char) == 127 for char in uri) or not safe_scheme:
+            output.append(escape(text[start:end]))
+        else:
+            output.append(f'<a href="{escape(uri, quote=True)}">{escape(text[start:end])}</a>')
         position = end
     output.append(escape(text[position:]))
     return "".join(output).replace("\n", "<br>")

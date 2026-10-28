@@ -33,8 +33,9 @@ Recognized explicit `filetype` values are:
 | PDF | `pdf`, `.pdf` |
 | Word | `docx`, `.docx`, `word` |
 | PowerPoint | `pptx`, `.pptx`, `powerpoint` |
+| EPUB (unreleased) | `epub`, `.epub`, `ebook` |
 
-For paths, the suffix is checked against the detected content. For bytes, the native detector identifies PDF and OOXML content. A mismatched explicit type raises `UnsupportedFormatError`.
+For paths, the suffix is checked against the detected content. For bytes, the native detector identifies PDF, OOXML and EPUB content. A mismatched explicit type raises `UnsupportedFormatError`.
 
 Passwords are supported for encrypted PDF and DOCX input. Encrypted PPTX is rejected by the upstream DeckCraft importer.
 
@@ -109,7 +110,7 @@ After `close()`, document operations raise `DocumentClosedError`. Previously obt
 
 ## `Page`
 
-`Page.number` is always zero-based. DOCX pages are WordCraft layout pages, PDF pages retain source order, and PPTX pages correspond one-to-one with slides.
+`Page.number` is always zero-based. DOCX pages are WordCraft layout pages, PDF pages retain source order, PPTX pages correspond one-to-one with slides, and unreleased EPUB support maps each spine chapter to a page without physical pagination.
 
 ### Text
 
@@ -117,11 +118,38 @@ After `close()`, document operations raise `DocumentClosedError`. Previously obt
 page.get_text()             # plain text
 page.get_text("text")       # plain text
 page.get_text("markdown")   # conventional Markdown
+page.get_text("html")       # semantic HTML fragment (unreleased)
 page.get_text("dict")       # structured dictionary
 page.get_text("json")       # JSON string
 ```
 
 An unknown option raises `ValueError`. Plain text preserves table rows using tabs between cells. Markdown emits headings, inline links when exact offsets are known, pipe tables, images, notes, comments, and a final link list for unmatched links.
+
+### Export a page as HTML (unreleased)
+
+```python
+from pathlib import Path
+import doc_ex
+
+with doc_ex.open("report.docx") as document:
+    fragment = document[0].get_text("html")
+    Path("page-1.html").write_text(
+        "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\">"
+        "<title>Extracted page</title><body>" + fragment + "</body></html>",
+        encoding="utf-8",
+    )
+```
+
+The result is an HTML fragment, not a full document. It includes headings,
+paragraphs, semantic tables (including nested and merged cells), links with
+known text offsets, and embedded image data. Source ordering is retained where
+available. It does not reproduce fonts, positioning, or page layout; use
+`get_pixmap()` when visual appearance matters. Links without matched text
+are available through `get_links()` and are not added to the fragment. Unsafe
+link schemes are rendered as text. Images with missing data or unsupported
+media types raise `MalformedDocumentError`; excessive content raises
+`UnsafeArchiveError`. HTML reflects untrusted input and is not a general-purpose
+HTML sanitizer; apply your application's security policy before publishing it.
 
 ### Structured content
 
@@ -134,6 +162,55 @@ tables = page.find_tables()
 ```
 
 `get_links()`, `get_images()`, and `find_tables()` return new lists containing the underlying model objects. `get_images(full=True)` returns one-based `(ordinal, Image)` tuples for loose PyMuPDF compatibility.
+
+### Example: inspect structured text and render the same PDF page
+
+This example uses the first page of the [IRS 2025 Form 1040](https://www.irs.gov/pub/irs-prior/f1040--2025.pdf). Download it as `f1040--2025.pdf` and run:
+
+```python
+import json
+from pathlib import Path
+import doc_ex
+
+with doc_ex.open("f1040--2025.pdf") as document:
+    page = document[0]
+    # Select a few fields from the owned Block objects for a compact display.
+    summary = [
+        {
+            "kind": block.kind,
+            "text": block.text.strip(),
+            "bbox": [round(value, 1) for value in block.bbox] if block.bbox else None,
+        }
+        for block in page.blocks[:3]
+    ]
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
+    Path("form-page-1.png").write_bytes(page.get_pixmap(dpi=96))
+```
+
+The beginning of the output on this sample is:
+
+```json
+[
+  {"kind": "paragraph", "text": "1040", "bbox": [43.2, 24.7, 97.1, 48.7]},
+  {"kind": "paragraph", "text": "Department of the Treasury—Internal Revenue Service", "bbox": [97.6, 26.5, 245.4, 32.5]},
+  {"kind": "paragraph", "text": "U.S. Individual Income Tax Return", "bbox": [97.6, 34.6, 283.8, 46.6]}
+]
+```
+
+This is a shortened projection of the first three blocks, not the entire page.
+`page.get_text("dict")` returns the complete normalized page, including blocks,
+links, image metadata, tables and page metadata. Geometry and reading order
+come from the PDF engine and can differ across documents; table detection is
+conservative. For this example, the form's visible grid is not extracted as a
+semantic table. Use `page.find_tables()` to inspect tables that were detected.
+
+The same page rendered at 96 DPI looks like this:
+
+![Rendered first page of the 2025 IRS Form 1040](../website/assets/irs-1040-page-1.png)
+
+*Source: U.S. Internal Revenue Service, 2025 Form 1040. The illustration is a
+PNG rendered from the linked PDF with pydoccraft. Its visual layout is separate
+from the extracted structured text above.*
 
 ### Rendering
 

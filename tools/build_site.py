@@ -71,6 +71,9 @@ class Links(HTMLParser):
         if not target.is_relative_to(ROOT) or not target.exists():
             raise ValueError(f"Missing repository target in {self.source}: {value}")
         key = target.relative_to(ROOT)
+        if key.is_relative_to(Path("website/assets")):
+            asset = Path("assets") / key.relative_to(Path("website/assets"))
+            return urlunsplit(("", "", relative(asset, self.destination), url.query, url.fragment))
         if key in PAGES:
             path = relative(PAGES[key], self.destination)
             return urlunsplit(("", "", path, url.query, url.fragment))
@@ -144,6 +147,7 @@ def build(output: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(page)
     shutil.copytree(ROOT / "website/assets", output / "assets", dirs_exist_ok=True)
+    shutil.copyfile(ROOT / "llms.txt", output / "llms.txt")
     (output / ".nojekyll").touch()
     print(f"Built {len(PAGES)} pages in {output}")
 

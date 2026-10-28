@@ -2639,3 +2639,9 @@ It did not reproduce locally: the test passed alone and in the full 466-test sui
 That one assertion was removed. The rest of the test still checks colour order, links, media, picture ink and matching dimensions at 72, 144 and 200 DPI. The four other full-raster within-one comparisons (`pptx_cell_delete_proof`, `pptx_cell_tabs_proof`, `author_pptx`, `author_docx`) passed in the same CI run and were left in place. It waits on the same tolerance decision as the tests listed above.
 
 The container run also showed that `upstream_border_styles_and_widths_are_drawn_as_themselves`, rewritten during the upgrade, failed on Linux arm64: a 0.125 pt hairline and a 0.25 pt line rendered identically there. Its width-only cases (hairline against 0.25 pt, 1.0 pt against 1.5 pt) differ by less than a pixel at 144 DPI, so they were dropped. The triple and dash-dot cases, whose line patterns differ, remain. After both edits the full suite passes on Linux x86_64 under emulation (466 passed, 0 failed). Whether CI now passes is not known until it runs.
+
+Page HTML formatter: two isolated Python tests passed for escaped text, links, merged cells, embedded images, placement deduplication and unsafe link schemes. Native integration and full corpus were not run in this environment because the native extension is not installed.
+
+Page HTML integration: exercised on disk PDF, DOCX, PPTX and EPUB fixtures and the checked-in DeckCraft PPTX, using the existing EPUB build native extension; HTML text, tables, links and embedded image output were checked. The full corpus was not run for this change.
+
+Documentation PDF example: extracted the first three blocks and rendered page one at 96 DPI from the IRS 2025 Form 1040 using the existing 0.3.1 EPUB-build native wheel. Built the documentation site and checked 30 pages and 1,880 local links/assets/fragments.

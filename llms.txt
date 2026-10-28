@@ -1,0 +1,27 @@
+# pydoccraft
+
+> Python document extraction, rendering, conversion and authoring using in-process Rust engines. The import name is `doc_ex`. The documentation describes the development branch; check releases for availability.
+
+## Documentation
+
+- [Python API](https://narain1.github.io/pydoccraft/docs/api.html): opening documents, extracting pages, models, rendering and conversion.
+- [Formats and fidelity](https://narain1.github.io/pydoccraft/docs/formats.html): supported formats, conversions and known limitations.
+- [Cookbook](https://narain1.github.io/pydoccraft/docs/cookbook.html): practical authoring workflows.
+- [Authoring](https://narain1.github.io/pydoccraft/docs/authoring.html): creating and editing documents.
+- [Markdown and assets](https://narain1.github.io/pydoccraft/docs/markdown-assets.html): exporting Markdown and referenced media.
+- [Safety](https://narain1.github.io/pydoccraft/docs/safety.html): input limits and error handling.
+- [Operation support matrix](https://narain1.github.io/pydoccraft/docs/support-matrix.html): operation-level support and evidence.
+- [Repository](https://github.com/narain1/pydoccraft): source, issues and release information.
+
+## Quick example
+
+```python
+from pathlib import Path
+import doc_ex
+
+with doc_ex.open("report.pdf") as document:
+    print(document[0].get_text())
+    Path("page.png").write_bytes(document[0].get_pixmap(dpi=144))
+```
+
+Pages are zero-indexed. HTML extraction via `page.get_text("html")` is unreleased and returns semantic content, not a layout reproduction. EPUB support is also unreleased; EPUB chapters are not physical pages and PNG rendering is unavailable. Conversion is not pixel-perfect. No runtime downloads, external executables, cloud credentials or OCR are required.

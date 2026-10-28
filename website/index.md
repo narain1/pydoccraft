@@ -30,6 +30,8 @@ Rendering returns PNG bytes. Page indexes start at zero; negative indexes work a
 | I want to… | Start here |
 |---|---|
 | Extract text, links, tables and images | [Python API](../docs/api.md) |
+| See structured PDF text alongside a page image | [PDF example](../docs/api.md#example-inspect-structured-text-and-render-the-same-pdf-page) |
+| Export a page as semantic HTML (unreleased) | [HTML example](../docs/api.md#export-a-page-as-html-unreleased) |
 | Render a page or slide, or convert a document | [Formats and rendering](../docs/formats.md) |
 | Create a report with paragraphs, tables and backgrounds | [Native authoring — development API](../docs/authoring.md) |
 | Compose reports, templates, watermarks and batches | [Six runnable cookbook workflows](../docs/cookbook.md) |
