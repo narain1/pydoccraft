@@ -1,4 +1,7 @@
-use std::{io::Cursor, sync::Arc};
+use std::sync::Arc;
+
+#[cfg(test)]
+use std::io::Cursor;
 
 use pdfcraft_content::{serialize_ops, Op};
 use pdfcraft_cos::{Document, SaveOptions};
@@ -10,10 +13,13 @@ use serde_json::{json, Value};
 
 use crate::EngineError;
 
+#[path = "author_pdf_validation.rs"]
+mod validation;
+use validation::{validate_page_size, validate_png, validate_position, MAX_IMAGE_BYTES};
+
 const MAX_PAGES: usize = 10_000;
 const MAX_ITEMS: usize = 10_000;
 const MAX_TEXT_BYTES: usize = 1_000_000;
-const MAX_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_DOCUMENT_INPUT: usize = 128 * 1024 * 1024;
 const MAX_OUTPUT_BYTES: usize = 256 * 1024 * 1024;
 const MAX_FIELDS: usize = 1_000;
@@ -3867,56 +3873,6 @@ fn annotation_error(error: pdfcraft_annot::AnnotError) -> EngineError {
         | pdfcraft_annot::AnnotError::Undrawable(message) => EngineError::Unsupported(message),
         other => EngineError::Conversion(format!("PDF annotation operation failed: {other}")),
     }
-}
-
-fn validate_page_size(width: f64, height: f64) -> PyResult<()> {
-    if !width.is_finite()
-        || !height.is_finite()
-        || !(3.0..=14_400.0).contains(&width)
-        || !(3.0..=14_400.0).contains(&height)
-    {
-        return Err(PyValueError::new_err(
-            "page sides must be finite and between 3 and 14400 points",
-        ));
-    }
-    Ok(())
-}
-
-fn validate_position(x: f64, y: f64, width: f64, height: f64) -> PyResult<()> {
-    if !x.is_finite() || !y.is_finite() || x < 0.0 || y < 0.0 || x >= width || y >= height {
-        return Err(PyValueError::new_err(
-            "position must be finite and inside the page",
-        ));
-    }
-    Ok(())
-}
-
-fn validate_png(data: &[u8]) -> PyResult<()> {
-    if data.len() > MAX_IMAGE_BYTES {
-        return Err(EngineError::ResourceLimit("image input exceeds 64 MiB".into()).into());
-    }
-    if !data.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return Err(EngineError::Unsupported(
-            "PDF image insertion currently accepts PNG bytes".into(),
-        )
-        .into());
-    }
-    let mut decoder = png::Decoder::new(Cursor::new(data));
-    decoder.set_limits(png::Limits {
-        bytes: MAX_IMAGE_BYTES,
-    });
-    let reader = decoder
-        .read_info()
-        .map_err(|error| EngineError::Malformed(format!("invalid PNG image: {error}")))?;
-    let info = reader.info();
-    crate::rendering::validate_size(f64::from(info.width), f64::from(info.height), 16_000)?;
-    if reader
-        .output_buffer_size()
-        .is_none_or(|size| size > 256_000_000)
-    {
-        return Err(EngineError::ResourceLimit("decoded image exceeds 256 MB".into()).into());
-    }
-    Ok(())
 }
 
 fn creation_error(error: pdfcraft_create::CreateError) -> EngineError {
