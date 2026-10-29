@@ -28,6 +28,11 @@
 - The shared DOCX editor now builds with no Python feature, using native errors in that configuration while retaining the Python boundary. Linux x86_64, Rust 1.95: 399 Python-free library tests and a DOCX author/edit/save/extract integration test passed; Python-enabled locked Clippy with warnings denied and Rust formatting passed.
 - A Python 3.13 locked release wheel installed outside the source tree passed 594 Python tests. Full Rust tests on the final combined tree, Python 3.11 and cross-platform validation remain open. The editor primitives do not yet provide all Python facade ownership or formatting semantics in Rust, and Node/Go authoring parity is not claimed.
 
+## Node source preview (unreleased)
+
+- Linux x86_64, Rust 1.95, Node 20.19.2: the independent Node manifest built with `--offline --locked` and seven focused Node tests passed, including input bounds, DOCX extraction, rendering and conversion, and PPTX conversion refusal. This is not installed-package or cross-platform evidence.
+- The separately locked normal/build dependency graph was reviewed against the regenerated permissive root inventory; third-party package rows are a subset. The preview is private, Linux-only and has no packaged native binary. It lacks passwords, clipping, sessions and authoring, and is not an npm release.
+
 ## 2026-10-20 DOCX properties and PDF markup (unreleased)
 
 - Runtime commits `849de87` and `70b636a` passed the combined offline Linux x86_64 corpus: Rust 1.95.0 formatting, 186 native tests, warnings-denied Clippy, locked Maturin 1.8.1 release build and 203 installed-wheel Python 3.11.2 tests, zero skips, with verified artifact identity.
