@@ -1,6 +1,7 @@
+#![recursion_limit = "1024"]
+
 pub mod api;
-#[cfg(feature = "python")]
-mod author_docx;
+pub mod author_docx;
 pub mod author_epub;
 pub mod author_pdf;
 pub mod author_pptx;
@@ -21,9 +22,6 @@ pub mod session_api;
 
 #[cfg(feature = "python")]
 mod python;
-#[cfg(feature = "python")]
-use python::DocExNativeError;
-
 use thiserror::Error;
 
 #[derive(Debug, Error)]

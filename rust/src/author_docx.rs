@@ -6,8 +6,11 @@ use std::{
     sync::Arc,
 };
 
+#[cfg(feature = "python")]
 use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
+#[cfg(feature = "python")]
 use pyo3::prelude::*;
+#[cfg(feature = "python")]
 use pyo3::types::{PyBool, PyInt};
 use serde_json::{json, Map, Value};
 use wordcraft_doc::para::{Anchor, Float, InlineObject, NoteKind, Wrap};
@@ -24,7 +27,43 @@ use wordcraft_doc::{
     StoryRef, StyleKind, Table, TextColor,
 };
 
-use crate::{DocExNativeError, EngineError};
+use crate::EngineError;
+
+// Existing shared tests initialize Python before constructing Python errors.
+// Native errors do not need an interpreter, but the same tests can still run.
+#[cfg(all(test, not(feature = "python")))]
+mod pyo3 {
+    pub fn prepare_freethreaded_python() {}
+}
+
+#[cfg(not(feature = "python"))]
+type PyResult<T> = Result<T, EngineError>;
+#[cfg(not(feature = "python"))]
+type PyErr = EngineError;
+#[cfg(not(feature = "python"))]
+struct PyValueError;
+#[cfg(not(feature = "python"))]
+struct PyIndexError;
+#[cfg(not(feature = "python"))]
+struct PyKeyError;
+#[cfg(not(feature = "python"))]
+impl PyValueError {
+    fn new_err(message: impl Into<String>) -> EngineError {
+        EngineError::InvalidArgument(message.into())
+    }
+}
+#[cfg(not(feature = "python"))]
+impl PyIndexError {
+    fn new_err(message: impl Into<String>) -> EngineError {
+        EngineError::PageIndex(message.into())
+    }
+}
+#[cfg(not(feature = "python"))]
+impl PyKeyError {
+    fn new_err(message: impl Into<String>) -> EngineError {
+        EngineError::InvalidArgument(message.into())
+    }
+}
 
 #[path = "author_docx_comments.rs"]
 mod comments;
@@ -55,6 +94,19 @@ const MAX_LIST_MATCH_WORK: usize = 2_000_000;
 #[derive(Clone, Copy)]
 pub struct ListStart(u32);
 
+impl ListStart {
+    /// Create a list start, validating the range supported by WordCraft.
+    pub fn new(start: u32) -> Result<Self, EngineError> {
+        if !(1..=32767).contains(&start) {
+            return Err(EngineError::InvalidArgument(
+                "list start must be between 1 and 32767".into(),
+            ));
+        }
+        Ok(Self(start))
+    }
+}
+
+#[cfg(feature = "python")]
 impl<'py> FromPyObject<'py> for ListStart {
     fn extract_bound(value: &Bound<'py, PyAny>) -> PyResult<Self> {
         if value.is_instance_of::<PyBool>() || !value.is_instance_of::<PyInt>() {
@@ -88,7 +140,7 @@ const MAX_PROPERTY_BYTES: usize = 256 * 1024;
 const MAX_PROPERTY_VALUE_BYTES: usize = 64 * 1024;
 const MAX_CUSTOM_PROPERTIES: usize = 1024;
 
-#[pyclass]
+#[cfg_attr(feature = "python", pyclass)]
 pub struct EditableDocx {
     document: Option<Document>,
     // Native body position, never an editable handle ID.
@@ -109,8 +161,39 @@ pub struct EditableDocx {
     shape_ids: BTreeSet<usize>,
 }
 
-#[pymethods]
-impl EditableDocx {
+// Emit the Python and native impls from one set of declarations, leaving the
+// PyO3-only attributes out of the native version.
+macro_rules! docx_methods {
+    (@parse [$($py:tt)*] [$($native:tt)*] [] []) => {
+        #[cfg(feature = "python")]
+        #[pymethods]
+        impl EditableDocx { $($py)* }
+        #[cfg(not(feature = "python"))]
+        impl EditableDocx { $($native)* }
+    };
+    (@parse [$($py:tt)*] [$($native:tt)*] [$($pa:tt)*] [$($na:tt)*]
+        #[pyo3($($binding:tt)*)] $($rest:tt)*) => {
+        docx_methods!(@parse [$($py)*] [$($native)*] [$($pa)* #[pyo3($($binding)*)]] [$($na)*] $($rest)*);
+    };
+    (@parse [$($py:tt)*] [$($native:tt)*] [$($pa:tt)*] [$($na:tt)*]
+        #[new] $($rest:tt)*) => {
+        docx_methods!(@parse [$($py)*] [$($native)*] [$($pa)* #[new]] [$($na)*] $($rest)*);
+    };
+    (@parse [$($py:tt)*] [$($native:tt)*] [$($pa:tt)*] [$($na:tt)*]
+        #[$attr:meta] $($rest:tt)*) => {
+        docx_methods!(@parse [$($py)*] [$($native)*] [$($pa)* #[$attr]] [$($na)* #[$attr]] $($rest)*);
+    };
+    (@parse [$($py:tt)*] [$($native:tt)*] [$($pa:tt)*] [$($na:tt)*]
+        $vis:vis fn $name:ident ($($args:tt)*) $(-> $result:ty)? $body:block $($rest:tt)*) => {
+        docx_methods!(@parse
+            [$($py)* $($pa)* $vis fn $name($($args)*) $(-> $result)? $body]
+            [$($native)* $($na)* $vis fn $name($($args)*) $(-> $result)? $body]
+            [] [] $($rest)*);
+    };
+    ($($methods:tt)*) => { docx_methods!(@parse [] [] [] [] $($methods)*); };
+}
+
+docx_methods! {
     #[new]
     pub fn new() -> Self {
         Self {
@@ -5355,7 +5438,7 @@ impl EditableDocx {
     fn document(&self) -> PyResult<&Document> {
         self.document
             .as_ref()
-            .ok_or_else(|| DocExNativeError::new_err("closed:document is closed"))
+            .ok_or_else(|| EngineError::Closed("document is closed".into()).into())
     }
 
     fn paragraph(&self, id: usize) -> PyResult<&Paragraph> {
