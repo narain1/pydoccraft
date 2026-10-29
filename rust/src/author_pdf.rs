@@ -7,15 +7,68 @@ use pdfcraft_content::{serialize_ops, Op};
 use pdfcraft_cos::{Document, SaveOptions};
 use pdfcraft_cos::{ObjRef, Object};
 use pdfcraft_edit::{AddedImage, AddedText, Content, EditError};
+#[cfg(feature = "python")]
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
+#[cfg(feature = "python")]
 use pyo3::prelude::*;
 use serde_json::{json, Value};
 
 use crate::EngineError;
 
+// Keep the existing editor and its Python exceptions intact while making the
+// same operations usable without linking Python.
+#[cfg(not(feature = "python"))]
+type PyResult<T> = Result<T, EngineError>;
+#[cfg(not(feature = "python"))]
+struct PyValueError;
+#[cfg(not(feature = "python"))]
+struct PyIndexError;
+#[cfg(not(feature = "python"))]
+struct PyRuntimeError;
+#[cfg(not(feature = "python"))]
+impl PyValueError {
+    fn new_err(message: impl Into<String>) -> EngineError {
+        EngineError::InvalidArgument(message.into())
+    }
+}
+#[cfg(not(feature = "python"))]
+impl PyIndexError {
+    fn new_err(message: impl Into<String>) -> EngineError {
+        EngineError::PageIndex(message.into())
+    }
+}
+#[cfg(not(feature = "python"))]
+impl PyRuntimeError {
+    fn new_err(message: impl Into<String>) -> EngineError {
+        EngineError::Closed(message.into())
+    }
+}
+
 #[path = "author_pdf_validation.rs"]
 mod validation;
 use validation::{validate_page_size, validate_png, validate_position, MAX_IMAGE_BYTES};
+
+#[cfg(all(test, not(feature = "python")))]
+mod native_api_tests {
+    use super::*;
+
+    #[test]
+    fn create_edit_save_and_reopen_without_python() {
+        let mut pdf = EditablePdf::new(612.0, 792.0).unwrap();
+        pdf.add_page(300.0, 400.0).unwrap();
+        pdf.rotate_page(1, 90).unwrap();
+        assert_eq!(pdf.page_size(-1).unwrap(), (400.0, 300.0));
+        let bytes = pdf.to_bytes().unwrap();
+        let reopened = EditablePdf::from_bytes(&bytes, None).unwrap();
+        assert_eq!(reopened.page_count().unwrap(), 2);
+        assert!(matches!(
+            reopened.page_size(2),
+            Err(EngineError::PageIndex(_))
+        ));
+        pdf.close();
+        assert!(matches!(pdf.page_count(), Err(EngineError::Closed(_))));
+    }
+}
 
 const MAX_PAGES: usize = 10_000;
 const MAX_ITEMS: usize = 10_000;
@@ -34,7 +87,7 @@ enum BackgroundState {
 }
 
 /// Editable native PDF model. Python owns the public authoring facade.
-#[pyclass(module = "doc_ex._core")]
+#[cfg_attr(feature = "python", pyclass(module = "doc_ex._core"))]
 pub struct EditablePdf {
     document: Option<Document>,
     sizes: Vec<(f64, f64)>,
@@ -46,10 +99,42 @@ pub struct EditablePdf {
     owns_fields: bool,
 }
 
-#[pymethods]
-impl EditablePdf {
-    #[new]
-    #[pyo3(signature = (width=612.0, height=792.0))]
+// PyO3 needs to see its method attributes directly, before cfg_attr expansion.
+// Build both impls from the same declarations, removing binding-only attributes
+// from the native impl rather than maintaining a second editor.
+macro_rules! pdf_methods {
+    (@parse [$($py:tt)*] [$($native:tt)*] [] [] ) => {
+        #[cfg(feature = "python")]
+        #[pymethods]
+        impl EditablePdf { $($py)* }
+        #[cfg(not(feature = "python"))]
+        impl EditablePdf { $($native)* }
+    };
+    (@parse [$($py:tt)*] [$($native:tt)*] [$($pa:tt)*] [$($na:tt)*]
+        #[cfg_attr(feature = "python", pyo3($($binding:tt)*))] $($rest:tt)*) => {
+        pdf_methods!(@parse [$($py)*] [$($native)*] [$($pa)* #[pyo3($($binding)*)]] [$($na)*] $($rest)*);
+    };
+    (@parse [$($py:tt)*] [$($native:tt)*] [$($pa:tt)*] [$($na:tt)*]
+        #[cfg_attr(feature = "python", $binding:ident)] $($rest:tt)*) => {
+        pdf_methods!(@parse [$($py)*] [$($native)*] [$($pa)* #[$binding]] [$($na)*] $($rest)*);
+    };
+    (@parse [$($py:tt)*] [$($native:tt)*] [$($pa:tt)*] [$($na:tt)*]
+        #[$attr:meta] $($rest:tt)*) => {
+        pdf_methods!(@parse [$($py)*] [$($native)*] [$($pa)* #[$attr]] [$($na)* #[$attr]] $($rest)*);
+    };
+    (@parse [$($py:tt)*] [$($native:tt)*] [$($pa:tt)*] [$($na:tt)*]
+        $vis:vis fn $name:ident ($($args:tt)*) $(-> $result:ty)? $body:block $($rest:tt)*) => {
+        pdf_methods!(@parse
+            [$($py)* $($pa)* $vis fn $name($($args)*) $(-> $result)? $body]
+            [$($native)* $($na)* $vis fn $name($($args)*) $(-> $result)? $body]
+            [] [] $($rest)*);
+    };
+    ($($methods:tt)*) => { pdf_methods!(@parse [] [] [] [] $($methods)*); };
+}
+
+pdf_methods! {
+    #[cfg_attr(feature = "python", new)]
+    #[cfg_attr(feature = "python", pyo3(signature = (width=612.0, height=792.0)))]
     pub fn new(width: f64, height: f64) -> PyResult<Self> {
         validate_page_size(width, height)?;
         let document = pdfcraft_create::blank(width, height, 1).map_err(creation_error)?;
@@ -64,8 +149,8 @@ impl EditablePdf {
         })
     }
 
-    #[staticmethod]
-    #[pyo3(signature = (data, password=None))]
+    #[cfg_attr(feature = "python", staticmethod)]
+    #[cfg_attr(feature = "python", pyo3(signature = (data, password=None)))]
     pub fn from_bytes(data: &[u8], password: Option<&str>) -> PyResult<Self> {
         if data.len() > MAX_DOCUMENT_INPUT {
             return Err(EngineError::ResourceLimit("PDF input exceeds 128 MiB".into()).into());
@@ -172,7 +257,7 @@ impl EditablePdf {
         self.backgrounds.clear();
     }
 
-    #[pyo3(name = "to_bytes", signature = (object_streams=true))]
+    #[cfg_attr(feature = "python", pyo3(name = "to_bytes", signature = (object_streams=true)))]
     pub fn to_bytes_with_options(&self, object_streams: bool) -> PyResult<Vec<u8>> {
         self.serialize_with_limit(object_streams, MAX_OUTPUT_BYTES)
     }
@@ -201,7 +286,7 @@ impl EditablePdf {
         crate::limits::bounded_json(&values, 4096).map_err(Into::into)
     }
 
-    #[pyo3(signature = (page, kind, rect=None))]
+    #[cfg_attr(feature = "python", pyo3(signature = (page, kind, rect=None)))]
     pub fn set_page_box(
         &mut self,
         page: isize,
@@ -294,7 +379,7 @@ impl EditablePdf {
         Ok(())
     }
 
-    #[pyo3(signature = (width=612.0, height=792.0))]
+    #[cfg_attr(feature = "python", pyo3(signature = (width=612.0, height=792.0)))]
     pub fn add_page(&mut self, width: f64, height: f64) -> PyResult<usize> {
         self.document()?;
         validate_page_size(width, height)?;
@@ -369,7 +454,7 @@ impl EditablePdf {
         Ok(())
     }
 
-    #[pyo3(signature = (data, password, indices, destination, outline_title=None))]
+    #[cfg_attr(feature = "python", pyo3(signature = (data, password, indices, destination, outline_title=None)))]
     pub fn import_pages(
         &mut self,
         data: &[u8],
@@ -591,7 +676,7 @@ impl EditablePdf {
         })
     }
 
-    #[pyo3(signature = (page=None))]
+    #[cfg_attr(feature = "python", pyo3(signature = (page=None)))]
     pub fn fields(&self, page: Option<isize>) -> PyResult<String> {
         let page = page.map(|p| self.page_index(p)).transpose()?;
         let values = self
@@ -609,7 +694,7 @@ impl EditablePdf {
             .map_err(Into::into)
     }
 
-    #[pyo3(signature = (page, name, kind, rect, options=Vec::new()))]
+    #[cfg_attr(feature = "python", pyo3(signature = (page, name, kind, rect, options=Vec::new())))]
     pub fn add_field(
         &mut self,
         page: isize,
@@ -1114,7 +1199,7 @@ impl EditablePdf {
         Ok(fields.len())
     }
 
-    #[pyo3(signature = (page, rect, uri=None, target_page=None))]
+    #[cfg_attr(feature = "python", pyo3(signature = (page, rect, uri=None, target_page=None)))]
     pub fn add_link(
         &mut self,
         page: isize,
@@ -1142,7 +1227,7 @@ impl EditablePdf {
         Ok(index)
     }
 
-    #[pyo3(signature = (page, kind, rect, text="", author="", color=(255, 210, 0)))]
+    #[cfg_attr(feature = "python", pyo3(signature = (page, kind, rect, text="", author="", color=(255, 210, 0))))]
     #[allow(clippy::too_many_arguments)]
     pub fn add_annotation(
         &mut self,
@@ -1311,7 +1396,7 @@ impl EditablePdf {
         Ok(payload)
     }
 
-    #[pyo3(signature = (page, index, text=None, rect=None, color=None, uri=None, target_page=None, author=None, opacity=None))]
+    #[cfg_attr(feature = "python", pyo3(signature = (page, index, text=None, rect=None, color=None, uri=None, target_page=None, author=None, opacity=None)))]
     #[allow(clippy::too_many_arguments)]
     pub fn update_annotation(
         &mut self,
@@ -1685,7 +1770,7 @@ impl EditablePdf {
         Ok(payload)
     }
 
-    #[pyo3(signature = (title, page, parent, index=None))]
+    #[cfg_attr(feature = "python", pyo3(signature = (title, page, parent, index=None)))]
     pub fn add_bookmark(
         &mut self,
         title: &str,
@@ -1720,7 +1805,7 @@ impl EditablePdf {
         Ok(path)
     }
 
-    #[pyo3(signature = (path, title=None, page=None, open=None))]
+    #[cfg_attr(feature = "python", pyo3(signature = (path, title=None, page=None, open=None)))]
     pub fn update_bookmark(
         &mut self,
         path: Vec<usize>,
@@ -1800,7 +1885,7 @@ impl EditablePdf {
     }
 
     /// Draw bounded typed path commands; the backend serializes and inserts page content.
-    #[pyo3(signature = (page, commands, stroke=None, fill=None, width=1.0, close=false))]
+    #[cfg_attr(feature = "python", pyo3(signature = (page, commands, stroke=None, fill=None, width=1.0, close=false)))]
     #[allow(clippy::too_many_arguments)]
     pub fn draw_path(
         &mut self,
@@ -1932,7 +2017,7 @@ impl EditablePdf {
 
     /// Explicit rows with a caller-supplied embeddable font; no system-font lookup or fallback.
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (page, text, x, y, size, font_bytes, color=(0, 0, 0)))]
+    #[cfg_attr(feature = "python", pyo3(signature = (page, text, x, y, size, font_bytes, color=(0, 0, 0))))]
     pub fn add_text_with_font(
         &mut self,
         page: isize,
@@ -1958,7 +2043,7 @@ impl EditablePdf {
 
     /// x/y are the top-left of a text box, in points. Text wraps to the page's right edge.
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (page, text, x, y, size=12.0, color=(0, 0, 0), behind=false))]
+    #[cfg_attr(feature = "python", pyo3(signature = (page, text, x, y, size=12.0, color=(0, 0, 0), behind=false)))]
     pub fn add_text(
         &mut self,
         page: isize,
@@ -1984,7 +2069,7 @@ impl EditablePdf {
 
     /// A bounded native text area; caller fonts retain explicit-line layout only.
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (page, text, rect, size=12.0, color=(0,0,0), align="left", font_bytes=None, behind=false))]
+    #[cfg_attr(feature = "python", pyo3(signature = (page, text, rect, size=12.0, color=(0,0,0), align="left", font_bytes=None, behind=false)))]
     pub fn add_text_box(
         &mut self,
         page: isize,
@@ -2047,7 +2132,7 @@ impl EditablePdf {
 
     /// Place PNG/JPEG bytes at a top-left position without resampling source pixels.
     #[allow(clippy::too_many_arguments)] // The narrow native boundary receives flattened geometry.
-    #[pyo3(signature = (page,data,x,y,width,height,crop=None,rotation=0,flip_h=false,flip_v=false,behind=false))]
+    #[cfg_attr(feature = "python", pyo3(signature = (page,data,x,y,width,height,crop=None,rotation=0,flip_h=false,flip_v=false,behind=false)))]
     pub fn add_image(
         &mut self,
         page: isize,
@@ -4123,7 +4208,7 @@ fn preserve_drawing_resources(before: &Document, after: &Document, page: usize) 
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "python"))]
 mod tests {
     use super::*;
 

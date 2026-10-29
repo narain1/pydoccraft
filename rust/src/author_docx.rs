@@ -2732,7 +2732,10 @@ impl EditableDocx {
         for (key, value) in object {
             match key.as_str() {
                 "vertical_alignment" => {
-                    props.valign = valign::parse(value)?;
+                    props.valign = valign::parse(value).map_err(|error| match error {
+                        EngineError::InvalidArgument(message) => PyValueError::new_err(message),
+                        error => error.into(),
+                    })?;
                 }
                 "start" => {
                     props.start = parse_section_start(value.as_str().unwrap_or(""))?;

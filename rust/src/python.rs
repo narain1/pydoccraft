@@ -1,6 +1,6 @@
 use crate::{
-    api, author_docx, author_epub, author_pdf, author_pptx, docx, limits, pdf, pptx, rendering,
-    EngineError,
+    api, author_docx, author_epub, author_pdf, author_pptx_python, docx, limits, pdf, pptx,
+    rendering, EngineError,
 };
 use api::normalize;
 use pyo3::create_exception;
@@ -283,7 +283,7 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<author_docx::EditableDocx>()?;
     module.add_class::<NativeEditableEpub>()?;
     module.add_class::<author_pdf::EditablePdf>()?;
-    module.add_class::<author_pptx::EditablePptx>()?;
+    module.add_class::<author_pptx_python::NativeEditablePptx>()?;
     module.add_class::<NativePdfSession>()?;
     module.add_class::<NativeOfficeSession>()?;
     module.add(

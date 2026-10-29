@@ -2,10 +2,10 @@ pub mod api;
 #[cfg(feature = "python")]
 mod author_docx;
 pub mod author_epub;
+pub mod author_pdf;
+pub mod author_pptx;
 #[cfg(feature = "python")]
-mod author_pdf;
-#[cfg(feature = "python")]
-mod author_pptx;
+mod author_pptx_python;
 #[path = "convert.rs"]
 mod conversion;
 mod diagnostics;

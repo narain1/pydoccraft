@@ -3,7 +3,6 @@ use super::*;
 use deckcraft_model::text::{Bullet, LevelStyle, ParaProps, Paragraph as NativeParagraph, Spacing};
 
 fn fixture(merged: u8) -> (EditablePptx, u32) {
-    pyo3::prepare_freethreaded_python();
     let mut owner = EditablePptx::new(576.0, 576.0).unwrap();
     owner.add_slide("blank").unwrap();
     owner.set_slide_notes(0, "Retained notes").unwrap();

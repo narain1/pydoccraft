@@ -1,6 +1,11 @@
 //! Bounded admission for native page-body alignment; no placement algorithm.
-use super::*;
-use wordcraft_doc::section::PageVAlign;
+use super::{MAX_BLOCKS, MAX_LAYOUT_ITEMS, MAX_SECTIONS};
+use crate::EngineError;
+use serde_json::Value;
+use wordcraft_doc::para::{InlineObject, Wrap};
+use wordcraft_doc::props::TextDirection;
+use wordcraft_doc::section::{PageVAlign, SectionStart};
+use wordcraft_doc::{Block, Document, PartKind, StoryRef};
 
 pub(super) fn name(value: PageVAlign) -> &'static str {
     match value {
@@ -10,33 +15,36 @@ pub(super) fn name(value: PageVAlign) -> &'static str {
         PageVAlign::Justify => "justify",
     }
 }
-pub(super) fn parse(value: &Value) -> PyResult<PageVAlign> {
+pub(super) fn parse(value: &Value) -> Result<PageVAlign, EngineError> {
     match value.as_str() {
         Some("top") => Ok(PageVAlign::Top),
         Some("center") => Ok(PageVAlign::Center),
         Some("bottom") => Ok(PageVAlign::Bottom),
         Some("justify") => Ok(PageVAlign::Justify),
-        _ => Err(PyValueError::new_err(
-            "vertical_alignment must be top, center, bottom or justify",
+        _ => Err(EngineError::InvalidArgument(
+            "vertical_alignment must be top, center, bottom or justify".into(),
         )),
     }
 }
-fn unsupported() -> PyErr {
-    EngineError::Unsupported("non-top section alignment requires horizontal next-page single-column sections with horizontal cells and without notes, active even/odd header/footer mode or floating objects; restore top before combining these features".into()).into()
+fn unsupported() -> EngineError {
+    EngineError::Unsupported("non-top section alignment requires horizontal next-page single-column sections with horizontal cells and without notes, active even/odd header/footer mode or floating objects; restore top before combining these features".into())
 }
-fn charge(work: &mut usize, amount: usize, maximum: usize) -> PyResult<()> {
+fn limit(message: &str) -> EngineError {
+    EngineError::ResourceLimit(message.into())
+}
+fn charge(work: &mut usize, amount: usize, maximum: usize) -> Result<(), EngineError> {
     *work = work
         .checked_add(amount)
         .filter(|n| *n <= maximum)
         .ok_or_else(|| limit("section alignment validation exceeds 2000000 source items"))?;
     Ok(())
 }
-pub(super) fn profile(document: &Document) -> PyResult<bool> {
+pub(super) fn profile(document: &Document) -> Result<bool, EngineError> {
     profile_with_limit(document, MAX_LAYOUT_ITEMS)
 }
 // Called after the existing bounded exact-model inventory at commit and output.
 // The independent charge also bounds this scan and its reference stack.
-fn profile_with_limit(document: &Document, maximum: usize) -> PyResult<bool> {
+fn profile_with_limit(document: &Document, maximum: usize) -> Result<bool, EngineError> {
     if document.body.len() > MAX_BLOCKS {
         return Err(limit(
             "section alignment validation exceeds 100000 body blocks",
@@ -133,9 +141,9 @@ fn profile_with_limit(document: &Document, maximum: usize) -> PyResult<bool> {
     Ok(true)
 }
 
-pub(super) fn page_bounds(page: &wordcraft_layout::Page) -> PyResult<()> {
+pub(super) fn page_bounds(page: &wordcraft_layout::Page) -> Result<(), EngineError> {
     let bad = || {
-        EngineError::Unsupported("non-top section alignment places body content outside its vertical page bounds; reduce content or formatting, enlarge the page, or restore top".into()).into()
+        EngineError::Unsupported("non-top section alignment places body content outside its vertical page bounds; reduce content or formatting, enlarge the page, or restore top".into())
     };
     let body_top = page.body.y;
     let body_bottom = page.body.bottom();
@@ -205,7 +213,15 @@ pub(super) fn page_bounds(page: &wordcraft_layout::Page) -> PyResult<()> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::*;
     use super::*;
+    #[test]
+    fn parse_invalid_alignment_is_a_native_invalid_argument() {
+        assert!(matches!(
+            parse(&json!("invalid")),
+            Err(EngineError::InvalidArgument(_))
+        ));
+    }
     fn aligned(mode: &str) -> EditableDocx {
         let mut d = EditableDocx::new();
         d.set_page_size(320.0, 420.0).unwrap();

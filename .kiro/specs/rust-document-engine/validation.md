@@ -12,6 +12,12 @@
 - Experimental Go detection/conversion tests passed on Linux with a manually configured shared library path; the Node preview is not distribution-ready. Neither binding covers the complete API. PDF/DOCX/PPTX authoring and Python formatting and lifecycle behavior still require migration. No feature parity is claimed.
 - A later preparatory PDF authoring change moved page, position and PNG checks to helpers returning native errors; two focused Python-enabled Rust tests passed and formatting was checked. The helpers remain internal to the Python-gated PDF editor, not a Python-free PDF authoring API. Full tests, Clippy and installed-wheel validation were not rerun for this later change.
 
+## PDF and PPTX Rust authoring primitives (unreleased)
+
+- The PDF editor now builds without PyO3 using the same authoring logic; its error result differs by feature and is not yet a stable language-independent contract. PPTX authoring uses a native editor and a separate Python wrapper. DOCX section-alignment validation was moved to native errors; the DOCX editor remains Python-dependent.
+- Linux x86_64, Rust 1.95: `cargo test --locked --no-default-features --lib` passed 161 tests; two PPTX Rust integration tests passed. Python-enabled locked all-targets Clippy passed with warnings denied. A Python 3.13 locked release wheel installed outside the source tree passed 594 Python tests. The tests preceded the final removal of whitespace in PPTX attributes, which did not change runtime behavior.
+- Full Rust tests, Python 3.11 and cross-platform tests for this later tree remain open. These are editor primitives, not the complete Python facade, and do not establish Node or Go parity or release readiness.
+
 ## 2026-10-20 DOCX properties and PDF markup (unreleased)
 
 - Runtime commits `849de87` and `70b636a` passed the combined offline Linux x86_64 corpus: Rust 1.95.0 formatting, 186 native tests, warnings-denied Clippy, locked Maturin 1.8.1 release build and 203 installed-wheel Python 3.11.2 tests, zero skips, with verified artifact identity.
