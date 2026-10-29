@@ -18,6 +18,11 @@
 - Linux x86_64, Rust 1.95: `cargo test --locked --no-default-features --lib` passed 161 tests; two PPTX Rust integration tests passed. Python-enabled locked all-targets Clippy passed with warnings denied. A Python 3.13 locked release wheel installed outside the source tree passed 594 Python tests. The tests preceded the final removal of whitespace in PPTX attributes, which did not change runtime behavior.
 - Full Rust tests, Python 3.11 and cross-platform tests for this later tree remain open. These are editor primitives, not the complete Python facade, and do not establish Node or Go parity or release readiness.
 
+## Go source preview (unreleased)
+
+- Linux x86_64, Rust 1.95 and Go 1.24.4: three Go tests passed with Cargo offline and `GOPROXY=off`, including DOCX extraction, clipped PNG rendering and reopening converted PDF. The compiled tests passed with `PATH=/nonexistent`; `ldd` showed no Python library. Only this platform and focused corpus were checked.
+- The Linux cgo preview requires a separately built native library and dynamic-loader configuration. It does not cover sessions or authoring, is not a complete or distributable binding, and requires packaged attribution and cross-platform validation before release.
+
 ## 2026-10-20 DOCX properties and PDF markup (unreleased)
 
 - Runtime commits `849de87` and `70b636a` passed the combined offline Linux x86_64 corpus: Rust 1.95.0 formatting, 186 native tests, warnings-denied Clippy, locked Maturin 1.8.1 release build and 203 installed-wheel Python 3.11.2 tests, zero skips, with verified artifact identity.
