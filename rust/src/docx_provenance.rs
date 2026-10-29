@@ -397,6 +397,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "python")]
     fn provenance_preserves_native_signed_advances_for_condensed_rtl_text() {
         pyo3::prepare_freethreaded_python();
         let text = "سلام Word";

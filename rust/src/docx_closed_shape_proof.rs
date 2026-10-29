@@ -53,6 +53,7 @@ fn png_marker() -> Vec<u8> {
 }
 
 #[test]
+#[cfg(feature = "python")]
 fn closed_shape_native_insert_delete_retains_anchor_and_neighbors() {
     pyo3::prepare_freethreaded_python();
     let mut owner = crate::author_docx::EditableDocx::new();

@@ -5,6 +5,12 @@
 - Linux x86_64, Rust 1.95 container with Python 3.13 development libraries: `cargo test --locked --test rust_api` passed (one test), covering PDF detection and unsupported detection/conversion errors from an external Rust test. `git diff --check` passed.
 - This is focused evidence only: the crate still links PyO3, and the full Rust corpus, Clippy, installed-wheel Python corpus and conversion output validation were not run for this slice. No Python-independent build or cross-language parity is claimed.
 
+## Rust-first migration slices (unreleased)
+
+- A subsequent Python-free build (`--no-default-features`) covers typed extraction, rendering, conversion, retained render sessions and EPUB authoring; focused Rust session tests passed (3) and EPUB authoring tests passed (2). Python-enabled Rust library tests passed (468), before the separate session module was added.
+- Linux x86_64, Rust 1.95, Python 3.13: a locked release wheel was installed outside the source tree; 594 Python tests passed. The separately added Rust session module was not part of that wheel run. These results are not a complete release validation; Clippy, complete Rust tests on the final combined tree, Python 3.11 and cross-platform tests remain open.
+- Experimental Go detection/conversion tests passed on Linux with a manually configured shared library path; the Node preview is not distribution-ready. Neither binding covers the complete API. PDF/DOCX/PPTX authoring and Python formatting and lifecycle behavior still require migration. No feature parity is claimed.
+
 ## 2026-10-20 DOCX properties and PDF markup (unreleased)
 
 - Runtime commits `849de87` and `70b636a` passed the combined offline Linux x86_64 corpus: Rust 1.95.0 formatting, 186 native tests, warnings-denied Clippy, locked Maturin 1.8.1 release build and 203 installed-wheel Python 3.11.2 tests, zero skips, with verified artifact identity.

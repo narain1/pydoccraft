@@ -12,8 +12,9 @@ crate-type = ["cdylib", "rlib"]
 path = "rust/src/lib.rs"
 
 [features]
-default = []
-extension-module = ["pyo3/extension-module"]
+default = ["python"]
+python = ["dep:pyo3"]
+extension-module = ["python", "pyo3/extension-module"]
 
 [dependencies]
 base64 = "=0.22.1"
@@ -36,7 +37,7 @@ pdfcraft-forms = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868
 pdfcraft-organize = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
 pdfcraft-render = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
 png = "=0.18.1"
-pyo3 = { version = "=0.23.5" }
+pyo3 = { version = "=0.23.5", optional = true }
 quick-xml = "=0.41.0"
 rbook = { version = "=0.7.12", default-features = false, features = ["write"] }
 serde = { version = "=1.0.228", features = ["derive"] }
