@@ -1,5 +1,9 @@
 # Implementation Plan
 
+## Proposed Rust-first API migration
+
+- [ ] Review and execute the [Rust-first API and language bindings plan](../../../docs/rust-api-bindings-plan.md). The plan covers the complete existing API, independent Rust consumption, and thin Python, Node.js and Go bindings; it does not assert that any migration or binding is already implemented.
+
 - [x] 1. Change the package and source license to Apache-2.0 and document attribution obligations.
 - [x] 2. Replace direct PDF parsing with pinned PdfCraft extraction, image, link, and rendering APIs.
 - [x] 3. Replace direct DOCX parsing with pinned WordCraft document-model traversal, layout, rendering, and PDF export.
