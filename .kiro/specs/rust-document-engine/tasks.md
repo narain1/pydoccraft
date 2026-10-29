@@ -3,6 +3,7 @@
 ## Proposed Rust-first API migration
 
 - [ ] Review and execute the [Rust-first API and language bindings plan](../../../docs/rust-api-bindings-plan.md). The plan covers the complete existing API, independent Rust consumption, and thin Python, Node.js and Go bindings; it does not assert that any migration or binding is already implemented.
+- [ ] Separate the core from PyO3. Initial slice: Rust-facing format detection and conversion dispatch share the existing Python entry points. The crate still depends on PyO3 and authoring, sessions, and the rest of the public API have not been migrated.
 
 - [x] 1. Change the package and source license to Apache-2.0 and document attribution obligations.
 - [x] 2. Replace direct PDF parsing with pinned PdfCraft extraction, image, link, and rendering APIs.

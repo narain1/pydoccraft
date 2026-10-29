@@ -1,3 +1,4 @@
+pub mod api;
 mod author_docx;
 mod author_epub;
 mod author_pdf;
@@ -14,6 +15,7 @@ mod pdf;
 mod pptx;
 mod rendering;
 
+use api::normalize;
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
@@ -230,15 +232,7 @@ fn convert(
     target_format: &str,
     password: Option<&str>,
 ) -> PyResult<Vec<u8>> {
-    limits::validate_input_size(data.len())?;
-    let source = normalize(source_format)?;
-    let target = normalize(target_format)?;
-    match (source, target) {
-        ("pdf", "docx") => conversion::pdf_to_docx(data, password).map_err(Into::into),
-        ("docx", "pdf") => conversion::docx_to_pdf(data, password).map_err(Into::into),
-        ("pptx", "pdf") => conversion::pptx_to_pdf(data).map_err(Into::into),
-        _ => Err(EngineError::Unsupported(format!("conversion from {source} to {target}")).into()),
-    }
+    api::convert(data, source_format, target_format, password).map_err(Into::into)
 }
 
 #[pyfunction]
@@ -272,36 +266,7 @@ fn render(
 
 #[pyfunction]
 fn detect(data: &[u8]) -> PyResult<String> {
-    limits::validate_input_size(data.len())?;
-    if data.starts_with(b"%PDF-") {
-        return Ok("pdf".into());
-    }
-    if wordcraft_docx::is_encrypted(data) {
-        return Ok("docx".into());
-    }
-    if data.starts_with(b"PK\x03\x04") {
-        if let Some(filetype) = ooxml::document_type(data)? {
-            return Ok(filetype.into());
-        }
-        if epub::is_epub(data)? {
-            return Ok("epub".into());
-        }
-    }
-    Err(EngineError::Unsupported("could not identify document format".into()).into())
-}
-
-fn normalize(filetype: &str) -> Result<&'static str, EngineError> {
-    match filetype
-        .trim_start_matches('.')
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "pdf" => Ok("pdf"),
-        "docx" | "word" => Ok("docx"),
-        "pptx" | "powerpoint" => Ok("pptx"),
-        "epub" | "ebook" => Ok("epub"),
-        _ => Err(EngineError::Unsupported(format!("file type {filetype}"))),
-    }
+    api::detect(data).map_err(Into::into)
 }
 
 #[pymodule]

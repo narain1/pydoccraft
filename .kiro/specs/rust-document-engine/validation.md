@@ -1,5 +1,10 @@
 # Validation evidence
 
+## Rust-facing dispatch initial slice (unreleased)
+
+- Linux x86_64, Rust 1.95 container with Python 3.13 development libraries: `cargo test --locked --test rust_api` passed (one test), covering PDF detection and unsupported detection/conversion errors from an external Rust test. `git diff --check` passed.
+- This is focused evidence only: the crate still links PyO3, and the full Rust corpus, Clippy, installed-wheel Python corpus and conversion output validation were not run for this slice. No Python-independent build or cross-language parity is claimed.
+
 ## 2026-10-20 DOCX properties and PDF markup (unreleased)
 
 - Runtime commits `849de87` and `70b636a` passed the combined offline Linux x86_64 corpus: Rust 1.95.0 formatting, 186 native tests, warnings-denied Clippy, locked Maturin 1.8.1 release build and 203 installed-wheel Python 3.11.2 tests, zero skips, with verified artifact identity.
