@@ -1,6 +1,8 @@
 //! Raw native primitives and exact shared placement pairs; no owned shape adapter.
 use super::*;
-use std::{io::Cursor, sync::Arc};
+use std::io::Cursor;
+#[cfg(feature = "python")]
+use std::sync::Arc;
 use wordcraft_doc::para::{Anchor, Float, ShapeKind, Wrap};
 use wordcraft_doc::{CharProps, Rgb};
 use wordcraft_layout::{
@@ -37,6 +39,7 @@ fn page() -> Document {
 fn layout(d: &Document) -> DocLayout {
     wordcraft_layout::layout(d, &mut LayoutCache::new(), &LayoutOptions::default())
 }
+#[cfg(feature = "python")]
 fn png_marker() -> Vec<u8> {
     let mut out = Vec::new();
     {

@@ -8,7 +8,7 @@
 ## Rust-first migration slices (unreleased)
 
 - A subsequent Python-free build (`--no-default-features`) covers typed extraction, rendering, conversion, retained render sessions and EPUB authoring; focused Rust session tests passed (3) and EPUB authoring tests passed (2). Python-enabled Rust library tests passed (468), before the separate session module was added.
-- Linux x86_64, Rust 1.95, Python 3.13: a locked release wheel was installed outside the source tree; 594 Python tests passed. The separately added Rust session module was not part of that wheel run. These results are not a complete release validation; Clippy, complete Rust tests on the final combined tree, Python 3.11 and cross-platform tests remain open.
+- Linux x86_64, Rust 1.95, Python 3.13: a locked release wheel was installed outside the source tree; 594 Python tests passed. The separately added Rust session module was not part of that wheel run. On the combined tree, Rust formatting and Python-enabled `cargo clippy --offline --locked --all-targets -- -D warnings` passed. These results are not complete release validation; complete Rust tests on the final combined tree, Python 3.11 and cross-platform tests remain open.
 - Experimental Go detection/conversion tests passed on Linux with a manually configured shared library path; the Node preview is not distribution-ready. Neither binding covers the complete API. PDF/DOCX/PPTX authoring and Python formatting and lifecycle behavior still require migration. No feature parity is claimed.
 
 ## 2026-10-20 DOCX properties and PDF markup (unreleased)

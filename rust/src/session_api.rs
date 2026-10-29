@@ -7,9 +7,9 @@
 use crate::{api, docx, limits, pdf, pptx, EngineError};
 
 enum Backend {
-    Pdf(pdf::PdfSession),
-    Docx(docx::DocxSession),
-    Pptx(pptx::PptxSession),
+    Pdf(Box<pdf::PdfSession>),
+    Docx(Box<docx::DocxSession>),
+    Pptx(Box<pptx::PptxSession>),
 }
 
 /// An owned renderer that reuses the document's parsed native state.
@@ -34,15 +34,15 @@ impl DocumentSession {
         let (backend, payload) = match api::normalize(filetype)? {
             "pdf" => {
                 let (session, payload) = pdf::PdfSession::open(data, password)?;
-                (Backend::Pdf(session), payload)
+                (Backend::Pdf(Box::new(session)), payload)
             }
             "docx" => {
                 let (session, payload) = docx::DocxSession::open(data, password)?;
-                (Backend::Docx(session), payload)
+                (Backend::Docx(Box::new(session)), payload)
             }
             "pptx" => {
                 let (session, payload) = pptx::PptxSession::open(data)?;
-                (Backend::Pptx(session), payload)
+                (Backend::Pptx(Box::new(session)), payload)
             }
             "epub" => {
                 return Err(EngineError::Unsupported(
