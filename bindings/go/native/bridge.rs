@@ -98,3 +98,48 @@ pub unsafe extern "C" fn pydoccraft_free(buffer: Buffer) {
         drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(buffer.ptr, buffer.len)));
     }
 }
+
+// Session pointers are private to the Go wrapper, which serializes use and free.
+#[no_mangle]
+pub unsafe extern "C" fn pydoccraft_session_open(ptr: *const u8, len: usize,
+    format: *const u8, format_len: usize, password: *const u8, password_len: usize,
+    has_password: u8, out: *mut *mut _core::session_api::DocumentSession) -> ResultBuffer {
+    run(|| {
+        if out.is_null() { return Err(EngineError::InvalidArgument("null session output".into())); }
+        *out = std::ptr::null_mut();
+        let (format, password) = arguments(format, format_len, password, password_len, has_password)?;
+        let (session, payload) = _core::session_api::DocumentSession::open(bytes(ptr, len)?, format, password)?;
+        let json = serde_json::to_vec(&payload).map_err(|e| EngineError::InvalidArgument(e.to_string()))?;
+        *out = Box::into_raw(Box::new(session));
+        Ok(json)
+    })
+}
+#[no_mangle]
+pub unsafe extern "C" fn pydoccraft_session_render(session: *mut _core::session_api::DocumentSession,
+    page: usize, dpi: f64, has_clip: u8, x: f64, y: f64, width: f64, height: f64) -> ResultBuffer {
+    run(|| {
+        let session = session.as_ref().ok_or_else(|| EngineError::Closed("session closed".into()))?;
+        if has_clip > 1 { return Err(EngineError::InvalidArgument("invalid clip flag".into())); }
+        session.render(page, dpi, if has_clip == 1 { Some((x, y, width, height)) } else { None })
+    })
+}
+#[no_mangle]
+pub unsafe extern "C" fn pydoccraft_session_search(session: *mut _core::session_api::DocumentSession,
+    page: usize, query: *const u8, query_len: usize) -> ResultBuffer {
+    run(|| {
+        let session = session.as_ref().ok_or_else(|| EngineError::Closed("session closed".into()))?;
+        if query_len > 1_048_576 { return Err(EngineError::ResourceLimit("search query too large".into())); }
+        let matches = session.search_for(page, text(query, query_len)?)?;
+        serde_json::to_vec(&matches).map_err(|e| EngineError::InvalidArgument(e.to_string()))
+    })
+}
+#[no_mangle]
+pub unsafe extern "C" fn pydoccraft_session_close(session: *mut _core::session_api::DocumentSession) -> ResultBuffer {
+    run(|| {
+        if !session.is_null() {
+            let session = Box::from_raw(session);
+            session.close()?;
+        }
+        Ok(Vec::new())
+    })
+}

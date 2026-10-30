@@ -14,4 +14,12 @@ pydoccraft_result pydoccraft_extract(const uint8_t *, size_t, const uint8_t *, s
 pydoccraft_result pydoccraft_render(const uint8_t *, size_t, const uint8_t *, size_t,
     const uint8_t *, size_t, uint8_t, size_t, double, uint8_t, double, double, double, double);
 void pydoccraft_free(pydoccraft_buffer);
+typedef struct pydoccraft_session pydoccraft_session;
+pydoccraft_result pydoccraft_session_open(const uint8_t *, size_t, const uint8_t *, size_t,
+    const uint8_t *, size_t, uint8_t, pydoccraft_session **);
+pydoccraft_result pydoccraft_session_render(pydoccraft_session *, size_t, double, uint8_t,
+    double, double, double, double);
+pydoccraft_result pydoccraft_session_search(pydoccraft_session *, size_t, const uint8_t *, size_t);
+/* Consumes the handle, even if close reports an error. Caller serializes all operations. */
+pydoccraft_result pydoccraft_session_close(pydoccraft_session *);
 #endif

@@ -7,7 +7,7 @@ distribution must carry reviewed attribution and native libraries before release
 
 This initial Linux/cgo binding calls the Python-free Rust core in-process. It
 exposes byte-based detection, JSON extraction, PNG rendering (including clipping),
-and conversion, but not EPUB authoring, sessions, or the Python compatibility API.
+conversion, and reusable render sessions, but not EPUB authoring or the Python compatibility API.
 The extraction JSON follows the Rust `DocumentPayload` schema and is not a typed
 Go API. Extraction supports PDF, DOCX, PPTX and EPUB; rendering supports PDF,
 DOCX and PPTX, not EPUB. Page indexes are nonnegative and zero-based; clip values
@@ -57,10 +57,11 @@ Use a dedicated target directory if it contains multiple `serde_json` rlibs;
 the build fails rather than selecting an incompatible artifact.
 
 Validation: on Linux x86-64, a Rust 1.95 container and Debian Go 1.24.4 built
-the binding with Cargo offline and ran all three Go tests with `GOPROXY=off`.
-The compiled tests also passed with `PATH=/nonexistent`, and `ldd` showed no
-Python library dependency. These checks cover the included DOCX fixture and its
-PDF conversion, not every supported format or platform.
+the binding with Cargo offline and ran all seven Go tests, including with the Go
+race detector, with `GOPROXY=off`. An earlier stateless build also passed with
+`PATH=/nonexistent`, and `ldd` showed no Python library dependency. These checks
+cover the included DOCX fixture, PDF conversion and a PDF search fixture, not
+every supported format or platform. The Go race detector does not instrument Rust.
 
 `Error.Code` values are 1 invalid argument, 2 unsupported, 3 malformed, 4 unsafe
 archive, 5 resource limit, 6 encrypted, 7 conversion failure, 8 other engine
@@ -72,3 +73,9 @@ and invalid C pointers cannot be recovered. The C API requires valid input memor
 and exactly-once freeing of each unmodified returned buffer. Go copies results
 before freeing native memory. Neither API should be used with untrusted callers
 that can forge pointers.
+
+`OpenSession` returns a session and separately owned JSON payload. Close every
+session explicitly; close is idempotent and waits for in-flight session calls.
+Do not copy a Session. Render and PDF-only SearchFor use zero-based page indexes;
+search rectangles are `[x0, y0, x1, y1]` in displayed page points. Sessions do
+not support EPUB. Returned payloads and images remain usable after Close.

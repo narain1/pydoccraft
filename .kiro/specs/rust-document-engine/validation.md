@@ -22,6 +22,7 @@
 
 - Linux x86_64, Rust 1.95 and Go 1.24.4: three Go tests passed with Cargo offline and `GOPROXY=off`, including DOCX extraction, clipped PNG rendering and reopening converted PDF. The compiled tests passed with `PATH=/nonexistent`; `ldd` showed no Python library. Only this platform and focused corpus were checked.
 - The Linux cgo preview requires a separately built native library and dynamic-loader configuration. It does not cover sessions or authoring, is not a complete or distributable binding, and requires packaged attribution and cross-platform validation before release.
+- A later Go session slice added owned extraction payloads, rendering, PDF search and synchronized close. Linux Go tests passed normally and with `-race` (7 each); the Go race detector does not instrument Rust internals. The earlier statement that sessions are unavailable describes the earlier preview only. Authoring and distribution remain open.
 
 ## DOCX Rust authoring primitives (unreleased)
 

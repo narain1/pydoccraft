@@ -9,8 +9,10 @@ package doccraft
 import "C"
 
 import (
+	"encoding/json"
 	"fmt"
 	"runtime"
+	"sync"
 	"unsafe"
 )
 
@@ -112,4 +114,108 @@ func Render(data []byte, filetype string, page int, dpi float64, password *strin
 	runtime.KeepAlive(f)
 	runtime.KeepAlive(p)
 	return take(r)
+}
+
+// Session owns a native renderer. It must be closed and must not be copied.
+// Methods are safe for concurrent use; Close waits for an active operation.
+type Session struct {
+	mu     sync.Mutex
+	handle *C.pydoccraft_session
+}
+
+// OpenSession opens a PDF, DOCX or PPTX renderer and returns its independent
+// normalized JSON payload. The caller must close the session. EPUB is unsupported.
+func OpenSession(data []byte, filetype string, password *string) (*Session, []byte, error) {
+	f := []byte(filetype)
+	var p []byte
+	var has C.uint8_t
+	if password != nil {
+		p = []byte(*password)
+		has = 1
+	}
+	var h *C.pydoccraft_session
+	r := C.pydoccraft_session_open(ptr(data), C.size_t(len(data)), ptr(f), C.size_t(len(f)), ptr(p), C.size_t(len(p)), has, &h)
+	runtime.KeepAlive(data)
+	runtime.KeepAlive(f)
+	runtime.KeepAlive(p)
+	payload, err := take(r)
+	if err != nil {
+		if h != nil {
+			_, _ = take(C.pydoccraft_session_close(h))
+		}
+		return nil, nil, err
+	}
+	if h == nil {
+		return nil, nil, fmt.Errorf("doccraft: native session missing")
+	}
+	return &Session{handle: h}, payload, nil
+}
+
+// Close releases native state. It is idempotent, including after a close error.
+func (s *Session) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.handle == nil {
+		return nil
+	}
+	h := s.handle
+	s.handle = nil
+	_, err := take(C.pydoccraft_session_close(h))
+	return err
+}
+
+// Render returns PNG bytes for a zero-based page.
+func (s *Session) Render(page int, dpi float64, clip *Clip) ([]byte, error) {
+	if s == nil {
+		return nil, &Error{10, "session closed"}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.handle == nil {
+		return nil, &Error{10, "session closed"}
+	}
+	if page < 0 {
+		return nil, &Error{1, "page must be non-negative"}
+	}
+	var clipped C.uint8_t
+	var x, y, width, height C.double
+	if clip != nil {
+		clipped = 1
+		x = C.double(clip.X)
+		y = C.double(clip.Y)
+		width = C.double(clip.Width)
+		height = C.double(clip.Height)
+	}
+	return take(C.pydoccraft_session_render(s.handle, C.size_t(page), C.double(dpi), clipped, x, y, width, height))
+}
+
+// SearchFor returns displayed-page rectangles [x0, y0, x1, y1]. Only PDF
+// sessions support searching.
+func (s *Session) SearchFor(page int, query string) ([][4]float32, error) {
+	if s == nil {
+		return nil, &Error{10, "session closed"}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.handle == nil {
+		return nil, &Error{10, "session closed"}
+	}
+	if page < 0 {
+		return nil, &Error{1, "page must be non-negative"}
+	}
+	q := []byte(query)
+	r := C.pydoccraft_session_search(s.handle, C.size_t(page), ptr(q), C.size_t(len(q)))
+	runtime.KeepAlive(q)
+	data, err := take(r)
+	if err != nil {
+		return nil, err
+	}
+	var rects [][4]float32
+	if err := json.Unmarshal(data, &rects); err != nil {
+		return nil, fmt.Errorf("doccraft: invalid search result: %w", err)
+	}
+	return rects, nil
 }
