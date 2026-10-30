@@ -10,6 +10,7 @@ type Callback = unsafe extern "C" fn(Env, Info) -> Value;
 #[repr(C)]
 struct TypeTag { lower: u64, upper: u64 }
 static SESSION_TAG: TypeTag = TypeTag { lower: 0x93662d6bec3d4f0b, upper: 0xaca15b880f37193b };
+static EPUB_TAG: TypeTag = TypeTag { lower: 0x2c789bd485be48c3, upper: 0xbb79402c65ebd965 };
 struct SessionHandle {
     session: _core::session_api::DocumentSession,
     snapshot: Mutex<Option<String>>,
@@ -22,6 +23,7 @@ extern "C" {
     fn napi_get_typedarray_info(env: Env, value: Value, kind: *mut i32, length: *mut usize, data: *mut *mut c_void, arraybuffer: *mut Value, offset: *mut usize) -> i32;
     fn napi_is_arraybuffer(env: Env, value: Value, result: *mut bool) -> i32;
     fn napi_get_value_string_utf8(env: Env, value: Value, buf: *mut c_char, size: usize, len: *mut usize) -> i32;
+    fn napi_get_value_string_utf16(env: Env, value: Value, buf: *mut u16, size: usize, len: *mut usize) -> i32;
     fn napi_create_string_utf8(env: Env, text: *const c_char, len: usize, result: *mut Value) -> i32;
     fn napi_create_buffer_copy(env: Env, len: usize, data: *const c_void, result_data: *mut *mut c_void, result: *mut Value) -> i32;
     fn napi_create_function(env: Env, name: *const c_char, len: usize, cb: Option<Callback>, data: *mut c_void, result: *mut Value) -> i32;
@@ -37,6 +39,7 @@ extern "C" {
     fn napi_type_tag_object(env: Env, value: Value, tag: *const TypeTag) -> i32;
     fn napi_check_object_type_tag(env: Env, value: Value, tag: *const TypeTag, result: *mut bool) -> i32;
     fn napi_get_undefined(env: Env, result: *mut Value) -> i32;
+    fn napi_create_uint32(env: Env, value: u32, result: *mut Value) -> i32;
 }
 
 unsafe fn fail(env: Env, message: &str) -> Value {
@@ -76,9 +79,22 @@ unsafe fn bytes<'a>(env: Env, value: Value) -> Result<&'a [u8], &'static str> {
 }
 
 unsafe fn string(env: Env, value: Value) -> Result<String, &'static str> {
+    bounded_string(env, value, 1024)
+}
+
+unsafe fn bounded_string(env: Env, value: Value, max: usize) -> Result<String, &'static str> {
     let mut len = 0;
-    if napi_get_value_string_utf8(env, value, ptr::null_mut(), 0, &mut len) != 0 || len > 1024 {
+    if napi_get_value_string_utf8(env, value, ptr::null_mut(), 0, &mut len) != 0 || len > max {
         return Err("invalid_argument:expected a short string");
+    }
+    let mut units = 0;
+    if napi_get_value_string_utf16(env, value, ptr::null_mut(), 0, &mut units) != 0 || units > max {
+        return Err("invalid_argument:expected a short string");
+    }
+    let mut utf16 = vec![0u16; units + 1];
+    if napi_get_value_string_utf16(env, value, utf16.as_mut_ptr(), utf16.len(), &mut units) != 0
+        || char::decode_utf16(utf16[..units].iter().copied()).any(|c| c.is_err()) {
+        return Err("invalid_argument:invalid Unicode string");
     }
     let mut buffer = vec![0u8; len + 1];
     if napi_get_value_string_utf8(env, value, buffer.as_mut_ptr().cast(), buffer.len(), &mut len) != 0 {
@@ -309,9 +325,170 @@ unsafe extern "C" fn session_convert(env: Env, info: Info) -> Value {
     match result { Ok(Ok(v)) => v, Ok(Err(e)) => fail(env, &e), Err(_) => fail(env, "native_failure:unexpected panic") }
 }
 
+type EpubHandle = Mutex<_core::author_epub::EditableEpub>;
+
+unsafe extern "C" fn finalize_epub(_: Env, data: *mut c_void, _: *mut c_void) {
+    if !data.is_null() {
+        let _ = std::panic::catch_unwind(|| drop(Box::from_raw(data.cast::<EpubHandle>())));
+    }
+}
+
+unsafe fn epub_handle<'a>(env: Env, value: Value) -> Result<&'a EpubHandle, String> {
+    let mut kind = 0;
+    let mut tagged = false;
+    let mut data = ptr::null_mut();
+    if napi_typeof(env, value, &mut kind) != 0 || kind != 8
+        || napi_check_object_type_tag(env, value, &EPUB_TAG, &mut tagged) != 0 || !tagged
+        || napi_get_value_external(env, value, &mut data) != 0 || data.is_null() {
+        return Err("invalid_argument:expected a native EPUB handle".into());
+    }
+    Ok(&*data.cast::<EpubHandle>())
+}
+
+unsafe fn make_epub(env: Env, book: _core::author_epub::EditableEpub) -> Result<Value, String> {
+    let raw = Box::into_raw(Box::new(Mutex::new(book)));
+    let mut out = ptr::null_mut();
+    if napi_create_external(env, raw.cast(), Some(finalize_epub), ptr::null_mut(), &mut out) != 0 {
+        drop(Box::from_raw(raw));
+        return Err("native_failure:cannot create EPUB handle".into());
+    }
+    if napi_type_tag_object(env, out, &EPUB_TAG) != 0 {
+        return Err("native_failure:cannot tag EPUB handle".into());
+    }
+    Ok(out)
+}
+
+unsafe extern "C" fn epub_new(env: Env, info: Info) -> Value {
+    let result = std::panic::catch_unwind(|| -> Result<Value, String> {
+        args(env, info, 0).map_err(str::to_owned)?;
+        make_epub(env, _core::author_epub::EditableEpub::new())
+    });
+    match result { Ok(Ok(v)) => v, Ok(Err(e)) => fail(env, &e), Err(_) => fail(env, "native_failure:unexpected panic") }
+}
+
+enum EpubOp {
+    Metadata(String, String, String, Vec<String>),
+    Chapter(String), Count, Copy, Close, Save,
+    Heading(usize, String, u8), Paragraph(usize, String), Link(usize, String, String),
+    Image(usize, Vec<u8>, String, String),
+}
+
+unsafe fn index(env: Env, value: Value) -> Result<usize, String> {
+    let n = number(env, value)?;
+    if n < 0.0 || n.fract() != 0.0 || n >= usize::MAX as f64 { return Err("invalid_argument:expected a non-negative integer".into()); }
+    Ok(n as usize)
+}
+
+unsafe fn authors(env: Env, value: Value) -> Result<Vec<String>, String> {
+    let mut array = false;
+    let mut len = 0;
+    if napi_is_array(env, value, &mut array) != 0 || !array || napi_get_array_length(env, value, &mut len) != 0 {
+        return Err("invalid_argument:authors must be an array".into());
+    }
+    if len > 1000 { return Err("resource_limit:EPUB authors exceed 1000".into()); }
+    let mut out = Vec::with_capacity(len as usize);
+    let mut total = 0usize;
+    for i in 0..len {
+        let mut item = ptr::null_mut();
+        if napi_get_element(env, value, i, &mut item) != 0 { return Err("invalid_argument:invalid author".into()); }
+        let author = bounded_string(env, item, 65_536).map_err(str::to_owned)?;
+        total += author.len();
+        if total > 1024 * 1024 { return Err("resource_limit:EPUB authors exceed 1 MiB".into()); }
+        out.push(author);
+    }
+    Ok(out)
+}
+
+fn safe_epub_label(value: &str) -> Result<(), String> {
+    if value.contains(['&', '<', '>']) {
+        return Err("unsupported:XML-sensitive EPUB metadata and chapter titles cannot round-trip reliably".into());
+    }
+    Ok(())
+}
+
+unsafe extern "C" fn epub_op(env: Env, info: Info) -> Value {
+    let result = std::panic::catch_unwind(|| -> Result<Value, String> {
+        let a = args(env, info, 6).map_err(str::to_owned)?;
+        let op = string(env, a[1]).map_err(str::to_owned)?;
+        let text = |value| bounded_string(env, value, 65_536).map_err(str::to_owned);
+        // Parse every JS value before locking: array getters may call back into the addon.
+        let op = match op.as_str() {
+            "metadata" => EpubOp::Metadata(text(a[2])?, bounded_string(env, a[3], 4096).map_err(str::to_owned)?, bounded_string(env, a[4], 128).map_err(str::to_owned)?, authors(env, a[5])?),
+            "chapter" => EpubOp::Chapter(text(a[2])?),
+            "count" => EpubOp::Count,
+            "copy" => EpubOp::Copy,
+            "close" => EpubOp::Close,
+            "save" => EpubOp::Save,
+            "heading" => {
+                let chapter = index(env, a[2])?;
+                let text = text(a[3])?;
+                let level = index(env, a[4])?;
+                if !(1..=6).contains(&level) { return Err("invalid_argument:heading level must be between 1 and 6".into()); }
+                EpubOp::Heading(chapter, text, level as u8)
+            }
+            "paragraph" => EpubOp::Paragraph(index(env, a[2])?, text(a[3])?),
+            "link" => EpubOp::Link(index(env, a[2])?, text(a[3])?, bounded_string(env, a[4], 16_384).map_err(str::to_owned)?),
+            "image" => {
+                let chapter = index(env, a[2])?;
+                let media = string(env, a[4]).map_err(str::to_owned)?;
+                let alt = text(a[5])?;
+                let input = bytes(env, a[3]).map_err(str::to_owned)?;
+                if input.is_empty() || input.len() > 16 * 1024 * 1024 { return Err("resource_limit:EPUB image must contain at most 16 MiB".into()); }
+                let mut data = Vec::new();
+                data.try_reserve_exact(input.len()).map_err(|_| "resource_limit:cannot allocate EPUB image")?;
+                data.extend_from_slice(input);
+                EpubOp::Image(chapter, data, media, alt)
+            }
+            _ => return Err("invalid_argument:unknown EPUB operation".into()),
+        };
+        match &op {
+            EpubOp::Metadata(t, i, l, authors) => {
+                safe_epub_label(t)?; safe_epub_label(i)?; safe_epub_label(l)?;
+                for author in authors { safe_epub_label(author)?; }
+            }
+            EpubOp::Chapter(title) => safe_epub_label(title)?,
+            _ => {}
+        }
+        let handle = epub_handle(env, a[0])?;
+        let mut book = handle.lock().map_err(|_| "native_failure:EPUB lock poisoned")?;
+        let mut out = ptr::null_mut();
+        match op {
+            EpubOp::Metadata(t, i, l, a) => book.set_metadata(t, i, l, a).map_err(|e| e.to_string())?,
+            EpubOp::Chapter(t) => {
+                let n = book.add_chapter(t).map_err(|e| e.to_string())?;
+                if napi_create_uint32(env, n as u32, &mut out) != 0 { return Err("native_failure:cannot create number".into()); }
+                return Ok(out);
+            }
+            EpubOp::Count => {
+                let n = book.chapter_count().map_err(|e| e.to_string())?;
+                if napi_create_uint32(env, n as u32, &mut out) != 0 { return Err("native_failure:cannot create number".into()); }
+                return Ok(out);
+            }
+            EpubOp::Copy => {
+                let copy = book.copy().map_err(|e| e.to_string())?;
+                drop(book);
+                return make_epub(env, copy);
+            }
+            EpubOp::Close => book.close(),
+            EpubOp::Save => {
+                let data = book.to_bytes().map_err(|e| e.to_string())?;
+                if napi_create_buffer_copy(env, data.len(), data.as_ptr().cast(), ptr::null_mut(), &mut out) != 0 { return Err("native_failure:cannot create Buffer".into()); }
+                return Ok(out);
+            }
+            EpubOp::Heading(c, t, l) => book.add_heading(c, t, l).map_err(|e| e.to_string())?,
+            EpubOp::Paragraph(c, t) => book.add_paragraph(c, t).map_err(|e| e.to_string())?,
+            EpubOp::Link(c, t, h) => book.add_link(c, t, h).map_err(|e| e.to_string())?,
+            EpubOp::Image(c, d, m, a) => book.add_image(c, d, m, a).map_err(|e| e.to_string())?,
+        }
+        if napi_get_undefined(env, &mut out) != 0 { return Err("native_failure:cannot return undefined".into()); }
+        Ok(out)
+    });
+    match result { Ok(Ok(v)) => v, Ok(Err(e)) => fail(env, &e), Err(_) => fail(env, "native_failure:unexpected panic") }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn napi_register_module_v1(env: Env, exports: Value) -> Value {
-    for (name, cb) in [(b"detect\0".as_slice(), detect as Callback), (b"convert\0".as_slice(), convert as Callback), (b"extract\0".as_slice(), extract as Callback), (b"render\0".as_slice(), render as Callback), (b"sessionOpen\0".as_slice(), session_open as Callback), (b"sessionExtract\0".as_slice(), session_extract as Callback), (b"sessionRender\0".as_slice(), session_render as Callback), (b"sessionClose\0".as_slice(), session_close as Callback), (b"sessionConvert\0".as_slice(), session_convert as Callback)] {
+    for (name, cb) in [(b"detect\0".as_slice(), detect as Callback), (b"convert\0".as_slice(), convert as Callback), (b"extract\0".as_slice(), extract as Callback), (b"render\0".as_slice(), render as Callback), (b"sessionOpen\0".as_slice(), session_open as Callback), (b"sessionExtract\0".as_slice(), session_extract as Callback), (b"sessionRender\0".as_slice(), session_render as Callback), (b"sessionClose\0".as_slice(), session_close as Callback), (b"sessionConvert\0".as_slice(), session_convert as Callback), (b"epubNew\0".as_slice(), epub_new as Callback), (b"epubOp\0".as_slice(), epub_op as Callback)] {
         let mut function = ptr::null_mut();
         if napi_create_function(env, name.as_ptr().cast(), name.len() - 1, Some(cb), ptr::null_mut(), &mut function) != 0 || napi_set_named_property(env, exports, name.as_ptr().cast(), function) != 0 {
             return fail(env, "native_failure:cannot register function");

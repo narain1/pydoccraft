@@ -34,4 +34,24 @@ function open(data, filetype, password = null) {
   });
 }
 
-module.exports = { detect, extract, render, convert, open };
+function wrapEpub(handle) {
+  const op = (name, a = null, b = null, c = null, d = null) => native.epubOp(handle, name, a, b, c, d);
+  return Object.freeze({
+    setMetadata(title, identifier, language, authors) { count(arguments.length, 4, 4); return op('metadata', title, identifier, language, authors); },
+    addChapter(title) { count(arguments.length, 1, 1); return op('chapter', title); },
+    chapterCount() { count(arguments.length, 0, 0); return op('count'); },
+    addHeading(chapter, text, level) { count(arguments.length, 3, 3); return op('heading', chapter, text, level); },
+    addParagraph(chapter, text) { count(arguments.length, 2, 2); return op('paragraph', chapter, text); },
+    addLink(chapter, text, href) { count(arguments.length, 3, 3); return op('link', chapter, text, href); },
+    addImage(chapter, data, mediaType, alt) { count(arguments.length, 4, 4); return op('image', chapter, data, mediaType, alt); },
+    save() { count(arguments.length, 0, 0); return op('save'); },
+    copy() { count(arguments.length, 0, 0); return wrapEpub(op('copy')); },
+    close() { count(arguments.length, 0, 0); return op('close'); },
+  });
+}
+function createEpub() {
+  count(arguments.length, 0, 0);
+  return wrapEpub(native.epubNew());
+}
+
+module.exports = { detect, extract, render, convert, open, createEpub };

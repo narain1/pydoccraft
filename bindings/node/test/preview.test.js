@@ -73,6 +73,67 @@ test('native handles reject foreign values and tolerate reentrant close', () => 
   assert.throws(() => session.render(0, 72, clip), /closed:/);
 });
 
+test('authors EPUB, reopens snapshots, and copies independently', () => {
+  const book = api.createEpub();
+  assert.throws(() => book.save(), /invalid_argument:/);
+  book.setMetadata('Created book', 'urn:test:created', 'en', ['Author One']);
+  const chapter = book.addChapter('Introduction');
+  assert.equal(chapter, 0);
+  book.addHeading(chapter, 'Welcome & hello', 1);
+  book.addParagraph(chapter, 'Created paragraph café');
+  book.addLink(chapter, 'Project', 'https://example.com');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII=', 'base64');
+  book.addImage(chapter, png, 'image/png', 'Pixel');
+  const clone = book.copy();
+  clone.addChapter('Appendix');
+  assert.equal(book.chapterCount(), 1);
+  assert.equal(clone.chapterCount(), 2);
+  const data = book.save();
+  assert.equal(api.detect(data), 'epub');
+  const extracted = JSON.stringify(JSON.parse(api.extract(data, 'epub')));
+  for (const expected of ['Created book', 'Author One', 'Welcome & hello', 'Created paragraph café', 'https://example.com']) assert.ok(extracted.includes(expected), expected);
+  assert.deepEqual(Buffer.from(JSON.parse(api.extract(data, 'epub')).pages[0].images[0].data, 'base64'), png);
+  assert.equal(JSON.parse(api.extract(clone.save(), 'epub')).pages.length, 2);
+  clone.close();
+  book.close();
+  book.close();
+  assert.throws(() => book.save(), /closed:/);
+  assert.throws(() => book.copy(), /closed:/);
+  assert.equal(api.detect(data), 'epub');
+});
+
+test('EPUB authoring rejects invalid changes without mutation', () => {
+  const book = api.createEpub();
+  book.setMetadata('Original', 'urn:test', 'en', ['A']);
+  const chapter = book.addChapter('One');
+  book.addParagraph(chapter, 'unchanged');
+  assert.throws(() => book.setMetadata('changed', 'urn:test', 'en', ['bad\u0001']), /invalid_argument:/);
+  assert.throws(() => book.setMetadata('A & B', 'urn:test', 'en', ['A']), /unsupported:/);
+  assert.throws(() => book.addChapter('A & B'), /unsupported:/);
+  assert.throws(() => book.addHeading(chapter, 'bad', 7), /invalid_argument:/);
+  assert.throws(() => book.addParagraph(chapter, '\ud800'), /invalid_argument:/);
+  assert.throws(() => book.addLink(chapter, 'bad', 'javascript:alert(1)'), /unsupported:/);
+  assert.throws(() => book.addImage(99, Buffer.from('89504e470d0a1a0a', 'hex'), 'image/png', 'bad'), /invalid_argument:/);
+  assert.throws(() => book.addImage(chapter, Buffer.from('bad'), 'image/png', 'bad'), /invalid_argument:/);
+  assert.throws(() => book.addImage(chapter, Buffer.alloc(16 * 1024 * 1024 + 1), 'image/png', ''), /resource_limit:/);
+  assert.throws(() => book.addImage(chapter, Buffer.from(new SharedArrayBuffer(8)), 'image/png', ''), /invalid_argument:/);
+  assert.throws(() => book.setMetadata('x', 'y', 'en', Array(1001).fill('a')), /resource_limit:/);
+  const result = JSON.stringify(JSON.parse(api.extract(book.save(), 'epub')));
+  assert.ok(result.includes('Original'));
+  assert.ok(result.includes('unchanged'));
+  assert.ok(!result.includes('javascript:'));
+  book.close();
+});
+
+test('EPUB native handle validation and reentrant author getters', () => {
+  const native = require('../doccraft.node');
+  assert.throws(() => native.epubOp({}, 'save', null, null, null, null), /invalid_argument:/);
+  const book = api.createEpub();
+  const authors = ['A'];
+  Object.defineProperty(authors, 0, { get() { book.close(); return 'A'; } });
+  assert.throws(() => book.setMetadata('title', 'urn:test', 'en', authors), /closed:/);
+});
+
 test('rejects malformed documents and invalid buffer storage', () => {
   for (const value of [null, {}, new Uint8Array([1]), Buffer.alloc(0)]) {
     assert.throws(() => api.detect(value));

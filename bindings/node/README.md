@@ -2,8 +2,8 @@
 
 This Linux-only, synchronous, in-process preview depends on the **in-progress**
 Python-free `pydoccraft-core` API. It is not a published package, a stable API,
-or a replacement for the Python API. No EPUB authoring, async execution, or
-TypeScript definitions are exposed. Calls block the
+or a replacement for the Python API. No async execution or TypeScript
+definitions are exposed. Calls block the
 Node event loop. Document processing never invokes a subprocess or downloads code.
 
 `detect(Buffer)` returns `pdf`, `docx`, `pptx`, or `epub`. Detection is not a
@@ -34,6 +34,34 @@ close. Session conversion is unsupported by the core and throws `unsupported:`;
 use the stateless `convert` operation instead. `close()` is idempotent; other
 calls after close throw `closed:` errors. A finalizer releases sessions that are
 not explicitly closed. Closing does not guarantee secure erasure of memory.
+
+`createEpub()` creates a new, in-memory editable EPUB; it cannot edit an existing
+EPUB. Its synchronous methods are:
+
+```js
+const book = api.createEpub();
+book.setMetadata('Title', 'urn:example:book', 'en', ['Author']);
+const chapter = book.addChapter('Introduction'); // zero-based index
+book.addHeading(chapter, 'Heading', 1); // levels 1–6
+book.addParagraph(chapter, 'Text');
+book.addLink(chapter, 'Project', 'https://example.com');
+book.addImage(chapter, pngBuffer, 'image/png', 'Description');
+const bytes = book.save(); // new EPUB Buffer, not a filesystem operation
+const independentCopy = book.copy();
+book.close(); // idempotent; also finalized when unreachable
+```
+
+`chapterCount()` reports the number of chapters. Saving requires a nonempty
+title, identifier, language and at least one chapter. Text and link targets are
+validated by the core; links are restricted to HTTP(S), mailto and safe
+fragments. Images accept PNG, JPEG and GIF; SVG is rejected. Image bytes must
+have non-shared backing storage. Because reopening currently corrupts some
+XML-sensitive metadata, this preview rejects `&`, `<` and `>` in metadata and
+chapter titles. Body text supports these characters. Core authoring limits
+include 10,000 chapters/images, 64 MiB of body text, 16 MiB per image, 64 MiB
+of images, and 128 MiB output; this binding additionally limits aggregate author
+names to 1 MiB. `copy()` duplicates the bounded document and may use substantial
+memory. Failed validation does not intentionally modify the document.
 
 With Node.js and Rust 1.95+ installed, from the repository root:
 
