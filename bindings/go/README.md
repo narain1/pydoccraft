@@ -7,7 +7,8 @@ distribution must carry reviewed attribution and native libraries before release
 
 This initial Linux/cgo binding calls the Python-free Rust core in-process. It
 exposes byte-based detection, JSON extraction, PNG rendering (including clipping),
-conversion, and reusable render sessions, but not EPUB authoring or the Python compatibility API.
+conversion, reusable render sessions, and bounded EPUB authoring, but not the
+Python compatibility API.
 The extraction JSON follows the Rust `DocumentPayload` schema and is not a typed
 Go API. Extraction supports PDF, DOCX, PPTX and EPUB; rendering supports PDF,
 DOCX and PPTX, not EPUB. Page indexes are nonnegative and zero-based; clip values
@@ -57,10 +58,11 @@ Use a dedicated target directory if it contains multiple `serde_json` rlibs;
 the build fails rather than selecting an incompatible artifact.
 
 Validation: on Linux x86-64, a Rust 1.95 container and Debian Go 1.24.4 built
-the binding with Cargo offline and ran all seven Go tests, including with the Go
+the binding with Cargo offline and ran all ten Go tests, including with the Go
 race detector, with `GOPROXY=off`. An earlier stateless build also passed with
 `PATH=/nonexistent`, and `ldd` showed no Python library dependency. These checks
-cover the included DOCX fixture, PDF conversion and a PDF search fixture, not
+cover the included DOCX fixture, PDF conversion, a PDF search fixture and an
+authored EPUB reopen, not
 every supported format or platform. The Go race detector does not instrument Rust.
 
 `Error.Code` values are 1 invalid argument, 2 unsupported, 3 malformed, 4 unsafe
@@ -79,3 +81,14 @@ session explicitly; close is idempotent and waits for in-flight session calls.
 Do not copy a Session. Render and PDF-only SearchFor use zero-based page indexes;
 search rectangles are `[x0, y0, x1, y1]` in displayed page points. Sessions do
 not support EPUB. Returned payloads and images remain usable after Close.
+
+`NewEPUB` creates a new editable book; it cannot import or edit existing EPUBs.
+Set title, identifier and language and add at least one chapter before `Save`.
+Chapters accept headings, plain paragraphs, links and PNG/JPEG/GIF images. Images
+are checked by signature, not decoded or guaranteed valid; SVG is rejected.
+Links are limited to HTTP(S), mailto and safe fragments. Chapters use zero-based
+indexes. `Save` returns bytes, not a file, and `Copy` creates an independent book.
+Close each book explicitly and do not copy its Go struct. Calls serialize with
+close. Native limits include 10,000 chapters and images, 64 MiB each for content
+and total image data, 16 MiB per image and 128 MiB output; this Go binding also
+limits aggregate metadata to 1 MiB. The API does not fetch links or image data.

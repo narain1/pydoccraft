@@ -143,3 +143,79 @@ pub unsafe extern "C" fn pydoccraft_session_close(session: *mut _core::session_a
         Ok(Vec::new())
     })
 }
+
+// Editable EPUB handles are owned and serialized by the Go wrapper.
+use _core::author_epub::EditableEpub;
+#[no_mangle]
+pub unsafe extern "C" fn pydoccraft_epub_new(out: *mut *mut EditableEpub) -> ResultBuffer {
+    run(|| {
+        if out.is_null() { return Err(EngineError::InvalidArgument("null EPUB output".into())); }
+        *out = Box::into_raw(Box::new(EditableEpub::new()));
+        Ok(Vec::new())
+    })
+}
+#[no_mangle]
+pub unsafe extern "C" fn pydoccraft_epub_copy(book: *mut EditableEpub, out: *mut *mut EditableEpub) -> ResultBuffer {
+    run(|| {
+        if out.is_null() { return Err(EngineError::InvalidArgument("null EPUB output".into())); }
+        *out = std::ptr::null_mut();
+        let book = book.as_ref().ok_or_else(|| EngineError::Closed("EPUB closed".into()))?;
+        *out = Box::into_raw(Box::new(book.copy()?));
+        Ok(Vec::new())
+    })
+}
+#[no_mangle]
+pub unsafe extern "C" fn pydoccraft_epub_close(book: *mut EditableEpub) -> ResultBuffer {
+    run(|| {
+        if !book.is_null() { let mut book = Box::from_raw(book); book.close(); }
+        Ok(Vec::new())
+    })
+}
+fn epub_string<'a>(value: &'a serde_json::Value, key: &str, limit: usize) -> Result<&'a str, EngineError> {
+    let s = value.get(key).and_then(|v| v.as_str()).ok_or_else(|| EngineError::InvalidArgument(format!("missing EPUB {key}")))?;
+    if s.len() > limit { return Err(EngineError::ResourceLimit(format!("EPUB {key} too large"))); }
+    Ok(s)
+}
+fn epub_index(value: &serde_json::Value) -> Result<usize, EngineError> {
+    value.get("chapter").and_then(|v| v.as_u64()).and_then(|n| usize::try_from(n).ok())
+        .ok_or_else(|| EngineError::InvalidArgument("invalid EPUB chapter".into()))
+}
+#[no_mangle]
+pub unsafe extern "C" fn pydoccraft_epub_command(book: *mut EditableEpub, command: *const u8,
+    command_len: usize, image: *const u8, image_len: usize) -> ResultBuffer {
+    run(|| {
+        let book = book.as_mut().ok_or_else(|| EngineError::Closed("EPUB closed".into()))?;
+        // Bound JSON before parsing, including escaped metadata.
+        if command_len > 8 * 1024 * 1024 || image_len > 16 * 1024 * 1024 {
+            return Err(EngineError::ResourceLimit("EPUB binding input too large".into()));
+        }
+        let v: serde_json::Value = serde_json::from_slice(bytes(command, command_len)?)
+            .map_err(|_| EngineError::InvalidArgument("invalid EPUB command".into()))?;
+        let op = epub_string(&v, "op", 32)?;
+        match op {
+            "metadata" => {
+                let authors = v.get("authors").and_then(|v| v.as_array()).ok_or_else(|| EngineError::InvalidArgument("invalid EPUB authors".into()))?;
+                if authors.len() > 1000 { return Err(EngineError::ResourceLimit("EPUB authors exceed 1000".into())); }
+                let mut names = Vec::with_capacity(authors.len());
+                for author in authors {
+                    let s = author.as_str().ok_or_else(|| EngineError::InvalidArgument("invalid EPUB author".into()))?;
+                    if s.len() > 65_536 { return Err(EngineError::ResourceLimit("EPUB author too large".into())); }
+                    names.push(s.to_owned());
+                }
+                book.set_metadata(epub_string(&v,"title",65_536)?.into(), epub_string(&v,"identifier",4096)?.into(), epub_string(&v,"language",128)?.into(), names)?;
+                Ok(Vec::new())
+            },
+            "chapter" => Ok(book.add_chapter(epub_string(&v,"text",65_536)?.into())?.to_string().into_bytes()),
+            "count" => Ok(book.chapter_count()?.to_string().into_bytes()),
+            "heading" => {
+                let level = v.get("level").and_then(|v| v.as_u64()).and_then(|n| u8::try_from(n).ok()).ok_or_else(|| EngineError::InvalidArgument("invalid heading level".into()))?;
+                book.add_heading(epub_index(&v)?, epub_string(&v,"text",65_536)?.into(), level)?; Ok(Vec::new())
+            },
+            "paragraph" => { book.add_paragraph(epub_index(&v)?, epub_string(&v,"text",65_536)?.into())?; Ok(Vec::new()) },
+            "link" => { book.add_link(epub_index(&v)?, epub_string(&v,"text",65_536)?.into(), epub_string(&v,"href",16_384)?.into())?; Ok(Vec::new()) },
+            "image" => { book.add_image(epub_index(&v)?, bytes(image,image_len)?.to_vec(), epub_string(&v,"media_type",128)?.into(), epub_string(&v,"alt",65_536)?.into())?; Ok(Vec::new()) },
+            "save" => book.to_bytes(),
+            _ => Err(EngineError::InvalidArgument("unknown EPUB command".into())),
+        }
+    })
+}

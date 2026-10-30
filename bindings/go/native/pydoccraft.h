@@ -22,4 +22,11 @@ pydoccraft_result pydoccraft_session_render(pydoccraft_session *, size_t, double
 pydoccraft_result pydoccraft_session_search(pydoccraft_session *, size_t, const uint8_t *, size_t);
 /* Consumes the handle, even if close reports an error. Caller serializes all operations. */
 pydoccraft_result pydoccraft_session_close(pydoccraft_session *);
+typedef struct pydoccraft_epub pydoccraft_epub;
+/* EPUB handles must be serialized by the caller and closed exactly once;
+ * close consumes the handle even on error. Inputs are borrowed for the call. */
+pydoccraft_result pydoccraft_epub_new(pydoccraft_epub **);
+pydoccraft_result pydoccraft_epub_copy(pydoccraft_epub *, pydoccraft_epub **);
+pydoccraft_result pydoccraft_epub_close(pydoccraft_epub *);
+pydoccraft_result pydoccraft_epub_command(pydoccraft_epub *, const uint8_t *, size_t, const uint8_t *, size_t);
 #endif
