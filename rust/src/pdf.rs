@@ -1853,6 +1853,7 @@ mod raster_limit_tests {
     }
 
     #[test]
+    #[cfg(feature = "python")]
     fn linked_native_typed_placement_preserves_identity_order_and_reopened_paint() {
         use crate::author_pdf::{add_content_with_placement, Placement};
         use pdfcraft_cos::{

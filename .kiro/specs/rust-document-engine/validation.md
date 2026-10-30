@@ -1,5 +1,52 @@
 # Validation evidence
 
+## Rust-facing dispatch initial slice (unreleased)
+
+- Linux x86_64, Rust 1.95 container with Python 3.13 development libraries: `cargo test --locked --test rust_api` passed (one test), covering PDF detection and unsupported detection/conversion errors from an external Rust test. `git diff --check` passed.
+- This is focused evidence only: the crate still links PyO3, and the full Rust corpus, Clippy, installed-wheel Python corpus and conversion output validation were not run for this slice. No Python-independent build or cross-language parity is claimed.
+
+## Rust-first migration slices (unreleased)
+
+- A subsequent Python-free build (`--no-default-features`) covers typed extraction, rendering, conversion, retained render sessions and EPUB authoring; focused Rust session tests passed (3) and EPUB authoring tests passed (2). Python-enabled Rust library tests passed (468), before the separate session module was added.
+- Linux x86_64, Rust 1.95, Python 3.13: a locked release wheel was installed outside the source tree; 594 Python tests passed. The separately added Rust session module was not part of that wheel run. On the combined tree, Rust formatting, Python-enabled `cargo clippy --offline --locked --all-targets -- -D warnings`, and `cargo test --offline --locked` passed (471 unit and 4 integration tests). The first combined test attempt failed during linking with a bus error while the temporary filesystem was 97% full; the successful retry used a larger target filesystem. These results are not complete release validation; Python 3.11 and cross-platform tests remain open.
+- Experimental Go detection/conversion tests passed on Linux with a manually configured shared library path; the Node preview is not distribution-ready. Neither binding covers the complete API. PDF/DOCX/PPTX authoring and Python formatting and lifecycle behavior still require migration. No feature parity is claimed.
+- A later preparatory PDF authoring change moved page, position and PNG checks to helpers returning native errors; two focused Python-enabled Rust tests passed and formatting was checked. The helpers remain internal to the Python-gated PDF editor, not a Python-free PDF authoring API. Full tests, Clippy and installed-wheel validation were not rerun for this later change.
+
+## PDF and PPTX Rust authoring primitives (unreleased)
+
+- The PDF editor now builds without PyO3 using the same authoring logic; its error result differs by feature and is not yet a stable language-independent contract. PPTX authoring uses a native editor and a separate Python wrapper. DOCX section-alignment validation was moved to native errors; the DOCX editor remains Python-dependent.
+- Linux x86_64, Rust 1.95: `cargo test --locked --no-default-features --lib` passed 161 tests; two PPTX Rust integration tests passed. Python-enabled locked all-targets Clippy passed with warnings denied. A Python 3.13 locked release wheel installed outside the source tree passed 594 Python tests. The tests preceded the final removal of whitespace in PPTX attributes, which did not change runtime behavior.
+- Full Rust tests, Python 3.11 and cross-platform tests for this later tree remain open. These are editor primitives, not the complete Python facade, and do not establish Node or Go parity or release readiness.
+
+## Go source preview (unreleased)
+
+- Linux x86_64, Rust 1.95 and Go 1.24.4: three Go tests passed with Cargo offline and `GOPROXY=off`, including DOCX extraction, clipped PNG rendering and reopening converted PDF. The compiled tests passed with `PATH=/nonexistent`; `ldd` showed no Python library. Only this platform and focused corpus were checked.
+- The Linux cgo preview requires a separately built native library and dynamic-loader configuration. It does not cover sessions or authoring, is not a complete or distributable binding, and requires packaged attribution and cross-platform validation before release.
+- A later Go session slice added owned extraction payloads, rendering, PDF search and synchronized close. Linux Go tests passed normally and with `-race` (7 each); the Go race detector does not instrument Rust internals. The earlier statement that sessions are unavailable describes the earlier preview only. Authoring and distribution remain open.
+- A later Go EPUB creation slice adds metadata, chapters, text, links, images, save, copy and synchronized close. Ten Linux Go tests passed normally and with `-race` using offline dependencies, including reopen and atomic failures. Image input is signature-checked, not fully decoded; imported EPUB editing, other authoring formats and distribution remain open.
+- A subsequent Go regression reproduced EPUB metadata truncation when reopening XML-sensitive values and added explicit rejection of `&`, `<` and `>` in metadata and chapter titles. Eleven Go tests passed normally and with `-race`; the focused run used a copy under `/data` because the checkout filesystem was full. Upstream parser correction remains open.
+
+## DOCX Rust authoring primitives (unreleased)
+
+- The shared DOCX editor now builds with no Python feature, using native errors in that configuration while retaining the Python boundary. Linux x86_64, Rust 1.95: 399 Python-free library tests and a DOCX author/edit/save/extract integration test passed; Python-enabled locked Clippy with warnings denied and Rust formatting passed.
+- A Python 3.13 locked release wheel installed outside the source tree passed 594 Python tests. Full Rust tests on the final combined tree, Python 3.11 and cross-platform validation remain open. The editor primitives do not yet provide all Python facade ownership or formatting semantics in Rust, and Node/Go authoring parity is not claimed.
+
+## Node source preview (unreleased)
+
+- Linux x86_64, Rust 1.95, Node 20.19.2: the independent Node manifest built with `--offline --locked` and seven focused Node tests passed, including input bounds, DOCX extraction, rendering and conversion, and PPTX conversion refusal. This is not installed-package or cross-platform evidence.
+- The separately locked normal/build dependency graph was reviewed against the regenerated permissive root inventory; third-party package rows are a subset. The preview is private, Linux-only and has no packaged native binary. It lacks passwords, clipping, sessions and authoring, and is not an npm release.
+- A later Node preview adds passwords, clipping and Rust-backed render sessions with explicit close and finalization; 10 Node tests passed against an offline Rust 1.95 build. The earlier limitations describe the preceding version. Session conversion, authoring, packaged binaries, installed-package tests and other platforms remain open.
+- A subsequent Node EPUB creation slice passed 13 focused tests on Linux with an offline locked Rust 1.95 build. It explicitly rejects XML-sensitive metadata and chapter titles due to observed reopen corruption, and does not support importing EPUB for editing. Other authoring formats and distribution remain open.
+
+## Bounded formatter join (unreleased)
+
+- The Python facade delegates bounded joins of exact strings to Rust after preflight; oversized inputs, subclasses and lone surrogates retain the Python path. Link, table, HTML, stripping and callback behavior remain Python-owned. Linux Python 3.13: 31 focused tests passed against an installed wheel; Rust formatter test and Python-enabled warnings-denied all-targets Clippy passed. Full installed-wheel and cross-language parity tests remain open.
+
+## Shared authoring errors and PDF binding profiles (unreleased)
+
+- PDF and DOCX authoring now return a feature-independent `AuthoringError`, mapped to the existing Python exception categories. On Linux x86_64 with Rust 1.95, Python-enabled `cargo test --offline --locked` passed 477 unit and six integration tests, including exception-kind mapping; formatting and warnings-denied all-targets Clippy passed. An installed Python 3.13 release wheel passed 597 tests. Python 3.11 and other platforms remain unverified.
+- Go and Node previews add limited PDF creation/editing, copy, save and close backed by the Rust editor; they do not expose the complete PDF API. The offline Go suite passed with `-race`; a fresh offline Node build passed 15 tests. Neither result establishes complete bindings or distribution readiness.
+
 ## 2026-10-20 DOCX properties and PDF markup (unreleased)
 
 - Runtime commits `849de87` and `70b636a` passed the combined offline Linux x86_64 corpus: Rust 1.95.0 formatting, 186 native tests, warnings-denied Clippy, locked Maturin 1.8.1 release build and 203 installed-wheel Python 3.11.2 tests, zero skips, with verified artifact identity.
