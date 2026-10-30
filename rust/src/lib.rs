@@ -12,6 +12,8 @@ mod conversion;
 mod diagnostics;
 mod docx;
 mod epub;
+#[cfg(feature = "python")]
+mod formatter;
 mod limits;
 mod model;
 mod ooxml;

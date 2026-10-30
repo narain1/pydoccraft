@@ -6,6 +6,7 @@
 - [ ] Separate the complete core from PyO3. Initial slices support Python-free detection, extraction, rendering, conversion, render sessions and EPUB, PDF, DOCX and PPTX editor primitives. Python-side formatting and ownership, and stable typed cross-language authoring parity remain to be migrated; Python remains the default feature.
 - [ ] Complete and distribute Go bindings. An experimental Linux/cgo source preview covers detection, extraction, rendering, conversion and render sessions; authoring, stable API/ABI and packaged native libraries remain open.
 - [ ] Complete and distribute npm bindings. An experimental Linux Node-API source preview covers detection, extraction, rendering and PDF/DOCX conversion; sessions, authoring, passwords, clipping and packaged native binaries remain open.
+- [ ] Move the full Python document formatting contract to Rust. A bounded join primitive is delegated to Rust; Python still owns trimming, links, tables, HTML, mutable-model compatibility and fallback behavior.
 
 - [x] 1. Change the package and source license to Apache-2.0 and document attribution obligations.
 - [x] 2. Replace direct PDF parsing with pinned PdfCraft extraction, image, link, and rendering APIs.

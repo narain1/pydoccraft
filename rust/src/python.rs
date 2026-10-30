@@ -6,8 +6,55 @@ use api::normalize;
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
+use pyo3::types::{PyList, PyString};
 
 create_exception!(_core, DocExNativeError, PyException);
+
+#[pyfunction]
+fn _format_join(
+    parts: &Bound<'_, PyList>,
+    separator: &Bound<'_, PyAny>,
+    skip_empty: bool,
+) -> PyResult<Option<String>> {
+    // Preflight Python objects before PyO3 copies or materializes UTF-8 strings.
+    // Returning None selects the original Python implementation, not a new
+    // public limit on page text or Markdown.
+    const MAX_PARTS: usize = 100_000;
+    const MAX_CHARS: usize = 1_000_000;
+    if !parts.is_exact_instance_of::<PyList>()
+        || parts.len() > MAX_PARTS
+        || !separator.is_exact_instance_of::<PyString>()
+    {
+        return Ok(None);
+    }
+    let separator_len = separator.len()?;
+    if separator_len > MAX_CHARS {
+        return Ok(None);
+    }
+    let Some(mut chars) = separator_len.checked_mul(parts.len().saturating_sub(1)) else {
+        return Ok(None);
+    };
+    if chars > MAX_CHARS {
+        return Ok(None);
+    }
+    for part in parts.iter() {
+        if !part.is_exact_instance_of::<PyString>() {
+            return Ok(None);
+        }
+        let Some(total) = chars.checked_add(part.len()?) else {
+            return Ok(None);
+        };
+        chars = total;
+        if chars > MAX_CHARS {
+            return Ok(None);
+        }
+    }
+    let separator: &str = separator.extract()?;
+    let strings: Vec<String> = parts.extract()?;
+    Ok(Some(crate::formatter::join_parts(
+        strings, separator, skip_empty,
+    )))
+}
 
 #[pyclass(module = "doc_ex._core", name = "EditableEpub")]
 struct NativeEditableEpub {
@@ -280,6 +327,7 @@ fn detect(data: &[u8]) -> PyResult<String> {
 
 #[pymodule]
 fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add_function(wrap_pyfunction!(_format_join, module)?)?;
     module.add_class::<author_docx::EditableDocx>()?;
     module.add_class::<NativeEditableEpub>()?;
     module.add_class::<author_pdf::EditablePdf>()?;

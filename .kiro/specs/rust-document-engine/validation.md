@@ -34,6 +34,10 @@
 - Linux x86_64, Rust 1.95, Node 20.19.2: the independent Node manifest built with `--offline --locked` and seven focused Node tests passed, including input bounds, DOCX extraction, rendering and conversion, and PPTX conversion refusal. This is not installed-package or cross-platform evidence.
 - The separately locked normal/build dependency graph was reviewed against the regenerated permissive root inventory; third-party package rows are a subset. The preview is private, Linux-only and has no packaged native binary. It lacks passwords, clipping, sessions and authoring, and is not an npm release.
 
+## Bounded formatter join (unreleased)
+
+- The Python facade delegates bounded joins of exact strings to Rust after preflight; oversized inputs, subclasses and lone surrogates retain the Python path. Link, table, HTML, stripping and callback behavior remain Python-owned. Linux Python 3.13: 31 focused tests passed against an installed wheel; Rust formatter test and Python-enabled warnings-denied all-targets Clippy passed. Full installed-wheel and cross-language parity tests remain open.
+
 ## 2026-10-20 DOCX properties and PDF markup (unreleased)
 
 - Runtime commits `849de87` and `70b636a` passed the combined offline Linux x86_64 corpus: Rust 1.95.0 formatting, 186 native tests, warnings-denied Clippy, locked Maturin 1.8.1 release build and 203 installed-wheel Python 3.11.2 tests, zero skips, with verified artifact identity.
