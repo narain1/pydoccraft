@@ -24,6 +24,7 @@
 - The Linux cgo preview requires a separately built native library and dynamic-loader configuration. It does not cover sessions or authoring, is not a complete or distributable binding, and requires packaged attribution and cross-platform validation before release.
 - A later Go session slice added owned extraction payloads, rendering, PDF search and synchronized close. Linux Go tests passed normally and with `-race` (7 each); the Go race detector does not instrument Rust internals. The earlier statement that sessions are unavailable describes the earlier preview only. Authoring and distribution remain open.
 - A later Go EPUB creation slice adds metadata, chapters, text, links, images, save, copy and synchronized close. Ten Linux Go tests passed normally and with `-race` using offline dependencies, including reopen and atomic failures. Image input is signature-checked, not fully decoded; imported EPUB editing, other authoring formats and distribution remain open.
+- A subsequent Go regression reproduced EPUB metadata truncation when reopening XML-sensitive values and added explicit rejection of `&`, `<` and `>` in metadata and chapter titles. Eleven Go tests passed normally and with `-race`; the focused run used a copy under `/data` because the checkout filesystem was full. Upstream parser correction remains open.
 
 ## DOCX Rust authoring primitives (unreleased)
 

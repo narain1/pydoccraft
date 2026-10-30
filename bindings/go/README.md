@@ -58,7 +58,7 @@ Use a dedicated target directory if it contains multiple `serde_json` rlibs;
 the build fails rather than selecting an incompatible artifact.
 
 Validation: on Linux x86-64, a Rust 1.95 container and Debian Go 1.24.4 built
-the binding with Cargo offline and ran all ten Go tests, including with the Go
+the binding with Cargo offline and ran all eleven Go tests, including with the Go
 race detector, with `GOPROXY=off`. An earlier stateless build also passed with
 `PATH=/nonexistent`, and `ldd` showed no Python library dependency. These checks
 cover the included DOCX fixture, PDF conversion, a PDF search fixture and an
@@ -92,3 +92,7 @@ Close each book explicitly and do not copy its Go struct. Calls serialize with
 close. Native limits include 10,000 chapters and images, 64 MiB each for content
 and total image data, 16 MiB per image and 128 MiB output; this Go binding also
 limits aggregate metadata to 1 MiB. The API does not fetch links or image data.
+As a conservative preview restriction, metadata fields (including authors) and
+chapter titles reject `&`, `<` and `>`: the core EPUB reader can corrupt
+XML-sensitive metadata on reopen. Text, link labels and image alt text are not
+subject to this restriction.

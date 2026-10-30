@@ -24,7 +24,7 @@ func epubFixture(t *testing.T) *EPUB {
 			t.Error(err)
 		}
 	})
-	if err = e.SetMetadata("Title & more", "urn:test:123", "en", []string{"Author"}); err != nil {
+	if err = e.SetMetadata("Title more", "urn:test:123", "en", []string{"Author"}); err != nil {
 		t.Fatal(err)
 	}
 	n, err := e.AddChapter("Chapter one")
@@ -143,7 +143,7 @@ func TestEPUBFailureAtomicity(t *testing.T) {
 			r, _ := f.Open()
 			b, _ := io.ReadAll(r)
 			r.Close()
-			if !bytes.Contains(b, []byte("Title &amp; more")) || bytes.Contains(b, []byte("urn:new")) {
+			if !bytes.Contains(b, []byte("Title more")) || bytes.Contains(b, []byte("urn:new")) {
 				t.Fatalf("metadata changed: %s", b)
 			}
 		}
@@ -178,5 +178,93 @@ func TestEPUBCloseConcurrent(t *testing.T) {
 	var native *Error
 	if !errors.As(err, &native) || native.Code != 10 {
 		t.Fatalf("closed: %v", err)
+	}
+}
+
+func TestEPUBRejectSensitiveMetadataAndChapterTitles(t *testing.T) {
+	e := epubFixture(t)
+	for _, character := range []string{"&", "<", ">"} {
+		calls := []struct {
+			name string
+			call func() error
+		}{
+			{"title", func() error { return e.SetMetadata("bad"+character, "urn:test:123", "en", []string{"Author"}) }},
+			{"identifier", func() error { return e.SetMetadata("Title more", "urn:test:"+character, "en", []string{"Author"}) }},
+			{"language", func() error { return e.SetMetadata("Title more", "urn:test:123", "en"+character, []string{"Author"}) }},
+			{"author", func() error { return e.SetMetadata("Title more", "urn:test:123", "en", []string{"Author" + character}) }},
+			{"chapter", func() error { _, err := e.AddChapter("bad" + character); return err }},
+		}
+		for _, tc := range calls {
+			err := tc.call()
+			var native *Error
+			if !errors.As(err, &native) || native.Code != 2 {
+				t.Fatalf("%s %q: %v", tc.name, character, err)
+			}
+		}
+	}
+	count, err := e.ChapterCount()
+	if err != nil || count != 1 {
+		t.Fatalf("chapter count after failures: %d %v", count, err)
+	}
+	data, err := e.Save()
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := Extract(data, "epub", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reopened struct {
+		Metadata struct {
+			Title       string   `json:"title"`
+			Authors     []string `json:"authors"`
+			Identifiers []string `json:"identifiers"`
+			Languages   []string `json:"languages"`
+		} `json:"metadata"`
+		Pages []struct {
+			Metadata struct {
+				ChapterTitle string `json:"chapter_title"`
+			} `json:"metadata"`
+		} `json:"pages"`
+	}
+	if err = json.Unmarshal(payload, &reopened); err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Metadata.Title != "Title more" || len(reopened.Metadata.Authors) != 1 || reopened.Metadata.Authors[0] != "Author" || len(reopened.Metadata.Identifiers) != 1 || reopened.Metadata.Identifiers[0] != "urn:test:123" || len(reopened.Metadata.Languages) != 1 || reopened.Metadata.Languages[0] != "en" || len(reopened.Pages) != 1 || reopened.Pages[0].Metadata.ChapterTitle != "Chapter one" {
+		t.Fatalf("reopened after rejected mutations: %s", payload)
+	}
+}
+
+func TestEPUBNativeMetadataGuard(t *testing.T) {
+	e := epubFixture(t)
+	for _, c := range []string{"&", "<", ">"} {
+		for _, v := range []map[string]any{
+			{"op": "metadata", "title": "bad" + c, "identifier": "id", "language": "en", "authors": []string{}},
+			{"op": "metadata", "title": "title", "identifier": "id" + c, "language": "en", "authors": []string{}},
+			{"op": "metadata", "title": "title", "identifier": "id", "language": "en" + c, "authors": []string{}},
+			{"op": "metadata", "title": "title", "identifier": "id", "language": "en", "authors": []string{"bad" + c}},
+			{"op": "chapter", "text": "bad" + c},
+		} {
+			_, err := e.command(v, nil)
+			var native *Error
+			if !errors.As(err, &native) || native.Code != 2 {
+				t.Fatalf("native guard %v: %v", v, err)
+			}
+		}
+	}
+	count, err := e.ChapterCount()
+	if err != nil || count != 1 {
+		t.Fatalf("chapter count: %d %v", count, err)
+	}
+	data, err := e.Save()
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := Extract(data, "epub", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(payload, []byte("Title more")) || !bytes.Contains(payload, []byte("urn:test:123")) {
+		t.Fatalf("metadata mutated: %s", payload)
 	}
 }
