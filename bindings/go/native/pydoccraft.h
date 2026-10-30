@@ -29,4 +29,11 @@ pydoccraft_result pydoccraft_epub_new(pydoccraft_epub **);
 pydoccraft_result pydoccraft_epub_copy(pydoccraft_epub *, pydoccraft_epub **);
 pydoccraft_result pydoccraft_epub_close(pydoccraft_epub *);
 pydoccraft_result pydoccraft_epub_command(pydoccraft_epub *, const uint8_t *, size_t, const uint8_t *, size_t);
+typedef struct pydoccraft_pdf pydoccraft_pdf;
+/* Handles are caller-serialized; close consumes the handle exactly once. */
+pydoccraft_result pydoccraft_pdf_new(double, double, pydoccraft_pdf **);
+pydoccraft_result pydoccraft_pdf_open(const uint8_t *, size_t, const uint8_t *, size_t, uint8_t, pydoccraft_pdf **);
+pydoccraft_result pydoccraft_pdf_copy(pydoccraft_pdf *, pydoccraft_pdf **);
+pydoccraft_result pydoccraft_pdf_close(pydoccraft_pdf *);
+pydoccraft_result pydoccraft_pdf_command(pydoccraft_pdf *, const uint8_t *, size_t);
 #endif

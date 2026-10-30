@@ -54,4 +54,25 @@ function createEpub() {
   return wrapEpub(native.epubNew());
 }
 
-module.exports = { detect, extract, render, convert, open, createEpub };
+function wrapPdf(handle) {
+  const op = (name, a = null, b = null, c = null, d = null, e = null) => native.pdfOp(handle, name, a, b, c, d, e);
+  return Object.freeze({
+    addPage(width, height) { count(arguments.length, 2, 2); return op('addPage', width, height); },
+    addText(page, text, x, y, size = 12) { count(arguments.length, 4, 5); return op('text', page, text, x, y, size); },
+    pageCount() { count(arguments.length, 0, 0); return op('count'); },
+    pageSize(page) { count(arguments.length, 1, 1); return JSON.parse(op('size', page)); },
+    save() { count(arguments.length, 0, 0); return op('save'); },
+    copy() { count(arguments.length, 0, 0); return wrapPdf(op('copy')); },
+    close() { count(arguments.length, 0, 0); return op('close'); },
+  });
+}
+function createPdf(width = 612, height = 792) {
+  count(arguments.length, 0, 2);
+  return wrapPdf(native.pdfNew(width, height));
+}
+function openPdf(data, password = null) {
+  count(arguments.length, 1, 2);
+  return wrapPdf(native.pdfOpen(data, password));
+}
+
+module.exports = { detect, extract, render, convert, open, createEpub, createPdf, openPdf };

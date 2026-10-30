@@ -8,41 +8,15 @@ use pdfcraft_cos::{Document, SaveOptions};
 use pdfcraft_cos::{ObjRef, Object};
 use pdfcraft_edit::{AddedImage, AddedText, Content, EditError};
 #[cfg(feature = "python")]
-use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
-#[cfg(feature = "python")]
-use pyo3::prelude::*;
+use pyo3::prelude::{pyclass, pymethods};
 use serde_json::{json, Value};
 
 use crate::EngineError;
 
-// Keep the existing editor and its Python exceptions intact while making the
-// same operations usable without linking Python.
-#[cfg(not(feature = "python"))]
-type PyResult<T> = Result<T, EngineError>;
-#[cfg(not(feature = "python"))]
-struct PyValueError;
-#[cfg(not(feature = "python"))]
-struct PyIndexError;
-#[cfg(not(feature = "python"))]
-struct PyRuntimeError;
-#[cfg(not(feature = "python"))]
-impl PyValueError {
-    fn new_err(message: impl Into<String>) -> EngineError {
-        EngineError::InvalidArgument(message.into())
-    }
-}
-#[cfg(not(feature = "python"))]
-impl PyIndexError {
-    fn new_err(message: impl Into<String>) -> EngineError {
-        EngineError::PageIndex(message.into())
-    }
-}
-#[cfg(not(feature = "python"))]
-impl PyRuntimeError {
-    fn new_err(message: impl Into<String>) -> EngineError {
-        EngineError::Closed(message.into())
-    }
-}
+use crate::author_docx::error::{
+    AuthoringResult as PyResult, IndexError as PyIndexError, RuntimeError as PyRuntimeError,
+    ValueError as PyValueError,
+};
 
 #[path = "author_pdf_validation.rs"]
 mod validation;
@@ -63,10 +37,13 @@ mod native_api_tests {
         assert_eq!(reopened.page_count().unwrap(), 2);
         assert!(matches!(
             reopened.page_size(2),
-            Err(EngineError::PageIndex(_))
+            Err(crate::author_docx::error::AuthoringError::Index(_))
         ));
         pdf.close();
-        assert!(matches!(pdf.page_count(), Err(EngineError::Closed(_))));
+        assert!(matches!(
+            pdf.page_count(),
+            Err(crate::author_docx::error::AuthoringError::Runtime(_))
+        ));
     }
 }
 

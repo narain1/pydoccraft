@@ -7,11 +7,11 @@ use std::{
 };
 
 #[cfg(feature = "python")]
-use pyo3::exceptions::{PyIndexError, PyKeyError, PyTypeError, PyValueError};
+use pyo3::exceptions::PyTypeError;
 #[cfg(feature = "python")]
-use pyo3::prelude::*;
+use pyo3::prelude::{pyclass, pymethods, Bound, FromPyObject, PyAny};
 #[cfg(feature = "python")]
-use pyo3::types::{PyBool, PyInt};
+use pyo3::types::{PyAnyMethods, PyBool, PyInt};
 use serde_json::{json, Map, Value};
 use wordcraft_doc::para::{Anchor, Float, InlineObject, NoteKind, Wrap};
 use wordcraft_doc::props::{
@@ -36,34 +36,12 @@ mod pyo3 {
     pub fn prepare_freethreaded_python() {}
 }
 
-#[cfg(not(feature = "python"))]
-type PyResult<T> = Result<T, EngineError>;
-#[cfg(not(feature = "python"))]
-type PyErr = EngineError;
-#[cfg(not(feature = "python"))]
-struct PyValueError;
-#[cfg(not(feature = "python"))]
-struct PyIndexError;
-#[cfg(not(feature = "python"))]
-struct PyKeyError;
-#[cfg(not(feature = "python"))]
-impl PyValueError {
-    fn new_err(message: impl Into<String>) -> EngineError {
-        EngineError::InvalidArgument(message.into())
-    }
-}
-#[cfg(not(feature = "python"))]
-impl PyIndexError {
-    fn new_err(message: impl Into<String>) -> EngineError {
-        EngineError::PageIndex(message.into())
-    }
-}
-#[cfg(not(feature = "python"))]
-impl PyKeyError {
-    fn new_err(message: impl Into<String>) -> EngineError {
-        EngineError::InvalidArgument(message.into())
-    }
-}
+#[path = "authoring_error.rs"]
+pub mod error;
+use error::{
+    AuthoringError as PyErr, AuthoringResult as PyResult, IndexError as PyIndexError,
+    KeyError as PyKeyError, ValueError as PyValueError,
+};
 
 #[path = "author_docx_comments.rs"]
 mod comments;
@@ -108,19 +86,14 @@ impl ListStart {
 
 #[cfg(feature = "python")]
 impl<'py> FromPyObject<'py> for ListStart {
-    fn extract_bound(value: &Bound<'py, PyAny>) -> PyResult<Self> {
+    fn extract_bound(value: &Bound<'py, PyAny>) -> pyo3::PyResult<Self> {
         if value.is_instance_of::<PyBool>() || !value.is_instance_of::<PyInt>() {
             return Err(PyTypeError::new_err(
                 "list start must be an integer, not a boolean",
             ));
         }
         let start = value.extract::<u32>()?;
-        if !(1..=32767).contains(&start) {
-            return Err(PyValueError::new_err(
-                "list start must be between 1 and 32767",
-            ));
-        }
-        Ok(Self(start))
+        Self::new(start).map_err(Into::into)
     }
 }
 const MAX_LINK_BYTES: usize = 16 * 1024 * 1024;

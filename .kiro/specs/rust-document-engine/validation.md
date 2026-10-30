@@ -42,6 +42,11 @@
 
 - The Python facade delegates bounded joins of exact strings to Rust after preflight; oversized inputs, subclasses and lone surrogates retain the Python path. Link, table, HTML, stripping and callback behavior remain Python-owned. Linux Python 3.13: 31 focused tests passed against an installed wheel; Rust formatter test and Python-enabled warnings-denied all-targets Clippy passed. Full installed-wheel and cross-language parity tests remain open.
 
+## Shared authoring errors and PDF binding profiles (unreleased)
+
+- PDF and DOCX authoring now return a feature-independent `AuthoringError`, mapped to the existing Python exception categories. On Linux x86_64 with Rust 1.95, Python-enabled `cargo test --offline --locked` passed 477 unit and six integration tests, including exception-kind mapping; formatting and warnings-denied all-targets Clippy passed. An installed Python 3.13 release wheel passed 597 tests. Python 3.11 and other platforms remain unverified.
+- Go and Node previews add limited PDF creation/editing, copy, save and close backed by the Rust editor; they do not expose the complete PDF API. The offline Go suite passed with `-race`; a fresh offline Node build passed 15 tests. Neither result establishes complete bindings or distribution readiness.
+
 ## 2026-10-20 DOCX properties and PDF markup (unreleased)
 
 - Runtime commits `849de87` and `70b636a` passed the combined offline Linux x86_64 corpus: Rust 1.95.0 formatting, 186 native tests, warnings-denied Clippy, locked Maturin 1.8.1 release build and 203 installed-wheel Python 3.11.2 tests, zero skips, with verified artifact identity.

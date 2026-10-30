@@ -11,6 +11,7 @@ type Callback = unsafe extern "C" fn(Env, Info) -> Value;
 struct TypeTag { lower: u64, upper: u64 }
 static SESSION_TAG: TypeTag = TypeTag { lower: 0x93662d6bec3d4f0b, upper: 0xaca15b880f37193b };
 static EPUB_TAG: TypeTag = TypeTag { lower: 0x2c789bd485be48c3, upper: 0xbb79402c65ebd965 };
+static PDF_TAG: TypeTag = TypeTag { lower: 0xd7282eb140094376, upper: 0x859ba71b5b03281c };
 struct SessionHandle {
     session: _core::session_api::DocumentSession,
     snapshot: Mutex<Option<String>>,
@@ -486,9 +487,91 @@ unsafe extern "C" fn epub_op(env: Env, info: Info) -> Value {
     match result { Ok(Ok(v)) => v, Ok(Err(e)) => fail(env, &e), Err(_) => fail(env, "native_failure:unexpected panic") }
 }
 
+type PdfHandle = Mutex<_core::author_pdf::EditablePdf>;
+
+unsafe extern "C" fn finalize_pdf(_: Env, data: *mut c_void, _: *mut c_void) {
+    if !data.is_null() { let _ = std::panic::catch_unwind(|| drop(Box::from_raw(data.cast::<PdfHandle>()))); }
+}
+
+unsafe fn pdf_handle<'a>(env: Env, value: Value) -> Result<&'a PdfHandle, String> {
+    let (mut kind, mut tagged, mut data) = (0, false, ptr::null_mut());
+    if napi_typeof(env, value, &mut kind) != 0 || kind != 8
+        || napi_check_object_type_tag(env, value, &PDF_TAG, &mut tagged) != 0 || !tagged
+        || napi_get_value_external(env, value, &mut data) != 0 || data.is_null() {
+        return Err("invalid_argument:expected a native PDF handle".into());
+    }
+    Ok(&*data.cast::<PdfHandle>())
+}
+
+unsafe fn make_pdf(env: Env, pdf: _core::author_pdf::EditablePdf) -> Result<Value, String> {
+    let raw = Box::into_raw(Box::new(Mutex::new(pdf)));
+    let mut out = ptr::null_mut();
+    if napi_create_external(env, raw.cast(), Some(finalize_pdf), ptr::null_mut(), &mut out) != 0 {
+        drop(Box::from_raw(raw));
+        return Err("native_failure:cannot create PDF handle".into());
+    }
+    if napi_type_tag_object(env, out, &PDF_TAG) != 0 { return Err("native_failure:cannot tag PDF handle".into()); }
+    Ok(out)
+}
+
+unsafe extern "C" fn pdf_new(env: Env, info: Info) -> Value {
+    let result = std::panic::catch_unwind(|| -> Result<Value, String> {
+        let a = args(env, info, 2).map_err(str::to_owned)?;
+        make_pdf(env, _core::author_pdf::EditablePdf::new(number(env, a[0])?, number(env, a[1])?).map_err(|e| e.to_string())?)
+    });
+    match result { Ok(Ok(v)) => v, Ok(Err(e)) => fail(env, &e), Err(_) => fail(env, "native_failure:unexpected panic") }
+}
+
+unsafe extern "C" fn pdf_open(env: Env, info: Info) -> Value {
+    let result = std::panic::catch_unwind(|| -> Result<Value, String> {
+        let a = args(env, info, 2).map_err(str::to_owned)?;
+        let password = optional_string(env, a[1])?;
+        let input = bytes(env, a[0]).map_err(str::to_owned)?;
+        make_pdf(env, _core::author_pdf::EditablePdf::from_bytes(input, password.as_deref()).map_err(|e| e.to_string())?)
+    });
+    match result { Ok(Ok(v)) => v, Ok(Err(e)) => fail(env, &e), Err(_) => fail(env, "native_failure:unexpected panic") }
+}
+
+enum PdfOp { AddPage(f64, f64), Text(isize, String, f64, f64, f64), Size(isize), Count, Copy, Close, Save }
+
+unsafe fn pdf_index(env: Env, value: Value) -> Result<isize, String> {
+    let n = number(env, value)?;
+    if n.fract() != 0.0 || n.abs() > 9_007_199_254_740_991.0 || n < isize::MIN as f64 || n >= isize::MAX as f64 {
+        return Err("invalid_argument:page must be a safe integer".into());
+    }
+    Ok(n as isize)
+}
+
+unsafe extern "C" fn pdf_op(env: Env, info: Info) -> Value {
+    let result = std::panic::catch_unwind(|| -> Result<Value, String> {
+        let a = args(env, info, 7).map_err(str::to_owned)?;
+        let op = match string(env, a[1]).map_err(str::to_owned)?.as_str() {
+            "addPage" => PdfOp::AddPage(number(env, a[2])?, number(env, a[3])?),
+            "text" => PdfOp::Text(pdf_index(env, a[2])?, bounded_string(env, a[3], 1_000_000).map_err(str::to_owned)?, number(env, a[4])?, number(env, a[5])?, number(env, a[6])?),
+            "size" => PdfOp::Size(pdf_index(env, a[2])?),
+            "count" => PdfOp::Count, "copy" => PdfOp::Copy, "close" => PdfOp::Close, "save" => PdfOp::Save,
+            _ => return Err("unsupported:unknown PDF authoring operation".into()),
+        };
+        let mut pdf = pdf_handle(env, a[0])?.lock().map_err(|_| "native_failure:PDF lock poisoned")?;
+        let mut out = ptr::null_mut();
+        match op {
+            PdfOp::AddPage(w, h) => { let n = pdf.add_page(w, h).map_err(|e| e.to_string())?; if napi_create_uint32(env, n as u32, &mut out) != 0 { return Err("native_failure:cannot create number".into()); } return Ok(out); }
+            PdfOp::Text(p, t, x, y, s) => pdf.add_text(p, &t, x, y, s, (0, 0, 0), false).map_err(|e| e.to_string())?,
+            PdfOp::Size(p) => { let (w, h) = pdf.page_size(p).map_err(|e| e.to_string())?; let text = format!("[{w},{h}]"); if napi_create_string_utf8(env, text.as_ptr().cast(), text.len(), &mut out) != 0 { return Err("native_failure:cannot create string".into()); } return Ok(out); }
+            PdfOp::Count => { let n = pdf.page_count().map_err(|e| e.to_string())?; if napi_create_uint32(env, n as u32, &mut out) != 0 { return Err("native_failure:cannot create number".into()); } return Ok(out); }
+            PdfOp::Copy => { let copy = pdf.copy().map_err(|e| e.to_string())?; drop(pdf); return make_pdf(env, copy); }
+            PdfOp::Close => pdf.close(),
+            PdfOp::Save => { let data = pdf.to_bytes().map_err(|e| e.to_string())?; if napi_create_buffer_copy(env, data.len(), data.as_ptr().cast(), ptr::null_mut(), &mut out) != 0 { return Err("native_failure:cannot create Buffer".into()); } return Ok(out); }
+        }
+        if napi_get_undefined(env, &mut out) != 0 { return Err("native_failure:cannot return undefined".into()); }
+        Ok(out)
+    });
+    match result { Ok(Ok(v)) => v, Ok(Err(e)) => fail(env, &e), Err(_) => fail(env, "native_failure:unexpected panic") }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn napi_register_module_v1(env: Env, exports: Value) -> Value {
-    for (name, cb) in [(b"detect\0".as_slice(), detect as Callback), (b"convert\0".as_slice(), convert as Callback), (b"extract\0".as_slice(), extract as Callback), (b"render\0".as_slice(), render as Callback), (b"sessionOpen\0".as_slice(), session_open as Callback), (b"sessionExtract\0".as_slice(), session_extract as Callback), (b"sessionRender\0".as_slice(), session_render as Callback), (b"sessionClose\0".as_slice(), session_close as Callback), (b"sessionConvert\0".as_slice(), session_convert as Callback), (b"epubNew\0".as_slice(), epub_new as Callback), (b"epubOp\0".as_slice(), epub_op as Callback)] {
+    for (name, cb) in [(b"detect\0".as_slice(), detect as Callback), (b"convert\0".as_slice(), convert as Callback), (b"extract\0".as_slice(), extract as Callback), (b"render\0".as_slice(), render as Callback), (b"sessionOpen\0".as_slice(), session_open as Callback), (b"sessionExtract\0".as_slice(), session_extract as Callback), (b"sessionRender\0".as_slice(), session_render as Callback), (b"sessionClose\0".as_slice(), session_close as Callback), (b"sessionConvert\0".as_slice(), session_convert as Callback), (b"epubNew\0".as_slice(), epub_new as Callback), (b"epubOp\0".as_slice(), epub_op as Callback), (b"pdfNew\0".as_slice(), pdf_new as Callback), (b"pdfOpen\0".as_slice(), pdf_open as Callback), (b"pdfOp\0".as_slice(), pdf_op as Callback)] {
         let mut function = ptr::null_mut();
         if napi_create_function(env, name.as_ptr().cast(), name.len() - 1, Some(cb), ptr::null_mut(), &mut function) != 0 || napi_set_named_property(env, exports, name.as_ptr().cast(), function) != 0 {
             return fail(env, "native_failure:cannot register function");

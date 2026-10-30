@@ -63,6 +63,21 @@ of images, and 128 MiB output; this binding additionally limits aggregate author
 names to 1 MiB. `copy()` duplicates the bounded document and may use substantial
 memory. Failed validation does not intentionally modify the document.
 
+`createPdf(width = 612, height = 792)` creates a PDF with one blank page;
+`openPdf(buffer, password = null)` opens an existing PDF for editing. Both
+return an editor with `pageCount()`, `pageSize(page)` (a `[width, height]`
+array), `addPage(width, height)` (returns the new zero-based index),
+`addText(page, text, x, y, size = 12)`, `save()`, `copy()` and `close()`.
+Page indexes may be negative; coordinates and sizes are in points, with text
+positioned from the top left. Text uses the core's built-in font, black color,
+and wraps to the page's right edge. Other authoring features are not exposed.
+The core validates dimensions, text, item counts and input/output sizes. Editing
+encrypted PDFs and imported PDFs with forms, signatures or certification is
+unsupported. Saving returns a Buffer; it does not write a file. Copies are
+independent and may use substantial memory. Close is idempotent; finalizers
+release unreachable editors. Core closed and page-index errors currently have
+unprefixed messages, unlike some other preview errors.
+
 With Node.js and Rust 1.95+ installed, from the repository root:
 
 ```sh

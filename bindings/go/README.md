@@ -96,3 +96,13 @@ As a conservative preview restriction, metadata fields (including authors) and
 chapter titles reject `&`, `<` and `>`: the core EPUB reader can corrupt
 XML-sensitive metadata on reopen. Text, link labels and image alt text are not
 subject to this restriction.
+
+### PDF authoring
+
+`NewPDF(width, height)` creates a one-page editor; `OpenPDF(bytes, password)`
+imports an existing PDF subject to the shared editor's safety restrictions.
+Call `Close` on every editor and independent `Copy`. Copies of a Go `PDF` value
+share the same handle; use `Copy` for independent edits. Methods serialize
+with `Close`. `AddPage`, `DeletePage`, `RotatePage`, `PageSize`, `PageCount`,
+`AddText` (black text) and `Save` are supported. Other PDF authoring features
+are not exposed by this preview. Saved bytes can be reopened with `OpenPDF`.

@@ -223,3 +223,46 @@ pub unsafe extern "C" fn pydoccraft_epub_command(book: *mut EditableEpub, comman
         }
     })
 }
+
+// PDF handles are opaque and must be serialized and consumed once by the caller.
+use _core::author_pdf::EditablePdf;
+fn pdf_error(e: _core::author_docx::error::AuthoringError) -> EngineError {
+    use _core::author_docx::error::AuthoringError::*;
+    match e { Value(s) | Key(s) => EngineError::InvalidArgument(s), Index(s) => EngineError::PageIndex(s), Runtime(s) => EngineError::Closed(s), Engine(e) => e }
+}
+#[no_mangle]
+pub unsafe extern "C" fn pydoccraft_pdf_new(width: f64, height: f64, out: *mut *mut EditablePdf) -> ResultBuffer {
+    run(|| { if out.is_null() { return Err(EngineError::InvalidArgument("null PDF output".into())); } *out = std::ptr::null_mut(); *out = Box::into_raw(Box::new(EditablePdf::new(width,height).map_err(pdf_error)?)); Ok(Vec::new()) })
+}
+#[no_mangle]
+pub unsafe extern "C" fn pydoccraft_pdf_open(data: *const u8, len: usize, password: *const u8, password_len: usize, has: u8, out: *mut *mut EditablePdf) -> ResultBuffer {
+    run(|| { if out.is_null() { return Err(EngineError::InvalidArgument("null PDF output".into())); } *out = std::ptr::null_mut(); if has > 1 { return Err(EngineError::InvalidArgument("invalid password flag".into())); } if password_len > 1_048_576 { return Err(EngineError::ResourceLimit("password too large".into())); } let p = if has == 1 { Some(text(password,password_len)?) } else { None }; *out = Box::into_raw(Box::new(EditablePdf::from_bytes(bytes(data,len)?,p).map_err(pdf_error)?)); Ok(Vec::new()) })
+}
+#[no_mangle]
+pub unsafe extern "C" fn pydoccraft_pdf_copy(pdf: *mut EditablePdf, out: *mut *mut EditablePdf) -> ResultBuffer {
+    run(|| { if out.is_null() { return Err(EngineError::InvalidArgument("null PDF output".into())); } *out = std::ptr::null_mut(); let pdf = pdf.as_ref().ok_or_else(|| EngineError::Closed("PDF closed".into()))?; *out = Box::into_raw(Box::new(pdf.copy().map_err(pdf_error)?)); Ok(Vec::new()) })
+}
+#[no_mangle]
+pub unsafe extern "C" fn pydoccraft_pdf_close(pdf: *mut EditablePdf) -> ResultBuffer {
+    run(|| { if !pdf.is_null() { let mut pdf = Box::from_raw(pdf); pdf.close(); } Ok(Vec::new()) })
+}
+#[no_mangle]
+pub unsafe extern "C" fn pydoccraft_pdf_command(pdf: *mut EditablePdf, command: *const u8, len: usize) -> ResultBuffer {
+    run(|| {
+        let pdf = pdf.as_mut().ok_or_else(|| EngineError::Closed("PDF closed".into()))?;
+        if len > 2_000_000 { return Err(EngineError::ResourceLimit("PDF command too large".into())); }
+        let v: serde_json::Value = serde_json::from_slice(bytes(command,len)?).map_err(|_| EngineError::InvalidArgument("invalid PDF command".into()))?;
+        let number = |key: &str| v.get(key).and_then(|x| x.as_f64()).ok_or_else(|| EngineError::InvalidArgument(format!("invalid PDF {key}")));
+        let page = || v.get("page").and_then(|x| x.as_i64()).and_then(|x| isize::try_from(x).ok()).ok_or_else(|| EngineError::InvalidArgument("invalid PDF page".into()));
+        match v.get("op").and_then(|x| x.as_str()) {
+            Some("count") => Ok(pdf.page_count().map_err(pdf_error)?.to_string().into_bytes()),
+            Some("size") => serde_json::to_vec(&pdf.page_size(page()?).map_err(pdf_error)?).map_err(|e| EngineError::InvalidArgument(e.to_string())),
+            Some("add_page") => Ok(pdf.add_page(number("width")?,number("height")?).map_err(pdf_error)?.to_string().into_bytes()),
+            Some("delete_page") => { pdf.delete_page(page()?).map_err(pdf_error)?; Ok(Vec::new()) },
+            Some("rotate") => { let degrees = v.get("degrees").and_then(|x| x.as_i64()).ok_or_else(|| EngineError::InvalidArgument("invalid rotation".into()))?; pdf.rotate_page(page()?, degrees).map_err(pdf_error)?; Ok(Vec::new()) },
+            Some("text") => { let s = v.get("text").and_then(|x| x.as_str()).ok_or_else(|| EngineError::InvalidArgument("invalid PDF text".into()))?; if s.len() > 1_000_000 { return Err(EngineError::ResourceLimit("PDF text too large".into())); } pdf.add_text(page()?,s,number("x")?,number("y")?,number("size")?,(0,0,0),false).map_err(pdf_error)?; Ok(Vec::new()) },
+            Some("save") => pdf.to_bytes().map_err(pdf_error),
+            _ => Err(EngineError::Unsupported("PDF operation unsupported by Go binding".into())),
+        }
+    })
+}
