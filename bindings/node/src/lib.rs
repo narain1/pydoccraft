@@ -1,11 +1,19 @@
 //! Minimal Node-API boundary. No Node package or build-time binding generator is needed.
 use std::ffi::{c_char, c_void, CString};
 use std::ptr;
+use std::sync::Mutex;
 
 type Env = *mut c_void;
 type Value = *mut c_void;
 type Info = *mut c_void;
 type Callback = unsafe extern "C" fn(Env, Info) -> Value;
+#[repr(C)]
+struct TypeTag { lower: u64, upper: u64 }
+static SESSION_TAG: TypeTag = TypeTag { lower: 0x93662d6bec3d4f0b, upper: 0xaca15b880f37193b };
+struct SessionHandle {
+    session: _core::session_api::DocumentSession,
+    snapshot: Mutex<Option<String>>,
+}
 
 extern "C" {
     fn napi_get_cb_info(env: Env, info: Info, argc: *mut usize, argv: *mut Value, this: *mut Value, data: *mut *mut c_void) -> i32;
@@ -20,6 +28,15 @@ extern "C" {
     fn napi_set_named_property(env: Env, object: Value, name: *const c_char, value: Value) -> i32;
     fn napi_throw_error(env: Env, code: *const c_char, message: *const c_char) -> i32;
     fn napi_get_value_double(env: Env, value: Value, result: *mut f64) -> i32;
+    fn napi_typeof(env: Env, value: Value, result: *mut i32) -> i32;
+    fn napi_is_array(env: Env, value: Value, result: *mut bool) -> i32;
+    fn napi_get_array_length(env: Env, value: Value, result: *mut u32) -> i32;
+    fn napi_get_element(env: Env, value: Value, index: u32, result: *mut Value) -> i32;
+    fn napi_create_external(env: Env, data: *mut c_void, finalize: Option<unsafe extern "C" fn(Env, *mut c_void, *mut c_void)>, hint: *mut c_void, result: *mut Value) -> i32;
+    fn napi_get_value_external(env: Env, value: Value, result: *mut *mut c_void) -> i32;
+    fn napi_type_tag_object(env: Env, value: Value, tag: *const TypeTag) -> i32;
+    fn napi_check_object_type_tag(env: Env, value: Value, tag: *const TypeTag, result: *mut bool) -> i32;
+    fn napi_get_undefined(env: Env, result: *mut Value) -> i32;
 }
 
 unsafe fn fail(env: Env, message: &str) -> Value {
@@ -94,12 +111,38 @@ unsafe fn number(env: Env, value: Value) -> Result<f64, String> {
     Ok(n)
 }
 
+unsafe fn optional_string(env: Env, value: Value) -> Result<Option<String>, String> {
+    let mut kind = 0;
+    if napi_typeof(env, value, &mut kind) != 0 { return Err("invalid_argument:invalid password".into()); }
+    if kind == 0 || kind == 1 { return Ok(None); } // undefined or null
+    string(env, value).map(Some).map_err(str::to_owned)
+}
+
+unsafe fn clip(env: Env, value: Value) -> Result<Option<_core::api::Clip>, String> {
+    let mut kind = 0;
+    if napi_typeof(env, value, &mut kind) != 0 { return Err("invalid_argument:invalid clip".into()); }
+    if kind == 0 || kind == 1 { return Ok(None); }
+    let mut array = false;
+    let mut len = 0;
+    if napi_is_array(env, value, &mut array) != 0 || !array || napi_get_array_length(env, value, &mut len) != 0 || len != 4 {
+        return Err("invalid_argument:clip must be [x, y, width, height]".into());
+    }
+    let mut coords = [0.0; 4];
+    for (i, coord) in coords.iter_mut().enumerate() {
+        let mut element = ptr::null_mut();
+        if napi_get_element(env, value, i as u32, &mut element) != 0 { return Err("invalid_argument:invalid clip".into()); }
+        *coord = number(env, element)?;
+    }
+    Ok(Some((coords[0], coords[1], coords[2], coords[3])))
+}
+
 unsafe extern "C" fn extract(env: Env, info: Info) -> Value {
     let result = std::panic::catch_unwind(|| -> Result<String, String> {
-        let a = args(env, info, 2).map_err(str::to_owned)?;
+        let a = args(env, info, 3).map_err(str::to_owned)?;
         let input = bytes(env, a[0]).map_err(str::to_owned)?;
         let format = string(env, a[1]).map_err(str::to_owned)?;
-        let payload = _core::api::extract(input, &format, None).map_err(|e| e.to_string())?;
+        let password = optional_string(env, a[2])?;
+        let payload = _core::api::extract(input, &format, password.as_deref()).map_err(|e| e.to_string())?;
         serde_json::to_string(&payload).map_err(|e| format!("native_failure:{e}"))
     });
     match result {
@@ -114,15 +157,19 @@ unsafe extern "C" fn extract(env: Env, info: Info) -> Value {
 
 unsafe extern "C" fn render(env: Env, info: Info) -> Value {
     let result = std::panic::catch_unwind(|| -> Result<Vec<u8>, String> {
-        let a = args(env, info, 4).map_err(str::to_owned)?;
-        let input = bytes(env, a[0]).map_err(str::to_owned)?;
+        let a = args(env, info, 6).map_err(str::to_owned)?;
         let format = string(env, a[1]).map_err(str::to_owned)?;
         let page = number(env, a[2])?;
         if page < 0.0 || page.fract() != 0.0 || page >= usize::MAX as f64 {
             return Err("invalid_argument:page must be a non-negative integer".into());
         }
         let dpi = number(env, a[3])?;
-        _core::api::render(input, &format, page as usize, dpi, None, None).map_err(|e| e.to_string())
+        let password = optional_string(env, a[4])?;
+        let clip = clip(env, a[5])?;
+        // Array element access can invoke JavaScript getters. Borrow the input
+        // only after those callbacks, which may detach its backing store.
+        let input = bytes(env, a[0]).map_err(str::to_owned)?;
+        _core::api::render(input, &format, page as usize, dpi, password.as_deref(), clip).map_err(|e| e.to_string())
     });
     match result {
         Ok(Ok(data)) => {
@@ -136,7 +183,7 @@ unsafe extern "C" fn render(env: Env, info: Info) -> Value {
 
 unsafe extern "C" fn convert(env: Env, info: Info) -> Value {
     let result = std::panic::catch_unwind(|| -> Result<Vec<u8>, String> {
-        let a = args(env, info, 3).map_err(str::to_owned)?;
+        let a = args(env, info, 4).map_err(str::to_owned)?;
         let input = bytes(env, a[0]).map_err(str::to_owned)?;
         let source = string(env, a[1]).map_err(str::to_owned)?;
         let target = string(env, a[2]).map_err(str::to_owned)?;
@@ -146,7 +193,8 @@ unsafe extern "C" fn convert(env: Env, info: Info) -> Value {
         if normalized_source == "pptx" || normalized_source == "powerpoint" {
             return Err("unsupported:PPTX conversion is disabled in this preview".into());
         }
-        _core::api::convert(input, &source, &target, None).map_err(|e| e.to_string())
+        let password = optional_string(env, a[3])?;
+        _core::api::convert(input, &source, &target, password.as_deref()).map_err(|e| e.to_string())
     });
     match result {
         Ok(Ok(data)) => {
@@ -158,9 +206,112 @@ unsafe extern "C" fn convert(env: Env, info: Info) -> Value {
     }
 }
 
+unsafe extern "C" fn finalize_session(_: Env, data: *mut c_void, _: *mut c_void) {
+    if !data.is_null() {
+        // Finalizers must not unwind across the Node-API boundary.
+        let _ = std::panic::catch_unwind(|| drop(Box::from_raw(data.cast::<SessionHandle>())));
+    }
+}
+
+unsafe fn session<'a>(env: Env, value: Value) -> Result<&'a SessionHandle, String> {
+    let mut tagged = false;
+    let mut data = ptr::null_mut();
+    let mut kind = 0;
+    if napi_typeof(env, value, &mut kind) != 0 || kind != 8
+        || napi_check_object_type_tag(env, value, &SESSION_TAG, &mut tagged) != 0 || !tagged
+        || napi_get_value_external(env, value, &mut data) != 0 || data.is_null() {
+        return Err("invalid_argument:expected a native document session".into());
+    }
+    Ok(&*data.cast::<SessionHandle>())
+}
+
+unsafe extern "C" fn session_open(env: Env, info: Info) -> Value {
+    let result = std::panic::catch_unwind(|| -> Result<Value, String> {
+        let a = args(env, info, 3).map_err(str::to_owned)?;
+        let format = string(env, a[1]).map_err(str::to_owned)?;
+        let password = optional_string(env, a[2])?;
+        let input = bytes(env, a[0]).map_err(str::to_owned)?;
+        let (session, snapshot) = _core::session_api::DocumentSession::open(input, &format, password.as_deref()).map_err(|e| e.to_string())?;
+        let snapshot = serde_json::to_string(&snapshot).map_err(|e| format!("native_failure:{e}"))?;
+        let handle = Box::new(SessionHandle { session, snapshot: Mutex::new(Some(snapshot)) });
+        let raw = Box::into_raw(handle);
+        let mut out = ptr::null_mut();
+        if napi_create_external(env, raw.cast(), Some(finalize_session), ptr::null_mut(), &mut out) != 0 {
+            drop(Box::from_raw(raw));
+            return Err("native_failure:cannot create session".into());
+        }
+        // Once created, the external owns raw, including if tagging fails.
+        if napi_type_tag_object(env, out, &SESSION_TAG) != 0 {
+            return Err("native_failure:cannot tag session".into());
+        }
+        Ok(out)
+    });
+    match result { Ok(Ok(v)) => v, Ok(Err(e)) => fail(env, &e), Err(_) => fail(env, "native_failure:unexpected panic") }
+}
+
+unsafe extern "C" fn session_extract(env: Env, info: Info) -> Value {
+    let result = std::panic::catch_unwind(|| -> Result<Value, String> {
+        let a = args(env, info, 1).map_err(str::to_owned)?;
+        let handle = session(env, a[0])?;
+        let snapshot = handle.snapshot.lock().map_err(|_| "native_failure:session lock poisoned")?;
+        let text = snapshot.as_ref().ok_or("closed:document session is closed")?;
+        let mut out = ptr::null_mut();
+        if napi_create_string_utf8(env, text.as_ptr().cast(), text.len(), &mut out) != 0 { return Err("native_failure:cannot create string".into()); }
+        Ok(out)
+    });
+    match result { Ok(Ok(v)) => v, Ok(Err(e)) => fail(env, &e), Err(_) => fail(env, "native_failure:unexpected panic") }
+}
+
+unsafe extern "C" fn session_render(env: Env, info: Info) -> Value {
+    let result = std::panic::catch_unwind(|| -> Result<Value, String> {
+        let a = args(env, info, 4).map_err(str::to_owned)?;
+        let page = number(env, a[1])?;
+        if page < 0.0 || page.fract() != 0.0 || page >= usize::MAX as f64 { return Err("invalid_argument:page must be a non-negative integer".into()); }
+        let dpi = number(env, a[2])?;
+        // Clip getters can execute JS, including close(); run them before locking.
+        let clip = clip(env, a[3])?;
+        let handle = session(env, a[0])?;
+        let snapshot = handle.snapshot.lock().map_err(|_| "native_failure:session lock poisoned")?;
+        if snapshot.is_none() { return Err("closed:document session is closed".into()); }
+        let data = handle.session.render(page as usize, dpi, clip).map_err(|e| e.to_string())?;
+        let mut out = ptr::null_mut();
+        if napi_create_buffer_copy(env, data.len(), data.as_ptr().cast(), ptr::null_mut(), &mut out) != 0 { return Err("native_failure:cannot create Buffer".into()); }
+        Ok(out)
+    });
+    match result { Ok(Ok(v)) => v, Ok(Err(e)) => fail(env, &e), Err(_) => fail(env, "native_failure:unexpected panic") }
+}
+
+unsafe extern "C" fn session_close(env: Env, info: Info) -> Value {
+    let result = std::panic::catch_unwind(|| -> Result<Value, String> {
+        let a = args(env, info, 1).map_err(str::to_owned)?;
+        let handle = session(env, a[0])?;
+        let mut snapshot = handle.snapshot.lock().map_err(|_| "native_failure:session lock poisoned")?;
+        if snapshot.is_some() {
+            handle.session.close().map_err(|e| e.to_string())?;
+            *snapshot = None;
+        }
+        let mut out = ptr::null_mut();
+        if napi_get_undefined(env, &mut out) != 0 { return Err("native_failure:cannot return undefined".into()); }
+        Ok(out)
+    });
+    match result { Ok(Ok(v)) => v, Ok(Err(e)) => fail(env, &e), Err(_) => fail(env, "native_failure:unexpected panic") }
+}
+
+unsafe extern "C" fn session_convert(env: Env, info: Info) -> Value {
+    let result = std::panic::catch_unwind(|| -> Result<Value, String> {
+        let a = args(env, info, 2).map_err(str::to_owned)?;
+        string(env, a[1]).map_err(str::to_owned)?;
+        let handle = session(env, a[0])?;
+        let snapshot = handle.snapshot.lock().map_err(|_| "native_failure:session lock poisoned")?;
+        if snapshot.is_none() { return Err("closed:document session is closed".into()); }
+        Err("unsupported:session conversion is not supported by the core".into())
+    });
+    match result { Ok(Ok(v)) => v, Ok(Err(e)) => fail(env, &e), Err(_) => fail(env, "native_failure:unexpected panic") }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn napi_register_module_v1(env: Env, exports: Value) -> Value {
-    for (name, cb) in [(b"detect\0".as_slice(), detect as Callback), (b"convert\0".as_slice(), convert as Callback), (b"extract\0".as_slice(), extract as Callback), (b"render\0".as_slice(), render as Callback)] {
+    for (name, cb) in [(b"detect\0".as_slice(), detect as Callback), (b"convert\0".as_slice(), convert as Callback), (b"extract\0".as_slice(), extract as Callback), (b"render\0".as_slice(), render as Callback), (b"sessionOpen\0".as_slice(), session_open as Callback), (b"sessionExtract\0".as_slice(), session_extract as Callback), (b"sessionRender\0".as_slice(), session_render as Callback), (b"sessionClose\0".as_slice(), session_close as Callback), (b"sessionConvert\0".as_slice(), session_convert as Callback)] {
         let mut function = ptr::null_mut();
         if napi_create_function(env, name.as_ptr().cast(), name.len() - 1, Some(cb), ptr::null_mut(), &mut function) != 0 || napi_set_named_property(env, exports, name.as_ptr().cast(), function) != 0 {
             return fail(env, "native_failure:cannot register function");

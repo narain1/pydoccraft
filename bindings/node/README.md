@@ -2,28 +2,38 @@
 
 This Linux-only, synchronous, in-process preview depends on the **in-progress**
 Python-free `pydoccraft-core` API. It is not a published package, a stable API,
-or a replacement for the Python API. No sessions, EPUB authoring, password
-argument, clipping, async execution, or TypeScript definitions are exposed. Calls block the
+or a replacement for the Python API. No EPUB authoring, async execution, or
+TypeScript definitions are exposed. Calls block the
 Node event loop. Document processing never invokes a subprocess or downloads code.
 
 `detect(Buffer)` returns `pdf`, `docx`, `pptx`, or `epub`. Detection is not a
-complete validity check. `convert(Buffer, source, target)` returns a new Buffer;
+complete validity check. `convert(Buffer, source, target, password = null)` returns a new Buffer;
 the preview allows PDF→DOCX and DOCX→PDF only. PPTX conversion is disabled
 entirely because upstream PDF export can corrupt searchable text for explicit
 paragraph breaks, and the core has no reliable guard. Conversion fidelity is
-not pixel-perfect. No password can be
-passed, so encrypted documents may fail. Errors are ordinary JavaScript `Error`s
+not pixel-perfect. Passwords are optional strings and are passed to the core;
+password support depends on the format and upstream engine. Errors are ordinary JavaScript `Error`s
 whose messages start with the core error category; these are preview behavior.
 Inputs must be Node Buffers backed by non-shared ArrayBuffers; shared backing
 storage is rejected to prevent concurrent mutation during native processing.
 The core rejects inputs larger than 128 MiB, but conversion and output copying
 can require substantially more memory; this is not a process memory limit.
 
-`extract(Buffer, filetype)` returns the core's normalized payload as a JSON
-string, including EPUB extraction. `render(Buffer, filetype, page, dpi)` returns
+`extract(Buffer, filetype, password = null)` returns the core's normalized payload as a JSON
+string, including EPUB extraction. `render(Buffer, filetype, page, dpi, password = null, clip = null)` returns
 a PNG Buffer; page is a zero-based non-negative integer. EPUB rendering is not
 supported. Both are stateless and apply the core's input, payload and rendering
-limits. They take exactly the listed arguments and do not accept a password.
+limits. A clip is `[x, y, width, height]` in displayed page points and is subject
+to the core's validation. Pass `null` for the password to supply a clip without one.
+
+`open(Buffer, filetype, password = null)` opens a PDF, DOCX or PPTX and returns a
+session with `extract()`, `render(page, dpi, clip = null)`, `convert(target)`,
+and `close()`. EPUB sessions are unsupported. A native session retains parsed
+state and an owned extraction snapshot; returned JSON strings remain usable after
+close. Session conversion is unsupported by the core and throws `unsupported:`;
+use the stateless `convert` operation instead. `close()` is idempotent; other
+calls after close throw `closed:` errors. A finalizer releases sessions that are
+not explicitly closed. Closing does not guarantee secure erasure of memory.
 
 With Node.js and Rust 1.95+ installed, from the repository root:
 

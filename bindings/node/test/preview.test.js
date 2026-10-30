@@ -25,7 +25,52 @@ test('rejects unsupported conversions and bad arguments', () => {
   assert.throws(() => api.convert(Buffer.from('x'), 'pdf', 'pptx'), /unsupported:/);
   assert.throws(() => api.convert(fixture('deckcraft-table-line-breaks.pptx'), 'powerpoint', 'pdf'), /unsupported:/);
   assert.throws(() => api.convert(Buffer.from('x'), 'pdf', 42), /invalid_argument:/);
-  assert.throws(() => api.convert(Buffer.from('x'), 'pdf', 'docx', 'extra'), /invalid_argument:/);
+  assert.throws(() => api.convert(Buffer.from('x'), 'pdf', 'docx', null, 'extra'), /invalid_argument:/);
+});
+
+test('password and clipping arguments are validated and forwarded', () => {
+  const input = fixture('wordcraft-rectangle-stroke100.docx');
+  assert.ok(JSON.parse(api.extract(input, 'docx', null)).pages.length);
+  assert.throws(() => api.extract(input, 'docx', 42), /invalid_argument:/);
+  assert.throws(() => api.convert(input, 'docx', 'pdf', 42), /invalid_argument:/);
+  const png = api.render(input, 'docx', 0, 72, null, [0, 0, 20, 30]);
+  assert.deepEqual(png.subarray(0, 8), Buffer.from('89504e470d0a1a0a', 'hex'));
+  assert.equal(png.readUInt32BE(16), 20);
+  assert.equal(png.readUInt32BE(20), 30);
+  for (const clip of [[0, 0, 0, 1], [0, 0, Infinity, 1], [0, 0, 1], 'bad']) {
+    assert.throws(() => api.render(input, 'docx', 0, 72, null, clip));
+  }
+});
+
+test('session owns bytes and closes idempotently', () => {
+  const input = fixture('wordcraft-rectangle-stroke100.docx');
+  const session = api.open(input, 'docx');
+  input.fill(0);
+  assert.ok(JSON.parse(session.extract()).pages.length);
+  assert.equal(session.render(0, 72, [0, 0, 10, 10]).readUInt32BE(16), 10);
+  assert.throws(() => session.convert('pdf'), /unsupported:/);
+  const snapshot = session.extract();
+  session.close();
+  session.close();
+  assert.ok(JSON.parse(snapshot).pages.length);
+  assert.throws(() => session.extract(), /closed:/);
+  assert.throws(() => session.render(0, 72), /closed:/);
+  assert.throws(() => session.convert('pdf'), /closed:/);
+  assert.throws(() => api.open(Buffer.from(new SharedArrayBuffer(8)), 'docx'), /invalid_argument:/);
+  assert.throws(() => api.open(Buffer.from('broken'), 'docx'));
+  assert.throws(() => api.open(Buffer.alloc(0), 'epub'), /unsupported:/);
+});
+
+test('native handles reject foreign values and tolerate reentrant close', () => {
+  const native = require('../doccraft.node');
+  for (const value of [null, {}, Buffer.alloc(8), 1]) {
+    assert.throws(() => native.sessionExtract(value), /invalid_argument:/);
+    assert.throws(() => native.sessionClose(value), /invalid_argument:/);
+  }
+  const session = api.open(fixture('wordcraft-rectangle-stroke100.docx'), 'docx');
+  const clip = [0, 0, 10, 10];
+  Object.defineProperty(clip, 0, { get() { session.close(); return 0; } });
+  assert.throws(() => session.render(0, 72, clip), /closed:/);
 });
 
 test('rejects malformed documents and invalid buffer storage', () => {

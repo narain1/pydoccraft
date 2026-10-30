@@ -33,6 +33,7 @@
 
 - Linux x86_64, Rust 1.95, Node 20.19.2: the independent Node manifest built with `--offline --locked` and seven focused Node tests passed, including input bounds, DOCX extraction, rendering and conversion, and PPTX conversion refusal. This is not installed-package or cross-platform evidence.
 - The separately locked normal/build dependency graph was reviewed against the regenerated permissive root inventory; third-party package rows are a subset. The preview is private, Linux-only and has no packaged native binary. It lacks passwords, clipping, sessions and authoring, and is not an npm release.
+- A later Node preview adds passwords, clipping and Rust-backed render sessions with explicit close and finalization; 10 Node tests passed against an offline Rust 1.95 build. The earlier limitations describe the preceding version. Session conversion, authoring, packaged binaries, installed-package tests and other platforms remain open.
 
 ## Bounded formatter join (unreleased)
 
