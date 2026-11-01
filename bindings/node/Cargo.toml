@@ -1,0 +1,25 @@
+[package]
+name = "doccraft-node-preview"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pydoccraft-core = { path = "../..", default-features = false }
+serde_json = "=1.0.149"
+
+# Cargo ignores patches in dependency manifests. Keep these identical to the root.
+[patch.crates-io]
+hayro = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
+hayro-cmap = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
+hayro-interpret = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
+hayro-jbig2 = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
+hayro-postscript = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
+hayro-syntax = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
+lopdf = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
+krilla = { git = "https://github.com/storytold/craft-libs", rev = "9f75d3dc19b4b514c4f3d4847ed1ec1b0e86b4ef" }

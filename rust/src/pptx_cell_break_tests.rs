@@ -3,7 +3,6 @@ use super::*;
 use deckcraft_model::text::{Run, RunKind};
 
 fn fixture() -> (EditablePptx, u32, CellTarget) {
-    pyo3::prepare_freethreaded_python();
     let mut owner = EditablePptx::new(576.0, 360.0).unwrap();
     owner.add_slide("blank").unwrap();
     owner.set_slide_notes(0, "Retained notes").unwrap();
