@@ -4,6 +4,7 @@
 
 - At feature commit `08f7ebe`, the Go and Node preview bindings built offline with Rust 1.95 and their committed lockfiles. Linux Go 1.24: 14 tests passed with `-race`; Node 22.22.1: 15 tests passed. The Go race detector does not instrument Rust internals.
 - A DOCX→PDF output and its PDF→DOCX conversion were reopened, extracted and rendered; each output had one page. The builds emitted eight existing dead-code warnings. These are preview checks, not complete API parity or cross-platform/distribution evidence.
+- Linux x86_64, Rust 1.95 and CPython 3.11: locked formatting, Rust tests (477 unit and six integration tests), warnings-denied Clippy, release wheel build and 597 installed-wheel Python tests passed. The artifact `pydoccraft-0.3.1-cp311-cp311-manylinux_2_35_x86_64.whl` is 19,048,415 bytes, SHA-256 `519645d0dda12ec6200ff7fbd1140521935ebb7d2be7690c99a3cbd7b75df10f`; its native extension is 44,301,368 bytes uncompressed. This validates the existing pins, not the separate upstream upgrade or complete language-binding parity.
 
 ## Rust-facing dispatch initial slice (unreleased)
 
