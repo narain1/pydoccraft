@@ -1,5 +1,10 @@
 # Validation evidence
 
+## 2026-10-31 binding revalidation (unreleased)
+
+- At feature commit `08f7ebe`, the Go and Node preview bindings built offline with Rust 1.95 and their committed lockfiles. Linux Go 1.24: 14 tests passed with `-race`; Node 22.22.1: 15 tests passed. The Go race detector does not instrument Rust internals.
+- A DOCX→PDF output and its PDF→DOCX conversion were reopened, extracted and rendered; each output had one page. The builds emitted eight existing dead-code warnings. These are preview checks, not complete API parity or cross-platform/distribution evidence.
+
 ## Rust-facing dispatch initial slice (unreleased)
 
 - Linux x86_64, Rust 1.95 container with Python 3.13 development libraries: `cargo test --locked --test rust_api` passed (one test), covering PDF detection and unsupported detection/conversion errors from an external Rust test. `git diff --check` passed.
