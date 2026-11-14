@@ -1,5 +1,9 @@
 # Validation evidence
 
+## PR 143 readiness: license audit and binding CI
+
+The November 1 CI failure was reproduced against the unchanged lockfile: the audit discarded non-table attribution following the crate rows, causing both a stale-inventory failure and loss of that attribution under `--write`. The audit now preserves text following the table, and a regression test covers table regeneration with a trailing attribution. The existing inventories remain byte-identical and the locked audit passes with 299 normal/build packages. Current-main workflow pins were merged without an upstream engine upgrade. A separate Linux CI job now exercises the Python-free Rust tests and the existing Go and Node previews; it does not claim cross-platform or distributed-package validation. Its first local Python-free build exposed a stale DOCX integration test expecting `EngineError` after the authoring API changed to `AuthoringError`. The test now checks the public index and wrapped closed error variants; the corrected suite is being rerun. Rust 1.95 formatting, the Python-enabled locked suite (477 unit tests and integration tests), and warnings-denied all-target Clippy passed locally. The new Python-free/binding job and current-head CI remain pending.
+
 ## 2026-10-31 binding revalidation (unreleased)
 
 - At feature commit `08f7ebe`, the Go and Node preview bindings built offline with Rust 1.95 and their committed lockfiles. Linux Go 1.24: 14 tests passed with `-race`; Node 22.22.1: 15 tests passed. The Go race detector does not instrument Rust internals.

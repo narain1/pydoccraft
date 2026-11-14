@@ -2,7 +2,7 @@
 
 ## Proposed Rust-first API migration
 
-- [ ] Review and execute the [Rust-first API and language bindings plan](../../../docs/rust-api-bindings-plan.md). The plan covers the complete existing API, independent Rust consumption, and thin Python, Node.js and Go bindings; it does not assert that any migration or binding is already implemented.
+- [ ] Execute the remaining [Rust-first API and language bindings plan](../../../docs/rust-api-bindings-plan.md). Initial Rust APIs and Linux Go and Node source previews exist; complete parity, distribution and cross-platform coverage remain open.
 - [ ] Separate the complete core from PyO3. Initial slices support Python-free detection, extraction, rendering, conversion, render sessions and EPUB, PDF, DOCX and PPTX editor primitives. Python-side formatting and ownership, and stable typed cross-language authoring parity remain to be migrated; Python remains the default feature.
 - [ ] Complete and distribute Go bindings. An experimental Linux/cgo source preview covers detection, extraction, rendering, conversion, render sessions, EPUB creation and a basic PDF editing profile; full PDF/DOCX/PPTX authoring, stable API/ABI and packaged native libraries remain open.
 - [ ] Complete and distribute npm bindings. An experimental Linux Node-API source preview covers detection, extraction, rendering, PDF/DOCX conversion, native sessions, EPUB creation and a basic PDF editing profile; full PDF/DOCX/PPTX authoring, session conversion and packaged native binaries remain open.

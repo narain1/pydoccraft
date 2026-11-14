@@ -10,6 +10,11 @@ SPEC.loader.exec_module(audit)
 
 
 class LicenseAuditTests(unittest.TestCase):
+    def test_regeneration_preserves_attribution_after_table(self):
+        existing = "Attribution\n\n| Crate | Version | License |\n|---|---:|---|\n| `old` | `1` | MIT |\n\nImage attribution.\n"
+        expected = existing.replace("| `old` | `1` | MIT |", "| `new` | `2` | Apache-2.0 |")
+        self.assertEqual(audit.render_inventory(existing, [("new", "2", "Apache-2.0")]), expected)
+
     def test_permissive_alternatives_and_required_terms(self):
         for expression in ("MIT", "MIT/Apache-2.0", "GPL-3.0-only OR MIT", "(MIT OR Apache-2.0) AND BSD-3-Clause", "Apache-2.0 WITH LLVM-exception"):
             self.assertTrue(audit.allowed(expression), expression)

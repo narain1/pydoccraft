@@ -95,6 +95,16 @@ def inventory(metadata):
     return rows
 
 
+def render_inventory(existing, rows):
+    prefix, marker, table = existing.partition("| Crate | Version | License |\n|---|---:|---|\n")
+    if not marker:
+        raise ValueError("license inventory table header is missing")
+    lines = table.splitlines(keepends=True)
+    first_suffix = next((i for i, line in enumerate(lines) if not line.startswith("| ")), len(lines))
+    suffix = "".join(lines[first_suffix:])
+    return prefix + marker + "".join(f"| `{name}` | `{version}` | {license} |\n" for name, version, license in rows) + suffix
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("metadata", type=Path)
@@ -104,10 +114,10 @@ def main():
     root = Path(__file__).resolve().parents[1]
     inventory_path = root / "THIRD_PARTY_LICENSES.md"
     existing = inventory_path.read_text(encoding="utf-8")
-    prefix, marker, _ = existing.partition("| Crate | Version | License |\n|---|---:|---|\n")
-    if not marker:
-        parser.error("license inventory table header is missing")
-    rendered = prefix + marker + "".join(f"| `{name}` | `{version}` | {license} |\n" for name, version, license in rows)
+    try:
+        rendered = render_inventory(existing, rows)
+    except ValueError as error:
+        parser.error(str(error))
     if args.write:
         inventory_path.write_text(rendered, encoding="utf-8")
         (root / "LICENSE-THIRD-PARTY").write_text(rendered, encoding="utf-8")

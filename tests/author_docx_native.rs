@@ -1,7 +1,7 @@
 #![cfg(not(feature = "python"))]
 
 use _core::author_docx::{EditableDocx, ListStart};
-use _core::{api, EngineError};
+use _core::{api, author_docx::error::AuthoringError, EngineError};
 
 #[test]
 fn author_edit_serialize_and_extract_without_python() {
@@ -31,8 +31,11 @@ fn author_edit_serialize_and_extract_without_python() {
     ));
     assert!(matches!(
         doc.cell_text(table, 2, 0),
-        Err(EngineError::PageIndex(_))
+        Err(AuthoringError::Index(_))
     ));
     doc.close();
-    assert!(matches!(doc.revision(), Err(EngineError::Closed(_))));
+    assert!(matches!(
+        doc.revision(),
+        Err(AuthoringError::Engine(EngineError::Closed(_)))
+    ));
 }

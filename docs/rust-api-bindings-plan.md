@@ -1,6 +1,6 @@
 # Rust-first API and language bindings plan
 
-Status: proposed; no API migration or new language binding is implemented by this plan.
+Status: in progress. The initial Python-independent Rust APIs and Linux Go and Node source previews are implemented; the workstreams and complete parity gates below remain open. See the [migration inventory](python-api-migration-inventory.md) and the binding READMEs for current scope and limitations.
 
 ## Goal and scope
 
