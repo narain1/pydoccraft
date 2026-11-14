@@ -93,8 +93,11 @@ pub fn add_uncompressed_size(total: u64, size: u64) -> Result<u64, crate::Engine
 }
 
 pub fn validate_member(name: &str, size: u64, compressed: u64) -> Result<(), crate::EngineError> {
+    let bytes = name.as_bytes();
     if name.starts_with('/')
         || name.starts_with('\\')
+        || name.contains('\0')
+        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
         || name.split(['/', '\\']).any(|part| part == "..")
     {
         return Err(crate::EngineError::UnsafeArchive(

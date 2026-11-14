@@ -351,7 +351,7 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 
 ## EPUB extension profile
 
-EPUB 2/3 extraction and append-only EPUB 3 creation are authorized through the dedicated [EPUB support specification](../epub-support/requirements.md). This format has no ArtCraft engine; the implementation SHALL use the permissively licensed, exact-locked LexePub extraction engine and rbook writer rather than handwritten EPUB package generation. EPUB rendering, conversion, CSS fidelity, SVG authoring, fixed layout, DRM, scripts, and editing existing books remain unsupported.
+EPUB 2/3 extraction and append-only EPUB 3 creation are authorized through the dedicated [EPUB support specification](../epub-support/requirements.md). This format has no ArtCraft engine; the implementation SHALL use the permissively licensed, exact-locked LexePub chapter engine and rbook metadata reader/writer rather than handwritten EPUB package parsing or generation. EPUB rendering, conversion, CSS fidelity, SVG authoring, fixed layout, DRM, scripts, and editing existing books remain unsupported.
 ## 45. Executable usability cookbook
 
 1. Six short workflows SHALL demonstrate a letter, invoice, branded report, authored template filling, PDF assembly and slide previews through the existing public API. Examples SHALL be import-safe, accept explicit output directories and selectable DPI, use ordinary Python value formatting, and require no runtime document executables, downloads or optional dependencies.
@@ -1048,3 +1048,7 @@ Page HTML extraction SHALL return a bounded semantic HTML fragment with escaped 
 The crate SHALL support Python-free builds for the documented Rust detection, extraction, conversion, rendering, retained-session and authoring primitives while preserving the existing Python API and errors. Linux Go and Node source previews SHALL call this core in-process, enforce their documented supported subset and return explicit errors for unavailable operations. These previews are experimental and SHALL NOT claim complete compatibility, stable distribution or cross-platform support. The remaining full migration, package distribution and platform acceptance gates remain open in the Rust-first plan.
 
 The license inventory audit SHALL preserve attribution outside the generated crate table when checking or regenerating both inventory copies. CI SHALL exercise the Python-free Rust suite and existing Go and Node preview tests in addition to the installed Python wheel checks.
+
+## Bounded ZIP directory and EPUB metadata
+
+DOCX, PPTX and EPUB SHALL bound raw ZIP central-directory records, names and expansion before name-keyed archive indexes are constructed, and reject duplicate names or directory-count inconsistencies explicitly. Bounded preflight SHALL retain data-descriptor support. ZIP64, multi-disk, trailing-data and ambiguous-end-record archives are explicitly unsupported until bounded upstream handling is available. EPUB SHALL also reject multiple rootfiles, inconsistent local/central headers and end-record signatures in archive comments before its upstream readers run. OPF metadata SHALL preserve XML-sensitive text and repeated values through the pinned upstream metadata reader.

@@ -1,6 +1,7 @@
 #![recursion_limit = "1024"]
 
 pub mod api;
+mod archive_safety;
 pub mod author_docx;
 pub mod author_epub;
 pub mod author_pdf;

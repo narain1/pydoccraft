@@ -108,8 +108,6 @@ test('EPUB authoring rejects invalid changes without mutation', () => {
   const chapter = book.addChapter('One');
   book.addParagraph(chapter, 'unchanged');
   assert.throws(() => book.setMetadata('changed', 'urn:test', 'en', ['bad\u0001']), /invalid_argument:/);
-  assert.throws(() => book.setMetadata('A & B', 'urn:test', 'en', ['A']), /unsupported:/);
-  assert.throws(() => book.addChapter('A & B'), /unsupported:/);
   assert.throws(() => book.addHeading(chapter, 'bad', 7), /invalid_argument:/);
   assert.throws(() => book.addParagraph(chapter, '\ud800'), /invalid_argument:/);
   assert.throws(() => book.addLink(chapter, 'bad', 'javascript:alert(1)'), /unsupported:/);
@@ -171,4 +169,25 @@ test('extracts normalized JSON and renders PNG', () => {
   assert.throws(() => api.render(input, 'epub', 0, 72), /unsupported:/);
   assert.throws(() => api.extract(Buffer.from('broken'), 'docx'));
   assert.throws(() => api.extract(Buffer.from(new SharedArrayBuffer(8)), 'pdf'), /invalid_argument:/);
+});
+
+test('EPUB metadata preserves XML-sensitive values', () => {
+  const book = api.createEpub();
+  book.setMetadata('A & <B>', 'urn:a&b', 'en', ['C & D', 'E <F>']);
+  book.addChapter('Chapter');
+  const reopened = JSON.parse(api.extract(book.save(), 'epub'));
+  assert.equal(reopened.metadata.title, 'A & <B>');
+  assert.deepEqual(reopened.metadata.authors, ['C & D', 'E <F>']);
+  assert.deepEqual(reopened.metadata.identifiers, ['urn:a&b']);
+  book.close();
+});
+
+test('EPUB chapter titles preserve XML-sensitive characters', () => {
+  const book = api.createEpub();
+  book.setMetadata('Book', 'urn:test', 'en', []);
+  const titles = ['A & B', 'A <B>', 'A > B', 'A &amp; B'];
+  for (const title of titles) book.addChapter(title);
+  const reopened = JSON.parse(api.extract(book.save(), 'epub'));
+  assert.deepEqual(reopened.pages.map(page => page.metadata.chapter_title), titles);
+  book.close();
 });

@@ -174,10 +174,12 @@ Conversion is not pixel-perfect. Font substitution, unsupported PDF constructs, 
 
 ## EPUB (unreleased extraction and creation profile)
 
-The EPUB feature branch detects EPUB 2/3 containers and maps each spine chapter to one compatibility `Page` in reading order. This is a chapter boundary, not physical pagination. Native extraction preserves semantic headings, paragraphs, readable list/quote/preformatted/cell text, inline links, referenced image bytes/alt text and publication metadata through LexePub 0.1.2 after shared archive safety and strict container/package/XHTML XML preflights.
+The EPUB feature branch detects EPUB 2/3 containers and maps each spine chapter to one compatibility `Page` in reading order. This is a chapter boundary, not physical pagination. Native extraction preserves semantic headings, paragraphs, readable list/quote/preformatted/cell text, inline links and referenced image bytes/alt text through LexePub 0.1.2, and publication metadata through the existing rbook 0.7.12 reader, after shared archive safety and strict container/package/XHTML XML preflights.
 
 The same branch adds `doc_ex.new("epub")` through rbook 0.7.12 for bounded semantic metadata, chapters, headings, paragraphs, inert links and signature-checked PNG/JPEG/GIF images. Created bytes reopen through the independent extraction path. Authored SVG is rejected because arbitrary SVG cannot be guaranteed inert.
 
 LexePub still eagerly materializes its complete CSS/chapter AST before the adapter's final normalized-output check, and rbook writes through an in-memory vector. The public profile applies source ZIP/input limits, strict XML checks, 64 MiB content/media ceilings, 16 MiB per image, and conservative/actual 128 MiB output checks, but does not claim hard intermediate-allocation ceilings without upstream streaming APIs.
 
 Rendering, fixed-layout pagination, CSS fidelity, scripts, SVG authoring, media overlays, editing existing EPUB files and conversion are intentionally unsupported. Encrypted or DRM-protected resources fail explicitly. See `.kiro/specs/epub-support/` for requirements and deferred work.
+
+ZIP safety preflight for DOCX, PPTX and EPUB bounds raw central-directory entries and rejects duplicate names and malformed directories before constructing archive indexes. ZIP64, multi-disk archives, ZIPs with trailing data, and archives with ambiguous end records are explicitly unsupported. EPUB additionally rejects multiple package rootfiles, inconsistent local/central headers and end-record signatures in the ZIP comment. ZIP data descriptors remain supported.
