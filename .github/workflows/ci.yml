@@ -114,3 +114,9 @@ jobs:
           cargo build --locked --manifest-path bindings/node/Cargo.toml
           cp "$CARGO_TARGET_DIR/debug/libdoccraft_node_preview.so" bindings/node/doccraft.node
           node --test bindings/node/test/*.test.js
+
+      - name: Audit Node preview licenses and attribution
+        run: |
+          cargo metadata --locked --format-version 1 > "$RUNNER_TEMP/root-metadata.json"
+          cargo metadata --locked --format-version 1 --manifest-path bindings/node/Cargo.toml > "$RUNNER_TEMP/node-metadata.json"
+          python3 tools/audit_binding_licenses.py "$RUNNER_TEMP/root-metadata.json" "$RUNNER_TEMP/node-metadata.json"

@@ -2,11 +2,16 @@
 from copy import deepcopy
 import importlib.util
 from pathlib import Path
+import sys
 import unittest
 
 SPEC = importlib.util.spec_from_file_location("audit_licenses", Path(__file__).resolve().parents[1] / "tools/audit_licenses.py")
 audit = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(audit)
+sys.modules["audit_licenses"] = audit
+BINDING_SPEC = importlib.util.spec_from_file_location("audit_binding_licenses", Path(__file__).resolve().parents[1] / "tools/audit_binding_licenses.py")
+binding_audit = importlib.util.module_from_spec(BINDING_SPEC)
+BINDING_SPEC.loader.exec_module(binding_audit)
 
 
 class LicenseAuditTests(unittest.TestCase):
@@ -42,3 +47,16 @@ class LicenseAuditTests(unittest.TestCase):
         metadata["packages"][2]["license"] = "AGPL-3.0-only"
         with self.assertRaisesRegex(ValueError, "prohibited licenses"):
             audit.inventory(metadata)
+
+    def test_binding_graph_requires_root_attribution(self):
+        def graph(root, dependency):
+            return {
+                "packages": [{"id": name, "name": name, "version": "1", "license": "MIT"} for name in (root, dependency)],
+                "resolve": {"root": root, "nodes": [
+                    {"id": root, "deps": [{"pkg": dependency, "dep_kinds": [{"kind": None}]}]},
+                    {"id": dependency, "deps": []},
+                ]},
+            }
+        root = graph("core", "shared")
+        self.assertEqual(binding_audit.missing_attributions(root, graph("binding", "shared")), [])
+        self.assertEqual(binding_audit.missing_attributions(root, graph("binding", "missing")), [("missing", "1", "MIT")])
