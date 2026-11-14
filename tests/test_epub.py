@@ -50,6 +50,23 @@ def rewrite_epub(data: bytes, updates: dict[str, bytes | str]) -> bytes:
 
 
 class EpubTests(unittest.TestCase):
+    def test_xml_sensitive_metadata_roundtrips(self) -> None:
+        with doc_ex.new("epub") as book:
+            book.set_metadata(title="A & <B>", identifier="urn:a&b", language="en", authors=["A & B", "C <D>"])
+            book.add_chapter("Chapter").add_paragraph("Text")
+            data = book.to_bytes()
+        with doc_ex.open(data) as document:
+            self.assertEqual(document.metadata["title"], "A & <B>")
+            self.assertEqual(document.metadata["identifiers"], ["urn:a&b"])
+            self.assertEqual(document.metadata["authors"], ["A & B", "C <D>"])
+
+    def test_multiple_rootfiles_are_rejected_before_metadata_parsing(self) -> None:
+        data = rewrite_epub(epub_fixture(), {
+            "META-INF/container.xml": '<container><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/><rootfile full-path="other" media-type="other/type"/></rootfiles></container>'
+        })
+        with self.assertRaises(doc_ex.UnsupportedFormatError):
+            doc_ex.open(data)
+
     def test_bytes_path_metadata_order_and_owned_values(self) -> None:
         data = epub_fixture()
         with doc_ex.open(data) as document:

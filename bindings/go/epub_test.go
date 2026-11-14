@@ -181,17 +181,13 @@ func TestEPUBCloseConcurrent(t *testing.T) {
 	}
 }
 
-func TestEPUBRejectSensitiveMetadataAndChapterTitles(t *testing.T) {
+func TestEPUBRejectSensitiveChapterTitles(t *testing.T) {
 	e := epubFixture(t)
 	for _, character := range []string{"&", "<", ">"} {
 		calls := []struct {
 			name string
 			call func() error
 		}{
-			{"title", func() error { return e.SetMetadata("bad"+character, "urn:test:123", "en", []string{"Author"}) }},
-			{"identifier", func() error { return e.SetMetadata("Title more", "urn:test:"+character, "en", []string{"Author"}) }},
-			{"language", func() error { return e.SetMetadata("Title more", "urn:test:123", "en"+character, []string{"Author"}) }},
-			{"author", func() error { return e.SetMetadata("Title more", "urn:test:123", "en", []string{"Author" + character}) }},
 			{"chapter", func() error { _, err := e.AddChapter("bad" + character); return err }},
 		}
 		for _, tc := range calls {
@@ -235,14 +231,10 @@ func TestEPUBRejectSensitiveMetadataAndChapterTitles(t *testing.T) {
 	}
 }
 
-func TestEPUBNativeMetadataGuard(t *testing.T) {
+func TestEPUBNativeChapterGuard(t *testing.T) {
 	e := epubFixture(t)
 	for _, c := range []string{"&", "<", ">"} {
 		for _, v := range []map[string]any{
-			{"op": "metadata", "title": "bad" + c, "identifier": "id", "language": "en", "authors": []string{}},
-			{"op": "metadata", "title": "title", "identifier": "id" + c, "language": "en", "authors": []string{}},
-			{"op": "metadata", "title": "title", "identifier": "id", "language": "en" + c, "authors": []string{}},
-			{"op": "metadata", "title": "title", "identifier": "id", "language": "en", "authors": []string{"bad" + c}},
 			{"op": "chapter", "text": "bad" + c},
 		} {
 			_, err := e.command(v, nil)
@@ -266,5 +258,33 @@ func TestEPUBNativeMetadataGuard(t *testing.T) {
 	}
 	if !bytes.Contains(payload, []byte("Title more")) || !bytes.Contains(payload, []byte("urn:test:123")) {
 		t.Fatalf("metadata mutated: %s", payload)
+	}
+}
+
+func TestEPUBSensitiveMetadataRoundTrip(t *testing.T) {
+	e := epubFixture(t)
+	if err := e.SetMetadata("A & <B>", "urn:a&b", "en", []string{"C & D", "E <F>"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := e.Save()
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := Extract(data, "epub", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Metadata struct {
+			Title       string   `json:"title"`
+			Authors     []string `json:"authors"`
+			Identifiers []string `json:"identifiers"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Metadata.Title != "A & <B>" || len(got.Metadata.Authors) != 2 || got.Metadata.Authors[0] != "C & D" || got.Metadata.Authors[1] != "E <F>" || len(got.Metadata.Identifiers) != 1 || got.Metadata.Identifiers[0] != "urn:a&b" {
+		t.Fatalf("corrupted metadata: %s", payload)
 	}
 }
