@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 	"unicode/utf8"
 )
@@ -90,16 +89,6 @@ func epubText(s string, max int) error {
 	return nil
 }
 
-// The upstream chapter-title reader can truncate XML-sensitive titles.
-func epubChapterTitle(s string, max int) error {
-	if err := epubText(s, max); err != nil {
-		return err
-	}
-	if strings.ContainsAny(s, "&<>") {
-		return &Error{2, "EPUB chapter titles cannot contain &, < or > in this preview"}
-	}
-	return nil
-}
 func (e *EPUB) command(v map[string]any, image []byte) ([]byte, error) {
 	if e == nil {
 		return nil, &Error{10, "EPUB closed"}
@@ -156,7 +145,7 @@ func (e *EPUB) SetMetadata(title, identifier, language string, authors []string)
 
 // AddChapter appends a chapter and returns its zero-based index.
 func (e *EPUB) AddChapter(title string) (int, error) {
-	if err := epubChapterTitle(title, 65536); err != nil {
+	if err := epubText(title, 65536); err != nil {
 		return 0, err
 	}
 	b, err := e.command(map[string]any{"op": "chapter", "text": title}, nil)

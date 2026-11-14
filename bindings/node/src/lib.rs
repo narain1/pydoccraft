@@ -400,13 +400,6 @@ unsafe fn authors(env: Env, value: Value) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
-fn safe_epub_label(value: &str) -> Result<(), String> {
-    if value.contains(['&', '<', '>']) {
-        return Err("unsupported:XML-sensitive EPUB chapter titles cannot round-trip reliably".into());
-    }
-    Ok(())
-}
-
 unsafe extern "C" fn epub_op(env: Env, info: Info) -> Value {
     let result = std::panic::catch_unwind(|| -> Result<Value, String> {
         let a = args(env, info, 6).map_err(str::to_owned)?;
@@ -442,10 +435,6 @@ unsafe extern "C" fn epub_op(env: Env, info: Info) -> Value {
             }
             _ => return Err("invalid_argument:unknown EPUB operation".into()),
         };
-        match &op {
-            EpubOp::Chapter(title) => safe_epub_label(title)?,
-            _ => {}
-        }
         let handle = epub_handle(env, a[0])?;
         let mut book = handle.lock().map_err(|_| "native_failure:EPUB lock poisoned")?;
         let mut out = ptr::null_mut();

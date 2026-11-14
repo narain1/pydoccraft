@@ -92,7 +92,7 @@ Close each book explicitly and do not copy its Go struct. Calls serialize with
 close. Native limits include 10,000 chapters and images, 64 MiB each for content
 and total image data, 16 MiB per image and 128 MiB output; this Go binding also
 limits aggregate metadata to 1 MiB. The API does not fetch links or image data.
-As a conservative preview restriction, chapter titles reject `&`, `<` and `>` because the upstream chapter-title reader can truncate them. Metadata, text, link labels and image alt text are not subject to this restriction.
+Metadata and chapter titles support XML-sensitive characters; chapter display titles are inferred from the chapter content by the upstream reader.
 
 ### PDF authoring
 
