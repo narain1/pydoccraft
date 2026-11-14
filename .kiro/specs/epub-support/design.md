@@ -35,5 +35,3 @@ The adapter rejects XML-illegal text, escapes text/attributes, accepts only sign
 ## Deferred work
 
 The completed profile adds semantic extraction and append-only creation. Navigation beyond extracted hyperlinks, CSS, SVG authoring, media overlays, fixed-layout pagination/rendering, conversion, and editing existing EPUB files require separate acceptance criteria.
-
-The adapter uses the already-pinned rbook reader for OPF metadata after the archive, container, package and XHTML preflight. LexePub 0.1.2 discards XML entity events in metadata. To ensure both readers use the validated package, containers with multiple rootfiles are rejected explicitly. This adds a second eager parse and does not establish a hard intermediate-memory ceiling. LexePub remains the chapter and semantic-content reader.

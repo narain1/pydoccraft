@@ -35,8 +35,6 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
     crate::ooxml::preflight(data)?;
     validate_container(data)?;
 
-    let mut values = read_package_metadata(data)?;
-
     let mut book = lexepub::LexEpub::from_sync_reader(Cursor::new(data.to_vec()))
         .map_err(|error| EngineError::Malformed(format!("invalid EPUB: {error}")))?;
     let metadata = block_on(book.get_metadata())
@@ -112,7 +110,18 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
         });
     }
 
+    let mut values = Map::new();
+    insert(&mut values, "title", metadata.title);
+    insert(&mut values, "description", metadata.description);
+    insert(&mut values, "publisher", metadata.publisher);
+    insert(&mut values, "publication_date", metadata.publication_date);
+    insert(&mut values, "rights", metadata.rights);
     insert(&mut values, "epub_version", metadata.version);
+    values.insert("authors".into(), json!(metadata.authors));
+    values.insert("languages".into(), json!(metadata.languages));
+    values.insert("subjects".into(), json!(metadata.subjects));
+    values.insert("identifiers".into(), json!(metadata.identifiers));
+    values.insert("contributors".into(), json!(metadata.contributors));
     values.insert("chapter_count".into(), json!(expected));
     values.insert("chapter_mapping".into(), json!("spine_chapter"));
 
@@ -122,43 +131,6 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
         pages,
         stories: Vec::new(),
     })
-}
-
-fn read_package_metadata(data: &[u8]) -> Result<Map<String, Value>, EngineError> {
-    // LexePub 0.1.2 drops XML entity events in OPF metadata. Read this
-    // bounded package through the existing rbook engine so character data
-    // and repeated metadata values are retained without a local OPF parser.
-    let metadata_book = rbook::Epub::options()
-        .skip_toc(true)
-        .skip_manifest(true)
-        .skip_spine(true)
-        .read(Cursor::new(data.to_vec()))
-        .map_err(|error| EngineError::Malformed(format!("invalid EPUB metadata: {error}")))?;
-
-    let mut values = Map::new();
-    let native_metadata = metadata_book.metadata();
-    let values_for = |name: &str| -> Vec<String> {
-        native_metadata
-            .by_property(name)
-            .map(|value| value.value().to_owned())
-            .filter(|value| !value.trim().is_empty())
-            .collect()
-    };
-    insert(&mut values, "title", values_for("dc:title").pop());
-    insert(
-        &mut values,
-        "description",
-        values_for("dc:description").pop(),
-    );
-    insert(&mut values, "publisher", values_for("dc:publisher").pop());
-    insert(&mut values, "publication_date", values_for("dc:date").pop());
-    insert(&mut values, "rights", values_for("dc:rights").pop());
-    values.insert("authors".into(), json!(values_for("dc:creator")));
-    values.insert("languages".into(), json!(values_for("dc:language")));
-    values.insert("subjects".into(), json!(values_for("dc:subject")));
-    values.insert("identifiers".into(), json!(values_for("dc:identifier")));
-    values.insert("contributors".into(), json!(values_for("dc:contributor")));
-    Ok(values)
 }
 
 fn validate_xhtml(data: &[u8]) -> Result<(), EngineError> {
@@ -500,19 +472,12 @@ fn container_rootfile(data: &[u8]) -> Result<String, EngineError> {
     let mut reader = quick_xml::Reader::from_reader(data);
     let mut buffer = Vec::new();
     let mut rootfile = None;
-    let mut rootfile_count = 0usize;
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(quick_xml::events::Event::Start(event))
             | Ok(quick_xml::events::Event::Empty(event))
                 if event.local_name().as_ref() == b"rootfile" =>
             {
-                rootfile_count += 1;
-                if rootfile_count > 1 {
-                    return Err(EngineError::Unsupported(
-                        "EPUB containers with multiple rootfiles are not supported".into(),
-                    ));
-                }
                 let mut path = None;
                 let mut media_type = None;
                 for attribute in event.attributes() {

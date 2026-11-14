@@ -177,7 +177,7 @@ fn epub_string<'a>(value: &'a serde_json::Value, key: &str, limit: usize) -> Res
     Ok(s)
 }
 fn epub_safe(s: &str) -> Result<&str, EngineError> {
-    if s.contains(['&', '<', '>']) { return Err(EngineError::Unsupported("EPUB chapter titles cannot contain &, < or > in this preview".into())); }
+    if s.contains(['&', '<', '>']) { return Err(EngineError::Unsupported("EPUB metadata and chapter titles cannot contain &, < or > in this preview".into())); }
     Ok(s)
 }
 fn epub_index(value: &serde_json::Value) -> Result<usize, EngineError> {
@@ -204,9 +204,9 @@ pub unsafe extern "C" fn pydoccraft_epub_command(book: *mut EditableEpub, comman
                 for author in authors {
                     let s = author.as_str().ok_or_else(|| EngineError::InvalidArgument("invalid EPUB author".into()))?;
                     if s.len() > 65_536 { return Err(EngineError::ResourceLimit("EPUB author too large".into())); }
-                    names.push(s.to_owned());
+                    names.push(epub_safe(s)?.to_owned());
                 }
-                book.set_metadata(epub_string(&v,"title",65_536)?.into(), epub_string(&v,"identifier",4096)?.into(), epub_string(&v,"language",128)?.into(), names)?;
+                book.set_metadata(epub_safe(epub_string(&v,"title",65_536)?)?.into(), epub_safe(epub_string(&v,"identifier",4096)?)?.into(), epub_safe(epub_string(&v,"language",128)?)?.into(), names)?;
                 Ok(Vec::new())
             },
             "chapter" => Ok(book.add_chapter(epub_safe(epub_string(&v,"text",65_536)?)?.into())?.to_string().into_bytes()),

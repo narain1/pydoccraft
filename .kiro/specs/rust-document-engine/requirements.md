@@ -351,7 +351,7 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 
 ## EPUB extension profile
 
-EPUB 2/3 extraction and append-only EPUB 3 creation are authorized through the dedicated [EPUB support specification](../epub-support/requirements.md). This format has no ArtCraft engine; the implementation SHALL use the permissively licensed, exact-locked LexePub chapter engine and rbook metadata reader/writer rather than handwritten EPUB package parsing or generation. EPUB rendering, conversion, CSS fidelity, SVG authoring, fixed layout, DRM, scripts, and editing existing books remain unsupported.
+EPUB 2/3 extraction and append-only EPUB 3 creation are authorized through the dedicated [EPUB support specification](../epub-support/requirements.md). This format has no ArtCraft engine; the implementation SHALL use the permissively licensed, exact-locked LexePub extraction engine and rbook writer rather than handwritten EPUB package generation. EPUB rendering, conversion, CSS fidelity, SVG authoring, fixed layout, DRM, scripts, and editing existing books remain unsupported.
 ## 45. Executable usability cookbook
 
 1. Six short workflows SHALL demonstrate a letter, invoice, branded report, authored template filling, PDF assembly and slide previews through the existing public API. Examples SHALL be import-safe, accept explicit output directories and selectable DPI, use ordinary Python value formatting, and require no runtime document executables, downloads or optional dependencies.

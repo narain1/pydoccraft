@@ -63,7 +63,3 @@ The historical results above cover the original branch, not this integration. Th
 - `cargo clippy --locked --all-targets -- -D warnings` reports 40 errors on Rust 1.99 (`chunks_exact` and needless-borrow lints) in `author_pdf.rs`, `author_docx.rs`, `author_pptx.rs`, `rendering.rs` and the `*_proof.rs` files. None are in EPUB files, and the 1.95 floor has not been rerun.
 - Release wheel built with `maturin build --release --locked`: 17,784,893 bytes; extension 37,073,040 bytes. The installed-wheel Python suite passed 589 tests, including the 7 EPUB tests.
 - Not yet run: the 1.95 Clippy floor, a clean Python 3.11 environment, and the CI platforms.
-
-## Metadata entity correction (in progress)
-
-The LexePub metadata reader silently split `A & B` authors and returned only `B` as the title. The existing rbook upstream reader returned the original metadata for a generated EPUB and the existing EPUB 2/3 fixtures. The adapter now uses it for preflighted package metadata and rejects multiple rootfiles before either reader. This adds an eager parse; hard intermediate allocation ceilings remain an upstream limitation. Focused Linux Rust 1.95 Python-free EPUB tests passed (3), Go 1.24 race tests passed (15), Node 20 tests passed (16), and a clean CPython 3.13 installed release wheel passed all 9 EPUB tests. Full Rust, installed-wheel corpus and current-head CI remain pending.

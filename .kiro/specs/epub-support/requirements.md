@@ -34,5 +34,3 @@
 1. Tests SHALL generate EPUB fixtures locally without external executables or network access.
 2. Tests SHALL cover path/bytes detection, metadata, chapter order, malformed/missing resources, archive safety, encrypted-resource rejection, lifecycle ownership, unsupported rendering, and unsupported conversions.
 3. Rust formatting/tests/Clippy and installed-wheel tests SHALL pass with the committed lockfile and audited license inventory.
-
-- OPF metadata SHALL retain XML-sensitive characters and repeated values using an upstream reader after bounded archive and XML preflight. EPUB containers with multiple rootfiles SHALL fail explicitly while the metadata readers cannot safely select a common package.
