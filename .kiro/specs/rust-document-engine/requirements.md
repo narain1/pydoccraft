@@ -1042,3 +1042,9 @@ Existing authoring properties must describe supported input types and None retur
 148.2 Complete471 native, unchanged586 installed Python, strict typing, attribution/license/citation audit, artifact size/identity and independent focused review before current-head CI/manual delivery. The original146468/585 artifact and later153 source integration remain distinct; no broad SLIDE1/U11 closure is implied.
 
 Page HTML extraction SHALL return a bounded semantic HTML fragment with escaped text, structured tables and embedded referenced images; it SHALL not claim layout fidelity.
+
+## Rust-first migration: initial slice
+
+The crate SHALL support Python-free builds for the documented Rust detection, extraction, conversion, rendering, retained-session and authoring primitives while preserving the existing Python API and errors. Linux Go and Node source previews SHALL call this core in-process, enforce their documented supported subset and return explicit errors for unavailable operations. These previews are experimental and SHALL NOT claim complete compatibility, stable distribution or cross-platform support. The remaining full migration, package distribution and platform acceptance gates remain open in the Rust-first plan.
+
+The license inventory audit SHALL preserve attribution outside the generated crate table when checking or regenerating both inventory copies. CI SHALL exercise the Python-free Rust suite and existing Go and Node preview tests in addition to the installed Python wheel checks.

@@ -962,3 +962,9 @@ The native contribution bounds the resulting presentation to10,000 slides/100,00
 The dedicated package upgrade links that lower-level model capability without admitting a Python copy method. Its single native regression exercises real model construction, source/copy semantic tables, notes, image paint, connector and fixed-link identities, readback, missing-source atomicity and actual72/144DPI rendering/PDF extraction. An initial fixture wrongly demanded a resolved label for overlapping shape and run links; existing PDF ambiguity policy intentionally returns unresolved_geometry. The corrected fixture compares every link field exactly before/source/copy (normalizing only owning page index), retains exact PPTX labels and PDF text multiplicity, and separately proves a nonoverlapping URI-only resolved label. No production link logic changed.
 
 Page.get_text("html") formats owned page blocks as a semantic fragment, reusing the structured table formatter and embedding bounded image data. Unsafe link schemes are rendered as text.
+
+## Rust-first migration: initial slice
+
+The root crate exposes typed Rust dispatch, retained render sessions and format authoring primitives with the optional `python` feature disabled. The existing Python facade delegates through the same dispatch while retaining compatibility logic that has not yet migrated. Experimental Linux Go/cgo and Node-API adapters call the Python-free core and enforce their documented narrower feature profiles. Their current source builds are neither packaged nor cross-platform releases; full object, formatting, ownership, error and distribution parity remains in the Rust-first plan.
+
+The license inventory generator replaces only the crate rows after the table header and preserves subsequent attribution text. A Linux CI job builds and tests the Python-free core and both source previews independently of the Python-wheel job.

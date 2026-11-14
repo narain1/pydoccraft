@@ -1,5 +1,6 @@
-//! Rust-facing document operations. This API is an initial migration slice;
-//! authoring and document sessions are not yet independent of Python.
+//! Rust-facing document operations. This is an initial migration slice;
+//! Python-free session and authoring primitives are exposed separately, while
+//! full compatibility and cross-language parity remain in progress.
 
 use crate::{conversion, docx, epub, limits, ooxml, pdf, pptx, rendering, EngineError};
 
