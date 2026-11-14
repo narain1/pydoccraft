@@ -77,8 +77,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      CARGO_PROFILE_DEV_DEBUG: 0
-      CARGO_TARGET_DIR: ${{ runner.temp }}/pydoccraft-go-target
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -94,10 +93,13 @@ jobs:
           node --version
 
       - name: Test Python-free Rust API
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/pydoccraft-go-target
         run: cargo test --locked --no-default-features
 
       - name: Build and test Go preview
         env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/pydoccraft-go-target
           PYDOCCRAFT_GO_LIB_DIR: ${{ runner.temp }}/pydoccraft-go-lib
           GOPROXY: "off"
         run: |
