@@ -55,7 +55,7 @@ book.close(); // idempotent; also finalized when unreachable
 title, identifier, language and at least one chapter. Text and link targets are
 validated by the core; links are restricted to HTTP(S), mailto and safe
 fragments. Images accept PNG, JPEG and GIF; SVG is rejected. Image bytes must
-have non-shared backing storage. Metadata and chapter titles support XML-sensitive characters; chapter display titles are inferred from chapter content by the upstream reader. Core authoring limits
+have non-shared backing storage. Because the upstream chapter-title reader can truncate XML-sensitive titles, this preview rejects `&`, `<` and `>` in chapter titles. Metadata and body text support these characters. Core authoring limits
 include 10,000 chapters/images, 64 MiB of body text, 16 MiB per image, 64 MiB
 of images, and 128 MiB output; this binding additionally limits aggregate author
 names to 1 MiB. `copy()` duplicates the bounded document and may use substantial
