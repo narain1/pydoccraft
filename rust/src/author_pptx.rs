@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 use std::sync::Arc;
 
+use crate::EngineError;
 use deckcraft_model::style::PictureFill;
 use deckcraft_model::text::{
     Action, Align, Anchor, AutoFit, Hyperlink, ListStyle, ParaProps, RunProps, Spacing, Strike,
@@ -12,10 +13,47 @@ use deckcraft_model::{
     Background, ColorBase, ColorRef, Fill, Geom, LayoutType, Line, Presentation, Rgba, Shape,
     ShapeId, ShapeKind, Size, SlideId, Table, Theme, Xfrm,
 };
-use pyo3::exceptions::{PyIndexError, PyValueError};
-use pyo3::prelude::*;
 
-use crate::{DocExNativeError, EngineError};
+/// Errors from presentation authoring, independent of any language binding.
+#[derive(Debug, thiserror::Error)]
+pub enum PptxAuthoringError {
+    #[error("{0}")]
+    InvalidArgument(String),
+    #[error("{0}")]
+    Index(String),
+    #[error(transparent)]
+    Engine(#[from] EngineError),
+}
+
+type PyResult<T> = Result<T, PptxAuthoringError>;
+type PyErr = PptxAuthoringError;
+
+// Keep validation sites concise while making them independent of Python.
+struct PyValueError;
+impl PyValueError {
+    fn new_err(message: impl Into<String>) -> PptxAuthoringError {
+        PptxAuthoringError::InvalidArgument(message.into())
+    }
+}
+struct PyIndexError;
+impl PyIndexError {
+    fn new_err(message: impl Into<String>) -> PptxAuthoringError {
+        PptxAuthoringError::Index(message.into())
+    }
+}
+
+#[cfg(feature = "python")]
+impl From<PptxAuthoringError> for pyo3::PyErr {
+    fn from(error: PptxAuthoringError) -> Self {
+        match error {
+            PptxAuthoringError::InvalidArgument(message) => {
+                pyo3::exceptions::PyValueError::new_err(message)
+            }
+            PptxAuthoringError::Index(message) => pyo3::exceptions::PyIndexError::new_err(message),
+            PptxAuthoringError::Engine(error) => error.into(),
+        }
+    }
+}
 
 const MAX_SLIDES: usize = 10_000;
 const MAX_SHAPES: usize = 100_000;
@@ -33,20 +71,19 @@ const MAX_TABS: usize = 32;
 const MAX_TAB_POSITION: f64 = 2_147_483_647.0;
 const MAX_TAB_WORK: usize = 2_000_000;
 
-type TextFormat = (
+pub(crate) type TextFormat = (
     Option<f64>,
     Option<(u8, u8, u8)>,
     Option<bool>,
     Option<bool>,
     Option<String>,
 );
-type Stroke = Option<((u8, u8, u8), f64)>;
-type LinkValue = Option<(Option<String>, Option<u32>, String)>;
+pub(crate) type Stroke = Option<((u8, u8, u8), f64)>;
+pub(crate) type LinkValue = Option<(Option<String>, Option<u32>, String)>;
 // Canonical cell coordinates, paragraph ordinal, grid generation, body generation.
-type CellTarget = (usize, usize, usize, u64, u64);
-type CellParagraphInfo = (usize, usize, u64, u64, usize);
+pub(crate) type CellTarget = (usize, usize, usize, u64, u64);
+pub(crate) type CellParagraphInfo = (usize, usize, u64, u64, usize);
 
-#[pyclass(module = "doc_ex._core")]
 #[derive(Clone)]
 pub struct EditablePptx {
     presentation: Option<Presentation>,
@@ -110,7 +147,7 @@ impl EditablePptx {
     fn document(&self) -> PyResult<&Presentation> {
         self.presentation
             .as_ref()
-            .ok_or_else(|| DocExNativeError::new_err("closed:document is closed"))
+            .ok_or_else(|| EngineError::Closed("document is closed".into()).into())
     }
 
     fn mutate<T>(
@@ -317,10 +354,7 @@ impl EditablePptx {
     }
 }
 
-#[pymethods]
 impl EditablePptx {
-    #[new]
-    #[pyo3(signature = (width=720.0, height=540.0))]
     pub fn new(width: f64, height: f64) -> PyResult<Self> {
         dimensions(width, height)?;
         let presentation = deckcraft_model::defaults::blank_presentation(
@@ -468,7 +502,6 @@ impl EditablePptx {
         Ok(output)
     }
 
-    #[pyo3(signature = (layout="blank"))]
     pub fn add_slide(&mut self, layout: &str) -> PyResult<usize> {
         let document = self.document()?;
         if document.slides.len() >= MAX_SLIDES {
@@ -551,7 +584,6 @@ impl EditablePptx {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (slide, text, x, y, width, height, size=18.0))]
     pub fn add_text(
         &mut self,
         slide: usize,
@@ -692,7 +724,6 @@ impl EditablePptx {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (slide, kind, x, y, width, height, fill=None, stroke=None, stroke_width=1.0))]
     pub fn add_shape(
         &mut self,
         slide: usize,
@@ -831,7 +862,6 @@ impl EditablePptx {
         rgb_fill(fill)
     }
 
-    #[pyo3(signature = (slide, id, color=None))]
     pub fn set_shape_fill(
         &mut self,
         slide: usize,
@@ -870,7 +900,6 @@ impl EditablePptx {
         }
     }
 
-    #[pyo3(signature = (slide, id, color=None, width=1.0))]
     pub fn set_shape_stroke(
         &mut self,
         slide: usize,
@@ -914,7 +943,6 @@ impl EditablePptx {
         }
     }
 
-    #[pyo3(signature = (slide, id, cell=None))]
     pub fn shape_text(&self, slide: usize, id: u32, cell: Option<CellTarget>) -> PyResult<String> {
         let body = self.target_body(slide, id, cell)?;
         Ok(match cell {
@@ -923,7 +951,6 @@ impl EditablePptx {
         })
     }
 
-    #[pyo3(signature = (slide, id, start, end, cell=None))]
     pub fn text_range(
         &self,
         slide: usize,
@@ -946,7 +973,6 @@ impl EditablePptx {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (slide, id, start, end, revision, cell=None))]
     pub fn range_text(
         &self,
         slide: usize,
@@ -960,7 +986,6 @@ impl EditablePptx {
         Ok(self.text_range(slide, id, start, end, cell)?.0)
     }
 
-    #[pyo3(signature = (slide, id, text, patch="{}", cell=None))]
     pub fn add_run_patch(
         &mut self,
         slide: usize,
@@ -996,7 +1021,6 @@ impl EditablePptx {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (slide, id, start, end, revision, text, cell=None))]
     pub fn replace_range(
         &mut self,
         slide: usize,
@@ -1029,7 +1053,6 @@ impl EditablePptx {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (slide, id, start, end, revision, patch, cell=None))]
     pub fn format_range_patch(
         &mut self,
         slide: usize,
@@ -1061,7 +1084,6 @@ impl EditablePptx {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (slide, id, start, end, revision, allow_mixed=false, cell=None))]
     pub fn range_link(
         &self,
         slide: usize,
@@ -1105,7 +1127,6 @@ impl EditablePptx {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (slide, id, start, end, revision, url=None, target_slide=None, tooltip="", cell=None))]
     pub fn set_range_link(
         &mut self,
         slide: usize,
@@ -1155,7 +1176,6 @@ impl EditablePptx {
         link_value(self.shape(slide, id)?.click.as_ref())
     }
 
-    #[pyo3(signature = (slide, id, url=None, target_slide=None, tooltip=""))]
     pub fn set_shape_link(
         &mut self,
         slide: usize,
@@ -1292,7 +1312,6 @@ impl EditablePptx {
         Ok((Some(row.height), "at_least"))
     }
 
-    #[pyo3(signature = (slide, id, row, height=None, rule="auto"))]
     pub fn set_row_height(
         &mut self,
         slide: usize,
@@ -1333,7 +1352,6 @@ impl EditablePptx {
         Ok(found.flatten())
     }
 
-    #[pyo3(signature = (slide, id, color="#000000", width=0.5))]
     pub fn set_table_borders(
         &mut self,
         slide: usize,
@@ -1385,7 +1403,6 @@ impl EditablePptx {
         Ok((top, right, bottom, left))
     }
 
-    #[pyo3(signature = (slide, id, row, col, margins=None))]
     pub fn set_cell_margins(
         &mut self,
         slide: usize,
@@ -1445,7 +1462,6 @@ impl EditablePptx {
         }))
     }
 
-    #[pyo3(signature = (slide, id, row, col, alignment=None))]
     pub fn set_cell_alignment(
         &mut self,
         slide: usize,
@@ -1496,7 +1512,6 @@ impl EditablePptx {
         })
     }
 
-    #[pyo3(signature = (slide, id, row, col, columns=None))]
     pub fn split_cell(
         &mut self,
         slide: usize,
@@ -1878,7 +1893,6 @@ impl EditablePptx {
         })
     }
 
-    #[pyo3(signature = (slide, id, cell, alignment=None))]
     pub fn set_cell_paragraph_alignment(
         &mut self,
         slide: usize,
@@ -2044,7 +2058,6 @@ impl EditablePptx {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (slide, id, size=None, color=None, bold=None, italic=None, font=None))]
     pub fn set_text_format(
         &mut self,
         slide: usize,
@@ -2156,7 +2169,6 @@ impl EditablePptx {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (slide, rows, x, y, width, height, size=18.0))]
     pub fn add_table(
         &mut self,
         slide: usize,
@@ -2223,7 +2235,6 @@ impl EditablePptx {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (slide, data, x, y, width, height, alt=""))]
     pub fn add_image(
         &mut self,
         slide: usize,
@@ -2367,7 +2378,6 @@ impl EditablePptx {
         Ok((transform.flip_h, transform.flip_v))
     }
 
-    #[pyo3(signature = (slide,id,flip_h=None,flip_v=None))]
     pub fn set_picture_flips(
         &mut self,
         slide: usize,
@@ -3861,7 +3871,6 @@ fn validate_png(data: &[u8]) -> PyResult<()> {
 mod tests {
     #[test]
     fn cell_paragraph_targets_share_ranges_and_stale_after_reset_or_grid_changes() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         author.add_slide("blank").unwrap();
@@ -3933,7 +3942,6 @@ mod tests {
 
     #[test]
     fn cell_paragraph_invalid_text_and_budgets_reject_before_mutation() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         let id = author
@@ -3996,7 +4004,6 @@ mod tests {
 
     #[test]
     fn cell_paragraph_links_and_alignment_preserve_neighboring_paragraphs() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         author.add_slide("blank").unwrap();
@@ -4109,7 +4116,6 @@ mod tests {
 
     #[test]
     fn picture_transforms_use_native_crop_then_flips_and_clockwise_rotation() {
-        pyo3::prepare_freethreaded_python();
         let image = picture_quadrants();
         let colors = [
             [255, 0, 0, 255],
@@ -4179,7 +4185,6 @@ mod tests {
 
     #[test]
     fn picture_replacement_preserves_identity_properties_links_and_shared_sources() {
-        pyo3::prepare_freethreaded_python();
         let old = picture_fixture(0, [255, 0, 0]);
         let replacement = picture_fixture(0, [0, 255, 0]);
         let mut author = EditablePptx::new(300.0, 300.0).unwrap();
@@ -4239,7 +4244,6 @@ mod tests {
 
     #[test]
     fn picture_invalid_updates_preserve_model_counters_and_revision() {
-        pyo3::prepare_freethreaded_python();
         let png = picture_fixture(0, [255, 0, 0]);
         let mut author = EditablePptx::new(200.0, 200.0).unwrap();
         author.add_slide("blank").unwrap();
@@ -4303,7 +4307,6 @@ mod tests {
 
     #[test]
     fn picture_live_media_budget_allows_dedup_and_reclaims_last_replaced_source() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(200.0, 200.0).unwrap();
         author.add_slide("blank").unwrap();
         let mut ids = Vec::new();
@@ -4351,7 +4354,6 @@ mod tests {
 
     #[test]
     fn authored_layouts_create_fresh_inherited_placeholders_and_roundtrip() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         let masters = author.document().unwrap().masters.clone();
         let mut ids = HashSet::new();
@@ -4400,7 +4402,6 @@ mod tests {
 
     #[test]
     fn authored_layouts_render_actual_title_and_column_text_and_export_pdf() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         let mut labels = Vec::new();
         for layout in ["title", "title_and_content", "two_content"] {
@@ -4450,7 +4451,6 @@ mod tests {
 
     #[test]
     fn placeholder_geometry_changes_resolve_native_inheritance_only_for_edited_shape() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("title_and_content").unwrap();
         let shapes = author.shape_ids(0).unwrap();
@@ -4493,7 +4493,6 @@ mod tests {
 
     #[test]
     fn authored_layout_validation_id_and_shape_budgets_are_atomic() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         let before = author.document().unwrap().clone();
@@ -4538,7 +4537,6 @@ mod tests {
 
     #[test]
     fn saves_native_slides_text_tables_and_background() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         assert_eq!(author.add_slide("blank").unwrap(), 0);
         author
@@ -4577,7 +4575,6 @@ mod tests {
 
     #[test]
     fn copies_are_independent_and_rejected_changes_are_atomic() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         let mut copied = author.copy().unwrap();
@@ -4606,7 +4603,6 @@ mod tests {
 
     #[test]
     fn validates_png_before_adding_owned_media() {
-        pyo3::prepare_freethreaded_python();
         let mut png = Vec::new();
         {
             let mut encoder = png::Encoder::new(&mut png, 1, 1);
@@ -4656,7 +4652,6 @@ mod tests {
 
     #[test]
     fn updates_typed_objects_without_losing_format_or_geometry() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         let text_id = author
@@ -4717,7 +4712,6 @@ mod tests {
 
     #[test]
     fn formatting_reports_mixed_values_without_averaging() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         let id = author
@@ -4763,7 +4757,6 @@ mod tests {
 
     #[test]
     fn slide_organization_preserves_identity_and_rejects_references() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         author.add_slide("blank").unwrap();
@@ -4783,7 +4776,6 @@ mod tests {
 
     #[test]
     fn slide_metadata_notes_and_cell_style_survive_native_round_trip() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         author.set_slide_name(0, "Quarterly λ").unwrap();
@@ -4829,7 +4821,6 @@ mod tests {
 
     #[test]
     fn rejects_excessive_paragraphs_before_building_text_model() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         let before = author.document().unwrap().clone();
@@ -4849,7 +4840,6 @@ mod tests {
 
     #[test]
     fn drawings_keep_geometry_style_and_identity_through_stack_changes() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         let rectangle = author
@@ -4923,7 +4913,6 @@ mod tests {
 
     #[test]
     fn image_backgrounds_retain_shared_media_until_last_reference_is_removed() {
-        pyo3::prepare_freethreaded_python();
         let mut png = Vec::new();
         {
             let mut encoder = png::Encoder::new(&mut png, 1, 1);
@@ -4962,7 +4951,6 @@ mod tests {
 
     #[test]
     fn object_replacement_character_is_literal_pptx_text() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         let id = author
@@ -4987,7 +4975,6 @@ mod tests {
 
     #[test]
     fn rejects_carriage_returns_without_mutating_presentation() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         let text_id = author
@@ -5019,7 +5006,6 @@ mod tests {
 
     #[test]
     fn rich_ranges_preserve_unicode_paragraphs_and_roundtrip_formatting() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         let id = author
@@ -5054,7 +5040,6 @@ mod tests {
 
     #[test]
     fn replacement_at_run_boundary_uses_selected_character_format() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         let id = author
@@ -5081,7 +5066,6 @@ mod tests {
 
     #[test]
     fn readable_underline_names_roundtrip_through_native_writer() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         let id = author
@@ -5118,7 +5102,6 @@ mod tests {
 
     #[test]
     fn links_cross_runs_preserve_labels_and_export_native_navigation() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         author.add_slide("blank").unwrap();
@@ -5189,7 +5172,6 @@ mod tests {
 
     #[test]
     fn rejects_invalid_ranges_patches_and_links_atomically() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         let id = author
@@ -5311,7 +5293,6 @@ mod tests {
 
     #[test]
     fn mixed_link_assignment_lookup_retains_range_and_revision_validation() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         let id = author
@@ -5398,7 +5379,6 @@ mod tests {
 
     #[test]
     fn deletion_detects_table_and_nested_group_references() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         author.add_slide("blank").unwrap();
@@ -5449,7 +5429,6 @@ mod tests {
 
     #[test]
     fn rich_text_preflights_fragmentation_and_cloned_link_budgets() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         let id = author
@@ -5504,7 +5483,6 @@ mod tests {
 
     #[test]
     fn table_layout_roundtrips_and_native_rows_expand_to_fit_content() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         let long = "Line one\nLine two\nLine three";
@@ -5612,7 +5590,6 @@ mod tests {
 
     #[test]
     fn table_merges_alias_covered_cells_and_split_preserves_text_once() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         let id = author
@@ -5688,7 +5665,6 @@ mod tests {
 
     #[test]
     fn table_native_grid_edits_preserve_merge_anchors_and_generations() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         author.add_slide("blank").unwrap();
@@ -5729,7 +5705,6 @@ mod tests {
 
     #[test]
     fn table_geometry_changes_and_rejected_edits_are_atomic() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         let id = author
@@ -5795,7 +5770,6 @@ mod tests {
 
     #[test]
     fn table_insertions_preflight_aggregate_cells_even_without_paragraphs() {
-        pyo3::prepare_freethreaded_python();
         let mut author = EditablePptx::new(720.0, 540.0).unwrap();
         author.add_slide("blank").unwrap();
         let mut ids = Vec::new();
@@ -5835,7 +5809,6 @@ mod tests {
     }
     #[test]
     fn background_reset_inherits_native_master_layout_and_theme_with_pixels() {
-        pyo3::prepare_freethreaded_python();
         for target in ["theme", "master", "layout", "gradient", "picture"] {
             let mut author = EditablePptx::new(160.0, 160.0).unwrap();
             author.add_slide("blank").unwrap();
@@ -5944,7 +5917,6 @@ mod tests {
 
     #[test]
     fn background_reset_reclaims_only_unreferenced_owned_media_and_rolls_back() {
-        pyo3::prepare_freethreaded_python();
         let image = picture_quadrants();
         let mut author = EditablePptx::new(160.0, 160.0).unwrap();
         author.add_slide("blank").unwrap();
@@ -5980,7 +5952,6 @@ mod tests {
 
     #[test]
     fn background_reset_rejects_picture_reclamation_with_inherited_picture_assets() {
-        pyo3::prepare_freethreaded_python();
         for master_background in [false, true] {
             let mut author = EditablePptx::new(160.0, 160.0).unwrap();
             author.add_slide("blank").unwrap();
@@ -6026,7 +5997,6 @@ mod letter_spacing_tests {
     use serde_json::json;
 
     fn setup(text: &str) -> (EditablePptx, u32) {
-        pyo3::prepare_freethreaded_python();
         let mut d = EditablePptx::new(1584.0, 288.0).unwrap();
         d.add_slide("blank").unwrap();
         let id = d

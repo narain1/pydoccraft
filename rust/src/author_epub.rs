@@ -1,5 +1,3 @@
-use pyo3::prelude::*;
-
 use crate::EngineError;
 
 const MAX_CHAPTERS: usize = 10_000;
@@ -21,7 +19,6 @@ struct ImageResource {
     data: Vec<u8>,
 }
 
-#[pyclass(module = "doc_ex._core")]
 #[derive(Clone)]
 pub struct EditableEpub {
     title: String,
@@ -35,9 +32,7 @@ pub struct EditableEpub {
     closed: bool,
 }
 
-#[pymethods]
 impl EditableEpub {
-    #[new]
     pub fn new() -> Self {
         Self {
             title: String::new(),
@@ -259,6 +254,12 @@ impl EditableEpub {
             ));
         }
         Ok(output)
+    }
+}
+
+impl Default for EditableEpub {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

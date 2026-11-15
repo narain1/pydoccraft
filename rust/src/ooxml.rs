@@ -25,6 +25,7 @@ fn inspect(
     read_content_types: bool,
     count_presentation_slides: bool,
 ) -> Result<Option<&'static str>, EngineError> {
+    crate::archive_safety::validate_directory(data)?;
     let mut archive = zip::ZipArchive::new(Cursor::new(data))
         .map_err(|error| EngineError::Malformed(format!("invalid ZIP: {error}")))?;
     validate_member_count(archive.len())?;

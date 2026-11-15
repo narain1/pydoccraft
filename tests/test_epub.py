@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import io
+import struct
 from pathlib import Path
 import tempfile
 import unittest
+import warnings
 import zipfile
 
 import doc_ex
@@ -50,6 +52,102 @@ def rewrite_epub(data: bytes, updates: dict[str, bytes | str]) -> bytes:
 
 
 class EpubTests(unittest.TestCase):
+    def test_xml_sensitive_metadata_roundtrips(self) -> None:
+        with doc_ex.new("epub") as book:
+            book.set_metadata(title="A & <B>", identifier="urn:a&b", language="en", authors=["A & B", "C <D>"])
+            book.add_chapter("Chapter").add_paragraph("Text")
+            data = book.to_bytes()
+        with doc_ex.open(data) as document:
+            self.assertEqual(document.metadata["title"], "A & <B>")
+            self.assertEqual(document.metadata["identifiers"], ["urn:a&b"])
+            self.assertEqual(document.metadata["authors"], ["A & B", "C <D>"])
+
+    def test_multiple_rootfiles_are_rejected_before_metadata_parsing(self) -> None:
+        data = rewrite_epub(epub_fixture(), {
+            "META-INF/container.xml": '<container><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/><rootfile full-path="other" media-type="other/type"/></rootfiles></container>'
+        })
+        with self.assertRaises(doc_ex.UnsupportedFormatError):
+            doc_ex.open(data)
+
+    def test_duplicate_package_members_are_rejected_before_engine_parsing(self) -> None:
+        output = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(epub_fixture())) as source:
+            with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+                for member in source.infolist():
+                    archive.writestr(member.filename, source.read(member))
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    archive.writestr("OEBPS/content.opf", "<!DOCTYPE package><package/>")
+        with self.assertRaises(doc_ex.UnsafeArchiveError):
+            doc_ex.open(output.getvalue())
+
+    def test_raw_duplicate_member_count_is_bounded(self) -> None:
+        output = io.BytesIO()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with zipfile.ZipFile(output, "w") as archive:
+                for _ in range(10_001):
+                    archive.writestr("same", "")
+        with self.assertRaises(doc_ex.UnsafeArchiveError):
+            doc_ex.open(output.getvalue(), filetype="epub")
+
+    def test_forged_directory_count_is_rejected(self) -> None:
+        data = bytearray(epub_fixture())
+        end = data.rfind(b"PK\x05\x06")
+        self.assertGreaterEqual(end, 0)
+        struct.pack_into("<HH", data, end + 8, 1, 1)
+        with self.assertRaises(doc_ex.UnsafeArchiveError):
+            doc_ex.open(bytes(data), filetype="epub")
+
+    def test_local_and_central_names_must_agree(self) -> None:
+        data = bytearray(epub_fixture())
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            member = archive.getinfo("OEBPS/content.opf")
+        offset = member.header_offset + 30
+        data[offset] = ord("X")
+        with self.assertRaises(doc_ex.UnsafeArchiveError):
+            doc_ex.open(bytes(data), filetype="epub")
+
+    def test_data_descriptor_members_remain_supported(self) -> None:
+        class Sink(io.RawIOBase):
+            def __init__(self):
+                self.data = bytearray()
+
+            def writable(self):
+                return True
+
+            def write(self, value):
+                self.data.extend(value)
+                return len(value)
+
+        sink = Sink()
+        with zipfile.ZipFile(io.BytesIO(epub_fixture())) as source:
+            with zipfile.ZipFile(sink, "w", zipfile.ZIP_DEFLATED) as archive:
+                for member in source.infolist():
+                    archive.writestr(member.filename, source.read(member))
+        with doc_ex.open(bytes(sink.data)) as document:
+            self.assertEqual(document.metadata["title"], "Native EPUB fixture")
+            self.assertEqual(document.page_count, 2)
+
+    def test_zip64_is_explicitly_unsupported_by_bounded_preflight(self) -> None:
+        output = io.BytesIO()
+        original_limit = zipfile.ZIP64_LIMIT
+        try:
+            zipfile.ZIP64_LIMIT = 1
+            with zipfile.ZipFile(output, "w", allowZip64=True) as archive:
+                archive.writestr("mimetype", "application/epub+zip")
+        finally:
+            zipfile.ZIP64_LIMIT = original_limit
+        with self.assertRaises(doc_ex.UnsupportedFormatError):
+            doc_ex.open(output.getvalue(), filetype="epub")
+
+    def test_zip_comment_with_ambiguous_signature_is_explicitly_unsupported(self) -> None:
+        data = io.BytesIO(epub_fixture())
+        with zipfile.ZipFile(data, "a") as archive:
+            archive.comment = b"A harmless PK\x05\x06 marker"
+        with self.assertRaises(doc_ex.UnsupportedFormatError):
+            doc_ex.open(data.getvalue())
+
     def test_bytes_path_metadata_order_and_owned_values(self) -> None:
         data = epub_fixture()
         with doc_ex.open(data) as document:

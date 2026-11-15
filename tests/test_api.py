@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import tempfile
 import unittest
+import warnings
 import zipfile
 from pathlib import Path
 
@@ -27,6 +28,46 @@ from fixtures import (
 
 
 class ApiTests(unittest.TestCase):
+    def test_office_duplicate_zip_members_are_rejected(self) -> None:
+        for original in (docx_fixture(), pptx_fixture()):
+            data = io.BytesIO(original)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                with zipfile.ZipFile(data, "a") as archive:
+                    archive.writestr("[Content_Types].xml", "<Types/>")
+            with self.subTest(format_size=len(original)):
+                with self.assertRaises(UnsafeArchiveError):
+                    doc_ex.open(data.getvalue())
+
+    def test_office_windows_absolute_zip_member_is_rejected(self) -> None:
+        data = io.BytesIO(docx_fixture())
+        with zipfile.ZipFile(data, "a") as archive:
+            archive.writestr("C:\\outside.xml", "not a safe relative member")
+        with self.assertRaises(UnsafeArchiveError):
+            doc_ex.open(data.getvalue())
+
+    def test_office_zip_data_descriptors_remain_supported(self) -> None:
+        class Sink(io.RawIOBase):
+            def __init__(self):
+                self.data = bytearray()
+
+            def writable(self):
+                return True
+
+            def write(self, value):
+                self.data.extend(value)
+                return len(value)
+
+        for source_bytes in (docx_fixture(), pptx_fixture()):
+            sink = Sink()
+            with zipfile.ZipFile(io.BytesIO(source_bytes)) as source:
+                with zipfile.ZipFile(sink, "w", zipfile.ZIP_DEFLATED) as target:
+                    for member in source.infolist():
+                        target.writestr(member.filename, source.read(member))
+            with self.subTest(source_size=len(source_bytes)):
+                with doc_ex.open(bytes(sink.data)) as document:
+                    self.assertGreater(document.page_count, 0)
+
     def test_pdf_path_bytes_links_images_and_lifecycle(self) -> None:
         data = pdf_fixture()
         with tempfile.TemporaryDirectory() as temporary:

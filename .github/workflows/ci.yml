@@ -71,3 +71,52 @@ jobs:
           name: validation-evidence
           path: dist/validation.json
           if-no-files-found: warn
+
+  binding-previews:
+    name: Python-free Rust and binding previews
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust 1.95
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal
+          rustup default 1.95.0
+
+      - name: Check preview toolchains
+        run: |
+          go version
+          node --version
+
+      - name: Test Python-free Rust API
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/pydoccraft-go-target
+        run: cargo test --locked --no-default-features
+
+      - name: Build and test Go preview
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/pydoccraft-go-target
+          PYDOCCRAFT_GO_LIB_DIR: ${{ runner.temp }}/pydoccraft-go-lib
+          GOPROXY: "off"
+        run: |
+          sh bindings/go/build.sh
+          cd bindings/go
+          CGO_LDFLAGS="-L$PYDOCCRAFT_GO_LIB_DIR" LD_LIBRARY_PATH="$PYDOCCRAFT_GO_LIB_DIR" go test -race -count=1 ./...
+
+      - name: Build and test Node preview
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/pydoccraft-node-target
+        run: |
+          cargo build --locked --manifest-path bindings/node/Cargo.toml
+          cp "$CARGO_TARGET_DIR/debug/libdoccraft_node_preview.so" bindings/node/doccraft.node
+          node --test bindings/node/test/*.test.js
+
+      - name: Audit Node preview licenses and attribution
+        run: |
+          cargo metadata --locked --format-version 1 > "$RUNNER_TEMP/root-metadata.json"
+          cargo metadata --locked --format-version 1 --manifest-path bindings/node/Cargo.toml > "$RUNNER_TEMP/node-metadata.json"
+          python3 tools/audit_binding_licenses.py "$RUNNER_TEMP/root-metadata.json" "$RUNNER_TEMP/node-metadata.json"

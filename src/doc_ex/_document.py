@@ -26,6 +26,21 @@ _MEDIA_EXTENSIONS = {
 }
 
 
+def _format_join(parts: list[str], separator: str, skip_empty: bool = False) -> str:
+    # Preserve Python's handling of string subclasses and lone surrogates.
+    if all(type(part) is str for part in parts):
+        from . import _core
+        try:
+            result = _core._format_join(parts, separator, skip_empty)
+            if result is not None:
+                return result.strip()
+        except UnicodeEncodeError:
+            pass
+    if skip_empty:
+        return separator.join(part for part in parts if part).strip()
+    return separator.join(parts).strip()
+
+
 def _search_query(text: str) -> str:
     if not isinstance(text, str):
         raise TypeError("search text must be a string")
@@ -235,7 +250,7 @@ class Page:
                     parts.extend("\t".join(row) for row in block.table.rows)
                 elif block.text:
                     parts.append(block.text)
-            return "\n".join(parts).strip()
+            return _format_join(parts, "\n")
         if option == "markdown":
             return self._markdown()
         if option == "html":
@@ -332,7 +347,7 @@ class Page:
         ]
         if remaining:
             parts.append("**Links:**\n" + "\n".join(f"- [{link.text or link.uri}]({link.uri})" for link in remaining))
-        return "\n\n".join(part for part in parts if part).strip()
+        return _format_join(parts, "\n\n", True)
 
     def _html(self) -> str:
         # Apply the same structure and expansion limits as Markdown export.
@@ -428,7 +443,7 @@ class Document:
                         _, emitted = Page._linked_text(nested.text, nested.links)
                         table_links.update(key for link in nested.links if (link.uri, link.text, link.metadata.get("start"), link.metadata.get("end")) in emitted and (key := _source_asset(link)) is not None)
                         table_images.update(key for image in nested.images if (key := _source_asset(image)) is not None)
-        return "\n\n".join(markdown for index, page in enumerate(self._pages) if (markdown := page._markdown(table_links, table_images, image_reference=image_reference, path=("pages", index)))).strip()
+        return _format_join([page._markdown(table_links, table_images, image_reference=image_reference, path=("pages", index)) for index, page in enumerate(self._pages)], "\n\n", True)
 
     def export_markdown(self) -> dict[str, bytes]:
         """Return portable Markdown, media and a JSON manifest as owned file bytes."""

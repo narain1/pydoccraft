@@ -1,0 +1,11 @@
+{
+  "name": "pydoccraft-node-preview",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Experimental in-process document bindings",
+  "main": "index.js",
+  "license": "Apache-2.0",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

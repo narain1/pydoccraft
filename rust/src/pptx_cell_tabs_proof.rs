@@ -6,7 +6,6 @@ use deckcraft_model::text::{
 use std::collections::HashMap;
 
 fn fixture(merged: u8, empty: bool) -> (EditablePptx, u32) {
-    pyo3::prepare_freethreaded_python();
     let mut owner = EditablePptx::new(576.0, 360.0).unwrap();
     owner.add_slide("blank").unwrap();
     owner.add_slide("blank").unwrap();

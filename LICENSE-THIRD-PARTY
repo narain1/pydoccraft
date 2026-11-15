@@ -4,11 +4,9 @@ Generated from the committed `Cargo.lock` using `cargo metadata --locked`. This 
 
 The resolved graph was reviewed for license declarations and compatibility. GPL-, AGPL-, and LGPL-only dependencies are prohibited; SPDX `OR` expressions remain acceptable when they provide a permissive alternative. Every package in this inventory declares a license, and no GPL-, AGPL-, or LGPL-only dependency was found.
 
-DeckCraft library crates use the reviewed contribution fork at `https://github.com/narain1/deckcraft`, revision `dd4fd70b6347dd2ce782e33f030a2b6c0abb0106`, directly based on upstream `22db9261f9d1a214c296fd390173130c45d76d66`. The contribution changes rendering error propagation only; package versions, license expressions and bundled assets remain unchanged. See NOTICE for upstream attribution.
+The independently locked, unpublished Node preview was also reviewed using `cargo metadata --offline --locked` and the same normal/build graph checks. Its 288 third-party name/version/license rows are a subset of this inventory; its remaining normal/build package is the local Apache-2.0 `pydoccraft-core`. This inventory is a superset, not an exact Node dependency list. See `bindings/node/ATTRIBUTION.md` and NOTICE for scope and attribution.
 
-WordCraft library crates use the reviewed contribution fork at `https://github.com/narain1/wordcraft`, revision `f04bc4ca09e009c7cf076a31a044aa4c9b8a87ef`, directly based on upstream `f2e15cf8f899a79899a2d9595ca4ce7df1e5ea22`. The contribution changes PDF shape stroke caps/joins only; package versions, license expressions and bundled assets remain unchanged. See NOTICE for upstream attribution.
-
-PdfCraft library crates use the reviewed contribution fork at `https://github.com/narain1/pdfcraft`, revision `516caea956c0aaf15f2bd1f35a15e07c73a9ead6`, based on reviewed contribution `60a8d7998b64c7718e08e9054e99f1f2eb1eda8d` and original upstream `645016addcfb9078c557f0189559ab47cdcee057`. The contributions retain the final integer raster allocation-budget check and add typed native content placement; package versions, license expressions and bundled assets remain unchanged. See NOTICE for upstream attribution.
+PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream repositories at the immutable revisions recorded in NOTICE.
 
 | Crate | Version | License |
 |---|---:|---|
