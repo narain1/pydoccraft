@@ -21,22 +21,22 @@ base64 = "=0.22.1"
 async_zip = { version = "=0.0.18", default-features = false, features = ["deflate", "deflate64"] }
 futures = "=0.3.32"
 lexepub = { version = "=0.1.2", default-features = false }
-deckcraft-model = { git = "https://github.com/storytold/deckcraft", rev = "aaf6c1c38aa6c59beda8110bd014cc6c96c6ec74" }
-deckcraft-pdf = { git = "https://github.com/storytold/deckcraft", rev = "aaf6c1c38aa6c59beda8110bd014cc6c96c6ec74" }
-deckcraft-pptx = { git = "https://github.com/storytold/deckcraft", rev = "aaf6c1c38aa6c59beda8110bd014cc6c96c6ec74" }
-deckcraft-render = { git = "https://github.com/storytold/deckcraft", rev = "aaf6c1c38aa6c59beda8110bd014cc6c96c6ec74" }
+deckcraft-model = { git = "https://github.com/storytold/deckcraft", rev = "f7a7fd7f5ffda19758584908730216222e387aa6" }
+deckcraft-pdf = { git = "https://github.com/storytold/deckcraft", rev = "f7a7fd7f5ffda19758584908730216222e387aa6" }
+deckcraft-pptx = { git = "https://github.com/storytold/deckcraft", rev = "f7a7fd7f5ffda19758584908730216222e387aa6" }
+deckcraft-render = { git = "https://github.com/storytold/deckcraft", rev = "f7a7fd7f5ffda19758584908730216222e387aa6" }
 kurbo = "=0.13.1"
-pdfcraft-annot = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
-pdfcraft-cos = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
-pdfcraft-model = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
-pdfcraft-content = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
-pdfcraft-create = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
-pdfcraft-edit = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
-pdfcraft-export = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
-pdfcraft-fonts = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
-pdfcraft-forms = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
-pdfcraft-organize = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
-pdfcraft-render = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
+pdfcraft-annot = { git = "https://github.com/storytold/pdfcraft", rev = "03996b10258288e723c4e07334c9cd1bae1f68a8" }
+pdfcraft-cos = { git = "https://github.com/storytold/pdfcraft", rev = "03996b10258288e723c4e07334c9cd1bae1f68a8" }
+pdfcraft-model = { git = "https://github.com/storytold/pdfcraft", rev = "03996b10258288e723c4e07334c9cd1bae1f68a8" }
+pdfcraft-content = { git = "https://github.com/storytold/pdfcraft", rev = "03996b10258288e723c4e07334c9cd1bae1f68a8" }
+pdfcraft-create = { git = "https://github.com/storytold/pdfcraft", rev = "03996b10258288e723c4e07334c9cd1bae1f68a8" }
+pdfcraft-edit = { git = "https://github.com/storytold/pdfcraft", rev = "03996b10258288e723c4e07334c9cd1bae1f68a8" }
+pdfcraft-export = { git = "https://github.com/storytold/pdfcraft", rev = "03996b10258288e723c4e07334c9cd1bae1f68a8" }
+pdfcraft-fonts = { git = "https://github.com/storytold/pdfcraft", rev = "03996b10258288e723c4e07334c9cd1bae1f68a8" }
+pdfcraft-forms = { git = "https://github.com/storytold/pdfcraft", rev = "03996b10258288e723c4e07334c9cd1bae1f68a8" }
+pdfcraft-organize = { git = "https://github.com/storytold/pdfcraft", rev = "03996b10258288e723c4e07334c9cd1bae1f68a8" }
+pdfcraft-render = { git = "https://github.com/storytold/pdfcraft", rev = "03996b10258288e723c4e07334c9cd1bae1f68a8" }
 png = "=0.18.1"
 pyo3 = { version = "=0.23.5", optional = true }
 quick-xml = "=0.41.0"
@@ -45,20 +45,20 @@ serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.149"
 skrifa = "=0.44.0"
 thiserror = "=2.0.21"
-wordcraft-doc = { git = "https://github.com/storytold/wordcraft", rev = "9d1067fc0e7f754978879bfd61351d359c9b39cb" }
-wordcraft-docx = { git = "https://github.com/storytold/wordcraft", rev = "9d1067fc0e7f754978879bfd61351d359c9b39cb" }
-wordcraft-layout = { git = "https://github.com/storytold/wordcraft", rev = "9d1067fc0e7f754978879bfd61351d359c9b39cb" }
-wordcraft-pdf = { git = "https://github.com/storytold/wordcraft", rev = "9d1067fc0e7f754978879bfd61351d359c9b39cb" }
-wordcraft-render = { git = "https://github.com/storytold/wordcraft", rev = "9d1067fc0e7f754978879bfd61351d359c9b39cb" }
+wordcraft-doc = { git = "https://github.com/storytold/wordcraft", rev = "bbe3547dd11bb5f613f3aa893b12f593910644de" }
+wordcraft-docx = { git = "https://github.com/storytold/wordcraft", rev = "bbe3547dd11bb5f613f3aa893b12f593910644de" }
+wordcraft-layout = { git = "https://github.com/storytold/wordcraft", rev = "bbe3547dd11bb5f613f3aa893b12f593910644de" }
+wordcraft-pdf = { git = "https://github.com/storytold/wordcraft", rev = "bbe3547dd11bb5f613f3aa893b12f593910644de" }
+wordcraft-render = { git = "https://github.com/storytold/wordcraft", rev = "bbe3547dd11bb5f613f3aa893b12f593910644de" }
 zip = { version = "=2.2.2", default-features = false, features = ["deflate"] }
 zip_guard = { package = "zip", version = "=9.1.3", default-features = false }
 
 [patch.crates-io]
-hayro = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
-hayro-cmap = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
-hayro-interpret = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
-hayro-jbig2 = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
-hayro-postscript = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
-hayro-syntax = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
-lopdf = { git = "https://github.com/storytold/pdfcraft", rev = "64e0868b844e0230027a493c90d6e4bdc7af086f" }
-krilla = { git = "https://github.com/storytold/craft-libs", rev = "9f75d3dc19b4b514c4f3d4847ed1ec1b0e86b4ef" }
+hayro = { git = "https://github.com/storytold/pdfcraft", rev = "03996b10258288e723c4e07334c9cd1bae1f68a8" }
+hayro-cmap = { git = "https://github.com/storytold/pdfcraft", rev = "03996b10258288e723c4e07334c9cd1bae1f68a8" }
+hayro-interpret = { git = "https://github.com/storytold/pdfcraft", rev = "03996b10258288e723c4e07334c9cd1bae1f68a8" }
+hayro-jbig2 = { git = "https://github.com/storytold/pdfcraft", rev = "03996b10258288e723c4e07334c9cd1bae1f68a8" }
+hayro-postscript = { git = "https://github.com/storytold/pdfcraft", rev = "03996b10258288e723c4e07334c9cd1bae1f68a8" }
+hayro-syntax = { git = "https://github.com/storytold/pdfcraft", rev = "03996b10258288e723c4e07334c9cd1bae1f68a8" }
+lopdf = { git = "https://github.com/storytold/pdfcraft", rev = "03996b10258288e723c4e07334c9cd1bae1f68a8" }
+krilla = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }

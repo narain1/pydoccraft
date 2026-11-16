@@ -290,6 +290,16 @@ fn upstream_comment_storage_unicode_multirun_cells_replies_and_resolved() {
                 original.props_of_char(offset)
             );
         }
+        // Upstream no longer invents UTC metadata from a local comment date.
+        // An explicitly supplied UTC value must still survive a round-trip.
+        let mut explicit_utc = native.clone();
+        explicit_utc.comments.get_mut(&7).unwrap().date_utc = Some("2026-10-20T12:00:00Z".into());
+        let explicit_read =
+            wordcraft_docx::read(&wordcraft_docx::write(&explicit_utc).unwrap()).unwrap();
+        assert_eq!(
+            explicit_read.comments[&7].date_utc.as_deref(),
+            Some("2026-10-20T12:00:00Z")
+        );
         let mut encoded = wordcraft_docx::write(&native).unwrap();
         let first = wordcraft_docx::read(&encoded).unwrap();
         let original_reopened =
@@ -393,7 +403,7 @@ fn upstream_comment_storage_unicode_multirun_cells_replies_and_resolved() {
             let root = &read.comments[&7];
             assert_eq!(root.author, "Ada 😀");
             assert_eq!(root.date, "2026-10-20T12:00:00Z");
-            assert_eq!(root.date_utc.as_deref(), Some("2026-10-20T12:00:00Z"));
+            assert_eq!(root.date_utc, None);
             assert_eq!(root.parent, None);
             assert!(root.resolved);
             assert_eq!(root.durable_id, first_durable);
@@ -534,7 +544,7 @@ fn upstream_comment_update_delete_keep_unrelated_media_sections_and_parts() {
     let info = &read.comments[&0];
     assert_eq!(info.author, "Ben");
     assert_eq!(info.date, "2026-10-21T00:00:00Z");
-    assert_eq!(info.date_utc.as_deref(), Some("2026-10-21T00:00:00Z"));
+    assert_eq!(info.date_utc, None);
     assert!(info.resolved);
     assert_eq!(read.plain_text(StoryRef::Part(info.part)), "UpdatedOnly");
     assert_eq!(drop_comment(&mut native, &path, 1), replypart);

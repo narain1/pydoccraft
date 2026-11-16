@@ -2030,7 +2030,7 @@ mod raster_limit_tests {
             .collect();
         assert_eq!(entries.len(), 1);
         assert!(entries[0].lines().any(|line| line.trim() ==
-            "source = \"git+https://github.com/storytold/pdfcraft?rev=64e0868b844e0230027a493c90d6e4bdc7af086f#64e0868b844e0230027a493c90d6e4bdc7af086f\""));
+            "source = \"git+https://github.com/storytold/pdfcraft?rev=03996b10258288e723c4e07334c9cd1bae1f68a8#03996b10258288e723c4e07334c9cd1bae1f68a8\""));
         for rotation in [0, 90, 180, 270] {
             let raw = fixture(4000.25, 3999.75, 2.0, rotation);
             for reject_oversize in [false, true] {

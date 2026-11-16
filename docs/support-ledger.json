@@ -3,22 +3,22 @@
   "audited_commit": "77cd8c0e00600554f14ea1e9d61a138e9211d8d9",
   "references": {
     "pdfcraft": {
-      "revision": "64e0868b844e0230027a493c90d6e4bdc7af086f",
+      "revision": "03996b10258288e723c4e07334c9cd1bae1f68a8",
       "kind": "engine",
       "repository": "https://github.com/storytold/pdfcraft"
     },
     "wordcraft": {
-      "revision": "9d1067fc0e7f754978879bfd61351d359c9b39cb",
+      "revision": "bbe3547dd11bb5f613f3aa893b12f593910644de",
       "kind": "engine",
       "repository": "https://github.com/storytold/wordcraft"
     },
     "deckcraft": {
-      "revision": "aaf6c1c38aa6c59beda8110bd014cc6c96c6ec74",
+      "revision": "f7a7fd7f5ffda19758584908730216222e387aa6",
       "kind": "engine",
       "repository": "https://github.com/storytold/deckcraft"
     },
     "craft-libs": {
-      "revision": "9f75d3dc19b4b514c4f3d4847ed1ec1b0e86b4ef",
+      "revision": "92d392cff132eaf53e13afff77f38b5c11b73aa0",
       "kind": "engine",
       "repository": "https://github.com/storytold/craft-libs"
     },
@@ -262,7 +262,7 @@
         },
         "write": {
           "reference": "wordcraft",
-          "path": "crates/docx/src/write/mod.rs",
+          "path": "crates/docx/src/write.rs",
           "symbols": [
             "write"
           ]
@@ -364,7 +364,7 @@
         },
         "write": {
           "reference": "wordcraft",
-          "path": "crates/docx/src/write/mod.rs",
+          "path": "crates/docx/src/write.rs",
           "symbols": [
             "write"
           ]
@@ -914,7 +914,7 @@
       "native_sources": {
         "write": {
           "reference": "wordcraft",
-          "path": "crates/docx/src/write/mod.rs",
+          "path": "crates/docx/src/write.rs",
           "symbols": [
             "write"
           ]
@@ -1048,7 +1048,7 @@
       "native_sources": {
         "write": {
           "reference": "wordcraft",
-          "path": "crates/docx/src/write/mod.rs",
+          "path": "crates/docx/src/write.rs",
           "symbols": [
             "write"
           ]
@@ -1196,7 +1196,7 @@
         },
         "write": {
           "reference": "wordcraft",
-          "path": "crates/docx/src/write/mod.rs",
+          "path": "crates/docx/src/write.rs",
           "symbols": [
             "write"
           ]
@@ -1490,7 +1490,7 @@
         },
         "write": {
           "reference": "wordcraft",
-          "path": "crates/docx/src/write/mod.rs",
+          "path": "crates/docx/src/write.rs",
           "symbols": [
             "write"
           ]
@@ -1648,7 +1648,7 @@
         },
         "write": {
           "reference": "wordcraft",
-          "path": "crates/docx/src/write/mod.rs",
+          "path": "crates/docx/src/write.rs",
           "symbols": [
             "write"
           ]
@@ -1678,7 +1678,7 @@
         },
         "note_mark": {
           "reference": "wordcraft",
-          "path": "crates/docx/src/write/mod.rs",
+          "path": "crates/docx/src/write.rs",
           "symbols": [
             "note_blocks"
           ]
@@ -1990,7 +1990,7 @@
         },
         "write": {
           "reference": "wordcraft",
-          "path": "crates/docx/src/write/mod.rs",
+          "path": "crates/docx/src/write.rs",
           "symbols": [
             "write"
           ]
@@ -2287,7 +2287,7 @@
         },
         "write": {
           "reference": "wordcraft",
-          "path": "crates/docx/src/write/mod.rs",
+          "path": "crates/docx/src/write.rs",
           "symbols": [
             "write"
           ]
@@ -2697,7 +2697,7 @@
         },
         "write": {
           "reference": "wordcraft",
-          "path": "crates/docx/src/write/mod.rs",
+          "path": "crates/docx/src/write.rs",
           "symbols": [
             "write"
           ]

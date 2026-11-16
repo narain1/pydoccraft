@@ -2279,6 +2279,7 @@ mod imported_property_tests {
 
     fn property(name: &str, kind: &str, value: &str) -> CustomProp {
         CustomProp {
+            link_target: None,
             name: name.into(),
             kind: kind.into(),
             value: value.into(),

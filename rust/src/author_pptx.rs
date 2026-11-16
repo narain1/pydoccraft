@@ -5816,6 +5816,7 @@ mod tests {
             let layout_id = raw.slides[0].layout;
             let inherited = match target {
                 "gradient" => Fill::Gradient(deckcraft_model::style::Gradient {
+                    flip: None,
                     stops: vec![
                         deckcraft_model::style::GradientStop {
                             pos: 0.0,

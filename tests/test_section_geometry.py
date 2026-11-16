@@ -27,11 +27,11 @@ def colored_bounds(png, channel):
             max(x for x, _ in points), max(y for _, y in points))
 
 
-def separator_ink(png):
+def separator_ink(png, y_start=100, y_end=500):
     width, pixels = rgba_pixels(png_chunks(png))
-    # At 144 DPI the gap center is x=340; sample below all text lines.
+    # At 144 DPI the gap center is x=340.
     return sum(max(pixels[(y * width + x) * 4:(y * width + x) * 4 + 3]) < 230
-               for y in range(100, 500) for x in range(339, 342))
+               for y in range(y_start, y_end) for x in range(339, 342))
 
 
 class SectionGeometryTests(unittest.TestCase):
@@ -76,7 +76,9 @@ class SectionGeometryTests(unittest.TestCase):
                     self.assertGreaterEqual(right[0], 360)
                     self.assertLess(right[0], 376)
                     self.assertLess(right[2], 840)
-                    self.assertGreater(separator_ink(png), 300)
+                    # WordCraft now bounds the separator to the column text extent.
+                    self.assertGreater(separator_ink(png, 40, 100), 30)
+                    self.assertEqual(separator_ink(png), 0)
                     following = colored_bounds(reopened.render_page(1, dpi=144), 2)
                     self.assertGreaterEqual(following[0], 80)
                     self.assertLess(following[0], 96)
