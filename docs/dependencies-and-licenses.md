@@ -10,14 +10,16 @@ The package links selected library crates rather than complete ArtCraft applicat
 
 | Project | Pinned revision | Responsibility |
 |---|---|---|
-| [PdfCraft](https://github.com/storytold/pdfcraft) | `64e0868b844e0230027a493c90d6e4bdc7af086f` | PDF inspection, reading-order text, links, images, rendering, DOCX export primitives |
-| [WordCraft](https://github.com/storytold/wordcraft) | `9d1067fc0e7f754978879bfd61351d359c9b39cb` | DOCX model, layout, rendering, PDF export |
-| [DeckCraft](https://github.com/storytold/deckcraft) | `aaf6c1c38aa6c59beda8110bd014cc6c96c6ec74` | PPTX model, rendering, PDF export |
-| [craft-libs](https://github.com/storytold/craft-libs) | `9f75d3dc19b4b514c4f3d4847ed1ec1b0e86b4ef` | Shared PDF backend and patched Krilla dependency |
+| [PdfCraft](https://github.com/storytold/pdfcraft) | `03996b10258288e723c4e07334c9cd1bae1f68a8` | PDF inspection, reading-order text, links, images, rendering, DOCX export primitives |
+| [WordCraft](https://github.com/storytold/wordcraft) | `bbe3547dd11bb5f613f3aa893b12f593910644de` | DOCX model, layout, rendering, PDF export |
+| [DeckCraft](https://github.com/storytold/deckcraft) | `f7a7fd7f5ffda19758584908730216222e387aa6` | PPTX model, rendering, PDF export |
+| [craft-libs](https://github.com/storytold/craft-libs) | `92d392cff132eaf53e13afff77f38b5c11b73aa0` | Shared PDF backend and patched Krilla dependency |
 
 PdfCraft, WordCraft and DeckCraft are pinned to immutable commits on the `main` branch of their original repositories (`storytold/*`). The pins carry no local patches and no contribution forks. Never pin a branch name; move the pin to a newer `main` commit in a dedicated upgrade.
 
-**WordCraft is held back on purpose.** Its `main` has moved craft-libs on from `9f75d3dc` (to `17744430`, then `1e6f1278`, then `b926b5c0`) while DeckCraft `main` still pins `9f75d3dc`. All three engines must share one craft-libs backend, so WordCraft stays at `9d1067fc`, the newest commit that still uses `9f75d3dc` (it includes storytold/wordcraft#4092). Moving WordCraft further needs DeckCraft to move its craft-libs rev first; otherwise the lockfile holds two `craft-pdf` copies. Check this on every upgrade.
+**Upstream revisions are held back on purpose.** PdfCraft `03996b10` predates a CropBox extraction change that omits off-page text previously extracted. WordCraft `bbe3547d` predates a separate craft-libs proofing revision, and DeckCraft `f7a7fd7f` is the newest first-parent commit sharing their PDF backend. Both use craft-libs `92d392cf` for `craft-pdf` and Krilla. Newer upstream heads diverge on shared revisions; revisit these holds after the extraction contract and dependency convergence are resolved.
+
+On 2026-11-15, the checked upstream heads were PdfCraft `e191b0ea69b7dcc4e554c1c4e51b6214bec1c590`, WordCraft `cc90520b9d8fb0d1e6be2c2688e6f915319e850a`, DeckCraft `bb2c2254ee60761b2b4dab2053fe33d7190b6804`, and craft-libs `58964adec11197594d9b6b79a94ae6232221211a`. Their PDF dependencies pin craft-libs at `e2dc681a`, `6e03f65b`, and `63196e66` respectively. Current WordCraft additionally pins its proofing library separately, and current DeckCraft pins other shared crates separately. Linking these heads would therefore violate the single-revision rule; root workspace patches cannot make the upstream Git revisions converge without changing the engines. PdfCraft also requires its own Vello patches at newer revisions, and its CropBox text filtering needs a deliberate compatibility decision before adoption.
 
 Behavior the earlier reviewed forks provided is handled in the adapters or is unsupported. Treat these as the current contract:
 
@@ -50,7 +52,7 @@ Apache-2.0 redistribution requires preservation of applicable notices and identi
 
 ## Locked dependency inventory
 
-`THIRD_PARTY_LICENSES.md` is generated from the committed `Cargo.lock` and reviewed against the final normal/build graph. The current recorded audit covered 264 packages and found no undeclared or GPL-, AGPL-, or LGPL-only runtime dependency.
+`THIRD_PARTY_LICENSES.md` is generated from the committed `Cargo.lock` and reviewed against the final normal/build graph. The current recorded audit covered 300 packages and found no undeclared or GPL-, AGPL-, or LGPL-only runtime dependency.
 
 An SPDX `OR` expression is acceptable when at least one available license is allowed and the project complies with that choice. Bundled assets—such as fonts and CMaps—must be reviewed separately from crate metadata because asset licenses may not be represented by Cargo's package license field.
 

@@ -8,26 +8,26 @@ PdfCraft
 Copyright (c) 2026 ArtCraft Team and the PdfCraft contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option.
 Upstream source: https://github.com/storytold/pdfcraft
-Pinned revision: 64e0868b844e0230027a493c90d6e4bdc7af086f
+Pinned revision: 03996b10258288e723c4e07334c9cd1bae1f68a8
 The selected PdfCraft library crates include pdfcraft-organize for page insertion and organization, pdfcraft-annot for annotations and links, pdfcraft-forms for bounded creation and filling of native form fields, and pdfcraft-model for native inherited page-resource inspection.
 
 WordCraft
 Copyright (c) 2026 ArtCraft Team and the WordCraft contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option.
 Upstream source: https://github.com/storytold/wordcraft
-Pinned revision: 9d1067fc0e7f754978879bfd61351d359c9b39cb
+Pinned revision: bbe3547dd11bb5f613f3aa893b12f593910644de
 
 DeckCraft
 Copyright (c) 2026 ArtCraft Team and the DeckCraft contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option.
 Upstream source: https://github.com/storytold/deckcraft
-Pinned revision: aaf6c1c38aa6c59beda8110bd014cc6c96c6ec74
+Pinned revision: f7a7fd7f5ffda19758584908730216222e387aa6
 
 craft-libs PDF backend
 Copyright (c) 2026 ArtCraft Team and craft-libs contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option.
 Source: https://github.com/storytold/craft-libs
-Pinned revision: 9f75d3dc19b4b514c4f3d4847ed1ec1b0e86b4ef
+Pinned revision: 92d392cff132eaf53e13afff77f38b5c11b73aa0
 
 LexePub
 Copyright 2026 NellowTCS and LexePub contributors.
@@ -46,6 +46,7 @@ Only the `write` feature is enabled. It provides in-memory EPUB package, manifes
 Documentation image: website/assets/irs-1040-page-1.png is rendered from the U.S. Internal Revenue Service 2025 Form 1040 (https://www.irs.gov/pub/irs-prior/f1040--2025.pdf), a U.S. government work.
 
 Bundled and linked third-party material
+
 
 - Foxit standard-14 substitute fonts: Copyright 2014 PDFium Authors; original code copyright 2014 Foxit Software Inc. BSD-3-Clause.
 - Adobe CMap resources: Copyright 1990-2023 Adobe. BSD-3-Clause. Neither Adobe nor contributor names may be used to endorse derived products without prior written permission.

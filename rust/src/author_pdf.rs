@@ -1525,10 +1525,7 @@ pdf_methods! {
                     &mut edited,
                     page,
                     index,
-                    color.map(rgb),
-                    opacity,
-                    None,
-                    None,
+                    pdfcraft_annot::StyleChange::new(color.map(rgb), opacity, None, None),
                     &meta,
                 )
                 .map_err(annotation_error)?;

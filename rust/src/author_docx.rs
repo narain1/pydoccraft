@@ -5618,6 +5618,7 @@ fn patch_custom_metadata(candidate: &mut Document, value: Value) -> PyResult<()>
             property.value = text;
         } else {
             candidate.custom_props.push(wordcraft_doc::CustomProp {
+                link_target: None,
                 name,
                 kind: kind.into(),
                 value: text,

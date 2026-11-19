@@ -4,7 +4,7 @@ Generated from the committed `Cargo.lock` using `cargo metadata --locked`. This 
 
 The resolved graph was reviewed for license declarations and compatibility. GPL-, AGPL-, and LGPL-only dependencies are prohibited; SPDX `OR` expressions remain acceptable when they provide a permissive alternative. Every package in this inventory declares a license, and no GPL-, AGPL-, or LGPL-only dependency was found.
 
-The independently locked, unpublished Node preview was also reviewed using `cargo metadata --offline --locked` and the same normal/build graph checks. Its 288 third-party name/version/license rows are a subset of this inventory; its remaining normal/build package is the local Apache-2.0 `pydoccraft-core`. This inventory is a superset, not an exact Node dependency list. See `bindings/node/ATTRIBUTION.md` and NOTICE for scope and attribution.
+The independently locked, unpublished Node preview was also reviewed using `cargo metadata --offline --locked` and the same normal/build graph checks. Its 289 third-party name/version/license rows are a subset of this inventory; its remaining normal/build package is the local Apache-2.0 `pydoccraft-core`. This inventory is a superset, not an exact Node dependency list. See `bindings/node/ATTRIBUTION.md` and NOTICE for scope and attribution.
 
 PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream repositories at the immutable revisions recorded in NOTICE.
 
@@ -22,6 +22,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `async_zip` | `0.0.18` | MIT |
 | `autocfg` | `1.5.1` | Apache-2.0 OR MIT |
 | `base64` | `0.22.1` | MIT OR Apache-2.0 |
+| `base64` | `0.23.1` | MIT OR Apache-2.0 |
 | `bitflags` | `2.13.2` | MIT OR Apache-2.0 |
 | `block-buffer` | `0.12.1` | MIT OR Apache-2.0 |
 | `block-padding` | `0.4.2` | MIT OR Apache-2.0 |
@@ -60,16 +61,16 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `crunchy` | `0.2.4` | MIT |
 | `crypto-common` | `0.2.2` | MIT OR Apache-2.0 |
 | `ctutils` | `0.4.3` | Apache-2.0 OR MIT |
-| `deckcraft-anim` | `0.11.1` | MIT OR Apache-2.0 |
-| `deckcraft-color` | `0.11.1` | MIT OR Apache-2.0 |
-| `deckcraft-fonts` | `0.11.1` | MIT OR Apache-2.0 |
-| `deckcraft-geom` | `0.11.1` | MIT OR Apache-2.0 |
-| `deckcraft-metafile` | `0.11.1` | MIT OR Apache-2.0 |
-| `deckcraft-model` | `0.11.1` | MIT OR Apache-2.0 |
-| `deckcraft-pdf` | `0.11.1` | MIT OR Apache-2.0 |
-| `deckcraft-pptx` | `0.11.1` | MIT OR Apache-2.0 |
-| `deckcraft-render` | `0.11.1` | MIT OR Apache-2.0 |
-| `deckcraft-text` | `0.11.1` | MIT OR Apache-2.0 |
+| `deckcraft-anim` | `0.13.1` | MIT OR Apache-2.0 |
+| `deckcraft-color` | `0.13.1` | MIT OR Apache-2.0 |
+| `deckcraft-fonts` | `0.13.1` | MIT OR Apache-2.0 |
+| `deckcraft-geom` | `0.13.1` | MIT OR Apache-2.0 |
+| `deckcraft-metafile` | `0.13.1` | MIT OR Apache-2.0 |
+| `deckcraft-model` | `0.13.1` | MIT OR Apache-2.0 |
+| `deckcraft-pdf` | `0.13.1` | MIT OR Apache-2.0 |
+| `deckcraft-pptx` | `0.13.1` | MIT OR Apache-2.0 |
+| `deckcraft-render` | `0.13.1` | MIT OR Apache-2.0 |
+| `deckcraft-text` | `0.13.1` | MIT OR Apache-2.0 |
 | `deflate64` | `0.1.12` | MIT |
 | `derive_arbitrary` | `1.5.0` | MIT OR Apache-2.0 |
 | `digest` | `0.11.3` | MIT OR Apache-2.0 |
@@ -158,19 +159,19 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `ordered-channel` | `1.2.0` | MIT OR Apache-2.0 |
 | `parking` | `2.2.1` | Apache-2.0 OR MIT |
 | `pdf-writer` | `0.15.0` | MIT OR Apache-2.0 |
-| `pdfcraft-annot` | `0.14.0` | MIT OR Apache-2.0 |
-| `pdfcraft-content` | `0.14.0` | MIT OR Apache-2.0 |
-| `pdfcraft-cos` | `0.14.0` | MIT OR Apache-2.0 |
-| `pdfcraft-create` | `0.14.0` | MIT OR Apache-2.0 |
-| `pdfcraft-crypt` | `0.14.0` | MIT OR Apache-2.0 |
-| `pdfcraft-edit` | `0.14.0` | MIT OR Apache-2.0 |
-| `pdfcraft-export` | `0.14.0` | MIT OR Apache-2.0 |
-| `pdfcraft-filters` | `0.14.0` | MIT OR Apache-2.0 |
-| `pdfcraft-fonts` | `0.14.0` | MIT OR Apache-2.0 |
-| `pdfcraft-forms` | `0.14.0` | MIT OR Apache-2.0 |
-| `pdfcraft-model` | `0.14.0` | MIT OR Apache-2.0 |
-| `pdfcraft-organize` | `0.14.0` | MIT OR Apache-2.0 |
-| `pdfcraft-render` | `0.14.0` | MIT OR Apache-2.0 |
+| `pdfcraft-annot` | `0.15.0` | MIT OR Apache-2.0 |
+| `pdfcraft-content` | `0.15.0` | MIT OR Apache-2.0 |
+| `pdfcraft-cos` | `0.15.0` | MIT OR Apache-2.0 |
+| `pdfcraft-create` | `0.15.0` | MIT OR Apache-2.0 |
+| `pdfcraft-crypt` | `0.15.0` | MIT OR Apache-2.0 |
+| `pdfcraft-edit` | `0.15.0` | MIT OR Apache-2.0 |
+| `pdfcraft-export` | `0.15.0` | MIT OR Apache-2.0 |
+| `pdfcraft-filters` | `0.15.0` | MIT OR Apache-2.0 |
+| `pdfcraft-fonts` | `0.15.0` | MIT OR Apache-2.0 |
+| `pdfcraft-forms` | `0.15.0` | MIT OR Apache-2.0 |
+| `pdfcraft-model` | `0.15.0` | MIT OR Apache-2.0 |
+| `pdfcraft-organize` | `0.15.0` | MIT OR Apache-2.0 |
+| `pdfcraft-render` | `0.15.0` | MIT OR Apache-2.0 |
 | `peniko` | `0.6.1` | Apache-2.0 OR MIT |
 | `percent-encoding` | `2.3.2` | MIT OR Apache-2.0 |
 | `phf` | `0.13.1` | MIT |
@@ -258,7 +259,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `unicode-script` | `0.5.8` | MIT OR Apache-2.0 |
 | `unicode-segmentation` | `1.13.3` | MIT OR Apache-2.0 |
 | `unindent` | `0.2.4` | MIT OR Apache-2.0 |
-| `uuid` | `1.28.0` | Apache-2.0 OR MIT |
+| `uuid` | `1.29.2` | Apache-2.0 OR MIT |
 | `vello_common` | `0.0.8` | Apache-2.0 OR MIT |
 | `vello_common` | `0.0.9` | Apache-2.0 OR MIT |
 | `vello_common` | `0.2.0` | Apache-2.0 OR MIT |
@@ -282,15 +283,15 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `windows-strings` | `0.5.1` | MIT OR Apache-2.0 |
 | `windows-sys` | `0.61.2` | MIT OR Apache-2.0 |
 | `wit-bindgen` | `0.57.1` | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
-| `wordcraft-doc` | `0.10.0` | MIT OR Apache-2.0 |
-| `wordcraft-docx` | `0.10.0` | MIT OR Apache-2.0 |
-| `wordcraft-fonts` | `0.10.0` | MIT OR Apache-2.0 |
-| `wordcraft-geom` | `0.10.0` | MIT OR Apache-2.0 |
-| `wordcraft-layout` | `0.10.0` | MIT OR Apache-2.0 |
-| `wordcraft-metafile` | `0.10.0` | MIT OR Apache-2.0 |
-| `wordcraft-pdf` | `0.10.0` | MIT OR Apache-2.0 |
-| `wordcraft-proof` | `0.10.0` | MIT OR Apache-2.0 |
-| `wordcraft-render` | `0.10.0` | MIT OR Apache-2.0 |
+| `wordcraft-doc` | `0.14.0` | MIT OR Apache-2.0 |
+| `wordcraft-docx` | `0.14.0` | MIT OR Apache-2.0 |
+| `wordcraft-fonts` | `0.14.0` | MIT OR Apache-2.0 |
+| `wordcraft-geom` | `0.14.0` | MIT OR Apache-2.0 |
+| `wordcraft-layout` | `0.14.0` | MIT OR Apache-2.0 |
+| `wordcraft-metafile` | `0.14.0` | MIT OR Apache-2.0 |
+| `wordcraft-pdf` | `0.14.0` | MIT OR Apache-2.0 |
+| `wordcraft-proof` | `0.14.0` | MIT OR Apache-2.0 |
+| `wordcraft-render` | `0.14.0` | MIT OR Apache-2.0 |
 | `write-fonts` | `0.48.1` | MIT OR Apache-2.0 |
 | `wuff` | `0.2.9` | MIT |
 | `xmp-writer` | `0.3.3` | MIT OR Apache-2.0 |

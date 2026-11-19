@@ -536,16 +536,31 @@ fn upstream_section_valign_composition_fixed_stories_notes_tables_and_pagination
     // duplicate or move line/cell boxes beyond the physical body region.
     let mut flow = Document::new();
     setup(&mut flow);
+    // Single spacing keeps the whole line box inside the page; multiple spacing
+    // has a separate proof below for WordCraft's bottom-margin leading rule.
+    let single_spaced = |text: &str, color: Rgb| {
+        let mut p = Paragraph::with_text(
+            text,
+            CharProps {
+                color: Some(TextColor::Rgb(color)),
+                ..Default::default()
+            },
+        );
+        p.props.space_before = Some(0.0);
+        p.props.space_after = Some(0.0);
+        p.props.line_spacing = Some(LineSpacing::Multiple(1.0));
+        wordcraft_doc::para_block(p)
+    };
     flow.body = (0..45)
-        .map(|i| para(&format!("Flow-{i:02}-end"), Rgb(0, 0, 0)))
+        .map(|i| single_spaced(&format!("Flow-{i:02}-end"), Rgb(0, 0, 0)))
         .collect();
     let mut t = Table::new(16, 1, 200.0);
     for (i, row) in t.rows.iter_mut().enumerate() {
-        row.cells[0].blocks = vec![para(&format!("Row-{i:02}-end"), Rgb(0, 0, 0))];
+        row.cells[0].blocks = vec![single_spaced(&format!("Row-{i:02}-end"), Rgb(0, 0, 0))];
     }
     t.rows[0].props.header = true;
     flow.body.push(Arc::new(Block::Table(t)));
-    flow.body.push(para("Tail", Rgb(255, 0, 0)));
+    flow.body.push(single_spaced("Tail", Rgb(255, 0, 0)));
     let count = layout(&flow).pages.len();
     assert!(count > 2);
     for mode in MODES {
@@ -575,6 +590,67 @@ fn upstream_section_valign_composition_fixed_stories_notes_tables_and_pagination
             }
         }
     }
+}
+
+// WordCraft permits the unused leading of a multiply spaced final line to enter
+// the bottom margin. The non-top authoring profile deliberately guards full line
+// boxes, so it must reject this geometry instead of silently accepting it.
+#[test]
+fn upstream_multiple_spacing_margin_leading_is_guarded_for_alignment() {
+    let mut d = Document::new();
+    setup(&mut d);
+    let mut p = Paragraph::with_text("Margin leading", CharProps::default());
+    p.props.space_before = Some(0.0);
+    p.props.space_after = Some(0.0);
+    p.props.line_spacing = Some(LineSpacing::Multiple(2.0));
+    d.body = vec![wordcraft_doc::para_block(p); 3];
+    let probe = layout(&d);
+    let (height, text_height) = probe.pages[0]
+        .items
+        .iter()
+        .find_map(|item| {
+            if let Placed::Lines {
+                story: StoryRef::Body,
+                para,
+                l0,
+                ..
+            } = item
+            {
+                let line = &para.lines[*l0];
+                Some((line.height, line.baseline - line.top + line.text_desc))
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert!(text_height < height);
+    d.last_section.page_h = 104.0 + 3.0 * height - (height - text_height) / 2.0;
+    d.last_section.valign = PageVAlign::Bottom;
+    let l = layout(&d);
+    assert_eq!(l.pages.len(), 1);
+    let page = &l.pages[0];
+    let (top, line) = page
+        .items
+        .iter()
+        .filter_map(|item| {
+            if let Placed::Lines {
+                story: StoryRef::Body,
+                para,
+                l0,
+                y,
+                ..
+            } = item
+            {
+                Some((*y, &para.lines[*l0]))
+            } else {
+                None
+            }
+        })
+        .next_back()
+        .unwrap();
+    assert!(top + line.baseline - line.top + line.text_desc <= page.body.bottom() + 0.1);
+    assert!(top + line.height > page.body.bottom() + 0.1);
+    assert!(super::valign::page_bounds(page).is_err());
 }
 
 #[test]
