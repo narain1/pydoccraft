@@ -53,7 +53,14 @@ jobs:
           if os.environ["EVENT_NAME"] == "pull_request":
               subprocess.run(["git", "fetch", "--no-tags", "origin", os.environ["BASE_SHA"]], check=True)
               previous = subprocess.check_output(["git", "show", f"{os.environ['BASE_SHA']}:pyproject.toml"], text=True)
-              should_build = tomllib.loads(previous)["project"]["version"] != version
+              previous_version = tomllib.loads(previous)["project"]["version"]
+              # A prior release may have failed after its version bump merged.
+              # Retry an untagged version on the next merge; never move an existing tag.
+              existing_tag = subprocess.check_output(
+                  ["git", "ls-remote", "--refs", "--tags", "origin", f"refs/tags/v{version}"],
+                  text=True,
+              ).strip()
+              should_build = previous_version != version or not existing_tag
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               print(f"release_tag=v{version}", file=output)
               print(f"should_build={str(should_build).lower()}", file=output)

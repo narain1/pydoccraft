@@ -4,7 +4,7 @@
 
 Use `lexepub = 0.1.2` from crates.io, locked by checksum in `Cargo.lock`. The crate is Apache-2.0 and supports in-memory EPUB extraction. Default features are disabled; its CLI, C FFI, WASM, and Embassy features are not linked. The GPL-3.0 `epub` crate is prohibited.
 
-`rust/src/epub.rs` is a thin adapter. Existing ZIP preflight runs before LexePub. A bounded strict XML preflight validates the container, selected OPF package, and chapter XHTML before LexePub's metadata/AST traversal. The adapter verifies that every declared chapter was returned and maps headings, paragraphs, links, referenced images, and otherwise readable block text into the existing normalized payload.
+`rust/src/epub.rs` is a thin adapter. Existing ZIP preflight runs before LexePub. A bounded strict XML preflight validates the container, selected OPF package, and chapter XHTML before LexePub's metadata/AST traversal. The adapter verifies that every declared chapter was returned and maps headings, paragraphs, links, referenced images, and otherwise readable block text into the existing normalized payload. On Windows, after validating the original archive, a bounded private ZIP adds aliases for LexePub 0.1.2 host-separator joins; archive metadata and safety checks still use the original, and public chapter paths use forward slashes.
 
 ## Compatibility mapping
 

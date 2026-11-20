@@ -2723,3 +2723,7 @@ Local Rust 1.95 validation: formatting and strict all-target Clippy passed. The 
 ### 0.3.2 version metadata
 
 Updated the Python and Rust package versions, public `doc_ex.__version__`, and root and Node lockfiles to 0.3.2. Rust 1.95 locked offline `cargo check` and both dependency-license audits passed; regenerated third-party inventories were unchanged. A local CPython 3.13 debug wheel built and installed in an isolated target, and its installed distribution metadata and imported public version both report 0.3.2. This is a development-wheel check, not release-candidate validation.
+
+### Windows EPUB release retry
+
+The 0.3.2 release matrix failed Windows installed-wheel EPUB extraction; Linux and macOS passed. See `.kiro/specs/epub-support/validation.md` for the bounded LexePub compatibility workaround, local checks, and pending Windows evidence. An absent-tag release retry was added so the failed version can be published after a verified fix merges, without moving an existing tag.
