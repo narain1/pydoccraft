@@ -34,11 +34,12 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
     }
     crate::ooxml::preflight(data)?;
     crate::archive_safety::validate_epub_readers(data)?;
-    validate_container(data)?;
+    let rootfile = validate_container(data)?;
 
     let mut values = read_package_metadata(data)?;
 
-    let mut book = lexepub::LexEpub::from_sync_reader(Cursor::new(data.to_vec()))
+    let lexepub_data = lexepub_archive(data, &rootfile, cfg!(windows))?;
+    let mut book = lexepub::LexEpub::from_sync_reader(Cursor::new(lexepub_data))
         .map_err(|error| EngineError::Malformed(format!("invalid EPUB: {error}")))?;
     let metadata = block_on(book.get_metadata())
         .map_err(|error| EngineError::Malformed(format!("invalid EPUB metadata: {error}")))?;
@@ -106,7 +107,10 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
             images,
             metadata: Map::from_iter([
                 ("spine_index".into(), json!(number)),
-                ("chapter_href".into(), json!(chapter.chapter_info.href)),
+                (
+                    "chapter_href".into(),
+                    json!(chapter.chapter_info.href.replace('\\', "/")),
+                ),
                 ("chapter_title".into(), json!(chapter.title)),
             ]),
             ..Default::default()
@@ -123,6 +127,103 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
         pages,
         stories: Vec::new(),
     })
+}
+
+// LexePub 0.1.2 joins the OPF directory and member href with the host
+// separator. On Windows, add exact aliases for that join to a private in-memory
+// copy after all archive checks; never rewrite or extract caller-controlled paths.
+fn lexepub_archive(data: &[u8], rootfile: &str, windows: bool) -> Result<Vec<u8>, EngineError> {
+    let Some((directory, _)) = rootfile.rsplit_once('/') else {
+        return Ok(data.to_vec());
+    };
+    if !windows || directory.is_empty() {
+        return Ok(data.to_vec());
+    }
+    let prefix = format!("{directory}/");
+    let mut archive = zip::ZipArchive::new(Cursor::new(data))
+        .map_err(|error| EngineError::Malformed(format!("invalid EPUB ZIP: {error}")))?;
+    // The original archive is capped at 128 MiB and 10,000 entries. The
+    // private copy contains at most two compressed copies plus bounded headers.
+    let maximum = crate::limits::MAX_INPUT_SIZE * 2 + 16 * 1024 * 1024;
+    let mut output = zip::ZipWriter::new(BoundedArchive::new(maximum));
+    for index in 0..archive.len() {
+        let file = archive
+            .by_index(index)
+            .map_err(|error| EngineError::Malformed(format!("invalid EPUB ZIP member: {error}")))?;
+        let name = file.name().to_owned();
+        let alias = name
+            .strip_prefix(&prefix)
+            .filter(|suffix| !suffix.is_empty())
+            .map(|suffix| format!("{directory}\\{suffix}"));
+        output
+            .raw_copy_file(file)
+            .map_err(|error| archive_copy_error(&error))?;
+        if let Some(alias) = alias {
+            let file = archive.by_index(index).map_err(|error| {
+                EngineError::Malformed(format!("invalid EPUB ZIP member: {error}"))
+            })?;
+            output
+                .raw_copy_file_rename(file, alias)
+                .map_err(|error| archive_copy_error(&error))?;
+        }
+    }
+    Ok(output
+        .finish()
+        .map_err(|error| archive_copy_error(&error))?
+        .inner
+        .into_inner())
+}
+
+fn archive_copy_error(error: &zip::result::ZipError) -> EngineError {
+    match error {
+        zip::result::ZipError::Io(error) if error.kind() == std::io::ErrorKind::OutOfMemory => {
+            EngineError::ResourceLimit(
+                "EPUB compatibility archive exceeds its memory budget".into(),
+            )
+        }
+        _ => EngineError::Malformed(format!(
+            "cannot prepare EPUB compatibility archive: {error}"
+        )),
+    }
+}
+
+struct BoundedArchive {
+    inner: Cursor<Vec<u8>>,
+    maximum: usize,
+}
+impl BoundedArchive {
+    fn new(maximum: usize) -> Self {
+        Self {
+            inner: Cursor::new(Vec::new()),
+            maximum,
+        }
+    }
+}
+impl std::io::Write for BoundedArchive {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let end = usize::try_from(self.inner.position())
+            .ok()
+            .and_then(|position| position.checked_add(bytes.len()))
+            .filter(|end| *end <= self.maximum)
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::OutOfMemory, "archive budget exceeded")
+            })?;
+        if end > self.inner.get_ref().len() {
+            let additional = end - self.inner.get_ref().len();
+            self.inner.get_mut().try_reserve(additional).map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::OutOfMemory, "archive allocation failed")
+            })?;
+        }
+        std::io::Write::write(&mut self.inner, bytes)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+impl std::io::Seek for BoundedArchive {
+    fn seek(&mut self, position: std::io::SeekFrom) -> std::io::Result<u64> {
+        std::io::Seek::seek(&mut self.inner, position)
+    }
 }
 
 fn read_package_metadata(data: &[u8]) -> Result<Map<String, Value>, EngineError> {
@@ -416,7 +517,7 @@ fn image_media_type(name: &str) -> Result<&'static str, EngineError> {
     }
 }
 
-fn validate_container(data: &[u8]) -> Result<(), EngineError> {
+fn validate_container(data: &[u8]) -> Result<String, EngineError> {
     let mut archive = zip::ZipArchive::new(Cursor::new(data))
         .map_err(|error| EngineError::Malformed(format!("invalid EPUB ZIP: {error}")))?;
     if archive.by_name("META-INF/encryption.xml").is_ok() {
@@ -493,7 +594,7 @@ fn validate_container(data: &[u8]) -> Result<(), EngineError> {
         })?;
         validate_xhtml(&bytes)?;
     }
-    Ok(())
+    Ok(rootfile)
 }
 
 #[allow(deprecated)]
@@ -606,5 +707,59 @@ fn validate_package_structure(data: &[u8]) -> Result<(), EngineError> {
 fn insert(metadata: &mut Map<String, Value>, key: &str, value: Option<String>) {
     if let Some(value) = value {
         metadata.insert(key.into(), Value::String(value));
+    }
+}
+
+#[cfg(test)]
+mod windows_archive_tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn windows_aliases_preserve_originals_and_nested_resources() {
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, content) in [
+            ("mimetype", b"application/epub+zip".as_slice()),
+            ("META-INF/container.xml", b"container"),
+            ("OPS/nested/book.opf", b"package"),
+            ("OPS/nested/Text/chapter.xhtml", b"chapter"),
+            ("OPS/nested/Images/picture.png", b"picture"),
+            ("outside/other.txt", b"other"),
+        ] {
+            writer
+                .start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(content).unwrap();
+        }
+        let original = writer.finish().unwrap().into_inner();
+        assert_eq!(
+            lexepub_archive(&original, "OPS/nested/book.opf", false).unwrap(),
+            original
+        );
+        let adapted = lexepub_archive(&original, "OPS/nested/book.opf", true).unwrap();
+        let extractor = lexepub::EpubExtractor::from_sync_reader(Cursor::new(adapted)).unwrap();
+        for (name, expected) in [
+            ("OPS/nested/Text/chapter.xhtml", b"chapter".as_slice()),
+            ("OPS/nested\\Text/chapter.xhtml", b"chapter"),
+            ("OPS/nested\\Images/picture.png", b"picture"),
+            ("META-INF/container.xml", b"container"),
+        ] {
+            assert_eq!(block_on(extractor.read_file(name)).unwrap(), expected);
+        }
+        assert!(block_on(extractor.read_file("outside\\other.txt")).is_err());
+        assert_eq!(
+            lexepub_archive(&original, "book.opf", true).unwrap(),
+            original
+        );
+    }
+
+    #[test]
+    fn compatibility_archive_enforces_its_byte_budget() {
+        let mut output = BoundedArchive::new(4);
+        output.write_all(b"1234").unwrap();
+        assert_eq!(
+            output.write_all(b"5").unwrap_err().kind(),
+            std::io::ErrorKind::OutOfMemory
+        );
     }
 }
