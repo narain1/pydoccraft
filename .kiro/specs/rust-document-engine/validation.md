@@ -2727,3 +2727,5 @@ Updated the Python and Rust package versions, public `doc_ex.__version__`, and r
 ### Windows EPUB release retry
 
 The 0.3.2 release matrix failed Windows installed-wheel EPUB extraction; Linux and macOS passed. See `.kiro/specs/epub-support/validation.md` for the bounded LexePub compatibility workaround, local checks, and pending Windows evidence. An absent-tag release retry was added so the failed version can be published after a verified fix merges, without moving an existing tag.
+
+Validation-only release run [44779508068](https://github.com/narain1/pydoccraft/actions/runs/44779508068) passed all nine installed-wheel jobs at source `89539403f89b4a2bb7d71ef1ecbd51b12d6518e5`, with 612 tests on each platform/Python combination. The run did not publish or create a tag.
