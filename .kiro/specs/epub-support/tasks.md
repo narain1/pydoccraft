@@ -8,7 +8,8 @@
 - [x] Add semantic reflow preview and DOCX/PDF conversion with explicit errors for unsupported features.
 - [x] Update locked dependencies, license inventories, and format and authoring documentation.
 - [x] Accept inert XHTML and selected legacy doctypes. Reopen and edit the original W3C Accessible EPUB 3 sample.
-- [ ] Expand the public EPUB conformance corpus. Exercise math-heavy books that exceed the eager semantic output budget.
+- [ ] Expand the public EPUB conformance corpus.
+- [x] Open the unmodified math-heavy *Linear Algebra* sample within the semantic output budget and exercise its spine previews.
 - [ ] Validate the release wheel matrix on Linux, macOS, and Windows.
 - [x] Replace existing XHTML chapters transactionally and preserve targeted navigation and overlay anchors.
 - [x] Synchronize EPUB 3 `mathml` and `svg` resource properties after chapter insertion or replacement.
@@ -20,6 +21,7 @@
 - [x] Render fixed-layout spreads in both reading directions, honor spine placement and orientation-dependent spread rules, and clip across page boundaries.
 - [x] Export selected fixed-layout viewports as image-only PDF pages at their original sizes.
 - [ ] Extend source CSS and fixed-layout fidelity, including font Unicode ranges and variable axes, additional SVG features and semantic fixed-layout conversion.
+- [ ] Track chapter box styles separately from equation styles so large MathML trees use the equation and selector work limits.
 - [x] Project inherited MathML attributes, accents, movable limits, repeated script pairs, varied fences and separators, horizontal spaces, and zero-dimension padding.
 - [x] Apply chapter CSS to MathML colors, font sizes, bold and italic runs, and movable limit placement in previews and native exports.
 - [ ] Expand MathML layout to remaining elements and attributes, including spanning matrices, arbitrary padding and visual properties beyond the supported cascade.

@@ -1426,6 +1426,35 @@ class EpubTests(unittest.TestCase):
                 self.assertIn("Before", pdf[0].get_text())
                 self.assertIn("After", word[0].get_text())
 
+    def test_mathml_normalizes_xml_whitespace_but_keeps_nonbreaking_spaces(self) -> None:
+        def one_chapter(formula: str) -> bytes:
+            return epub_fixture(chapter_one=f'<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML"><body><p>Before {formula} After</p></body></html>')
+
+        compact = "<m:math><m:mrow><m:mi>x</m:mi><m:mo>+</m:mo><m:mtext>&#160;two terms&#160;</m:mtext></m:mrow></m:math>"
+        pretty = """<m:math><m:semantics>
+          <m:mrow>
+            <m:mi> x </m:mi>
+            <m:mo> + </m:mo>
+            <m:mtext>
+              &#160;two	 terms&#160;
+            </m:mtext>
+          </m:mrow>
+          <m:annotation encoding="text/plain">Other representation</m:annotation>
+        </m:semantics></m:math>"""
+        with doc_ex.open(one_chapter(pretty)) as book, doc_ex.open(one_chapter(compact)) as control:
+            expected = "Before x+\u00a0two terms\u00a0 After"
+            self.assertEqual(book[0].get_text(), expected)
+            self.assertEqual(book[0].get_text(), control[0].get_text())
+            equation = book[0].blocks[0].metadata["mathml"][0]
+            self.assertEqual(expected[equation["start"]:equation["end"]], "x+\u00a0two terms\u00a0")
+            self.assertIn("\n            <m:mi> x </m:mi>", equation["source"])
+            self.assertIn("Other representation", equation["source"])
+            self.assertEqual(book.render_page(0, dpi=96), control.render_page(0, dpi=96))
+            with zipfile.ZipFile(io.BytesIO(book.convert("docx"))) as archive:
+                xml = ET.fromstring(archive.read("word/document.xml"))
+            math_text = [node.text for node in xml.iter("{http://schemas.openxmlformats.org/officeDocument/2006/math}t")]
+            self.assertIn("\u00a0two terms\u00a0", math_text)
+
     def test_mathml_applies_chapter_css_in_preview_and_native_exports(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Math styles</title><link rel="stylesheet" href="math.css"/>

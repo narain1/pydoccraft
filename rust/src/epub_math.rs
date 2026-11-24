@@ -78,7 +78,12 @@ impl Css {
 pub(super) fn presentation_text(root: Node<'_, '_>) -> String {
     fn append(node: Node<'_, '_>, output: &mut String) {
         if node.is_text() {
-            output.push_str(node.text().unwrap_or_default());
+            // Preserve indentation in the source markup and omit it from equation text.
+            output.push_str(node.text().unwrap_or_default().trim_matches(xml_space));
+        } else if node.tag_name().namespace() == Some(MATHML)
+            && matches!(node.tag_name().name(), "mi" | "mn" | "mo" | "ms" | "mtext")
+        {
+            append_token_text(node, output);
         } else if node.has_tag_name((MATHML, "semantics")) {
             if let Some(presentation) = node.children().find(Node::is_element) {
                 append(presentation, output);
@@ -94,6 +99,30 @@ pub(super) fn presentation_text(root: Node<'_, '_>) -> String {
     let mut output = String::new();
     append(root, &mut output);
     output
+}
+
+fn xml_space(character: char) -> bool {
+    matches!(character, ' ' | '\t' | '\n' | '\r')
+}
+
+fn append_token_text(node: Node<'_, '_>, output: &mut String) {
+    let start = output.len();
+    let mut gap = false;
+    let text = node
+        .descendants()
+        .filter(Node::is_text)
+        .filter_map(|child| child.text());
+    for character in text.flat_map(str::chars) {
+        if xml_space(character) {
+            gap = output.len() != start;
+        } else {
+            if gap {
+                output.push(' ');
+                gap = false;
+            }
+            output.push(character);
+        }
+    }
 }
 
 pub(super) fn equation(
@@ -444,11 +473,9 @@ fn token(node: Node<'_, '_>, style: Presentation<'_>) -> Result<MNode, EngineErr
     if node.children().any(|child| child.is_element()) {
         return Err(unsupported("nested content in a MathML token"));
     }
-    let value: String = node
-        .children()
-        .filter_map(|child| child.text().filter(|_| child.is_text()))
-        .collect();
-    let mut run = MRun::new(value.split_whitespace().collect::<Vec<_>>().join(" "));
+    let mut text = String::new();
+    append_token_text(node, &mut text);
+    let mut run = MRun::new(text);
     if tag == "ms" {
         let left = node.attribute("lquote").unwrap_or("\"");
         let right = node.attribute("rquote").unwrap_or("\"");
