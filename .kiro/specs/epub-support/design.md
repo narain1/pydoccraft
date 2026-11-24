@@ -1,39 +1,21 @@
-# Design: EPUB support
+# EPUB design
 
-## Engine selection
+## Container and package
 
-Use `lexepub = 0.1.2` from crates.io, locked by checksum in `Cargo.lock`. The crate is Apache-2.0 and supports in-memory EPUB extraction. Default features are disabled; its CLI, C FFI, WASM, and Embassy features are not linked. The GPL-3.0 `epub` crate is prohibited.
+The in-repo reader uses the existing shared ZIP preflight and locked rust libraries for ZIP and XML. The preflight bounds central directory work and checks local/central consistency before indexing. The EPUB layer compares the archive readers' entry views, opens the single declared package, then bounds each resource read and the cumulative read budget. Paths use `/` and resolve only inside the publication. Runtime operations are in-process and offline.
 
-`rust/src/epub.rs` is a thin adapter. Existing ZIP preflight runs before LexePub. A bounded strict XML preflight validates the container, selected OPF package, and chapter XHTML before LexePub's metadata/AST traversal. The adapter verifies that every declared chapter was returned and maps headings, paragraphs, links, referenced images, and otherwise readable block text into the existing normalized payload.
+`epub.rs` owns the OPF metadata, manifest and spine, EPUB 3 navigation and EPUB 2 NCX, and guarded resource I/O. `epub_content.rs` maps namespace-aware XHTML onto ordered document blocks. Tables carry semantic cells with nested blocks, spans, headings and row-group metadata. Images retain source bytes, alternative text and inline position. SVG uses a restricted static profile. MathML is stored as a namespace-complete source fragment plus text, with no execution or rendering.
 
-## Compatibility mapping
+## Public API and output
 
-An EPUB is reflowable rather than page-based. The compatibility API maps one spine chapter to one zero-based `Page`. Each chapter contains source-ordered heading/paragraph blocks, inline link offsets, and referenced images exposed by the upstream AST. Recognized readable list, quote, preformatted, caption, definition, and table-cell containers map to paragraph blocks without duplicating nested text. Document metadata records `format=epub`, EPUB version, title, authors, language and other available publication fields.
+The existing native extraction, render, and conversion operations dispatch to EPUB. Python also exposes `Document.read_epub_resource(path)` and `Document.edit_epub_metadata(title=..., description=...)`. The latter edits only the relevant OPF ranges and rebuilds the ZIP within the output budget. Its original chapter and resource bytes are preserved. Untouched ZIP headers and compression layout can change.
 
-This chapter-as-page mapping is explicit and must not be described as physical pagination. Fixed-layout EPUB remains unsupported.
+`epub_output.rs` projects supported semantic blocks into the existing WordCraft model. A WordCraft web layout renders an individual chapter. The native DOCX and PDF exporters handle document pagination. Sources with unsupported layout or content features return explicit errors. The adapter applies no EPUB CSS and performs no physical page mapping during extraction.
 
-## Boundary
+## Creation and dependency scope
 
-The existing boundary remains unchanged:
+`EditableEpub` validates and escapes semantic EPUB 3 source, then calls rbook 0.7.12 with only its write feature. Writes run through a bounded sink. The public creation APIs do not accept externally supplied XHTML, OPF, or archive entry names. Authoring and metadata editing use the same output limit. Input, output, XML and resource limits bound the work of individual stages. They do not measure total process memory.
 
-```python
-_core.extract(data, "epub", password=None) -> JSON string
-```
+This design replaces LexePub and retains the existing rbook writer. It requires no craft-libs EPUB proposal or change to the shared backend revision. The read and creation paths are independently exercised by round-trip tests.
 
-Passwords are rejected because encrypted/DRM EPUB is unsupported. Rendering and conversion dispatch return stable unsupported errors.
-
-## Safety
-
-Run the shared ZIP preflight before upstream parsing. Require the EPUB mimetype marker, strict bounded container/OPF/XHTML XML, and reject DTDs, unsafe package paths, and encryption metadata. Cap chapters at 10,000 and normalized JSON at 64 MiB. LexePub 0.1.2 still eagerly materializes and clones its CSS/chapter AST before returning; a hard intermediate-allocation ceiling requires an upstream bounded traversal API and is not claimed here.
-
-## Creation backend
-
-Use `rbook = 0.7.12` with default features disabled and only `write` enabled. It is Apache-2.0, accepts in-memory resources, generates the package/manifest/spine/navigation/mimetype/ZIP structure, and writes to `Vec<u8>`. A private `EditableEpub` stores only bounded semantic metadata, chapters, safe text fragments, inert links and image resources. Python owns path/stream I/O through the existing `EditableDocument` lifecycle.
-
-The adapter rejects XML-illegal text, escapes text/attributes, accepts only signature-checked PNG/JPEG/GIF images, and supplies bounded semantic XHTML bodies to rbook. It tracks 64 MiB content and aggregate-media budgets, a 16 MiB per-image budget, and a conservative 128 MiB output budget before writing, then checks actual output size. Callers cannot provide raw XHTML, OPF, CSS, SVG, scripts, archive paths or arbitrary resource names. Because rbook writes to a `Vec<u8>`, a sink-enforced allocation ceiling remains an upstream requirement; the conservative preflight prevents profile-compliant state from exceeding the public bound.
-
-## Deferred work
-
-The completed profile adds semantic extraction and append-only creation. Navigation beyond extracted hyperlinks, CSS, SVG authoring, media overlays, fixed-layout pagination/rendering, conversion, and editing existing EPUB files require separate acceptance criteria.
-
-The adapter uses the already-pinned rbook reader for OPF metadata after the archive, container, package and XHTML preflight. LexePub 0.1.2 discards XML entity events in metadata. To ensure both readers use the validated package, containers with multiple rootfiles, ZIP64, inconsistent local/central headers or an end signature in the ZIP comment are rejected explicitly. This adds a second eager parse and does not establish a hard intermediate-memory ceiling. LexePub remains the chapter and semantic-content reader.
+Container limits, repeated metadata, namespace preservation, links, table spans, and image handling are owned by the local reader. The existing writer accepts a bounded sink and publication dates at its current pin. MathML is retained for downstream use. Its layout and the EPUB CSS cascade still need implementations before source-fidelity rendering can be offered.

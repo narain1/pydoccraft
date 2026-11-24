@@ -2723,3 +2723,7 @@ Local Rust 1.95 validation: formatting and strict all-target Clippy passed. The 
 ### 0.3.2 version metadata
 
 Updated the Python and Rust package versions, public `doc_ex.__version__`, and root and Node lockfiles to 0.3.2. Rust 1.95 locked offline `cargo check` and both dependency-license audits passed; regenerated third-party inventories were unchanged. A local CPython 3.13 debug wheel built and installed in an isolated target, and its installed distribution metadata and imported public version both report 0.3.2. This is a development-wheel check, not release-candidate validation.
+
+## 2026-11-23 EPUB reader, metadata editing and semantic output
+
+The shared engine pins remain at PdfCraft `03996b10`, WordCraft `bbe3547d`, DeckCraft `f7a7fd7f`, and craft-libs `92d392cf`. The EPUB reader now runs locally over the bounded ZIP and XML libraries. The exact locked audits cover 275 core and 265 Node normal/build packages. Linux x86-64 CPython 3.11 and 3.13 release wheels measure 19,625,782 and 19,618,416 bytes, with uncompressed native extensions of 45,550,904 and 45,527,256 bytes. See [the EPUB validation record](../epub-support/validation.md#2026-11-23-in-repo-epub-reader-and-semantic-output) for the corpus results, checksums, and output limits.

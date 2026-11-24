@@ -8,15 +8,15 @@ The [operation evidence matrix](support-matrix.md) separates reading, creation, 
 
 | Capability | PDF | DOCX | PPTX | EPUB |
 |---|---:|---:|---:|---:|
-| Structured extraction | Yes | Yes | Yes | Reflowable profile |
+| Structured extraction | Yes | Yes | Yes | EPUB 2 and 3 semantic profile |
 | Page/slide boundaries | Source pages | WordCraft layout pages | One page per slide | One page per spine chapter |
 | Text and geometry | Yes | Text; layout page metadata | Text and shape geometry | Semantic text; no physical geometry |
 | URI links | Yes | Yes | Yes | Yes |
-| Semantic tables | Conservative geometry inference | Yes | Yes | Readable cell text only |
+| Semantic tables | Conservative geometry inference | Yes | Yes | Yes, including nested tables and row groups |
 | Embedded image bytes | Exportable images | Referenced images | Referenced pictures | Referenced images |
 | Notes | No dedicated model | Owned footnote/endnote stories and body references | Speaker notes | No |
 | Comments | PDF comments not normalized | Comments and replies | Comments and replies | No |
-| PNG rendering | Yes | Yes | Yes | No |
+| PNG rendering | Yes | Yes | Yes | Reflowable chapter preview |
 | Password input | Yes | Yes | Encrypted PPTX unsupported | DRM/password unsupported |
 | OCR | No | Not applicable | Not applicable | Not applicable |
 | Create a new document from scratch | Authored profile | Authored profile | Authored profile | Append-only profile |
@@ -124,6 +124,7 @@ Both methods return encoded PNG bytes.
 - PDF rendering uses PdfCraft pixels and rejects oversized output.
 - DOCX rendering uses WordCraft layout and its page renderer.
 - PPTX rendering uses DeckCraft slide rendering.
+- EPUB rendering lays out a reflowable chapter on a scrolling WordCraft surface at a fixed width of 612 points.
 - `dpi / 72` is used as the native scale.
 - DPI must be finite and between 1 and 1200.
 - Out-of-range pages are rejected in Python before native dispatch.
@@ -153,6 +154,8 @@ Path("page.png").write_bytes(document[0].get_pixmap())
 | PDF | DOCX | PdfCraft extraction values → `pdfcraft-export` DOCX writer | Positioned text styling and exportable images; not semantic PDF-table conversion |
 | DOCX | PDF | WordCraft layout and PDF export | Supports Unicode and tested explicit empty pages |
 | PPTX | PDF | DeckCraft PDF export | Slides become PDF pages with a searchable text layer where supported |
+| EPUB | DOCX | Semantic EPUB blocks → WordCraft DOCX writer | Reflowable content, with each chapter beginning on a new page |
+| EPUB | PDF | Semantic EPUB blocks → WordCraft PDF export | Same content profile as EPUB to DOCX, laid out as printable pages |
 
 DeckCraft PDF export corrupts searchable text for PPTX paragraphs containing explicit breaks; native PDF export of those documents is unsupported until the upstream defect is fixed. A visually correct slide is not evidence that its PDF text layer is correct.
 
@@ -170,16 +173,16 @@ Conversion is not pixel-perfect. Font substitution, unsupported PDF constructs, 
 
 ## Document creation
 
-`doc_ex.new("docx" | "pdf" | "pptx" | "epub")` creates an owned editable native document with insertion, formatting, copy, and atomic path saving. EPUB creation is append-only and reflowable: it supports metadata, ordered chapters, headings, paragraphs, inert links, and signature-checked PNG/JPEG/GIF resources; it does not support rendering, conversion, CSS, raw XHTML, SVG, or editing existing books. See the supported methods and limitations in [Authoring](authoring.md). Extracted Python values remain independent snapshots; arbitrary source-Office editing is still unavailable, while PDF `Document.edit()` uses a conservative preservation profile.
+`doc_ex.new("docx" | "pdf" | "pptx" | "epub")` creates an owned editable native document with copy and atomic path saving. EPUB creation appends semantic content to reflowable EPUB 3 chapters. Extracted Python values remain independent snapshots. PDF `Document.edit()` uses a conservative preservation profile. See [Authoring](authoring.md) for the supported methods.
 
-## EPUB (unreleased extraction and creation profile)
+## EPUB (unreleased)
 
-The EPUB feature branch detects EPUB 2/3 containers and maps each spine chapter to one compatibility `Page` in reading order. This is a chapter boundary, not physical pagination. Native extraction preserves semantic headings, paragraphs, readable list/quote/preformatted/cell text, inline links and referenced image bytes/alt text through LexePub 0.1.2, and publication metadata through the existing rbook 0.7.12 reader, after shared archive safety and strict container/package/XHTML XML preflights.
+Each spine entry maps to one compatibility `Page` in reading order, including repeated and non-linear entries. The page represents a chapter boundary. Extraction preserves semantic text, inline character offsets, nested tables, referenced images, and MathML markup with readable text. Raster image bytes are returned as stored. Static SVG passes a restrictive validation profile and remains inert data.
 
-The same branch adds `doc_ex.new("epub")` through rbook 0.7.12 for bounded semantic metadata, chapters, headings, paragraphs, inert links and signature-checked PNG/JPEG/GIF images. Created bytes reopen through the independent extraction path. Authored SVG is rejected because arbitrary SVG cannot be guaranteed inert.
+`Document.metadata["dublin_core"]` contains repeated Dublin Core values keyed by field name. `package_metadata` contains OPF meta records and their refinement targets. `navigation` contains nested navigation groups from an EPUB 3 navigation document or EPUB 2 NCX. `manifest` describes packaged resources. Use `Document.read_epub_resource(path)` with a decoded, relative archive path to retrieve a resource as bytes, limited to 16 MiB.
 
-LexePub still eagerly materializes its complete CSS/chapter AST before the adapter's final normalized-output check, and rbook writes through an in-memory vector. The public profile applies source ZIP/input limits, strict XML checks, 64 MiB content/media ceilings, 16 MiB per image, and conservative/actual 128 MiB output checks, but does not claim hard intermediate-allocation ceilings without upstream streaming APIs.
+PNG preview, DOCX export, and PDF export use WordCraft's default typography and semantic reflow. They support headings, paragraphs, common raster images (PNG and JPEG), and basic nested or merged tables. Fixed-layout packages, MathML layout, SVG or other image formats, and table features that cannot be projected raise an explicit unsupported error. Conversion also rejects internal and image-only hyperlinks. Use extraction to access those structures.
 
-Rendering, fixed-layout pagination, CSS fidelity, scripts, SVG authoring, media overlays, editing existing EPUB files and conversion are intentionally unsupported. Encrypted or DRM-protected resources fail explicitly. See `.kiro/specs/epub-support/` for requirements and deferred work.
+The reader parses bounded UTF-8 XML and never fetches external resources or runs scripts. It supports inspecting fixed-layout package metadata, but does not reproduce fixed layouts, CSS, or physical pagination. Audio/video playback, media overlays, scripts, DRM, and general lossless conversion are outside the profile. See the [EPUB specification](../.kiro/specs/epub-support/requirements.md) for details.
 
 ZIP safety preflight for DOCX, PPTX and EPUB bounds raw central-directory entries and rejects duplicate names and malformed directories before constructing archive indexes. ZIP64, multi-disk archives, ZIPs with trailing data, and archives with ambiguous end records are explicitly unsupported. EPUB additionally rejects multiple package rootfiles, inconsistent local/central headers and end-record signatures in the ZIP comment. ZIP data descriptors remain supported.

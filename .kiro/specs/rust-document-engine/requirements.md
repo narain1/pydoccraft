@@ -351,7 +351,7 @@ See the [API proposal and reference crosswalk](../../../docs/authoring-api-desig
 
 ## EPUB extension profile
 
-EPUB 2/3 extraction and append-only EPUB 3 creation are authorized through the dedicated [EPUB support specification](../epub-support/requirements.md). This format has no ArtCraft engine; the implementation SHALL use the permissively licensed, exact-locked LexePub chapter engine and rbook metadata reader/writer rather than handwritten EPUB package parsing or generation. EPUB rendering, conversion, CSS fidelity, SVG authoring, fixed layout, DRM, scripts, and editing existing books remain unsupported.
+The dedicated [EPUB support specification](../epub-support/requirements.md) defines EPUB 2/3 extraction, EPUB 3 creation, targeted metadata editing, and semantic preview and export. EPUB SHALL use the bounded local package reader with exact-locked XML and ZIP libraries, rbook for creation, and WordCraft for semantic layout and export.
 ## 45. Executable usability cookbook
 
 1. Six short workflows SHALL demonstrate a letter, invoice, branded report, authored template filling, PDF assembly and slide previews through the existing public API. Examples SHALL be import-safe, accept explicit output directories and selectable DPI, use ordinary Python value formatting, and require no runtime document executables, downloads or optional dependencies.
@@ -1051,4 +1051,4 @@ The license inventory audit SHALL preserve attribution outside the generated cra
 
 ## Bounded ZIP directory and EPUB metadata
 
-DOCX, PPTX and EPUB SHALL bound raw ZIP central-directory records, names and expansion before name-keyed archive indexes are constructed, and reject duplicate names or directory-count inconsistencies explicitly. Bounded preflight SHALL retain data-descriptor support. ZIP64, multi-disk, trailing-data and ambiguous-end-record archives are explicitly unsupported until bounded upstream handling is available. EPUB SHALL also reject multiple rootfiles, inconsistent local/central headers and end-record signatures in archive comments before its upstream readers run. OPF metadata SHALL preserve XML-sensitive text and repeated values through the pinned upstream metadata reader.
+DOCX, PPTX and EPUB SHALL bound raw ZIP central-directory records, names and expansion before name-keyed archive indexes are constructed, and reject duplicate names or directory-count inconsistencies explicitly. Bounded preflight SHALL retain data-descriptor support. ZIP64, multi-disk, trailing-data and ambiguous-end-record archives are explicitly unsupported until bounded upstream handling is available. EPUB SHALL also reject multiple rootfiles, inconsistent local/central headers and end-record signatures in archive comments. The EPUB package reader SHALL preserve XML-sensitive OPF metadata and repeated values.

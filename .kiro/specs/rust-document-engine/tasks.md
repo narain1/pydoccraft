@@ -279,7 +279,7 @@ The [upstream register U01–U11](../../../docs/upstream-roadmap.md) marks libra
 ## EPUB extension
 
 - [x] Authorize and link the dedicated EPUB extraction/creation spec.
-- [x] Add exact-locked permissive LexePub/rbook adapters, synchronized license evidence, and generated tests.
+- [x] Replace LexePub with the bounded in-repo reader, retain the pinned rbook writer, and add targeted metadata editing and semantic preview and export. Track EPUB cases in the [EPUB plan](../epub-support/tasks.md).
 - [ ] Track upstream bounded traversal/writer sinks before claiming hard intermediate-allocation ceilings.
 ## Executable usability cookbook
 

@@ -11,9 +11,9 @@ conversion, reusable render sessions, and bounded EPUB authoring, but not the
 Python compatibility API.
 The extraction JSON follows the Rust `DocumentPayload` schema and is not a typed
 Go API. Extraction supports PDF, DOCX, PPTX and EPUB; rendering supports PDF,
-DOCX and PPTX, not EPUB. Page indexes are nonnegative and zero-based; clip values
+DOCX, PPTX and reflowable EPUB chapters. Page indexes are nonnegative and zero-based; clip values
 are in displayed page points. Detection recognizes PDF,
-DOCX, PPTX and EPUB; conversion is limited to PDF→DOCX and DOCX→PDF.
+DOCX, PPTX and EPUB; conversion supports PDF→DOCX, DOCX→PDF and the supported EPUB→DOCX/PDF profile.
 The native engines' fidelity limitations and resource limits still apply; this
 is not pixel-perfect conversion. In particular, native PPTX PDF export does not
 support paragraphs with explicit line breaks because upstream corrupts their

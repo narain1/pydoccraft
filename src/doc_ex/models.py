@@ -62,11 +62,21 @@ class Table:
     def _markdown(self, image_reference: Callable[[Image, tuple], str] | None = None, path: tuple = ()) -> str:
         # Pipe tables cannot represent nested tables, merged cells or rich content.
         # HTML preserves that hierarchy without emitting the flat rows a second time.
-        if any(
-            cell.col_span != 1 or cell.row_span != 1 or cell.covered
-            or cell.metadata.get("grid_column", column) != column
-            or any(block.table or block.links or block.images for block in cell.blocks)
-            for row in self.cells for column, cell in enumerate(row)
+        declared_headers = any("header" in cell.metadata for row in self.cells for cell in row)
+        simple_headers = bool(self.cells and self.cells[0]) and all(
+            cell.metadata.get("header") is True for cell in self.cells[0]
+        ) and all(cell.metadata.get("header") is not True for row in self.cells[1:] for cell in row)
+        source_attributes = ("html_id", "html_scope", "html_headers", "html_abbr")
+        if (
+            "html_row_groups" in self.metadata
+            or (declared_headers and not simple_headers)
+            or any(any(key in cell.metadata for key in source_attributes) for row in self.cells for cell in row)
+            or any(
+                cell.col_span != 1 or cell.row_span != 1 or cell.covered
+                or cell.metadata.get("grid_column", column) != column
+                or any(block.table or block.links or block.images for block in cell.blocks)
+                for row in self.cells for column, cell in enumerate(row)
+            )
         ):
             return self._to_html(image_reference, path)
         if not self.rows:
@@ -88,9 +98,24 @@ class Table:
 
     def _to_html(self, image_reference: Callable[[Image, tuple], str] | None = None, path: tuple = ()) -> str:
         rows = self.cells or [[Cell([Block("paragraph", text)]) for text in row] for row in self.rows]
+        groups = self._html_groups(len(rows))
+        groups_by_start: dict[int, list[tuple[str, int, str | None]]] = {}
+        ends: dict[int, str] = {}
+        row_group_end: list[int | None] = [None] * len(rows)
+        for kind, start, count, group_id in groups:
+            groups_by_start.setdefault(start, []).append((kind, count, group_id))
+            if count:
+                ends[start + count] = kind
+                for index in range(start, start + count):
+                    row_group_end[index] = start + count
         output = ["<table>"]
         occupied: dict[int, int] = {}
         for row_number, row in enumerate(rows):
+            for kind, count, group_id in groups_by_start.get(row_number, []):
+                attribute = f' id="{escape(group_id, quote=True)}"' if group_id is not None else ""
+                output.append(f"<{kind}{attribute}>")
+                if not count:
+                    output.append(f"</{kind}>")
             output.append("<tr>")
             column = 0
             for cell_number, cell in enumerate(row):
@@ -102,6 +127,9 @@ class Table:
                     or not isinstance(cell.row_span, int) or not 1 <= cell.row_span <= 32767
                 ):
                     raise ValueError("structured table spans must fit a 1000-column, 32767-row grid")
+                group_end = row_group_end[row_number]
+                if group_end is not None and cell.row_span > group_end - row_number:
+                    raise ValueError("structured table row span exceeds its row group")
                 while column < grid_column:
                     if column not in occupied:
                         output.append("<td></td>")
@@ -113,7 +141,15 @@ class Table:
                     continue
                 if cell.row_span > 1:
                     occupied.update((index, cell.row_span) for index in range(grid_column, column))
-                output.append(f'<td colspan="{cell.col_span}" rowspan="{cell.row_span}">')
+                tag = "th" if cell.metadata.get("header") is True else "td"
+                attributes = f' colspan="{cell.col_span}" rowspan="{cell.row_span}"'
+                for key, name in (("html_id", "id"), ("html_scope", "scope"), ("html_headers", "headers"), ("html_abbr", "abbr")):
+                    if key in cell.metadata:
+                        value = cell.metadata[key]
+                        if not isinstance(value, str):
+                            raise ValueError("structured table HTML attributes must be strings")
+                        attributes += f' {name}="{escape(value, quote=True)}"'
+                output.append(f"<{tag}{attributes}>")
                 for block_number, block in enumerate(cell.blocks):
                     block_path = path + ("cells", row_number, cell_number, "blocks", block_number)
                     if block.table:
@@ -123,11 +159,38 @@ class Table:
                     for image_number, image in enumerate(block.images):
                         reference = image_reference(image, block_path + ("images", image_number)) if image_reference else image.name
                         output.append(f'<img src="{escape(reference, quote=True)}" alt="{escape(image.alt, quote=True)}">')
-                output.append("</td>")
+                output.append(f"</{tag}>")
             output.append("</tr>")
+            if row_number + 1 in ends:
+                output.append(f'</{ends[row_number + 1]}>')
             occupied = {column: remaining - 1 for column, remaining in occupied.items() if remaining > 1}
+        for kind, count, group_id in groups_by_start.get(len(rows), []):
+            attribute = f' id="{escape(group_id, quote=True)}"' if group_id is not None else ""
+            output.append(f"<{kind}{attribute}></{kind}>")
         output.append("</table>")
         return "".join(output)
+
+    def _html_groups(self, row_count: int) -> list[tuple[str, int, int, str | None]]:
+        raw = self.metadata.get("html_row_groups", [])
+        if not isinstance(raw, list):
+            raise ValueError("structured table row groups must be a list")
+        result: list[tuple[str, int, int, str | None]] = []
+        previous_end = 0
+        for group in raw:
+            if not isinstance(group, dict):
+                raise ValueError("invalid structured table row group")
+            kind, start, count = group.get("kind"), group.get("start_row"), group.get("row_count")
+            group_id = group.get("id")
+            if (
+                kind not in ("thead", "tbody", "tfoot")
+                or type(start) is not int or type(count) is not int
+                or start < previous_end or count < 0 or start + count > row_count
+                or (group_id is not None and not isinstance(group_id, str))
+            ):
+                raise ValueError("invalid structured table row group")
+            result.append((kind, start, count, group_id))
+            previous_end = start + count
+        return result
 
 
 def _html_text(text: str, links: list[Link]) -> str:

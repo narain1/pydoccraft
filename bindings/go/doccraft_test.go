@@ -62,8 +62,8 @@ func TestExtractAndRender(t *testing.T) {
 		t.Fatalf("negative page: %v", err)
 	}
 	_, err = Render(data, "epub", 0, 72, nil, nil)
-	if !errors.As(err, &native) || native.Code != 2 {
-		t.Fatalf("EPUB render: %v", err)
+	if !errors.As(err, &native) || native.Code != 3 {
+		t.Fatalf("wrong format for EPUB render: %v", err)
 	}
 	_, err = Render(data, "docx", 0, math.NaN(), nil, nil)
 	if err == nil {

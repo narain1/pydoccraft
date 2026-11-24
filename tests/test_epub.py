@@ -312,7 +312,11 @@ class EpubTests(unittest.TestCase):
             for operation in (
                 lambda: chapter.add_paragraph("bad\x01text"),
                 lambda: chapter.add_link("bad\x02label", "https://example.com"),
-                lambda: chapter.add_image(b"<svg><script/></svg>", media_type="image/svg+xml"),
+                lambda: chapter.add_image(b'<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>', media_type="image/svg+xml"),
+                lambda: chapter.add_image(
+                    b'<svg xmlns="http://www.w3.org/2000/svg"><rect fill="url(https://example.com/paint)"/></svg>',
+                    media_type="image/svg+xml",
+                ),
                 lambda: chapter.add_image(b"not png", media_type="image/png"),
             ):
                 with self.assertRaises((ValueError, doc_ex.UnsupportedFormatError)):
@@ -320,8 +324,114 @@ class EpubTests(unittest.TestCase):
                 self.assertEqual(book.to_bytes(), before)
             chapter.add_link("Uppercase", "HTTPS://example.com")
 
-    def test_render_conversion_encryption_and_malformed_fail_explicitly(self) -> None:
-        with doc_ex.open(epub_fixture()) as document:
+    def test_reflowable_preview_and_conversions_reopen(self) -> None:
+        from test_authoring import image_fixture
+
+        source = rewrite_epub(epub_fixture(), {"OEBPS/image.png": image_fixture()})
+        with doc_ex.open(source) as document:
+            self.assertTrue(document.render_page(0, dpi=72).startswith(b"\x89PNG"))
+            self.assertTrue(document.render_page(1, dpi=72, clip=(15, 15, 120, 50)).startswith(b"\x89PNG"))
+            for output in ("pdf", "docx"):
+                with self.subTest(output=output), doc_ex.open(document.convert(output)) as converted:
+                    self.assertIn("First chapter", converted[0].get_text())
+                    self.assertIn("Second chapter", converted[-1].get_text())
+                    self.assertTrue(converted[0].get_images())
+                    self.assertIn("https://example.com", [link.uri for link in converted[0].get_links()])
+
+    def test_namespace_paths_navigation_and_spine_occurrences(self) -> None:
+        data = epub_fixture(chapter_one='<h:html xmlns:h="http://www.w3.org/1999/xhtml"><h:body><h:p>Greek λ<![CDATA[ & café]]><h:br/><h:a href="../Text/Two%20%C3%A9.xhtml#tag">go</h:a></h:p><h:img src="../Media/caf%C3%A9.png"/></h:body></h:html>')
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        package = package.replace(b"</metadata>", b'<other:title xmlns:other="urn:other">wrong</other:title><dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">Second &amp; title</dc:title></metadata>')
+        package = package.replace(b'href="two.xhtml"', b'href="../Text/Two%20%C3%A9.xhtml"').replace(b'<item id="image" href="image.png"', b'<item id="image" href="../Media/caf%C3%A9.png"')
+        package = package.replace(b"</manifest>", b'<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/></manifest>')
+        package = package.replace(b'<itemref idref="two"/>', b'<itemref idref="two" linear="no"/><itemref idref="one"/>')
+        data = rewrite_epub(data, {
+            "OEBPS/content.opf": package,
+            "Media/café.png": PNG,
+            "Text/Two é.xhtml": '<html xmlns="http://www.w3.org/1999/xhtml"><body><p id="tag">Target</p></body></html>',
+            "OEBPS/nav.xhtml": '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><span>Part</span><ol><li><a href="../Text/Two%20%C3%A9.xhtml#tag">Target</a></li></ol></li></ol></nav></body></html>',
+        })
+        with doc_ex.open(data) as document:
+            self.assertEqual(document.page_count, 3)
+            self.assertEqual(document.metadata["dublin_core"]["title"], ["Native EPUB fixture", "Second & title"])
+            self.assertEqual(document.metadata["navigation"][0]["items"][0]["children"][0]["path"], "Text/Two é.xhtml")
+            self.assertIn("Greek λ & café\ngo", document[0].get_text())
+            self.assertEqual(document[0].get_text(), document[2].get_text())
+            self.assertEqual(document[0].get_links()[0].metadata["target_path"], "Text/Two é.xhtml")
+            self.assertEqual(document[0].get_images()[0].data, PNG)
+            self.assertEqual(document.read_epub_resource("Media/café.png"), PNG)
+            with self.assertRaises(doc_ex.UnsafeArchiveError):
+                document.read_epub_resource("../Media/café.png")
+
+    def test_nested_tables_linked_images_and_inherited_svg_namespaces(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:s="http://www.w3.org/2000/svg"
+          xmlns:m="http://www.w3.org/1998/Math/MathML"><body>
+          <table><caption>Caption</caption><thead><tr><th id="h" scope="col">Title</th><th>B</th></tr></thead>
+          <tbody><tr><td rowspan="0" headers="h">Row</td><td><table><tr><td>Nested</td></tr></table></td></tr>
+          <tr><td><a href="https://example.com/img"><img src="image.png" alt="Linked"/></a></td></tr></tbody></table>
+          <p><s:svg width="10" height="10"><s:rect width="10" height="10"/></s:svg><m:math><m:mi>x</m:mi></m:math></p>
+          </body></html>"""
+        with doc_ex.open(epub_fixture(chapter_one=chapter)) as document:
+            page = document[0]
+            table = page.find_tables()[0]
+            self.assertEqual(table.cells[1][0].row_span, 2)
+            self.assertEqual(table.cells[1][0].metadata["html_headers"], "h")
+            self.assertEqual(page.get_text().count("Nested"), 1)
+            self.assertIn('<th colspan="1" rowspan="1" id="h" scope="col">', page.get_text("markdown"))
+            self.assertEqual(page.get_images()[0].metadata["href"], "https://example.com/img")
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(page.get_images()[1].data)
+            self.assertEqual(root.tag, "{http://www.w3.org/2000/svg}svg")
+            self.assertIn("<m:mi>x", page.blocks[-1].metadata["mathml"][0]["source"])
+
+    def test_richer_authoring_roundtrip(self) -> None:
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="5" height="5"><rect width="5" height="5"/></svg>'
+        with doc_ex.new("epub") as book:
+            book.set_metadata(title="a" * 1100, identifier="urn:extended")
+            book.set_publication_date("2026-11-23")
+            chapter = book.add_chapter("Chapter & table")
+            chapter.add_table([["Header", "Name"], ["Row", "Data"]], header=True)
+            chapter.add_list(["First", "Second"], ordered=True)
+            chapter.add_preformatted("  indented\rline")
+            chapter.add_image(svg, media_type="image/svg+xml", alt="tab\t and newline\n")
+            with doc_ex.open(book.to_bytes()) as read:
+                self.assertEqual(read.metadata["title"], "a" * 1100)
+                self.assertTrue(read.metadata["publication_date"].startswith("2026-11-23"))
+                self.assertEqual(read[0].find_tables()[0].rows[1], ["Row", "Data"])
+                self.assertIn("  indented\rline", read[0].get_text())
+                self.assertEqual(read[0].get_images()[0].alt, "tab\t and newline\n")
+                self.assertEqual(read[0].get_images()[0].data, svg)
+
+    def test_epub2_ncx_and_existing_metadata_edit_preserve_members(self) -> None:
+        source = epub_fixture(version="2.0")
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        package = package.replace(b"</manifest><spine>", b'<item id="toc" href="toc.ncx" media-type="application/x-dtbncx+xml"/></manifest><spine toc="toc">')
+        ncx = '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"><navMap><navPoint id="a"><navLabel><text>One &amp; first</text></navLabel><content src="one.xhtml#first"/></navPoint></navMap></ncx>'
+        source = rewrite_epub(source, {"OEBPS/content.opf": package, "OEBPS/toc.ncx": ncx})
+        with doc_ex.open(source) as document:
+            self.assertEqual(document.metadata["navigation"][0]["items"][0]["label"], "One & first")
+            changed = document.edit_epub_metadata(title="A & new title", description="New description")
+            self.assertEqual(document.metadata["title"], "Native EPUB fixture")
+        with doc_ex.open(changed) as edited:
+            self.assertEqual(edited.metadata["title"], "A & new title")
+            self.assertEqual(edited.metadata["description"], "New description")
+            self.assertEqual(edited.metadata["identifiers"], ["urn:test:book"])
+            self.assertIn("First chapter", edited[0].get_text())
+        with zipfile.ZipFile(io.BytesIO(source)) as old, zipfile.ZipFile(io.BytesIO(changed)) as new:
+            self.assertEqual(new.infolist()[0].filename, "mimetype")
+            self.assertEqual(new.infolist()[0].compress_type, zipfile.ZIP_STORED)
+            for name in set(old.namelist()) - {"OEBPS/content.opf"}:
+                self.assertEqual(old.read(name), new.read(name), name)
+
+    def test_fixed_layout_and_encryption_remain_explicit(self) -> None:
+        with zipfile.ZipFile(io.BytesIO(epub_fixture())) as archive:
+            package = archive.read("OEBPS/content.opf")
+        fixed = rewrite_epub(epub_fixture(), {
+            "OEBPS/content.opf": package.replace(b'<itemref idref="one"/>', b'<itemref idref="one" properties="rendition:layout-pre-paginated"/>')
+        })
+        with doc_ex.open(fixed) as document:
             with self.assertRaises(doc_ex.UnsupportedFormatError):
                 document.render_page(0)
             with self.assertRaises(doc_ex.UnsupportedFormatError):

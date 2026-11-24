@@ -103,6 +103,33 @@ impl NativeEditableEpub {
         self.inner.add_paragraph(chapter, text)
     }
 
+    #[pyo3(signature = (date=None))]
+    fn set_publication_date(&mut self, date: Option<String>) -> Result<(), EngineError> {
+        self.inner.set_publication_date(date)
+    }
+
+    fn add_list(
+        &mut self,
+        chapter: usize,
+        items: Vec<String>,
+        ordered: bool,
+    ) -> Result<(), EngineError> {
+        self.inner.add_list(chapter, items, ordered)
+    }
+
+    fn add_table(
+        &mut self,
+        chapter: usize,
+        rows: Vec<Vec<String>>,
+        header: bool,
+    ) -> Result<(), EngineError> {
+        self.inner.add_table(chapter, rows, header)
+    }
+
+    fn add_preformatted(&mut self, chapter: usize, text: String) -> Result<(), EngineError> {
+        self.inner.add_preformatted(chapter, text)
+    }
+
     fn add_link(&mut self, chapter: usize, text: String, href: String) -> Result<(), EngineError> {
         self.inner.add_link(chapter, text, href)
     }
@@ -321,6 +348,21 @@ fn render(
 }
 
 #[pyfunction]
+#[pyo3(signature = (data, title=None, description=None))]
+fn _edit_epub_metadata(
+    data: &[u8],
+    title: Option<&str>,
+    description: Option<&str>,
+) -> Result<Vec<u8>, EngineError> {
+    crate::epub::update_metadata(data, title, description)
+}
+
+#[pyfunction]
+fn _epub_resource(data: &[u8], path: &str) -> Result<Vec<u8>, EngineError> {
+    crate::epub::read_resource(data, path)
+}
+
+#[pyfunction]
 fn detect(data: &[u8]) -> PyResult<String> {
     api::detect(data).map_err(Into::into)
 }
@@ -341,6 +383,8 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(_open_pdf, module)?)?;
     module.add_function(wrap_pyfunction!(_open_office, module)?)?;
     module.add_function(wrap_pyfunction!(extract, module)?)?;
+    module.add_function(wrap_pyfunction!(_edit_epub_metadata, module)?)?;
+    module.add_function(wrap_pyfunction!(_epub_resource, module)?)?;
     module.add_function(wrap_pyfunction!(extract_text, module)?)?;
     module.add_function(wrap_pyfunction!(convert, module)?)?;
     module.add_function(wrap_pyfunction!(render, module)?)?;

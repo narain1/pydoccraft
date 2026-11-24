@@ -4,7 +4,7 @@ Generated from the committed `Cargo.lock` using `cargo metadata --locked`. This 
 
 The resolved graph was reviewed for license declarations and compatibility. GPL-, AGPL-, and LGPL-only dependencies are prohibited; SPDX `OR` expressions remain acceptable when they provide a permissive alternative. Every package in this inventory declares a license, and no GPL-, AGPL-, or LGPL-only dependency was found.
 
-The independently locked, unpublished Node preview was also reviewed using `cargo metadata --offline --locked` and the same normal/build graph checks. Its 289 third-party name/version/license rows are a subset of this inventory; its remaining normal/build package is the local Apache-2.0 `pydoccraft-core`. This inventory is a superset, not an exact Node dependency list. See `bindings/node/ATTRIBUTION.md` and NOTICE for scope and attribution.
+The independently locked, unpublished Node preview was also reviewed using `cargo metadata --offline --locked` and the same normal/build graph checks. Its 264 third-party name/version/license rows are a subset of this inventory; its remaining normal/build package is the local Apache-2.0 `pydoccraft-core`. This inventory is a superset, not an exact Node dependency list. See `bindings/node/ATTRIBUTION.md` and NOTICE for scope and attribution.
 
 PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream repositories at the immutable revisions recorded in NOTICE.
 
@@ -18,8 +18,6 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `arbitrary` | `1.5.0` | MIT OR Apache-2.0 |
 | `arrayref` | `0.3.9` | BSD-2-Clause |
 | `arrayvec` | `0.7.8` | MIT OR Apache-2.0 |
-| `async-compression` | `0.4.51` | MIT OR Apache-2.0 |
-| `async_zip` | `0.0.18` | MIT |
 | `autocfg` | `1.5.1` | Apache-2.0 OR MIT |
 | `base64` | `0.22.1` | MIT OR Apache-2.0 |
 | `base64` | `0.23.1` | MIT OR Apache-2.0 |
@@ -44,8 +42,6 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `cmov` | `0.5.4` | Apache-2.0 OR MIT |
 | `color` | `0.3.3` | Apache-2.0 OR MIT |
 | `color_quant` | `1.1.0` | MIT |
-| `compression-codecs` | `0.4.46` | MIT OR Apache-2.0 |
-| `compression-core` | `0.4.34` | MIT OR Apache-2.0 |
 | `const-oid` | `0.10.2` | Apache-2.0 OR MIT |
 | `core-foundation-sys` | `0.8.7` | MIT OR Apache-2.0 |
 | `core_detect` | `1.0.0` | MIT/Apache-2.0 |
@@ -71,12 +67,8 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `deckcraft-pptx` | `0.13.1` | MIT OR Apache-2.0 |
 | `deckcraft-render` | `0.13.1` | MIT OR Apache-2.0 |
 | `deckcraft-text` | `0.13.1` | MIT OR Apache-2.0 |
-| `deflate64` | `0.1.12` | MIT |
 | `derive_arbitrary` | `1.5.0` | MIT OR Apache-2.0 |
 | `digest` | `0.11.3` | MIT OR Apache-2.0 |
-| `diplomat` | `0.16.1` | MIT OR Apache-2.0 |
-| `diplomat-runtime` | `0.16.1` | MIT OR Apache-2.0 |
-| `diplomat_core` | `0.16.1` | MIT OR Apache-2.0 |
 | `displaydoc` | `0.2.7` | MIT OR Apache-2.0 |
 | `ecb` | `0.2.1` | MIT OR Apache-2.0 |
 | `either` | `1.19.0` | MIT OR Apache-2.0 |
@@ -95,14 +87,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `foldhash` | `0.2.0` | Zlib |
 | `font-types` | `0.11.3` | MIT OR Apache-2.0 |
 | `font-types` | `0.12.7` | MIT OR Apache-2.0 |
-| `futures` | `0.3.32` | MIT OR Apache-2.0 |
-| `futures-channel` | `0.3.34` | MIT OR Apache-2.0 |
 | `futures-core` | `0.3.34` | MIT OR Apache-2.0 |
-| `futures-executor` | `0.3.34` | MIT OR Apache-2.0 |
-| `futures-io` | `0.3.34` | MIT OR Apache-2.0 |
-| `futures-lite` | `2.6.1` | Apache-2.0 OR MIT |
-| `futures-macro` | `0.3.34` | MIT OR Apache-2.0 |
-| `futures-sink` | `0.3.34` | MIT OR Apache-2.0 |
 | `futures-task` | `0.3.34` | MIT OR Apache-2.0 |
 | `futures-util` | `0.3.34` | MIT OR Apache-2.0 |
 | `getrandom` | `0.3.4` | MIT OR Apache-2.0 |
@@ -125,7 +110,6 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `hayro-syntax` | `0.7.2` | Apache-2.0 OR MIT |
 | `heck` | `0.5.0` | MIT OR Apache-2.0 |
 | `hmac` | `0.13.0` | MIT OR Apache-2.0 |
-| `html-escape` | `0.2.15` | MIT |
 | `hybrid-array` | `0.4.15` | MIT OR Apache-2.0 |
 | `iana-time-zone` | `0.1.65` | MIT OR Apache-2.0 |
 | `iana-time-zone-haiku` | `0.1.2` | MIT OR Apache-2.0 |
@@ -139,7 +123,6 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `js-sys` | `0.3.106` | MIT OR Apache-2.0 |
 | `krilla` | `0.8.2` | MIT OR Apache-2.0 |
 | `kurbo` | `0.13.1` | Apache-2.0 OR MIT |
-| `lexepub` | `0.1.2` | Apache-2.0 |
 | `libc` | `0.2.191` | MIT OR Apache-2.0 |
 | `libm` | `0.2.16` | MIT |
 | `linebender_resource_handle` | `0.1.1` | Apache-2.0 OR MIT |
@@ -157,7 +140,6 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `num-traits` | `0.2.19` | MIT OR Apache-2.0 |
 | `once_cell` | `1.21.4` | MIT OR Apache-2.0 |
 | `ordered-channel` | `1.2.0` | MIT OR Apache-2.0 |
-| `parking` | `2.2.1` | Apache-2.0 OR MIT |
 | `pdf-writer` | `0.15.0` | MIT OR Apache-2.0 |
 | `pdfcraft-annot` | `0.15.0` | MIT OR Apache-2.0 |
 | `pdfcraft-content` | `0.15.0` | MIT OR Apache-2.0 |
@@ -179,8 +161,6 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `phf_macros` | `0.13.1` | MIT |
 | `phf_shared` | `0.13.1` | MIT |
 | `pic-scale` | `0.7.12` | BSD-3-Clause OR Apache-2.0 |
-| `pin-project` | `1.1.13` | Apache-2.0 OR MIT |
-| `pin-project-internal` | `1.1.13` | Apache-2.0 OR MIT |
 | `pin-project-lite` | `0.2.17` | Apache-2.0 OR MIT |
 | `png` | `0.18.1` | MIT OR Apache-2.0 |
 | `polycool` | `0.4.0` | MIT OR Apache-2.0 |
@@ -208,13 +188,13 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `read-fonts` | `0.41.0` | MIT OR Apache-2.0 |
 | `read-fonts` | `0.43.3` | MIT OR Apache-2.0 |
 | `read-fonts` | `0.44.0` | MIT OR Apache-2.0 |
+| `roxmltree` | `0.21.2` | MIT OR Apache-2.0 |
 | `rustc-hash` | `2.1.3` | Apache-2.0 OR MIT |
 | `rustversion` | `1.0.23` | MIT OR Apache-2.0 |
 | `rustybuzz` | `0.20.1` | MIT |
 | `ryu` | `1.0.23` | Apache-2.0 OR BSL-1.0 |
 | `scopeguard` | `1.2.0` | MIT OR Apache-2.0 |
 | `serde` | `1.0.228` | MIT OR Apache-2.0 |
-| `serde-wasm-bindgen` | `0.6.5` | MIT |
 | `serde_core` | `1.0.228` | MIT OR Apache-2.0 |
 | `serde_derive` | `1.0.228` | MIT OR Apache-2.0 |
 | `serde_json` | `1.0.149` | MIT OR Apache-2.0 |
@@ -230,7 +210,6 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `slab` | `0.4.12` | MIT |
 | `smallvec` | `1.16.3` | MIT OR Apache-2.0 |
 | `stable_deref_trait` | `1.2.1` | MIT OR Apache-2.0 |
-| `strck` | `1.0.0` | MIT |
 | `strict-num` | `0.1.1` | MIT |
 | `stringprep` | `0.1.5` | MIT/Apache-2.0 |
 | `subsetter` | `0.2.6` | MIT OR Apache-2.0 |
@@ -244,8 +223,6 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `tiff` | `0.11.3` | MIT |
 | `tiny-skia-path` | `0.12.0` | BSD-3-Clause |
 | `tinyvec` | `1.13.3` | Zlib OR Apache-2.0 OR MIT |
-| `tl` | `0.7.8` | MIT |
-| `tokio` | `1.54.1` | MIT |
 | `ttf-parser` | `0.25.1` | MIT OR Apache-2.0 |
 | `typed-path` | `0.13.0` | MIT OR Apache-2.0 |
 | `typenum` | `1.20.1` | MIT OR Apache-2.0 |
@@ -267,11 +244,9 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `vello_cpu` | `0.2.0` | Apache-2.0 OR MIT |
 | `wasip2` | `1.0.4+wasi-0.2.12` | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | `wasm-bindgen` | `0.2.129` | MIT OR Apache-2.0 |
-| `wasm-bindgen-futures` | `0.4.79` | MIT OR Apache-2.0 |
 | `wasm-bindgen-macro` | `0.2.129` | MIT OR Apache-2.0 |
 | `wasm-bindgen-macro-support` | `0.2.129` | MIT OR Apache-2.0 |
 | `wasm-bindgen-shared` | `0.2.129` | MIT OR Apache-2.0 |
-| `web-sys` | `0.3.106` | MIT OR Apache-2.0 |
 | `web-time` | `1.1.0` | MIT OR Apache-2.0 |
 | `weezl` | `0.1.12` | MIT OR Apache-2.0 |
 | `weezl` | `0.2.1` | MIT OR Apache-2.0 |

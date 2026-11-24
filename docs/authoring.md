@@ -39,9 +39,9 @@ A new PDF starts with one Letter page unless `size` is supplied. `pdf.pages.add(
 
 ### EPUB reflowable books
 
-`doc_ex.new("epub" | "ebook")` creates an append-only EPUB 3 book. Set required title, identifier, and language metadata, add ordered chapters, then append headings, paragraphs, HTTP(S)/mailto/fragment links, and PNG/JPEG/GIF images. Text must be valid XML 1.0. Images are signature checked, limited to 16 MiB each and 64 MiB total; authored content is limited to 64 MiB and estimated/actual output to 128 MiB. SVG is rejected because arbitrary SVG cannot be guaranteed inert. `copy()`, bytes/path/stream save, context management, and close follow the lifecycle above.
+`doc_ex.new("epub" | "ebook")` creates a reflowable EPUB 3 book. Set the title, identifier, and language, add ordered chapters, and append headings, paragraphs, lists, tables, preformatted text, links, and images. The lifecycle includes `copy()`, bytes/path/stream saving, context management, and close.
 
-EPUB rendering, conversion, CSS, raw XHTML/OPF, scripts, fixed layout, editing an existing book, and physical pagination are unavailable. The extraction API maps each spine chapter to one compatibility page.
+Existing books support targeted title and description edits. See [EPUB creation](#epub-creation-unreleased) and the [EPUB format profile](formats.md#epub-unreleased) for the supported content and output.
 
 ## Typing and inspection
 
@@ -960,14 +960,18 @@ with doc_ex.new("epub") as book:
         language="en",
         authors=["Example Author"],
     )
+    book.set_publication_date("2026-11-23")
     chapter = book.add_chapter("Introduction")
     chapter.add_heading("Welcome", level=1)
     chapter.add_paragraph("A reflowable paragraph.")
+    chapter.add_list(["Read the introduction", "Review the examples"], ordered=True)
+    chapter.add_table([["Name", "Role"], ["Ada", "Editor"]], header=True)
+    chapter.add_preformatted("first line\n  indented line")
     chapter.add_link("Project", "https://example.com")
     chapter.add_image(png_bytes, media_type="image/png", alt="Diagram")
     epub_bytes = book.to_bytes()
 ```
 
-EPUB creation is append-only and semantic. `EpubDocument` supports the shared `to_bytes`, path/stream `save`, `copy`, context manager and idempotent `close` lifecycle. Required metadata is title, identifier and language. Links are inert ASCII-case-insensitive HTTP(S), mailto or safe fragment targets; remote resources are never fetched. Supported image resources are signature-checked PNG, JPEG and GIF bytes, limited to 16 MiB each and 64 MiB total. SVG authoring is rejected because active content cannot be guaranteed inert.
+EPUB creation appends semantic content. Title, identifier, and language are required. Links accept ASCII-case-insensitive HTTP(S), mailto, and safe fragments. The document can store signature-checked PNG, JPEG, GIF, and WebP, and validated static SVG. Each image is limited to 16 MiB. The media and chapter-content budgets are 64 MiB each, and the estimated and actual archive limits are 128 MiB.
 
-Callers cannot inject raw XHTML, OPF, CSS, SVG, scripts or archive paths. Existing EPUB editing, fixed-layout content, rendering, conversion, DRM and media overlays are unsupported.
+For an existing book, `doc_ex.open("original.epub").edit_epub_metadata(title="New title", description="New description")` returns EPUB bytes with the supplied Dublin Core fields updated. The chapter and resource members retain their uncompressed bytes. A field left at `None` keeps its original value. Signed and encrypted packages are rejected. The editor does not expose arbitrary chapter changes or allow raw XHTML, OPF, CSS, scripts, or archive paths in the creation API.

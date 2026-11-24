@@ -1,3 +1,5 @@
+use std::io::{Cursor, Seek, SeekFrom, Write};
+
 use crate::EngineError;
 
 const MAX_CHAPTERS: usize = 10_000;
@@ -25,6 +27,7 @@ pub struct EditableEpub {
     identifier: String,
     language: String,
     authors: Vec<String>,
+    publication_date: Option<String>,
     chapters: Vec<Chapter>,
     images: Vec<ImageResource>,
     content_bytes: usize,
@@ -39,6 +42,7 @@ impl EditableEpub {
             identifier: String::new(),
             language: "en".into(),
             authors: Vec::new(),
+            publication_date: None,
             chapters: Vec::new(),
             images: Vec::new(),
             content_bytes: 0,
@@ -79,10 +83,29 @@ impl EditableEpub {
         for author in &authors {
             validate_text(author, 65_536, "author")?;
         }
+        if title.len()
+            + identifier.len()
+            + language.len()
+            + authors.iter().map(String::len).sum::<usize>()
+            > 128 * 1024
+        {
+            return Err(EngineError::ResourceLimit(
+                "EPUB metadata exceeds 128 KiB".into(),
+            ));
+        }
         self.title = title;
         self.identifier = identifier;
         self.language = language;
         self.authors = authors;
+        Ok(())
+    }
+
+    pub fn set_publication_date(&mut self, date: Option<String>) -> Result<(), EngineError> {
+        self.ensure_open()?;
+        if let Some(value) = &date {
+            validate_text(value, 128, "publication date")?;
+        }
+        self.publication_date = date;
         Ok(())
     }
 
@@ -94,10 +117,18 @@ impl EditableEpub {
                 "EPUB chapters exceed 10000".into(),
             ));
         }
+        let next = self
+            .content_bytes
+            .checked_add(title.len() * 6)
+            .filter(|size| *size <= MAX_CONTENT_BYTES)
+            .ok_or_else(|| {
+                EngineError::ResourceLimit("EPUB chapter titles exceed the content budget".into())
+            })?;
         self.chapters.push(Chapter {
             title,
             body: String::new(),
         });
+        self.content_bytes = next;
         Ok(self.chapters.len() - 1)
     }
 
@@ -120,6 +151,61 @@ impl EditableEpub {
     pub fn add_paragraph(&mut self, chapter: usize, text: String) -> Result<(), EngineError> {
         validate_text(&text, 65_536, "paragraph text")?;
         let fragment = format!("<p>{}</p>\n", escape_text(&text));
+        self.append(chapter, &fragment)
+    }
+
+    pub fn add_list(
+        &mut self,
+        chapter: usize,
+        items: Vec<String>,
+        ordered: bool,
+    ) -> Result<(), EngineError> {
+        let tag = if ordered { "ol" } else { "ul" };
+        if items.len() > 10_000 {
+            return Err(EngineError::ResourceLimit(
+                "EPUB list exceeds 10000 items".into(),
+            ));
+        }
+        let mut fragment = format!("<{tag}>");
+        for item in items {
+            push_item(&mut fragment, &item, "li")?;
+        }
+        fragment.push_str(&format!("</{tag}>\n"));
+        self.append(chapter, &fragment)
+    }
+
+    pub fn add_table(
+        &mut self,
+        chapter: usize,
+        rows: Vec<Vec<String>>,
+        header: bool,
+    ) -> Result<(), EngineError> {
+        let width = rows.first().map_or(0, Vec::len);
+        if width == 0
+            || width > 1000
+            || rows.len().saturating_mul(width) > 10_000
+            || rows.iter().any(|row| row.len() != width)
+        {
+            return Err(EngineError::InvalidArgument(
+                "EPUB table must be a nonempty rectangular grid of at most 10000 cells".into(),
+            ));
+        }
+        let mut fragment = "<table>".to_string();
+        for (index, row) in rows.iter().enumerate() {
+            fragment.push_str("<tr>");
+            let tag = if header && index == 0 { "th" } else { "td" };
+            for item in row {
+                push_item(&mut fragment, item, tag)?;
+            }
+            fragment.push_str("</tr>");
+        }
+        fragment.push_str("</table>\n");
+        self.append(chapter, &fragment)
+    }
+
+    pub fn add_preformatted(&mut self, chapter: usize, text: String) -> Result<(), EngineError> {
+        let mut fragment = String::new();
+        push_item(&mut fragment, &text, "pre")?;
         self.append(chapter, &fragment)
     }
 
@@ -244,16 +330,20 @@ impl EditableEpub {
                     .xhtml_body(chapter.body.as_str()),
             );
         }
-        let output =
-            builder.build().write().to_vec().map_err(|error| {
-                EngineError::Conversion(format!("EPUB writing failed: {error}"))
-            })?;
-        if output.len() > MAX_OUTPUT_BYTES {
-            return Err(EngineError::ResourceLimit(
-                "EPUB output exceeds 128 MiB".into(),
-            ));
+        if let Some(date) = &self.publication_date {
+            builder = builder.published_date(date.as_str());
         }
-        Ok(output)
+        let mut output = BoundedOutput::default();
+        if let Err(error) = builder.build().write().write(&mut output) {
+            return Err(if output.exceeded {
+                EngineError::ResourceLimit(
+                    "EPUB output exceeds 128 MiB or cannot be allocated".into(),
+                )
+            } else {
+                EngineError::Conversion(format!("EPUB writing failed: {error}"))
+            });
+        }
+        Ok(output.into_bytes())
     }
 }
 
@@ -293,7 +383,7 @@ impl EditableEpub {
     }
 }
 
-fn validate_text(value: &str, limit: usize, name: &str) -> Result<(), EngineError> {
+pub(crate) fn validate_text(value: &str, limit: usize, name: &str) -> Result<(), EngineError> {
     let valid_xml = value.chars().all(|character| {
         matches!(character, '\u{9}' | '\u{A}' | '\u{D}')
             || ('\u{20}'..='\u{D7FF}').contains(&character)
@@ -334,10 +424,16 @@ fn validate_image(data: &[u8], media_type: &str) -> Result<&'static str, EngineE
         "image/gif" => {
             (data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a")).then_some("gif")
         }
-        "image/svg+xml" => return Err(EngineError::Unsupported(
-            "EPUB SVG authoring is not supported because active content cannot be guaranteed inert"
-                .into(),
-        )),
+        "image/svg+xml" => {
+            crate::epub::validate_svg_resource(data).map_err(|error| match error {
+                EngineError::Malformed(message) => EngineError::InvalidArgument(message),
+                other => other,
+            })?;
+            Some("svg")
+        }
+        "image/webp" => {
+            (data.starts_with(b"RIFF") && data.get(8..12) == Some(b"WEBP")).then_some("webp")
+        }
         _ => {
             return Err(EngineError::Unsupported(format!(
                 "EPUB image type {media_type} is not supported"
@@ -351,15 +447,76 @@ fn validate_image(data: &[u8], media_type: &str) -> Result<&'static str, EngineE
     })
 }
 
-fn escape_text(value: &str) -> String {
+pub(crate) fn escape_text(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+        .replace('\r', "&#13;")
 }
 
 fn escape_attribute(value: &str) -> String {
-    escape_text(value).replace('"', "&quot;")
+    escape_text(value)
+        .replace('"', "&quot;")
+        .replace('\t', "&#9;")
+        .replace('\n', "&#10;")
+}
+
+fn push_item(fragment: &mut String, text: &str, tag: &str) -> Result<(), EngineError> {
+    validate_text(text, 65_536, "content")?;
+    let escaped = escape_text(text);
+    if fragment.len() + escaped.len() + tag.len() * 2 + 5 > 4 * 1024 * 1024 {
+        return Err(EngineError::ResourceLimit(
+            "EPUB structure exceeds its content budget".into(),
+        ));
+    }
+    fragment.push_str(&format!("<{tag}>{escaped}</{tag}>"));
+    Ok(())
+}
+
+#[derive(Default)]
+pub(crate) struct BoundedOutput {
+    inner: Cursor<Vec<u8>>,
+    pub(crate) exceeded: bool,
+}
+
+impl BoundedOutput {
+    pub(crate) fn into_bytes(self) -> Vec<u8> {
+        self.inner.into_inner()
+    }
+}
+
+impl Write for BoundedOutput {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let current_len = self.inner.get_ref().len();
+        let end = usize::try_from(self.inner.position())
+            .ok()
+            .and_then(|position| position.checked_add(bytes.len()));
+        let Some(end) = end.filter(|end| *end <= MAX_OUTPUT_BYTES) else {
+            self.exceeded = true;
+            return Err(std::io::Error::other("EPUB output budget exceeded"));
+        };
+        if self
+            .inner
+            .get_mut()
+            .try_reserve(end.saturating_sub(current_len))
+            .is_err()
+        {
+            self.exceeded = true;
+            return Err(std::io::Error::other("cannot allocate EPUB output"));
+        }
+        self.inner.write(bytes)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Seek for BoundedOutput {
+    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(position)
+    }
 }
 
 #[cfg(test)]

@@ -1,38 +1,30 @@
-# Requirements: EPUB support
+# EPUB requirements
 
-## 1. Native in-process extraction
+## Extraction
 
-1. WHEN `doc_ex.open()` receives EPUB 2 or EPUB 3 bytes/path, THE SYSTEM SHALL detect `application/epub+zip` and parse it in-process through a permissively licensed Rust EPUB library.
-2. THE SYSTEM SHALL preserve reading/spine order and expose one compatibility page per readable spine chapter.
-3. THE SYSTEM SHALL extract semantic headings, paragraphs, exact inline hyperlinks, referenced image bytes/alt text, and publication metadata including title, authors, languages, subjects, publisher, identifiers, rights, contributors, version, and publication date when supplied.
-4. Returned values SHALL be eager and owned and remain readable after document closure.
+1. Detect EPUB 2 and 3 containers and read them in-process. Preserve spine order, repeated entries, and non-linear entries. Expose one compatibility page per entry.
+2. Preserve ordered Dublin Core values, OPF meta refinements, manifest records, and hierarchical EPUB 3 navigation or EPUB 2 NCX. Resolve UTF-8 resource paths using archive separators on every host.
+3. Preserve semantic headings, paragraphs, preformatted text, inline link labels and character offsets, nested tables, captions, spans, row groups and headers. Preserve referenced raster or validated static SVG images, their alternative text and link metadata, and MathML text and source markup.
+4. Return owned extraction values. Support bounded byte retrieval for a particular archive resource while the document is open.
 
-## 2. Safety and errors
+## Safety and errors
 
-1. EPUB archives SHALL use the existing member-count, path, member-size, aggregate-expansion, and compression-ratio preflight limits before upstream parsing.
-2. Container, selected package, and chapter XML SHALL be validated as bounded, strict UTF-8 XML without DTDs before lossy upstream handling.
-3. Encrypted/DRM resources SHALL fail explicitly as unsupported; content SHALL NOT be silently omitted.
-4. Missing container, package, manifest, spine, or chapter resources and malformed XML/HTML SHALL return stable errors.
-5. Input and normalized JSON limits SHALL remain identical to other formats. LexePub's eager AST/CSS allocation remains a documented upstream limit until it exposes bounded traversal.
+1. Preflight member counts, paths, archive structure, lengths, expansion, compression ratios, and local/central consistency. Limit individual and cumulative reads, XML sizes and structure, and normalized output.
+2. Parse UTF-8 XML without custom DTDs. Reject unsupported package selection, archive traversal, remote resource loading, and encrypted content. Never execute active content.
+3. Report malformed source and unsupported operations through stable errors. Reject authoring mutations atomically when they would violate limits or input validation.
 
-## 3. Native creation
+## Creation and metadata editing
 
-1. `doc_ex.new("epub" | "ebook")` SHALL return an owned reflowable EPUB authoring document.
-2. Creation SHALL support required title/identifier/language metadata, ordered authors and chapters, semantic headings, paragraphs, inert ASCII-case-insensitive HTTP(S)/mailto/fragment links, and signature-checked in-memory PNG/JPEG/GIF resources. XML-illegal controls and authored SVG SHALL be rejected.
-3. Authored content SHALL be capped at 64 MiB, each image at 16 MiB, aggregate encoded media at 64 MiB, and estimated/actual output at 128 MiB.
-4. `to_bytes()`, path/stream `save()`, `copy()`, context management, and idempotent `close()` SHALL follow the existing editable-document lifecycle.
-5. Created EPUB bytes SHALL reopen through the independent extraction adapter with metadata, chapter order, headings, links, image bytes and alt text preserved.
-6. Invalid metadata, unsafe link schemes, unsupported or mislabeled image types, excessive chapters/content/media, stale/closed handles, and suffix mismatches SHALL fail explicitly without partial mutation or output.
+1. Create reflowable EPUB 3 with title, identifier, language, ordered authors and chapters, and optional publication date. Support headings, paragraphs, lists, tables, preformatted text, inert links, common raster images, and validated static SVG.
+2. Use the existing editable-document bytes, path/stream save, copy, context manager, and close lifecycle. Reopen created bytes through the extraction path.
+3. Limit individual images to 16 MiB, cumulative media and chapter content to 64 MiB each, and encoded EPUB output to 128 MiB.
+4. Update selected Dublin Core title and description fields in an existing unsigned book. Preserve the uncompressed bytes of untouched chapter and resource members and the unrelated OPF fields. Reject signed and encrypted packages.
 
-## 4. Explicit non-goals
+## Preview and conversion
 
-1. Rendering, fixed-layout pagination, CSS fidelity, scripts, DRM, media overlays, arbitrary XHTML input, editing existing EPUBs, and format conversion remain unsupported.
-2. No GPL/AGPL/LGPL-only runtime dependency is permitted.
+1. Preview supported reflowable chapters as PNG with the common DPI and clipping API. Export the semantic profile to DOCX and PDF, starting each chapter on a new page.
+2. Retain supported native text, tables and raster images. Return an explicit unsupported error when a semantic feature cannot be projected safely. Source CSS and fixed-layout fidelity, DRM, script execution, media overlay playback, arbitrary imported chapter edits, and other conversion pairs remain outside the supported profile.
 
-## 5. Verification
+## Verification
 
-1. Tests SHALL generate EPUB fixtures locally without external executables or network access.
-2. Tests SHALL cover path/bytes detection, metadata, chapter order, malformed/missing resources, archive safety, encrypted-resource rejection, lifecycle ownership, unsupported rendering, and unsupported conversions.
-3. Rust formatting/tests/Clippy and installed-wheel tests SHALL pass with the committed lockfile and audited license inventory.
-
-- OPF metadata SHALL retain XML-sensitive characters and repeated values using an upstream reader after bounded archive and XML preflight. EPUB containers with multiple rootfiles SHALL fail explicitly while the metadata readers cannot safely select a common package.
+Run the locked Rust, license, and installed-wheel checks. Generate local fixtures to exercise EPUB 2 and 3, semantic links and tables, archive bounds, authoring and targeted edits, preview, and reopened conversion outputs. Keep all engine and shared backend Git pins immutable and compatible.

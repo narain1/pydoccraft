@@ -37,7 +37,9 @@ Recognized explicit `filetype` values are:
 
 For paths, the suffix is checked against the detected content. For bytes, the native detector identifies PDF, OOXML and EPUB content. A mismatched explicit type raises `UnsupportedFormatError`.
 
-Passwords are supported for encrypted PDF and DOCX input. Encrypted PPTX is rejected by the upstream DeckCraft importer.
+Passwords are supported for encrypted PDF and DOCX input. Encrypted PPTX and EPUB files are rejected.
+
+For an open EPUB, `document.read_epub_resource(path)` reads a local resource by its decoded archive path. The manifest in `document.metadata["manifest"]` lists paths, media types and resource properties. `document.edit_epub_metadata(title=..., description=...)` returns a new EPUB byte string with the requested fields updated. See the [EPUB format profile](formats.md#epub-unreleased) for extraction and conversion limits.
 
 ## Fast text extraction
 

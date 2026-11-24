@@ -8,7 +8,7 @@ Node event loop. Document processing never invokes a subprocess or downloads cod
 
 `detect(Buffer)` returns `pdf`, `docx`, `pptx`, or `epub`. Detection is not a
 complete validity check. `convert(Buffer, source, target, password = null)` returns a new Buffer;
-the preview allows PDF→DOCX and DOCX→PDF only. PPTX conversion is disabled
+the preview allows PDF→DOCX, DOCX→PDF and the supported EPUB→DOCX/PDF profile. PPTX conversion is disabled
 entirely because upstream PDF export can corrupt searchable text for explicit
 paragraph breaks, and the core has no reliable guard. Conversion fidelity is
 not pixel-perfect. Passwords are optional strings and are passed to the core;
@@ -21,8 +21,7 @@ can require substantially more memory; this is not a process memory limit.
 
 `extract(Buffer, filetype, password = null)` returns the core's normalized payload as a JSON
 string, including EPUB extraction. `render(Buffer, filetype, page, dpi, password = null, clip = null)` returns
-a PNG Buffer; page is a zero-based non-negative integer. EPUB rendering is not
-supported. Both are stateless and apply the core's input, payload and rendering
+a PNG Buffer; page is a zero-based non-negative integer. EPUB renders one reflowable chapter per index. Both are stateless and apply the core's input, payload and rendering
 limits. A clip is `[x, y, width, height]` in displayed page points and is subject
 to the core's validation. Pass `null` for the password to supply a clip without one.
 
@@ -90,8 +89,8 @@ Cargo root repeats the parent workspace's pinned patches because dependency
 patches do not propagate. `Cargo.lock` was derived from the root lockfile; its
 only package additions are this local binding, and Python-only dependencies are
 absent. Reconcile patches and locked versions whenever the parent changes.
-An offline locked metadata review found 289 normal/build packages, all accepted by
-the repository's license-expression and prohibited-package checks. The 288
+An offline locked metadata review found 265 normal/build packages, all accepted by
+the repository's license-expression and prohibited-package checks. The 264
 third-party name/version/license rows occur in the regenerated root inventory;
 the remaining row is the local Apache-2.0 `pydoccraft-core`. No packaged binary
 is provided, and this review is not a production distribution approval.

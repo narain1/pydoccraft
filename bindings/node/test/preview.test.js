@@ -166,7 +166,7 @@ test('extracts normalized JSON and renders PNG', () => {
   assert.throws(() => api.render(input, 'docx', -1, 72), /invalid_argument:/);
   assert.throws(() => api.render(input, 'docx', 0.5, 72), /invalid_argument:/);
   assert.throws(() => api.render(input, 'docx', 0, NaN), /invalid_argument:/);
-  assert.throws(() => api.render(input, 'epub', 0, 72), /unsupported:/);
+  assert.throws(() => api.render(input, 'epub', 0, 72), /malformed:/);
   assert.throws(() => api.extract(Buffer.from('broken'), 'docx'));
   assert.throws(() => api.extract(Buffer.from(new SharedArrayBuffer(8)), 'pdf'), /invalid_argument:/);
 });

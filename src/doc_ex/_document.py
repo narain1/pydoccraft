@@ -538,6 +538,28 @@ class Document:
         from . import convert
         return convert(self._source, output_format, filetype=self._filetype, password=self._password)
 
+    def read_epub_resource(self, path: str) -> bytes:
+        """Read up to 16 MiB from a local EPUB member by its decoded archive path."""
+        self._ensure_open()
+        if self._filetype != "epub":
+            from .errors import UnsupportedFormatError
+
+            raise UnsupportedFormatError("EPUB resource access requires EPUB input")
+        from . import _core, _native
+
+        return bytes(_native(lambda: _core._epub_resource(self._source, path)))
+
+    def edit_epub_metadata(self, *, title: str | None = None, description: str | None = None) -> bytes:
+        """Return an EPUB copy with updated package metadata and unchanged publication resources."""
+        self._ensure_open()
+        if self._filetype != "epub":
+            from .errors import UnsupportedFormatError
+
+            raise UnsupportedFormatError("EPUB metadata editing requires EPUB input")
+        from . import _core, _native
+
+        return bytes(_native(lambda: _core._edit_epub_metadata(self._source, title, description)))
+
     def edit(self) -> PdfDocument:
         """Create an independent editable native PDF; unsupported preservation fails."""
         self._ensure_open()

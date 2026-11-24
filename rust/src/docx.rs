@@ -186,7 +186,7 @@ fn render_impl(
     render_with(&state.document, &state.layout, page, dpi, clip)
 }
 
-fn render_with(
+pub(crate) fn render_with(
     document: &Document,
     layout: &DocLayout,
     page: usize,
