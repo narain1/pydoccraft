@@ -116,6 +116,8 @@ Bundled and linked third-party material
 - Color 0.3.3, by the Linebender contributors, is Apache-2.0 OR MIT. The existing color dependency is also used directly for EPUB CSS colors.
 - Skrifa 0.44.0, by the Fontations Authors, is MIT OR Apache-2.0. The existing font dependency is also used directly for bounded native TrueType outline inspection. All font parsing and outline geometry use public upstream library APIs.
 
+- Unicode Segmentation 1.13.3, by the Unicode-rs contributors, is MIT OR Apache-2.0. The existing dependency is also used directly to keep grapheme clusters together in SVG font fallback.
+
 The locked crate-by-crate license inventory is distributed as LICENSE-THIRD-PARTY and maintained in source as THIRD_PARTY_LICENSES.md.
 
 The ArtCraft, PdfCraft, WordCraft, and DeckCraft names, wordmarks, and logos are trademarks of their respective owners. No trademark license is granted. No upstream logos or brand assets are included in pydoccraft.

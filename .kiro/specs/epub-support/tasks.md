@@ -27,7 +27,8 @@
 - [x] Resolve author-defined CSS custom properties in supported XHTML and SVG styles, including scoped inheritance, fallback cycles and deferred shorthands.
 - [x] Render bounded same-document SVG use references, including nested instances and symbols, in fixed-layout and inline content.
 - [x] Render SVG gradient templates and bounded Gaussian blur in fixed-layout previews, visual PDF and rasterized inline SVG exports.
-- [ ] Extend source CSS and fixed-layout fidelity, including SVG font ranges and fallback stacks, variable font-face descriptor ranges and defaults, additional SVG effects, and semantic fixed-layout conversion.
+- [x] Apply Unicode ranges and ordered font fallback to static SVG text, including inherited lists and matching in reopened exports.
+- [ ] Extend source CSS and fixed-layout fidelity, including variable font-face descriptor ranges and defaults, additional SVG effects, complex SVG text fallback and semantic fixed-layout conversion.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.
 - [x] Render tall reflowable chapters within the paint coordinate budget and apply raster limits to the requested DPI and clip.
 - [x] Project inherited MathML attributes, accents, movable limits, repeated script pairs, varied fences and separators, horizontal spaces, and zero-dimension padding.

@@ -44,6 +44,20 @@ def epub_fixture(*, encrypted: bool = False, version: str = "3.0", chapter_one: 
     return output.getvalue()
 
 
+def font_with_extra_advance(font: bytes) -> bytes:
+    # Distinguish two copies of the same face without adding a binary fixture.
+    wide = bytearray(font)
+    count = struct.unpack_from(">H", wide, 4)[0]
+    offsets = {tag: offset for tag, _, offset, _ in
+               struct.iter_unpack(">4sIII", wide[12:12 + 16 * count])}
+    metrics = struct.unpack_from(">H", wide, offsets[b"hhea"] + 34)[0]
+    for i in range(metrics):
+        pos = offsets[b"hmtx"] + i * 4
+        advance = struct.unpack_from(">H", wide, pos)[0]
+        struct.pack_into(">H", wide, pos, min(65535, advance + 300))
+    return bytes(wide)
+
+
 def rewrite_epub(data: bytes, updates: dict[str, bytes | str]) -> bytes:
     members: dict[str, bytes] = {}
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
@@ -847,22 +861,13 @@ class EpubTests(unittest.TestCase):
 
     def test_epub_unicode_range_uses_composite_faces_and_fallback_glyphs(self) -> None:
         inter = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
-        # Give the second in-memory face different advances to distinguish overlapping glyphs.
-        wide = bytearray(inter)
-        count = struct.unpack_from(">H", wide, 4)[0]
-        offsets = {tag: offset for tag, _, offset, _ in
-                   struct.iter_unpack(">4sIII", wide[12:12 + 16 * count])}
-        metrics = struct.unpack_from(">H", wide, offsets[b"hhea"] + 34)[0]
-        for i in range(metrics):
-            pos = offsets[b"hmtx"] + i * 4
-            advance = struct.unpack_from(">H", wide, pos)[0]
-            struct.pack_into(">H", wide, pos, min(65535, advance + 300))
+        wide = font_with_extra_advance(inter)
 
         def preview(css: str, content: str) -> bytes:
             source = epub_fixture(chapter_one=f"""<html xmlns="http://www.w3.org/1999/xhtml"><head>
               <style>body, p {{margin: 0; font-size: 42px; line-height: 64px}} {css}</style></head>
               <body><p>{content}</p></body></html>""")
-            source = rewrite_epub(source, {"OEBPS/inter.ttf": inter, "OEBPS/wide.ttf": bytes(wide)})
+            source = rewrite_epub(source, {"OEBPS/inter.ttf": inter, "OEBPS/wide.ttf": wide})
             with doc_ex.open(source) as book:
                 self.assertEqual(book[0].get_text(), "AAAABBBBX")
                 return book.render_page(0, dpi=96)
@@ -877,7 +882,7 @@ class EpubTests(unittest.TestCase):
         self.assertEqual(composite, reference)
         self.assertNotEqual(composite, preview(second + first + " p {font-family: Composite}", "AAAABBBBX"))
 
-        struct.pack_into(">H", wide, 4, 4096)
+        wide = wide[:4] + struct.pack(">H", 4096) + wide[6:]
         with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "font table count"):
             preview(first + second + " p {font-family: Composite}", "AAAABBBBX")
 
@@ -1036,6 +1041,92 @@ class EpubTests(unittest.TestCase):
         self.assertEqual(default, preview("initial"))
         self.assertEqual(default, preview("normal", optical="NONE"))
         self.assertNotEqual(default, preview("normal", optical="initial"))
+
+    def test_epub_svg_font_ranges_and_stacks_preserve_preferred_glyphs(self) -> None:
+        inter = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
+        wide = font_with_extra_advance(inter)
+        resources = {
+            "OEBPS/Art/inter.ttf": doc_ex.EpubResource("font/ttf", inter),
+            "OEBPS/Art/wide.ttf": doc_ex.EpubResource("font/ttf", wide),
+        }
+        standard_faces = """
+          @font-face {font-family: Standard; src: url(inter.ttf)}
+          @font-face {font-family: "Other, Face"; src: url(wide.ttf)}
+          @font-face {font-family: "monospace"; src: url(wide.ttf)}
+          @font-face {font-family: Unused; src: url(not-packaged.ttf)}
+        """
+
+        def fixed(css: str, text: str) -> tuple[bytes, bytes]:
+            svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 140">
+              <style>{standard_faces} text {{font-size:34px;font-kerning:none}} {css}</style>
+              {text}</svg>"""
+            chapter = doc_ex.EpubSvgChapterSource("Typography", svg, "OEBPS/Art/fonts.svg")
+            with doc_ex.open(epub_fixture()) as original:
+                result = original.edit_epub_structure([chapter, 0], resources=resources)
+            with doc_ex.open(result) as book:
+                self.assertEqual(book.read_epub_resource("OEBPS/Art/fonts.svg"), svg.encode())
+                png = book.render_page(0, dpi=96)
+            return result, png
+
+        broad = "@font-face {font-family: Composite; src: url(inter.ttf); unicode-range: U+004?}"
+        narrow = "@font-face {font-family: Composite; src: url(wide.ttf); unicode-range: U+0042}"
+        composite = '<text x="10" y="48" font-family="Composite, Standard">AAAABBBBX</text>'
+        spans = """<text x="10" y="48" font-family="Standard">AAAA<tspan
+          font-family="'Other, Face'">BBBB</tspan>X</text>"""
+        encoded, actual = fixed(broad + narrow, composite)
+        _, expected = fixed("", spans)
+        _, reversed_rules = fixed(narrow + broad, composite)
+        self.assertEqual(actual, expected)
+        self.assertNotEqual(actual, reversed_rules)
+        with doc_ex.open(encoded) as book, doc_ex.open(book.export_epub_fixed_pdf(pages=[0], dpi=96)) as pdf:
+            self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))),
+                             rgba_pixels(png_chunks(actual)))
+
+        first = "@font-face {font-family: First; src: url(inter.ttf); unicode-range: U+0041}"
+        stacks = """<g style="font-family:First, &quot;Other, Face&quot;">
+          <text x="10" y="48" font-family="inherit">AABBBAA</text></g>
+          <text x="10" y="108" font-family="First, Standard">AABBBAA</text>"""
+        _, stacked = fixed(first, stacks)
+        _, control = fixed("", """<text x="10" y="48" font-family="Standard">AA<tspan
+          font-family="'Other, Face'">BBB</tspan>AA</text>
+          <text x="10" y="108" font-family="Standard">AABBBAA</text>""")
+        self.assertEqual(stacked, control)
+
+        # A serif ligature followed by an uncovered letter must preserve both font runs.
+        actual_ligature = """<text x="10" y="48" font-family="'Source Serif 4', Standard">officeƕ</text>"""
+        expected_ligature = """<text x="10" y="48" font-family="'Source Serif 4'">office<tspan
+          font-family="Standard">ƕ</tspan></text>"""
+        _, ligature = fixed("", actual_ligature)
+        _, isolated = fixed("", expected_ligature)
+        self.assertEqual(ligature, isolated)
+
+        _, quoted = fixed("", '<text x="10" y="48" font-family="&quot;monospace&quot;, monospace">WW</text>')
+        _, named = fixed("", '<text x="10" y="48" font-family="&quot;Other, Face&quot;">WW</text>')
+        _, generic = fixed("", '<text x="10" y="48" font-family="monospace, &quot;monospace&quot;">WW</text>')
+        self.assertEqual(quoted, named)
+        self.assertNotEqual(quoted, generic)
+
+    def test_epub_svg_mixed_font_inline_export_matches_explicit_runs(self) -> None:
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
+        def chapter(text: str) -> bytes:
+            xhtml = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head>
+              <title>Inline fonts</title></head><body><p>
+              <svg xmlns="http://www.w3.org/2000/svg" width="260" height="90" viewBox="0 0 260 90">
+              <style>@font-face {{font-family: Standard; src: url(inter.ttf);
+                unicode-range: U+0195}} text {{font-size:42px;fill:#14558a}}</style>
+              {text}</svg></p></body></html>"""
+            return rewrite_epub(epub_fixture(chapter_one=xhtml), {"OEBPS/inter.ttf": font})
+
+        actual = chapter("""<text x="8" y="58" font-family="'Source Serif 4', Standard">officeƕ</text>""")
+        expected = chapter("""<text x="8" y="58" font-family="'Source Serif 4'">office<tspan
+          font-family="Standard">ƕ</tspan></text>""")
+        with doc_ex.open(actual) as book, doc_ex.open(expected) as control:
+            self.assertEqual(book.render_page(0, dpi=96), control.render_page(0, dpi=96))
+            for target in ("pdf", "docx"):
+                with doc_ex.open(book.convert(target)) as output, doc_ex.open(control.convert(target)) as reference:
+                    png = output.render_page(0, dpi=96)
+                    self.assertEqual(png, reference.render_page(0, dpi=96))
+                    self.assertIn(bytes.fromhex("14558aff"), rgba_pixels(png_chunks(png))[1])
 
     def test_epub_packaged_fonts_preserve_inline_svg_and_math(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"

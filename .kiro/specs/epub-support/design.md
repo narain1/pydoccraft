@@ -42,7 +42,11 @@ XHTML parses literal CSS `font-variation-settings` with Raffia, inherits or clea
 
 The XHTML and SVG cascades compute unregistered custom properties on each element before substituting var() in supported declarations. Case-sensitive names, the inherited computed values, dependencies inside fallbacks, and shorthand cascade order are preserved. Each declaration, dependency depth and chapter-wide substitution work is bounded. SVG still checks resolved paint values before passing them to resvg. [CSS custom properties](https://www.w3.org/TR/css-variables-1/)
 
-Broader selectors, registered CSS custom properties, SVG font Unicode ranges and fallback stacks, variable `@font-face` descriptor ranges and defaults, additional SVG features and semantic fixed-layout conversion remain open.
+SVG rendering registers the same bounded Unicode-restricted font copies used for XHTML. A document-scoped resolver matches native style, weight, and stretch, and keeps the author's ordered family list for each selected face. Equal descriptors prefer later matching packaged declarations. Fallback faces exclude characters covered by earlier candidates so the SVG shaper keeps preferred glyphs even when a later face could render the entire span. Font bytes, faces, stack counts and matching work have explicit bounds.
+
+If native fallback leaves a missing glyph after finding a candidate, the adapter can retry the source text as separate font runs. It chooses a face for each complete Unicode grapheme cluster and lets the same SVG engine place and shape the resulting runs. It validates the retained glyphs after the retry. When the source placement or inherited style cannot be preserved, the renderer returns an explicit unsupported error. [CSS Fonts matching algorithm](https://www.w3.org/TR/css-fonts-4/#font-matching-algorithm)
+
+Broader selectors, registered CSS custom properties, variable `@font-face` descriptor ranges and defaults, additional SVG features and semantic fixed-layout conversion remain open.
 
 
 ## Presentation MathML

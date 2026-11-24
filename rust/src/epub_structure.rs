@@ -718,7 +718,7 @@ fn inner_range(source: &str, node: Node<'_, '_>) -> Result<Range<usize>, EngineE
     Ok(start..end)
 }
 
-fn append(output: &mut String, text: &str, limit: usize) -> Result<(), EngineError> {
+pub(super) fn append(output: &mut String, text: &str, limit: usize) -> Result<(), EngineError> {
     if output.len().saturating_add(text.len()) > limit {
         return Err(limited("edited EPUB XML exceeds its byte budget"));
     }

@@ -39,7 +39,7 @@ use super::{
 use crate::{model::BlockPayload, EngineError};
 
 #[path = "epub_font_ranges.rs"]
-mod ranges;
+pub(super) mod ranges;
 
 pub(super) const MAX_FONT_BYTES: usize = 8 * 1024 * 1024;
 type Brush = [u8; 4];

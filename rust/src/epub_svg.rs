@@ -1,20 +1,22 @@
 //! Rasterize a validated EPUB SVG content document on its declared viewport.
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
-    sync::{Arc, OnceLock},
+    collections::{hash_map::Entry, HashMap},
+    sync::Arc,
 };
 
 use resvg::{tiny_skia, usvg};
 use roxmltree::Node;
 
 use super::{
-    charge, content, css::Cascade, external, fonts, invalid, limited, rendition::Region, resolve,
+    charge, content, css::Cascade, external, invalid, limited, rendition::Region, resolve,
     unsupported, Book,
 };
 use crate::{author_epub::escape_attribute, model::ImagePayload, EngineError};
 
 #[path = "epub_svg_effects.rs"]
 pub(super) mod effects;
+#[path = "epub_svg_fonts.rs"]
+mod svg_fonts;
 #[path = "epub_svg_use.rs"]
 pub(super) mod use_refs;
 
@@ -208,32 +210,57 @@ fn parse(
     ];
     let mut cascade = Cascade::load_svg(root, base, book, viewport)?;
     let (styled, families) = apply_styles(root, source, &mut cascade)?;
-    if root
+    let fonts = if root
         .descendants()
         .any(|node| node.has_tag_name((NS, "text")))
     {
-        options.fontdb = font_database(&cascade.fonts, &families, book)?;
-    }
-    if has_uses {
-        // Count computed style payload too, since usvg copies it into each clone.
-        let xml = super::parse_xml(&styled)?;
-        use_refs::validate_use_graph(xml.root_element())?;
-        usvg::Tree::from_xmltree(&xml, &options).map_err(invalid)
+        Some(svg_fonts::Resolver::install(
+            &mut options,
+            &cascade.fonts,
+            families,
+            book,
+        )?)
     } else {
-        usvg::Tree::from_data(&styled, &options).map_err(invalid)
-    }
+        None
+    };
+    let result = native_tree(&styled, &options, has_uses);
+    let Some(fonts) = fonts else { return result };
+    fonts.check()?;
+    let tree = result?;
+    let Some(fallback) = fonts.split_fallback_runs(&styled, &tree)? else {
+        return Ok(tree);
+    };
+    options.fontdb = tree.fontdb().clone();
+    let result = native_tree(fallback.as_bytes(), &options, has_uses);
+    fonts.check()?;
+    let tree = result?;
+    fonts.check_rendered(&tree)?;
+    Ok(tree)
 }
 
-type FontNames = HashMap<String, HashSet<String>>;
+fn native_tree(
+    source: &[u8],
+    options: &usvg::Options<'_>,
+    has_uses: bool,
+) -> Result<usvg::Tree, EngineError> {
+    if has_uses {
+        // Count computed style payload too, since usvg copies it into each clone.
+        let xml = super::parse_xml(source)?;
+        use_refs::validate_use_graph(xml.root_element())?;
+        usvg::Tree::from_xmltree(&xml, options).map_err(invalid)
+    } else {
+        usvg::Tree::from_data(source, options).map_err(invalid)
+    }
+}
 
 fn apply_styles(
     root: Node<'_, '_>,
     source: &[u8],
     cascade: &mut Cascade,
-) -> Result<(Vec<u8>, FontNames), EngineError> {
+) -> Result<(Vec<u8>, svg_fonts::Families), EngineError> {
     let mut output = Vec::with_capacity(source.len());
     let mut cursor = 0;
-    let mut families = FontNames::new();
+    let mut families = svg_fonts::Families::default();
     let mut added_bytes = 0;
     let mut effects = None;
     // Process byte ranges in document order. Source XML remains available for extraction.
@@ -255,18 +282,15 @@ fn apply_styles(
             .find(|(key, _)| key == "font-family")
             .map(|(_, value)| value.as_str())
             .or_else(|| node.attribute("font-family"));
+        let mut style = String::new();
         if let Some(family) = family {
-            for name in family
-                .split(',')
-                .map(|name| name.trim().trim_matches(['\'', '"']))
-            {
-                families
-                    .entry(name.to_lowercase())
-                    .or_default()
-                    .insert(name.to_owned());
+            if let Some(encoded) = families.encode(family)? {
+                style.push_str("font-family:");
+                style.push_str(&encoded);
+                style.push(';');
             }
         }
-        let mut style = String::new();
+        props.retain(|(key, _)| key != "font-family");
         for (key, mut value) in props {
             if key == "font-optical-sizing" {
                 value = match super::css::optical_sizing(&value) {
@@ -466,72 +490,6 @@ fn raster_images<'a>(
         entry.insert((area, usvg::ImageKind::PNG(Arc::new(png))));
     }
     Ok(images)
-}
-
-fn font_database(
-    faces: &[fonts::Face],
-    families: &FontNames,
-    book: &mut Book<'_>,
-) -> Result<Arc<usvg::fontdb::Database>, EngineError> {
-    use usvg::fontdb::{Database, Source, Style, Weight};
-
-    static FONTS: OnceLock<Arc<Database>> = OnceLock::new();
-    let mut database = FONTS
-        .get_or_init(|| {
-            let mut database = Database::new();
-            database.load_system_fonts();
-            for &font in wordcraft_fonts::bundled() {
-                database.load_font_source(Source::Binary(Arc::new(font)));
-            }
-            database.set_serif_family("Source Serif 4");
-            database.set_sans_serif_family("Source Sans 3");
-            database.set_monospace_family("JetBrains Mono");
-            Arc::new(database)
-        })
-        .clone();
-    let mut bytes = 0;
-    for face in faces {
-        let Some(names) = families.get(&face.family.to_lowercase()) else {
-            continue;
-        };
-        let (Some(weight), Some(style)) = (face.weight, face.style) else {
-            return Err(unsupported("EPUB SVG font-face weight and style ranges"));
-        };
-        if face.unicode_ranges.is_some() {
-            return Err(unsupported("EPUB SVG font-face unicode-range"));
-        }
-        let data = fonts::read_face(face, book)?;
-        charge(
-            &mut bytes,
-            data.len(),
-            16 * 1024 * 1024,
-            "EPUB SVG decoded fonts exceed 16 MiB",
-        )?;
-        let database = Arc::make_mut(&mut database);
-        let ids = database.load_font_source(Source::Binary(Arc::new(data)));
-        if ids.is_empty() {
-            return Err(invalid("EPUB SVG font-face has no usable font"));
-        }
-        for id in ids {
-            let mut info = database
-                .face(id)
-                .cloned()
-                .ok_or_else(|| invalid("missing EPUB SVG font face"))?;
-            database.remove_face(id);
-            info.families = names
-                .iter()
-                .map(|name| (name.clone(), usvg::fontdb::Language::English_UnitedStates))
-                .collect();
-            info.style = match style {
-                parley::FontStyle::Normal => Style::Normal,
-                parley::FontStyle::Italic => Style::Italic,
-                parley::FontStyle::Oblique(_) => Style::Oblique,
-            };
-            info.weight = Weight(weight as u16);
-            database.push_face_info(info);
-        }
-    }
-    Ok(database)
 }
 
 pub(super) fn transparent_png(

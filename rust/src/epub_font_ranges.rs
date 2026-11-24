@@ -19,7 +19,7 @@ const MAPPING_LIMIT: usize = 2 * 0x110000;
 // The SFNT directory stores its binary-search range in 16 bits.
 const MAX_SFNT_TABLES: usize = u16::MAX as usize / 16;
 
-pub(super) fn register(
+pub(in crate::epub) fn register(
     data: &[u8],
     ranges: &[(u32, u32)],
     work: &mut usize,
@@ -39,130 +39,154 @@ pub(super) fn register(
         if index >= 256 {
             return Err(limited("EPUB font collection exceeds 256 faces"));
         }
-        let source = source.map_err(invalid)?;
-        if source.table_directory().table_records().len() > MAX_SFNT_TABLES {
-            return Err(limited(
-                "EPUB font table count exceeds the SFNT directory limit",
-            ));
+        if let Some(bytes) = rewrite(
+            source.map_err(invalid)?,
+            FontRef::from_index(data, index as u32).map_err(invalid)?,
+            &covered,
+            work,
+            &mut rewritten,
+        )? {
+            register(bytes)?;
         }
-        let font = FontRef::from_index(data, index as u32).map_err(invalid)?;
-        let chars = font.charmap();
-        let mut groups: Vec<SequentialMapGroup> = Vec::new();
-        for (code, glyph) in chars.mappings() {
-            charge(
-                work,
-                1,
-                MAPPING_LIMIT,
-                "EPUB font character map work limit exceeded",
-            )?;
-            let glyph = glyph.to_u32();
-            if glyph == 0
-                || glyph > u32::from(u16::MAX)
-                || char::from_u32(code).is_none()
-                || !covered(code)
-            {
-                continue;
-            }
-            if let Some(last) = groups.last_mut().filter(|last| {
-                last.end_char_code + 1 == code
-                    && last.start_glyph_id + (code - last.start_char_code) == glyph
-            }) {
-                last.end_char_code = code;
-            } else {
-                groups.push(SequentialMapGroup::new(code, code, glyph));
-            }
-        }
-        let mut variants: BTreeMap<u32, (Vec<UnicodeRange>, Vec<UvsMapping>)> = BTreeMap::new();
-        for (code, selector, glyph) in chars.variant_mappings() {
-            charge(
-                work,
-                1,
-                MAPPING_LIMIT,
-                "EPUB font character map work limit exceeded",
-            )?;
-            if !covered(code)
-                || char::from_u32(code).is_none()
-                || char::from_u32(selector).is_none()
-            {
-                continue;
-            }
-            let (default, mapped) = variants.entry(selector).or_default();
-            match glyph {
-                MapVariant::UseDefault => {
-                    if let Some(last) = default.last_mut().filter(|last| {
-                        last.additional_count < u8::MAX
-                            && last.start_unicode_value.to_u32()
-                                + u32::from(last.additional_count)
-                                + 1
-                                == code
-                    }) {
-                        last.additional_count += 1;
-                    } else {
-                        default.push(UnicodeRange::new(Uint24::new(code), 0));
-                    }
-                }
-                MapVariant::Variant(id) => {
-                    let id = u16::try_from(id.to_u32()).map_err(invalid)?;
-                    mapped.push(UvsMapping::new(Uint24::new(code), id));
-                }
-            }
-        }
-        if groups.is_empty() && variants.is_empty() {
+    }
+    Ok(())
+}
+
+pub(in crate::epub) fn filter_face(
+    data: &[u8],
+    index: u32,
+    covered: impl Fn(u32) -> bool,
+    work: &mut usize,
+) -> Result<Option<Vec<u8>>, EngineError> {
+    rewrite(
+        TableFont::from_index(data, index).map_err(invalid)?,
+        FontRef::from_index(data, index).map_err(invalid)?,
+        &covered,
+        work,
+        &mut 0,
+    )
+}
+
+fn rewrite(
+    source: TableFont<'_>,
+    font: FontRef<'_>,
+    covered: &dyn Fn(u32) -> bool,
+    work: &mut usize,
+    rewritten: &mut usize,
+) -> Result<Option<Vec<u8>>, EngineError> {
+    if source.table_directory().table_records().len() > MAX_SFNT_TABLES {
+        return Err(limited(
+            "EPUB font table count exceeds the SFNT directory limit",
+        ));
+    }
+    let chars = font.charmap();
+    let mut groups: Vec<SequentialMapGroup> = Vec::new();
+    for (code, glyph) in chars.mappings() {
+        charge(
+            work,
+            1,
+            MAPPING_LIMIT,
+            "EPUB font character map work limit exceeded",
+        )?;
+        let glyph = glyph.to_u32();
+        if glyph == 0
+            || glyph > u32::from(u16::MAX)
+            || char::from_u32(code).is_none()
+            || !covered(code)
+        {
             continue;
         }
-        let full = CmapSubtable::Format12(Cmap12::new(0, groups));
-        let mut records = vec![EncodingRecord::new(PlatformId::Unicode, 4, full.clone())];
-        if !variants.is_empty() {
-            let selectors: Vec<_> = variants
-                .into_iter()
-                .map(|(selector, (default, mapped))| {
-                    VariationSelector::new(
-                        Uint24::new(selector),
-                        (!default.is_empty())
-                            .then(|| DefaultUvs::new(default.len() as u32, default)),
-                        (!mapped.is_empty())
-                            .then(|| NonDefaultUvs::new(mapped.len() as u32, mapped)),
-                    )
-                })
-                .collect();
-            let mut table = Cmap14::new(0, selectors.len() as u32, selectors);
-            table.length = dump_table(&table).map_err(invalid)?.len() as u32;
-            records.push(EncodingRecord::new(
-                PlatformId::Unicode,
-                5,
-                CmapSubtable::Format14(table),
-            ));
+        if let Some(last) = groups.last_mut().filter(|last| {
+            last.end_char_code + 1 == code
+                && last.start_glyph_id + (code - last.start_char_code) == glyph
+        }) {
+            last.end_char_code = code;
+        } else {
+            groups.push(SequentialMapGroup::new(code, code, glyph));
         }
-        records.push(EncodingRecord::new(PlatformId::Windows, 10, full));
-        let cmap = dump_table(&Cmap::new(records)).map_err(invalid)?;
-        let mut builder = FontBuilder::new();
+    }
+    let mut variants: BTreeMap<u32, (Vec<UnicodeRange>, Vec<UvsMapping>)> = BTreeMap::new();
+    for (code, selector, glyph) in chars.variant_mappings() {
         charge(
-            &mut rewritten,
-            cmap.len() + 32,
+            work,
+            1,
+            MAPPING_LIMIT,
+            "EPUB font character map work limit exceeded",
+        )?;
+        if !covered(code) || char::from_u32(code).is_none() || char::from_u32(selector).is_none() {
+            continue;
+        }
+        let (default, mapped) = variants.entry(selector).or_default();
+        match glyph {
+            MapVariant::UseDefault => {
+                if let Some(last) = default.last_mut().filter(|last| {
+                    last.additional_count < u8::MAX
+                        && last.start_unicode_value.to_u32() + u32::from(last.additional_count) + 1
+                            == code
+                }) {
+                    last.additional_count += 1;
+                } else {
+                    default.push(UnicodeRange::new(Uint24::new(code), 0));
+                }
+            }
+            MapVariant::Variant(id) => {
+                let id = u16::try_from(id.to_u32()).map_err(invalid)?;
+                mapped.push(UvsMapping::new(Uint24::new(code), id));
+            }
+        }
+    }
+    if groups.is_empty() && variants.is_empty() {
+        return Ok(None);
+    }
+    let full = CmapSubtable::Format12(Cmap12::new(0, groups));
+    let mut records = vec![EncodingRecord::new(PlatformId::Unicode, 4, full.clone())];
+    if !variants.is_empty() {
+        let selectors: Vec<_> = variants
+            .into_iter()
+            .map(|(selector, (default, mapped))| {
+                VariationSelector::new(
+                    Uint24::new(selector),
+                    (!default.is_empty()).then(|| DefaultUvs::new(default.len() as u32, default)),
+                    (!mapped.is_empty()).then(|| NonDefaultUvs::new(mapped.len() as u32, mapped)),
+                )
+            })
+            .collect();
+        let mut table = Cmap14::new(0, selectors.len() as u32, selectors);
+        table.length = dump_table(&table).map_err(invalid)?.len() as u32;
+        records.push(EncodingRecord::new(
+            PlatformId::Unicode,
+            5,
+            CmapSubtable::Format14(table),
+        ));
+    }
+    records.push(EncodingRecord::new(PlatformId::Windows, 10, full));
+    let cmap = dump_table(&Cmap::new(records)).map_err(invalid)?;
+    let mut builder = FontBuilder::new();
+    charge(
+        rewritten,
+        cmap.len() + 32,
+        MAX_FONT_BYTES,
+        "EPUB Unicode-restricted font exceeds 8 MiB",
+    )?;
+    builder.add_raw(write_fonts::types::Tag::new(b"cmap"), cmap);
+    for record in source.table_directory().table_records() {
+        let tag = record.tag();
+        if matches!(
+            tag.to_be_bytes(),
+            [b'c', b'm', b'a', b'p'] | [b'D', b'S', b'I', b'G']
+        ) {
+            continue;
+        }
+        let bytes = source
+            .data_for_tag(tag)
+            .ok_or_else(|| invalid("invalid EPUB font table"))?;
+        charge(
+            rewritten,
+            bytes.len() + 19,
             MAX_FONT_BYTES,
             "EPUB Unicode-restricted font exceeds 8 MiB",
         )?;
-        builder.add_raw(write_fonts::types::Tag::new(b"cmap"), cmap);
-        for record in source.table_directory().table_records() {
-            let tag = record.tag();
-            if matches!(
-                tag.to_be_bytes(),
-                [b'c', b'm', b'a', b'p'] | [b'D', b'S', b'I', b'G']
-            ) {
-                continue;
-            }
-            let bytes = source
-                .data_for_tag(tag)
-                .ok_or_else(|| invalid("invalid EPUB font table"))?;
-            charge(
-                &mut rewritten,
-                bytes.len() + 19,
-                MAX_FONT_BYTES,
-                "EPUB Unicode-restricted font exceeds 8 MiB",
-            )?;
-            builder.add_raw(tag, bytes.as_bytes());
-        }
-        register(builder.build())?;
+        builder.add_raw(tag, bytes.as_bytes());
     }
-    Ok(())
+    Ok(Some(builder.build()))
 }
