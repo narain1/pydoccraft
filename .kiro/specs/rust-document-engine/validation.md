@@ -2807,3 +2807,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 672 installed tests, inclu
 ## 2026-11-24 Chained EPUB Opus narration
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 673 installed tests, including 78 EPUB tests. It measured 23,001,236 bytes with a 53,409,736-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-chained-ogg-opus-narration) covers boundary-crossing cues, streaming, and the reference decoder comparison.
+
+## 2026-11-24 EPUB XHTML font Unicode ranges
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 674 installed tests, including 79 EPUB tests. It measured 23,069,375 bytes with a 53,562,792-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-epub-xhtml-font-unicode-ranges) records the composite face, glyph fallback and font table bound checks.

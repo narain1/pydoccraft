@@ -4,8 +4,8 @@ use std::{cell::RefCell, collections::HashSet, ops::Range, sync::Arc};
 use kurbo::BezPath;
 use parley::{
     fontique::{Blob, FontInfoOverride},
-    Alignment, AlignmentOptions, BaseDirection, FontContext, FontFamily, FontStyle, FontWeight,
-    InlineBox, InlineBoxKind, Layout, LayoutContext, LineHeight, PositionedLayoutItem,
+    Alignment, AlignmentOptions, BaseDirection, FontContext, FontFamily, FontFamilyName, FontStyle,
+    FontWeight, InlineBox, InlineBoxKind, Layout, LayoutContext, LineHeight, PositionedLayoutItem,
     StyleProperty,
 };
 use skrifa::{
@@ -32,6 +32,9 @@ use super::{
 };
 use crate::{model::BlockPayload, EngineError};
 
+#[path = "epub_font_ranges.rs"]
+mod ranges;
+
 pub(super) const MAX_FONT_BYTES: usize = 8 * 1024 * 1024;
 type Brush = [u8; 4];
 
@@ -41,7 +44,7 @@ pub(super) struct Face {
     pub urls: Vec<String>,
     pub weight: Option<f32>,
     pub style: Option<FontStyle>,
-    pub unicode_range: bool,
+    pub unicode_ranges: Option<Vec<(u32, u32)>>,
 }
 
 pub(super) struct Fonts {
@@ -97,7 +100,11 @@ impl Fonts {
             .collect();
         let mut result = Self::empty();
         let mut budget = 0;
-        for face in faces {
+        let mut mapping_work = 0;
+        let mut rewritten_bytes = 0;
+        // Fontique tries matching faces in registration order. CSS composite faces
+        // try the last declaration first when multiple faces cover a character.
+        for face in faces.iter().rev() {
             let key = face.family.to_ascii_lowercase();
             if !used.contains(&key) {
                 continue;
@@ -105,9 +112,6 @@ impl Fonts {
             let (Some(weight), Some(style)) = (face.weight, face.style) else {
                 return Err(unsupported("EPUB font-face weight and style ranges"));
             };
-            if face.unicode_range {
-                return Err(unsupported("EPUB font-face unicode-range"));
-            }
             let data = read_face(face, book)?;
             charge(
                 &mut budget,
@@ -115,19 +119,35 @@ impl Fonts {
                 16 * 1024 * 1024,
                 "EPUB decoded fonts exceed 16 MiB",
             )?;
-            let registrations = result.fonts.collection.register_fonts(
-                Blob::new(Arc::new(data)),
-                Some(FontInfoOverride {
-                    family_name: Some(&face.family),
-                    weight: Some(FontWeight::new(weight)),
-                    style: Some(style),
-                    ..Default::default()
-                }),
-            );
-            if registrations.is_empty() {
-                return Err(invalid("EPUB font-face has no usable font"));
+            let overrides = Some(FontInfoOverride {
+                family_name: Some(&face.family),
+                weight: Some(FontWeight::new(weight)),
+                style: Some(style),
+                ..Default::default()
+            });
+            let mut register = |data| {
+                let registrations = result
+                    .fonts
+                    .collection
+                    .register_fonts(Blob::new(Arc::new(data)), overrides);
+                if registrations.is_empty() {
+                    return Err(invalid("EPUB font-face has no usable font"));
+                }
+                result.names.insert(key.clone());
+                Ok(())
+            };
+            match face.unicode_ranges.as_deref() {
+                None | Some([(0, 0x10ffff)]) => register(data)?,
+                Some(ranges) => ranges::register(&data, ranges, &mut mapping_work, |data| {
+                    charge(
+                        &mut rewritten_bytes,
+                        data.len(),
+                        16 * 1024 * 1024,
+                        "EPUB Unicode-restricted fonts exceed 16 MiB",
+                    )?;
+                    register(data)
+                })?,
             }
-            result.names.insert(key);
         }
         if result.names.is_empty() {
             return Ok(None);
@@ -278,7 +298,13 @@ impl Fonts {
                     }
                 };
                 builder.push(
-                    StyleProperty::FontFamily(FontFamily::Source(family.into())),
+                    StyleProperty::FontFamily(FontFamily::List(
+                        vec![
+                            FontFamilyName::named(family),
+                            FontFamilyName::named("Source Sans 3"),
+                        ]
+                        .into(),
+                    )),
                     range.clone(),
                 );
             }

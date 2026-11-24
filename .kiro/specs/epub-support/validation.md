@@ -311,3 +311,13 @@ The mono fixture is a locally generated 340 Hz sine wave with a 350 ms duration 
 The Linux x86-64 CPython 3.11.15 release wheel passed 673 installed tests, including 78 EPUB tests, with zero failures, errors or skips. The wheel measured 23,001,236 bytes and its native extension measured 53,409,736 bytes. Wheel SHA-256 is `0631781d7d6ced71c58ddbf8a979e8eccccd28245e95def25822531f15015591`. Both lockfiles and the four upstream revisions match the preceding checkpoint. License checks passed for the 341 core and 315 Node packages. The wheel contains the source license files.
 
 Rust 1.95 formatting and warnings-denied all-target Clippy passed. The locked default suite passed 478 unit tests and 7 integration tests. The Python-free suite passed 401 unit tests and 8 integration tests. All 17 Node 22.22.1 preview tests passed. Public typing, documentation links, support evidence and roadmap checks passed. Cleanup removed about 4.9 GiB of Cargo output, the temporary wheel, Node addon and site build.
+
+## 2026-11-24 EPUB XHTML font Unicode ranges
+
+The composite font regression compares rendered pixels with an explicit per-run font assignment. It checks wildcard and absolute ranges, a later equal-style face winning on an overlap, and bundled fallback for a glyph outside both ranges. Reversing the face declarations changes the rendered result. A font declaring 4,096 SFNT table records returns the resource-limit error before rewriting. [CSS font-face character ranges](https://www.w3.org/TR/css-fonts-4/#unicode-range-desc)
+
+The root and Node lockfiles now record a direct dependency on the already-resolved `write-fonts` 0.48.1 package. No package versions or upstream Git pins changed. The regenerated license files match the prior inventory, and the audits cover 341 core and 315 Node packages.
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 674 installed tests, including 79 EPUB tests, with zero failures, errors or skips. The wheel measured 23,069,375 bytes and its native extension measured 53,562,792 bytes. Wheel SHA-256 is `efd46ca8cba31bdd96cc3cd5791867e2b48dc07ab643f5e476c61be173d9b56d`. The audit also verified the three license files packaged in the wheel.
+
+Rust 1.95 formatting and warnings-denied all-target Clippy passed. The locked default suite passed 478 unit tests and 7 integration tests. The Python-free suite passed 401 unit tests and 8 integration tests. All 17 Node 22.22.1 preview tests passed. Public typing, documentation links, support evidence and roadmap checks passed. Cleanup removed about 6.1 GiB of Cargo output, the temporary wheels, Node addon and site build.

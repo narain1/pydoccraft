@@ -1823,6 +1823,7 @@ dependencies = [
  "wordcraft-layout",
  "wordcraft-pdf",
  "wordcraft-render",
+ "write-fonts",
  "zip 2.2.2",
  "zip 9.1.3",
 ]

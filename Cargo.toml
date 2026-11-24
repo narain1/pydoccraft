@@ -46,6 +46,7 @@ serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.149"
 sha1 = "=0.11.0"
 skrifa = "=0.44.0"
+write-fonts = { version = "=0.48.1", features = ["read"] }
 taffy = { version = "=0.16.0", default-features = false, features = ["std", "taffy_tree", "block_layout", "flexbox", "grid", "content_size"] }
 thiserror = "=2.0.21"
 wordcraft-doc = { git = "https://github.com/storytold/wordcraft", rev = "bbe3547dd11bb5f613f3aa893b12f593910644de" }

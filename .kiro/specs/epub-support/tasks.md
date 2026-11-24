@@ -21,7 +21,8 @@
 - [x] Render SVG CSS, packaged SVG fonts, and referenced PNG and JPEG resources in spine previews, XHTML and semantic export.
 - [x] Render fixed-layout spreads in both reading directions, honor spine placement and orientation-dependent spread rules, and clip across page boundaries.
 - [x] Export selected fixed-layout viewports as image-only PDF pages at their original sizes.
-- [ ] Extend source CSS and fixed-layout fidelity, including font Unicode ranges and variable axes, additional SVG features and semantic fixed-layout conversion.
+- [x] Scope packaged XHTML font faces using CSS Unicode ranges, overlap order and glyph fallback.
+- [ ] Extend source CSS and fixed-layout fidelity, including SVG font ranges, font-family stacks, variable axes, additional SVG features and semantic fixed-layout conversion.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.
 - [x] Render tall reflowable chapters within the paint coordinate budget and apply raster limits to the requested DPI and clip.
 - [x] Project inherited MathML attributes, accents, movable limits, repeated script pairs, varied fences and separators, horizontal spaces, and zero-dimension padding.

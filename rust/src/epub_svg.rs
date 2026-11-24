@@ -443,7 +443,7 @@ fn font_database(
         let (Some(weight), Some(style)) = (face.weight, face.style) else {
             return Err(unsupported("EPUB SVG font-face weight and style ranges"));
         };
-        if face.unicode_range {
+        if face.unicode_ranges.is_some() {
             return Err(unsupported("EPUB SVG font-face unicode-range"));
         }
         let data = fonts::read_face(face, book)?;

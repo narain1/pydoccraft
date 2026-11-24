@@ -450,11 +450,21 @@ fn font_face(
         return Err(invalid("invalid EPUB font-face family"));
     }
     let mut urls = Vec::new();
+    let mut unicode_ranges = None;
     for statement in &block.statements {
         let Statement::Declaration(declaration) = statement else {
             continue;
         };
-        if !ident(&declaration.name).is_some_and(|name| name.eq_ignore_ascii_case("src")) {
+        let Some(key) = ident(&declaration.name) else {
+            continue;
+        };
+        if key.eq_ignore_ascii_case("unicode-range") {
+            if let Some(ranges) = unicode_range_list(&declaration.value)? {
+                unicode_ranges = Some(ranges);
+            }
+            continue;
+        }
+        if !key.eq_ignore_ascii_case("src") {
             continue;
         }
         urls.clear();
@@ -492,8 +502,44 @@ fn font_face(
         urls,
         weight,
         style,
-        unicode_range: values.contains_key("unicode-range"),
+        unicode_ranges,
     }))
+}
+
+fn unicode_range_list(
+    values: &[ComponentValue<'_>],
+) -> Result<Option<Vec<(u32, u32)>>, EngineError> {
+    if values.len() > 511 {
+        return Err(limited("EPUB font-face exceeds 256 Unicode ranges"));
+    }
+    if values.len().is_multiple_of(2) {
+        return Ok(None);
+    }
+    let mut ranges = Vec::new();
+    for (index, value) in values.iter().enumerate() {
+        match value {
+            ComponentValue::UnicodeRange(range)
+                if index.is_multiple_of(2) && range.start <= range.end && range.end <= 0x10ffff =>
+            {
+                ranges.push((range.start, range.end));
+            }
+            ComponentValue::Delimiter(Delimiter {
+                kind: DelimiterKind::Comma,
+                ..
+            }) if !index.is_multiple_of(2) => {}
+            _ => return Ok(None),
+        }
+    }
+    ranges.sort_unstable();
+    let mut merged: Vec<(u32, u32)> = Vec::new();
+    for (first, last) in ranges {
+        if let Some(range) = merged.last_mut().filter(|range| first <= range.1 + 1) {
+            range.1 = range.1.max(last);
+        } else {
+            merged.push((first, last));
+        }
+    }
+    Ok(Some(merged))
 }
 
 fn declarations(

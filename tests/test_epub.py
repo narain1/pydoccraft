@@ -723,6 +723,42 @@ class EpubTests(unittest.TestCase):
         with doc_ex.open(bad_font) as book, self.assertRaises(doc_ex.MalformedDocumentError):
             book.render_page(0, dpi=96)
 
+    def test_epub_unicode_range_uses_composite_faces_and_fallback_glyphs(self) -> None:
+        inter = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
+        # Give the second in-memory face different advances to distinguish overlapping glyphs.
+        wide = bytearray(inter)
+        count = struct.unpack_from(">H", wide, 4)[0]
+        offsets = {tag: offset for tag, _, offset, _ in
+                   struct.iter_unpack(">4sIII", wide[12:12 + 16 * count])}
+        metrics = struct.unpack_from(">H", wide, offsets[b"hhea"] + 34)[0]
+        for i in range(metrics):
+            pos = offsets[b"hmtx"] + i * 4
+            advance = struct.unpack_from(">H", wide, pos)[0]
+            struct.pack_into(">H", wide, pos, min(65535, advance + 300))
+
+        def preview(css: str, content: str) -> bytes:
+            source = epub_fixture(chapter_one=f"""<html xmlns="http://www.w3.org/1999/xhtml"><head>
+              <style>body, p {{margin: 0; font-size: 42px; line-height: 64px}} {css}</style></head>
+              <body><p>{content}</p></body></html>""")
+            source = rewrite_epub(source, {"OEBPS/inter.ttf": inter, "OEBPS/wide.ttf": bytes(wide)})
+            with doc_ex.open(source) as book:
+                self.assertEqual(book[0].get_text(), "AAAABBBBX")
+                return book.render_page(0, dpi=96)
+
+        first = "@font-face {font-family: Composite; src: url(inter.ttf); unicode-range: U+004?, U+20}"
+        second = "@font-face {font-family: Composite; src: url(wide.ttf); unicode-range: U+0042-0042}"
+        controls = """@font-face {font-family: Standard; src: url(inter.ttf)}
+          @font-face {font-family: Wide; src: url(wide.ttf)}
+          .standard {font-family: Standard} .wide {font-family: Wide} .fallback {font-family: 'Source Sans 3'}"""
+        reference = preview(controls, '<span class="standard">AAAA</span><span class="wide">BBBB</span><span class="fallback">X</span>')
+        composite = preview(first + second + " p {font-family: Composite}", "AAAABBBBX")
+        self.assertEqual(composite, reference)
+        self.assertNotEqual(composite, preview(second + first + " p {font-family: Composite}", "AAAABBBBX"))
+
+        struct.pack_into(">H", wide, 4, 4096)
+        with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "font table count"):
+            preview(first + second + " p {font-family: Composite}", "AAAABBBBX")
+
     def test_epub_packaged_fonts_preserve_inline_svg_and_math(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"
           xmlns:m="http://www.w3.org/1998/Math/MathML" xmlns:s="http://www.w3.org/2000/svg"><head>
