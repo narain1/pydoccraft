@@ -79,6 +79,14 @@ Resource removal checks the staged archive after additions, replacements, and ov
 An IDPF-obfuscated font replacement validates the plain input within the shared font budget and applies the original package's obfuscation key before writing the member. After a successful staged reference check, removing a font splices its declaration out of the encryption document. Removing the last declared font removes the encryption document from the archive as well.
 
 
+## Embedded text and media intervals
+
+The source inventory resolves a local media URI's archive member separately from its temporal fragment. Normal-play-time fragments accept seconds and clock syntax with one or both bounds. Playback intersects the authored interval with the requested range. Video clips are limited to the source presentation duration. Audio uses its sample geometry and applies a resource limit to the fragment end, preserving the existing strict SMIL clip behavior. [Media Fragments URI](https://www.w3.org/TR/media-frags/#npttimedef)
+
+The native text-track reader opens bounded local WebVTT and TTML resources on demand. WebVTT keeps cue markup and settings with the plain-text projection. TTML uses an integer document clock with units divisible by the declared frame and tick rates. Parallel and sequential containers resolve timing before a text-event sweep combines active fragments in source order. Conversion to microseconds happens after the sweep. Both profiles expose half-open intervals and retain overlaps.
+
+The Python video iterator sweeps start and end events across decoded frame intervals. At each cue transition it emits a new presentation interval over the same decoded RGB buffer, keeping overlap order stable. Seeking clips captions and frames using the same effective window. Audio clients can query the cue intervals on the source timeline. [WebVTT](https://www.w3.org/TR/webvtt1/), [TTML timing](https://www.w3.org/TR/ttml2/#timing)
+
 ## Media overlay playback
 
 `epub_audio.rs` maps SMIL time bounds to half-open sample-frame intervals. Streaming advances that integer cursor using PCM frames returned by the decoder. It reuses the track and its decoded frame cache between reads and supports an open-ended interval through the end of the resource. The MPEG decoder verifies a supported Xing/Info tag against packet headers before applying its encoder delay, decoder delay and end padding. AAC uses the MP4 presentation edit.

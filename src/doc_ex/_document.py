@@ -15,7 +15,7 @@ from typing import Any, Callable, Iterator, Literal, TYPE_CHECKING, overload
 
 from .errors import DocumentClosedError, MalformedDocumentError, UnsafeArchiveError
 from .models import (
-    Block, EpubAudioClip, EpubChapterSource, EpubEmbeddedMedia, EpubMediaSource, EpubMediaTrack, EpubNarrationCue, EpubOverlayCue, EpubOverlaySequence, EpubResource, EpubSvgChapterSource, EpubVideoFrame, Image, Link, Story, Table,
+    Block, EpubAudioClip, EpubChapterSource, EpubEmbeddedMedia, EpubMediaSource, EpubMediaTrack, EpubNarrationCue, EpubOverlayCue, EpubOverlaySequence, EpubResource, EpubSvgChapterSource, EpubTextCue, EpubVideoFrame, Image, Link, Story, Table,
     _html_text,
 )
 
@@ -59,6 +59,54 @@ def _epub_playback_interval(start_us: int, end_us: int | None) -> tuple[int, int
     ):
         raise ValueError("EPUB playback requires a nonnegative start and an optional later end")
     return start, end
+
+
+def _epub_source_interval(
+    source: EpubMediaSource, start_us: int, end_us: int | None
+) -> tuple[int, int | None]:
+    start, end = _epub_playback_interval(start_us, end_us)
+    start = max(start, source.fragment_start_us)
+    if source.fragment_end_us is not None:
+        end = source.fragment_end_us if end is None else min(end, source.fragment_end_us)
+    return start, end
+
+
+class _EpubTextTimeline:
+    def __init__(self, cues: list[EpubTextCue]) -> None:
+        self._cues = cues
+        self._events = [(cue.start_us, True, index) for index, cue in enumerate(cues)]
+        self._events.extend(
+            (cue.end_us, False, index)
+            for index, cue in enumerate(cues)
+            if cue.end_us is not None
+        )
+        self._events.sort()
+        self._index = 0
+        self._active: set[int] = set()
+        self._visible: tuple[EpubTextCue, ...] = ()
+
+    def _advance(self, time: int) -> None:
+        previous = self._index
+        while self._index < len(self._events) and self._events[self._index][0] <= time:
+            _, starts, index = self._events[self._index]
+            self._index += 1
+            if starts:
+                self._active.add(index)
+            else:
+                self._active.discard(index)
+        if self._index != previous:
+            if len(self._active) > 128:
+                raise UnsafeArchiveError("EPUB video exceeds 128 simultaneous text cues")
+            self._visible = tuple(self._cues[index] for index in sorted(self._active))
+
+    def segments(self, start: int, end: int) -> Iterator[tuple[int, int, tuple[EpubTextCue, ...]]]:
+        self._advance(start)
+        while self._index < len(self._events) and self._events[self._index][0] < end:
+            boundary = self._events[self._index][0]
+            yield start, boundary, self._visible
+            self._advance(boundary)
+            start = boundary
+        yield start, end, self._visible
 
 
 def _epub_edit_text(value: str, limit: int, label: str) -> str:
@@ -687,6 +735,33 @@ class Document:
             for item in chapter.metadata.get("embedded_media", ())
         ]
 
+    def epub_embedded_text(
+        self,
+        page: int,
+        media_index: int,
+        *,
+        track_index: int | None = None,
+        start_us: int = 0,
+        end_us: int | None = None,
+    ) -> list[EpubTextCue]:
+        """Return clipped WebVTT or TTML cues on the media presentation timeline."""
+        embedded = self.epub_embedded_media(page)[operator.index(media_index)]
+        if track_index is None:
+            track = next((track for track in embedded.tracks if track.default), None)
+            if track is None and embedded.tracks:
+                track = embedded.tracks[0]
+        else:
+            track = embedded.tracks[operator.index(track_index)]
+        start, end = _epub_playback_interval(start_us, end_us)
+        return [] if track is None else self._read_epub_text(track, start, end)
+
+    def _read_epub_text(self, track: EpubMediaTrack, start: int, end: int | None) -> list[EpubTextCue]:
+        from . import _core, _native
+
+        self._ensure_open()
+        result = _native(lambda: _core._epub_text_track(self._source, track.path, track.media_type, start, end))
+        return [EpubTextCue(*cue) for cue in result]
+
     def epub_embedded_audio(
         self,
         page: int,
@@ -709,11 +784,16 @@ class Document:
             source = embedded.sources[operator.index(source_index)]
         if source is None or source.path is None or source.media_type is None or not source.playable_audio:
             raise UnsupportedFormatError("embedded audio requires a supported local source")
-        start, end = _epub_playback_interval(start_us, end_us)
+        start, end = _epub_source_interval(source, start_us, end_us)
         frames = _epub_chunk_size(chunk_frames)
         selection = _epub_opus_index(opus_track)
+        self._ensure_open()
+        if end is not None and start >= end:
+            return
         decoder = _native(lambda: _core._open_epub_audio(self._source, source.path, source.media_type, selection))
-        yield from self._epub_pcm_chunks(decoder, start, end, frames)
+        yield from self._epub_pcm_chunks(
+            decoder, start, end, frames, clamp_to_duration=source.fragment_end_us is not None
+        )
 
     def epub_embedded_video(
         self,
@@ -723,8 +803,9 @@ class Document:
         source_index: int | None = None,
         start_us: int = 0,
         end_us: int | None = None,
+        text_track: int | None = None,
     ) -> Iterator[EpubVideoFrame]:
-        """Read local AVC video frames in presentation order, with bounded seeking."""
+        """Read AVC video frames with optional local text cues on the same timeline."""
         from . import _core, _native
         from .errors import UnsupportedFormatError
 
@@ -740,7 +821,12 @@ class Document:
             source = embedded.sources[operator.index(source_index)]
         if source is None or source.path is None or source.media_type != "video/mp4":
             raise UnsupportedFormatError("embedded video playback requires a local MP4 source")
-        start, end = _epub_playback_interval(start_us, end_us)
+        start, end = _epub_source_interval(source, start_us, end_us)
+        track = None if text_track is None else embedded.tracks[operator.index(text_track)]
+        self._ensure_open()
+        if end is not None and start >= end:
+            return
+        timeline = None if track is None else _EpubTextTimeline(self._read_epub_text(track, start, end))
         decoder = _native(lambda: _core._open_epub_video(self._source, source.path, start, end))
         while True:
             self._ensure_open()
@@ -748,7 +834,13 @@ class Document:
             if result is None:
                 return
             rgb, width, height, aspect, timestamp, duration = result
-            yield EpubVideoFrame(bytes(rgb), width, height, aspect, timestamp, duration)
+            pixels = bytes(rgb)
+            if timeline is None:
+                yield EpubVideoFrame(pixels, width, height, aspect, timestamp, duration)
+            else:
+                for begin, finish, visible in timeline.segments(timestamp, timestamp + duration):
+                    self._ensure_open()
+                    yield EpubVideoFrame(pixels, width, height, aspect, begin, finish - begin, visible)
 
     def epub_media_cues(self, page: int) -> list[dict[str, Any]]:
         """Return SMIL cues for a spine page, in playback order."""
@@ -844,6 +936,8 @@ class Document:
         begin: int,
         end: int | None,
         chunk_frames: int | None,
+        *,
+        clamp_to_duration: bool = False,
     ) -> Iterator[EpubAudioClip]:
         from . import _native
 
@@ -852,7 +946,7 @@ class Document:
             wave, rate, channels, frames = _native(lambda: decoder.clip(begin, end))
             yield EpubAudioClip(bytes(wave), rate, channels, frames)
             return
-        _native(lambda: decoder.start_stream(begin, end))
+        _native(lambda: decoder.start_stream(begin, end, clamp_to_duration))
         while True:
             self._ensure_open()
             chunk = _native(lambda: decoder.next_chunk(chunk_frames))

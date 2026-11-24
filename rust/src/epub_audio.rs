@@ -31,6 +31,7 @@ struct AudioWindow {
     speaker_mask: Option<u32>,
     next: usize,
     end: Option<usize>,
+    allow_eof: bool,
     started: bool,
 }
 
@@ -118,14 +119,19 @@ impl AudioSource {
 
     pub(crate) fn clip(&mut self, begin: u64, end: Option<u64>) -> Result<AudioClip, EngineError> {
         self.stream = None;
-        let window = self.window(begin, end)?;
+        let window = self.window(begin, end, false)?;
         let samples = self.read_frames(window.next, window.end, window.end.is_none())?;
         encode_clip(window.spec, window.speaker_mask, samples)
     }
 
-    pub(crate) fn start_stream(&mut self, begin: u64, end: Option<u64>) -> Result<(), EngineError> {
+    pub(crate) fn start_stream(
+        &mut self,
+        begin: u64,
+        end: Option<u64>,
+        clamp_to_duration: bool,
+    ) -> Result<(), EngineError> {
         self.stream = None;
-        self.stream = Some(self.window(begin, end)?);
+        self.stream = Some(self.window(begin, end, clamp_to_duration)?);
         Ok(())
     }
 
@@ -146,8 +152,8 @@ impl AudioSource {
             .checked_add(chunk_frames)
             .ok_or_else(|| limited("media-overlay audio time exceeds limits"))?;
         let stop = window.end.map_or(limit, |end| end.min(limit));
-        let samples = self.read_frames(window.next, Some(stop), window.end.is_none())?;
-        if samples.is_empty() && window.started && window.end.is_none() {
+        let samples = self.read_frames(window.next, Some(stop), window.allow_eof)?;
+        if samples.is_empty() && window.started && window.allow_eof {
             return Ok(None);
         }
         let result = encode_clip(window.spec, window.speaker_mask, samples)?;
@@ -160,16 +166,24 @@ impl AudioSource {
         Ok(Some(result))
     }
 
-    fn window(&mut self, begin: u64, end: Option<u64>) -> Result<AudioWindow, EngineError> {
+    fn window(
+        &mut self,
+        begin: u64,
+        end: Option<u64>,
+        clamp_to_duration: bool,
+    ) -> Result<AudioWindow, EngineError> {
         if end.is_some_and(|end| end <= begin) {
             return Err(invalid("media-overlay audio end must follow its start"));
         }
         let (spec, duration) = self.geometry()?;
         let next = frame_at(begin, spec.sample_rate)?;
-        let end = end
+        let mut end = end
             .map(|end| frame_at(end, spec.sample_rate))
             .transpose()?
             .or(duration);
+        if clamp_to_duration {
+            end = end.into_iter().chain(duration).min();
+        }
         if end.is_some_and(|end| end <= next || duration.is_some_and(|duration| end > duration)) {
             return Err(invalid(
                 "media-overlay audio clip lies outside its resource or contains no sample frames",
@@ -184,6 +198,7 @@ impl AudioSource {
             speaker_mask,
             next,
             end,
+            allow_eof: end.is_none() || (clamp_to_duration && duration.is_none()),
             started: false,
         })
     }

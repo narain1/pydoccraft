@@ -66,6 +66,19 @@ class EpubAudioClip:
 
 
 @dataclass(frozen=True, slots=True)
+class EpubTextCue:
+    """Plain text and an interval on the embedded media presentation timeline."""
+
+    start_us: int
+    end_us: int | None
+    text: str
+    id: str | None = None
+    settings: str | None = None
+    region: str | None = None
+    markup: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class EpubVideoFrame:
     """Owned packed RGB8 pixels and a frame interval on the presentation timeline."""
 
@@ -75,6 +88,7 @@ class EpubVideoFrame:
     pixel_aspect_ratio: tuple[int, int]
     start_us: int
     duration_us: int
+    text_cues: tuple[EpubTextCue, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +99,8 @@ class EpubMediaSource:
     path: str | None
     media_type: str | None
     playable_audio: bool
+    fragment_start_us: int = 0
+    fragment_end_us: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

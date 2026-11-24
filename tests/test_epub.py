@@ -1550,7 +1550,9 @@ class EpubTests(unittest.TestCase):
             ("missing.ogg", doc_ex.MalformedDocumentError, "absent from the manifest"),
             ("image.png", doc_ex.MalformedDocumentError, "type differs"),
             ("%2e%2e/audio.ogg", doc_ex.UnsafeArchiveError, "encoded EPUB parent"),
-            ("image.png#t=1", doc_ex.UnsupportedFormatError, "query or fragment"),
+            ("image.png#xywh=0,0,1,1", doc_ex.UnsupportedFormatError, "temporal t dimension"),
+            ("image.png#t=1", doc_ex.MalformedDocumentError, "type differs"),
+            ("image.png#t=2,1", doc_ex.MalformedDocumentError, "end must follow"),
         ):
             with self.subTest(src=src), self.assertRaisesRegex(error, message):
                 doc_ex.open(epub_fixture(chapter_one=chapter(src)))
@@ -1561,6 +1563,147 @@ class EpubTests(unittest.TestCase):
             self.assertIn("A transcript.", book[0].get_text())
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "local source"):
                 next(book.epub_embedded_audio(0, 0))
+
+    def test_embedded_text_tracks_split_video_at_cue_edges_and_source_fragment(self) -> None:
+        resource = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        _, wav = narrated_epub()
+        caption = """WEBVTT English
+
+NOTE Credit line
+Notes outside cues are ignored.
+
+REGION
+id:lower
+
+first
+00:00.125 --> 00:00.176 line:90% region:lower
+<v Narrator><b>One &amp; two</b></v>
+
+00:00.160 --> 00:00.180
+<ruby>字<rt>ji</rt></ruby><00:00.170> next
+"""
+        caption = ("\uFEFF" + caption.replace("\n", "\r\n")).encode()
+        alternative = b"WEBVTT\n\n00:00.000 --> 00:01.000\nAlternative\n"
+        xhtml = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Captions</title></head>
+          <body><video src="clip.mp4#t=npt%3A00%3A00.100%2C0.23">
+            <track src="alt.vtt" kind="subtitles" srclang="fr"/>
+            <track src="english.vtt" kind="captions" srclang="en" default="default"/>
+          </video>
+          <audio src="sound.wav#t=00:00.500,600"/>
+          <audio src="sound.wav#t=,0.125"/>
+          <audio src="sound.wav#t=0.5"/>
+          </body></html>"""
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Captions", xhtml, "OEBPS/captions.xhtml")],
+                resources={
+                    "OEBPS/clip.mp4": doc_ex.EpubResource("video/mp4", resource),
+                    "OEBPS/sound.wav": doc_ex.EpubResource("audio/wav", wav),
+                    "OEBPS/english.vtt": doc_ex.EpubResource("text/vtt", caption),
+                    "OEBPS/alt.vtt": doc_ex.EpubResource("text/vtt", alternative),
+                },
+            )
+        with doc_ex.open(data) as book:
+            source, = book.epub_embedded_media(0)[0].sources
+            self.assertEqual((source.path, source.fragment_start_us, source.fragment_end_us),
+                             ("OEBPS/clip.mp4", 100_000, 230_000))
+            default = book.epub_embedded_text(0, 0)
+            self.assertEqual(default, [
+                doc_ex.EpubTextCue(125_000, 176_000, "One & two", "first",
+                                  "line:90% region:lower", "lower", "<v Narrator><b>One &amp; two</b></v>"),
+                doc_ex.EpubTextCue(160_000, 180_000, "字 next", markup="<ruby>字<rt>ji</rt></ruby><00:00.170> next"),
+            ])
+            self.assertEqual([cue.text for cue in book.epub_embedded_text(0, 0, track_index=0)], ["Alternative"])
+            self.assertEqual([(c.start_us, c.end_us) for c in
+                              book.epub_embedded_text(0, 0, start_us=163_000, end_us=176_000)],
+                             [(163_000, 176_000), (163_000, 176_000)])
+            self.assertEqual(book.epub_embedded_text(0, 0, start_us=180_000), [])
+            self.assertEqual(book.read_epub_resource("OEBPS/english.vtt"), caption)
+
+            frames = list(book.epub_embedded_video(0, 0, text_track=1))
+            self.assertEqual([(f.start_us, f.start_us + f.duration_us, tuple(c.text for c in f.text_cues)) for f in frames], [
+                (100_000, 125_000, ()),
+                (125_000, 160_000, ("One & two",)),
+                (160_000, 166_666, ("One & two", "字 next")),
+                (166_666, 176_000, ("One & two", "字 next")),
+                (176_000, 180_000, ("字 next",)),
+                (180_000, 230_000, ()),
+            ])
+            self.assertIs(frames[0].rgb, frames[2].rgb)
+            self.assertIs(frames[3].rgb, frames[5].rgb)
+            seek = list(book.epub_embedded_video(0, 0, start_us=164_000, end_us=178_000, text_track=1))
+            self.assertEqual(seek[0].start_us, 164_000)
+            self.assertEqual(tuple(c.text for c in seek[0].text_cues), ("One & two", "字 next"))
+            self.assertEqual(seek[-1].start_us + seek[-1].duration_us, 178_000)
+            self.assertEqual(list(book.epub_embedded_video(0, 0, start_us=230_000)), [])
+            self.assertTrue(all(not frame.text_cues for frame in book.epub_embedded_video(0, 0)))
+            self.assertEqual(sum(clip.frame_count for clip in book.epub_embedded_audio(0, 0)), 6240)
+            self.assertEqual(sum(clip.frame_count for clip in book.epub_embedded_audio(0, 1)), 12_384)
+            self.assertEqual(sum(clip.frame_count for clip in book.epub_embedded_audio(0, 2)), 1000)
+            self.assertEqual(sum(clip.frame_count for clip in book.epub_embedded_audio(0, 3)), 12_384)
+            with self.assertRaisesRegex(ValueError, "still referenced"):
+                book.edit_epub_structure(remove_resources=["OEBPS/sound.wav"])
+
+    def test_embedded_ttml_nested_timing_preserves_regions_and_clip_intervals(self) -> None:
+        ttml = b"""<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttp="http://www.w3.org/ns/ttml#parameter"
+          xml:lang="en" ttp:timeBase="media" ttp:frameRate="30" ttp:frameRateMultiplier="1000 1001"
+          ttp:subFrameRate="2" ttp:tickRate="200"><head><layout><region xml:id="lower"/></layout></head>
+          <body begin="100ms"><div timeContainer="seq" region="lower">
+            <p xml:id="intro" dur="30f"> Begin <span begin="20t" dur="5t">timed</span><br/>World</p>
+            <p begin="10t" dur="00:00:00:06.1" xml:space="preserve">Two  spaces</p>
+          </div><div begin="2s" timeContainer="seq">
+            <p dur="1f">One</p><p dur="1f">Two</p><p dur="1f">Three</p>
+          </div><div begin="3s"><p>Open end</p></div></body></tt>"""
+        xhtml = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Timed text</title></head>
+          <body><audio><track src="timed.ttml" kind="captions" srclang="en"/></audio></body></html>"""
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Timed text", xhtml, "OEBPS/track.xhtml")],
+                resources={"OEBPS/timed.ttml": doc_ex.EpubResource("application/ttml+xml", ttml)},
+            )
+        with doc_ex.open(data) as book:
+            self.assertEqual(book.epub_embedded_text(0, 0), [
+                doc_ex.EpubTextCue(100_000, 200_000, "Begin\nWorld", "intro", region="lower"),
+                doc_ex.EpubTextCue(200_000, 225_000, "Begin timed\nWorld", "intro", region="lower"),
+                doc_ex.EpubTextCue(225_000, 1_101_000, "Begin\nWorld", "intro", region="lower"),
+                doc_ex.EpubTextCue(1_151_000, 1_367_883, "Two  spaces", region="lower"),
+                doc_ex.EpubTextCue(2_100_000, 2_133_367, "One"),
+                doc_ex.EpubTextCue(2_133_367, 2_166_733, "Two"),
+                doc_ex.EpubTextCue(2_166_733, 2_200_100, "Three"),
+                doc_ex.EpubTextCue(3_100_000, None, "Open end"),
+            ])
+            self.assertEqual(book.epub_embedded_text(0, 0, start_us=3_200_000, end_us=3_250_000),
+                             [doc_ex.EpubTextCue(3_200_000, 3_250_000, "Open end")])
+            replaced = book.edit_epub_chapters({0: xhtml.replace("Timed text", "Revised title")})
+        with doc_ex.open(replaced) as book:
+            self.assertEqual(book.epub_embedded_text(0, 0)[1].text, "Begin timed\nWorld")
+            self.assertEqual(book.read_epub_resource("OEBPS/timed.ttml"), ttml)
+
+    def test_embedded_text_tracks_reject_invalid_timing_and_excessive_cues(self) -> None:
+        def with_track(media: str, track: bytes) -> bytes:
+            xhtml = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Captions</title></head>
+              <body><audio><track src="test.track" kind="captions" srclang="en"/></audio></body></html>"""
+            with doc_ex.open(epub_fixture()) as book:
+                return book.edit_epub_structure(
+                    [doc_ex.EpubChapterSource("Captions", xhtml, "OEBPS/track.xhtml")],
+                    resources={"OEBPS/test.track": doc_ex.EpubResource(media, track)},
+                )
+
+        choices = (
+            ("text/vtt", b"WEBVTT\n\n00:61.000 --> 01:02.000\nInvalid", doc_ex.MalformedDocumentError, "timestamp"),
+            ("text/vtt", b"WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:0\n\n",
+             doc_ex.UnsupportedFormatError, "timestamp maps"),
+            ("text/vtt", ("WEBVTT\n\n" + "".join(
+                f"{i:05x}\n00:00.000 --> 00:01.000\nCaption\n\n" for i in range(10_001)
+            )).encode(), doc_ex.UnsafeArchiveError, "10000 cues"),
+            ("application/ttml+xml",
+             b'<tt xmlns="http://www.w3.org/ns/ttml"><body><p begin="invalid">No</p></body></tt>',
+             doc_ex.MalformedDocumentError, "TTML time expression"),
+        )
+        for media, track, exception, message in choices:
+            with self.subTest(message=message), doc_ex.open(with_track(media, track)) as book:
+                with self.assertRaisesRegex(exception, message):
+                    book.epub_embedded_text(0, 0)
 
     def test_embedded_mp4_video_frames_follow_presentation_order_and_clip_bounds(self) -> None:
         path = "OEBPS/clip.mp4"

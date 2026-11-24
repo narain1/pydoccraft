@@ -2875,3 +2875,7 @@ The Linux x86-64 CPython 3.11.15 wheel passed 698 installed tests, including 103
 ## 2026-11-24 SVG Unicode ranges and font fallback
 
 The Linux x86-64 CPython 3.11.15 wheel passed 700 installed tests, including 105 EPUB tests. It measured 23,808,547 bytes with a 55,356,264-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-svg-unicode-ranges-and-font-fallback) covers preserved glyphs, overlapping ranges, mixed-font ligatures, reopened exports, and EPUBCheck.
+
+## 2026-11-24 Embedded text tracks and temporal media fragments
+
+The Linux x86-64 CPython 3.11.15 wheel passed 703 installed tests, including 108 EPUB tests. It measured 23,832,044 bytes with a 55,406,632-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-embedded-text-tracks-and-temporal-media-fragments) covers exact cue and frame boundaries, reopened chapter edits, and the authored and public media samples.

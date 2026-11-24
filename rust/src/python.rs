@@ -405,14 +405,15 @@ impl NativeEpubAudio {
         py.allow_threads(|| self.0.clip(begin, end)).map(pcm_clip)
     }
 
-    #[pyo3(signature = (begin, end))]
+    #[pyo3(signature = (begin, end, clamp_to_duration=false))]
     fn start_stream(
         &mut self,
         py: Python<'_>,
         begin: u64,
         end: Option<u64>,
+        clamp_to_duration: bool,
     ) -> Result<(), EngineError> {
-        py.allow_threads(|| self.0.start_stream(begin, end))
+        py.allow_threads(|| self.0.start_stream(begin, end, clamp_to_duration))
     }
 
     fn next_chunk(
@@ -487,6 +488,44 @@ fn _open_epub_video(
         .map(NativeEpubVideo)
 }
 
+type TimedTextCue = (
+    u64,
+    Option<u64>,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+#[pyfunction]
+#[pyo3(signature = (data, path, media, start, end))]
+fn _epub_text_track(
+    py: Python<'_>,
+    data: &[u8],
+    path: &str,
+    media: &str,
+    start: u64,
+    end: Option<u64>,
+) -> Result<Vec<TimedTextCue>, EngineError> {
+    py.allow_threads(|| crate::epub::text_tracks::read(data, path, media, start, end))
+        .map(|cues| {
+            cues.into_iter()
+                .map(|cue| {
+                    (
+                        cue.start,
+                        cue.end,
+                        cue.text,
+                        cue.id,
+                        cue.settings,
+                        cue.region,
+                        cue.markup,
+                    )
+                })
+                .collect()
+        })
+}
+
 #[pyfunction]
 #[pyo3(signature = (data, path, fragment))]
 fn _epub_narration_text(
@@ -554,6 +593,7 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(_epub_resource, module)?)?;
     module.add_function(wrap_pyfunction!(_open_epub_audio, module)?)?;
     module.add_function(wrap_pyfunction!(_open_epub_video, module)?)?;
+    module.add_function(wrap_pyfunction!(_epub_text_track, module)?)?;
     module.add_function(wrap_pyfunction!(_epub_narration_text, module)?)?;
     module.add_function(wrap_pyfunction!(extract_text, module)?)?;
     module.add_function(wrap_pyfunction!(convert, module)?)?;

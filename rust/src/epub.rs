@@ -48,6 +48,9 @@ mod style;
 #[path = "epub_svg.rs"]
 mod svg;
 #[cfg(feature = "python")]
+#[path = "epub_text_tracks.rs"]
+pub(crate) mod text_tracks;
+#[cfg(feature = "python")]
 #[path = "epub_video.rs"]
 pub(crate) mod video;
 

@@ -2,7 +2,7 @@
 use roxmltree::Node;
 use serde_json::{json, Value};
 
-use super::{content::Context, external, invalid, resolve, unsupported, XHTML};
+use super::{content::Context, external, invalid, percent_decode, resolve, unsupported, XHTML};
 use crate::EngineError;
 
 pub(super) enum AudioCodec {
@@ -101,7 +101,11 @@ fn source(
             .bytes(hint.map_or(0, str::len).saturating_mul(3))?;
         return Ok(json!({"uri": src, "path": null, "media_type": hint, "playable_audio": false}));
     }
-    let (path, media) = local(src, cx)?;
+    let (uri, fragment) = src
+        .split_once('#')
+        .map_or((src, None), |(uri, fragment)| (uri, Some(fragment)));
+    let (fragment_start_us, fragment_end_us) = fragment.map_or(Ok((0, None)), temporal_fragment)?;
+    let (path, media) = local(uri, cx)?;
     if media
         .split_once('/')
         .is_none_or(|(prefix, _)| prefix != kind)
@@ -113,7 +117,92 @@ fn source(
     let playable_audio =
         (kind == "audio" && audio_codec(media).is_some() && hint.is_none_or(supported_audio_hint))
             || (kind == "video" && media == "video/mp4");
-    Ok(json!({"uri": src, "path": path, "media_type": media, "playable_audio": playable_audio}))
+    Ok(json!({
+        "uri": src, "path": path, "media_type": media, "playable_audio": playable_audio,
+        "fragment_start_us": fragment_start_us, "fragment_end_us": fragment_end_us,
+    }))
+}
+
+const MAX_TIME: u128 = (1u128 << 53) - 1;
+
+fn temporal_fragment(fragment: &str) -> Result<(u64, Option<u64>), EngineError> {
+    let Some((name, value)) = fragment.split_once('=') else {
+        return Err(unsupported(
+            "embedded media fragment requires a temporal t dimension",
+        ));
+    };
+    if percent_decode(name)? != "t" || value.contains('&') {
+        return Err(unsupported(
+            "embedded media fragments support only one temporal t dimension",
+        ));
+    }
+    let value = percent_decode(value)?;
+    let value = value.strip_prefix("npt:").unwrap_or(&value);
+    let (start, end) = match value.split_once(',') {
+        Some((start, end)) => {
+            let start = if start.is_empty() { 0 } else { npt(start)? };
+            (start, Some(npt(end)?))
+        }
+        None => (npt(value)?, None),
+    };
+    if end.is_some_and(|end| end <= start) {
+        return Err(invalid("embedded media fragment end must follow its start"));
+    }
+    Ok((start, end))
+}
+
+fn npt(value: &str) -> Result<u64, EngineError> {
+    let malformed = || invalid("invalid embedded media normal play time");
+    let mut fields = value.rsplit(':');
+    let seconds = fields.next().ok_or_else(malformed)?;
+    let (whole, fraction) = seconds.split_once('.').unwrap_or((seconds, ""));
+    if !fraction.bytes().all(|digit| digit.is_ascii_digit()) {
+        return Err(malformed());
+    }
+    let mut micro = 0u128;
+    for (i, digit) in fraction
+        .bytes()
+        .chain(std::iter::repeat(b'0'))
+        .take(7)
+        .enumerate()
+    {
+        if i < 6 {
+            micro = micro * 10 + u128::from(digit - b'0');
+        } else if digit >= b'5' {
+            micro += 1;
+        }
+    }
+    let s = integer(whole).ok_or_else(malformed)?;
+    let m = if let Some(minutes) = fields.next() {
+        if s >= 60 || whole.len() != 2 || minutes.len() != 2 {
+            return Err(malformed());
+        }
+        integer(minutes)
+            .filter(|&minutes| minutes < 60)
+            .ok_or_else(malformed)?
+    } else {
+        0
+    };
+    let h = fields
+        .next()
+        .map(|h| integer(h).ok_or_else(malformed))
+        .transpose()?
+        .unwrap_or(0);
+    if fields.next().is_some() {
+        return Err(malformed());
+    }
+    let time = (u128::from(h) * 3600 + u128::from(m) * 60 + u128::from(s)) * 1_000_000 + micro;
+    if time > MAX_TIME {
+        return Err(malformed());
+    }
+    Ok(time as u64)
+}
+
+pub(super) fn integer(value: &str) -> Option<u64> {
+    if value.is_empty() || !value.bytes().all(|digit| digit.is_ascii_digit()) {
+        return None;
+    }
+    value.parse().ok()
 }
 
 pub(super) fn inventory(
