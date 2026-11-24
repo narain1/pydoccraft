@@ -39,7 +39,7 @@ For paths, the suffix is checked against the detected content. For bytes, the na
 
 Passwords are supported for encrypted PDF and DOCX input. Encrypted PPTX and EPUB files are rejected.
 
-For an open EPUB, `document.read_epub_resource(path, offset=0, length=None)` reads a local resource by its decoded archive path. The manifest in `document.metadata["manifest"]` lists paths, media types and resource properties. `document.epub_media_cues(page)` returns the chapter's ordered SMIL audio and text cues. `document.edit_epub_metadata(title=..., description=...)` and `document.edit_epub_chapters({page: xhtml})` return new EPUB bytes with the requested changes. See the [EPUB format profile](formats.md#epub-unreleased) for extraction and conversion limits.
+For an open EPUB, `document.read_epub_resource(path, offset=0, length=None)` reads a local resource by its decoded archive path. The manifest in `document.metadata["manifest"]` lists paths, media types and resource properties. `document.epub_media_cues(page)` returns the chapter's ordered SMIL audio and text cues. `document.edit_epub_metadata(title=..., description=...)` and `document.edit_epub_chapters({page: xhtml})` return new EPUB bytes with the requested changes. `document.edit_epub_structure(order, resources=...)` reorders, inserts or removes entries in the reading order and can add or replace packaged resources. See [EPUB authoring](authoring.md#epub-creation-unreleased) and the [EPUB format profile](formats.md#epub-unreleased).
 
 ## Fast text extraction
 

@@ -7,6 +7,7 @@
 - [x] Extend reflowable EPUB 3 creation with publication dates, lists, tables, preformatted text and static media. Enforce the ZIP output limit at the writer sink.
 - [x] Add semantic reflow preview and DOCX/PDF conversion with explicit errors for unsupported features.
 - [x] Update locked dependencies, license inventories, and format and authoring documentation.
+- [ ] Accept inert XHTML doctypes and expand coverage with the W3C sample corpus.
 - [ ] Validate the release wheel matrix on Linux, macOS, and Windows.
 - [x] Replace existing XHTML chapters transactionally and preserve targeted navigation and overlay anchors.
 - [x] Read SMIL timing trees and expose chapter cue order, time ranges, target IDs and bounded audio reads.
@@ -15,4 +16,5 @@
 - [ ] Extend source CSS and fixed-layout fidelity, including archive-local fonts, embedded SVG, synthetic spreads and conversion.
 - [ ] Expand MathML layout to remaining elements, attributes and styling.
 - [ ] Decode and synchronize media overlay playback, including text-only narration cues.
-- [ ] Add structural chapter operations and edits to packaged resources.
+- [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
+- [ ] Add dependency-aware deletion of packaged resources and author new media-overlay associations.

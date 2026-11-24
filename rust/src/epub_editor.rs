@@ -1,6 +1,6 @@
 //! Rebuild a guarded EPUB archive while preserving untouched members.
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     io::Write,
 };
 
@@ -16,7 +16,7 @@ use crate::{
     EngineError,
 };
 
-fn open_for_edit(data: &[u8]) -> Result<Book<'_>, EngineError> {
+pub(super) fn open_for_edit(data: &[u8]) -> Result<Book<'_>, EngineError> {
     let book = Book::open(data)?;
     if book
         .archive
@@ -104,13 +104,22 @@ pub(crate) fn update_metadata(
     rewrite(
         &mut book,
         HashMap::from([(package_path.as_str(), new_package.as_bytes())]),
+        BTreeMap::new(),
     )
 }
 
-fn rewrite(
+pub(super) fn rewrite(
     book: &mut Book<'_>,
     mut replacements: HashMap<&str, &[u8]>,
+    additions: BTreeMap<&str, &[u8]>,
 ) -> Result<Vec<u8>, EngineError> {
+    crate::limits::validate_member_count(book.archive.len().saturating_add(additions.len()))?;
+    for path in additions.keys() {
+        super::validate_archive_path(path)?;
+        if book.archive.index_for_name(path).is_some() {
+            return Err(invalid("new EPUB member already exists"));
+        }
+    }
     let mut sink = BoundedOutput::default();
     let result = (|| {
         let mut writer = zip::ZipWriter::new(&mut sink);
@@ -137,6 +146,14 @@ fn rewrite(
             } else {
                 writer.raw_copy_file(member)?;
             }
+        }
+        for (path, content) in additions {
+            writer.start_file(
+                path,
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored),
+            )?;
+            writer.write_all(content)?;
         }
         writer.finish()?;
         Ok::<(), zip::result::ZipError>(())
@@ -240,7 +257,7 @@ pub(crate) fn update_chapters(
             }
         }
     }
-    let result = rewrite(&mut book, replacements)?;
+    let result = rewrite(&mut book, replacements, BTreeMap::new())?;
     extract(&result, None)?;
     Ok(result)
 }

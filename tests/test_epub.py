@@ -7,6 +7,7 @@ import tempfile
 import unittest
 import warnings
 import wave
+import xml.etree.ElementTree as ET
 import zipfile
 
 import doc_ex
@@ -81,6 +82,152 @@ def narrated_epub(*, first_clip_end: str = "00:00:01.125", first_target: str = "
 
 
 class EpubTests(unittest.TestCase):
+    def test_spine_edit_updates_navigation_and_keeps_removed_resources_reachable(self) -> None:
+        source, original_audio = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        package = package.replace(
+            b"</manifest>",
+            b'<item id="nav" href="Nav/book.xhtml" media-type="application/xhtml+xml" properties="nav"/></manifest>',
+        ).replace(b'<itemref idref="one"/>', b'<itemref id="retained-id" idref="one" linear="no"/>')
+        source = rewrite_epub(source, {
+            "OEBPS/content.opf": package,
+            "OEBPS/Nav/book.xhtml": """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+            <head><title>Original navigation</title></head><body>
+            <nav epub:type="toc" id="author-toc"><ol>
+              <li><span>Part &amp; section</span><ol><li><a href="../one.xhtml#caf%C3%A9">Narrated</a></li></ol></li>
+              <li><a href="../two.xhtml">Original last</a></li>
+            </ol></nav>
+            <nav epub:type="page-list"><ol><li><a href="../two.xhtml">2</a></li></ol></nav>
+            </body></html>""",
+        })
+        new_page = doc_ex.EpubChapterSource(
+            'Inserted "Étude"',
+            """<html xmlns="http://www.w3.org/1999/xhtml"><head>
+            <title>Inserted Fixed Chapter</title><meta name="viewport" content="width=120,height=80"/>
+            <link rel="stylesheet" href="../OEBPS/Styles/new.css"/></head>
+            <body><h1>New Chapter</h1><a href="../OEBPS/two.xhtml">Original backlink</a>
+            <img src="../OEBPS/Art/gold.png" alt="Gold"/></body></html>""",
+            path="Extras/new étude.xhtml",
+            fixed_layout=True,
+        )
+        css = b"body { background-color: #f2e0a0; margin: 0; } img { position: absolute; top: 50px; left: 80px; width: 20px; height: 20px; }"
+        art = solid((220, 170, 0))
+        with doc_ex.open(source) as original:
+            self.assertEqual(original.edit_epub_structure([0, 1]), source)
+            self.assertEqual(original.edit_epub_structure(), source)
+            revised = original.edit_epub_structure([1, new_page, 0], resources={
+                "OEBPS/Styles/new.css": doc_ex.EpubResource("text/css", css),
+                "OEBPS/Art/gold.png": doc_ex.EpubResource("image/png", art),
+            })
+            self.assertEqual(len(original), 2)
+            cues = original.epub_media_cues(0)
+        with doc_ex.open(revised) as published:
+            self.assertEqual(len(published), 3)
+            self.assertIn("Second chapter", published[0].get_text())
+            self.assertEqual(published[1].metadata["chapter_path"], "Extras/new étude.xhtml")
+            self.assertIn("New Chapter", published[1].get_text())
+            self.assertEqual(published[1].metadata["viewport"], [90, 60])
+            self.assertEqual(published.read_epub_resource("OEBPS/Styles/new.css"), css)
+            self.assertEqual(published.read_epub_resource("OEBPS/Art/gold.png"), art)
+            rendered = png_chunks(published.render_page(1, dpi=96))
+            self.assertEqual(struct.unpack_from(">II", rendered[b"IHDR"]), (120, 80))
+            width, rgba = rgba_pixels(rendered)
+            offset = (62 * width + 90) * 4
+            self.assertEqual(rgba[offset:offset + 4], bytes((220, 170, 0, 255)))
+            self.assertFalse(published[2].metadata["linear"])
+            self.assertEqual(published.epub_media_cues(2), cues)
+            items = published.metadata["navigation"][0]["items"]
+            self.assertEqual([item["label"] for item in items], ["Original last", 'Inserted "Étude"', "Part & section"])
+            self.assertEqual(items[2]["children"][0]["fragment"], "café")
+            modified = next(meta["value"] for meta in published.metadata["package_metadata"] if meta["property"] == "dcterms:modified")
+            self.assertRegex(modified, r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+            removed = published.edit_epub_structure([1, 2], resources={
+                "OEBPS/Styles/new.css": doc_ex.EpubResource("text/css", css + b"\n/* revised */"),
+            })
+        with zipfile.ZipFile(io.BytesIO(source)) as before, zipfile.ZipFile(io.BytesIO(revised)) as after:
+            for path in set(before.namelist()) - {"OEBPS/content.opf", "OEBPS/Nav/book.xhtml"}:
+                self.assertEqual(before.read(path), after.read(path), path)
+            self.assertIn(b'id="retained-id"', after.read("OEBPS/content.opf"))
+        with doc_ex.open(removed) as published:
+            self.assertEqual(len(published), 2)
+            self.assertEqual(published.epub_media_cues(1), cues)
+            self.assertEqual(published.read_epub_resource("OEBPS/Media/voice.wav"), original_audio)
+            self.assertIn(b"Second chapter", published.read_epub_resource("OEBPS/two.xhtml"))
+            self.assertEqual(published[0].get_links()[0].metadata["target_path"], "OEBPS/two.xhtml")
+            self.assertEqual([nav["kind"] for nav in published.metadata["navigation"]], ["toc"])
+            self.assertTrue(published.read_epub_resource("OEBPS/Styles/new.css").endswith(b"/* revised */"))
+
+    def test_spine_edit_reorders_epub2_ncx_and_creates_missing_navigation(self) -> None:
+        source = epub_fixture(version="2.0")
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        package = package.replace(b"<spine>", b'<spine toc="ncx">').replace(
+            b"</manifest>", b'<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/></manifest>',
+        )
+        ncx = """<n:ncx xmlns:n="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+        <n:head><n:meta name="dtb:depth" content="1"/></n:head><n:docTitle><n:text>Book</n:text></n:docTitle>
+        <n:navMap><n:navPoint id="first" playOrder="1"><n:navLabel><n:text>First</n:text></n:navLabel>
+        <n:content src="one.xhtml"/></n:navPoint><n:navPoint id="last" playOrder="2">
+        <n:navLabel><n:text>Last</n:text></n:navLabel><n:content src="two.xhtml"/></n:navPoint></n:navMap></n:ncx>"""
+        chapter = doc_ex.EpubChapterSource("Added", '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Fresh content</p></body></html>')
+        data = rewrite_epub(source, {"OEBPS/content.opf": package, "OEBPS/toc.ncx": ncx})
+        with doc_ex.open(data) as original, doc_ex.open(original.edit_epub_structure([1, chapter, 0])) as edited:
+            self.assertEqual(edited.metadata["epub_version"], "2.0")
+            self.assertEqual([item["label"] for item in edited.metadata["navigation"][0]["items"]], ["Last", "Added", "First"])
+            ncx_nodes = ET.fromstring(edited.read_epub_resource("OEBPS/toc.ncx")).findall(".//{*}navPoint")
+            self.assertEqual([node.attrib["playOrder"] for node in ncx_nodes], ["1", "2", "3"])
+            self.assertEqual(ncx_nodes[0].attrib["id"], "last")
+        for version in ("2.0", "3.0"):
+            with self.subTest(version=version), doc_ex.open(epub_fixture(version=version)) as original:
+                data = original.edit_epub_structure([chapter, 0])
+                with doc_ex.open(data) as edited:
+                    self.assertEqual(len(edited), 2)
+                    self.assertEqual(edited[0].get_text(), "Fresh content")
+                    self.assertEqual(edited.metadata["navigation"][0]["items"][0]["label"], "Added")
+
+    def test_spine_edit_promotes_nested_navigation_with_inherited_namespaces(self) -> None:
+        source = epub_fixture()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        package = package.replace(
+            b"</manifest>",
+            b'<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/></manifest>',
+        )
+        source = rewrite_epub(source, {
+            "OEBPS/content.opf": package,
+            "OEBPS/nav.xhtml": """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+            <head><title>Navigation</title></head><body><nav epub:type="toc"><ol>
+            <li xmlns:local="http://www.w3.org/1999/xhtml"><a href="one.xhtml">Removed</a>
+            <ol><local:li><local:a href="two.xhtml">Surviving</local:a></local:li></ol></li>
+            </ol></nav></body></html>""",
+        })
+        with doc_ex.open(source) as original, doc_ex.open(original.edit_epub_structure([1])) as edited:
+            items = edited.metadata["navigation"][0]["items"]
+            self.assertEqual([item["label"] for item in items], ["Surviving"])
+            nav = ET.fromstring(edited.read_epub_resource("OEBPS/nav.xhtml"))
+            self.assertEqual(len(nav.findall(".//{*}li")), 1)
+
+    def test_spine_and_resource_changes_fail_atomically(self) -> None:
+        source = epub_fixture()
+        valid = '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>New</p></body></html>'
+        with doc_ex.open(source) as document:
+            for order in ([], [0, -2], [doc_ex.EpubChapterSource("Collision", valid, "OEBPS/one.xhtml")]):
+                with self.subTest(order=order), self.assertRaises(ValueError):
+                    document.edit_epub_structure(order)
+            with self.assertRaises(doc_ex.MalformedDocumentError):
+                document.edit_epub_structure([1, doc_ex.EpubChapterSource("Bad", "<html>"), 0])
+            with self.assertRaises(ValueError):
+                document.edit_epub_structure(resources={"OEBPS/image.png": doc_ex.EpubResource("audio/mpeg", b"wrong type")})
+            with self.assertRaises(ValueError):
+                document.edit_epub_structure(resources={"META-INF/container.xml": doc_ex.EpubResource("text/css", b"bad")})
+            with self.assertRaises(doc_ex.UnsafeArchiveError):
+                document.edit_epub_structure(resources={"../new.css": doc_ex.EpubResource("text/css", b"a {}")})
+            self.assertEqual(document.edit_epub_structure(), source)
+        signed = rewrite_epub(source, {"META-INF/signatures.xml": "<signatures/>"})
+        with doc_ex.open(signed) as document, self.assertRaises(doc_ex.UnsupportedFormatError):
+            document.edit_epub_structure([1, 0])
+
     def test_fixed_layout_uses_viewport_and_local_stylesheet_cascade(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head>
         <meta name="viewport" content="width=320, height=240"/>

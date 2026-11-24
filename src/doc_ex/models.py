@@ -8,6 +8,24 @@ from urllib.parse import urlsplit
 BBox = tuple[float, float, float, float]
 
 
+@dataclass(frozen=True, slots=True)
+class EpubChapterSource:
+    """XHTML and navigation title for a new spine entry."""
+
+    title: str
+    xhtml: str
+    path: str | None = None
+    fixed_layout: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class EpubResource:
+    """Media type and bytes for a local publication resource."""
+
+    media_type: str
+    data: bytes
+
+
 @dataclass(slots=True)
 class Link:
     uri: str

@@ -12,6 +12,8 @@ The existing native extraction, render, and conversion operations dispatch to EP
 
 `epub_editor.rs` handles targeted OPF metadata updates and batch XHTML replacements. It stages changes, resolves repeated spine positions to their shared file, checks existing text anchors, and rebuilds the ZIP through the bounded sink. The chapter editor validates the complete tentative book before returning its bytes. Untouched members keep their uncompressed content, with archive header details subject to the writer.
 
+`epub_structure.rs` stages a replacement spine and manifest additions. It retains original itemrefs, assigns unique paths and IDs to new chapters, and shares the editor’s ZIP writer. `epub_toc_edit.rs` updates EPUB 3 navigation and EPUB 2 NCX in the same transaction. Navigation groups keep their hierarchy and use each group’s earliest surviving spine target for sibling ordering. Omitted chapters stay in the manifest and archive so references from other chapters or media overlays can still resolve. New and replaced local assets are bounded, and the completed archive is parsed again before return.
+
 `epub_output.rs` projects supported semantic blocks into the existing WordCraft model. The WordCraft web layout handles unstyled reflowable previews. The native DOCX and PDF exporters handle document pagination in the semantic profile. The bounded `epub_math.rs` adapter substitutes an equation object at each formula's original text span and lets the pinned math engine shape it.
 
 ## Creation and dependency scope

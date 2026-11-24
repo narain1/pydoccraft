@@ -2735,3 +2735,7 @@ The locked engine revisions are unchanged from the November 23 validation. A Lin
 ## 2026-11-24 EPUB CSS and fixed-layout previews
 
 The release wheel for Linux x86-64 CPython 3.11.15 passed 623 installed tests, measured 21,546,751 bytes, and contained a 50,102,776-byte native extension. The engine pins remain unchanged. The audited lockfiles include the EPUB CSS parser, box layout, and SVG renderer. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-css-and-fixed-layout-previews) for the exact checks and supported output profile.
+
+## 2026-11-24 EPUB spine, navigation and resource edits
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 627 installed tests, including 32 EPUB tests. It measured 21,623,959 bytes with a 50,267,848-byte native extension. The locked engine revisions are unchanged. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-structural-chapter-and-resource-edits) for the conformance smoke test, checksum, and remaining work.

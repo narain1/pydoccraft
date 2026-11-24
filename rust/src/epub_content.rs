@@ -809,6 +809,10 @@ fn standalone(node: Node<'_, '_>, data: &[u8]) -> Result<Vec<u8>, EngineError> {
     let raw = data
         .get(node.range())
         .ok_or_else(|| invalid("invalid XML fragment range"))?;
+    namespace_complete(node, raw)
+}
+
+pub(super) fn namespace_complete(node: Node<'_, '_>, raw: &[u8]) -> Result<Vec<u8>, EngineError> {
     let mut reader = quick_xml::Reader::from_reader(raw);
     let start = match reader.read_event().map_err(invalid)? {
         quick_xml::events::Event::Start(start) | quick_xml::events::Event::Empty(start) => start,

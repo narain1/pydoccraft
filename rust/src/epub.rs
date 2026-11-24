@@ -23,12 +23,15 @@ mod math;
 mod output;
 #[path = "epub_overlay.rs"]
 mod overlay;
+#[path = "epub_structure.rs"]
+mod structure;
 #[path = "epub_style.rs"]
 mod style;
 #[path = "epub_svg.rs"]
 mod svg;
 
 pub(crate) use editor::{update_chapters, update_metadata};
+pub(crate) use structure::{update_structure, ResourceEdit, SpineEdit};
 
 pub(crate) fn render(
     data: &[u8],

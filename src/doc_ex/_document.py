@@ -5,14 +5,15 @@ import hashlib
 import json
 import math
 import operator
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
+from datetime import datetime, timezone
 from numbers import Real
 from html import escape
 from types import SimpleNamespace
 from typing import Any, Callable, Iterator, Literal, TYPE_CHECKING, overload
 
 from .errors import DocumentClosedError, MalformedDocumentError, UnsafeArchiveError
-from .models import Block, Image, Link, Story, Table, _html_text
+from .models import Block, EpubChapterSource, EpubResource, Image, Link, Story, Table, _html_text
 
 if TYPE_CHECKING:
     from ._authoring import PdfDocument
@@ -27,6 +28,15 @@ _MEDIA_EXTENSIONS = {
     "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
     "image/webp": "webp", "image/tiff": "tiff", "image/bmp": "bmp",
 }
+
+
+def _epub_edit_text(value: str, limit: int, label: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{label} must be a string")
+    value = str.__str__(value)
+    if len(value) > limit or len(value.encode("utf-8")) > limit:
+        raise UnsafeArchiveError(f"EPUB {label} exceeds its byte budget")
+    return value
 
 
 def _format_join(parts: list[str], separator: str, skip_empty: bool = False) -> str:
@@ -635,6 +645,66 @@ class Document:
             changes.append((index, markup))
         self._ensure_open()
         return bytes(_native(lambda: _core._edit_epub_chapters(self._source, changes)))
+
+    def edit_epub_structure(
+        self,
+        order: Iterable[int | EpubChapterSource] | None = None,
+        *,
+        resources: Mapping[str, EpubResource] | None = None,
+    ) -> bytes:
+        """Return an EPUB with a new reading order and optional local resource edits."""
+        self._ensure_open()
+        if self._filetype != "epub":
+            from .errors import UnsupportedFormatError
+
+            raise UnsupportedFormatError("spine editing requires EPUB input")
+        from . import _core, _native
+
+        total_bytes = 0
+        selected: list[tuple[int | None, tuple[str, str, str | None, bool] | None]] | None = None
+        if order is not None:
+            selected = []
+            count = len(self._pages)
+            for entry in order:
+                self._ensure_open()
+                if len(selected) >= 10_000:
+                    raise UnsafeArchiveError("too many EPUB spine entries")
+                if isinstance(entry, EpubChapterSource):
+                    title = _epub_edit_text(entry.title, 1_024, "chapter title")
+                    xhtml = _epub_edit_text(entry.xhtml, _MAX_EPUB_CHAPTER_BYTES, "chapter XHTML")
+                    path = None if entry.path is None else _epub_edit_text(entry.path, 4_096, "chapter path")
+                    if type(entry.fixed_layout) is not bool:
+                        raise TypeError("fixed_layout must be a bool")
+                    total_bytes += len(title.encode()) + len(xhtml.encode())
+                    if path is not None:
+                        total_bytes += len(path.encode())
+                    selected.append((None, (title, xhtml, path, entry.fixed_layout)))
+                else:
+                    index = operator.index(entry)
+                    self._ensure_open()
+                    if not -count <= index < count:
+                        raise IndexError("page index out of range")
+                    selected.append((index, None))
+                if total_bytes > _MAX_EPUB_EDIT_BYTES:
+                    raise UnsafeArchiveError("EPUB edits exceed their byte budget")
+
+        changes: list[tuple[str, str, bytes]] = []
+        if resources is not None:
+            for path, resource in resources.items():
+                self._ensure_open()
+                if len(changes) >= 10_000:
+                    raise UnsafeArchiveError("too many EPUB resource edits")
+                if not isinstance(resource, EpubResource) or not isinstance(resource.data, bytes):
+                    raise TypeError("resource edits require EpubResource values with bytes")
+                name = _epub_edit_text(path, 4_096, "resource path")
+                media = _epub_edit_text(resource.media_type, 255, "resource media type")
+                total_bytes += len(name.encode()) + len(media.encode()) + bytes.__len__(resource.data)
+                if total_bytes > _MAX_EPUB_EDIT_BYTES:
+                    raise UnsafeArchiveError("EPUB edits exceed their byte budget")
+                changes.append((name, media, resource.data))
+        self._ensure_open()
+        modified = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+        return bytes(_native(lambda: _core._edit_epub_structure(self._source, selected, changes, modified)))
 
     def edit(self) -> PdfDocument:
         """Create an independent editable native PDF; unsupported preservation fails."""

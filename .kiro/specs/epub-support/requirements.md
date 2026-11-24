@@ -21,6 +21,7 @@
 3. Limit individual images to 16 MiB, cumulative media and chapter content to 64 MiB each, and encoded EPUB output to 128 MiB.
 4. Update selected Dublin Core title and description fields in an existing unsigned book. Preserve the uncompressed bytes of untouched chapter and resource members and the unrelated OPF fields. Reject signed and encrypted packages.
 5. Replace multiple XHTML chapter resources by spine position in one transaction. Preserve the original publication's manifest, navigation and spine, and keep IDs targeted by the extracted links, navigation and overlays. Reject edits that fail validation and leave the original usable.
+6. Add, remove and reorder spine entries in one transaction. Update EPUB 3 navigation and EPUB 2 NCX, preserving unrelated package information and referenced resources. Add or replace supported local resources using decoded archive paths and validate the resulting book.
 
 ## Preview and conversion
 
@@ -28,7 +29,7 @@
 2. Retain supported native text, tables, raster images and Presentation MathML. Render supported equation structures through the native equation backend and export native DOCX equations. Return an explicit error when a structure cannot be projected safely.
 3. Render fixed-layout XHTML at its numeric viewport and static SVG at its viewBox dimensions while honoring package and spine layout declarations. Clip previews at requested DPI.
 4. Apply the supported author CSS cascade for styled XHTML. Read inline, embedded, linked and imported styles using archive-relative resolution. Exercise inherited typography, positioning, colors, box styling, and block, flex and grid layout with pixel-level acceptance tests.
-5. Full source CSS and fixed-layout fidelity, richer MathML layout, synchronized media playback and structural chapter operations remain open. DRM, script execution and unlisted conversion pairs remain outside the scope.
+5. Full source CSS and fixed-layout fidelity, richer MathML layout, synchronized media playback, asset deletion and authoring new media overlay associations remain open. DRM, script execution and unlisted conversion pairs remain outside the scope.
 
 ## Verification
 

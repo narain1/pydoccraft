@@ -1,0 +1,495 @@
+//! Update existing EPUB 3 and EPUB 2 navigation hierarchies after a spine edit.
+use std::collections::{HashMap, HashSet};
+
+use roxmltree::Node;
+
+use super::{
+    append, apply_edits, child, escape_text, external, inner_range, invalid, name, opening_end,
+    parse_xml, relative_url, resolve, EPUB, NCX, XHTML, XML_BYTES,
+};
+use crate::EngineError;
+
+pub(super) struct Chapter {
+    pub path: String,
+    pub href: String,
+    pub label: String,
+    pub inserted: bool,
+}
+
+pub(super) fn edit(
+    data: &[u8],
+    path: &str,
+    epub3: bool,
+    chapters: &[Chapter],
+    old_paths: &HashSet<&str>,
+) -> Result<String, EngineError> {
+    let source = std::str::from_utf8(data).map_err(invalid)?;
+    let xml = parse_xml(data)?;
+    let root = xml.root_element();
+    let mut ranks = HashMap::new();
+    for (position, chapter) in chapters.iter().enumerate() {
+        for path in [chapter.path.as_str(), chapter.href.as_str()] {
+            ranks.entry(path).or_insert(position);
+        }
+    }
+    let context = Context {
+        source,
+        path,
+        ranks,
+        old_paths,
+    };
+    let mut edits = Vec::new();
+    let primary = if epub3 {
+        let mut primary = false;
+        for nav in root.descendants().filter(|node| name(*node, XHTML, "nav")) {
+            let Some(kind) = nav.attribute((EPUB, "type")) else {
+                continue;
+            };
+            let list = child(nav, XHTML, "ol")
+                .ok_or_else(|| invalid("EPUB navigation has no ordered list"))?;
+            let is_toc = kind.split_ascii_whitespace().any(|kind| kind == "toc");
+            if is_toc && std::mem::replace(&mut primary, true) {
+                return Err(invalid("multiple EPUB tables of contents"));
+            }
+            let items = context.items(list, Kind::Html)?;
+            let edited = context.render_list(items, Kind::Html, is_toc, chapters)?;
+            if edited.is_empty() {
+                edits.push((nav.range(), String::new()));
+            } else {
+                edits.push(replace_contents(source, list, edited)?);
+            }
+        }
+        primary
+    } else {
+        let mut primary = false;
+        for group in root.children().filter(Node::is_element) {
+            let kind = match group.tag_name().name() {
+                "navMap" => Kind::NcxPoint,
+                "pageList" => Kind::NcxPage,
+                "navList" => Kind::NcxTarget,
+                _ => continue,
+            };
+            let is_toc = kind == Kind::NcxPoint;
+            if is_toc && std::mem::replace(&mut primary, true) {
+                return Err(invalid("multiple NCX tables of contents"));
+            }
+            let mut content = String::new();
+            let items = context.items(group, kind)?;
+            let edited = context.render_list(items, kind, is_toc, chapters)?;
+            if edited.is_empty() {
+                edits.push((group.range(), String::new()));
+            } else {
+                let range = inner_range(source, group)?;
+                let mut start = range.start;
+                for element in group.children().filter(|node| kind.accepts(*node)) {
+                    append(
+                        &mut content,
+                        &source[start..element.range().start],
+                        XML_BYTES,
+                    )?;
+                    start = element.range().end;
+                }
+                append(&mut content, &edited, XML_BYTES)?;
+                append(&mut content, &source[start..range.end], XML_BYTES)?;
+                edits.push((range, content));
+            }
+        }
+        primary
+    };
+    if !primary {
+        let container = if epub3 {
+            child(root, XHTML, "body").ok_or_else(|| invalid("EPUB navigation has no body"))?
+        } else {
+            root
+        };
+        let range = inner_range(source, container)?;
+        edits.push((range.end..range.end, flat(path, epub3, chapters)?));
+    }
+    let result = apply_edits(source, edits, XML_BYTES)?;
+    if epub3 {
+        Ok(result)
+    } else {
+        renumber(&result, path)
+    }
+}
+
+pub(super) fn create(
+    path: &str,
+    epub3: bool,
+    title: &str,
+    uid: &str,
+    chapters: &[Chapter],
+) -> Result<String, EngineError> {
+    let title = escape_text(title);
+    let mut output = if epub3 {
+        format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?><html xmlns=\"{XHTML}\" xmlns:epub=\"{EPUB}\"><head><title>{title}</title></head><body>")
+    } else {
+        let uid = crate::author_epub::escape_attribute(uid);
+        format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?><ncx xmlns=\"{NCX}\" version=\"2005-1\"><head><meta name=\"dtb:uid\" content=\"{uid}\"/><meta name=\"dtb:depth\" content=\"1\"/><meta name=\"dtb:totalPageCount\" content=\"0\"/><meta name=\"dtb:maxPageNumber\" content=\"0\"/></head><docTitle><text>{title}</text></docTitle>")
+    };
+    append(&mut output, &flat(path, epub3, chapters)?, XML_BYTES)?;
+    append(
+        &mut output,
+        if epub3 { "</body></html>" } else { "</ncx>" },
+        XML_BYTES,
+    )?;
+    if epub3 {
+        Ok(output)
+    } else {
+        renumber(&output, path)
+    }
+}
+
+fn flat(path: &str, epub3: bool, chapters: &[Chapter]) -> Result<String, EngineError> {
+    let mut output = if epub3 {
+        format!("<nav xmlns=\"{XHTML}\" xmlns:epub=\"{EPUB}\" epub:type=\"toc\"><ol>")
+    } else {
+        format!("<navMap xmlns=\"{NCX}\">")
+    };
+    for (position, chapter) in chapters.iter().enumerate() {
+        chapter_link(
+            &mut output,
+            path,
+            epub3,
+            chapter,
+            &format!("doccraft-toc-{}", position + 1),
+        )?;
+    }
+    append(
+        &mut output,
+        if epub3 { "</ol></nav>" } else { "</navMap>" },
+        XML_BYTES,
+    )?;
+    Ok(output)
+}
+
+fn chapter_link(
+    output: &mut String,
+    path: &str,
+    epub3: bool,
+    chapter: &Chapter,
+    id: &str,
+) -> Result<(), EngineError> {
+    let href = relative_url(path, &chapter.path);
+    let label = escape_text(&chapter.label);
+    let markup = if epub3 {
+        format!("<li xmlns=\"{XHTML}\"><a href=\"{href}\">{label}</a></li>")
+    } else {
+        format!("<navPoint xmlns=\"{NCX}\" id=\"{id}\" playOrder=\"0\"><navLabel><text>{label}</text></navLabel><content src=\"{href}\"/></navPoint>")
+    };
+    append(output, &markup, XML_BYTES)
+}
+
+struct Context<'a> {
+    source: &'a str,
+    path: &'a str,
+    ranks: HashMap<&'a str, usize>,
+    old_paths: &'a HashSet<&'a str>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Html,
+    NcxPoint,
+    NcxPage,
+    NcxTarget,
+}
+
+impl Kind {
+    fn accepts(self, node: Node<'_, '_>) -> bool {
+        match self {
+            Self::Html => name(node, XHTML, "li"),
+            Self::NcxPoint => name(node, NCX, "navPoint"),
+            Self::NcxPage => name(node, NCX, "pageTarget"),
+            Self::NcxTarget => name(node, NCX, "navTarget"),
+        }
+    }
+}
+
+enum Entry<'a> {
+    Source {
+        node: Node<'a, 'a>,
+        before: &'a str,
+        after: &'a str,
+        children: Vec<Item<'a>>,
+        promoted: bool,
+    },
+    Inserted(&'a Chapter, String),
+}
+
+struct Item<'a> {
+    rank: usize,
+    entry: Entry<'a>,
+}
+
+impl<'a> Context<'a> {
+    fn items(&self, container: Node<'a, 'a>, kind: Kind) -> Result<Vec<Item<'a>>, EngineError> {
+        let mut items = Vec::new();
+        for node in container.children().filter(|node| kind.accepts(*node)) {
+            let target = if kind == Kind::Html {
+                child(node, XHTML, "a").and_then(|anchor| anchor.attribute("href"))
+            } else {
+                child(node, NCX, "content").and_then(|content| content.attribute("src"))
+            };
+            let resolved = target
+                .filter(|target| !external(target))
+                .map(|target| resolve(self.path, target))
+                .transpose()?;
+            let own_rank = resolved
+                .as_deref()
+                .and_then(|path| self.ranks.get(path))
+                .copied();
+            let removed = own_rank.is_none()
+                && resolved
+                    .as_deref()
+                    .is_some_and(|path| self.old_paths.contains(path));
+            let range = node.range();
+            let (before, after, mut children) = match kind {
+                Kind::Html => {
+                    if let Some(list) = child(node, XHTML, "ol") {
+                        let nested = self.items(list, kind)?;
+                        if nested.is_empty() {
+                            if target.is_none() {
+                                continue;
+                            }
+                            (
+                                &self.source[range.start..list.range().start],
+                                &self.source[list.range().end..range.end],
+                                nested,
+                            )
+                        } else {
+                            let inner = inner_range(self.source, list)?;
+                            (
+                                &self.source[range.start..inner.start],
+                                &self.source[inner.end..range.end],
+                                nested,
+                            )
+                        }
+                    } else {
+                        (&self.source[range], "", Vec::new())
+                    }
+                }
+                Kind::NcxPoint => {
+                    let nested = self.items(node, kind)?;
+                    if let Some(first) = node.children().find(|child| kind.accepts(*child)) {
+                        let start = first.range().start;
+                        let end = node
+                            .children()
+                            .rfind(|child| kind.accepts(*child))
+                            .map_or(start, |node| node.range().end);
+                        (
+                            &self.source[range.start..start],
+                            &self.source[end..range.end],
+                            nested,
+                        )
+                    } else {
+                        (&self.source[range], "", nested)
+                    }
+                }
+                _ => (&self.source[range], "", Vec::new()),
+            };
+            if removed {
+                for child in &mut children {
+                    if let Entry::Source { promoted, .. } = &mut child.entry {
+                        *promoted = true;
+                    }
+                }
+                items.extend(children);
+            } else {
+                let rank = own_rank
+                    .into_iter()
+                    .chain(children.iter().map(|child| child.rank))
+                    .min()
+                    .unwrap_or(usize::MAX);
+                items.push(Item {
+                    rank,
+                    entry: Entry::Source {
+                        node,
+                        before,
+                        after,
+                        children,
+                        promoted: false,
+                    },
+                });
+            }
+        }
+        Ok(items)
+    }
+
+    fn render_list(
+        &self,
+        mut items: Vec<Item<'a>>,
+        kind: Kind,
+        primary: bool,
+        chapters: &'a [Chapter],
+    ) -> Result<String, EngineError> {
+        if primary {
+            let mut ids: HashSet<String> = parse_xml(self.source.as_bytes())?
+                .descendants()
+                .filter(Node::is_element)
+                .flat_map(super::super::element_ids)
+                .map(str::to_owned)
+                .collect();
+            let fallback = items.is_empty();
+            let mut number = 0;
+            for (rank, chapter) in chapters.iter().enumerate() {
+                if chapter.inserted || fallback {
+                    let id = loop {
+                        number += 1;
+                        let id = format!("doccraft-toc-{number}");
+                        if ids.insert(id.clone()) {
+                            break id;
+                        }
+                    };
+                    items.push(Item {
+                        rank,
+                        entry: Entry::Inserted(chapter, id),
+                    });
+                }
+            }
+        }
+        let mut output = String::new();
+        write_items(&mut output, self.path, kind, &mut items, primary)?;
+        Ok(output)
+    }
+}
+
+fn write_items(
+    output: &mut String,
+    path: &str,
+    kind: Kind,
+    items: &mut [Item<'_>],
+    sort: bool,
+) -> Result<(), EngineError> {
+    if sort {
+        items.sort_by_key(|item| item.rank);
+    }
+    for item in items {
+        match &mut item.entry {
+            Entry::Source {
+                node,
+                before,
+                after,
+                children,
+                promoted,
+            } => {
+                if *promoted {
+                    let namespaced =
+                        super::super::content::namespace_complete(*node, before.as_bytes())?;
+                    append(
+                        output,
+                        std::str::from_utf8(&namespaced).map_err(invalid)?,
+                        XML_BYTES,
+                    )?;
+                } else {
+                    append(output, before, XML_BYTES)?;
+                }
+                write_items(output, path, kind, children, sort)?;
+                append(output, after, XML_BYTES)?;
+            }
+            Entry::Inserted(chapter, id) => {
+                chapter_link(output, path, kind == Kind::Html, chapter, id)?
+            }
+        }
+    }
+    Ok(())
+}
+
+fn replace_contents(
+    source: &str,
+    element: Node<'_, '_>,
+    content: String,
+) -> Result<(std::ops::Range<usize>, String), EngineError> {
+    if let Ok(range) = inner_range(source, element) {
+        return Ok((range, content));
+    }
+    let raw = &source[element.range()];
+    let mut reader = quick_xml::Reader::from_str(raw);
+    let quick_xml::events::Event::Empty(tag) = reader.read_event().map_err(invalid)? else {
+        return Err(invalid("invalid EPUB navigation container"));
+    };
+    let tag = std::str::from_utf8(tag.name().into_inner()).map_err(invalid)?;
+    Ok((
+        element.range(),
+        format!("{}>{content}</{tag}>", &raw[..raw.len() - 2]),
+    ))
+}
+
+fn renumber(source: &str, path: &str) -> Result<String, EngineError> {
+    let xml = parse_xml(source.as_bytes())?;
+    let nodes: Vec<_> = xml
+        .descendants()
+        .filter(|node| {
+            [Kind::NcxPoint, Kind::NcxPage, Kind::NcxTarget]
+                .into_iter()
+                .any(|kind| kind.accepts(*node))
+        })
+        .collect();
+    let uses_order = nodes.iter().any(|node| node.has_attribute("playOrder"));
+    let depth = nodes
+        .iter()
+        .filter(|node| Kind::NcxPoint.accepts(**node))
+        .map(|node| {
+            node.ancestors()
+                .filter(|parent| Kind::NcxPoint.accepts(*parent))
+                .count()
+        })
+        .max()
+        .unwrap_or(1);
+    let mut edits = Vec::new();
+    if uses_order {
+        let mut ranks = HashMap::new();
+        for node in nodes {
+            let target = child(node, NCX, "content")
+                .and_then(|node| node.attribute("src"))
+                .ok_or_else(|| invalid("NCX navigation item has no target"))?;
+            let fragment = target
+                .split_once('#')
+                .map(|(_, fragment)| super::super::percent_decode(fragment))
+                .transpose()?;
+            let target = if external(target) {
+                target.to_owned()
+            } else {
+                resolve(path, target)?
+            };
+            let next = ranks.len() + 1;
+            let order = ranks.entry((target, fragment)).or_insert(next).to_string();
+            if let Some(attribute) = node.attribute_node("playOrder") {
+                edits.push((value_range(source, attribute)?, order));
+            } else {
+                let end = opening_end(source, node)?;
+                edits.push((end - 1..end - 1, format!(" playOrder=\"{order}\"")));
+            }
+        }
+    }
+    if let Some(head) = child(xml.root_element(), NCX, "head") {
+        if let Some(meta) = head
+            .children()
+            .find(|node| name(*node, NCX, "meta") && node.attribute("name") == Some("dtb:depth"))
+        {
+            if let Some(content) = meta.attribute_node("content") {
+                edits.push((value_range(source, content)?, depth.to_string()));
+            }
+        }
+    }
+    apply_edits(source, edits, XML_BYTES)
+}
+
+// Use the complete attribute range so unusually long whitespace around '='
+// doesn't hit roxmltree's compact storage limit for range_value().
+fn value_range(
+    source: &str,
+    attribute: roxmltree::Attribute<'_, '_>,
+) -> Result<std::ops::Range<usize>, EngineError> {
+    let range = attribute.range();
+    let raw = &source[range.clone()];
+    let (name, after) = raw
+        .split_once('=')
+        .ok_or_else(|| invalid("missing NCX attribute value"))?;
+    let trimmed = after.trim_start_matches([' ', '\n', '\r', '\t']);
+    let start = name.len() + 1 + after.len() - trimmed.len();
+    if trimmed.len() < 2 || !trimmed.starts_with(['\'', '"']) {
+        return Err(invalid("invalid NCX attribute range"));
+    }
+    Ok(range.start + start + 1..range.end - 1)
+}

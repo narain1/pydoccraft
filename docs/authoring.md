@@ -41,7 +41,7 @@ A new PDF starts with one Letter page unless `size` is supplied. `pdf.pages.add(
 
 `doc_ex.new("epub" | "ebook")` creates a reflowable EPUB 3 book. Set the title, identifier, and language, add ordered chapters, and append headings, paragraphs, lists, tables, preformatted text, links, and images. The lifecycle includes `copy()`, bytes/path/stream saving, context management, and close.
 
-Existing books support targeted title and description edits and batch chapter replacement. See [EPUB creation](#epub-creation-unreleased) and the [EPUB format profile](formats.md#epub-unreleased) for the supported content and output.
+Existing books support title and description edits, batch chapter replacement, changes to spine order, and resource additions and replacements. See [EPUB creation](#epub-creation-unreleased) and the [EPUB format profile](formats.md#epub-unreleased) for the supported content and output.
 
 ## Typing and inspection
 
@@ -976,4 +976,25 @@ EPUB creation appends semantic content. Title, identifier, and language are requ
 
 For an existing book, `document.edit_epub_metadata(title="New title", description="New description")` returns EPUB bytes with the supplied Dublin Core fields updated. A field left at `None` keeps its original value. `document.edit_epub_chapters({0: first_chapter_xhtml, -1: last_chapter_xhtml})` replaces complete XHTML resources by spine index. Each replacement is a UTF-8 XML document. Keep the IDs targeted by existing navigation links and media overlays. When a spine resource appears more than once, the replacement applies at each occurrence.
 
-Both editors return a new archive and preserve the uncompressed bytes of untouched members. A failed edit leaves the original open document usable. Signed and encrypted EPUBs are rejected. Chapter replacement keeps the publication's existing resource names, manifest, navigation, and spine. Resource insertion and chapter reordering remain open.
+Use `document.edit_epub_structure(order, resources=...)` to set the reading order. An integer selects an existing spine entry by index, including negative indexes. Use an `EpubChapterSource` to insert a new XHTML chapter.
+
+```python
+added = doc_ex.EpubChapterSource(
+    "Appendix",
+    '<html xmlns="http://www.w3.org/1999/xhtml">'
+    '<head><title>Appendix</title>'
+    '<link rel="stylesheet" href="../Styles/appendix.css"/></head>'
+    '<body><h1>Appendix</h1></body></html>',
+    path="Text/appendix.xhtml",
+)
+with doc_ex.open(epub_bytes) as source:
+    revised = source.edit_epub_structure([0, added], resources={
+        "Styles/appendix.css": doc_ex.EpubResource("text/css", b"h1 { color: navy; }"),
+    })
+```
+
+The order must contain at least one entry and each selected spine index must occur once. Omitted entries leave the spine and its navigation, while their XHTML stays in the manifest and archive for surviving references. The editor preserves nested TOC groups where possible and orders siblings by their earliest spine target. It updates EPUB 3 navigation or EPUB 2 NCX and creates a primary TOC if needed. Optional chapter paths are decoded, archive-relative paths. Omit the path to allocate a unique one. Set `fixed_layout=True` to insert EPUB 3 XHTML with a declared numerical viewport.
+
+`resources` maps decoded paths to `EpubResource(media_type, data)`. It supports local stylesheets, images, fonts, audio, video and EPUB 3 SMIL files. Replacements use the existing manifest media type. Pass `order=None` for resource-only changes. Existing media-overlay associations remain in the manifest.
+
+The edit methods return a new archive and preserve the uncompressed bytes of untouched members. A failed edit leaves the original open document usable. Signed and encrypted EPUBs are rejected.

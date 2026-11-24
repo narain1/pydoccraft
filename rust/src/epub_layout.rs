@@ -125,7 +125,13 @@ pub(super) fn render(
     } else {
         body.id()
     };
-    layout.paint(root_id, [0.0, 0.0], canvas_source, &mut drawing)?;
+    layout.paint(
+        root_id,
+        [0.0, 0.0],
+        canvas_source,
+        &mut HashMap::new(),
+        &mut drawing,
+    )?;
     raster(&layout.output.document, &drawing, dimension, dpi, clip).map(Some)
 }
 
@@ -416,11 +422,18 @@ impl Layout {
         index: usize,
         origin: [f32; 2],
         canvas_source: roxmltree::NodeId,
+        positioned_origins: &mut HashMap<NodeId, [f32; 2]>,
         output: &mut Vec<Draw>,
     ) -> Result<(), EngineError> {
         let node = &self.boxes[index];
         let layout = *self.tree.layout(node.id).map_err(failure)?;
+        let origin = positioned_origins.remove(&node.id).unwrap_or(origin);
         let [x, y] = [origin[0] + layout.location.x, origin[1] + layout.location.y];
+        // Taffy reports out-of-flow locations relative to their containing
+        // block. Paint in DOM order but use that block's geometry.
+        for &child in self.tree.hoisted_children(node.id).map_err(failure)? {
+            positioned_origins.insert(child, [x, y]);
+        }
         let rectangle = Rect::new(x, y, layout.size.width, layout.size.height);
         if ![x, y, rectangle.w, rectangle.h]
             .into_iter()
@@ -495,7 +508,7 @@ impl Layout {
         let mut children = node.children.clone();
         children.sort_by_key(|&child| self.boxes[child].z_index);
         for child in children {
-            self.paint(child, [x, y], canvas_source, &mut inner)?;
+            self.paint(child, [x, y], canvas_source, positioned_origins, &mut inner)?;
         }
         if clip && !inner.is_empty() {
             let rect = Rect::new(

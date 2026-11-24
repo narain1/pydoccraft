@@ -415,7 +415,7 @@ fn validate_link(href: &str) -> Result<(), EngineError> {
     }
 }
 
-fn validate_image(data: &[u8], media_type: &str) -> Result<&'static str, EngineError> {
+pub(crate) fn validate_image(data: &[u8], media_type: &str) -> Result<&'static str, EngineError> {
     let valid = match media_type {
         "image/png" => data.starts_with(b"\x89PNG\r\n\x1a\n").then_some("png"),
         "image/jpeg" => {
@@ -455,7 +455,7 @@ pub(crate) fn escape_text(value: &str) -> String {
         .replace('\r', "&#13;")
 }
 
-fn escape_attribute(value: &str) -> String {
+pub(crate) fn escape_attribute(value: &str) -> String {
     escape_text(value)
         .replace('"', "&quot;")
         .replace('\t', "&#9;")
