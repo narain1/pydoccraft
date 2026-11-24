@@ -757,6 +757,8 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                         | "mask"
                         | "pattern"
                         | "marker"
+                        | "filter"
+                        | "feGaussianBlur"
                 ))
         {
             return Err(unsupported("SVG contains unsupported or active elements"));
@@ -781,8 +783,20 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                 super::svg::use_refs::href_id(value)?;
                 continue;
             }
+            if super::svg::effects::is_gradient(tag)
+                && key == "href"
+                && matches!(attribute.namespace(), None | Some(super::svg::XLINK))
+            {
+                super::svg::fragment_id(value)
+                    .ok_or_else(|| unsupported("SVG gradient requires a same-document template"))?;
+                continue;
+            }
             let static_attribute = match attribute.namespace() {
                 None if tag == "style" && matches!(key, "media" | "type") => true,
+                None if tag == "svg" && key == "baseProfile" => true,
+                None if tag == "filter" && matches!(key, "filterUnits" | "primitiveUnits") => true,
+                None if tag == "feGaussianBlur" && key == "stdDeviation" => true,
+                None if tag == "feGaussianBlur" && key == "in" => true,
                 Some(XML) => matches!(key, "lang" | "space"),
                 None => matches!(
                     key,
@@ -831,6 +845,8 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                         | "visibility"
                         | "clip-path"
                         | "clip-rule"
+                        | "filter"
+                        | "color-interpolation-filters"
                         | "clipPathUnits"
                         | "mask"
                         | "maskUnits"
@@ -893,6 +909,10 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                         && v.bytes()
                             .all(|b| b.is_ascii_alphanumeric() || b"_-.".contains(&b))
                 });
+            // Filter values have their own local-fragment grammar and target checks.
+            if static_attribute && key == "filter" {
+                continue;
+            }
             if !static_attribute
                 || (key != "style" || base.is_none())
                     && (value.contains('\\')
@@ -901,6 +921,16 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                 return Err(unsupported("SVG contains external or active attributes"));
             }
         }
+    }
+    if root.descendants().any(|node| {
+        node.is_element()
+            && (matches!(node.tag_name().name(), "filter" | "feGaussianBlur")
+                || node.attribute("filter").is_some()
+                || (super::svg::effects::is_gradient(node.tag_name().name())
+                    && (node.attribute("href").is_some()
+                        || node.attribute((super::svg::XLINK, "href")).is_some())))
+    }) {
+        super::svg::effects::validate_markup(root)?;
     }
     super::svg::use_refs::validate_use_graph(root)
 }

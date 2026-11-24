@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use roxmltree::{Node, NodeId};
 
-use super::{NS, XLINK};
+use super::{fragment_id, unqualified_attribute, NS, XLINK};
 use crate::{
     epub::{invalid, limited, unsupported},
     EngineError,
@@ -14,21 +14,7 @@ const MAX_EXPANDED_NODES: usize = 150_000;
 const MAX_EXPANDED_BYTES: usize = 16 * 1024 * 1024;
 
 pub(in crate::epub) fn href_id(value: &str) -> Result<&str, EngineError> {
-    value
-        .strip_prefix('#')
-        .filter(|id| {
-            !id.is_empty()
-                && id
-                    .chars()
-                    .all(|ch| ch.is_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':'))
-        })
-        .ok_or_else(|| unsupported("SVG use requires a same-document fragment"))
-}
-
-fn unqualified_attribute<'a>(node: Node<'a, '_>, name: &str) -> Option<&'a str> {
-    node.attributes()
-        .find(|attr| attr.namespace().is_none() && attr.name() == name)
-        .map(|attr| attr.value())
+    fragment_id(value).ok_or_else(|| unsupported("SVG use requires a same-document fragment"))
 }
 
 pub(in crate::epub) fn validate_use_graph(root: Node<'_, '_>) -> Result<bool, EngineError> {

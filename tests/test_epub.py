@@ -2517,6 +2517,126 @@ class EpubTests(unittest.TestCase):
             with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "size budget"):
                 book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Styles", svg(fanout)), 0])
 
+    def test_svg_gradient_templates_and_blur_render_in_epub(self) -> None:
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+              baseProfile="basic" width="128" height="80" viewBox="0 0 128 80">
+          <title>Gradient with a halo</title>
+          <style>#halo { filter: url("#soft"); }</style>
+          <defs>
+            <linearGradient id="stops">
+              <stop offset="0" stop-color="#ff0000"/>
+              <stop offset="1" stop-color="#0000ff"/>
+            </linearGradient>
+            <linearGradient id="linear" xlink:href="#stops"/>
+            <radialGradient id="radial" href="#linear"/>
+            <filter id="soft" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB">
+              <feGaussianBlur stdDeviation="3, 3"/>
+            </filter>
+            <rect id="halo" x="88" y="30" width="20" height="20" fill="#000000"/>
+          </defs>
+          <rect width="60" height="15" x="8" y="8" fill="url(#linear)"/>
+          <circle r="18" cx="36" cy="49" fill="url(#radial)"/>
+          <use href="#halo"/>
+        </svg>"""
+        chapter = doc_ex.EpubSvgChapterSource("Gradient with a halo", svg)
+        with doc_ex.open(epub_fixture()) as original:
+            archived = original.edit_epub_structure([chapter, 0])
+
+        def check_image(png: bytes) -> None:
+            self.assertEqual(struct.unpack_from(">II", png, 16), (128, 80))
+            width, data = rgba_pixels(png_chunks(png))
+
+            def pixel(x: int, y: int) -> bytes:
+                offset = (x + y * width) * 4
+                return data[offset:offset + 4]
+
+            self.assertGreater(pixel(11, 14)[0], 220)
+            self.assertGreater(pixel(65, 14)[2], 220)
+            self.assertGreater(pixel(36, 49)[0], 235)
+            self.assertGreater(pixel(51, 49)[2], 200)
+            self.assertLess(pixel(98, 38)[0], 20)
+            self.assertTrue(165 < pixel(85, 38)[0] < 235)
+            self.assertGreater(pixel(78, 38)[0], 249)
+
+        with doc_ex.open(archived) as book:
+            check_image(book.render_page(0, dpi=96))
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, pages=[0])) as pdf:
+                check_image(pdf.render_page(0, dpi=96))
+
+        xhtml = ('<html xmlns="http://www.w3.org/1999/xhtml"><body><p>'
+                 + svg + "</p></body></html>")
+        with doc_ex.open(epub_fixture(chapter_one=xhtml)) as book:
+            self.assertEqual(book[0].get_images()[0].alt, "Gradient with a halo")
+            for output in ("docx", "pdf"):
+                with doc_ex.open(book.convert(output)) as reopened:
+                    _, pixels = rgba_pixels(png_chunks(reopened.render_page(0, dpi=96)))
+                    colors = set(zip(pixels[::4], pixels[1::4], pixels[2::4]))
+                    self.assertTrue(any(red > 220 and blue < 30 for red, _, blue in colors))
+                    self.assertTrue(any(blue > 220 and red < 30 for red, _, blue in colors))
+                    self.assertTrue(any(165 < red == green == blue < 235 for red, green, blue in colors))
+
+    def test_svg_gradient_templates_and_blur_reject_unsafe_inputs(self) -> None:
+        def svg(body: str) -> str:
+            return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 48">'
+                    + body + "</svg>")
+
+        blur = '<defs><filter id="blur"><feGaussianBlur stdDeviation="1"/></filter></defs>'
+        layers = "".join(
+            '<rect width="64" height="36" filter="url(#blur)"/>'
+            for _ in range(20)
+        )
+        too_deep = "".join(
+            f'<linearGradient id="g{i}" href="#g{i + 1}"/>' for i in range(33)
+        ) + '<linearGradient id="g33"/>'
+        cases = (
+            ('<linearGradient href="unsafe.svg#a"/>', doc_ex.UnsupportedFormatError, "same-document"),
+            ('<linearGradient href="#missing"/>', doc_ex.MalformedDocumentError, "missing ID"),
+            ('<linearGradient id="x"/><radialGradient id="x"/><linearGradient href="#x"/>',
+             doc_ex.MalformedDocumentError, "duplicate ID"),
+            ('<linearGradient id="x" href="#y"/><radialGradient id="y" href="#x"/>',
+             doc_ex.MalformedDocumentError, "cyclic"),
+            (too_deep, doc_ex.UnsafeArchiveError, "depth"),
+            ('<filter id="x"><feImage href="image.png"/></filter>',
+             doc_ex.UnsupportedFormatError, "unsupported or active elements"),
+            ('<filter><feGaussianBlur stdDeviation="-5"/></filter>',
+             doc_ex.MalformedDocumentError, "deviation"),
+            (blur.replace('"1"', '"100000"'), doc_ex.UnsafeArchiveError, "deviation"),
+            ('<rect width="10" height="10" filter="url(#missing)"/>',
+             doc_ex.MalformedDocumentError, "missing ID"),
+            ('<style>rect {filter:url(https://example.invalid/#blur)}</style>'
+             '<rect width="10" height="10"/>', doc_ex.UnsupportedFormatError, "same-document"),
+            (blur + '<mask id="m"><rect width="10" height="10" filter="url(#blur)"/></mask>',
+             doc_ex.UnsupportedFormatError, "inside a pattern, mask or clip path"),
+        )
+        with doc_ex.open(epub_fixture()) as book:
+            for body, error, message in cases:
+                with self.subTest(message=message), self.assertRaisesRegex(error, message):
+                    book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Broken", svg(body)), 0])
+
+            def archived(body: str) -> bytes:
+                return book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Blur", svg(body)), 0])
+
+            huge = archived(blur + '<rect width="8000" height="6000" filter="url(#blur)"/>')
+            with doc_ex.open(huge) as large, self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "filter layer"):
+                large.render_page(0, dpi=96)
+
+            scaled = archived(
+                blur.replace('"1"', '"2"')
+                + '<rect width="1" height="1" transform="scale(900)" filter="url(#blur)"/>'
+            )
+            with (
+                doc_ex.open(scaled) as large,
+                self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "after scaling"),
+            ):
+                large.render_page(0, dpi=96)
+
+            repeated = archived(blur + '<g transform="scale(30)">' + layers + '</g>')
+            with (
+                doc_ex.open(repeated) as large,
+                self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "filter work"),
+            ):
+                large.render_page(0, dpi=96)
+
     def test_svg_chapter_insertion_rejects_broken_renditions(self) -> None:
         svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><rect width="20" height="10"/></svg>'
         with doc_ex.open(epub_fixture()) as book:

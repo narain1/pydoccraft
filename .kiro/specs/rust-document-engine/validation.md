@@ -2843,3 +2843,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 683 installed tests, inclu
 ## 2026-11-24 Same-document SVG use references
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 685 installed tests, including 90 EPUB tests. It measured 23,121,075 bytes with a 53,692,376-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-same-document-svg-use-references) covers reference expansion, reopened export geometry and public samples.
+
+## 2026-11-24 SVG gradient templates and Gaussian blur
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 687 installed tests, including 92 EPUB tests. It measured 23,127,416 bytes with a 53,709,736-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-svg-gradient-templates-and-gaussian-blur) covers gradient and blur fidelity, raster limits, and the unmodified SVG-in-spine sample.

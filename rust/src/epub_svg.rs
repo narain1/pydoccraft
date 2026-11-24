@@ -13,11 +13,28 @@ use super::{
 };
 use crate::{author_epub::escape_attribute, model::ImagePayload, EngineError};
 
+#[path = "epub_svg_effects.rs"]
+pub(super) mod effects;
 #[path = "epub_svg_use.rs"]
 pub(super) mod use_refs;
 
 pub(super) const NS: &str = "http://www.w3.org/2000/svg";
 pub(super) const XLINK: &str = "http://www.w3.org/1999/xlink";
+
+pub(super) fn fragment_id(value: &str) -> Option<&str> {
+    value.strip_prefix('#').filter(|id| {
+        !id.is_empty()
+            && id
+                .chars()
+                .all(|ch| ch.is_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':'))
+    })
+}
+
+fn unqualified_attribute<'a>(node: Node<'a, '_>, name: &str) -> Option<&'a str> {
+    node.attributes()
+        .find(|attr| attr.namespace().is_none() && attr.name() == name)
+        .map(|attr| attr.value())
+}
 
 pub(super) fn image_base(image: &ImagePayload) -> Result<&str, EngineError> {
     image
@@ -143,6 +160,7 @@ pub(super) fn render(
         -(region.x as f32),
         -(region.y as f32),
     );
+    effects::validate_raster(&tree, transform)?;
     resvg::render(&tree, transform, &mut image.as_mut());
     Ok(wordcraft_render::Rendered {
         width: region.width,
@@ -217,6 +235,7 @@ fn apply_styles(
     let mut cursor = 0;
     let mut families = FontNames::new();
     let mut added_bytes = 0;
+    let mut effects = None;
     // Process byte ranges in document order. Source XML remains available for extraction.
     for node in root.descendants().filter(Node::is_element) {
         if node.range().start < cursor {
@@ -263,7 +282,14 @@ fn apply_styles(
                     _ => {}
                 }
             }
-            validate_paint(&value)?;
+            if key == "filter" {
+                value = effects
+                    .get_or_insert_with(|| effects::Effects::new(root))
+                    .validate_filter(node, &value)?
+                    .map_or_else(|| "none".into(), |id| format!("url(#{id})"));
+            } else {
+                validate_paint(&value)?;
+            }
             style.push_str(&key);
             style.push(':');
             style.push_str(&value);
@@ -317,6 +343,8 @@ fn svg_property(key: &str) -> bool {
             | "clip-path"
             | "clip-rule"
             | "mask"
+            | "filter"
+            | "color-interpolation-filters"
             | "stop-color"
             | "stop-opacity"
             | "marker-start"
@@ -517,6 +545,7 @@ pub(super) fn transparent_png(
         width as f32 / tree.size().width(),
         height as f32 / tree.size().height(),
     );
+    effects::validate_raster(tree, scale)?;
     resvg::render(tree, scale, &mut image.as_mut());
     image.encode_png().map_err(invalid)
 }
