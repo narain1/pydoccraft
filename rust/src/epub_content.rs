@@ -578,7 +578,7 @@ pub(super) fn image(
     let bytes = cx.book.read(&path, MAX_IMAGE)?;
     if mime == "image/svg+xml" {
         let d = parse_xml(&bytes)?;
-        let mut image = svg_image(d.root_element(), &bytes, cx.page, src, cx.budget)?;
+        let mut image = svg_image(d.root_element(), &bytes, cx.page, src, &path, cx.budget)?;
         image.alt = alt.into();
         return Ok(image);
     }
@@ -622,7 +622,7 @@ pub(super) fn svg_page(
     path: &str,
     budget: &mut Budget,
 ) -> Result<PagePayload, EngineError> {
-    let image = svg_image(root, data, page, path, budget)?;
+    let image = svg_image(root, data, page, path, path, budget)?;
     Ok(PagePayload {
         number: page,
         images: vec![image.clone()],
@@ -640,7 +640,7 @@ pub(super) fn inline_svg(
     cx: &mut Context<'_, '_>,
 ) -> Result<ImagePayload, EngineError> {
     let bytes = standalone(node, cx.source)?;
-    svg_image(node, &bytes, cx.page, "inline.svg", cx.budget)
+    svg_image(node, &bytes, cx.page, "inline.svg", cx.path, cx.budget)
 }
 
 fn svg_image(
@@ -648,54 +648,90 @@ fn svg_image(
     data: &[u8],
     page: usize,
     path: &str,
+    base: &str,
     budget: &mut Budget,
 ) -> Result<ImagePayload, EngineError> {
-    validate_svg(root)?;
+    validate_svg(root, Some(base))?;
     let alt = child(root, SVG, "title").map(node_text).unwrap_or_default();
-    encoded_image(data, page, path, "image/svg+xml", &alt, budget)
+    budget.bytes(base.len().saturating_mul(3))?;
+    let mut image = encoded_image(data, page, path, "image/svg+xml", &alt, budget)?;
+    image.metadata.insert("epub_svg_base".into(), json!(base));
+    Ok(image)
 }
 
-pub(super) fn validate_svg(root: Node<'_, '_>) -> Result<(), EngineError> {
+pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<(), EngineError> {
     if root.tag_name().namespace() != Some(SVG) || root.tag_name().name() != "svg" {
         return Err(invalid("image is not SVG"));
     }
-    if root.document().descendants().any(|node| node.is_pi()) {
-        return Err(unsupported("SVG processing instructions"));
+    for instruction in root
+        .parent()
+        .filter(Node::is_root)
+        .into_iter()
+        .flat_map(|parent| parent.children())
+        .take_while(|node| !node.is_element())
+        .filter_map(|node| node.pi())
+    {
+        let base = base.ok_or_else(|| unsupported("SVG processing instructions"))?;
+        if let Some((href, _)) = super::svg::stylesheet(instruction)? {
+            super::svg::resource_path(base, &href)?;
+        }
+    }
+    if root.descendants().any(|node| node.is_pi())
+        || (root.parent().is_some_and(|parent| parent.is_root())
+            && root.next_siblings().any(|node| node.is_pi()))
+    {
+        return Err(unsupported(
+            "SVG processing instructions outside the prolog",
+        ));
     }
     for node in root.descendants().filter(Node::is_element) {
+        let tag = node.tag_name().name();
+        let packaged_element = base.is_some() && matches!(tag, "image" | "style");
         if node.tag_name().namespace() != Some(SVG)
-            || !matches!(
-                node.tag_name().name(),
-                "svg"
-                    | "g"
-                    | "defs"
-                    | "symbol"
-                    | "title"
-                    | "desc"
-                    | "path"
-                    | "rect"
-                    | "circle"
-                    | "ellipse"
-                    | "line"
-                    | "polyline"
-                    | "polygon"
-                    | "text"
-                    | "tspan"
-                    | "linearGradient"
-                    | "radialGradient"
-                    | "stop"
-                    | "clipPath"
-                    | "mask"
-                    | "pattern"
-                    | "marker"
-            )
+            || (!packaged_element
+                && !matches!(
+                    tag,
+                    "svg"
+                        | "g"
+                        | "defs"
+                        | "symbol"
+                        | "title"
+                        | "desc"
+                        | "path"
+                        | "rect"
+                        | "circle"
+                        | "ellipse"
+                        | "line"
+                        | "polyline"
+                        | "polygon"
+                        | "text"
+                        | "tspan"
+                        | "linearGradient"
+                        | "radialGradient"
+                        | "stop"
+                        | "clipPath"
+                        | "mask"
+                        | "pattern"
+                        | "marker"
+                ))
         {
             return Err(unsupported("SVG contains unsupported or active elements"));
+        }
+        if tag == "image" && super::svg::image_href(node).is_none() {
+            return Err(invalid("EPUB SVG image has no href"));
         }
         for attribute in node.attributes() {
             let key = attribute.name();
             let value = attribute.value();
+            if tag == "image"
+                && key == "href"
+                && matches!(attribute.namespace(), None | Some(super::svg::XLINK))
+            {
+                super::svg::resource_path(base.unwrap_or_default(), value)?;
+                continue;
+            }
             let static_attribute = match attribute.namespace() {
+                None if tag == "style" && matches!(key, "media" | "type") => true,
                 Some(XML) => matches!(key, "lang" | "space"),
                 None => matches!(
                     key,
@@ -803,8 +839,9 @@ pub(super) fn validate_svg(root: Node<'_, '_>) -> Result<(), EngineError> {
                             .all(|b| b.is_ascii_alphanumeric() || b"_-.".contains(&b))
                 });
             if !static_attribute
-                || value.contains('\\')
-                || (value.to_ascii_lowercase().contains("url(") && !local_paint)
+                || (key != "style" || base.is_none())
+                    && (value.contains('\\')
+                        || (value.to_ascii_lowercase().contains("url(") && !local_paint))
             {
                 return Err(unsupported("SVG contains external or active attributes"));
             }

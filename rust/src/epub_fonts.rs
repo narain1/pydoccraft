@@ -144,7 +144,7 @@ impl Fonts {
     pub(super) fn shape(
         &mut self,
         block: &BlockPayload,
-        output: &mut Output,
+        output: &mut Output<'_>,
         width: f32,
     ) -> Result<Text, EngineError> {
         if block.table.is_some() {
@@ -345,7 +345,7 @@ fn append_span<'a>(
 fn equation(
     markup: &str,
     mut style: CharProps,
-    output: &mut Output,
+    output: &mut Output<'_>,
     width: f32,
 ) -> Result<Fragment, EngineError> {
     let InlineObject::Equation {
@@ -436,7 +436,7 @@ fn equation(
     })
 }
 
-fn read_face(face: &Face, book: &mut Book<'_>) -> Result<Vec<u8>, EngineError> {
+pub(super) fn read_face(face: &Face, book: &mut Book<'_>) -> Result<Vec<u8>, EngineError> {
     let mut failure = None;
     for url in &face.urls {
         if external(url) || url.contains('#') {

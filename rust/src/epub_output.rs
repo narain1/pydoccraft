@@ -13,6 +13,7 @@ use crate::{
 };
 
 pub(super) fn render(
+    data: &[u8],
     book: &DocumentPayload,
     page: usize,
     dpi: f64,
@@ -23,7 +24,7 @@ pub(super) fn render(
         .pages
         .get(page)
         .ok_or_else(|| EngineError::PageIndex("EPUB chapter is out of range".into()))?;
-    let mut output = Output::new(book, false, dpi);
+    let mut output = Output::new(data, book, false, dpi);
     if page
         .metadata
         .get("fixed_layout")
@@ -55,8 +56,12 @@ pub(super) fn render(
     docx::render_with(&output.document, &layout, 0, dpi, clip)
 }
 
-pub(super) fn convert(book: &DocumentPayload, target: &str) -> Result<Vec<u8>, EngineError> {
-    let mut output = Output::new(book, true, 192.0);
+pub(super) fn convert(
+    data: &[u8],
+    book: &DocumentPayload,
+    target: &str,
+) -> Result<Vec<u8>, EngineError> {
+    let mut output = Output::new(data, book, true, 192.0);
     let mut body = Vec::new();
     for (index, page) in book.pages.iter().enumerate() {
         if page
@@ -90,7 +95,9 @@ pub(super) fn convert(book: &DocumentPayload, target: &str) -> Result<Vec<u8>, E
     Ok(result)
 }
 
-pub(super) struct Output {
+pub(super) struct Output<'a> {
+    data: &'a [u8],
+    archive: Option<super::Book<'a>>,
     pub document: Document,
     preserve_links: bool,
     pixels: u64,
@@ -116,8 +123,13 @@ pub(super) enum Inline<'a> {
     Link { end: usize, link: &'a LinkPayload },
 }
 
-impl Output {
-    pub(super) fn new(book: &DocumentPayload, preserve_links: bool, raster_dpi: f64) -> Self {
+impl<'a> Output<'a> {
+    pub(super) fn new(
+        data: &'a [u8],
+        book: &DocumentPayload,
+        preserve_links: bool,
+        raster_dpi: f64,
+    ) -> Self {
         let mut document = Document::new();
         if let Some(title) = book
             .metadata
@@ -127,6 +139,8 @@ impl Output {
             document.core.title = title.to_owned();
         }
         Self {
+            data,
+            archive: None,
             document,
             preserve_links,
             pixels: 0,
@@ -242,7 +256,15 @@ impl Output {
         }
         let bytes = image_bytes(image)?;
         if image.media_type == "image/svg+xml" {
-            let tree = super::svg::embedded(&bytes)?;
+            let base = super::svg::image_base(image)?;
+            if self.archive.is_none() {
+                self.archive = Some(super::Book::open(self.data)?);
+            }
+            let archive = self
+                .archive
+                .as_mut()
+                .ok_or_else(|| conversion("missing EPUB archive"))?;
+            let tree = super::svg::embedded(&bytes, base, archive)?;
             let width = tree.size().width();
             let height = tree.size().height();
             let media = self.rasterize_svg(&tree, width * 0.75, height * 0.75)?;

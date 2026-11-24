@@ -56,7 +56,7 @@ pub(super) fn render(
     let doc = parse_xml(&source)?;
     let root = doc.root_element();
     if root.has_tag_name((super::svg::NS, "svg")) {
-        return super::svg::render(root, &source, fixed, dpi, clip).map(Some);
+        return super::svg::render(root, &source, path, &mut archive, fixed, dpi, clip).map(Some);
     }
     let body = child(root, XHTML, "body").ok_or_else(|| invalid("XHTML chapter has no body"))?;
     let viewport = if fixed {
@@ -94,7 +94,7 @@ pub(super) fn render(
         budget: &mut budget,
         styles: Some(&styles),
     };
-    let mut layout = Layout::new(Output::new(book, false, dpi), viewport, fonts);
+    let mut layout = Layout::new(Output::new(data, book, false, dpi), viewport, fonts);
     let root_id = layout.build(root, &mut context)?;
     let id = layout.boxes[root_id].id;
     let mut root_style = layout.tree.style(id).map_err(failure)?.clone();
@@ -162,10 +162,10 @@ pub(super) fn dimensions(root: Node<'_, '_>) -> Option<[f32; 2]> {
         .then_some(dims)
 }
 
-struct Layout {
+struct Layout<'book> {
     tree: TaffyTree<usize>,
     boxes: Vec<PaintBox>,
-    output: Output,
+    output: Output<'book>,
     cache: LayoutCache,
     viewport: [f32; 2],
     measure_count: usize,
@@ -204,7 +204,7 @@ impl Picture {
         }
     }
 
-    fn media(&self, output: &mut Output, rect: Rect) -> Result<String, EngineError> {
+    fn media(&self, output: &mut Output<'_>, rect: Rect) -> Result<String, EngineError> {
         match self {
             Self::Raster(image) => Ok(image.media.clone()),
             Self::Svg(tree) => output.rasterize_svg(tree, rect.w, rect.h),
@@ -216,8 +216,8 @@ fn is_svg(node: Node<'_, '_>) -> bool {
     node.has_tag_name((super::svg::NS, "svg"))
 }
 
-impl Layout {
-    fn new(output: Output, viewport: [f32; 2], fonts: Option<Fonts>) -> Self {
+impl<'book> Layout<'book> {
+    fn new(output: Output<'book>, viewport: [f32; 2], fonts: Option<Fonts>) -> Self {
         let mut tree = TaffyTree::new();
         tree.disable_rounding();
         Self {
@@ -259,7 +259,12 @@ impl Layout {
             };
             if let Some(source) = image {
                 let picture = if source.media_type == "image/svg+xml" {
-                    Picture::Svg(Box::new(super::svg::embedded(&image_bytes(&source)?)?))
+                    let base = super::svg::image_base(&source)?;
+                    Picture::Svg(Box::new(super::svg::embedded(
+                        &image_bytes(&source)?,
+                        base,
+                        context.book,
+                    )?))
                 } else {
                     Picture::Raster(self.output.load_image(&source)?)
                 };

@@ -71,6 +71,48 @@ impl Cascade {
         Ok(cascade)
     }
 
+    pub(super) fn load_svg(
+        root: Node<'_, '_>,
+        base: &str,
+        book: &mut Book<'_>,
+        viewport: [f32; 2],
+    ) -> Result<Self, EngineError> {
+        let mut cascade = Self {
+            viewport,
+            ..Default::default()
+        };
+        for instruction in root
+            .document()
+            .root()
+            .children()
+            .take_while(|node| !node.is_element())
+            .filter_map(|node| node.pi())
+        {
+            if let Some((href, media)) = super::svg::stylesheet(instruction)? {
+                if cascade.media_matches(&media) {
+                    cascade.external_sheet(&href, base, book, 0)?;
+                }
+            }
+        }
+        for node in root
+            .descendants()
+            .filter(|n| n.has_tag_name((super::svg::NS, "style")))
+        {
+            if node.attribute("type").unwrap_or("text/css") != "text/css"
+                || !cascade.media_matches(node.attribute("media").unwrap_or(""))
+            {
+                continue;
+            }
+            let source = node
+                .children()
+                .filter(Node::is_text)
+                .filter_map(|child| child.text())
+                .collect::<String>();
+            cascade.sheet(&source, base, book, 0)?;
+        }
+        Ok(cascade)
+    }
+
     pub(super) fn needed(&self, root: Node<'_, '_>) -> bool {
         self.bytes != 0
             || root

@@ -15,7 +15,8 @@
 - [x] Project supported Presentation MathML into native equations for PNG, DOCX and PDF.
 - [x] Apply local author styles for the supported cascade and layout properties. Render fixed-layout XHTML and static SVG chapters with viewport bounds and clipping.
 - [x] Render local CSS font faces, IDPF-obfuscated fonts, and static SVG embedded in XHTML. Preserve inline equations, images and table spans with packaged fonts. Rasterize static SVG in semantic export.
-- [ ] Extend source CSS and fixed-layout fidelity, including font Unicode ranges and variable axes, SVG resource references, synthetic spreads and conversion.
+- [x] Render SVG CSS, packaged SVG fonts, and referenced PNG and JPEG resources in spine previews, XHTML and semantic export.
+- [ ] Extend source CSS and fixed-layout fidelity, including font Unicode ranges and variable axes, additional SVG features, synthetic spreads and conversion.
 - [ ] Expand MathML layout to remaining elements, attributes and styling.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [ ] Extend overlay support for Ogg Opus, embedded audio/video, gapless MP3, long-cue streaming, and playback navigation.

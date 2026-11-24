@@ -55,7 +55,7 @@ pub(crate) fn render(
     if let Some(png) = layout::render(data, &book, chapter, dpi, clip)? {
         return Ok(png);
     }
-    output::render(&book, page, dpi, clip)
+    output::render(data, &book, page, dpi, clip)
 }
 
 pub(crate) fn convert(
@@ -63,7 +63,7 @@ pub(crate) fn convert(
     target: &str,
     password: Option<&str>,
 ) -> Result<Vec<u8>, EngineError> {
-    output::convert(&extract(data, password)?, target)
+    output::convert(data, &extract(data, password)?, target)
 }
 
 const XHTML: &str = "http://www.w3.org/1999/xhtml";
@@ -895,7 +895,7 @@ fn nav_target(
 
 pub(crate) fn validate_svg_resource(data: &[u8]) -> Result<(), EngineError> {
     let xml = parse_xml(data)?;
-    content::validate_svg(xml.root_element())
+    content::validate_svg(xml.root_element(), None)
 }
 
 pub(crate) fn read_resource(

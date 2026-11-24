@@ -467,6 +467,106 @@ class EpubTests(unittest.TestCase):
                     self.assertEqual(len(converted[0].get_images()), 2)
                     self.assertTrue(converted.render_page(0, dpi=96).startswith(b"\x89PNG"))
 
+    def test_svg_spine_cascades_local_styles_and_renders_packaged_resources(self) -> None:
+        source = epub_fixture()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        package = package.replace(
+            b'href="one.xhtml" media-type="application/xhtml+xml"',
+            b'href="Graphics/cover.svg" media-type="image/svg+xml"',
+        ).replace(b'<itemref idref="one"/>', b'<itemref idref="one" properties="rendition:layout-pre-paginated"/>')
+        svg = """<?xml-stylesheet type="text/css" href="../Styles/main.css"?>
+        <?xml-stylesheet href="ignored.css" media="print"?>
+        <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+             width="240px" height="160px" viewBox="0 0 120 80">
+          <title>Styled vector page</title>
+          <style type="text/css">.swatch { fill: #884499 } .cascade { fill: #cc1144 }</style>
+          <rect class="swatch" width="20" height="20"/>
+          <rect class="cascade" x="20" width="20" height="20" style="fill:#33bb22"/>
+          <image xlink:href="../Images/raster%20tile.png" x="40" width="20" height="20"/>
+          <g class="label"><text x="3" y="55">Packed type 123</text></g>
+        </svg>"""
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
+        book = rewrite_epub(source, {
+            "OEBPS/content.opf": package,
+            "OEBPS/Graphics/cover.svg": svg,
+            "OEBPS/Styles/main.css": """@import 'Nested/palette.css';
+                .swatch { fill: #ffcc22 }
+                @font-face { font-family: 'Vector Face'; src: url('../Fonts/type.ttf'); }
+                .label { font-family: 'vector FACE'; font-size: 18px; fill: #113399; }""",
+            "OEBPS/Styles/Nested/palette.css": ".cascade { fill: #ee6600 !important }",
+            "OEBPS/Fonts/type.ttf": font,
+            "OEBPS/Images/raster tile.png": solid((11, 104, 163)),
+        })
+        with doc_ex.open(book) as document:
+            image, = document[0].get_images()
+            self.assertEqual((image.alt, image.data), ("Styled vector page", svg.encode()))
+            self.assertEqual(document[0].metadata["viewport"], [90, 60])
+            data = document.render_page(0, dpi=96)
+            width, pixels = rgba_pixels(png_chunks(data))
+            self.assertEqual(width, 120)
+            for x, color in ((8, (136, 68, 153)), (28, (238, 102, 0)), (48, (11, 104, 163))):
+                offset = (8 * width + x) * 4
+                self.assertEqual(pixels[offset:offset+4], bytes((*color, 255)))
+            self.assertTrue(bytes((17, 51, 153, 255)) in pixels[width * 26 * 4:])
+        with doc_ex.open(rewrite_epub(book, {"OEBPS/Fonts/type.ttf": b"invalid"})) as broken:
+            with self.assertRaises(doc_ex.MalformedDocumentError):
+                broken.render_page(0, dpi=96)
+
+    def test_svg_resource_bases_survive_reflow_preview_and_conversion(self) -> None:
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" width="25" height="20">
+            <style>.picture { opacity: 1 }</style>
+            <image class="picture" href="tile.png" width="25" height="20"/>
+          </svg>"""
+        chapter = f"""<html xmlns="http://www.w3.org/1999/xhtml"><body>
+            <p>Two swatches {svg}<img src="graphics/tile.svg" alt="Blue"/></p></body></html>"""
+        data = rewrite_epub(epub_fixture(chapter_one=chapter), {
+            "OEBPS/graphics/tile.svg": svg,
+            "OEBPS/tile.png": solid((215, 40, 26)),
+            "OEBPS/graphics/tile.png": solid((27, 54, 223)),
+        })
+
+        def assert_placements(preview: bytes) -> None:
+            _, pixels = rgba_pixels(png_chunks(preview))
+            self.assertTrue(bytes((215, 40, 26, 255)) in pixels, "red inline raster missing")
+            self.assertTrue(bytes((27, 54, 223, 255)) in pixels, "blue linked raster missing")
+
+        with doc_ex.open(data) as book:
+            self.assertEqual(len(book[0].get_images()), 2)
+            assert_placements(book.render_page(0, dpi=96))
+            for kind in ("docx", "pdf"):
+                with self.subTest(kind=kind), doc_ex.open(book.convert(kind), filetype=kind) as converted:
+                    self.assertIn("Two swatches", converted[0].get_text())
+                    self.assertEqual(len(converted[0].get_images()), 2)
+                    assert_placements(converted.render_page(0, dpi=96))
+
+    def test_svg_resource_profile_rejects_external_uris_and_bounds_placements(self) -> None:
+        def book_with_svg(body: str, prolog: str = "") -> bytes:
+            chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><body>
+                <p><img src="tile.svg" alt="Vector image"/></p></body></html>"""
+            svg = f'{prolog}<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 25 20">{body}</svg>'
+            return rewrite_epub(epub_fixture(chapter_one=chapter), {
+                "OEBPS/tile.svg": svg,
+                "OEBPS/tile.png": solid((215, 40, 26)),
+            })
+
+        for href in ("https://example.com/tile.png", "//example.com/tile.png", "file:///tile.png"):
+            with self.subTest(href=href), self.assertRaises(doc_ex.UnsupportedFormatError):
+                doc_ex.open(book_with_svg(f'<image href="{href}"/>'))
+        for href in ("../../tile.png", "%2E%2E/tile.png", "/tile.png"):
+            with self.subTest(href=href), self.assertRaises(doc_ex.UnsafeArchiveError):
+                doc_ex.open(book_with_svg(f'<image href="{href}"/>'))
+        with self.assertRaises(doc_ex.UnsupportedFormatError):
+            doc_ex.open(book_with_svg("", '<?xml-stylesheet href="https://example.com/style.css"?>'))
+        with self.assertRaises(doc_ex.UnsupportedFormatError):
+            doc_ex.open(book_with_svg("", '<?custom href="style.css"?>'))
+        with doc_ex.open(book_with_svg('<rect width="20" height="20" style="fill:url(https://example.com/paint)"/>')) as book:
+            with self.assertRaises(doc_ex.UnsupportedFormatError):
+                book.render_page(0, dpi=96)
+        with doc_ex.open(book_with_svg('<image href="tile.png" width="10" height="10"/>' * 257)) as book:
+            with self.assertRaises(doc_ex.UnsafeArchiveError):
+                book.render_page(0, dpi=96)
+
     def test_fixed_svg_chapter_renders_viewbox_and_clips(self) -> None:
         source = epub_fixture()
         with zipfile.ZipFile(io.BytesIO(source)) as archive:
