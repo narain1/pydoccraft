@@ -1,5 +1,5 @@
 //! Index a bounded Ogg Opus track and decode its presentation samples.
-use std::{io::Cursor, ops::Range};
+use std::{collections::HashSet, io::Cursor, ops::Range};
 
 use hound::{SampleFormat, WavSpec};
 use ogg::PacketReader;
@@ -15,10 +15,21 @@ const MAX_PACKET_BYTES: usize = 65_536;
 const MAX_COMMENT_BYTES: usize = 1024 * 1024;
 
 pub(super) struct Track {
+    links: Vec<Link>,
+    channels: usize,
+    frames: usize,
+    playback: Option<Playback>,
+}
+
+struct Link {
     bytes: Vec<u8>,
     packets: Vec<Packet>,
     head: OpusHead,
-    end: usize,
+    timeline: Range<usize>,
+}
+
+struct Playback {
+    link: usize,
     decoder: MultistreamDecoder,
     next_packet: usize,
     pcm: Vec<i16>,
@@ -31,7 +42,75 @@ struct Packet {
 
 impl Track {
     pub(super) fn open(file: &[u8]) -> Result<Self, EngineError> {
-        preflight(file)?;
+        let mut links = Vec::new();
+        let mut channels = 0;
+        let mut frames = 0;
+        for encoded in preflight(file)? {
+            let link = Link::index(encoded, frames)?;
+            channels = channels.max(usize::from(link.head.channel_count));
+            frames = link.timeline.end;
+            links.push(link);
+        }
+        Ok(Self {
+            links,
+            channels,
+            frames,
+            playback: None,
+        })
+    }
+
+    pub(super) fn spec(&self) -> WavSpec {
+        WavSpec {
+            channels: self.channels as u16,
+            sample_rate: OUTPUT_SAMPLE_RATE_HZ,
+            bits_per_sample: 16,
+            sample_format: SampleFormat::Int,
+        }
+    }
+
+    pub(super) fn frames(&self) -> usize {
+        self.frames
+    }
+
+    pub(super) fn samples(&mut self, start: usize, stop: usize) -> Result<Vec<i16>, EngineError> {
+        if start >= stop || stop > self.frames {
+            return Err(invalid("Ogg Opus clip lies outside its presentation"));
+        }
+        if stop - start > MAX_CLIP_SAMPLES / self.channels {
+            return Err(limited("media-overlay audio clip exceeds 16 MiB of PCM"));
+        }
+        let first = self
+            .links
+            .partition_point(|link| link.timeline.end <= start);
+        let last = self
+            .links
+            .partition_point(|link| link.timeline.start < stop);
+        let mut playback = self.playback.take();
+        let mut samples = Vec::with_capacity((stop - start) * self.channels);
+        let mut work = MAX_FRAMES_PER_CLIP;
+        for index in first..last {
+            let link = &self.links[index];
+            let mut state = playback
+                .take()
+                .filter(|state| state.link == index)
+                .unwrap_or_else(|| Playback {
+                    link: index,
+                    decoder: MultistreamDecoder::from_head(&link.head),
+                    next_packet: 0,
+                    pcm: Vec::new(),
+                });
+            let begin = start.max(link.timeline.start) - link.timeline.start;
+            let end = stop.min(link.timeline.end) - link.timeline.start;
+            state.append(link, begin..end, self.channels, &mut work, &mut samples)?;
+            playback = Some(state);
+        }
+        self.playback = playback;
+        Ok(samples)
+    }
+}
+
+impl Link {
+    fn index(file: &[u8], start: usize) -> Result<Self, EngineError> {
         let mut reader = PacketReader::new(Cursor::new(file));
         let id = reader.read_packet_expected().map_err(invalid)?;
         if !id.first_in_stream() || !id.last_in_page() || id.absgp_page() != 0 {
@@ -54,9 +133,6 @@ impl Track {
         let mut prior_granule = 0;
         let end = loop {
             let packet = reader.read_packet_expected().map_err(invalid)?;
-            if packets.len() >= MAX_PACKETS {
-                return Err(limited("Ogg Opus exceeds its packet count limit"));
-            }
             let encoded = OpusPacket::parse(&packet.data).map_err(invalid)?;
             let frame_count = output_samples_per_channel(encoded.toc.frame_size_tenths_ms)
                 * encoded.frame_count();
@@ -89,75 +165,73 @@ impl Track {
             }
             prior_granule = granule;
         };
-        if end <= usize::from(head.pre_skip) {
-            return Err(invalid("Ogg Opus has no playable samples"));
-        }
-        let decoder = MultistreamDecoder::from_head(&head);
+        let duration = end
+            .checked_sub(usize::from(head.pre_skip))
+            .filter(|frames| *frames != 0)
+            .ok_or_else(|| invalid("Ogg Opus has no playable samples"))?;
+        let end = start
+            .checked_add(duration)
+            .ok_or_else(|| limited("Ogg Opus presentation exceeds its frame limit"))?;
         Ok(Self {
             bytes,
             packets,
             head,
-            end,
-            decoder,
-            next_packet: 0,
-            pcm: Vec::new(),
+            timeline: start..end,
         })
     }
+}
 
-    pub(super) fn spec(&self) -> WavSpec {
-        WavSpec {
-            channels: u16::from(self.head.channel_count),
-            sample_rate: OUTPUT_SAMPLE_RATE_HZ,
-            bits_per_sample: 16,
-            sample_format: SampleFormat::Int,
-        }
-    }
-
-    pub(super) fn frames(&self) -> usize {
-        self.end - usize::from(self.head.pre_skip)
-    }
-
-    pub(super) fn samples(&mut self, start: usize, stop: usize) -> Result<Vec<i16>, EngineError> {
-        let channels = usize::from(self.head.channel_count);
-        if stop - start > MAX_CLIP_SAMPLES / channels {
-            return Err(limited("media-overlay audio clip exceeds 16 MiB of PCM"));
-        }
-        let skip = usize::from(self.head.pre_skip);
-        let (start, stop) = (start + skip, stop + skip);
-        let first = self
+impl Playback {
+    fn append(
+        &mut self,
+        link: &Link,
+        clip: Range<usize>,
+        output_channels: usize,
+        work: &mut usize,
+        samples: &mut Vec<i16>,
+    ) -> Result<(), EngineError> {
+        let channels = usize::from(link.head.channel_count);
+        let skip = usize::from(link.head.pre_skip);
+        let (start, stop) = (clip.start + skip, clip.end + skip);
+        let first = link
             .packets
             .partition_point(|packet| packet.frames.end <= start);
-        let last = self
+        let last = link
             .packets
             .partition_point(|packet| packet.frames.start < stop);
         if first < self.next_packet.saturating_sub(1) {
             self.decoder.reset();
             self.next_packet = 0;
         }
-        if last.saturating_sub(self.next_packet) > MAX_FRAMES_PER_CLIP {
-            return Err(limited("Ogg Opus clip exceeds its packet decoding budget"));
-        }
-        let mut samples = Vec::with_capacity((stop - start) * channels);
+        *work = work
+            .checked_sub(last.saturating_sub(self.next_packet))
+            .ok_or_else(|| limited("Ogg Opus clip exceeds its packet decoding budget"))?;
         for index in first..last {
             while self.next_packet <= index {
-                let packet = &self.packets[self.next_packet];
+                let packet = &link.packets[self.next_packet];
                 let audio = self
                     .decoder
-                    .decode_packet(&self.bytes[packet.bytes.clone()])
+                    .decode_packet(&link.bytes[packet.bytes.clone()])
                     .map_err(invalid)?;
                 if audio.pcm.len() != packet.frames.len() * channels {
                     return Err(invalid("Ogg Opus packet returned unexpected PCM geometry"));
                 }
                 self.pcm = audio.pcm;
-                self.head.apply_gain(&mut self.pcm);
+                link.head.apply_gain(&mut self.pcm);
                 self.next_packet += 1;
             }
-            let packet = &self.packets[index];
+            let packet = &link.packets[index];
             let left = start.saturating_sub(packet.frames.start) * channels;
             let right = (stop.min(packet.frames.end) - packet.frames.start) * channels;
-            samples.extend_from_slice(&self.pcm[left..right]);
+            let source = &self.pcm[left..right];
+            if channels == output_channels {
+                samples.extend_from_slice(source);
+            } else {
+                // Keep the output WAVE channel count stable when a chain has both mono and stereo.
+                samples.extend(source.iter().flat_map(|&sample| [sample, sample]));
+            }
         }
-        Ok(samples)
+        Ok(())
     }
 }
 
@@ -182,25 +256,52 @@ fn validate_comments(data: &[u8]) -> Result<(), EngineError> {
     Ok(())
 }
 
-/// Check transport bounds before the demuxer allocates complete packets. It
-/// verifies page checksums and reassembles lacing across pages during indexing.
-fn preflight(mut bytes: &[u8]) -> Result<(), EngineError> {
-    let serial = bytes
+/// Check transport bounds before the demuxer allocates complete packets.
+/// Pages in a logical stream are contiguous. PacketReader checks page CRCs.
+fn preflight(mut bytes: &[u8]) -> Result<Vec<&[u8]>, EngineError> {
+    if bytes.is_empty() {
+        return Err(invalid("truncated Ogg header"));
+    }
+    let mut serials = HashSet::new();
+    let mut links = Vec::new();
+    let mut pages_left = MAX_PAGES;
+    let mut packets_left = MAX_PACKETS;
+    while !bytes.is_empty() {
+        let (serial, rest) = preflight_link(bytes, &mut pages_left, &mut packets_left)?;
+        if !serials.insert(serial) {
+            return Err(invalid("Ogg chain repeats a stream serial number"));
+        }
+        links.push(&bytes[..bytes.len() - rest.len()]);
+        bytes = rest;
+    }
+    Ok(links)
+}
+
+fn preflight_link<'a>(
+    mut bytes: &'a [u8],
+    pages_left: &mut usize,
+    packets_left: &mut usize,
+) -> Result<([u8; 4], &'a [u8]), EngineError> {
+    let serial: [u8; 4] = bytes
         .get(14..18)
+        .and_then(|bytes| bytes.try_into().ok())
         .ok_or_else(|| invalid("truncated Ogg header"))?;
     let mut partial = 0;
     let mut packets = 0;
     for index in 0..MAX_PAGES as u32 {
+        *pages_left = pages_left
+            .checked_sub(1)
+            .ok_or_else(|| limited("Ogg Opus exceeds its page count limit"))?;
         let (header, rest) = bytes
             .split_first_chunk::<27>()
             .ok_or_else(|| invalid("truncated Ogg page header"))?;
         if &header[..5] != b"OggS\0" || header[5] & !7 != 0 {
             return Err(invalid("invalid Ogg page header"));
         }
-        if &header[14..18] != serial || (header[5] & 2 != 0 && index != 0) {
-            return Err(unsupported("multiplexed or chained Ogg audio"));
+        if header[14..18] != serial || (header[5] & 2 != 0 && index != 0) {
+            return Err(unsupported("multiplexed Ogg audio"));
         }
-        if header[18..22] != index.to_le_bytes()
+        if header[18..22] != u32::to_le_bytes(index)
             || (header[5] & 2 != 0) != (index == 0)
             || (header[5] & 1 != 0) != (partial != 0)
         {
@@ -219,11 +320,16 @@ fn preflight(mut bytes: &[u8]) -> Result<(), EngineError> {
             } else {
                 MAX_PACKET_BYTES
             };
-            if partial > maximum || packets >= MAX_PACKETS + 2 {
-                return Err(limited("Ogg Opus packet count or size exceeds limits"));
+            if partial > maximum {
+                return Err(limited("Ogg Opus packet size exceeds its limit"));
             }
             if segment < 255 {
                 partial = 0;
+                if packets >= 2 {
+                    *packets_left = packets_left
+                        .checked_sub(1)
+                        .ok_or_else(|| limited("Ogg Opus exceeds its packet count limit"))?;
+                }
                 packets += 1;
             }
         }
@@ -239,13 +345,10 @@ fn preflight(mut bytes: &[u8]) -> Result<(), EngineError> {
             return Err(invalid("invalid Ogg Opus header lacing"));
         }
         if header[5] & 4 != 0 {
-            if !bytes.is_empty() {
-                return Err(unsupported("trailing data after the Ogg stream"));
-            }
             if packets < 3 || packets == before || partial != 0 {
                 return Err(invalid("invalid Ogg final page"));
             }
-            return Ok(());
+            return Ok((serial, bytes));
         }
     }
     Err(limited("Ogg Opus exceeds its page count limit"))

@@ -1312,17 +1312,80 @@ class EpubTests(unittest.TestCase):
             with self.assertRaises(doc_ex.MalformedDocumentError):
                 next(document.epub_narration(0, chunk_frames=773))
 
+    def test_media_overlay_chains_ogg_opus_links_and_seeks_across_them(self) -> None:
+        source, _ = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(b"audio/wav", b"audio/ogg")
+            smil = archive.read("OEBPS/Sync/read.smil")
+        source = rewrite_epub(source, {"OEBPS/content.opf": package})
+        full = smil.replace(b'clipBegin="250ms" clipEnd="00:00:01.125"', b'clipBegin="0s"')
+        fixtures = Path(__file__).parent / "fixtures"
+        stereo = (fixtures / "epub-narration-stereo.opus").read_bytes()
+        mono = (fixtures / "epub-narration-mono.opus").read_bytes()
+
+        def pcm_frames(clip: doc_ex.EpubAudioClip) -> bytes:
+            with wave.open(io.BytesIO(clip.wave), "rb") as pcm:
+                self.assertEqual(pcm.getnchannels(), clip.channels)
+                return pcm.readframes(clip.frame_count)
+
+        individual = []
+        for payload, channels, frames in ((stereo, 2, 55200), (mono, 1, 16800)):
+            with doc_ex.open(rewrite_epub(source, {
+                "OEBPS/Sync/read.smil": full,
+                "OEBPS/Media/voice.wav": payload,
+            })) as book:
+                audio = next(book.epub_narration(0)).audio
+                assert audio is not None
+                self.assertEqual((audio.sample_rate, audio.channels, audio.frame_count), (48000, channels, frames))
+                individual.append(pcm_frames(audio))
+        duplicated_mono = b"".join(sample * 2 for (sample,) in struct.iter_unpack("2s", individual[1]))
+        expected = individual[0] + duplicated_mono
+        chain = rewrite_epub(source, {
+            "OEBPS/Sync/read.smil": full,
+            "OEBPS/Media/voice.wav": stereo + mono,
+        })
+        with doc_ex.open(chain) as book:
+            audio = next(book.epub_narration(0)).audio
+            assert audio is not None
+            self.assertEqual((audio.sample_rate, audio.channels, audio.frame_count), (48000, 2, 72000))
+            self.assertEqual(pcm_frames(audio), expected)
+            streamed = []
+            for cue in book.epub_narration(0, skip_roles={"aside"}, chunk_frames=773):
+                assert cue.audio is not None
+                self.assertLessEqual(cue.audio.frame_count, 773)
+                streamed.append(pcm_frames(cue.audio))
+            self.assertEqual(b"".join(streamed), expected)
+
+        seek = smil.replace(b'clipBegin="250ms" clipEnd="00:00:01.125"', b'clipBegin="1.14s" clipEnd="1.16s"')
+        backward = (b'<par id="seek-back"><text src="../one.xhtml#aside"/>'
+                    b'<audio src="../Media/voice.wav" clipBegin="1.00s" clipEnd="1.01s"/></par>')
+        slot = seek.index(b"</par>") + len(b"</par>")
+        seek = seek[:slot] + backward + seek[slot:]
+        with doc_ex.open(rewrite_epub(chain, {"OEBPS/Sync/read.smil": seek})) as book:
+            cross, back = list(book.epub_narration(0, skip_roles={"aside"}))
+            assert cross.audio is not None and back.audio is not None
+            self.assertEqual(pcm_frames(cross.audio), expected[54720 * 4:55680 * 4])
+            self.assertEqual(pcm_frames(back.audio), expected[48000 * 4:48480 * 4])
+
     def test_media_overlay_rejects_damaged_ogg_transport(self) -> None:
         source, _ = narrated_epub()
         with zipfile.ZipFile(io.BytesIO(source)) as archive:
             package = archive.read("OEBPS/content.opf").replace(b"audio/wav", b"audio/ogg")
-        data = (Path(__file__).parent / "fixtures" / "epub-narration-stereo.opus").read_bytes()
+        fixtures = Path(__file__).parent / "fixtures"
+        data = (fixtures / "epub-narration-stereo.opus").read_bytes()
+        other = (fixtures / "epub-narration-mono.opus").read_bytes()
         damaged = bytearray(data)
         damaged[-1] ^= 1
+        damaged_link = bytearray(other)
+        damaged_link[-1] ^= 1
+        first_page = 27 + data[26] + sum(data[27:27 + data[26]])
         for payload, error in (
             (data[:-1], doc_ex.MalformedDocumentError),
             (bytes(damaged), doc_ex.MalformedDocumentError),
-            (data + data, doc_ex.UnsupportedFormatError),
+            (data + data, doc_ex.MalformedDocumentError),
+            (data + other[:-1], doc_ex.MalformedDocumentError),
+            (data + damaged_link, doc_ex.MalformedDocumentError),
+            (data[:first_page] + other + data[first_page:], doc_ex.UnsupportedFormatError),
         ):
             source_with_audio = rewrite_epub(source, {
                 "OEBPS/content.opf": package, "OEBPS/Media/voice.wav": payload,

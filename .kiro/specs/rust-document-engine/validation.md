@@ -2803,3 +2803,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 670 installed tests, inclu
 ## 2026-11-24 EPUB SVG spine edits
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 672 installed tests, including 77 EPUB tests. It measured 22,996,107 bytes with a 53,399,848-byte native extension. Insertion and replacement of fixed-layout SVG spine entries retained navigation, narration and local resources in reopened books. The [EPUB validation record](../epub-support/validation.md#2026-11-24-svg-spine-chapter-editing) includes the rendering and EPUBCheck results.
+
+## 2026-11-24 Chained EPUB Opus narration
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 673 installed tests, including 78 EPUB tests. It measured 23,001,236 bytes with a 53,409,736-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-chained-ogg-opus-narration) covers boundary-crossing cues, streaming, and the reference decoder comparison.

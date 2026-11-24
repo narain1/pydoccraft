@@ -31,7 +31,8 @@
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.
 - [x] Decode and stream single-track mono and stereo Ogg Opus overlays with the correct presentation bounds and gain.
-- [ ] Play embedded audio and video and support broader Ogg Opus stream layouts.
+- [x] Stream sequentially chained mono and stereo Ogg Opus with a continuous sample timeline and bounded seeks.
+- [ ] Play embedded audio and video and support surround and multiplexed Ogg layouts.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
 - [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.
 - [x] Attach or detach EPUB 3 media overlays and author sequential text and audio cues with package duration metadata.
