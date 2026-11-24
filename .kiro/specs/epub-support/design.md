@@ -49,6 +49,13 @@ The structure editor rewrites the spine and navigation first, then stages narrat
 Resource removal checks the staged archive after additions, replacements, and overlay changes. It validates retained package ID references, targets in XHTML, SVG, SMIL and NCX, and stylesheet dependencies. The scan follows archive-local stylesheet links and imports regardless of media conditions. It includes recognized off-spine resources and excludes the removed members, allowing jointly removed assets to reference each other. Assets that are obfuscated or have unprovable scripted dependencies fail explicitly. Untouched ZIP members are raw-copied. The reader reopens and validates the entire result before returning bytes.
 
 
+## Media overlay playback
+
+`epub_audio.rs` maps SMIL time bounds to half-open sample-frame intervals. Streaming advances that integer cursor using PCM frames returned by the decoder. It reuses the track and its decoded frame cache between reads and supports an open-ended interval through the end of the resource. The MPEG decoder verifies a supported Xing/Info tag against packet headers before applying its encoder delay, decoder delay and end padding. AAC uses the MP4 presentation edit.
+
+The Python iterator seeks by chapter cue index before applying role filters. It decodes each selected target as a group of chunks. Playback calls the target callback once before handing that group's audio or text to the sinks and clears the target when the group finishes or a sink fails.
+
+
 ## Fixed-layout spreads and visual export
 
 The reader preserves package progression and spread settings and spine-level placement and spread overrides. EPUB spread preview pairs fixed-layout entries in progression order. Centered entries, reflowable chapters and entries where the active spread policy disables facing pages use an individual viewport. Non-linear entries can be previewed individually. The first automatic placement is the trailing slot. A missing companion is a white slot with the dimensions of the present chapter.

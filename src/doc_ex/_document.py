@@ -9,6 +9,7 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from numbers import Real
 from html import escape
+from itertools import chain
 from types import SimpleNamespace
 from typing import Any, Callable, Iterator, Literal, TYPE_CHECKING, overload
 
@@ -650,40 +651,86 @@ class Document:
             else:
                 stack.extend((child, roles) for child in reversed(node["children"]))
 
-    def epub_narration(
+    def _epub_narration_groups(
         self,
         page: int,
-        *,
-        skip_roles: Iterable[str] = (),
-    ) -> Iterator[EpubNarrationCue]:
-        """Decode one SMIL cue at a time and return its audio or narration text."""
+        skip_roles: Iterable[str],
+        start_cue: int,
+        chunk_frames: int | None,
+    ) -> Iterator[Iterator[EpubNarrationCue]]:
         from . import _core, _native
 
+        start_cue = operator.index(start_cue)
+        if start_cue < 0:
+            raise IndexError("EPUB narration cue index out of range")
+        if chunk_frames is not None:
+            chunk_frames = operator.index(chunk_frames)
+            if not 1 <= chunk_frames <= 262_144:
+                raise ValueError("EPUB narration chunk_frames must be between 1 and 262144")
         skipped = frozenset(skip_roles)
         current_track = None
         decoder = None
-        for cue, roles in self._epub_cues(page):
+        found_start = start_cue == 0
+        for index, (cue, roles) in enumerate(self._epub_cues(page)):
             self._ensure_open()
+            if index < start_cue:
+                continue
+            found_start = True
             if skipped.intersection(roles):
                 continue
             target = cue["text"]
+            args = (cue["id"], target["path"], target["fragment"], roles)
             audio = cue["audio"]
             if audio is None:
                 spoken = _native(lambda: _core._epub_narration_text(self._source, target["path"], target["fragment"]))
-                yield EpubNarrationCue(cue["id"], target["path"], target["fragment"], roles, text=spoken)
+                yield iter((EpubNarrationCue(*args, text=spoken),))
                 continue
             track = (audio["path"], audio["media_type"])
             if track != current_track:
                 decoder = None
                 decoder = _native(lambda: _core._open_epub_audio(self._source, *track))
                 current_track = track
-            wave, rate, channels, frames = _native(
-                lambda: decoder.clip(audio["clip_begin_us"], audio["clip_end_us"])
+            yield self._epub_audio_group(
+                args, decoder, audio["clip_begin_us"], audio["clip_end_us"], chunk_frames,
             )
-            yield EpubNarrationCue(
-                cue["id"], target["path"], target["fragment"], roles,
-                audio=EpubAudioClip(bytes(wave), rate, channels, frames),
-            )
+        if not found_start:
+            raise IndexError("EPUB narration cue index out of range")
+
+    def _epub_audio_group(
+        self,
+        args: tuple[str | None, str, str | None, tuple[str, ...]],
+        decoder: Any,
+        begin: int,
+        end: int | None,
+        chunk_frames: int | None,
+    ) -> Iterator[EpubNarrationCue]:
+        from . import _native
+
+        self._ensure_open()
+        if chunk_frames is None:
+            wave, rate, channels, frames = _native(lambda: decoder.clip(begin, end))
+            yield EpubNarrationCue(*args, audio=EpubAudioClip(bytes(wave), rate, channels, frames))
+            return
+        _native(lambda: decoder.start_stream(begin, end))
+        while True:
+            self._ensure_open()
+            chunk = _native(lambda: decoder.next_chunk(chunk_frames))
+            if chunk is None:
+                return
+            wave, rate, channels, frames = chunk
+            yield EpubNarrationCue(*args, audio=EpubAudioClip(bytes(wave), rate, channels, frames))
+
+    def epub_narration(
+        self,
+        page: int,
+        *,
+        skip_roles: Iterable[str] = (),
+        start_cue: int = 0,
+        chunk_frames: int | None = None,
+    ) -> Iterator[EpubNarrationCue]:
+        """Read cues starting at a chapter cue index, optionally in bounded audio chunks."""
+        for group in self._epub_narration_groups(page, skip_roles, start_cue, chunk_frames):
+            yield from group
 
     def play_epub_narration(
         self,
@@ -693,17 +740,21 @@ class Document:
         speak_text: Callable[[str], None],
         on_cue: Callable[[EpubNarrationCue | None], None] | None = None,
         skip_roles: Iterable[str] = (),
+        start_cue: int = 0,
+        chunk_frames: int | None = None,
     ) -> None:
-        """Play ordered cues via blocking audio and speech callbacks."""
-        for cue in self.epub_narration(page, skip_roles=skip_roles):
+        """Play cues through blocking sinks and hold each target across its audio chunks."""
+        for group in self._epub_narration_groups(page, skip_roles, start_cue, chunk_frames):
+            first = next(group)
             if on_cue is not None:
-                on_cue(cue)
+                on_cue(first)
             try:
-                self._ensure_open()
-                if cue.audio is not None:
-                    play_audio(cue.audio)
-                elif cue.text:
-                    speak_text(cue.text)
+                for cue in chain((first,), group):
+                    self._ensure_open()
+                    if cue.audio is not None:
+                        play_audio(cue.audio)
+                    elif cue.text:
+                        speak_text(cue.text)
             finally:
                 if on_cue is not None:
                     on_cue(None)

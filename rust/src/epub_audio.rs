@@ -1,5 +1,5 @@
 //! Decode bounded sections of local media-overlay audio for an offline playback sink.
-use std::{io::Cursor, panic::AssertUnwindSafe};
+use std::{io::Cursor, ops::Range, panic::AssertUnwindSafe};
 
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 
@@ -14,9 +14,20 @@ mod aac;
 const MAX_ENCODED_BYTES: usize = 32 * 1024 * 1024;
 const MAX_CLIP_SAMPLES: usize = 8 * 1024 * 1024;
 const MAX_FRAMES_PER_CLIP: usize = 120_000;
+const MP3_DECODER_DELAY: usize = 529;
 const MAX_NARRATION_BYTES: usize = 1024 * 1024;
 
-pub(crate) struct AudioSource(Decoder);
+pub(crate) struct AudioSource {
+    decoder: Decoder,
+    stream: Option<AudioWindow>,
+}
+
+struct AudioWindow {
+    spec: WavSpec,
+    next: usize,
+    end: Option<usize>,
+    started: bool,
+}
 
 enum Decoder {
     Wave(WavReader<Cursor<Vec<u8>>>),
@@ -36,7 +47,9 @@ impl AudioSource {
         let decoder = match media {
             "audio/mpeg" | "audio/mp3" => {
                 let bytes = read(data, path, MAX_ENCODED_BYTES)?;
-                Decoder::Mp3(Box::new(Mp3::new(bytes)?))
+                let track = std::panic::catch_unwind(|| Mp3::new(bytes))
+                    .map_err(|_| invalid("malformed MPEG Layer III audio"))??;
+                Decoder::Mp3(Box::new(track))
             }
             "audio/mp4" | "audio/x-m4a" => {
                 let bytes = read(data, path, MAX_ENCODED_BYTES)?;
@@ -50,51 +63,135 @@ impl AudioSource {
             }
             _ => return Err(unsupported("media-overlay audio codec is unsupported")),
         };
-        Ok(Self(decoder))
+        Ok(Self {
+            decoder,
+            stream: None,
+        })
     }
 
     pub(crate) fn clip(&mut self, begin: u64, end: Option<u64>) -> Result<AudioClip, EngineError> {
+        self.stream = None;
+        let window = self.window(begin, end)?;
+        let samples = self.read_frames(window.next, window.end, window.end.is_none())?;
+        encode_clip(window.spec, samples)
+    }
+
+    pub(crate) fn start_stream(&mut self, begin: u64, end: Option<u64>) -> Result<(), EngineError> {
+        self.stream = None;
+        self.stream = Some(self.window(begin, end)?);
+        Ok(())
+    }
+
+    pub(crate) fn next_chunk(
+        &mut self,
+        chunk_frames: usize,
+    ) -> Result<Option<AudioClip>, EngineError> {
+        if !(1..=262_144).contains(&chunk_frames) {
+            return Err(EngineError::InvalidArgument(
+                "EPUB narration chunk_frames must be between 1 and 262144".into(),
+            ));
+        }
+        let Some(mut window) = self.stream.take() else {
+            return Ok(None);
+        };
+        let limit = window
+            .next
+            .checked_add(chunk_frames)
+            .ok_or_else(|| limited("media-overlay audio time exceeds limits"))?;
+        let stop = window.end.map_or(limit, |end| end.min(limit));
+        let samples = self.read_frames(window.next, Some(stop), window.end.is_none())?;
+        if samples.is_empty() && window.started && window.end.is_none() {
+            return Ok(None);
+        }
+        let result = encode_clip(window.spec, samples)?;
+        window.next += result.frames;
+        window.started = true;
+        // When a decoder returns fewer frames than requested, it reached EOF.
+        if window.next == stop && window.end != Some(stop) {
+            self.stream = Some(window);
+        }
+        Ok(Some(result))
+    }
+
+    fn window(&mut self, begin: u64, end: Option<u64>) -> Result<AudioWindow, EngineError> {
         if end.is_some_and(|end| end <= begin) {
             return Err(invalid("media-overlay audio end must follow its start"));
         }
-        let (spec, samples) = match &mut self.0 {
-            Decoder::Wave(reader) => wav_samples(reader, begin, end)?,
-            Decoder::Aac(track) => {
-                std::panic::catch_unwind(AssertUnwindSafe(|| track.samples(begin, end)))
-                    .map_err(|_| invalid("malformed MP4 audio"))??
-            }
+        let (spec, duration) = match &mut self.decoder {
+            Decoder::Wave(reader) => (wav_spec(reader)?, Some(reader.duration() as usize)),
+            Decoder::Aac(track) => (track.spec(), Some(track.frames())),
             Decoder::Mp3(reader) => {
-                std::panic::catch_unwind(AssertUnwindSafe(|| reader.samples(begin, end)))
+                std::panic::catch_unwind(AssertUnwindSafe(|| reader.geometry()))
                     .map_err(|_| invalid("malformed MPEG Layer III audio"))??
             }
         };
-        let frames = samples.len() / usize::from(spec.channels);
-        if frames == 0 {
-            return Err(invalid("media-overlay audio clip has no samples"));
+        let next = frame_at(begin, spec.sample_rate)?;
+        let end = end
+            .map(|end| frame_at(end, spec.sample_rate))
+            .transpose()?
+            .or(duration);
+        if end.is_some_and(|end| end <= next || duration.is_some_and(|duration| end > duration)) {
+            return Err(invalid(
+                "media-overlay audio clip lies outside its resource or contains no sample frames",
+            ));
         }
-        let mut output = Cursor::new(Vec::new());
-        let mut writer = WavWriter::new(
-            &mut output,
-            WavSpec {
-                bits_per_sample: 16,
-                sample_format: SampleFormat::Int,
-                ..spec
-            },
-        )
-        .map_err(wav_error)?;
-        let mut writer_samples = writer.get_i16_writer(samples.len() as u32);
-        for sample in samples {
-            writer_samples.write_sample(sample);
-        }
-        writer_samples.flush().map_err(wav_error)?;
-        writer.finalize().map_err(wav_error)?;
-        Ok(AudioClip {
-            wave: output.into_inner(),
-            sample_rate: spec.sample_rate,
-            channels: spec.channels,
-            frames,
+        Ok(AudioWindow {
+            spec,
+            next,
+            end,
+            started: false,
         })
     }
+
+    fn read_frames(
+        &mut self,
+        start: usize,
+        end: Option<usize>,
+        allow_eof: bool,
+    ) -> Result<Vec<i16>, EngineError> {
+        let known_end = || end.ok_or_else(|| invalid("missing media-overlay audio duration"));
+        match &mut self.decoder {
+            Decoder::Wave(reader) => wav_samples(reader, start, known_end()?),
+            Decoder::Aac(track) => {
+                let end = known_end()?;
+                std::panic::catch_unwind(AssertUnwindSafe(|| track.samples(start, end)))
+                    .map_err(|_| invalid("malformed MP4 audio"))?
+            }
+            Decoder::Mp3(reader) => {
+                std::panic::catch_unwind(AssertUnwindSafe(|| reader.samples(start, end, allow_eof)))
+                    .map_err(|_| invalid("malformed MPEG Layer III audio"))?
+            }
+        }
+    }
+}
+
+fn encode_clip(spec: WavSpec, samples: Vec<i16>) -> Result<AudioClip, EngineError> {
+    let frames = samples.len() / usize::from(spec.channels);
+    if frames == 0 {
+        return Err(invalid("media-overlay audio clip has no samples"));
+    }
+    let mut output = Cursor::new(Vec::new());
+    let mut writer = WavWriter::new(
+        &mut output,
+        WavSpec {
+            bits_per_sample: 16,
+            sample_format: SampleFormat::Int,
+            ..spec
+        },
+    )
+    .map_err(wav_error)?;
+    let mut writer_samples = writer.get_i16_writer(samples.len() as u32);
+    for sample in samples {
+        writer_samples.write_sample(sample);
+    }
+    writer_samples.flush().map_err(wav_error)?;
+    writer.finalize().map_err(wav_error)?;
+    Ok(AudioClip {
+        wave: output.into_inner(),
+        sample_rate: spec.sample_rate,
+        channels: spec.channels,
+        frames,
+    })
 }
 
 fn read(data: &[u8], path: &str, limit: usize) -> Result<Vec<u8>, EngineError> {
@@ -107,28 +204,22 @@ fn frame_at(microseconds: u64, rate: u32) -> Result<usize, EngineError> {
     usize::try_from(frame).map_err(|_| limited("media-overlay audio time exceeds limits"))
 }
 
-fn wav_samples(
-    reader: &mut WavReader<Cursor<Vec<u8>>>,
-    begin: u64,
-    end: Option<u64>,
-) -> Result<(WavSpec, Vec<i16>), EngineError> {
+fn wav_spec(reader: &WavReader<Cursor<Vec<u8>>>) -> Result<WavSpec, EngineError> {
     let spec = reader.spec();
     if spec.channels == 0 || spec.channels > 8 || !(1..=192_000).contains(&spec.sample_rate) {
         return Err(unsupported(
             "WAVE sample rate or channel count is unsupported",
         ));
     }
-    let start = frame_at(begin, spec.sample_rate)?;
-    let frames = reader.duration() as usize;
-    let stop = end
-        .map(|time| frame_at(time, spec.sample_rate))
-        .transpose()?
-        .unwrap_or(frames);
-    if start >= stop || stop > frames {
-        return Err(invalid(
-            "media-overlay audio clip lies outside its WAVE resource",
-        ));
-    }
+    Ok(spec)
+}
+
+fn wav_samples(
+    reader: &mut WavReader<Cursor<Vec<u8>>>,
+    start: usize,
+    stop: usize,
+) -> Result<Vec<i16>, EngineError> {
+    let spec = reader.spec();
     let count = (stop - start).saturating_mul(usize::from(spec.channels));
     if count > MAX_CLIP_SAMPLES {
         return Err(limited("media-overlay audio clip exceeds 16 MiB of PCM"));
@@ -160,7 +251,7 @@ fn wav_samples(
     if samples.len() != count {
         return Err(invalid("truncated WAVE samples"));
     }
-    Ok((spec, samples))
+    Ok(samples)
 }
 
 fn wav_error(error: hound::Error) -> EngineError {
@@ -179,6 +270,7 @@ struct Mp3 {
     sample_offset: usize,
     frame_len: usize,
     format: Option<WavSpec>,
+    presentation: Option<Range<usize>>,
 }
 
 impl Mp3 {
@@ -209,6 +301,11 @@ impl Mp3 {
         if first >= bytes.len() {
             return Err(invalid("empty MPEG audio stream"));
         }
+        let presentation = mpeg_presentation(&bytes[first..])?;
+        let (first, presentation) = match presentation {
+            Some((metadata_frame, interval)) => (first + metadata_frame, Some(interval)),
+            None => (first, None),
+        };
         Ok(Self {
             bytes,
             first,
@@ -218,6 +315,7 @@ impl Mp3 {
             sample_offset: 0,
             frame_len: 0,
             format: None,
+            presentation,
         })
     }
 
@@ -262,21 +360,28 @@ impl Mp3 {
         Ok(true)
     }
 
-    fn samples(
-        &mut self,
-        begin: u64,
-        end: Option<u64>,
-    ) -> Result<(WavSpec, Vec<i16>), EngineError> {
+    fn geometry(&mut self) -> Result<(WavSpec, Option<usize>), EngineError> {
         if self.format.is_none() {
             self.next_frame()?;
         }
-        let format = self
-            .format
-            .ok_or_else(|| invalid("empty MPEG audio stream"))?;
-        let start = frame_at(begin, format.sample_rate)?;
-        let stop = end
-            .map(|time| frame_at(time, format.sample_rate))
-            .transpose()?;
+        self.format
+            .map(|format| (format, self.presentation.as_ref().map(Range::len)))
+            .ok_or_else(|| invalid("empty MPEG audio stream"))
+    }
+
+    fn samples(
+        &mut self,
+        start: usize,
+        stop: Option<usize>,
+        allow_eof: bool,
+    ) -> Result<Vec<i16>, EngineError> {
+        let (format, _) = self.geometry()?;
+        let origin = self
+            .presentation
+            .as_ref()
+            .map_or(0, |interval| interval.start);
+        let start = start + origin;
+        let stop = stop.map(|frame| frame + origin);
         let channels = usize::from(format.channels);
         if stop.is_some_and(|stop| stop.saturating_sub(start) > MAX_CLIP_SAMPLES / channels) {
             return Err(limited("media-overlay audio clip exceeds 16 MiB of PCM"));
@@ -302,19 +407,127 @@ impl Mp3 {
                 samples.extend_from_slice(&self.pcm[slice]);
             }
             if stop.is_some_and(|stop| stop <= frame_end) {
-                return Ok((format, samples));
+                return Ok(samples);
             }
             if !self.next_frame()? {
-                if stop.is_some() || samples.is_empty() {
+                if !allow_eof {
                     return Err(invalid(
                         "media-overlay audio clip lies outside its MPEG resource",
                     ));
                 }
-                return Ok((format, samples));
+                return Ok(samples);
             }
         }
         Err(limited("MPEG clip exceeds its frame decoding budget"))
     }
+}
+
+/// Parse encoder delay and padding from a Xing/Info frame. Packet headers
+/// confirm the declared sample count before using it as a presentation bound.
+fn mpeg_presentation(bytes: &[u8]) -> Result<Option<(usize, Range<usize>)>, EngineError> {
+    let Some(header) = bytes.get(..4) else {
+        return Ok(None);
+    };
+    // The Xing signature follows the MPEG header and version/channel-dependent
+    // Layer III side information. A LAME-style CRC does not move the signature.
+    if header[0] != 0xff || header[1] & 0xe6 != 0xe2 {
+        return Ok(None);
+    }
+    let mpeg1 = header[1] & 0x18 == 0x18;
+    let mono = header[3] >> 6 == 3;
+    let offset = 4 + match (mpeg1, mono) {
+        (true, false) => 32,
+        (true, true) | (false, false) => 17,
+        (false, true) => 9,
+    };
+    if !matches!(bytes.get(offset..offset + 4), Some(b"Xing" | b"Info")) {
+        return Ok(None);
+    }
+
+    let mut scanner = mp3dec::Decoder::new();
+    let mut info = mp3dec::FrameInfo::default();
+    let samples = scanner.decode_frame(bytes, None, &mut info);
+    if samples == 0 || info.layer != 3 || info.frame_offset != 0 {
+        return Err(invalid("invalid MPEG metadata frame"));
+    }
+    let mut fields = bytes
+        .get(offset + 4..info.frame_bytes)
+        .ok_or_else(|| invalid("truncated MPEG metadata frame"))?;
+    let field = |fields: &mut &[u8]| -> Result<usize, EngineError> {
+        let (value, rest) = fields
+            .split_first_chunk::<4>()
+            .ok_or_else(|| invalid("truncated MPEG metadata field"))?;
+        *fields = rest;
+        Ok(u32::from_be_bytes(*value) as usize)
+    };
+    let flags = field(&mut fields)?;
+    let count = if flags & 1 != 0 {
+        field(&mut fields)?
+    } else {
+        0
+    };
+    if flags & 2 != 0 {
+        let _ = field(&mut fields)?;
+    }
+    if flags & 4 != 0 {
+        fields = fields
+            .get(100..)
+            .ok_or_else(|| invalid("truncated MPEG seek table"))?;
+    }
+    if flags & 8 != 0 {
+        let _ = field(&mut fields)?;
+    }
+    if !matches!(fields.get(..4), Some(b"LAME" | b"Lavc" | b"Lavf")) || count == 0 {
+        return Ok(None);
+    }
+    let delay = fields
+        .get(21..24)
+        .ok_or_else(|| invalid("truncated MPEG encoder padding"))?;
+    let delay_and_padding =
+        (usize::from(delay[0]) << 16) | (usize::from(delay[1]) << 8) | usize::from(delay[2]);
+    let encoder_delay = delay_and_padding >> 12;
+    let padding = delay_and_padding & 0xfff;
+    if encoder_delay == 0 && padding == 0 {
+        return Ok(None);
+    }
+    if padding < MP3_DECODER_DELAY {
+        return Err(unsupported(
+            "MPEG encoder padding cannot represent the decoder delay",
+        ));
+    }
+    if count > 250_000 {
+        return Err(limited("MPEG audio exceeds its packet count limit"));
+    }
+    let first = info.frame_bytes;
+    let mut remaining = bytes
+        .get(first..)
+        .ok_or_else(|| invalid("invalid MPEG metadata size"))?;
+    let geometry = (info.hz, info.channels);
+    for _ in 0..count {
+        let mut frame = mp3dec::FrameInfo::default();
+        let length = scanner.decode_frame(remaining, None, &mut frame);
+        if length != samples
+            || frame.frame_offset != 0
+            || frame.layer != 3
+            || (frame.hz, frame.channels) != geometry
+        {
+            return Err(invalid(
+                "MPEG gapless metadata does not match its audio frames",
+            ));
+        }
+        remaining = remaining
+            .get(frame.frame_bytes..)
+            .ok_or_else(|| invalid("invalid MPEG audio frame size"))?;
+    }
+    if !remaining.is_empty() {
+        return Err(invalid("MPEG gapless frame count does not match its audio"));
+    }
+    let begin = encoder_delay + MP3_DECODER_DELAY;
+    let end = (count * samples)
+        .checked_sub(padding - MP3_DECODER_DELAY)
+        .filter(|end| *end > begin)
+        .ok_or_else(|| invalid("MPEG encoder padding leaves no playable samples"))?;
+    Ok(Some((first, begin..end)))
 }
 
 pub(crate) fn narration_text(

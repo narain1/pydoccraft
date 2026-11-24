@@ -22,7 +22,8 @@
 - [x] Project inherited MathML attributes, accents, movable limits, repeated script pairs, varied fences and separators, horizontal spaces, and zero-dimension padding.
 - [ ] Expand MathML layout to remaining elements and attributes, including spanning matrices, arbitrary padding and CSS within formulas.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
-- [ ] Extend overlay support for Ogg Opus, embedded audio/video, gapless MP3, long-cue streaming, and playback navigation.
+- [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.
+- [ ] Play Ogg Opus overlays and embedded audio and video.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
 - [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.
 - [x] Attach or detach EPUB 3 media overlays and author sequential text and audio cues with package duration metadata.

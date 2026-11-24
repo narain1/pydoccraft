@@ -1023,6 +1023,136 @@ class EpubTests(unittest.TestCase):
                 document.play_epub_narration(0, play_audio=fail, speak_text=lambda _: None, on_cue=cues.append)
         self.assertEqual([cue and cue.fragment for cue in cues], ["café", None])
 
+    def test_media_overlay_streaming_matches_buffered_pcm(self) -> None:
+        source, wav = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        fixtures = Path(__file__).parent / "fixtures"
+        for media, audio in (
+            (b"audio/wav", wav),
+            (b"audio/mpeg", (fixtures / "epub-narration-tone.mp3").read_bytes()),
+            (b"audio/mp4", (fixtures / "epub-narration-tone.m4a").read_bytes()),
+        ):
+            book = rewrite_epub(source, {
+                "OEBPS/content.opf": package.replace(b"audio/wav", media),
+                "OEBPS/Media/voice.wav": audio,
+            })
+            with self.subTest(media=media), doc_ex.open(book) as document:
+                for page in (0, 1):
+                    [full] = document.epub_narration(page, skip_roles={"aside"})
+                    assert full.audio is not None
+                    with wave.open(io.BytesIO(full.audio.wave), "rb") as pcm:
+                        expected = pcm.readframes(full.audio.frame_count)
+                    parts = bytearray()
+                    for cue in document.epub_narration(page, skip_roles={"aside"}, chunk_frames=513):
+                        self.assertEqual((cue.id, cue.path, cue.fragment, cue.roles),
+                                         (full.id, full.path, full.fragment, full.roles))
+                        assert cue.audio is not None
+                        self.assertLessEqual(cue.audio.frame_count, 513)
+                        with wave.open(io.BytesIO(cue.audio.wave), "rb") as pcm:
+                            parts.extend(pcm.readframes(cue.audio.frame_count))
+                    self.assertEqual(parts, expected)
+                    self.assertEqual([full], list(document.epub_narration(
+                        page, skip_roles={"aside"}, chunk_frames=full.audio.frame_count,
+                    )))
+
+    def test_media_overlay_cue_navigation_skips_preceding_audio(self) -> None:
+        source, _ = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(b"audio/wav", b"audio/flac")
+        source = rewrite_epub(source, {"OEBPS/content.opf": package})
+        with doc_ex.open(source) as document:
+            events: list[tuple[str, object]] = []
+            document.play_epub_narration(
+                0, start_cue=1, chunk_frames=1,
+                play_audio=lambda audio: events.append(("audio", audio.frame_count)),
+                speak_text=lambda text: events.append(("speech", text)),
+                on_cue=lambda cue: events.append(("target", cue and cue.fragment)),
+            )
+            self.assertEqual(events, [("target", "aside"), ("speech", "Text cue"), ("target", None)])
+            self.assertEqual(list(document.epub_narration(0, start_cue=1, skip_roles={"aside"})), [])
+            for index in (-1, 2):
+                with self.assertRaises(IndexError):
+                    list(document.epub_narration(0, start_cue=index))
+            for frames in (0, 262_145):
+                with self.assertRaises(ValueError):
+                    list(document.epub_narration(0, chunk_frames=frames))
+
+    def test_media_overlay_streams_long_cue_with_one_active_target(self) -> None:
+        source, _ = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            smil = archive.read("OEBPS/Sync/read.smil")
+        smil = smil.replace(b'clipBegin="250ms" clipEnd="00:00:01.125"', b'clipBegin="0s"')
+        frames = 8 * 1024 * 1024 + 1
+        wav = io.BytesIO()
+        with wave.open(wav, "wb") as writer:
+            writer.setparams((1, 1, 8000, 0, "NONE", "not compressed"))
+            writer.writeframes(bytes(range(256)) * (frames // 256) + b"\0")
+        source = rewrite_epub(source, {"OEBPS/Sync/read.smil": smil, "OEBPS/Media/voice.wav": wav.getvalue()})
+        with doc_ex.open(source) as document:
+            with self.assertRaises(doc_ex.UnsafeArchiveError):
+                next(document.epub_narration(0))
+            targets: list[str | None] = []
+            chunks: list[int] = []
+            digest = hashlib.sha256()
+
+            def play(audio: doc_ex.EpubAudioClip) -> None:
+                self.assertEqual(targets, ["café"])
+                chunks.append(audio.frame_count)
+                with wave.open(io.BytesIO(audio.wave), "rb") as pcm:
+                    digest.update(pcm.readframes(audio.frame_count))
+
+            document.play_epub_narration(
+                0, chunk_frames=262_144, skip_roles={"aside"}, play_audio=play,
+                speak_text=lambda text: self.fail(f"unexpected narration {text}"),
+                on_cue=lambda cue: targets.append(cue and cue.fragment),
+            )
+            self.assertEqual(targets, ["café", None])
+            self.assertEqual(chunks, [262_144] * 32 + [1])
+            expected = hashlib.sha256()
+            ramp = struct.pack("<256h", *(index * 256 for index in range(-128, 128)))
+            for _ in range(32):
+                expected.update(ramp * 1024)
+            expected.update(ramp[:2])
+            self.assertEqual(digest.digest(), expected.digest())
+
+    def test_media_overlay_applies_mpeg_encoder_delay_and_padding(self) -> None:
+        source, _ = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(b"audio/wav", b"audio/mpeg")
+            smil = archive.read("OEBPS/Sync/read.smil")
+        # A synthesized 1 kHz tone at 44.1 kHz with Xing/Info delay and padding.
+        audio = (Path(__file__).parent / "fixtures" / "epub-narration-gapless.mp3").read_bytes()
+        smil = smil.replace(b'clipBegin="250ms" clipEnd="00:00:01.125"', b'clipBegin="0s"')
+        source = rewrite_epub(source, {
+            "OEBPS/content.opf": package, "OEBPS/Sync/read.smil": smil, "OEBPS/Media/voice.wav": audio,
+        })
+        with doc_ex.open(source) as document:
+            clip = next(document.epub_narration(0)).audio
+            assert clip is not None
+            self.assertEqual((clip.sample_rate, clip.channels, clip.frame_count), (44100, 1, 17640))
+            with wave.open(io.BytesIO(clip.wave), "rb") as pcm:
+                reference = pcm.readframes(17640)
+            self.assertGreater(max(struct.unpack("<128h", reference[:256])), 1000)
+            self.assertGreater(max(struct.unpack("<128h", reference[-256:])), 1000)
+        smil = smil.replace(b'clipBegin="0s"', b'clipBegin="0.125s" clipEnd="0.4s"')
+        with doc_ex.open(rewrite_epub(source, {"OEBPS/Sync/read.smil": smil})) as document:
+            recorded = bytearray()
+            for cue in document.epub_narration(0, chunk_frames=509, skip_roles={"aside"}):
+                assert cue.audio is not None
+                with wave.open(io.BytesIO(cue.audio.wave), "rb") as pcm:
+                    recorded.extend(pcm.readframes(cue.audio.frame_count))
+            self.assertEqual(recorded, reference[5513 * 2:])
+        with doc_ex.open(rewrite_epub(source, {"OEBPS/Sync/read.smil": smil.replace(b"0.4s", b"0.401s")})) as document:
+            with self.assertRaises(doc_ex.MalformedDocumentError):
+                next(document.epub_narration(0, chunk_frames=509))
+        damaged = bytearray(audio)
+        count = damaged.index(b"Info") + 8
+        damaged[count + 3] += 1
+        with doc_ex.open(rewrite_epub(source, {"OEBPS/Media/voice.wav": bytes(damaged)})) as document:
+            with self.assertRaises(doc_ex.MalformedDocumentError):
+                next(document.epub_narration(0))
+
     def test_media_overlay_resolves_cues_and_audio_in_spine_order(self) -> None:
         data, audio = narrated_epub()
         with doc_ex.open(data) as document:

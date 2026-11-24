@@ -2763,3 +2763,7 @@ The Linux x86-64 CPython 3.11.15 wheel passed 648 installed tests, including 53 
 ## 2026-11-24 EPUB fixed-layout spreads and visual PDF
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 652 installed tests, including 57 EPUB tests. It measured 22,737,576 bytes with a 52,829,608-byte native extension. The ten-page *Page Blanche* EPUB rendered in landscape and portrait and exported to an image-only PDF at its source viewports. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-fixed-layout-spreads-and-visual-pdf) for exact check results.
+
+## 2026-11-24 EPUB streamed and seekable media overlays
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 656 installed tests, including 61 EPUB tests. It measured 22,742,307 bytes with a 52,838,312-byte native extension. The playback tests verify bounded WAV, MP3 and AAC-LC chunks, chapter cue seeking, and Xing/Info presentation timing. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-streamed-and-seekable-media-overlay-playback) for exact checks and the reference audio comparison.

@@ -33,7 +33,7 @@
 5. Shape XHTML text with archive-local CSS font faces in a chapter-scoped collection, including static TrueType, OpenType, WOFF and WOFF2, and IDPF-obfuscated fonts. Retain inline image and equation placement and table spans. Render validated static SVG content in XHTML and rasterize it in semantic exports.
 6. Render local SVG CSS from prolog stylesheet instructions and embedded styles. Resolve CSS imports, packaged fonts and referenced PNG or JPEG images inside the archive. Exercise the SVG rendition in spine pages, XHTML images and semantic export while preserving the original SVG payload.
 7. Preserve inherited MathML run size, color and variant, and project supported accents, movable limits, tensor indices, separators and spacing into editable equations. Retain annotations in source markup and extract text from the primary presentation.
-8. Decode local PCM WAVE, MPEG Layer III, and AAC-LC MP4 overlay audio to bounded PCM clips with the SMIL interval and target. Provide readable narration for text-only cues and a sequential playback API with synchronized target callbacks.
+8. Decode local PCM WAVE, MPEG Layer III, and AAC-LC MP4 overlay audio to bounded PCM clips with the SMIL interval and target. Apply supported Xing/Info encoder delay and padding to MP3 timing. Provide readable narration for text-only cues, allow playback to start at a chapter cue index, and stream long audio cues in bounded chunks while holding their target active.
 9. Full source CSS and fixed-layout fidelity, richer MathML layout, remaining overlay codecs and playback controls, arbitrary authored SMIL hierarchies and edits to obfuscated resources remain open. DRM, script execution and unlisted conversion pairs remain outside the scope.
 
 ## Verification

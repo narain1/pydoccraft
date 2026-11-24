@@ -6,7 +6,7 @@ use oxideav_aac::{asc::AudioSpecificConfig, decode::StreamDecoder};
 use oxideav_core::{CodecRegistry, Demuxer, MediaType};
 use oxideav_mp4::{boxes::read_box_header, demux::open_typed};
 
-use super::{frame_at, invalid, limited, unsupported, EngineError, MAX_CLIP_SAMPLES};
+use super::{invalid, limited, unsupported, EngineError, MAX_CLIP_SAMPLES};
 
 const MAX_METADATA_BYTES: usize = 4 * 1024 * 1024;
 const MAX_ACCESS_UNITS: usize = 250_000;
@@ -174,22 +174,16 @@ impl Track {
         self.pcm.clear();
     }
 
-    pub(super) fn samples(
-        &mut self,
-        begin: u64,
-        end: Option<u64>,
-    ) -> Result<(WavSpec, Vec<i16>), EngineError> {
+    pub(super) fn spec(&self) -> WavSpec {
+        self.spec
+    }
+
+    pub(super) fn frames(&self) -> usize {
+        self.media.len()
+    }
+
+    pub(super) fn samples(&mut self, start: usize, stop: usize) -> Result<Vec<i16>, EngineError> {
         let rate = self.spec.sample_rate;
-        let start = frame_at(begin, rate)?;
-        let stop = end
-            .map(|time| frame_at(time, rate))
-            .transpose()?
-            .unwrap_or(self.media.len());
-        if start >= stop || stop > self.media.len() {
-            return Err(invalid(
-                "media-overlay audio clip lies outside its MP4 resource",
-            ));
-        }
         let channels = usize::from(self.spec.channels);
         if stop - start > MAX_CLIP_SAMPLES / channels {
             return Err(limited("media-overlay audio clip exceeds 16 MiB of PCM"));
@@ -237,7 +231,7 @@ impl Track {
             let right = (stop - base).min(per_packet) * channels;
             samples.extend_from_slice(&self.pcm[left..right]);
         }
-        Ok((self.spec, samples))
+        Ok(samples)
     }
 }
 

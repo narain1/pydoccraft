@@ -401,10 +401,34 @@ impl NativeEpubAudio {
         py: Python<'_>,
         begin: u64,
         end: Option<u64>,
-    ) -> Result<(Vec<u8>, u32, u16, usize), EngineError> {
-        let clip = py.allow_threads(|| self.0.clip(begin, end))?;
-        Ok((clip.wave, clip.sample_rate, clip.channels, clip.frames))
+    ) -> Result<PcmClip, EngineError> {
+        py.allow_threads(|| self.0.clip(begin, end)).map(pcm_clip)
     }
+
+    #[pyo3(signature = (begin, end))]
+    fn start_stream(
+        &mut self,
+        py: Python<'_>,
+        begin: u64,
+        end: Option<u64>,
+    ) -> Result<(), EngineError> {
+        py.allow_threads(|| self.0.start_stream(begin, end))
+    }
+
+    fn next_chunk(
+        &mut self,
+        py: Python<'_>,
+        frames: usize,
+    ) -> Result<Option<PcmClip>, EngineError> {
+        py.allow_threads(|| self.0.next_chunk(frames))
+            .map(|chunk| chunk.map(pcm_clip))
+    }
+}
+
+type PcmClip = (Vec<u8>, u32, u16, usize);
+
+fn pcm_clip(clip: crate::epub::audio::AudioClip) -> PcmClip {
+    (clip.wave, clip.sample_rate, clip.channels, clip.frames)
 }
 
 #[pyfunction]
