@@ -1,5 +1,5 @@
 //! Translate the EPUB CSS cascade into typography and box layout inputs.
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use roxmltree::{Node, NodeId};
 use taffy::{
@@ -38,6 +38,7 @@ pub(super) struct Styled {
 #[derive(Clone, Default)]
 pub(super) struct Typography {
     pub chars: CharProps,
+    pub families: Arc<[css::Family]>,
     pub align: Option<Align>,
     pub line_height: Option<LineSpacing>,
     pub preformatted: bool,
@@ -54,6 +55,7 @@ impl ChapterStyles {
         let mut formula_end = 0;
         let mut annotation_end = 0;
         let mut equation_bytes = 0;
+        let mut font_values = HashMap::new();
         for node in root.descendants().filter(Node::is_element) {
             let range = node.range();
             if range.start < annotation_end {
@@ -94,7 +96,13 @@ impl ChapterStyles {
                 .parent_element()
                 .and_then(|parent| styles.boxes.get(&parent.id()));
             let mut text = parent.map(|parent| parent.text.clone()).unwrap_or_default();
-            text.apply(node, &values, viewport);
+            let font = values.get("font-family").and_then(|source| {
+                font_values
+                    .entry(source.clone())
+                    .or_insert_with(|| css::parse_font_family(source))
+                    .as_ref()
+            });
+            text.apply(node, &values, viewport, font);
             let tag = node.tag_name().name();
             let position = match value(&values, "position") {
                 "fixed" => Position::Fixed,
@@ -313,7 +321,13 @@ impl ChapterStyles {
 }
 
 impl Typography {
-    fn apply(&mut self, node: Node<'_, '_>, values: &Properties, viewport: [f32; 2]) {
+    fn apply(
+        &mut self,
+        node: Node<'_, '_>,
+        values: &Properties,
+        viewport: [f32; 2],
+        font: Option<&css::FontFamilyValue>,
+    ) {
         let tag = node.tag_name().name();
         let size = self.chars.size.unwrap_or(12.0);
         if let Some(new_size) = css::points(value(values, "font-size"), size, viewport)
@@ -334,22 +348,32 @@ impl Typography {
                 self.chars.size = Some(size * heading_size);
             }
         }
-        if let Some(name) = values
-            .get("font-family")
-            .and_then(|fonts| fonts.split(',').next())
-        {
-            let name = name.trim_matches(|c: char| c.is_whitespace() || matches!(c, '\'' | '"'));
-            self.chars.font = Some(
-                match name {
-                    "serif" => "Times New Roman",
-                    "sans-serif" | "system-ui" => "Arial",
-                    "monospace" => "Courier New",
-                    _ => name,
-                }
-                .to_owned(),
-            );
-        } else if matches!(tag, "pre" | "code" | "kbd" | "samp") {
-            self.chars.font = Some("Courier New".to_owned());
+        match font {
+            Some(css::FontFamilyValue::Families(families)) => {
+                let family = &families[0];
+                let name = if family.generic {
+                    match family.name.as_str() {
+                        "serif" | "ui-serif" => "Times New Roman",
+                        "sans-serif" | "system-ui" | "ui-sans-serif" => "Arial",
+                        "monospace" | "ui-monospace" => "Courier New",
+                        _ => &family.name,
+                    }
+                } else {
+                    &family.name
+                };
+                self.chars.font = Some(name.to_owned());
+                self.families = families.clone();
+            }
+            Some(css::FontFamilyValue::Initial) => {
+                self.chars.font = None;
+                self.families = Arc::default();
+            }
+            Some(css::FontFamilyValue::Inherit) => {}
+            None if matches!(tag, "pre" | "code" | "kbd" | "samp") => {
+                self.chars.font = Some("Courier New".to_owned());
+                self.families = Arc::default();
+            }
+            None => {}
         }
         self.chars.bold = match value(values, "font-weight") {
             "bold" | "bolder" => Some(true),

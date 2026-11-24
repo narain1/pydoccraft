@@ -68,7 +68,7 @@ struct Inline {
     links: Vec<LinkPayload>,
     images: Vec<ImagePayload>,
     math: Vec<serde_json::Value>,
-    styles: Vec<(usize, usize, wordcraft_doc::CharProps)>,
+    styles: Vec<(usize, usize, super::output::RunStyle)>,
 }
 
 impl Inline {
@@ -110,7 +110,10 @@ impl Inline {
                 props.hidden = Some(true);
             }
             if let Some((_, end, last)) = self.styles.last_mut() {
-                if *end == start && *last == props {
+                if *end == start
+                    && last.chars == props
+                    && last.families.as_slice() == typography.families.as_ref()
+                {
                     *end = self.characters;
                     return Ok(());
                 }
@@ -123,7 +126,17 @@ impl Inline {
                     .map_or(0, String::len)
                     .saturating_add(256),
             )?;
-            self.styles.push((start, self.characters, props));
+            for family in typography.families.iter() {
+                budget.bytes(48 + family.name.len().saturating_mul(3))?;
+            }
+            self.styles.push((
+                start,
+                self.characters,
+                super::output::RunStyle {
+                    chars: props,
+                    families: typography.families.to_vec(),
+                },
+            ));
         }
         Ok(())
     }

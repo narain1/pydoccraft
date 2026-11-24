@@ -2,8 +2,10 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use parley::fontique::GenericFamily;
 use raffia::{ast::*, Parser, Spanned, Syntax};
 use roxmltree::Node;
+use serde::{Deserialize, Serialize};
 
 use super::{charge, external, invalid, limited, name, resolve, unsupported, Book, XHTML};
 use crate::EngineError;
@@ -440,13 +442,20 @@ fn font_face(
         .into_iter()
         .map(|(key, value, _)| (key, value))
         .collect();
-    let Some(family) = values
-        .get("font-family")
-        .map(|family| family.trim_matches(['\'', '"']))
-    else {
+    let Some(family) = values.get("font-family") else {
         return Ok(None);
     };
-    if family.is_empty() || family.len() > 255 || family.contains(',') {
+    let Some(FontFamilyValue::Families(families)) = parse_font_family(family) else {
+        return Err(invalid("invalid EPUB font-face family"));
+    };
+    let [Family {
+        name: family,
+        generic: false,
+    }] = families.as_ref()
+    else {
+        return Err(invalid("invalid EPUB font-face family"));
+    };
+    if family.len() > 255 {
         return Err(invalid("invalid EPUB font-face family"));
     }
     let mut urls = Vec::new();
@@ -497,13 +506,88 @@ fn font_face(
         _ => None,
     };
     Ok(Some(super::fonts::Face {
-        family: family.into(),
+        family: family.clone(),
         base: base.into(),
         urls,
         weight,
         style,
         unicode_ranges,
     }))
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(super) struct Family {
+    pub name: String,
+    pub generic: bool,
+}
+
+#[derive(Clone)]
+pub(super) enum FontFamilyValue {
+    Families(Arc<[Family]>),
+    Inherit,
+    Initial,
+}
+
+pub(super) fn parse_font_family(source: &str) -> Option<FontFamilyValue> {
+    let declaration = format!("font-family:{source}");
+    let declaration = Parser::new(&declaration, Syntax::Css)
+        .parse::<Declaration>()
+        .ok()?;
+    font_family_value(&declaration.value)
+}
+
+fn font_family_value(values: &[ComponentValue<'_>]) -> Option<FontFamilyValue> {
+    if let [ComponentValue::InterpolableIdent(value)] = values {
+        match ident(value)?.to_ascii_lowercase().as_str() {
+            "inherit" | "unset" => return Some(FontFamilyValue::Inherit),
+            "initial" | "revert" | "revert-layer" => return Some(FontFamilyValue::Initial),
+            _ => {}
+        }
+    }
+    let mut families = Vec::new();
+    for entry in values.split(|value| {
+        matches!(
+            value,
+            ComponentValue::Delimiter(Delimiter {
+                kind: DelimiterKind::Comma,
+                ..
+            })
+        )
+    }) {
+        let (name, generic) = if let [ComponentValue::InterpolableStr(value)] = entry {
+            (string_value(value)?.to_owned(), false)
+        } else {
+            let mut words = Vec::new();
+            for value in entry {
+                let ComponentValue::InterpolableIdent(value) = value else {
+                    return None;
+                };
+                let name = ident(value)?;
+                if matches!(
+                    name.to_ascii_lowercase().as_str(),
+                    "initial" | "inherit" | "unset" | "revert" | "revert-layer" | "default"
+                ) {
+                    return None;
+                }
+                words.push(name);
+            }
+            let name = words.join(" ");
+            let generic = GenericFamily::parse(&name.to_ascii_lowercase()).is_some();
+            (name, generic)
+        };
+        if name.is_empty() {
+            return None;
+        }
+        families.push(Family {
+            name: if generic {
+                name.to_ascii_lowercase()
+            } else {
+                name
+            },
+            generic,
+        });
+    }
+    Some(FontFamilyValue::Families(families.into()))
 }
 
 fn unicode_range_list(
@@ -562,6 +646,9 @@ fn declarations(
             return Err(limited("EPUB CSS declarations exceed their budget"));
         }
         let key = key.to_ascii_lowercase();
+        if key == "font-family" && font_family_value(&declaration.value).is_none() {
+            continue;
+        }
         let important = declaration.important.is_some();
         if matches!(
             key.as_str(),

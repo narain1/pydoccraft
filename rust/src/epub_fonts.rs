@@ -1,9 +1,14 @@
 //! Shape EPUB text with scoped archive fonts and bundled fallback faces.
-use std::{cell::RefCell, collections::HashSet, ops::Range, sync::Arc};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    ops::Range,
+    sync::Arc,
+};
 
 use kurbo::BezPath;
 use parley::{
-    fontique::{Blob, FontInfoOverride},
+    fontique::{Blob, FontInfoOverride, GenericFamily},
     Alignment, AlignmentOptions, BaseDirection, FontContext, FontFamily, FontFamilyName, FontStyle,
     FontWeight, InlineBox, InlineBoxKind, Layout, LayoutContext, LineHeight, PositionedLayoutItem,
     StyleProperty,
@@ -25,7 +30,9 @@ use wordcraft_layout::{
 use super::{
     charge, external, invalid, limited,
     math::Equation,
-    output::{has_spanning_table, inline_items, CssParagraph, Inline, Output, StyledText},
+    output::{
+        has_spanning_table, inline_items, CssParagraph, Inline, Output, RunStyle, StyledText,
+    },
     resolve,
     style::Styles,
     unsupported, Book,
@@ -48,7 +55,7 @@ pub(super) struct Face {
 }
 
 pub(super) struct Fonts {
-    names: HashSet<String>,
+    names: HashMap<String, String>,
     fonts: FontContext,
     layout: LayoutContext<Brush>,
     shaping_bytes: usize,
@@ -57,7 +64,7 @@ pub(super) struct Fonts {
 impl Fonts {
     fn empty() -> Self {
         Self {
-            names: HashSet::new(),
+            names: HashMap::new(),
             fonts: FontContext::new(),
             layout: LayoutContext::new(),
             shaping_bytes: 0,
@@ -83,21 +90,27 @@ impl Fonts {
         styles: &Styles,
         book: &mut Book<'_>,
     ) -> Result<Option<Self>, EngineError> {
-        if faces.is_empty() {
-            return Ok(None);
+        let mut used = HashSet::new();
+        let mut needs_stack = false;
+        for style in styles.values().filter(|style| !style.hidden) {
+            let families = &style.text.families;
+            needs_stack |= families.len() > 1;
+            if families.is_empty() {
+                if let Some(name) = &style.text.chars.font {
+                    used.insert(name.to_ascii_lowercase());
+                }
+            } else {
+                used.extend(
+                    families
+                        .iter()
+                        .filter(|family| !family.generic)
+                        .map(|family| family.name.to_ascii_lowercase()),
+                );
+            }
         }
-        let used: HashSet<_> = styles
-            .values()
-            .filter(|style| !style.hidden)
-            .filter_map(|style| {
-                style
-                    .text
-                    .chars
-                    .font
-                    .as_deref()
-                    .map(str::to_ascii_lowercase)
-            })
-            .collect();
+        if faces.is_empty() {
+            return Ok(needs_stack.then(Self::bundled));
+        }
         let mut result = Self::empty();
         let mut budget = 0;
         let mut mapping_work = 0;
@@ -119,8 +132,15 @@ impl Fonts {
                 16 * 1024 * 1024,
                 "EPUB decoded fonts exceed 16 MiB",
             )?;
+            // Keep author families separate from bundled names so a glyph outside
+            // an author face's range can reach the next family on the CSS list.
+            let family = result
+                .names
+                .get(&key)
+                .cloned()
+                .unwrap_or_else(|| format!("\0EPUB font family {}", result.names.len()));
             let overrides = Some(FontInfoOverride {
-                family_name: Some(&face.family),
+                family_name: Some(&family),
                 weight: Some(FontWeight::new(weight)),
                 style: Some(style),
                 ..Default::default()
@@ -133,7 +153,7 @@ impl Fonts {
                 if registrations.is_empty() {
                     return Err(invalid("EPUB font-face has no usable font"));
                 }
-                result.names.insert(key.clone());
+                result.names.insert(key.clone(), family.clone());
                 Ok(())
             };
             match face.unicode_ranges.as_deref() {
@@ -149,7 +169,7 @@ impl Fonts {
                 })?,
             }
         }
-        if result.names.is_empty() {
+        if result.names.is_empty() && !needs_stack {
             return Ok(None);
         }
         result.register_bundled();
@@ -170,10 +190,19 @@ impl Fonts {
             return Ok(true);
         }
         Ok(StyledText::new(block)?.spans.iter().any(|(_, _, style)| {
-            style
-                .font
-                .as_deref()
-                .is_some_and(|name| self.names.contains(&name.to_ascii_lowercase()))
+            if style.families.is_empty() {
+                style
+                    .chars
+                    .font
+                    .as_deref()
+                    .is_some_and(|name| self.names.contains_key(&name.to_ascii_lowercase()))
+            } else {
+                style.families.len() > 1
+                    || style.families.iter().any(|family| {
+                        !family.generic
+                            && self.names.contains_key(&family.name.to_ascii_lowercase())
+                    })
+            }
         }))
     }
 
@@ -286,25 +315,38 @@ impl Fonts {
                 Align::Justify | Align::Distribute => Alignment::Justify,
             };
         }
-        for (range, style) in spans {
-            if let Some(name) = style.font.as_deref() {
-                let family = if self.names.contains(&name.to_ascii_lowercase()) {
-                    name
-                } else {
-                    match name {
-                        "Arial" => "Source Sans 3",
-                        "Times New Roman" => "Source Serif 4",
-                        _ => name,
+        for (range, run) in spans {
+            let style = &run.chars;
+            let mut families: Vec<_> = run
+                .families
+                .iter()
+                .map(|family| {
+                    if family.generic {
+                        match family.name.as_str() {
+                            "serif" | "ui-serif" => FontFamilyName::named("Source Serif 4"),
+                            "sans-serif" | "system-ui" | "ui-sans-serif" => {
+                                FontFamilyName::named("Source Sans 3")
+                            }
+                            "monospace" | "ui-monospace" => FontFamilyName::named("JetBrains Mono"),
+                            name => GenericFamily::parse(name).map_or_else(
+                                || FontFamilyName::named(name),
+                                FontFamilyName::Generic,
+                            ),
+                        }
+                    } else {
+                        named_family(&self.names, &family.name)
                     }
-                };
+                })
+                .collect();
+            if families.is_empty() {
+                if let Some(name) = style.font.as_deref() {
+                    families.push(named_family(&self.names, name));
+                }
+            }
+            if !families.is_empty() {
+                families.push(FontFamilyName::named("Source Sans 3"));
                 builder.push(
-                    StyleProperty::FontFamily(FontFamily::List(
-                        vec![
-                            FontFamilyName::named(family),
-                            FontFamilyName::named("Source Sans 3"),
-                        ]
-                        .into(),
-                    )),
+                    StyleProperty::FontFamily(FontFamily::List(families.into())),
                     range.clone(),
                 );
             }
@@ -360,11 +402,25 @@ struct Fragment {
     items: Vec<Draw>,
 }
 
+fn named_family<'a>(packaged: &'a HashMap<String, String>, name: &'a str) -> FontFamilyName<'a> {
+    let lower = name.to_ascii_lowercase();
+    FontFamilyName::named(if let Some(alias) = packaged.get(&lower) {
+        alias
+    } else {
+        match lower.as_str() {
+            "arial" => "Source Sans 3",
+            "times new roman" => "Source Serif 4",
+            "courier new" => "JetBrains Mono",
+            _ => name,
+        }
+    })
+}
+
 fn append_span<'a>(
     source: &'a StyledText<'_>,
     range: Range<usize>,
     text: &mut String,
-    spans: &mut Vec<(Range<usize>, &'a CharProps)>,
+    spans: &mut Vec<(Range<usize>, &'a RunStyle)>,
 ) {
     if range.is_empty() {
         return;

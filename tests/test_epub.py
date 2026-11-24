@@ -759,6 +759,37 @@ class EpubTests(unittest.TestCase):
         with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "font table count"):
             preview(first + second + " p {font-family: Composite}", "AAAABBBBX")
 
+    def test_epub_font_stacks_follow_declared_order_and_inherit(self) -> None:
+        inter = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
+
+        def preview(family: str, faces: str = "", child: str = "") -> bytes:
+            chapter = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><style>
+              {faces}
+              body {{margin:0; font-size:40px; line-height:60px; font-family:{family}}}
+              p {{margin:0}} {child}
+              </style></head><body><p><span>AAAA</span></p><p>BBBB</p></body></html>"""
+            source = rewrite_epub(epub_fixture(chapter_one=chapter), {"OEBPS/inter.ttf": inter})
+            with doc_ex.open(source) as book:
+                return book.render_page(0, dpi=96)
+
+        faces = """
+          @font-face {font-family: First; src: url(inter.ttf); unicode-range: U+0041}
+          @font-face {font-family: "Other, Face"; src: url(inter.ttf)}
+          @font-face {font-family: "monospace"; src: url(inter.ttf)}
+        """
+        full_face = preview('"Other, Face"', faces)
+        self.assertEqual(preview('Missing, First, "Other, Face", monospace', faces), full_face)
+        self.assertEqual(preview(r'Missing, Other\,\ Face, monospace', faces), full_face)
+        self.assertEqual(preview('First, "Other, Face"', faces, 'span {font-family: inherit}'), full_face)
+
+        generic = preview("Missing, monospace")
+        self.assertEqual(preview('monospace, "Other, Face"', faces), generic)
+        self.assertNotEqual(generic, full_face)
+        self.assertEqual(preview('"monospace", monospace', faces), full_face)
+        colliding = faces.replace("font-family: First", 'font-family: "Source Sans 3"')
+        self.assertEqual(preview('"Source Sans 3", "Other, Face"', colliding), full_face)
+        self.assertNotEqual(preview("Missing, sans-serif"), generic)
+
     def test_epub_packaged_fonts_preserve_inline_svg_and_math(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"
           xmlns:m="http://www.w3.org/1998/Math/MathML" xmlns:s="http://www.w3.org/2000/svg"><head>

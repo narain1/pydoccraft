@@ -465,10 +465,16 @@ impl CssParagraph {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(super) struct RunStyle {
+    pub chars: CharProps,
+    pub families: Vec<super::css::Family>,
+}
+
 pub(super) struct StyledText<'a> {
     pub value: &'a str,
     pub offsets: Vec<usize>,
-    pub spans: Vec<(usize, usize, CharProps)>,
+    pub spans: Vec<(usize, usize, RunStyle)>,
 }
 
 impl<'a> StyledText<'a> {
@@ -498,7 +504,7 @@ impl<'a> StyledText<'a> {
         self.spans
             .get(position)
             .filter(|(start, _, _)| *start <= offset)
-            .map(|(_, _, style)| style.clone())
+            .map(|(_, _, style)| style.chars.clone())
             .unwrap_or_default()
     }
 
@@ -522,7 +528,7 @@ impl<'a> StyledText<'a> {
                 cursor = *span_start;
             }
             let stop = end.min(*span_end);
-            self.insert_run(paragraph, cursor, stop, link, style.clone())?;
+            self.insert_run(paragraph, cursor, stop, link, style.chars.clone())?;
             cursor = stop;
         }
         self.insert_run(paragraph, cursor, end, link, CharProps::default())

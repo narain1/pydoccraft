@@ -345,7 +345,7 @@ impl<'book> Layout<'book> {
                 local = Some(Contents::Image(picture, source.alt));
             } else if name(node, XHTML, "table") {
                 let blocks = content::layout_piece(node, &[], context)?;
-                if self.uses_packaged_fonts(&blocks)? {
+                if self.uses_shaped_text(&blocks)? {
                     let table = blocks
                         .iter()
                         .find_map(|block| block.table.as_ref())
@@ -486,10 +486,7 @@ impl<'book> Layout<'book> {
         Ok(children)
     }
 
-    fn uses_packaged_fonts(
-        &self,
-        blocks: &[crate::model::BlockPayload],
-    ) -> Result<bool, EngineError> {
+    fn uses_shaped_text(&self, blocks: &[crate::model::BlockPayload]) -> Result<bool, EngineError> {
         if let Some(fonts) = &self.fonts {
             for block in blocks {
                 if fonts.used_in(block)? {

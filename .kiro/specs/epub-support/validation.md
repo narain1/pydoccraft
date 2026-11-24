@@ -321,3 +321,13 @@ The root and Node lockfiles now record a direct dependency on the already-resolv
 The Linux x86-64 CPython 3.11.15 release wheel passed 674 installed tests, including 79 EPUB tests, with zero failures, errors or skips. The wheel measured 23,069,375 bytes and its native extension measured 53,562,792 bytes. Wheel SHA-256 is `efd46ca8cba31bdd96cc3cd5791867e2b48dc07ab643f5e476c61be173d9b56d`. The audit also verified the three license files packaged in the wheel.
 
 Rust 1.95 formatting and warnings-denied all-target Clippy passed. The locked default suite passed 478 unit tests and 7 integration tests. The Python-free suite passed 401 unit tests and 8 integration tests. All 17 Node 22.22.1 preview tests passed. Public typing, documentation links, support evidence and roadmap checks passed. Cleanup removed about 6.1 GiB of Cargo output, the temporary wheels, Node addon and site build.
+
+## 2026-11-24 EPUB XHTML font-family stacks
+
+The regression compares rendered pixels with single-family controls. It checks inherited lists, unavailable names, Unicode coverage gaps in the first face, quoted and escaped commas, generic precedence, and a quoted name identical to a generic keyword. An author face named like a bundled font still passes uncovered characters to the next declared family. [CSS font-family matching](https://www.w3.org/TR/css-fonts-4/#font-family-prop)
+
+A 320 × 120 fixed-layout preview using a fallback stack matched its single-family control. The converted visual PDF reopened and rendered at the same dimensions. All 94 chapters of the unmodified *Linear Algebra* EPUB rendered at 24 DPI. The sample SHA-256 remains `87e523d8e16c2d1f4b211b47c0495841687a3573c828d3ef36b1f77f91b2abd4`. [EPUB 3 sample table](https://idpf.github.io/epub3-samples/30/samples.html)
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 675 installed tests, including 80 EPUB tests, with zero failures, errors or skips. The wheel measured 23,066,712 bytes and its native extension measured 53,554,920 bytes. Wheel SHA-256 is `cd48309f4d587296ff0a41ae601c2bcfd7fdc401577091d3b70d957d24392861`. Both lockfiles and all upstream revisions match the previous checkpoint. License audits reviewed 341 core and 315 Node packages and verified the wheel's license files.
+
+Rust 1.95 formatting and warnings-denied all-target Clippy passed. The locked default suite passed 478 unit tests and 7 integration tests. The Python-free suite passed 401 unit tests and 8 integration tests. All 17 Node 22.22.1 preview tests passed. Public typing, documentation links, support evidence and roadmap checks passed. Cleanup removed about 4.9 GiB of Cargo output, the temporary wheel, Node addon, site build and public sample archive.
