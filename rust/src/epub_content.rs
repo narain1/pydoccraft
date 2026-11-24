@@ -702,7 +702,7 @@ fn svg_image(
     Ok(image)
 }
 
-pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<(), EngineError> {
+pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<bool, EngineError> {
     if root.tag_name().namespace() != Some(SVG) || root.tag_name().name() != "svg" {
         return Err(invalid("image is not SVG"));
     }
@@ -738,6 +738,7 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<(),
                         | "g"
                         | "defs"
                         | "symbol"
+                        | "use"
                         | "title"
                         | "desc"
                         | "path"
@@ -771,6 +772,13 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<(),
                 && matches!(attribute.namespace(), None | Some(super::svg::XLINK))
             {
                 super::svg::resource_path(base.unwrap_or_default(), value)?;
+                continue;
+            }
+            if tag == "use"
+                && key == "href"
+                && matches!(attribute.namespace(), None | Some(super::svg::XLINK))
+            {
+                super::svg::use_refs::href_id(value)?;
                 continue;
             }
             let static_attribute = match attribute.namespace() {
@@ -894,7 +902,7 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<(),
             }
         }
     }
-    Ok(())
+    super::svg::use_refs::validate_use_graph(root)
 }
 
 // Reattach inherited namespace bindings to a detached fragment.

@@ -2435,6 +2435,88 @@ class EpubTests(unittest.TestCase):
                 self.assertEqual(struct.unpack_from(">II", png, 16), (100, 80))
                 self.assertIn(bytes.fromhex("e62c1aff"), rgba_pixels(png_chunks(png))[1])
 
+    def test_svg_use_preserves_nested_references_and_symbol_geometry(self) -> None:
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+              width="128" height="80" viewBox="0 0 128 80"><title>Reuse</title>
+          <defs>
+            <rect id="tile" width="10" height="10"/>
+            <g id="pair"><use href="#tile"/><use href="#tile" x="12"/></g>
+            <symbol id="écu" viewBox="0 0 12 8">
+              <rect width="12" height="8" fill="#148644"/>
+            </symbol>
+          </defs>
+          <use xlink:href="#pair" x="2" y="2" fill="#d82d44"/>
+          <use xlink:href="#pair" href="#tile" x="40" y="10" fill="#193ca8"/>
+          <use href="#écu" x="70" y="10" width="24" height="16"/>
+          </svg>"""
+        chapter = doc_ex.EpubSvgChapterSource("Reuse", svg, "OEBPS/Art/reuse.svg")
+        with doc_ex.open(epub_fixture()) as original:
+            archived = original.edit_epub_structure([chapter, 0])
+
+        def check_image(png: bytes) -> None:
+            self.assertEqual(struct.unpack_from(">II", png, 16), (128, 80))
+            width, data = rgba_pixels(png_chunks(png))
+            for x, y, color in ((3, 3, "d82d44"), (15, 3, "d82d44"), (43, 15, "193ca8"),
+                                (54, 15, "ffffff"), (90, 23, "148644")):
+                offset = (x + y * width) * 4
+                self.assertEqual(data[offset:offset + 4], bytes.fromhex(color + "ff"))
+
+        with doc_ex.open(archived) as book:
+            self.assertEqual(book.read_epub_resource("OEBPS/Art/reuse.svg"), svg.encode())
+            self.assertEqual(book[0].get_images()[0].alt, "Reuse")
+            check_image(book.render_page(0, dpi=96))
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, pages=[0])) as pdf:
+                check_image(pdf.render_page(0, dpi=96))
+
+        xhtml = ('<html xmlns="http://www.w3.org/1999/xhtml"><body><p>'
+                 + svg + "</p></body></html>")
+        with doc_ex.open(epub_fixture(chapter_one=xhtml)) as book:
+            self.assertEqual(book[0].get_images()[0].alt, "Reuse")
+            for converted in (book.convert("docx"), book.convert("pdf")):
+                with doc_ex.open(converted) as reopened:
+                    _, pixels = rgba_pixels(png_chunks(reopened.render_page(0, dpi=96)))
+                    for color in ("d82d44", "193ca8", "148644"):
+                        self.assertIn(bytes.fromhex(color + "ff"), pixels)
+
+    def test_svg_use_rejects_unsafe_or_unbounded_references(self) -> None:
+        def svg(body: str) -> str:
+            return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 48">'
+                    + body + "</svg>")
+
+        with doc_ex.open(epub_fixture()) as book:
+            invalid_marks = [
+                ('<use href="art.svg#a"/>', doc_ex.UnsupportedFormatError, "same-document"),
+                ('<use href="https://example.invalid/a.svg#a"/>', doc_ex.UnsupportedFormatError, "same-document"),
+                ('<use/>', doc_ex.MalformedDocumentError, "no href"),
+                ('<use href="#missing"/>', doc_ex.MalformedDocumentError, "missing ID"),
+                ('<g id="a"/><g id="a"/><use href="#a"/>', doc_ex.MalformedDocumentError, "duplicate ID"),
+                ('<g id="one"><use href="#two"/></g><g id="two"><use href="#one"/></g>',
+                 doc_ex.MalformedDocumentError, "cyclic SVG use"),
+            ]
+            for body, error, message in invalid_marks:
+                with self.subTest(message=message), self.assertRaisesRegex(error, message):
+                    book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Broken", svg(body)), 0])
+
+            tile = '<defs><rect id="layer0" width="2" height="2"/>'
+            for level in range(1, 18):
+                leaf = f'<use href="#layer{level - 1}"/>'
+                tile += f'<g id="layer{level}">{leaf}{leaf}</g>'
+            tile += '</defs><use href="#layer17"/>'
+            with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "size budget"):
+                book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Fanout", svg(tile)), 0])
+
+            deep = '<defs><rect id="part0" width="2" height="2"/>'
+            deep += "".join(f'<use id="part{n}" href="#part{n-1}"/>' for n in range(1, 50))
+            deep += '</defs><use href="#part49"/>'
+            with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "depth budget"):
+                book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Depth", svg(deep)), 0])
+
+            styles = "<style>#tile{stroke-dasharray:" + "1 " * 1500 + "}</style>"
+            fanout = (styles + '<defs><rect id="tile" width="2" height="2"/></defs>'
+                      + '<use href="#tile"/>' * 6000)
+            with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "size budget"):
+                book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Styles", svg(fanout)), 0])
+
     def test_svg_chapter_insertion_rejects_broken_renditions(self) -> None:
         svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><rect width="20" height="10"/></svg>'
         with doc_ex.open(epub_fixture()) as book:

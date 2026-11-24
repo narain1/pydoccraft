@@ -2839,3 +2839,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 681 installed tests, inclu
 ## 2026-11-24 CSS custom properties in EPUB previews
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 683 installed tests, including 88 EPUB tests. It measured 23,116,535 bytes with a 53,687,352-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-css-custom-properties-in-epub-previews) covers the cascade, expansion limits, SVG paint, and the complete Linear Algebra spine.
+
+## 2026-11-24 Same-document SVG use references
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 685 installed tests, including 90 EPUB tests. It measured 23,121,075 bytes with a 53,692,376-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-same-document-svg-use-references) covers reference expansion, reopened export geometry and public samples.

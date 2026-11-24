@@ -13,6 +13,9 @@ use super::{
 };
 use crate::{author_epub::escape_attribute, model::ImagePayload, EngineError};
 
+#[path = "epub_svg_use.rs"]
+pub(super) mod use_refs;
+
 pub(super) const NS: &str = "http://www.w3.org/2000/svg";
 pub(super) const XLINK: &str = "http://www.w3.org/1999/xlink";
 
@@ -165,7 +168,7 @@ fn parse(
     book: &mut Book<'_>,
     viewport: Option<[f32; 2]>,
 ) -> Result<usvg::Tree, EngineError> {
-    content::validate_svg(root, Some(base))?;
+    let has_uses = content::validate_svg(root, Some(base))?;
     let images = raster_images(root, base, book)?;
     let mut options = usvg::Options {
         image_href_resolver: usvg::ImageHrefResolver {
@@ -174,7 +177,7 @@ fn parse(
                 images.get(href).map(|(_, image)| image.clone())
             }),
         },
-        max_depth: 96,
+        max_depth: use_refs::MAX_DEPTH as u32,
         ..Default::default()
     };
     if let Some([w, h]) = viewport {
@@ -193,7 +196,14 @@ fn parse(
     {
         options.fontdb = font_database(&cascade.fonts, &families, book)?;
     }
-    usvg::Tree::from_data(&styled, &options).map_err(invalid)
+    if has_uses {
+        // Count computed style payload too, since usvg copies it into each clone.
+        let xml = super::parse_xml(&styled)?;
+        use_refs::validate_use_graph(xml.root_element())?;
+        usvg::Tree::from_xmltree(&xml, &options).map_err(invalid)
+    } else {
+        usvg::Tree::from_data(&styled, &options).map_err(invalid)
+    }
 }
 
 type FontNames = HashMap<String, HashSet<String>>;

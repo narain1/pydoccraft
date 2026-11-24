@@ -997,7 +997,7 @@ fn nav_target(
 
 pub(crate) fn validate_svg_resource(data: &[u8]) -> Result<(), EngineError> {
     let xml = parse_xml(data)?;
-    content::validate_svg(xml.root_element(), None)
+    content::validate_svg(xml.root_element(), None).map(|_| ())
 }
 
 pub(crate) fn read_resource(
