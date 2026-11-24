@@ -1850,6 +1850,85 @@ class EpubTests(unittest.TestCase):
                         self.assertEqual(first.count(value), 1, first)
                     self.assertTrue(reopened.render_page(0, dpi=96).startswith(b"\x89PNG"))
 
+    def test_mathml_nested_spanning_tables_preserve_layout_and_export(self) -> None:
+        def fixture(table: str) -> bytes:
+            return epub_fixture(chapter_one=f"""<html xmlns="http://www.w3.org/1999/xhtml"
+              xmlns:m="http://www.w3.org/1998/Math/MathML">
+              <head><style>body, p {{margin:0; font-size:24px}}
+              .inner {{color:#a32785}}</style></head>
+              <body><p><m:math>{table}</m:math></p></body></html>""")
+
+        inner = """<m:mstyle class="inner"><m:mtable rowspacing="8pt" columnspacing="12pt">
+          <m:mtr><m:mtd columnspan="2"><m:mtext>InnerHead</m:mtext></m:mtd></m:mtr>
+          <m:mtr><m:mtd mathcolor="#d52b37"><m:mtext>InnerLeft</m:mtext></m:mtd>
+            <m:mtd mathcolor="#158245"><m:mfrac><m:mtext>InnerRight</m:mtext>
+              <m:mn>7</m:mn></m:mfrac></m:mtd></m:mtr></m:mtable></m:mstyle>"""
+        outer = """<m:mtable columnspacing="14pt">
+          <m:mtr><m:mtd rowspan="2" rowalign="top">{}</m:mtd>
+            <m:mtd mathcolor="#1428d7"><m:mtext>OuterTop</m:mtext></m:mtd></m:mtr>
+          <m:mtr><m:mtd><m:mtext>OuterBottom</m:mtext></m:mtd></m:mtr></m:mtable>"""
+
+        with doc_ex.open(fixture(outer.format(inner))) as book:
+            tokens = ("InnerHead", "InnerLeft", "InnerRight", "OuterTop", "OuterBottom")
+            self.assertEqual(book[0].get_text(), "InnerHeadInnerLeftInnerRight7OuterTopOuterBottom")
+            width, pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+
+            def bounds(color: str) -> tuple[int, int, int, int]:
+                target = bytes.fromhex(color + "ff")
+                points = [(i // 4 % width, i // 4 // width) for i in range(0, len(pixels), 4)
+                          if pixels[i:i+4] == target]
+                self.assertTrue(points, color)
+                return min(x for x, _ in points), min(y for _, y in points), max(x for x, _ in points), max(y for _, y in points)
+
+            head, left, right, outside = map(bounds, ("a32785", "d52b37", "158245", "1428d7"))
+            self.assertLess(head[3], left[1])
+            self.assertLess(head[3], right[1])
+            self.assertLess(left[2], right[0])
+            self.assertLess(right[2], outside[0])
+
+            word = book.convert("docx")
+            with zipfile.ZipFile(io.BytesIO(word)) as archive:
+                document = ET.fromstring(archive.read("word/document.xml"))
+            ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+                  "m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+            outer_table = document.find("./w:body/w:tbl", ns)
+            self.assertIsNotNone(outer_table)
+            inner_table = outer_table.find("./w:tr/w:tc/w:tbl", ns)
+            self.assertIsNotNone(inner_table)
+            self.assertEqual(len(outer_table.findall("./w:tr/w:tc/w:tcPr/w:vMerge", ns)), 2)
+            self.assertEqual(inner_table.find(".//w:gridSpan", ns).get(f"{{{ns['w']}}}val"), "2")
+            self.assertEqual(len(inner_table.findall(".//m:oMath", ns)), 3)
+            self.assertEqual(len(inner_table.findall(".//m:f", ns)), 1)
+
+            for converted in (word, book.convert("pdf")):
+                with doc_ex.open(converted) as reopened:
+                    text = reopened[0].get_text()
+                    for token in tokens:
+                        self.assertEqual(text.count(token), 1, text)
+                    self.assertTrue(reopened.render_page(0, dpi=96).startswith(b"\x89PNG"))
+
+        invalid_span = inner.replace('columnspan="2"', 'rowspan="3"')
+        with doc_ex.open(fixture(outer.format(invalid_span))) as book:
+            with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "MathML table spans overlap"):
+                book.render_page(0, dpi=96)
+        with doc_ex.open(fixture(outer.format("<m:mrow><m:mi>x</m:mi>" + inner + "</m:mrow>"))) as book:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "sole expression"):
+                book.convert("docx")
+
+        deep = inner
+        for _ in range(9):
+            deep = outer.format(deep)
+        with doc_ex.open(fixture(deep)) as book:
+            with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "MathML structure"):
+                book.render_page(0, dpi=96)
+
+        sparse = ('<m:mtable><m:mtr><m:mtd columnspan="32"><m:mi>x</m:mi></m:mtd></m:mtr>'
+                  + '<m:mtr/>' * 127 + '</m:mtable>')
+        wide = '<m:mtable>' + f'<m:mtr><m:mtd>{sparse}</m:mtd></m:mtr>' * 13 + '</m:mtable>'
+        with doc_ex.open(fixture(wide)) as book:
+            with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "MathML table cells"):
+                book.render_page(0, dpi=96)
+
     def test_mathml_spanning_table_inline_preview_and_invalid_grid(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml"
           xmlns:m="http://www.w3.org/1998/Math/MathML"><head><title>Math spans</title></head>

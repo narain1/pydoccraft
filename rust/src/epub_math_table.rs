@@ -1,12 +1,12 @@
 //! Place native equation cells on a bounded MathML table grid.
-use std::ops::Range;
+use std::{ops::Range, sync::Arc};
 
 use roxmltree::Node;
 use wordcraft_doc::{
     math::{self, ColJc, Math},
     para::InlineObject,
     props::{Align, Borders, CharProps, HeightRule, TextColor},
-    Document, Paragraph, Table as NativeTable,
+    Block, Document, Paragraph, Table as NativeTable,
 };
 use wordcraft_fonts::math::{resolve_math, C};
 use wordcraft_layout::math::{layout_equation, MathLayout};
@@ -31,8 +31,13 @@ struct Cell {
     columns: Range<usize>,
     horizontal: ColJc,
     vertical: Vertical,
-    math: Math,
+    content: CellContent,
     format: CharProps,
+}
+
+enum CellContent {
+    Equation(Math),
+    Table(Table),
 }
 
 #[derive(Clone, Copy)]
@@ -45,7 +50,8 @@ enum Vertical {
 }
 
 pub(in crate::epub) fn has_spans(root: Node<'_, '_>) -> bool {
-    root.descendants().any(|node| {
+    // A spanning cell can contain a plain equation. Its own span belongs to the parent grid.
+    root.descendants().skip(1).any(|node| {
         node.has_tag_name((MATHML, "mtd"))
             && ["rowspan", "columnspan"].into_iter().any(|key| {
                 node.attribute(key)
@@ -58,7 +64,40 @@ pub(in crate::epub) fn has_spans(root: Node<'_, '_>) -> bool {
     })
 }
 
-pub(super) fn project<'xml>(
+pub(super) fn project_group<'xml>(
+    projection: &mut Projection<'_, 'xml>,
+    mut group: Node<'xml, '_>,
+    mut depth: usize,
+    mut style: Presentation<'xml>,
+) -> Result<Option<Table>, EngineError> {
+    if !has_spans(group) {
+        return Ok(None);
+    }
+    loop {
+        let mut children = group.children().filter(Node::is_element);
+        let Some(child) = children.next() else {
+            return Err(invalid("empty MathML spanning equation"));
+        };
+        if (!group.has_tag_name((MATHML, "semantics")) && children.next().is_some())
+            || child.tag_name().namespace() != Some(MATHML)
+        {
+            break;
+        }
+        depth += 1;
+        projection.charge(depth)?;
+        style = projection.style(child, style)?;
+        match child.tag_name().name() {
+            "mtable" => return project(projection, child, depth, style).map(Some),
+            "mrow" | "mstyle" | "semantics" => group = child,
+            _ => break,
+        }
+    }
+    Err(unsupported(
+        "a spanning MathML table must be the sole expression in a formula or table cell",
+    ))
+}
+
+fn project<'xml>(
     projection: &mut Projection<'_, 'xml>,
     table: Node<'xml, '_>,
     depth: usize,
@@ -102,7 +141,14 @@ pub(super) fn project<'xml>(
             occupied[column..right].fill(bottom);
             projection.charge(depth + 2)?;
             let style = projection.style(cell, row_style)?;
-            let nodes = math::merge_runs(projection.elements(cell, depth + 2, style)?);
+            let content = if let Some(nested) = project_group(projection, cell, depth + 2, style)? {
+                CellContent::Table(nested)
+            } else {
+                CellContent::Equation(Math {
+                    nodes: math::merge_runs(projection.elements(cell, depth + 2, style)?),
+                    ..Default::default()
+                })
+            };
             let horizontal = match cell
                 .attribute("columnalign")
                 .or_else(|| indexed(row.attribute("columnalign"), column))
@@ -132,10 +178,7 @@ pub(super) fn project<'xml>(
                 columns: column..right,
                 horizontal,
                 vertical,
-                math: Math {
-                    nodes,
-                    ..Default::default()
-                },
+                content,
                 format: CharProps {
                     size: Some(style.font_size()),
                     color: style.ink.map(TextColor::Rgb),
@@ -149,6 +192,13 @@ pub(super) fn project<'xml>(
     if column_count == 0 {
         return Err(invalid("MathML table has no cells"));
     }
+    // Native export materializes the full grid before merging, including
+    // entries implied by sparse rows and spanning cells.
+    let implicit_cells = rows.len() * column_count - cells.len();
+    *projection.remaining = projection
+        .remaining
+        .checked_sub(implicit_cells)
+        .ok_or_else(|| limited("MathML table cells exceed the layout budget"))?;
     let em = style.font_size();
     Ok(Table {
         cells,
@@ -202,10 +252,28 @@ pub(in crate::epub) struct Layout {
     pub width: f32,
     pub height: f32,
     pub baseline: f32,
-    pub cells: Vec<(f32, f32, MathLayout)>,
+    pub cells: Vec<(f32, f32, CellDrawing)>,
     widths: Vec<f32>,
     heights: Vec<f32>,
     row_positions: Vec<f32>,
+}
+
+pub(in crate::epub) enum CellDrawing {
+    Equation(MathLayout),
+    Table(Layout),
+}
+
+impl CellDrawing {
+    fn size(&self) -> (f32, f32, f32) {
+        match self {
+            Self::Equation(layout) => (layout.width, layout.ascent, layout.descent),
+            Self::Table(layout) => (
+                layout.width,
+                layout.baseline,
+                layout.height - layout.baseline,
+            ),
+        }
+    }
 }
 
 impl Table {
@@ -232,19 +300,22 @@ impl Table {
                 ..Default::default()
             };
             let resolved = doc.styles.resolve_char(None, &chars);
-            let measure = if cell.math.nodes.is_empty() {
-                MathLayout::default()
-            } else {
-                layout_equation(
-                    &cell.math,
+            let measure = match &cell.content {
+                CellContent::Table(table) => CellDrawing::Table(table.layout(doc, &chars)?),
+                CellContent::Equation(math) if math.nodes.is_empty() => {
+                    CellDrawing::Equation(MathLayout::default())
+                }
+                CellContent::Equation(math) => CellDrawing::Equation(layout_equation(
+                    math,
                     "",
                     &resolved,
                     false,
                     MAX_DIMENSION,
                     &Default::default(),
                     &mut 0,
-                )
+                )),
             };
+            let (_, cell_ascent, cell_descent) = measure.size();
             let offset = match cell.vertical {
                 Vertical::Baseline => Some(0.0),
                 Vertical::Axis => Some(resolved.draw_size() * axis_ratio - table_axis),
@@ -252,9 +323,9 @@ impl Table {
             };
             if let Some(offset) = offset {
                 let row = cell.rows.start;
-                ascent[row] = ascent[row].max(measure.ascent - offset);
+                ascent[row] = ascent[row].max(cell_ascent - offset);
                 if cell.rows.len() == 1 {
-                    descent[row] = descent[row].max(measure.descent + offset);
+                    descent[row] = descent[row].max(cell_descent + offset);
                 }
             }
             measures.push((measure, offset));
@@ -274,20 +345,19 @@ impl Table {
                 &mut widths,
                 &self.column_gaps,
                 &self.cells[index].columns,
-                measures[index].0.width,
+                measures[index].0.size().0,
             );
         }
         for index in ordered(|cell| cell.rows.len()) {
             let cell = &self.cells[index];
             let (measure, offset) = &measures[index];
-            let top = offset.map_or(0.0, |offset| {
-                ascent[cell.rows.start] + offset - measure.ascent
-            });
+            let (_, cell_ascent, cell_descent) = measure.size();
+            let top = offset.map_or(0.0, |offset| ascent[cell.rows.start] + offset - cell_ascent);
             grow(
                 &mut heights,
                 &self.row_gaps,
                 &cell.rows,
-                top + measure.ascent + measure.descent,
+                top + cell_ascent + cell_descent,
             );
         }
         let x = starts(&widths, &self.column_gaps);
@@ -305,10 +375,11 @@ impl Table {
             .iter()
             .zip(measures)
             .map(|(cell, (measure, offset))| {
+                let (cell_width, cell_ascent, cell_descent) = measure.size();
                 let horizontal_room =
-                    extent(&widths, &self.column_gaps, &cell.columns) - measure.width;
+                    extent(&widths, &self.column_gaps, &cell.columns) - cell_width;
                 let vertical_room =
-                    extent(&heights, &self.row_gaps, &cell.rows) - measure.ascent - measure.descent;
+                    extent(&heights, &self.row_gaps, &cell.rows) - cell_ascent - cell_descent;
                 let left = x[cell.columns.start]
                     + match cell.horizontal {
                         ColJc::Left => 0.0,
@@ -321,7 +392,7 @@ impl Table {
                         Vertical::Bottom => vertical_room,
                         Vertical::Center => vertical_room / 2.0,
                         Vertical::Baseline | Vertical::Axis => {
-                            ascent[cell.rows.start] + offset.unwrap_or_default() - measure.ascent
+                            ascent[cell.rows.start] + offset.unwrap_or_default() - cell_ascent
                         }
                     };
                 (left, top, measure)
@@ -346,11 +417,22 @@ impl Table {
         align: Option<Align>,
     ) -> Result<NativeTable, EngineError> {
         let layout = self.layout(doc, format)?;
+        let page = &doc.last_section;
+        let available_height = page.page_h - page.margin_top - page.margin_bottom;
+        self.export_layout(layout, format, available, available_height, align)
+    }
+
+    fn export_layout(
+        self,
+        layout: Layout,
+        format: &CharProps,
+        available: f32,
+        available_height: f32,
+        align: Option<Align>,
+    ) -> Result<NativeTable, EngineError> {
         let widths = margins_for_tracks(&layout.widths, &self.column_gaps);
         let heights = margins_for_tracks(&layout.heights, &self.row_gaps);
         let width = widths.iter().sum();
-        let page = &doc.last_section;
-        let available_height = page.page_h - page.margin_top - page.margin_bottom;
         if width > available || heights.iter().sum::<f32>() > available_height {
             return Err(unsupported(
                 "MathML spanning table exceeds the semantic export page",
@@ -372,7 +454,7 @@ impl Table {
                 cell.props.hide_mark = true;
             }
         }
-        for (cell, (_, top, _)) in self.cells.into_iter().zip(layout.cells) {
+        for (cell, (_, top, drawing)) in self.cells.into_iter().zip(layout.cells) {
             let row = cell.rows.start;
             let col = cell.columns.start;
             let last_row = cell.rows.end - 1;
@@ -384,38 +466,58 @@ impl Table {
                 .cell_at_grid(row, col)
                 .ok_or_else(|| invalid("missing MathML table cell"))?;
             let target = &mut native.rows[row].cells[native_col];
-            target.props.width = Some(native.grid[cell.columns].iter().sum());
+            let cell_width: f32 = native.grid[cell.columns].iter().sum();
+            target.props.width = Some(cell_width);
             target.props.no_wrap = true;
-            target.props.margins = Some([
+            let margins = [
                 (top - layout.row_positions[row]).max(0.0)
                     + side_gap(&self.row_gaps, row.checked_sub(1)),
                 side_gap(&self.column_gaps, col.checked_sub(1)),
                 side_gap(&self.row_gaps, Some(last_row)),
                 side_gap(&self.column_gaps, Some(last_col)),
-            ]);
-            let mut paragraph = Paragraph::new();
-            paragraph.props.space_before = Some(0.0);
-            paragraph.props.space_after = Some(0.0);
-            paragraph.props.align = Some(match cell.horizontal {
+            ];
+            target.props.margins = Some(margins);
+            let align = Some(match cell.horizontal {
                 ColJc::Left => Align::Left,
                 ColJc::Center => Align::Center,
                 ColJc::Right => Align::Right,
             });
-            if !cell.math.nodes.is_empty() {
-                let format = CharProps {
-                    color: cell.format.color.or(format.color),
-                    ..cell.format
-                };
-                let equation = InlineObject::Equation {
-                    linear: math::to_linear(&cell.math.nodes),
-                    math: cell.math,
-                    display: false,
-                };
-                paragraph
-                    .insert_object(0, equation, &format)
-                    .map_err(super::super::output::conversion)?;
-            }
-            target.blocks = vec![wordcraft_doc::para_block(paragraph)];
+            let format = CharProps {
+                color: cell.format.color.or(format.color),
+                ..cell.format
+            };
+            target.blocks = vec![match (cell.content, drawing) {
+                (CellContent::Table(nested), CellDrawing::Table(nested_layout)) => {
+                    // Widths reach DOCX in twentieths of a point.
+                    let inner_width = cell_width - margins[1] - margins[3] + 0.05;
+                    let nested = nested.export_layout(
+                        nested_layout,
+                        &format,
+                        inner_width,
+                        available_height,
+                        align,
+                    )?;
+                    Arc::new(Block::Table(nested))
+                }
+                (CellContent::Equation(math), CellDrawing::Equation(_)) => {
+                    let mut paragraph = Paragraph::new();
+                    paragraph.props.space_before = Some(0.0);
+                    paragraph.props.space_after = Some(0.0);
+                    paragraph.props.align = align;
+                    if !math.nodes.is_empty() {
+                        let equation = InlineObject::Equation {
+                            linear: math::to_linear(&math.nodes),
+                            math,
+                            display: false,
+                        };
+                        paragraph
+                            .insert_object(0, equation, &format)
+                            .map_err(super::super::output::conversion)?;
+                    }
+                    wordcraft_doc::para_block(paragraph)
+                }
+                _ => return Err(invalid("MathML table layout does not match its cells")),
+            }];
         }
         Ok(native)
     }

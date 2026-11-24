@@ -178,35 +178,8 @@ pub(super) fn equation(
         stylesheet,
         remaining,
     };
-    if table::has_spans(root) {
-        let mut node = root;
-        let mut style = style;
-        let mut depth = 0;
-        loop {
-            let mut children = node.children().filter(Node::is_element);
-            let child = children
-                .next()
-                .ok_or_else(|| invalid("empty MathML spanning equation"))?;
-            if (node.has_tag_name((MATHML, "semantics")) || children.next().is_none())
-                && child.tag_name().namespace() == Some(MATHML)
-            {
-                depth += 1;
-                projection.charge(depth)?;
-                style = projection.style(child, style)?;
-                match child.tag_name().name() {
-                    "mtable" => {
-                        return table::project(&mut projection, child, depth, style)
-                            .map(Equation::SpanningTable)
-                    }
-                    "mrow" | "mstyle" | "semantics" => {
-                        node = child;
-                        continue;
-                    }
-                    _ => {}
-                }
-            }
-            return Err(unsupported("MathML table spans nested inside an equation"));
-        }
+    if let Some(table) = table::project_group(&mut projection, root, 0, style)? {
+        return Ok(Equation::SpanningTable(table));
     }
     let nodes = math::merge_runs(projection.elements(root, 0, style)?);
     Ok(Equation::Native {

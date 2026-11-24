@@ -2819,3 +2819,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 675 installed tests, inclu
 ## 2026-11-24 EPUB variable font axes
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 677 installed tests, including 82 EPUB tests. It measured 23,088,249 bytes with a 53,607,160-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-epub-variable-font-axes) covers variable glyph outlines, bundled font fallback, and the complete sample spine.
+
+## 2026-11-24 Nested spanning MathML tables
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 678 installed tests, including 83 EPUB tests. It measured 23,074,002 bytes with a 53,577,912-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-nested-spanning-mathml-tables) records preview geometry, native DOCX and PDF export, and grid limits.

@@ -30,7 +30,7 @@ use wordcraft_layout::{
 
 use super::{
     charge, external, invalid, limited,
-    math::Equation,
+    math::{table, Equation},
     output::{
         has_spanning_table, inline_items, CssParagraph, Inline, Output, RunStyle, StyledText,
     },
@@ -473,21 +473,11 @@ fn equation(
         } => (linear, display, math),
         Equation::SpanningTable(table) => {
             let layout = table.layout(&output.document, &style)?;
-            let items = layout
-                .cells
-                .into_iter()
-                .map(|(x, y, cell)| Draw::Turned {
-                    x,
-                    y,
-                    turn: TextDirection::Horizontal,
-                    items: equation_items(cell),
-                })
-                .collect();
             return Ok(Fragment {
                 width: layout.width,
                 height: layout.height,
                 baseline: Some(layout.baseline),
-                items,
+                items: table_items(layout),
             });
         }
     };
@@ -508,6 +498,22 @@ fn equation(
         baseline: Some(layout.ascent),
         items: equation_items(layout),
     })
+}
+
+fn table_items(layout: table::Layout) -> Vec<Draw> {
+    layout
+        .cells
+        .into_iter()
+        .map(|(x, y, cell)| Draw::Turned {
+            x,
+            y,
+            turn: TextDirection::Horizontal,
+            items: match cell {
+                table::CellDrawing::Equation(equation) => equation_items(equation),
+                table::CellDrawing::Table(nested) => table_items(nested),
+            },
+        })
+        .collect()
 }
 
 fn equation_items(layout: MathLayout) -> Vec<Draw> {
