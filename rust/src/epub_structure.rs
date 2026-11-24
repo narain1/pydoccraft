@@ -29,14 +29,17 @@ mod toc;
 
 pub(crate) type SpineEdit = (Option<i64>, Option<(String, String, Option<String>, bool)>);
 pub(crate) type ResourceEdit = (String, String, Vec<u8>);
-type CueEdit = (
+// Depth-first timing entries keep the native boundary flat and bounded.
+type TimingEdit = (
+    usize,
+    bool,
     Option<String>,
     Option<String>,
     u64,
     Option<u64>,
     Option<String>,
 );
-pub(crate) type OverlayEdit = (String, Option<Vec<CueEdit>>);
+pub(crate) type OverlayEdit = (String, Option<Vec<TimingEdit>>);
 type Files<'a> = BTreeMap<String, Cow<'a, [u8]>>;
 
 pub(crate) fn update_structure<'a>(

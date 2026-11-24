@@ -2775,3 +2775,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 658 installed tests, inclu
 ## 2026-11-24 EPUB obfuscated font replacement and removal
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 659 installed tests, including 64 EPUB tests. It measured 22,906,617 bytes with a 53,176,808-byte native extension. EPUBCheck accepted both the replacement and removal samples. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-idpf-obfuscated-font-edits) for detailed check results.
+
+## 2026-11-24 EPUB nested SMIL authoring
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 661 installed tests, including 66 EPUB tests. It measured 22,911,408 bytes with a 53,190,488-byte native extension. EPUBCheck accepted the authored EPUB and its nested media overlay. The [EPUB validation record](../epub-support/validation.md#2026-11-24-nested-smil-authoring) includes the test results and sample checksum.

@@ -323,6 +323,67 @@ class EpubTests(unittest.TestCase):
             self.assertEqual(durations, {"#sync": "0:00:01.798", "#" + overlay_id: "0:00:00.500000",
                                          None: "0:00:02.298000"})
 
+    def test_author_nested_media_overlays_with_inherited_roles(self) -> None:
+        source = epub_fixture(chapter_one="""<html xmlns="http://www.w3.org/1999/xhtml"><body>
+        <section id="chapter"><p id="café">Listen</p><aside id="aside"><p id="note">Sidebar</p></aside></section>
+        <p id="end">Finish</p></body></html>""")
+        audio_path = "OEBPS/Media/voice.wav"
+        _, wav = narrated_epub()
+        sequence = doc_ex.EpubOverlaySequence([
+            doc_ex.EpubOverlayCue("café", audio_path, 10_000, 510_000, "sentence"),
+            doc_ex.EpubOverlaySequence([
+                doc_ex.EpubOverlayCue("note"),
+            ], "aside", "sidebar"),
+        ], "chapter", "chapter")
+        with doc_ex.open(source) as original:
+            revised = original.edit_epub_structure(
+                resources={audio_path: doc_ex.EpubResource("audio/wav", wav)},
+                overlays={"OEBPS/one.xhtml": [sequence, doc_ex.EpubOverlayCue("end")]},
+            )
+            self.assertEqual(original.epub_media_cues(0), [])
+        with doc_ex.open(revised) as document, zipfile.ZipFile(io.BytesIO(revised)) as archive:
+            overlay_id = document[0].metadata["media_overlay"]
+            overlay = document.metadata["media_overlays"][overlay_id]
+            group, last = overlay["body"]["children"]
+            self.assertEqual((group["kind"], group["id"], group["text"]["fragment"]),
+                             ("seq", "seq-1", "chapter"))
+            inner = group["children"][1]
+            self.assertEqual((inner["kind"], inner["id"], inner["text"]["fragment"], last["kind"]),
+                             ("seq", "seq-2", "aside", "par"))
+            self.assertIn(b"#caf%C3%A9", archive.read(overlay["path"]))
+            first, aside, last = document.epub_narration(0)
+            self.assertEqual([(cue.id, cue.fragment, cue.roles) for cue in (first, aside, last)], [
+                ("cue-1", "café", ("chapter", "sentence")),
+                ("cue-2", "note", ("chapter", "sidebar")),
+                ("cue-3", "end", ()),
+            ])
+            assert first.audio is not None
+            self.assertEqual(first.audio.frame_count, 4000)
+            self.assertEqual([cue.fragment for cue in document.epub_narration(0, skip_roles={"sidebar"})],
+                             ["café", "end"])
+            opf = ET.fromstring(archive.read("OEBPS/content.opf"))
+            durations = {node.get("refines"): node.text for node in opf.iter("{http://www.idpf.org/2007/opf}meta")
+                         if node.get("property") == "media:duration"}
+            self.assertEqual(durations, {"#" + overlay_id: "0:00:00.500000", None: "0:00:00.500000"})
+
+    def test_authored_overlay_rejects_empty_missing_and_unbounded_sequences(self) -> None:
+        path = "OEBPS/one.xhtml"
+        cue = doc_ex.EpubOverlayCue()
+        children: list[doc_ex.EpubOverlayCue | doc_ex.EpubOverlaySequence] = []
+        cycle = doc_ex.EpubOverlaySequence(children)
+        children.append(cycle)
+        bad_groups = (
+            (doc_ex.EpubOverlaySequence([]), ValueError),
+            (doc_ex.EpubOverlaySequence([cue], "missing"), doc_ex.MalformedDocumentError),
+            (cycle, doc_ex.UnsafeArchiveError),
+            (doc_ex.EpubOverlaySequence(cue for _ in range(10_000)), doc_ex.UnsafeArchiveError),
+        )
+        with doc_ex.open(epub_fixture()) as document:
+            for sequence, error in bad_groups:
+                with self.subTest(error=error), self.assertRaises(error):
+                    document.edit_epub_structure(overlays={path: [sequence]})
+            self.assertEqual(document.epub_media_cues(0), [])
+
     def test_detach_shared_overlay_and_remove_its_package_members_atomically(self) -> None:
         source, audio = narrated_epub()
         with zipfile.ZipFile(io.BytesIO(source)) as archive:

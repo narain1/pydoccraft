@@ -15,7 +15,7 @@ from typing import Any, Callable, Iterator, Literal, TYPE_CHECKING, overload
 
 from .errors import DocumentClosedError, MalformedDocumentError, UnsafeArchiveError
 from .models import (
-    Block, EpubAudioClip, EpubChapterSource, EpubNarrationCue, EpubOverlayCue, EpubResource, Image, Link, Story, Table,
+    Block, EpubAudioClip, EpubChapterSource, EpubNarrationCue, EpubOverlayCue, EpubOverlaySequence, EpubResource, Image, Link, Story, Table,
     _html_text,
 )
 
@@ -28,6 +28,7 @@ _MAX_EXPORT_NODES = 100_000
 _MAX_EXPORT_DEPTH = 32
 _MAX_EPUB_CHAPTER_BYTES = 8 * 1024 * 1024
 _MAX_EPUB_EDIT_BYTES = 128 * 1024 * 1024
+_OverlayEdit = tuple[int, bool, str | None, str | None, int, int | None, str | None]
 _MEDIA_EXTENSIONS = {
     "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
     "image/webp": "webp", "image/tiff": "tiff", "image/bmp": "bmp",
@@ -41,6 +42,28 @@ def _epub_edit_text(value: str, limit: int, label: str) -> str:
     if len(value) > limit or len(value.encode("utf-8")) > limit:
         raise UnsafeArchiveError(f"EPUB {label} exceeds its byte budget")
     return value
+
+
+def _epub_overlay_nodes(
+    nodes: Iterable[EpubOverlayCue | EpubOverlaySequence], depth: int = 0,
+) -> Iterator[_OverlayEdit]:
+    if depth > 32:
+        raise UnsafeArchiveError("EPUB media overlay nesting exceeds 32")
+    for node in nodes:
+        if not isinstance(node, (EpubOverlayCue, EpubOverlaySequence)):
+            raise TypeError("overlay entries must be EpubOverlayCue or EpubOverlaySequence values")
+        fragment = None if node.fragment is None else _epub_edit_text(node.fragment, 4_096, "cue fragment")
+        roles = None if node.epub_type is None else _epub_edit_text(node.epub_type, 1_024, "cue roles")
+        if isinstance(node, EpubOverlaySequence):
+            yield (depth, True, fragment, None, 0, None, roles)
+            yield from _epub_overlay_nodes(node.children, depth + 1)
+            continue
+        audio = None if node.audio_path is None else _epub_edit_text(node.audio_path, 4_096, "cue audio path")
+        begin = operator.index(node.clip_begin_us)
+        end = None if node.clip_end_us is None else operator.index(node.clip_end_us)
+        if not 0 <= begin < 2**53 or end is not None and not begin < end < 2**53:
+            raise ValueError("invalid EPUB media overlay interval")
+        yield (depth, False, fragment, audio, begin, end, roles)
 
 
 def _format_join(parts: list[str], separator: str, skip_empty: bool = False) -> str:
@@ -810,7 +833,7 @@ class Document:
         *,
         resources: Mapping[str, EpubResource] | None = None,
         remove_resources: Iterable[str] = (),
-        overlays: Mapping[str, Iterable[EpubOverlayCue] | None] | None = None,
+        overlays: Mapping[str, Iterable[EpubOverlayCue | EpubOverlaySequence] | None] | None = None,
     ) -> bytes:
         """Return an EPUB with transactional spine, resource, or narration edits."""
         self._ensure_open()
@@ -873,8 +896,8 @@ class Document:
                 raise UnsafeArchiveError("EPUB edits exceed their byte budget")
             removed.append(path)
 
-        narration: list[tuple[str, list[tuple[str | None, str | None, int, int | None, str | None]] | None]] = []
-        cue_count = 0
+        narration: list[tuple[str, list[_OverlayEdit] | None]] = []
+        node_count = 0
         if overlays is not None:
             for path, cues in overlays.items():
                 self._ensure_open()
@@ -885,24 +908,16 @@ class Document:
                 encoded = None
                 if cues is not None:
                     encoded = []
-                    for cue in cues:
+                    for entry in _epub_overlay_nodes(cues):
                         self._ensure_open()
-                        if cue_count >= 10_000:
-                            raise UnsafeArchiveError("too many EPUB media overlay cues")
-                        if not isinstance(cue, EpubOverlayCue):
-                            raise TypeError("overlay cues must be EpubOverlayCue values")
-                        fragment = None if cue.fragment is None else _epub_edit_text(cue.fragment, 4_096, "cue fragment")
-                        audio = None if cue.audio_path is None else _epub_edit_text(cue.audio_path, 4_096, "cue audio path")
-                        roles = None if cue.epub_type is None else _epub_edit_text(cue.epub_type, 1_024, "cue roles")
-                        begin = operator.index(cue.clip_begin_us)
-                        end = None if cue.clip_end_us is None else operator.index(cue.clip_end_us)
-                        if not 0 <= begin < 2**53 or end is not None and not begin < end < 2**53:
-                            raise ValueError("invalid EPUB media overlay interval")
+                        if node_count >= 10_000:
+                            raise UnsafeArchiveError("too many EPUB media overlay entries")
+                        _, _, fragment, audio, _, _, roles = entry
                         total_bytes += sum(len(value.encode()) for value in (fragment, audio, roles) if value is not None)
                         if total_bytes > _MAX_EPUB_EDIT_BYTES:
                             raise UnsafeArchiveError("EPUB edits exceed their byte budget")
-                        encoded.append((fragment, audio, begin, end, roles))
-                        cue_count += 1
+                        encoded.append(entry)
+                        node_count += 1
                 if total_bytes > _MAX_EPUB_EDIT_BYTES:
                     raise UnsafeArchiveError("EPUB edits exceed their byte budget")
                 narration.append((chapter, encoded))

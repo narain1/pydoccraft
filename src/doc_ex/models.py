@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from html import escape
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 from urllib.parse import urlsplit
 
 BBox = tuple[float, float, float, float]
@@ -34,6 +34,15 @@ class EpubOverlayCue:
     audio_path: str | None = None
     clip_begin_us: int = 0
     clip_end_us: int | None = None
+    epub_type: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EpubOverlaySequence:
+    """An ordered group of chapter cues with an optional fragment and inherited roles."""
+
+    children: Iterable[EpubOverlayCue | EpubOverlaySequence]
+    fragment: str | None = None
     epub_type: str | None = None
 
 

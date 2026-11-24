@@ -29,4 +29,4 @@
 - [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.
 - [x] Attach or detach EPUB 3 media overlays and author sequential text and audio cues with package duration metadata.
 - [x] Replace IDPF-obfuscated fonts from plain font bytes and update their declarations after resource removal.
-- [ ] Author richer SMIL hierarchies.
+- [x] Author nested SMIL sequences with chapter targets, inherited roles and clip-based durations.

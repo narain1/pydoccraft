@@ -9,7 +9,7 @@ use roxmltree::Node;
 
 use super::{
     append, apply_edits, argument, check_path, encode_url_part, inner_range, relative_url,
-    validate_text, CueEdit, OverlayEdit, Plan,
+    validate_text, OverlayEdit, Plan, TimingEdit,
 };
 use crate::{
     author_epub::escape_attribute,
@@ -39,9 +39,12 @@ pub(super) fn charge_edits(edits: &[OverlayEdit], budget: &mut usize) -> Result<
                 &mut count,
                 cues.len(),
                 10_000,
-                "too many media overlay cues",
+                "too many media overlay entries",
             )?;
-            for (fragment, audio, _, _, roles) in cues {
+            for (depth, _, fragment, audio, _, _, roles) in cues {
+                if *depth > 32 {
+                    return Err(limited("EPUB media overlay nesting exceeds 32"));
+                }
                 for value in [fragment, audio, roles].into_iter().flatten() {
                     charge(
                         budget,
@@ -166,7 +169,7 @@ pub(super) fn edit(
 fn write_smil(
     path: &str,
     chapter: &str,
-    cues: &[CueEdit],
+    cues: &[TimingEdit],
     local: &HashMap<String, Vec<Node<'_, '_>>>,
 ) -> Result<(String, u64), EngineError> {
     if cues.is_empty() {
@@ -180,7 +183,17 @@ fn write_smil(
     );
     let chapter = relative_url(path, chapter);
     let mut duration = 0;
-    for (i, (fragment, audio, begin, end, roles)) in cues.iter().enumerate() {
+    let mut open_sequences = 0;
+    let mut cue_id = 0;
+    let mut sequence_id = 0;
+    for (i, (depth, sequence, fragment, audio, begin, end, roles)) in cues.iter().enumerate() {
+        if *depth > open_sequences {
+            return Err(argument("invalid EPUB media overlay sequence depth"));
+        }
+        for _ in *depth..open_sequences {
+            append(&mut smil, "</seq>", XML_BYTES)?;
+        }
+        open_sequences = *depth;
         let mut target = chapter.clone();
         if let Some(fragment) = fragment {
             validate_text(fragment, 4_096, "media overlay fragment")?;
@@ -199,9 +212,28 @@ fn write_smil(
         } else {
             String::new()
         };
+        if *sequence {
+            if cues.get(i + 1).is_none_or(|next| next.0 != depth + 1) {
+                return Err(argument(
+                    "an EPUB media overlay sequence requires at least one entry",
+                ));
+            }
+            if audio.is_some() || *begin != 0 || end.is_some() {
+                return Err(argument("media overlay intervals belong to cues"));
+            }
+            sequence_id += 1;
+            append(
+                &mut smil,
+                &format!("<seq id=\"seq-{sequence_id}\" epub:textref=\"{target}\"{roles}>"),
+                XML_BYTES,
+            )?;
+            open_sequences += 1;
+            continue;
+        }
+        cue_id += 1;
         append(
             &mut smil,
-            &format!("<par id=\"cue-{}\"{roles}><text src=\"{target}\"/>", i + 1),
+            &format!("<par id=\"cue-{cue_id}\"{roles}><text src=\"{target}\"/>"),
             XML_BYTES,
         )?;
         if let Some(audio) = audio {
@@ -238,6 +270,9 @@ fn write_smil(
             ));
         }
         append(&mut smil, "</par>", XML_BYTES)?;
+    }
+    for _ in 0..open_sequences {
+        append(&mut smil, "</seq>", XML_BYTES)?;
     }
     append(&mut smil, "</body></smil>", XML_BYTES)?;
     Ok((smil, duration))
