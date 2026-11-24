@@ -2859,3 +2859,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 690 installed tests, inclu
 ## 2026-11-24 Embedded MP4 video playback
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 691 installed tests, including 96 EPUB tests. It measured 23,719,606 bytes with a 55,150,280-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-embedded-mp4-video-playback) covers video and audio timing, EPUBCheck, the coded-frame budget, and complete playback of the public Shared Culture MP4.
+
+## 2026-11-24 Composed MathML previews
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 693 installed tests, including 98 EPUB tests. It measured 23,738,411 bytes with a 55,178,248-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-composed-mathml-previews) covers nested table geometry, padding and vertical spacing, reopened fixed-layout PDF, and the complete Linear Algebra spine.

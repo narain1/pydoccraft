@@ -34,7 +34,9 @@
 - [x] Apply chapter CSS to MathML colors, font sizes, bold and italic runs, and movable limit placement in previews and native exports.
 - [x] Preview top-level MathML tables with row and column spans. Export standalone tables with editable DOCX cell equations and searchable PDF text.
 - [x] Render nested spanning MathML tables that are the sole expression in a containing cell. Export native nested tables in DOCX and searchable cell text in PDF.
-- [ ] Expand MathML layout to spanning tables within arbitrary expressions, inline semantic export, arbitrary padding and remaining visual properties.
+- [x] Compose spanning tables inside larger MathML formulas and table cells, including fractions, radicals and scripts.
+- [x] Apply MathML padding dimensions, relative padding offsets and vertical space in chapter previews and fixed-layout PDF.
+- [ ] Export composed MathML semantically, including tables mixed with surrounding paragraph content, and expand the remaining MathML visual properties.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.
 - [x] Decode and stream single-track mono and stereo Ogg Opus overlays with the correct presentation bounds and gain.

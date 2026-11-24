@@ -30,10 +30,8 @@ use wordcraft_layout::{
 
 use super::{
     charge, external, invalid, limited,
-    math::{table, Equation},
-    output::{
-        has_spanning_table, inline_items, CssParagraph, Inline, Output, RunStyle, StyledText,
-    },
+    math::Equation,
+    output::{has_composed_math, inline_items, CssParagraph, Inline, Output, RunStyle, StyledText},
     resolve,
     style::Styles,
     unsupported, Book,
@@ -187,7 +185,7 @@ impl Fonts {
                 }
             }
         }
-        if has_spanning_table(block) {
+        if has_composed_math(block) {
             return Ok(true);
         }
         Ok(StyledText::new(block)?.spans.iter().any(|(_, _, style)| {
@@ -465,55 +463,43 @@ fn equation(
     output: &mut Output<'_>,
     width: f32,
 ) -> Result<Fragment, EngineError> {
-    let (linear, display, equation) = match output.equation(markup, css, &mut style)? {
+    let equation = output.equation(markup, css, &mut style)?;
+    style.font = None;
+    let resolved = output.document.styles.resolve_char(None, &style);
+    let layout = match equation {
         Equation::Native {
             linear,
             display,
-            math,
-        } => (linear, display, math),
-        Equation::SpanningTable(table) => {
-            let layout = table.layout(&output.document, &style)?;
-            return Ok(Fragment {
-                width: layout.width,
-                height: layout.height,
-                baseline: Some(layout.baseline),
-                items: table_items(layout),
-            });
+            math: equation,
+        } => math::layout_equation(
+            &equation,
+            &linear,
+            &resolved,
+            display,
+            width,
+            &Default::default(),
+            &mut 0,
+        ),
+        Equation::SpanningTable(table, extras) => {
+            let measured = extras.measure(&output.document, &style)?;
+            table
+                .layout(&output.document, &style, &measured)?
+                .into_math()
         }
+        Equation::Composed {
+            math,
+            display,
+            extras,
+        } => extras
+            .measure(&output.document, &style)?
+            .layout(&math, "", &resolved, display, width)?,
     };
-    style.font = None;
-    let style = output.document.styles.resolve_char(None, &style);
-    let layout = math::layout_equation(
-        &equation,
-        &linear,
-        &style,
-        display,
-        width,
-        &Default::default(),
-        &mut 0,
-    );
     Ok(Fragment {
         width: layout.width,
         height: layout.ascent + layout.descent,
         baseline: Some(layout.ascent),
         items: equation_items(layout),
     })
-}
-
-fn table_items(layout: table::Layout) -> Vec<Draw> {
-    layout
-        .cells
-        .into_iter()
-        .map(|(x, y, cell)| Draw::Turned {
-            x,
-            y,
-            turn: TextDirection::Horizontal,
-            items: match cell {
-                table::CellDrawing::Equation(equation) => equation_items(equation),
-                table::CellDrawing::Table(nested) => table_items(nested),
-            },
-        })
-        .collect()
 }
 
 fn equation_items(layout: MathLayout) -> Vec<Draw> {

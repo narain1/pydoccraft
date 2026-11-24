@@ -2500,7 +2500,7 @@ class EpubTests(unittest.TestCase):
             with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "MathML table spans overlap"):
                 book.render_page(0, dpi=96)
         with doc_ex.open(fixture(outer.format("<m:mrow><m:mi>x</m:mi>" + inner + "</m:mrow>"))) as book:
-            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "sole expression"):
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "composed geometry"):
                 book.convert("docx")
 
         deep = inner
@@ -2570,11 +2570,104 @@ class EpubTests(unittest.TestCase):
             self.assertLess(left(padded.render_page(0, dpi=96)), start - 8)
             with zipfile.ZipFile(io.BytesIO(padded.convert("docx"))) as archive:
                 self.assertIn(b'<m:zeroWid m:val="1"/>', archive.read("word/document.xml"))
-        for math in ('<m:mspace width="1em" height="2px"/>',
-                     '<m:mpadded voffset="1em"><m:mi>x</m:mi></m:mpadded>'):
+        for math in ('<m:mspace width="1em" linebreak="newline"/>',
+                     '<m:mpadded voffset="invalid"><m:mi>x</m:mi></m:mpadded>'):
             with self.subTest(math=math), doc_ex.open(fixture(red + math)) as unsupported:
                 with self.assertRaises(doc_ex.UnsupportedFormatError):
                     unsupported.render_page(0, dpi=96)
+
+    def test_mathml_composes_spanning_tables_inside_fractions_radicals_and_scripts(self) -> None:
+        def grid(head: str, left: str, right: str) -> str:
+            return f"""<m:mtable rowspacing="4pt" columnspacing="8pt">
+              <m:mtr><m:mtd columnspan="2" mathcolor="#{head}"><m:mtext>Top</m:mtext></m:mtd></m:mtr>
+              <m:mtr><m:mtd mathcolor="#{left}"><m:mtext>Left</m:mtext></m:mtd>
+                <m:mtd mathcolor="#{right}"><m:mtext>Right</m:mtext></m:mtd></m:mtr>
+              </m:mtable>"""
+
+        upper = grid("db2828", "17669a", "a15a15")
+        lower = grid("7821b8", "057643", "b93181")
+        exponent = grid("1000cc", "be5609", "2a7040")
+        formula = f"""<m:math mathsize="21pt" display="block">
+         <m:mfrac>
+           <m:mfenced><m:mrow><m:mi>x</m:mi>{upper}</m:mrow></m:mfenced>
+           <m:msqrt><m:mrow>{lower}<m:mi>y</m:mi></m:mrow></m:msqrt>
+         </m:mfrac>
+         <m:mo>+</m:mo><m:msup><m:mi mathcolor="#7b2100">B</m:mi>
+         <m:mrow>{exponent}<m:mi>z</m:mi></m:mrow></m:msup></m:math>"""
+        xhtml = f"""<html xmlns="http://www.w3.org/1999/xhtml"
+          xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Composition</title><meta name="viewport" content="width=500,height=400"/></head>
+          <body><p>{formula}</p></body></html>"""
+        fixed = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 500, 400)])
+        fixed = rewrite_epub(fixed, {"OEBPS/s0.xhtml": xhtml})
+
+        def check_layout(png: bytes) -> None:
+            width, pixels = rgba_pixels(png_chunks(png))
+            def bounds(color: str) -> tuple[int, int, int, int]:
+                rgba = bytes.fromhex(color + "ff")
+                points = [(i // 4 % width, i // 4 // width)
+                          for i in range(0, len(pixels), 4) if pixels[i:i + 4] == rgba]
+                self.assertTrue(points, color)
+                return min(x for x, _ in points), min(y for _, y in points), max(x for x, _ in points), max(y for _, y in points)
+            for head, left, right in (("db2828", "17669a", "a15a15"),
+                                      ("7821b8", "057643", "b93181"),
+                                      ("1000cc", "be5609", "2a7040")):
+                self.assertLess(bounds(head)[3], bounds(left)[1])
+                self.assertLess(bounds(left)[2], bounds(right)[0])
+            self.assertLess(bounds("17669a")[3], bounds("7821b8")[1])
+            self.assertLess(bounds("1000cc")[3], bounds("7b2100")[1])
+            self.assertNotIn(b"\x00\x00\x01\xff", pixels)
+
+        with doc_ex.open(fixed) as book:
+            check_layout(book.render_page(0, dpi=120))
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=120)) as pdf:
+                check_layout(pdf.render_page(0, dpi=120))
+        with doc_ex.open(epub_fixture(chapter_one=xhtml)) as book:
+            self.assertIn("TopLeftRight", book[0].get_text())
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "composed geometry"):
+                book.convert("docx")
+
+    def test_mathml_relative_padding_and_vertical_space(self) -> None:
+        red = '<m:mi mathcolor="#d61020">H</m:mi>'
+        blue = '<m:mi mathcolor="#2344cc">M</m:mi>'
+        reference = '<m:mi mathcolor="#217629">H</m:mi>'
+
+        def preview(source: str) -> bytes:
+            chapter = f"""<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+            <head><style>body,p {{margin:0}}</style></head><body><p>
+            <m:math mathsize="18pt" mathvariant="normal">{reference}{source}</m:math>
+            </p></body></html>"""
+            with doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+                return book.render_page(0, dpi=96)
+
+        def at(png: bytes, color: str) -> tuple[int, int]:
+            width, pixels = rgba_pixels(png_chunks(png))
+            rgba = bytes.fromhex(color + "ff")
+            points = [(i // 4 % width, i // 4 // width)
+                      for i in range(0, len(pixels), 4) if pixels[i:i + 4] == rgba]
+            return min(x for x, _ in points), min(y for _, y in points)
+
+        identity = '<m:mpadded width="100%">' + red + '</m:mpadded>'
+        plain = preview(identity + blue)
+        moved = preview('<m:mpadded width="+12pt" height="+6pt" lspace="6pt" voffset="3pt">'
+                        + red + '</m:mpadded>' + blue)
+        guide = at(moved, "217629")
+        self.assertAlmostEqual(at(moved, "d61020")[0] - at(plain, "d61020")[0], 8, delta=1)
+        self.assertAlmostEqual(at(moved, "2344cc")[0] - at(plain, "2344cc")[0], 16, delta=1)
+        self.assertAlmostEqual(at(moved, "d61020")[1] - guide[1], -4, delta=1)
+        self.assertEqual(
+            preview('<m:mpadded width="+100%width" depth="100%height">' + red + "</m:mpadded>" + blue),
+            preview('<m:mpadded width="200%" depth="1height">' + red + "</m:mpadded>" + blue),
+        )
+        lowered = preview('<m:mpadded width="100%" lspace="-3pt" voffset="-3pt">'
+                          + red + '</m:mpadded>' + blue)
+        self.assertAlmostEqual(at(lowered, "d61020")[0] - at(plain, "d61020")[0], -4, delta=1)
+        self.assertAlmostEqual(at(lowered, "d61020")[1] - at(lowered, "217629")[1], 4, delta=1)
+        spaced = preview(identity + '<m:mspace width="1em" height="20pt" depth="8pt"/>' + blue)
+        self.assertAlmostEqual(at(spaced, "2344cc")[0] - at(plain, "2344cc")[0], 24, delta=2)
+        self.assertGreater(at(spaced, "d61020")[1], at(plain, "d61020")[1] + 5)
+        with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "native vertical extent"):
+            preview('<m:mpadded height="5000pt">' + red + '</m:mpadded>')
 
     def test_invalid_media_overlay_references_and_timing_are_explicit(self) -> None:
         for options, error in (

@@ -455,6 +455,9 @@ fn inline(
         if super::math::table::has_spans(node) {
             equation["spanning_table"] = true.into();
         }
+        if super::math::compose::needs_layout(node) {
+            equation["composed_math"] = true.into();
+        }
         if let Some((styles, viewport)) = cx.equation_styles {
             let base = node
                 .parent_element()

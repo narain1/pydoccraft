@@ -65,13 +65,14 @@ pub(super) fn render(
         [REFLOW_WIDTH, 792.0]
     };
     let mut cascade = Cascade::load(root, path, &mut archive, viewport)?;
-    let spanning_tables = super::math::table::has_spans(body);
-    if !fixed && !cascade.needed(root) && !spanning_tables {
+    let composed_math =
+        super::math::table::has_spans(body) || super::math::compose::needs_layout(body);
+    if !fixed && !cascade.needed(root) && !composed_math {
         return Ok(None);
     }
     let styles = ChapterStyles::compute(root, &mut cascade, viewport)?;
     let mut fonts = Fonts::load(&cascade.fonts, &styles.boxes, &mut archive)?;
-    if spanning_tables {
+    if composed_math {
         fonts.get_or_insert_with(Fonts::bundled);
     }
     let manifest = book

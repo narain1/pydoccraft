@@ -11,6 +11,8 @@ use wordcraft_doc::{
 use super::{css, invalid, limited, parse_xml, unsupported};
 use crate::EngineError;
 
+#[path = "epub_math_compose.rs"]
+pub(super) mod compose;
 #[path = "epub_math_table.rs"]
 pub(super) mod table;
 
@@ -139,7 +141,12 @@ pub(super) enum Equation {
         display: bool,
         math: Math,
     },
-    SpanningTable(table::Table),
+    SpanningTable(table::Table, compose::Extras),
+    Composed {
+        math: Math,
+        display: bool,
+        extras: compose::Extras,
+    },
 }
 
 pub(super) fn equation(
@@ -177,11 +184,25 @@ pub(super) fn equation(
         root_id: root.id().get(),
         stylesheet,
         remaining,
+        extras: compose::Extras::default(),
     };
+    if let Some(TextColor::Rgb(ink)) = format.color {
+        projection.extras.remember(ink);
+    }
     if let Some(table) = table::project_group(&mut projection, root, 0, style)? {
-        return Ok(Equation::SpanningTable(table));
+        return Ok(Equation::SpanningTable(table, projection.extras));
     }
     let nodes = math::merge_runs(projection.elements(root, 0, style)?);
+    if !projection.extras.is_empty() {
+        return Ok(Equation::Composed {
+            math: Math {
+                nodes,
+                ..Default::default()
+            },
+            display,
+            extras: projection.extras,
+        });
+    }
     Ok(Equation::Native {
         linear: math::to_linear(&nodes),
         display,
@@ -291,11 +312,12 @@ struct Projection<'a, 'xml> {
     root_id: u32,
     stylesheet: Option<&'a FormulaCss>,
     remaining: &'a mut usize,
+    extras: compose::Extras,
 }
 
 impl<'xml> Projection<'_, 'xml> {
     fn style(
-        &self,
+        &mut self,
         node: Node<'xml, '_>,
         parent: Presentation<'xml>,
     ) -> Result<Presentation<'xml>, EngineError> {
@@ -303,7 +325,11 @@ impl<'xml> Projection<'_, 'xml> {
             .stylesheet
             .and_then(|sheet| sheet.nodes.get(&(node.id().get() - self.root_id)));
         let viewport = self.stylesheet.map_or([0.0; 2], |sheet| sheet.viewport);
-        parent.on(node, css, viewport)
+        let style = parent.on(node, css, viewport)?;
+        if let Some(ink) = style.ink {
+            self.extras.remember(ink);
+        }
+        Ok(style)
     }
 
     fn charge(&mut self, depth: usize) -> Result<(), EngineError> {
@@ -349,8 +375,24 @@ impl<'xml> Projection<'_, 'xml> {
                     .ok_or_else(|| invalid("MathML semantics has no presentation child"))?;
                 return self.element(presentation, depth + 1, style);
             }
-            "mspace" => return space(node, style),
-            "mpadded" => return padded(node, self.elements(node, depth, style)?),
+            "mspace" => {
+                validate_space(node)?;
+                if compose::selected(node) {
+                    let viewport = self.stylesheet.map_or([0.0; 2], |sheet| sheet.viewport);
+                    return self.extras.push(compose::space(node, style, viewport)?);
+                }
+                return space(node, style);
+            }
+            "mpadded" => {
+                let body = self.elements(node, depth, style)?;
+                if compose::selected(node) {
+                    let viewport = self.stylesheet.map_or([0.0; 2], |sheet| sheet.viewport);
+                    return self
+                        .extras
+                        .push(compose::padding(node, body, style, viewport)?);
+                }
+                return padded(node, body);
+            }
             "mfrac" => {
                 let [num, den] = self.arguments(node, depth, style)?;
                 let kind = if boolean(node, "bevelled")? == Some(true) {
@@ -401,6 +443,13 @@ impl<'xml> Projection<'_, 'xml> {
             }
             "mmultiscripts" => return self.multiscripts(node, depth, style),
             "mfenced" => self.fenced(node, depth, style)?,
+            "mtable" if table::has_spans(node) => {
+                let grid = table::project(self, node, depth, style)?;
+                return self.extras.push(compose::Extra::Table(
+                    grid,
+                    Box::new(compose::format(style)),
+                ));
+            }
             "mtable" => return self.matrix(node, depth, style),
             "mphantom" => MNode::Phant {
                 show: false,
@@ -853,7 +902,8 @@ impl<'xml> Projection<'_, 'xml> {
                     return Err(limited("MathML matrix exceeds its layout budget"));
                 }
                 self.charge(depth + 2)?;
-                cells.push(self.elements(cell, depth + 2, self.style(cell, row_style)?)?);
+                let cell_style = self.style(cell, row_style)?;
+                cells.push(self.elements(cell, depth + 2, cell_style)?);
             }
             if rows.len() == MAX_MATRIX_SIZE {
                 return Err(limited("MathML matrix exceeds its layout budget"));
@@ -902,20 +952,12 @@ fn styled_run(text: impl Into<String>, style: Presentation<'_>) -> MNode {
     MNode::Run(run)
 }
 
-fn space(node: Node<'_, '_>, style: Presentation<'_>) -> Result<Arg, EngineError> {
+fn validate_space(node: Node<'_, '_>) -> Result<(), EngineError> {
     if node
         .children()
         .any(|child| child.is_element() || child.text().is_some_and(|text| !text.trim().is_empty()))
     {
         return Err(invalid("MathML mspace must be empty"));
-    }
-    for name in ["height", "depth"] {
-        if node
-            .attribute(name)
-            .is_some_and(|value| !zero_length(value))
-        {
-            return Err(unsupported("vertical MathML mspace dimensions"));
-        }
     }
     if node
         .attribute("linebreak")
@@ -923,6 +965,10 @@ fn space(node: Node<'_, '_>, style: Presentation<'_>) -> Result<Arg, EngineError
     {
         return Err(unsupported("MathML mspace linebreak"));
     }
+    Ok(())
+}
+
+fn space(node: Node<'_, '_>, style: Presentation<'_>) -> Result<Arg, EngineError> {
     let width = node.attribute("width").unwrap_or("0").trim();
     if zero_length(width) {
         return Ok(Vec::new());

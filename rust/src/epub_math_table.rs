@@ -9,10 +9,11 @@ use wordcraft_doc::{
     Block, Document, Paragraph, Table as NativeTable,
 };
 use wordcraft_fonts::math::{resolve_math, C};
-use wordcraft_layout::math::{layout_equation, MathLayout};
+use wordcraft_layout::math::MathLayout;
 
 use super::{
-    invalid, limited, size_points, unsupported, Presentation, Projection, MATHML, MAX_MATRIX_SIZE,
+    compose, invalid, limited, size_points, unsupported, Presentation, Projection, MATHML,
+    MAX_MATRIX_SIZE,
 };
 use crate::EngineError;
 
@@ -73,6 +74,7 @@ pub(super) fn project_group<'xml>(
     if !has_spans(group) {
         return Ok(None);
     }
+    let mut wrappers = Vec::new();
     loop {
         let mut children = group.children().filter(Node::is_element);
         let Some(child) = children.next() else {
@@ -81,23 +83,27 @@ pub(super) fn project_group<'xml>(
         if (!group.has_tag_name((MATHML, "semantics")) && children.next().is_some())
             || child.tag_name().namespace() != Some(MATHML)
         {
-            break;
+            return Ok(None);
         }
-        depth += 1;
-        projection.charge(depth)?;
-        style = projection.style(child, style)?;
+        wrappers.push(child);
         match child.tag_name().name() {
-            "mtable" => return project(projection, child, depth, style).map(Some),
+            "mtable" => break,
             "mrow" | "mstyle" | "semantics" => group = child,
-            _ => break,
+            _ => return Ok(None),
         }
     }
-    Err(unsupported(
-        "a spanning MathML table must be the sole expression in a formula or table cell",
-    ))
+    let table = *wrappers
+        .last()
+        .ok_or_else(|| invalid("missing MathML table"))?;
+    for wrapper in wrappers {
+        depth += 1;
+        projection.charge(depth)?;
+        style = projection.style(wrapper, style)?;
+    }
+    project(projection, table, depth, style).map(Some)
 }
 
-fn project<'xml>(
+pub(super) fn project<'xml>(
     projection: &mut Projection<'_, 'xml>,
     table: Node<'xml, '_>,
     depth: usize,
@@ -258,6 +264,31 @@ pub(in crate::epub) struct Layout {
     row_positions: Vec<f32>,
 }
 
+impl Layout {
+    pub(in crate::epub) fn into_math(self) -> MathLayout {
+        let mut result = MathLayout {
+            width: self.width,
+            ascent: self.baseline,
+            descent: self.height - self.baseline,
+            ..Default::default()
+        };
+        for (x, y, cell) in self.cells {
+            let layout = match cell {
+                CellDrawing::Equation(equation) => equation,
+                CellDrawing::Table(nested) => nested.into_math(),
+            };
+            let rise = self.baseline - y - layout.ascent;
+            result
+                .items
+                .extend(layout.items.into_iter().map(|mut item| {
+                    compose::position(&mut item, x, rise, 1.0);
+                    item
+                }));
+        }
+        result
+    }
+}
+
 pub(in crate::epub) enum CellDrawing {
     Equation(MathLayout),
     Table(Layout),
@@ -281,6 +312,7 @@ impl Table {
         &self,
         doc: &Document,
         format: &CharProps,
+        measurements: &compose::Measurements,
     ) -> Result<Layout, EngineError> {
         let (face, constants) = resolve_math("Cambria Math");
         let axis_ratio = constants.as_ref().map_or(0.25, |constants| {
@@ -301,19 +333,19 @@ impl Table {
             };
             let resolved = doc.styles.resolve_char(None, &chars);
             let measure = match &cell.content {
-                CellContent::Table(table) => CellDrawing::Table(table.layout(doc, &chars)?),
+                CellContent::Table(table) => {
+                    CellDrawing::Table(table.layout(doc, &chars, measurements)?)
+                }
                 CellContent::Equation(math) if math.nodes.is_empty() => {
                     CellDrawing::Equation(MathLayout::default())
                 }
-                CellContent::Equation(math) => CellDrawing::Equation(layout_equation(
+                CellContent::Equation(math) => CellDrawing::Equation(measurements.layout(
                     math,
                     "",
                     &resolved,
                     false,
                     MAX_DIMENSION,
-                    &Default::default(),
-                    &mut 0,
-                )),
+                )?),
             };
             let (_, cell_ascent, cell_descent) = measure.size();
             let offset = match cell.vertical {
@@ -416,7 +448,7 @@ impl Table {
         available: f32,
         align: Option<Align>,
     ) -> Result<NativeTable, EngineError> {
-        let layout = self.layout(doc, format)?;
+        let layout = self.layout(doc, format, &compose::Measurements::default())?;
         let page = &doc.last_section;
         let available_height = page.page_h - page.margin_top - page.margin_bottom;
         self.export_layout(layout, format, available, available_height, align)

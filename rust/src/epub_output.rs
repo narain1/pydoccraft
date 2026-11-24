@@ -187,11 +187,14 @@ impl<'a> Output<'a> {
                 && text.value[text.offsets[*end]..].trim().is_empty()
             {
                 let mut format = text.style_at(*start);
-                let super::math::Equation::SpanningTable(table) =
+                let super::math::Equation::SpanningTable(table, extras) =
                     self.equation(source, *css, &mut format)?
                 else {
-                    return Err(conversion("missing EPUB MathML table grid"));
+                    return Err(unsupported("MathML composed geometry in semantic export"));
                 };
+                if !extras.is_empty() {
+                    return Err(unsupported("MathML composed geometry in semantic export"));
+                }
                 let align = CssParagraph::from_block(block)?.and_then(|style| style.align);
                 return table
                     .export(&self.document, &format, width, align)
@@ -236,7 +239,7 @@ impl<'a> Output<'a> {
                         math,
                     } = self.equation(source, css, &mut style)?
                     else {
-                        return Err(unsupported("MathML table spans in semantic export"));
+                        return Err(unsupported("MathML composed geometry in semantic export"));
                     };
                     p.insert_object(
                         p.len(),
@@ -575,6 +578,19 @@ pub(super) fn has_spanning_table(block: &BlockPayload) -> bool {
                 .iter()
                 .any(|entry| entry["spanning_table"].as_bool() == Some(true))
         })
+}
+
+pub(super) fn has_composed_math(block: &BlockPayload) -> bool {
+    has_spanning_table(block)
+        || block
+            .metadata
+            .get("mathml")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|entries| {
+                entries
+                    .iter()
+                    .any(|entry| entry["composed_math"].as_bool() == Some(true))
+            })
 }
 
 pub(super) fn inline_items(
