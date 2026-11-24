@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 use super::{charge, external, invalid, limited, name, resolve, unsupported, Book, XHTML};
 use crate::EngineError;
 
+#[path = "epub_css_variables.rs"]
+mod variables;
+
 const SHEET_BYTES: usize = 256 * 1024;
 const SELECTOR_WORK: usize = 4_000_000;
 const SIDES: [&str; 4] = ["top", "right", "bottom", "left"];
@@ -26,6 +29,7 @@ pub(super) struct Cascade {
     bytes: usize,
     work: usize,
     viewport: [f32; 2],
+    variables: variables::Scope,
 }
 
 struct Rule {
@@ -105,7 +109,22 @@ enum KeyKind {
     Tag,
 }
 
-type DeclarationValue = (String, String, bool);
+type DeclarationValue = (String, CssValue, bool);
+
+#[derive(Clone)]
+enum CssValue {
+    Text(Arc<str>),
+    Pending(Arc<variables::Template>, Arc<str>),
+}
+
+fn value_parser(source: &str) -> Parser<'_, '_> {
+    raffia::ParserBuilder::new(source)
+        .options(raffia::ParserOptions {
+            try_parsing_value_in_custom_property: true,
+            ..Default::default()
+        })
+        .build()
+}
 
 impl Cascade {
     pub(super) fn load(
@@ -232,7 +251,7 @@ impl Cascade {
     ) -> Result<(), EngineError> {
         self.charge_bytes(source)?;
         let source = checked_css(source.trim_start_matches('\u{feff}'))?;
-        let sheet = Parser::new(&source, Syntax::Css)
+        let sheet = value_parser(&source)
             .parse::<Stylesheet>()
             .map_err(|error| {
                 invalid(format!(
@@ -356,7 +375,7 @@ impl Cascade {
         if let Some(style) = node.attribute("style") {
             self.charge_bytes(style)?;
             let source = checked_css(&format!("{{{style}}}"))?;
-            let block = Parser::new(&source, Syntax::Css)
+            let block = value_parser(&source)
                 .parse::<SimpleBlock>()
                 .map_err(|error| {
                     invalid(format!(
@@ -371,10 +390,38 @@ impl Cascade {
                 update(&mut selected, &key, &value, (important, true, [0; 3], 0));
             }
         }
-        Ok(selected
-            .into_iter()
-            .map(|(key, (_, value))| (key, value))
-            .collect())
+        let custom = selected
+            .extract_if(|name, _| name.starts_with("--"))
+            .map(|(name, (_, value))| (name, value))
+            .collect();
+        self.variables.enter(node, &custom)?;
+        let mut output = Properties::new();
+        for (name, (_, value)) in selected {
+            let value = match value {
+                CssValue::Text(value) => value.to_string(),
+                CssValue::Pending(template, property) => {
+                    let Some(value) = self.variables.substitute(&template)? else {
+                        continue;
+                    };
+                    if !valid_computed(&property, &value) {
+                        continue;
+                    }
+                    if name == property.as_ref() {
+                        value
+                    } else {
+                        let Some((_, expanded)) = expand(&property, &value)
+                            .into_iter()
+                            .find(|(part, _)| part == &name)
+                        else {
+                            continue;
+                        };
+                        expanded
+                    }
+                }
+            };
+            output.insert(name, value);
+        }
+        Ok(output)
     }
 
     fn media_matches(&self, query: &str) -> bool {
@@ -420,16 +467,16 @@ impl Cascade {
 type Priority = (bool, bool, Specificity, usize);
 
 fn update(
-    values: &mut HashMap<String, (Priority, String)>,
+    values: &mut HashMap<String, (Priority, CssValue)>,
     name: &str,
-    value: &str,
+    value: &CssValue,
     priority: Priority,
 ) {
     if values
         .get(name)
         .is_none_or(|(winner, _)| *winner <= priority)
     {
-        values.insert(name.to_owned(), (priority, value.to_owned()));
+        values.insert(name.to_owned(), (priority, value.clone()));
     }
 }
 
@@ -440,7 +487,10 @@ fn font_face(
 ) -> Result<Option<super::fonts::Face>, EngineError> {
     let values: Properties = declarations(block, source)?
         .into_iter()
-        .map(|(key, value, _)| (key, value))
+        .filter_map(|(key, value, _)| match value {
+            CssValue::Text(text) => Some((key, text.to_string())),
+            CssValue::Pending(..) => None,
+        })
         .collect();
     let Some(family) = values.get("font-family") else {
         return Ok(None);
@@ -693,69 +743,121 @@ fn declarations(
         let Some(key) = ident(&declaration.name) else {
             continue;
         };
-        let Some((first, last)) = declaration.value.first().zip(declaration.value.last()) else {
-            continue;
+        let custom = key.starts_with("--");
+        let name = if custom {
+            key.to_owned()
+        } else {
+            key.to_ascii_lowercase()
         };
-        let value = source[first.span().start..last.span().end].trim();
-        if output.len() >= 512 || value.len() > 4_096 {
+        let span = declaration
+            .value
+            .first()
+            .zip(declaration.value.last())
+            .map(|(first, last)| first.span().start..last.span().end)
+            .unwrap_or(0..0);
+        let value = source[span.clone()].trim();
+        if output.len() >= 512 || value.len() > 4096 {
             return Err(limited("EPUB CSS declarations exceed their budget"));
         }
-        let key = key.to_ascii_lowercase();
-        if (key == "font-family" && font_family_value(&declaration.value).is_none())
-            || (key == "font-variation-settings" && axis_value(&declaration.value).is_none())
-            || (key == "font-optical-sizing"
-                && optical_sizing(value).is_none()
-                && !matches!(
-                    value.to_ascii_lowercase().as_str(),
-                    "inherit" | "unset" | "revert" | "revert-layer"
-                ))
-        {
-            continue;
-        }
         let important = declaration.important.is_some();
-        if matches!(
-            key.as_str(),
-            "margin" | "padding" | "inset" | "border-width" | "border-color"
-        ) {
-            let words: Vec<_> = value.split_ascii_whitespace().collect();
-            if let Some(items) = sides(&words) {
-                for (side, value) in SIDES.into_iter().zip(items) {
-                    let name = match key.as_str() {
-                        "inset" => side.to_owned(),
-                        "border-width" => format!("border-{side}-width"),
-                        "border-color" => format!("border-{side}-color"),
-                        _ => format!("{key}-{side}"),
-                    };
-                    output.push((name, value.to_owned(), important));
-                }
+        if let Some(template) = variables::Template::parse(source, span, &declaration.value) {
+            let value = CssValue::Pending(Arc::new(template), Arc::from(name.as_str()));
+            for part in shorthand_parts(&name).unwrap_or_else(|| vec![name]) {
+                output.push((part, value.clone(), important));
             }
-        } else if key == "background" && color(value).is_some() {
-            output.push(("background-color".into(), value.into(), important));
-        } else if key == "border" {
-            let mut width = "0";
-            let mut ink = "currentColor";
-            let mut raw_style = "none";
-            for word in value.split_ascii_whitespace() {
-                if points(word, 12.0, [0.0; 2]).is_some()
-                    || matches!(word, "thin" | "medium" | "thick")
-                {
-                    width = word;
-                } else if color(word).is_some() {
-                    ink = word;
-                } else if matches!(word, "solid" | "none" | "hidden") {
-                    raw_style = word;
-                }
+        } else if custom {
+            output.push((name, CssValue::Text(Arc::from(value)), important));
+        } else if !value.is_empty() && valid_literal(&name, value, &declaration.value) {
+            for (part, value) in expand(&name, value) {
+                output.push((part, CssValue::Text(Arc::from(value)), important));
             }
-            for side in SIDES {
-                for (name, value) in [("width", width), ("color", ink), ("style", raw_style)] {
-                    output.push((format!("border-{side}-{name}"), value.into(), important));
-                }
-            }
-        } else {
-            output.push((key, value.to_owned(), important));
         }
     }
     Ok(output)
+}
+
+fn valid_literal(name: &str, value: &str, components: &[ComponentValue<'_>]) -> bool {
+    match name {
+        "font-family" => font_family_value(components).is_some(),
+        "font-variation-settings" => axis_value(components).is_some(),
+        "font-optical-sizing" => {
+            optical_sizing(value).is_some()
+                || matches!(
+                    value.to_ascii_lowercase().as_str(),
+                    "inherit" | "unset" | "revert" | "revert-layer"
+                )
+        }
+        _ => true,
+    }
+}
+
+fn valid_computed(name: &str, value: &str) -> bool {
+    if value.is_empty() {
+        return false;
+    }
+    let source = format!("{name}:{value}");
+    Parser::new(&source, Syntax::Css)
+        .parse::<Declaration>()
+        .is_ok_and(|declaration| {
+            declaration.span.end == source.len()
+                && declaration.important.is_none()
+                && valid_literal(name, value, &declaration.value)
+        })
+}
+
+fn side_names(name: &str) -> Option<[String; 4]> {
+    match name {
+        "inset" => Some(SIDES.map(str::to_owned)),
+        "border-width" => Some(SIDES.map(|side| format!("border-{side}-width"))),
+        "border-color" => Some(SIDES.map(|side| format!("border-{side}-color"))),
+        "margin" | "padding" => Some(SIDES.map(|side| format!("{name}-{side}"))),
+        _ => None,
+    }
+}
+
+fn border_names() -> impl Iterator<Item = String> {
+    SIDES.into_iter().flat_map(|side| {
+        ["width", "color", "style"].map(move |name| format!("border-{side}-{name}"))
+    })
+}
+
+fn shorthand_parts(name: &str) -> Option<Vec<String>> {
+    match name {
+        "background" => Some(vec!["background-color".to_owned()]),
+        "border" => Some(border_names().collect()),
+        _ => side_names(name).map(Vec::from),
+    }
+}
+
+fn expand(name: &str, value: &str) -> Vec<(String, String)> {
+    if let Some(names) = side_names(name) {
+        let pieces = value.split_ascii_whitespace().collect::<Vec<_>>();
+        return sides(&pieces)
+            .map(|pieces| names.into_iter().zip(pieces.map(str::to_owned)).collect())
+            .unwrap_or_default();
+    }
+    if name == "background" && color(value).is_some() {
+        return vec![("background-color".into(), value.into())];
+    }
+    if name == "border" {
+        let mut width = "0";
+        let mut ink = "currentColor";
+        let mut style = "none";
+        for word in value.split_ascii_whitespace() {
+            if points(word, 12.0, [0.0; 2]).is_some() || matches!(word, "thin" | "medium" | "thick")
+            {
+                width = word;
+            } else if color(word).is_some() {
+                ink = word;
+            } else if matches!(word, "solid" | "none" | "hidden") {
+                style = word;
+            }
+        }
+        return border_names()
+            .zip([width, ink, style].into_iter().cycle().map(str::to_owned))
+            .collect();
+    }
+    vec![(name.to_owned(), value.to_owned())]
 }
 
 fn sides<'a>(parts: &[&'a str]) -> Option<[&'a str; 4]> {

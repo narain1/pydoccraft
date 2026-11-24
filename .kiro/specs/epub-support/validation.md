@@ -387,3 +387,15 @@ Open-ended timing probes verified retained PCM and package duration against play
 The Linux x86-64 CPython 3.11.15 release wheel passed 681 installed tests, including 86 EPUB tests, with zero failures, errors or skips. It measured 23,098,392 bytes with a 53,622,472-byte native extension. Wheel SHA-256 is `f07bbc69157a23b7d269b4a9f7b74ff6ea1b2624c60a559079f7909def740fd5`. Both lockfiles and all upstream revisions match the preceding checkpoint. License audits reviewed 341 core and 315 Node packages and verified the license files packaged in the wheel.
 
 Rust 1.95 formatting and warnings-denied all-target Clippy passed. The locked default suite passed 479 unit tests and 7 integration tests. The Python-free suite passed 401 unit tests and 8 integration tests. All 17 Node 22.22.1 preview tests passed. Public typing, documentation links, support evidence and roadmap checks passed. Cleanup removed about 6.1 GiB of Cargo output across builds, plus the temporary wheels, Node addon, site build and EPUBCheck artifacts.
+
+## 2026-11-24 CSS custom properties in EPUB previews
+
+The XHTML regression compares archive-imported custom properties with literal rendered output. It covers case-sensitive names, inherited computed values, inline and important declarations, a dependency cycle through an unused fallback, and shorthand and longhand order. A repeated expansion beyond 4 KiB returns a resource-limit error. Follow-up checks verified empty fallbacks, escaped identifiers, scoped initial values, and numeric token boundaries. [CSS custom properties](https://www.w3.org/TR/css-variables-1/)
+
+The fixed-layout SVG regression compares inherited variable paint with literal fill colors. A variable resolving to an external paint URL returns the same explicit unsupported error as the equivalent literal URL.
+
+All 94 spine entries of the unmodified *Linear Algebra* EPUB rendered at 24 DPI. The sample SHA-256 is `87e523d8e16c2d1f4b211b47c0495841687a3573c828d3ef36b1f77f91b2abd4`. [EPUB 3 sample table](https://idpf.github.io/epub3-samples/30/samples.html)
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 683 installed tests, including 88 EPUB tests, with zero failures, errors or skips. It measured 23,116,535 bytes with a 53,687,352-byte native extension. Wheel SHA-256 is `eda0ad500b01bda4aece9420573826da32b36c5f46b20086827ef4ebba0f6cf6`. Both lockfiles and all upstream revisions match the preceding checkpoint. License audits reviewed 341 core and 315 Node packages and verified the license files packaged in the wheel.
+
+Rust 1.95 formatting and warnings-denied all-target Clippy passed. The locked default suite passed 479 unit tests and 7 integration tests. The Python-free suite passed 401 unit tests and 8 integration tests. All 17 Node 22.22.1 preview tests passed. Public typing, documentation links, support evidence and roadmap checks passed. Cleanup removed about 4.9 GiB of Cargo output and the temporary wheel, Node addon, site build and sample archive.

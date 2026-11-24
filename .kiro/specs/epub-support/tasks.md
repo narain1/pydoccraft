@@ -24,6 +24,7 @@
 - [x] Scope packaged XHTML font faces using CSS Unicode ranges, overlap order and glyph fallback.
 - [x] Preserve ordered XHTML font-family stacks across inherited and inline styles, including packaged and generic fallbacks.
 - [x] Shape variable-font glyphs with inherited CSS axis values and optical sizing in XHTML previews, and pass the properties to the static SVG renderer.
+- [x] Resolve author-defined CSS custom properties in supported XHTML and SVG styles, including scoped inheritance, fallback cycles and deferred shorthands.
 - [ ] Extend source CSS and fixed-layout fidelity, including SVG font ranges and fallback stacks, variable font-face descriptor ranges and defaults, additional SVG features and semantic fixed-layout conversion.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.
 - [x] Render tall reflowable chapters within the paint coordinate budget and apply raster limits to the requested DPI and clip.

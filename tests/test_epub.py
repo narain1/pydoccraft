@@ -852,6 +852,65 @@ class EpubTests(unittest.TestCase):
         with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "font table count"):
             preview(first + second + " p {font-family: Composite}", "AAAABBBBX")
 
+    def test_epub_css_variables_resolve_inheritance_cycles_and_shorthand_order(self) -> None:
+        def preview(main: str, local: str) -> bytes:
+            chapter = f'''<html xmlns="http://www.w3.org/1999/xhtml"><head>
+                <link rel="stylesheet" href="main.css"/></head>
+              <body><div class="box" style="{local}"><p>Typography</p>
+              <p class="cycle">Fallback</p><p class="case">Case sensitive</p>
+              <p class="invalid">Inherited color</p></div><p class="case">Outside</p></body></html>'''
+            source = rewrite_epub(epub_fixture(chapter_one=chapter), {
+                "OEBPS/main.css": ("@import url(tokens.css);" + main).encode(),
+                "OEBPS/tokens.css": b":root {--Ink:#2446a8;--ink:#95164a;--alias:var(--Ink);--gap:6px 12px}",
+            })
+            with doc_ex.open(source) as book:
+                return book.render_page(0, dpi=96)
+
+        common = "body,p {margin:0} body {color:#224466;font-family:sans-serif;font-size:20px}"
+        variables = """
+          .box {--Ink:#ac3316; --bg:#e9c682 !important;
+                padding:var(--gap); padding-right:7px; background:var(--bg);
+                border:var(--missing, 2px solid #245533); color: var(--alias)}
+          .cycle {--a:var(--b, blue);--b:var(--ink,var(--a));
+                  --c:var(--a,#118855);color:var(--c)}
+          .case {color:var(--Ink)}
+          .invalid {color:#dd1122;color:var(--missing)}
+        """
+        literals = """
+          .box {padding:6px 12px;padding-right:7px;background:#e9c682;
+                border:2px solid #245533;color:#2446a8}
+          .cycle {color:#118855}
+          .box .case {color:#ac3316}
+          .case {color:#2446a8}
+        """
+        self.assertEqual(
+            preview(common + variables, "--bg:#22eedd"),
+            preview(common + literals, ""),
+        )
+
+        amplified = ".box{--large:" + "red " * 700 + ";--twice:var(--large) var(--large);color:var(--twice)}"
+        with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "CSS variable value"):
+            preview(common + amplified, "")
+
+    def test_epub_svg_css_variable_values_pass_through_static_paint(self) -> None:
+        def preview(styles: str) -> bytes:
+            svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 48">
+              <style>{styles}</style><g class="layer">
+              <rect width="48" height="48"/><circle cx="74" cy="24" r="18"/></g></svg>'''
+            chapter = doc_ex.EpubSvgChapterSource("Paint", svg)
+            with doc_ex.open(epub_fixture()) as original:
+                revised = original.edit_epub_structure([chapter, 0])
+            with doc_ex.open(revised) as book:
+                return book.render_page(0, dpi=96)
+
+        self.assertEqual(
+            preview("svg{--color:#43883a}.layer{--alias:var(--color)}"
+                    "rect{fill:var(--alias)}circle{fill:var(--absent,#243a98)}"),
+            preview("rect{fill:#43883a}circle{fill:#243a98}"),
+        )
+        with self.assertRaises(doc_ex.UnsupportedFormatError):
+            preview("svg{--paint:url(https://example.invalid/item.svg)}rect{fill:var(--paint)}")
+
     def test_epub_font_stacks_follow_declared_order_and_inherit(self) -> None:
         inter = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
 

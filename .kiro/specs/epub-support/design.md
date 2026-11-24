@@ -34,7 +34,9 @@ The EPUB adapter owns author stylesheet resolution and knows only archive paths.
 
 XHTML parses literal CSS `font-variation-settings` with Raffia, inherits or clears the axis list through the cascade and supplies the resulting coordinates to Parley. Automatic optical sizing sets `opsz` from the font size in points when the author has not supplied that axis. The renderer draws glyph outlines at the normalized coordinates returned by shaping. SVG previews pass the corresponding stylesheet properties through to resvg.
 
-Broader selectors, CSS custom properties, SVG font Unicode ranges and fallback stacks, variable `@font-face` descriptor ranges and defaults, additional SVG features and semantic fixed-layout conversion remain open.
+The XHTML and SVG cascades compute unregistered custom properties on each element before substituting var() in supported declarations. Case-sensitive names, the inherited computed values, dependencies inside fallbacks, and shorthand cascade order are preserved. Each declaration, dependency depth and chapter-wide substitution work is bounded. SVG still checks resolved paint values before passing them to resvg. [CSS custom properties](https://www.w3.org/TR/css-variables-1/)
+
+Broader selectors, registered CSS custom properties, SVG font Unicode ranges and fallback stacks, variable `@font-face` descriptor ranges and defaults, additional SVG features and semantic fixed-layout conversion remain open.
 
 
 ## Presentation MathML
