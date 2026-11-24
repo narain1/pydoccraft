@@ -14,7 +14,7 @@ use super::{
 use crate::{
     author_epub::escape_attribute,
     epub::{
-        attribute, charge, invalid, limited, name, overlay, parse_xml, required, resolve,
+        attribute, charge, editor, invalid, limited, name, overlay, parse_xml, required, resolve,
         unsupported, Book, EPUB, METADATA_BYTES, OPF, XML_BYTES,
     },
     limits::{validate_member_count, MAX_INPUT_SIZE},
@@ -121,12 +121,7 @@ pub(super) fn edit(
         if let Some(old) = item.attribute_node("media-overlay") {
             edits.push((old.range(), replacement));
         } else if id.is_some() {
-            let start = item.range().start + 1;
-            let len = source[start..]
-                .bytes()
-                .position(|byte| byte.is_ascii_whitespace() || matches!(byte, b'/' | b'>'))
-                .ok_or_else(|| invalid("invalid EPUB manifest opening tag"))?;
-            let at = start + len;
+            let at = editor::before_attributes(source, *item)?;
             edits.push((at..at, replacement));
         }
     }

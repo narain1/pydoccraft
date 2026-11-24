@@ -4,15 +4,15 @@ use std::{
     io::Write,
 };
 
-use roxmltree::Document;
+use roxmltree::{Document, Node};
 use serde_json::Value;
 
 use super::{
-    extract, invalid, limited, name, parse_xml, required, unsupported, Book, DC, METADATA_BYTES,
-    MIME, XHTML, XML_BYTES,
+    external, extract, invalid, limited, name, parse_xml, required, resolve, unsupported, Book, DC,
+    METADATA_BYTES, MIME, OPF, XHTML, XML_BYTES,
 };
 use crate::{
-    author_epub::{escape_text, validate_text, BoundedOutput},
+    author_epub::{escape_attribute, escape_text, validate_text, BoundedOutput},
     EngineError,
 };
 
@@ -241,10 +241,18 @@ pub(crate) fn update_chapters(
             collect_fragments(value, &replacements, &mut links);
         }
     }
+    let epub3 = extracted.metadata["epub_version"]
+        .as_str()
+        .is_some_and(|version| version.starts_with('3'));
+    let mut declarations = HashMap::new();
     for (&path, &replacement) in &replacements {
         let xml = parse_xml(replacement)?;
-        if !name(xml.root_element(), XHTML, "html") {
+        let root = xml.root_element();
+        if !name(root, XHTML, "html") {
             return Err(invalid("replacement chapter must be XHTML"));
+        }
+        if epub3 {
+            declarations.insert(path, xhtml_properties(root));
         }
         // Preserve target IDs used by existing navigation, synchronization and links.
         if let Some(required) = links.get(path) {
@@ -264,9 +272,113 @@ pub(crate) fn update_chapters(
             }
         }
     }
+    let package = sync_chapter_properties(&mut book, &declarations)?;
+    if let Some((path, xml)) = &package {
+        replacements.insert(path, xml.as_bytes());
+    }
     let result = rewrite(&mut book, replacements, BTreeMap::new(), &HashSet::new())?;
     extract(&result, None)?;
     Ok(result)
+}
+
+const XHTML_PROPERTIES: [&str; 2] = ["mathml", "svg"];
+
+pub(super) fn xhtml_properties(root: Node<'_, '_>) -> Vec<&'static str> {
+    let mut math = false;
+    let mut svg = false;
+    for node in root.descendants().filter(Node::is_element) {
+        match node.tag_name().namespace() {
+            Some(super::math::MATHML) => math = true,
+            Some(super::svg::NS) => svg = true,
+            _ => {}
+        }
+        if math && svg {
+            break;
+        }
+    }
+    XHTML_PROPERTIES
+        .into_iter()
+        .zip([math, svg])
+        .filter_map(|(property, present)| present.then_some(property))
+        .collect()
+}
+
+pub(super) fn properties_attribute(properties: &[&str]) -> String {
+    if properties.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " properties=\"{}\"",
+            escape_attribute(&properties.join(" "))
+        )
+    }
+}
+
+pub(super) fn before_attributes(source: &str, element: Node<'_, '_>) -> Result<usize, EngineError> {
+    let name_start = element.range().start + 1;
+    let name_length = source[name_start..]
+        .bytes()
+        .position(|byte| byte.is_ascii_whitespace() || matches!(byte, b'/' | b'>'))
+        .ok_or_else(|| invalid("invalid EPUB manifest opening tag"))?;
+    Ok(name_start + name_length)
+}
+
+fn sync_chapter_properties(
+    book: &mut Book<'_>,
+    declarations: &HashMap<&str, Vec<&str>>,
+) -> Result<Option<(String, String)>, EngineError> {
+    if declarations.is_empty() {
+        return Ok(None);
+    }
+    let path = book.package_path()?;
+    let bytes = book.read(&path, METADATA_BYTES)?;
+    let source = std::str::from_utf8(&bytes).map_err(invalid)?;
+    let xml = parse_xml(&bytes)?;
+    let manifest = required(xml.root_element(), "manifest")?;
+    let mut edits = Vec::new();
+    for item in manifest.children().filter(|&node| name(node, OPF, "item")) {
+        let href = super::attribute(item, "href")?;
+        if external(href) {
+            continue;
+        }
+        let target = resolve(&path, href)?;
+        let Some(inferred) = declarations.get(target.as_str()) else {
+            continue;
+        };
+        let current: Vec<_> = item
+            .attribute("properties")
+            .unwrap_or_default()
+            .split_ascii_whitespace()
+            .collect();
+        let mut properties = Vec::new();
+        for &property in &current {
+            if !XHTML_PROPERTIES.contains(&property)
+                || (inferred.contains(&property) && !properties.contains(&property))
+            {
+                properties.push(property);
+            }
+        }
+        for &property in inferred {
+            if !properties.contains(&property) {
+                properties.push(property);
+            }
+        }
+        if properties == current {
+            continue;
+        }
+        let range = if let Some(attribute) = item.attribute_node("properties") {
+            attribute.range()
+        } else {
+            let at = before_attributes(source, item)?;
+            at..at
+        };
+        edits.push((range, properties_attribute(&properties)));
+    }
+    if edits.is_empty() {
+        return Ok(None);
+    }
+    let updated = super::structure::apply_edits(source, edits, METADATA_BYTES)?;
+    Ok(Some((path, updated)))
 }
 
 fn anchors<'a>(xml: &'a Document<'_>) -> HashSet<&'a str> {

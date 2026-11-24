@@ -46,6 +46,8 @@ WordCraft represents zeroed `mpadded` metrics with its visible phantom node. Hor
 
 ## Resource removal and media overlay authoring
 
+Chapter edits derive the EPUB 3 `mathml` and `svg` declarations from element namespaces in the new XHTML. Replacement splices only the affected manifest attributes into the original OPF. Insertion uses the same scanner when adding new manifest entries. EPUB 2 retains its existing package vocabulary.
+
 The structure editor rewrites the spine and navigation first, then stages narration association and duration edits. It creates one SMIL document per edited chapter with ordered sequences and text and audio cues. The Python facade sends a bounded depth-first list, and the native writer validates its parent-child transitions and emits `seq` and `par` elements. Sequences point to the chapter or a fragment, and their roles apply to descendant cues during playback. Durations use checked microsecond arithmetic. The package total sums each associated overlay once. Retained overlays use declared duration metadata or explicit clip ranges. Text-only cues contribute zero recorded duration.
 
 Resource removal checks the staged archive after additions, replacements, and overlay changes. It validates retained package ID references, targets in XHTML, SVG, SMIL and NCX, and stylesheet dependencies. The scan follows archive-local stylesheet links and imports regardless of media conditions. It includes recognized off-spine resources and excludes the removed members, allowing jointly removed assets to reference each other. Unprovable scripted dependencies fail explicitly. Untouched ZIP members are raw-copied. The reader reopens and validates the entire result before returning bytes.

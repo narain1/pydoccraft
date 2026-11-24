@@ -238,7 +238,15 @@ pub(crate) fn update_structure<'a>(
                     } else {
                         plan.new_path("chapter", "xhtml")
                     };
-                    let id = plan.add_manifest(&path, "application/xhtml+xml", "")?;
+                    let content_properties = if epub3 {
+                        editor::properties_attribute(&editor::xhtml_properties(
+                            chapter.root_element(),
+                        ))
+                    } else {
+                        String::new()
+                    };
+                    let id =
+                        plan.add_manifest(&path, "application/xhtml+xml", &content_properties)?;
                     // Inserted XHTML can author a viewport independently. By default it reflows.
                     let properties = if *fixed {
                         if !epub3 || super::layout::dimensions(chapter.root_element()).is_none() {
@@ -671,7 +679,7 @@ fn append(output: &mut String, text: &str, limit: usize) -> Result<(), EngineErr
     Ok(())
 }
 
-fn apply_edits(
+pub(super) fn apply_edits(
     source: &str,
     mut edits: Vec<(Range<usize>, String)>,
     limit: usize,

@@ -1608,6 +1608,51 @@ class EpubTests(unittest.TestCase):
             with self.assertRaises(doc_ex.UnsupportedFormatError):
                 signed.edit_epub_chapters({0: first})
 
+    def test_chapter_edits_update_mathml_and_svg_manifest_properties(self) -> None:
+        plain = '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Plain text</p></body></html>'
+        svg = '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="20"><rect width="50" height="20" fill="blue"/></svg>'
+        math = '<m:math xmlns:m="http://www.w3.org/1998/Math/MathML"><m:msup><m:mi>x</m:mi><m:mn>2</m:mn></m:msup></m:math>'
+        with_art = plain.replace('</body>', svg + '</body>')
+        rich = with_art.replace('</p>', math + '</p>')
+        source = epub_fixture()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(b'<item id="one" ', b"<item properties='custom:retained' id=\"one\" ")
+        source = rewrite_epub(source, {"OEBPS/content.opf": package})
+        with doc_ex.open(source) as book:
+            replaced = book.edit_epub_chapters({0: rich, -1: with_art})
+            self.assertIsNone(next(item for item in book.metadata["manifest"] if item["id"] == "two")["properties"])
+        added_path = "OEBPS/new chapter.xhtml"
+        with doc_ex.open(replaced) as book:
+            added = book.edit_epub_structure([0, 1, doc_ex.EpubChapterSource("Art and math", rich, added_path)])
+        with doc_ex.open(added) as book, zipfile.ZipFile(io.BytesIO(added)) as archive:
+            props = {item["path"]: item["properties"] for item in book.metadata["manifest"]}
+            self.assertEqual(props["OEBPS/one.xhtml"], "custom:retained mathml svg")
+            self.assertEqual(props["OEBPS/two.xhtml"], "svg")
+            self.assertEqual(props[added_path], "mathml svg")
+            self.assertIn(b'<item id="image" href="image.png" media-type="image/png"/>', archive.read("OEBPS/content.opf"))
+            self.assertTrue(book.render_page(2, dpi=48).startswith(b"\x89PNG"))
+            removed = book.edit_epub_chapters({0: plain, 1: plain})
+        with doc_ex.open(removed) as book:
+            props = {item["path"]: item["properties"] for item in book.metadata["manifest"]}
+            self.assertEqual(props["OEBPS/one.xhtml"], "custom:retained")
+            self.assertIsNone(props["OEBPS/two.xhtml"])
+            self.assertEqual(props[added_path], "mathml svg")
+
+    def test_epub2_chapter_edit_does_not_add_epub3_manifest_properties(self) -> None:
+        source = epub_fixture(version="2.0")
+        svg = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"/>'
+        xhtml = '<html xmlns="http://www.w3.org/1999/xhtml"><body>' + svg + '</body></html>'
+        with doc_ex.open(source) as book:
+            replaced = book.edit_epub_chapters({0: xhtml})
+        with zipfile.ZipFile(io.BytesIO(source)) as before, zipfile.ZipFile(io.BytesIO(replaced)) as after:
+            self.assertEqual(after.read("OEBPS/content.opf"), before.read("OEBPS/content.opf"))
+        with doc_ex.open(replaced) as book:
+            added = book.edit_epub_structure([0, doc_ex.EpubChapterSource("Legacy chapter", xhtml)])
+        with doc_ex.open(added) as book:
+            xhtml_entries = [item for item in book.metadata["manifest"] if item["media_type"] == "application/xhtml+xml"]
+            self.assertEqual(len(xhtml_entries), 3)
+            self.assertTrue(all(item["properties"] is None for item in xhtml_entries))
+
     def test_xml_sensitive_metadata_roundtrips(self) -> None:
         with doc_ex.new("epub") as book:
             book.set_metadata(title="A & <B>", identifier="urn:a&b", language="en", authors=["A & B", "C <D>"])

@@ -11,7 +11,7 @@
 - [ ] Expand the public EPUB conformance corpus. Exercise math-heavy books that exceed the eager semantic output budget.
 - [ ] Validate the release wheel matrix on Linux, macOS, and Windows.
 - [x] Replace existing XHTML chapters transactionally and preserve targeted navigation and overlay anchors.
-- [ ] Synchronize EPUB 3 content properties in the manifest after chapter insertion or replacement, including `mathml` and `svg`.
+- [x] Synchronize EPUB 3 `mathml` and `svg` resource properties after chapter insertion or replacement.
 - [x] Read SMIL timing trees and expose chapter cue order, time ranges, target IDs and bounded audio reads.
 - [x] Project supported Presentation MathML into native equations for PNG, DOCX and PDF.
 - [x] Apply local author styles for the supported cascade and layout properties. Render fixed-layout XHTML and static SVG chapters with viewport bounds and clipping.
