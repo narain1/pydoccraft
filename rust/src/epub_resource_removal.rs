@@ -28,13 +28,6 @@ pub(super) fn apply(
         if book.archive.index_for_name(path).is_none() {
             return Err(argument("removed EPUB resource is absent from the archive"));
         }
-        if book
-            .obfuscated_fonts
-            .as_ref()
-            .is_some_and(|fonts| fonts.contains(path))
-        {
-            return Err(unsupported("removing obfuscated EPUB fonts"));
-        }
     }
     let original = parse_xml(source.as_bytes())?;
     let root = original.root_element();

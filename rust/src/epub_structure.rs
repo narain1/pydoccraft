@@ -10,9 +10,9 @@ use roxmltree::Node;
 use serde_json::Value;
 
 use super::{
-    attribute, charge, child, editor, external, extract, invalid, limited, name, parse_xml,
-    required, resolve, unsupported, validate_archive_path, EPUB, METADATA_BYTES, NCX, OPF, XHTML,
-    XML_BYTES,
+    attribute, charge, child, editor, external, extract, fonts, invalid, limited, name,
+    obfuscation, parse_xml, required, resolve, unsupported, validate_archive_path, Book, EPUB,
+    METADATA_BYTES, NCX, OPF, XHTML, XML_BYTES,
 };
 use crate::{
     author_epub::{escape_text, validate_image, validate_text},
@@ -354,13 +354,6 @@ pub(crate) fn update_structure<'a>(
         .filter_map(|id| manifest.get(id))
         .collect();
     for (path, media, data) in resources {
-        if book
-            .obfuscated_fonts
-            .as_ref()
-            .is_some_and(|fonts| fonts.contains(path))
-        {
-            return Err(unsupported("replacing obfuscated EPUB fonts"));
-        }
         check_path(path)?;
         if plan.files.contains_key(path)
             || existing_toc.as_ref() == Some(path)
@@ -401,8 +394,31 @@ pub(crate) fn update_structure<'a>(
                 "EPUB resource replacement requires its existing manifest and media type",
             ));
         }
-        plan.files
-            .insert(path.clone(), Cow::Borrowed(data.as_slice()));
+        let replacement = if let Some(obfuscated) = book
+            .obfuscated_fonts
+            .as_ref()
+            .filter(|fonts| fonts.contains(path))
+        {
+            if data.len() > fonts::MAX_FONT_BYTES {
+                return Err(limited("EPUB replacement font exceeds 8 MiB"));
+            }
+            let decoded = wordcraft_fonts::decode_font_file(data).map_err(|err| {
+                argument(&format!(
+                    "EPUB font replacement requires a plain font: {err}"
+                ))
+            })?;
+            if decoded.len() > fonts::MAX_FONT_BYTES {
+                return Err(limited("EPUB decoded font exceeds 8 MiB"));
+            }
+            skrifa::raw::FileRef::new(&decoded)
+                .map_err(|err| argument(&format!("invalid EPUB replacement font: {err}")))?;
+            let mut stored = data.clone();
+            obfuscated.apply(path, &mut stored);
+            Cow::Owned(stored)
+        } else {
+            Cow::Borrowed(data.as_slice())
+        };
+        plan.files.insert(path.clone(), replacement);
     }
     if !plan.manifest_additions.is_empty() {
         let at = inner_range(package_source, manifest_node)?.end;
@@ -460,6 +476,8 @@ pub(crate) fn update_structure<'a>(
     if !removals.is_empty() {
         revised = Cow::Owned(removal::apply(&revised, &plan, &mut book, &removals)?);
     }
+    let empty_encryption = remove_font_declarations(&mut plan, &mut book, &removals)?;
+    removals.extend(empty_encryption.as_deref());
     if revised != package_source {
         plan.files.insert(
             package_path.clone(),
@@ -487,6 +505,33 @@ pub(crate) fn update_structure<'a>(
     )?;
     extract(&updated, None)?;
     Ok(updated)
+}
+
+fn remove_font_declarations(
+    plan: &mut Plan<'_>,
+    book: &mut Book<'_>,
+    removed: &HashSet<&str>,
+) -> Result<Option<String>, EngineError> {
+    let Some(fonts) = &book.obfuscated_fonts else {
+        return Ok(None);
+    };
+    let edits: Vec<_> = removed
+        .iter()
+        .filter_map(|path| fonts.declarations.get(*path))
+        .map(|range| (range.clone(), String::new()))
+        .collect();
+    if edits.is_empty() {
+        return Ok(None);
+    }
+    let path = fonts.encryption_path.clone();
+    if edits.len() == fonts.declarations.len() {
+        return Ok(Some(path));
+    }
+    let bytes = book.read(&path, METADATA_BYTES)?;
+    let source = std::str::from_utf8(&bytes).map_err(invalid)?;
+    let encryption = apply_edits(source, edits, METADATA_BYTES)?;
+    plan.files.insert(path, Cow::Owned(encryption.into_bytes()));
+    Ok(None)
 }
 
 struct Plan<'a> {
@@ -552,21 +597,15 @@ fn check_path(path: &str) -> Result<(), EngineError> {
 }
 
 fn editable_resource(media: &str) -> bool {
-    matches!(
-        media,
-        "text/css"
-            | "application/smil+xml"
-            | "application/font-sfnt"
-            | "application/vnd.ms-opentype"
-            | "application/x-font-ttf"
-            | "application/font-woff"
-    ) || media.split_once('/').is_some_and(|(kind, subtype)| {
-        matches!(kind, "image" | "audio" | "video" | "font")
-            && !subtype.is_empty()
-            && subtype
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"-+._".contains(&byte))
-    })
+    matches!(media, "text/css" | "application/smil+xml")
+        || obfuscation::is_font(media)
+        || media.split_once('/').is_some_and(|(kind, subtype)| {
+            matches!(kind, "image" | "audio" | "video" | "font")
+                && !subtype.is_empty()
+                && subtype
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"-+._".contains(&byte))
+        })
 }
 
 fn relative_url(base: &str, path: &str) -> String {

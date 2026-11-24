@@ -722,16 +722,76 @@ class EpubTests(unittest.TestCase):
             self.assertEqual(book.render_page(0, dpi=96), preview)
             self.assertEqual(book.read_epub_resource("OEBPS/Typeface.ttf"), wrapped)
             revision = book.edit_epub_structure([1, 0])
-            with self.assertRaises(doc_ex.UnsupportedFormatError):
-                book.edit_epub_structure(resources={"OEBPS/Typeface.ttf": doc_ex.EpubResource("font/ttf", font)})
+            replacement = book.edit_epub_structure(resources={
+                "OEBPS/Typeface.ttf": doc_ex.EpubResource("font/ttf", font + b"\0" * 4),
+            })
+            with self.assertRaises(ValueError):
+                book.edit_epub_structure(resources={
+                    "OEBPS/Typeface.ttf": doc_ex.EpubResource("font/ttf", wrapped),
+                })
+            self.assertEqual(book.read_epub_resource("OEBPS/Typeface.ttf"), wrapped)
         with doc_ex.open(revision) as edited:
             self.assertEqual(edited.render_page(1, dpi=96), preview)
+        with doc_ex.open(replacement) as edited, zipfile.ZipFile(io.BytesIO(replacement)) as archive:
+            self.assertEqual(edited.read_epub_resource("OEBPS/Typeface.ttf"), wrapped + b"\0" * 4)
+            self.assertEqual(edited.render_page(0, dpi=96), preview)
+            self.assertEqual(archive.read("META-INF/encryption.xml"), encryption.encode())
         for disallowed in (
             encryption.replace("OEBPS/Typeface.ttf", "OEBPS/one.xhtml"),
             encryption.replace("http://www.idpf.org/2008/embedding", "http://www.w3.org/2001/04/xmlenc#aes128-cbc"),
         ):
             with self.subTest(encryption=disallowed), self.assertRaises(doc_ex.UnsupportedFormatError):
                 doc_ex.open(rewrite_epub(encoded, {"META-INF/encryption.xml": disallowed}))
+
+    def test_remove_obfuscated_fonts_updates_only_matching_declarations(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head>
+        <link rel="stylesheet" href="styles.css"/>
+        </head><body><p>Obfuscated font</p></body></html>"""
+        source = epub_fixture(chapter_one=chapter)
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b"</manifest>",
+                b'<item id="css" href="styles.css" media-type="text/css"/>'
+                b'<item id="active" href="Fonts/Active%20Face.ttf" media-type="font/ttf"/>'
+                b'<item id="unused" href="Fonts/Unused.ttf" media-type="font/ttf"/></manifest>',
+            )
+        active_path = "OEBPS/Fonts/Active Face.ttf"
+        unused_path = "OEBPS/Fonts/Unused.ttf"
+        active_uri = "OEBPS/Fonts/Active%20Face.ttf"
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
+        key = hashlib.sha1(b"urn:test:book").digest()
+        wrapped = bytes(byte ^ key[index % len(key)] for index, byte in enumerate(font[:1040])) + font[1040:]
+        declaration = """<x:EncryptedData><x:EncryptionMethod Algorithm="http://www.idpf.org/2008/embedding"/>
+        <x:CipherData><x:CipherReference URI="{}"/></x:CipherData></x:EncryptedData>"""
+        first = declaration.format(active_uri)
+        second = declaration.format(unused_path)
+        encryption = f"""<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container"
+        xmlns:x="http://www.w3.org/2001/04/xmlenc#">{first}<!-- keep this comment -->{second}</encryption>"""
+        source = rewrite_epub(source, {
+            "OEBPS/content.opf": package,
+            "OEBPS/styles.css": "@font-face {font-family: Local; src: url('Fonts/Active%20Face.ttf')} p {font-family: Local}",
+            active_path: wrapped, unused_path: wrapped, "META-INF/encryption.xml": encryption,
+        })
+        with doc_ex.open(source) as document:
+            preview = document.render_page(0, dpi=96)
+            with self.assertRaises(ValueError):
+                document.edit_epub_structure(remove_resources=[active_path])
+            retained = document.edit_epub_structure(remove_resources=[unused_path])
+            self.assertEqual(document.read_epub_resource(unused_path), wrapped)
+        with doc_ex.open(retained) as document, zipfile.ZipFile(io.BytesIO(retained)) as archive:
+            self.assertEqual(archive.read("META-INF/encryption.xml"), encryption.replace(second, "").encode())
+            self.assertNotIn(unused_path, archive.namelist())
+            self.assertEqual(document.read_epub_resource(active_path), wrapped)
+            self.assertEqual(document.render_page(0, dpi=96), preview)
+            final = document.edit_epub_structure(
+                resources={"OEBPS/styles.css": doc_ex.EpubResource("text/css", b"p {font-weight: bold}")},
+                remove_resources=[active_path],
+            )
+        with doc_ex.open(final) as document, zipfile.ZipFile(io.BytesIO(final)) as archive:
+            self.assertNotIn("META-INF/encryption.xml", archive.namelist())
+            self.assertNotIn(active_path, archive.namelist())
+            self.assertEqual(document[0].get_text(), "Obfuscated font")
+            self.assertTrue(document.render_page(0, dpi=96).startswith(b"\x89PNG"))
 
     def test_embedded_and_linked_svg_render_in_chapter_viewport(self) -> None:
         xhtml = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:s="http://www.w3.org/2000/svg"><head>

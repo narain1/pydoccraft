@@ -28,4 +28,5 @@
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
 - [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.
 - [x] Attach or detach EPUB 3 media overlays and author sequential text and audio cues with package duration metadata.
-- [ ] Extend editing to obfuscated resources and author richer SMIL hierarchies.
+- [x] Replace IDPF-obfuscated fonts from plain font bytes and update their declarations after resource removal.
+- [ ] Author richer SMIL hierarchies.

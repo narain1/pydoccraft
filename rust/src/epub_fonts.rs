@@ -32,7 +32,7 @@ use super::{
 };
 use crate::{model::BlockPayload, EngineError};
 
-const MAX_FONT_BYTES: usize = 8 * 1024 * 1024;
+pub(super) const MAX_FONT_BYTES: usize = 8 * 1024 * 1024;
 type Brush = [u8; 4];
 
 pub(super) struct Face {

@@ -460,7 +460,7 @@ impl<'a> Book<'a> {
     fn read_font(&mut self, path: &str, limit: usize) -> Result<Vec<u8>, EngineError> {
         let mut bytes = self.read(path, limit)?;
         if let Some(fonts) = &self.obfuscated_fonts {
-            fonts.decode(path, &mut bytes);
+            fonts.apply(path, &mut bytes);
         }
         Ok(bytes)
     }

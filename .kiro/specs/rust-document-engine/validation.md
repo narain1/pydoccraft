@@ -2771,3 +2771,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 656 installed tests, inclu
 ## 2026-11-24 EPUB Ogg Opus overlays
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 658 installed tests, including 63 EPUB tests. It measured 22,912,369 bytes with a 53,193,912-byte native extension. It decodes single-stream mono and stereo Opus in Ogg. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-ogg-opus-media-overlays) for license attribution and reference decoder comparisons.
+
+## 2026-11-24 EPUB obfuscated font replacement and removal
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 659 installed tests, including 64 EPUB tests. It measured 22,906,617 bytes with a 53,176,808-byte native extension. EPUBCheck accepted both the replacement and removal samples. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-idpf-obfuscated-font-edits) for detailed check results.

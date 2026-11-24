@@ -1,5 +1,8 @@
-//! Reverse the EPUB OCF font-only obfuscation of a local font while rendering.
-use std::collections::HashSet;
+//! Apply and track the EPUB OCF font-only obfuscation of local fonts.
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Range,
+};
 
 use sha1::{Digest, Sha1};
 
@@ -13,16 +16,17 @@ const XMLENC: &str = "http://www.w3.org/2001/04/xmlenc#";
 const IDPF: &str = "http://www.idpf.org/2008/embedding";
 
 pub(super) struct FontObfuscation {
-    paths: HashSet<String>,
+    pub(super) encryption_path: String,
+    pub(super) declarations: HashMap<String, Range<usize>>,
     key: [u8; 20],
 }
 
 impl FontObfuscation {
     pub(super) fn contains(&self, path: &str) -> bool {
-        self.paths.contains(path)
+        self.declarations.contains_key(path)
     }
 
-    pub(super) fn decode(&self, path: &str, bytes: &mut [u8]) {
+    pub(super) fn apply(&self, path: &str, bytes: &mut [u8]) {
         if self.contains(path) {
             for (output, mask) in bytes.iter_mut().take(1040).zip(self.key.iter().cycle()) {
                 *output ^= *mask;
@@ -42,7 +46,7 @@ pub(super) fn load(
     if root.tag_name().namespace() != Some(OCF) || root.tag_name().name() != "encryption" {
         return Err(encrypted());
     }
-    let mut paths = HashSet::new();
+    let mut declarations = HashMap::new();
     for entry in root.children().filter(roxmltree::Node::is_element) {
         if !entry.has_tag_name((XMLENC, "EncryptedData"))
             || entry.children().filter(roxmltree::Node::is_element).count() != 2
@@ -68,11 +72,13 @@ pub(super) fn load(
             return Err(encrypted());
         }
         let path = resolve("container.xml", uri)?;
-        if book.archive.index_for_name(&path).is_none() || !paths.insert(path) {
+        if book.archive.index_for_name(&path).is_none()
+            || declarations.insert(path, entry.range()).is_some()
+        {
             return Err(encrypted());
         }
     }
-    if paths.is_empty() {
+    if declarations.is_empty() {
         return Err(encrypted());
     }
     let package_path = book.package_path()?;
@@ -98,14 +104,14 @@ pub(super) fn load(
             continue;
         }
         let path = resolve(&package_path, href)?;
-        if paths.contains(&path) {
+        if declarations.contains_key(&path) {
             if !is_font(attribute(item, "media-type")?) {
                 return Err(encrypted());
             }
             font_paths.insert(path);
         }
     }
-    if paths != font_paths {
+    if declarations.len() != font_paths.len() {
         return Err(encrypted());
     }
     let mut ident = String::new();
@@ -124,12 +130,13 @@ pub(super) fn load(
         return Err(encrypted());
     }
     Ok(FontObfuscation {
-        paths,
+        encryption_path: encryption_path.to_owned(),
+        declarations,
         key: Sha1::digest(ident.as_bytes()).into(),
     })
 }
 
-fn is_font(media: &str) -> bool {
+pub(super) fn is_font(media: &str) -> bool {
     matches!(
         media,
         "font/ttf"
