@@ -9,9 +9,10 @@ use std::{
 use kurbo::BezPath;
 use parley::{
     fontique::{Blob, FontInfoOverride, GenericFamily},
+    setting::{FontVariation, Tag},
     Alignment, AlignmentOptions, BaseDirection, FontContext, FontFamily, FontFamilyName, FontStyle,
-    FontWeight, InlineBox, InlineBoxKind, Layout, LayoutContext, LineHeight, PositionedLayoutItem,
-    StyleProperty,
+    FontVariations, FontWeight, InlineBox, InlineBoxKind, Layout, LayoutContext, LineHeight,
+    PositionedLayoutItem, StyleProperty,
 };
 use skrifa::{
     instance::{LocationRef, NormalizedCoord, Size},
@@ -347,6 +348,22 @@ impl Fonts {
                 families.push(FontFamilyName::named("Source Sans 3"));
                 builder.push(
                     StyleProperty::FontFamily(FontFamily::List(families.into())),
+                    range.clone(),
+                );
+            }
+            let mut variations: Vec<_> = run
+                .axes
+                .iter()
+                .map(|&(axis, value)| FontVariation::new(Tag::from_bytes(axis), value))
+                .collect();
+            let opsz = Tag::from_bytes(*b"opsz");
+            if !run.optical_sizing_disabled && !variations.iter().any(|axis| axis.tag == opsz) {
+                // XHTML layout measures the computed font size in typographic points.
+                variations.push(FontVariation::new(opsz, style.size.unwrap_or(12.0)));
+            }
+            if !variations.is_empty() {
+                builder.push(
+                    StyleProperty::FontVariations(FontVariations::List(variations.into())),
                     range.clone(),
                 );
             }

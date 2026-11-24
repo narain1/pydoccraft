@@ -238,7 +238,21 @@ fn apply_styles(
             }
         }
         let mut style = String::new();
-        for (key, value) in props {
+        for (key, mut value) in props {
+            if key == "font-optical-sizing" {
+                value = match super::css::optical_sizing(&value) {
+                    Some(true) => "auto",
+                    Some(false) => "none",
+                    None => continue,
+                }
+                .into();
+            } else if key == "font-variation-settings" {
+                match value.to_ascii_lowercase().as_str() {
+                    "inherit" | "unset" | "revert" | "revert-layer" => continue,
+                    "initial" => value = "normal".into(),
+                    _ => {}
+                }
+            }
             validate_paint(&value)?;
             style.push_str(&key);
             style.push(':');
@@ -312,6 +326,8 @@ fn svg_property(key: &str) -> bool {
             | "paint-order"
             | "font-kerning"
             | "font-feature-settings"
+            | "font-variation-settings"
+            | "font-optical-sizing"
             | "shape-rendering"
             | "text-rendering"
             | "image-rendering"

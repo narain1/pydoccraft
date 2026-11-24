@@ -790,6 +790,72 @@ class EpubTests(unittest.TestCase):
         self.assertEqual(preview('"Source Sans 3", "Other, Face"', colliding), full_face)
         self.assertNotEqual(preview("Missing, sans-serif"), generic)
 
+    def test_epub_xhtml_variable_axes_cascade_and_optical_sizing(self) -> None:
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
+
+        def preview(parent: str = "", child: str = "", optical: str = "none") -> bytes:
+            chapter = f'''<html xmlns="http://www.w3.org/1999/xhtml"><head><style>
+              @font-face {{font-family: Local Variable; src: url(variable.ttf)}}
+              body {{margin: 0; font-size: 48px; line-height: 64px;
+                     font-family: Missing, Local Variable, sans-serif;
+                     font-optical-sizing: {optical}; {parent}}}
+              p {{margin: 0}} span {{{child}}}
+              </style></head><body><p><span>Variable glyphs</span></p></body></html>'''
+            source = rewrite_epub(epub_fixture(chapter_one=chapter), {"OEBPS/variable.ttf": font})
+            with doc_ex.open(source) as book:
+                self.assertEqual(book[0].get_text(), "Variable glyphs")
+                return book.render_page(0, dpi=96)
+
+        heavy = 'font-variation-settings: "wght" 900'
+        default = preview()
+        bold = preview(heavy)
+        self.assertNotEqual(default, bold)
+        self.assertEqual(bold, preview(child=heavy))
+        self.assertEqual(bold, preview('font-variation-settings: "wght" 200, "wght" 900'))
+        self.assertEqual(bold, preview('font-variation-settings: "wght" 10000'))
+        self.assertEqual(bold, preview(heavy + '; font-variation-settings: "bad" 100'))
+        self.assertEqual(default, preview(heavy, "font-variation-settings: normal"))
+        self.assertEqual(default, preview('font-variation-settings: "XXXX" 700'))
+
+        automatic = preview(optical="auto")
+        self.assertNotEqual(default, automatic)
+        self.assertEqual(automatic, preview('font-variation-settings: "opsz" 32'))
+        self.assertEqual(default, preview(child="font-optical-sizing: none", optical="auto"))
+        self.assertEqual(default, preview('font-variation-settings: "opsz" 14', optical="auto"))
+
+        def bundled(settings: str) -> bytes:
+            chapter = f'''<html xmlns="http://www.w3.org/1999/xhtml">
+              <body style="font-size: 48px; {settings}"><p>Bundled static font</p></body></html>'''
+            with doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+                return book.render_page(0, dpi=96)
+
+        self.assertEqual(bundled(""), bundled("font-variation-settings: 'wght' 900"))
+
+    def test_epub_svg_variable_axes_change_rendered_text(self) -> None:
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
+
+        def preview(settings: str, optical: str = "none") -> bytes:
+            svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 350 100">
+              <style>@font-face {{font-family: Local Variable; src: url(variable.ttf)}}
+                text {{font-family: Local Variable; font-size: 40px;
+                       font-optical-sizing: {optical}; font-variation-settings: {settings}}}</style>
+              <text x="10" y="60">Variable glyphs</text></svg>'''
+            chapter = doc_ex.EpubSvgChapterSource("Axes", svg, "OEBPS/Art/axes.svg")
+            resource = doc_ex.EpubResource("font/ttf", font)
+            with doc_ex.open(epub_fixture()) as original:
+                data = original.edit_epub_structure(
+                    [chapter, 0], resources={"OEBPS/Art/variable.ttf": resource},
+                )
+            with doc_ex.open(data) as book:
+                return book.render_page(0, dpi=96)
+
+        default = preview('"wght" 400')
+        bold = preview('"wght" 900')
+        self.assertNotEqual(default, bold)
+        self.assertEqual(default, preview("initial"))
+        self.assertEqual(default, preview("normal", optical="NONE"))
+        self.assertNotEqual(default, preview("normal", optical="initial"))
+
     def test_epub_packaged_fonts_preserve_inline_svg_and_math(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"
           xmlns:m="http://www.w3.org/1998/Math/MathML" xmlns:s="http://www.w3.org/2000/svg"><head>

@@ -469,6 +469,8 @@ impl CssParagraph {
 pub(super) struct RunStyle {
     pub chars: CharProps,
     pub families: Vec<super::css::Family>,
+    pub axes: Vec<super::css::Axis>,
+    pub optical_sizing_disabled: bool,
 }
 
 pub(super) struct StyledText<'a> {

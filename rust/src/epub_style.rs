@@ -39,6 +39,8 @@ pub(super) struct Styled {
 pub(super) struct Typography {
     pub chars: CharProps,
     pub families: Arc<[css::Family]>,
+    pub axes: Arc<[css::Axis]>,
+    pub optical_sizing_disabled: bool,
     pub align: Option<Align>,
     pub line_height: Option<LineSpacing>,
     pub preformatted: bool,
@@ -56,6 +58,7 @@ impl ChapterStyles {
         let mut annotation_end = 0;
         let mut equation_bytes = 0;
         let mut font_values = HashMap::new();
+        let mut axis_values = HashMap::new();
         for node in root.descendants().filter(Node::is_element) {
             let range = node.range();
             if range.start < annotation_end {
@@ -102,6 +105,20 @@ impl ChapterStyles {
                     .or_insert_with(|| css::parse_font_family(source))
                     .as_ref()
             });
+            if let Some(source) = values.get("font-variation-settings") {
+                if let Some(css::AxisValue::Settings(axes)) = axis_values
+                    .entry(source.clone())
+                    .or_insert_with(|| css::parse_axes(source))
+                {
+                    text.axes = axes.clone();
+                }
+            }
+            if let Some(enabled) = values
+                .get("font-optical-sizing")
+                .and_then(|value| css::optical_sizing(value))
+            {
+                text.optical_sizing_disabled = !enabled;
+            }
             text.apply(node, &values, viewport, font);
             let tag = node.tag_name().name();
             let position = match value(&values, "position") {

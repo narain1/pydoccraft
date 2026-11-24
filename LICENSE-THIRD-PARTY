@@ -354,6 +354,8 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 
 Documentation image: `website/assets/irs-1040-page-1.png` is rendered from the U.S. Internal Revenue Service 2025 Form 1040 (https://www.irs.gov/pub/irs-prior/f1040--2025.pdf), a U.S. government work.
 
+Inter variable font test fixture: `tests/fixtures/fonts/InterVariable.ttf` is the unmodified font from [Inter v4.1](https://github.com/rsms/inter/tree/e3a3d4c57d5ecc01453a575621882a384c1995a3). Copyright 2016 The Inter Project Authors. SIL Open Font License 1.1. The full license accompanies the source fixture as `tests/fixtures/fonts/OFL-Inter.txt`.
+
 ## EPUB narration dependencies
 
 MIT License

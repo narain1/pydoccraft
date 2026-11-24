@@ -32,7 +32,9 @@ The EPUB adapter owns author stylesheet resolution and knows only archive paths.
 
 `epub_svg.rs` applies the shared EPUB cascade to SVG prolog stylesheets and embedded declarations in source order. It sends only supported presentation properties and same-document paint references to resvg. SVG images carry their archive resolution base independently of the original markup and public image name. The renderer supplies PNG or JPEG resources through a bounded in-memory resolver. The SVG font database is scoped to the rendition and registers packaged fonts under their CSS family names. External resolvers for file and data URLs are disabled.
 
-Broader selectors, CSS custom properties, SVG font Unicode ranges and fallback stacks, variable-axis selection, additional SVG features and semantic fixed-layout conversion remain open.
+XHTML parses literal CSS `font-variation-settings` with Raffia, inherits or clears the axis list through the cascade and supplies the resulting coordinates to Parley. Automatic optical sizing sets `opsz` from the font size in points when the author has not supplied that axis. The renderer draws glyph outlines at the normalized coordinates returned by shaping. SVG previews pass the corresponding stylesheet properties through to resvg.
+
+Broader selectors, CSS custom properties, SVG font Unicode ranges and fallback stacks, variable `@font-face` descriptor ranges and defaults, additional SVG features and semantic fixed-layout conversion remain open.
 
 
 ## Presentation MathML

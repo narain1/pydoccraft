@@ -113,6 +113,8 @@ impl Inline {
                 if *end == start
                     && last.chars == props
                     && last.families.as_slice() == typography.families.as_ref()
+                    && last.axes.as_slice() == typography.axes.as_ref()
+                    && last.optical_sizing_disabled == typography.optical_sizing_disabled
                 {
                     *end = self.characters;
                     return Ok(());
@@ -129,12 +131,15 @@ impl Inline {
             for family in typography.families.iter() {
                 budget.bytes(48 + family.name.len().saturating_mul(3))?;
             }
+            budget.bytes(typography.axes.len().saturating_mul(48))?;
             self.styles.push((
                 start,
                 self.characters,
                 super::output::RunStyle {
                     chars: props,
                     families: typography.families.to_vec(),
+                    axes: typography.axes.to_vec(),
+                    optical_sizing_disabled: typography.optical_sizing_disabled,
                 },
             ));
         }

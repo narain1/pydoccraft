@@ -23,7 +23,8 @@
 - [x] Export selected fixed-layout viewports as image-only PDF pages at their original sizes.
 - [x] Scope packaged XHTML font faces using CSS Unicode ranges, overlap order and glyph fallback.
 - [x] Preserve ordered XHTML font-family stacks across inherited and inline styles, including packaged and generic fallbacks.
-- [ ] Extend source CSS and fixed-layout fidelity, including SVG font ranges and fallback stacks, variable axes, additional SVG features and semantic fixed-layout conversion.
+- [x] Shape variable-font glyphs with inherited CSS axis values and optical sizing in XHTML previews, and pass the properties to the static SVG renderer.
+- [ ] Extend source CSS and fixed-layout fidelity, including SVG font ranges and fallback stacks, variable font-face descriptor ranges and defaults, additional SVG features and semantic fixed-layout conversion.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.
 - [x] Render tall reflowable chapters within the paint coordinate budget and apply raster limits to the requested DPI and clip.
 - [x] Project inherited MathML attributes, accents, movable limits, repeated script pairs, varied fences and separators, horizontal spaces, and zero-dimension padding.

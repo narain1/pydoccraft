@@ -1,5 +1,5 @@
 //! Load bounded EPUB stylesheets and cascade supported author declarations on the XHTML tree.
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use parley::fontique::GenericFamily;
@@ -590,6 +590,61 @@ fn font_family_value(values: &[ComponentValue<'_>]) -> Option<FontFamilyValue> {
     Some(FontFamilyValue::Families(families.into()))
 }
 
+pub(super) type Axis = ([u8; 4], f32);
+
+pub(super) enum AxisValue {
+    Settings(Arc<[Axis]>),
+    Inherit,
+}
+
+pub(super) fn parse_axes(source: &str) -> Option<AxisValue> {
+    let declaration = format!("font-variation-settings:{source}");
+    let declaration = Parser::new(&declaration, Syntax::Css)
+        .parse::<Declaration>()
+        .ok()?;
+    axis_value(&declaration.value)
+}
+
+fn axis_value(values: &[ComponentValue<'_>]) -> Option<AxisValue> {
+    if let [ComponentValue::InterpolableIdent(value)] = values {
+        return match ident(value)?.to_ascii_lowercase().as_str() {
+            "normal" | "initial" => Some(AxisValue::Settings(Arc::default())),
+            "inherit" | "unset" | "revert" | "revert-layer" => Some(AxisValue::Inherit),
+            _ => None,
+        };
+    }
+    let mut axes = BTreeMap::new();
+    for entry in values.split(|value| {
+        matches!(
+            value,
+            ComponentValue::Delimiter(Delimiter {
+                kind: DelimiterKind::Comma,
+                ..
+            })
+        )
+    }) {
+        let [ComponentValue::InterpolableStr(tag), ComponentValue::Number(value)] = entry else {
+            return None;
+        };
+        let tag: [u8; 4] = string_value(tag)?.as_bytes().try_into().ok()?;
+        if !tag.iter().all(|byte| (0x20..=0x7e).contains(byte)) || !value.value.is_finite() {
+            return None;
+        }
+        axes.insert(tag, value.value);
+    }
+    Some(AxisValue::Settings(axes.into_iter().collect()))
+}
+
+pub(super) fn optical_sizing(value: &str) -> Option<bool> {
+    if value.eq_ignore_ascii_case("none") {
+        Some(false)
+    } else if value.eq_ignore_ascii_case("auto") || value.eq_ignore_ascii_case("initial") {
+        Some(true)
+    } else {
+        None
+    }
+}
+
 fn unicode_range_list(
     values: &[ComponentValue<'_>],
 ) -> Result<Option<Vec<(u32, u32)>>, EngineError> {
@@ -646,7 +701,15 @@ fn declarations(
             return Err(limited("EPUB CSS declarations exceed their budget"));
         }
         let key = key.to_ascii_lowercase();
-        if key == "font-family" && font_family_value(&declaration.value).is_none() {
+        if (key == "font-family" && font_family_value(&declaration.value).is_none())
+            || (key == "font-variation-settings" && axis_value(&declaration.value).is_none())
+            || (key == "font-optical-sizing"
+                && optical_sizing(value).is_none()
+                && !matches!(
+                    value.to_ascii_lowercase().as_str(),
+                    "inherit" | "unset" | "revert" | "revert-layer"
+                ))
+        {
             continue;
         }
         let important = declaration.important.is_some();
