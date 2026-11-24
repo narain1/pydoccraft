@@ -1565,6 +1565,113 @@ class EpubTests(unittest.TestCase):
                 expected[18720 * 16:19680 * 16],
             )
 
+    def test_media_overlay_reads_opus_from_grouped_ogg_and_chains(self) -> None:
+        source, _ = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf")
+            smil = archive.read("OEBPS/Sync/read.smil")
+        bounds = b'clipBegin="250ms" clipEnd="00:00:01.125"'
+        full = smil.replace(bounds, b'clipBegin="0s"')
+        fixtures = Path(__file__).parent / "fixtures"
+        video = (fixtures / "epub-narration-theora-opus.ogv").read_bytes()
+        stereo = (fixtures / "epub-narration-stereo.opus").read_bytes()
+        mono = (fixtures / "epub-narration-mono.opus").read_bytes()
+
+        def fixture(payload: bytes, media: bytes = b"audio/ogg", timeline: bytes = full) -> bytes:
+            return rewrite_epub(source, {
+                "OEBPS/content.opf": package.replace(b"audio/wav", media),
+                "OEBPS/Sync/read.smil": timeline,
+                "OEBPS/Media/voice.wav": payload,
+            })
+
+        def pcm(audio: doc_ex.EpubAudioClip | None) -> bytes:
+            assert audio is not None
+            self.assertEqual(audio.sample_rate, 48000)
+            with wave.open(io.BytesIO(audio.wave), "rb") as reader:
+                self.assertEqual(reader.getnframes(), audio.frame_count)
+                return reader.readframes(audio.frame_count)
+
+        with doc_ex.open(fixture(stereo)) as book:
+            expected = pcm(next(book.epub_narration(0)).audio)
+        self.assertEqual(len(expected), 55200 * 4)
+        for media in (b"audio/ogg", b"application/ogg", b"video/ogg"):
+            with self.subTest(media=media), doc_ex.open(fixture(video, media)) as book:
+                self.assertEqual(pcm(next(book.epub_narration(0)).audio), expected)
+
+        with doc_ex.open(fixture(stereo + mono)) as book:
+            expected_chain = pcm(next(book.epub_narration(0)).audio)
+        with doc_ex.open(fixture(video + mono, b"application/ogg")) as book:
+            streamed = b"".join(
+                pcm(cue.audio)
+                for cue in book.epub_narration(0, chunk_frames=773, skip_roles={"aside"})
+            )
+            self.assertEqual(streamed, expected_chain)
+        cross = smil.replace(bounds, b'clipBegin="1.14s" clipEnd="1.16s"')
+        with doc_ex.open(fixture(video + mono, timeline=cross)) as book:
+            self.assertEqual(pcm(next(book.epub_narration(0)).audio), expected_chain[54720 * 4:55680 * 4])
+
+        # The auxiliary Theora stream begins first and ends after the Opus EOS.
+        # This distinguishes validation of the physical segment from the audio.
+        pages = []
+        offset = 0
+        while offset < len(video):
+            lacing = video[offset + 26]
+            body = offset + 27 + lacing
+            end = body + sum(video[offset + 27:body])
+            pages.append(video[offset:end])
+            offset = end
+        self.assertTrue(pages[-1][5] & 4)
+        self.assertEqual(pages[0][14:18], pages[-1][14:18])
+        self.assertNotEqual(pages[1][14:18], pages[-1][14:18])
+        damaged_aux = video[:-1] + bytes([video[-1] ^ 1])
+        missing_eos = b"".join(pages[:-1])
+        late_bos = pages[1] + pages[3] + pages[0] + pages[2] + b"".join(pages[4:])
+        for malformed in (damaged_aux, missing_eos, late_bos):
+            with doc_ex.open(fixture(malformed)) as book:
+                with self.assertRaises(doc_ex.MalformedDocumentError):
+                    next(book.epub_narration(0))
+
+        def checked_page(page: bytes | bytearray) -> bytes:
+            page = bytearray(page)
+            page[22:26] = bytes(4)
+            checksum = 0
+            for octet in page:
+                checksum ^= octet << 24
+                for _ in range(8):
+                    checksum = ((checksum << 1) ^ (0x04C11DB7 if checksum & 0x80000000 else 0)) & 0xFFFFFFFF
+            struct.pack_into("<I", page, 22, checksum)
+            return bytes(page)
+
+        # Ogg permits an auxiliary EOS page containing no packets.
+        nil_eos = bytearray(pages[-1][:27])
+        nil_eos[26] = 0
+        with doc_ex.open(fixture(missing_eos + checked_page(nil_eos))) as book:
+            self.assertEqual(pcm(next(book.epub_narration(0)).audio), expected)
+        with doc_ex.open(fixture(missing_eos + nil_eos)) as book:
+            with self.assertRaises(doc_ex.MalformedDocumentError):
+                next(book.epub_narration(0))
+
+        # A complete auxiliary stream may occupy a single leading BOS page.
+        single = bytearray(pages[0])
+        single[5] |= 4
+        with doc_ex.open(fixture(checked_page(single) + stereo)) as book:
+            self.assertEqual(pcm(next(book.epub_narration(0)).audio), expected)
+
+        path = "OEBPS/Media/grouped.ogg"
+        with doc_ex.open(source) as book:
+            edited = book.edit_epub_structure(
+                [1, 0],
+                resources={path: doc_ex.EpubResource("application/ogg", video)},
+                overlays={
+                    "OEBPS/one.xhtml": [doc_ex.EpubOverlayCue("café", path, 0, 20_000)],
+                    "OEBPS/two.xhtml": None,
+                },
+            )
+        with doc_ex.open(edited) as book:
+            self.assertEqual(book.epub_media_cues(0), [])
+            self.assertEqual(book.read_epub_resource(path), video)
+            self.assertEqual(pcm(next(book.epub_narration(1)).audio), expected[:960 * 4])
+
     def test_media_overlay_rejects_damaged_ogg_transport(self) -> None:
         source, _ = narrated_epub()
         with zipfile.ZipFile(io.BytesIO(source)) as archive:

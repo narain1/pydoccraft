@@ -2827,3 +2827,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 678 installed tests, inclu
 ## 2026-11-24 Surround Ogg Opus narration
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 679 installed tests, including 84 EPUB tests. It measured 23,077,723 bytes with a 53,584,824-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-surround-ogg-opus-narration) covers speaker layouts, bounded clip playback, and libopus comparisons.
+
+## 2026-11-24 Multiplexed Ogg narration
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 680 installed tests, including 85 EPUB tests. It measured 23,068,182 bytes with a 53,559,080-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-multiplexed-ogg-narration) covers grouped stream timing, auxiliary stream checks and chapter editing.

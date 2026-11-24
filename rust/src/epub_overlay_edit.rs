@@ -236,7 +236,7 @@ fn write_smil(
             if !local.get(audio).is_some_and(|items| {
                 items.iter().all(|item| {
                     item.attribute("media-type")
-                        .is_some_and(|media| media.starts_with("audio/"))
+                        .is_some_and(overlay::audio_media_type)
                 })
             }) {
                 return Err(argument(

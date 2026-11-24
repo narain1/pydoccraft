@@ -1,8 +1,8 @@
 //! Index a bounded Ogg Opus track and decode its presentation samples.
-use std::{collections::HashSet, io::Cursor, ops::Range};
+use std::ops::Range;
 
 use hound::{SampleFormat, WavSpec};
-use ogg::PacketReader;
+use ogg::reading::BasePacketReader;
 use oxideav_opus::{
     framing_self_delim::parse_self_delimited, output_samples_per_channel, MultistreamDecoder,
     OpusHead, OpusPacket, OUTPUT_SAMPLE_RATE_HZ,
@@ -10,10 +10,10 @@ use oxideav_opus::{
 
 use super::{invalid, limited, unsupported, EngineError, MAX_CLIP_SAMPLES, MAX_FRAMES_PER_CLIP};
 
-const MAX_PAGES: usize = 150_000;
+#[path = "epub_ogg.rs"]
+mod ogg_pages;
+
 const MAX_PACKETS: usize = 250_000;
-const MAX_PACKET_BYTES: usize = 65_536;
-const MAX_COMMENT_BYTES: usize = 1024 * 1024;
 
 // The decoded family-1 samples are ordered as in RFC 7845 §5.1.1.2.
 // Values are the WAVE_FORMAT_EXTENSIBLE bits for each speaker.
@@ -94,7 +94,7 @@ impl Track {
         let mut speakers = 0;
         let mut frames = 0;
         let mut coded_packets_left = MAX_PACKETS;
-        for encoded in preflight(file)? {
+        for encoded in ogg_pages::groups(file)? {
             let link = Link::index(encoded, frames, &mut coded_packets_left)?;
             if link.head.channel_count > 1 {
                 for flag in link.speakers() {
@@ -192,12 +192,22 @@ impl Link {
     }
 
     fn index(
-        file: &[u8],
+        pages: Vec<ogg_pages::Page<'_>>,
         start: usize,
         coded_packets_left: &mut usize,
     ) -> Result<Self, EngineError> {
-        let mut reader = PacketReader::new(Cursor::new(file));
-        let id = reader.read_packet_expected().map_err(invalid)?;
+        let mut reader = BasePacketReader::new();
+        let mut pages = pages.into_iter();
+        let mut next_packet = || loop {
+            if let Some(packet) = reader.read_packet() {
+                return Ok(packet);
+            }
+            let page = pages
+                .next()
+                .ok_or_else(|| invalid("truncated Ogg Opus stream"))?;
+            reader.push_page(page.parse()?).map_err(invalid)?;
+        };
+        let id = next_packet()?;
         if !id.first_in_stream() || !id.last_in_page() || id.absgp_page() != 0 {
             return Err(invalid("invalid Ogg Opus identification page"));
         }
@@ -207,7 +217,7 @@ impl Link {
                 "Ogg Opus playback requires channel mapping family 0 or 1",
             ));
         }
-        let comments = reader.read_packet_expected().map_err(invalid)?;
+        let comments = next_packet()?;
         if !comments.last_in_page() || comments.absgp_page() != 0 {
             return Err(invalid("invalid Ogg Opus comment page"));
         }
@@ -219,7 +229,7 @@ impl Link {
         let mut origin = None;
         let mut prior_granule = 0;
         let end = loop {
-            let packet = reader.read_packet_expected().map_err(invalid)?;
+            let packet = next_packet()?;
             let streams = head.mapping.stream_count;
             *coded_packets_left = coded_packets_left
                 .checked_sub(usize::from(streams))
@@ -368,104 +378,6 @@ fn validate_comments(data: &[u8]) -> Result<(), EngineError> {
         comment = comment.get(length..).ok_or_else(malformed)?;
     }
     Ok(())
-}
-
-/// Check transport bounds before the demuxer allocates complete packets.
-/// Pages in a logical stream are contiguous. PacketReader checks page CRCs.
-fn preflight(mut bytes: &[u8]) -> Result<Vec<&[u8]>, EngineError> {
-    if bytes.is_empty() {
-        return Err(invalid("truncated Ogg header"));
-    }
-    let mut serials = HashSet::new();
-    let mut links = Vec::new();
-    let mut pages_left = MAX_PAGES;
-    let mut packets_left = MAX_PACKETS;
-    while !bytes.is_empty() {
-        let (serial, rest) = preflight_link(bytes, &mut pages_left, &mut packets_left)?;
-        if !serials.insert(serial) {
-            return Err(invalid("Ogg chain repeats a stream serial number"));
-        }
-        links.push(&bytes[..bytes.len() - rest.len()]);
-        bytes = rest;
-    }
-    Ok(links)
-}
-
-fn preflight_link<'a>(
-    mut bytes: &'a [u8],
-    pages_left: &mut usize,
-    packets_left: &mut usize,
-) -> Result<([u8; 4], &'a [u8]), EngineError> {
-    let serial: [u8; 4] = bytes
-        .get(14..18)
-        .and_then(|bytes| bytes.try_into().ok())
-        .ok_or_else(|| invalid("truncated Ogg header"))?;
-    let mut partial = 0;
-    let mut packets = 0;
-    for index in 0..MAX_PAGES as u32 {
-        *pages_left = pages_left
-            .checked_sub(1)
-            .ok_or_else(|| limited("Ogg Opus exceeds its page count limit"))?;
-        let (header, rest) = bytes
-            .split_first_chunk::<27>()
-            .ok_or_else(|| invalid("truncated Ogg page header"))?;
-        if &header[..5] != b"OggS\0" || header[5] & !7 != 0 {
-            return Err(invalid("invalid Ogg page header"));
-        }
-        if header[14..18] != serial || (header[5] & 2 != 0 && index != 0) {
-            return Err(unsupported("multiplexed Ogg audio"));
-        }
-        if header[18..22] != u32::to_le_bytes(index)
-            || (header[5] & 2 != 0) != (index == 0)
-            || (header[5] & 1 != 0) != (partial != 0)
-        {
-            return Err(invalid("invalid Ogg page sequence or continuation"));
-        }
-        let (segments, body) = rest
-            .split_at_checked(usize::from(header[26]))
-            .ok_or_else(|| invalid("truncated Ogg page lacing"))?;
-        let mut size = 0;
-        let before = packets;
-        for &segment in segments {
-            size += usize::from(segment);
-            partial += usize::from(segment);
-            let maximum = if packets == 1 {
-                MAX_COMMENT_BYTES
-            } else {
-                MAX_PACKET_BYTES
-            };
-            if partial > maximum {
-                return Err(limited("Ogg Opus packet size exceeds its limit"));
-            }
-            if segment < 255 {
-                partial = 0;
-                if packets >= 2 {
-                    *packets_left = packets_left
-                        .checked_sub(1)
-                        .ok_or_else(|| limited("Ogg Opus exceeds its packet count limit"))?;
-                }
-                packets += 1;
-            }
-        }
-        bytes = body
-            .get(size..)
-            .ok_or_else(|| invalid("truncated Ogg page body"))?;
-        if index == 0 && !body[..size].starts_with(b"OpusHead") {
-            return Err(unsupported("Ogg audio requires an Opus stream"));
-        }
-        if (index == 0 && (packets != 1 || partial != 0))
-            || (before == 1 && (packets > 2 || (packets == 2 && partial != 0)))
-        {
-            return Err(invalid("invalid Ogg Opus header lacing"));
-        }
-        if header[5] & 4 != 0 {
-            if packets < 3 || packets == before || partial != 0 {
-                return Err(invalid("invalid Ogg final page"));
-            }
-            return Ok((serial, bytes));
-        }
-    }
-    Err(limited("Ogg Opus exceeds its page count limit"))
 }
 
 #[cfg(test)]

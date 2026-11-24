@@ -61,7 +61,11 @@ impl AudioSource {
                     .map_err(|_| invalid("malformed MP4 audio"))??;
                 Decoder::Aac(Box::new(track))
             }
-            "audio/ogg" | "audio/opus" | "audio/ogg; codecs=opus" => {
+            "audio/ogg"
+            | "audio/opus"
+            | "audio/ogg; codecs=opus"
+            | "application/ogg"
+            | "video/ogg" => {
                 let bytes = read(data, path, MAX_ENCODED_BYTES)?;
                 let track = std::panic::catch_unwind(|| opus::Track::open(&bytes))
                     .map_err(|_| invalid("malformed Ogg Opus audio"))??;

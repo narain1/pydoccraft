@@ -235,7 +235,7 @@ impl Reader<'_, '_> {
             .media
             .get(&path)
             .copied()
-            .filter(|value| value.starts_with("audio/"))
+            .filter(|value| audio_media_type(value))
             .ok_or_else(|| invalid("media overlay audio is absent from the audio manifest"))?;
         if self.book.archive.index_for_name(&path).is_none() {
             return Err(invalid("media overlay audio is absent from the archive"));
@@ -271,6 +271,10 @@ fn only_child<'a, 'input>(
         return Err(invalid(format!("multiple media overlay {tag} elements")));
     }
     Ok(first)
+}
+
+pub(super) fn audio_media_type(media: &str) -> bool {
+    media.starts_with("audio/") || matches!(media, "application/ogg" | "video/ogg")
 }
 
 fn local_path(base: &str, source: &str) -> Result<String, EngineError> {

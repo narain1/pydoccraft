@@ -37,9 +37,11 @@
 - [x] Decode and stream single-track mono and stereo Ogg Opus overlays with the correct presentation bounds and gain.
 - [x] Stream sequentially chained mono and stereo Ogg Opus with a continuous sample timeline and bounded seeks.
 - [x] Decode family-1 Ogg Opus surround and preserve speaker assignments in standalone and chained WAVE playback.
-- [ ] Play embedded audio and video and support multiplexed Ogg layouts.
+- [x] Read and author overlay cues from grouped and chained Ogg resources with one Opus track per segment. Validate auxiliary stream transport through its EOS.
+- [ ] Play embedded audio and video and support explicit selection when an Ogg segment contains several Opus tracks.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
 - [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.
 - [x] Attach or detach EPUB 3 media overlays and author sequential text and audio cues with package duration metadata.
+- [ ] Edit a subset of chapters that share a SMIL resource while retaining the other chapters' cues and recalculating duration metadata.
 - [x] Replace IDPF-obfuscated fonts from plain font bytes and update their declarations after resource removal.
 - [x] Author nested SMIL sequences with chapter targets, inherited roles and clip-based durations.
