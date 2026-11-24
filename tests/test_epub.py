@@ -398,18 +398,111 @@ class EpubTests(unittest.TestCase):
                 original.edit_epub_structure(remove_resources=[removed[0]])
             with self.assertRaisesRegex(ValueError, "still referenced"):
                 original.edit_epub_structure(remove_resources=[removed[1]])
-            with self.assertRaises(doc_ex.MalformedDocumentError):
-                original.edit_epub_structure(overlays={"OEBPS/one.xhtml": None})
+            partial = original.edit_epub_structure(overlays={"OEBPS/one.xhtml": None})
+            kept = original.epub_media_cues(1)
             revised = original.edit_epub_structure(
                 overlays={"OEBPS/one.xhtml": None, "OEBPS/two.xhtml": None},
                 remove_resources=removed,
             )
             self.assertEqual(original.read_epub_resource(removed[1]), audio)
+        with doc_ex.open(partial) as edited, zipfile.ZipFile(io.BytesIO(partial)) as archive:
+            self.assertEqual(edited.epub_media_cues(0), [])
+            self.assertEqual(edited.epub_media_cues(1), kept)
+            self.assertEqual(edited.read_epub_resource(removed[1]), audio)
+            root = ET.fromstring(archive.read("OEBPS/content.opf"))
+            durations = {node.get("refines"): node.text for node in root.iter("{http://www.idpf.org/2007/opf}meta")
+                         if node.get("property") == "media:duration"}
+            self.assertEqual(durations, {"#sync": "0:00:00.923000", None: "0:00:00.923000"})
         with doc_ex.open(revised) as edited, zipfile.ZipFile(io.BytesIO(revised)) as archive:
             self.assertIsNone(edited.metadata.get("media_overlays"))
             self.assertEqual(edited.epub_media_cues(0), [])
             self.assertTrue(set(removed).isdisjoint(archive.namelist()))
             self.assertNotIn(b"media:duration", archive.read("OEBPS/content.opf"))
+
+    def test_replace_chapter_in_shared_overlay_preserves_nested_roles_and_staged_timing(self) -> None:
+        source, original_audio = narrated_epub()
+        path = "OEBPS/Media/voice.wav"
+        retired = "OEBPS/Media/retired.wav"
+        smil_path = "OEBPS/Sync/read.smil"
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            smil = archive.read(smil_path)
+            package = archive.read("OEBPS/content.opf").replace(
+                b"</manifest>", b'<item id="retired" href="Media/retired.wav" media-type="audio/wav"/></manifest>',
+            )
+        smil = smil.replace(b"../Media/voice.wav", b"../Media/retired.wav", 1)
+        smil = smil.replace(b' clipEnd="00:00:01.125"', b"")
+        smil = smil.replace(b"<body>", b'<body epub:textref="../one.xhtml#chapter">')
+        smil = smil.replace(
+            b'</seq><par id="next">',
+            b'<seq id="nested" epub:textref="../two.xhtml" epub:type="subchapter"><par id="next">',
+        )
+        smil = smil.replace(b"</par></body>", b"</par></seq></seq></body>")
+        replacement = io.BytesIO()
+        with wave.open(replacement, "wb") as pcm:
+            pcm.setparams((1, 1, 8000, 0, "NONE", "not compressed"))
+            pcm.writeframes(bytes(20000))
+        with doc_ex.open(rewrite_epub(source, {
+            smil_path: smil, "OEBPS/content.opf": package, retired: original_audio,
+        })) as original:
+            self.assertEqual(original.epub_media_cues(1)[0]["id"], "next")
+            edited = original.edit_epub_structure(
+                [1, 0],
+                remove_resources=[retired],
+                resources={path: doc_ex.EpubResource("audio/wav", replacement.getvalue())},
+                overlays={"OEBPS/one.xhtml": [doc_ex.EpubOverlayCue("café", path, 0, 20_000)]},
+            )
+            self.assertEqual(original.read_epub_resource(smil_path), smil)
+
+        with doc_ex.open(edited) as book, zipfile.ZipFile(io.BytesIO(edited)) as archive:
+            self.assertEqual(book[0].metadata["chapter_path"], "OEBPS/two.xhtml")
+            self.assertEqual([cue["id"] for cue in book.epub_media_cues(0)], ["next"])
+            self.assertIsNone(book.epub_media_cues(0)[0]["audio"]["clip_end_us"])
+            self.assertEqual(book.epub_media_cues(1)[0]["text"]["fragment"], "café")
+            kept = next(book.epub_narration(0))
+            new = next(book.epub_narration(1))
+            assert kept.audio is not None and new.audio is not None
+            self.assertEqual(kept.audio.frame_count, 11000)
+            self.assertEqual(new.audio.frame_count, 160)
+            revised = book.metadata["media_overlays"]["sync"]["body"]
+            self.assertEqual(revised["text"], {"path": "OEBPS/two.xhtml", "fragment": None})
+            parent, = revised["children"]
+            nested, = parent["children"]
+            self.assertEqual((parent["epub_type"], nested["id"], nested["epub_type"]),
+                             ("chapter", "nested", "subchapter"))
+            self.assertEqual(parent["text"]["path"], "OEBPS/two.xhtml")
+            self.assertEqual(book.read_epub_resource(path), replacement.getvalue())
+            self.assertNotIn(retired, archive.namelist())
+            root = ET.fromstring(archive.read("OEBPS/content.opf"))
+            durations = {node.get("refines"): node.text for node in root.iter("{http://www.idpf.org/2007/opf}meta")
+                         if node.get("property") == "media:duration"}
+            self.assertEqual(durations.pop("#sync"), "0:00:01.375000")
+            self.assertEqual(durations.pop(None), "0:00:01.395000")
+            self.assertEqual(list(durations.values()), ["0:00:00.020000"])
+
+        # A chapter can be associated with a shared overlay while having
+        # no timed cues in it. A staged audio replacement still changes timing.
+        original_smil = smil[0:smil.index(b"<body")] + (
+            b"<body>" + smil[smil.index(b'<par id="next"'):smil.index(b"</par></seq></seq></body>")]
+            + b"</par></body></smil>"
+        )
+        declared = package.replace(b"</metadata>", (
+            b'<meta property="media:duration" refines="#sync">0:00:00.923</meta>'
+            b'<meta property="media:duration">0:00:00.923</meta></metadata>'
+        ))
+        with doc_ex.open(rewrite_epub(source, {
+            smil_path: original_smil, "OEBPS/content.opf": declared, retired: original_audio,
+        })) as original:
+            edited = original.edit_epub_structure(
+                resources={path: doc_ex.EpubResource("audio/wav", replacement.getvalue())},
+                overlays={"OEBPS/one.xhtml": None},
+            )
+        with doc_ex.open(edited) as book, zipfile.ZipFile(io.BytesIO(edited)) as archive:
+            self.assertEqual(book.epub_media_cues(0), [])
+            self.assertEqual(book.read_epub_resource(smil_path), original_smil)
+            root = ET.fromstring(archive.read("OEBPS/content.opf"))
+            durations = {node.get("refines"): node.text for node in root.iter("{http://www.idpf.org/2007/opf}meta")
+                         if node.get("property") == "media:duration"}
+            self.assertEqual(durations, {"#sync": "0:00:01.375000", None: "0:00:01.375000"})
 
     def test_spine_edit_reorders_epub2_ncx_and_creates_missing_navigation(self) -> None:
         source = epub_fixture(version="2.0")

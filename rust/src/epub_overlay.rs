@@ -94,18 +94,8 @@ pub(super) fn read(
         let bytes = book.read(&overlay.resolved, XML_BYTES)?;
         let xml = parse_xml(&bytes)?;
         let root = xml.root_element();
-        // EPUB 3.3 uses HTTPS in its definition and HTTP in its SMIL examples.
-        let namespace = root
-            .tag_name()
-            .namespace()
-            .filter(|ns| matches!(*ns, SMIL | SMIL_HTTPS));
-        let Some(namespace) = namespace else {
-            return Err(invalid("media overlay requires the SMIL namespace"));
-        };
-        if root.tag_name().name() != "smil" || root.attribute("version") != Some("3.0") {
-            return Err(invalid("media overlay requires a SMIL 3.0 root"));
-        }
-        let body = only_child(root, "body")?.ok_or_else(|| invalid("media overlay has no body"))?;
+        let body = body(root)?;
+        let namespace = body.tag_name().namespace().unwrap_or(SMIL);
         let mut reader = Reader {
             id,
             namespace,
@@ -129,6 +119,17 @@ pub(super) fn read(
         );
     }
     Ok(overlays)
+}
+
+pub(super) fn body<'a, 'input>(root: Node<'a, 'input>) -> Result<Node<'a, 'input>, EngineError> {
+    // EPUB 3.3 uses HTTPS in its definition and HTTP in its SMIL examples.
+    if !matches!(root.tag_name().namespace(), Some(SMIL | SMIL_HTTPS)) {
+        return Err(invalid("media overlay requires the SMIL namespace"));
+    }
+    if root.tag_name().name() != "smil" || root.attribute("version") != Some("3.0") {
+        return Err(invalid("media overlay requires a SMIL 3.0 root"));
+    }
+    only_child(root, "body")?.ok_or_else(|| invalid("media overlay has no body"))
 }
 
 struct Reader<'a, 'archive> {
@@ -256,7 +257,7 @@ impl Reader<'_, '_> {
     }
 }
 
-fn only_child<'a, 'input>(
+pub(super) fn only_child<'a, 'input>(
     node: Node<'a, 'input>,
     tag: &str,
 ) -> Result<Option<Node<'a, 'input>>, EngineError> {
@@ -277,7 +278,7 @@ pub(super) fn audio_media_type(media: &str) -> bool {
     media.starts_with("audio/") || matches!(media, "application/ogg" | "video/ogg")
 }
 
-fn local_path(base: &str, source: &str) -> Result<String, EngineError> {
+pub(super) fn local_path(base: &str, source: &str) -> Result<String, EngineError> {
     if external(source) {
         return Err(unsupported("remote media overlay resources"));
     }

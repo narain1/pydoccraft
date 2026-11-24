@@ -86,6 +86,7 @@ pub(super) fn edit(
     }
 
     let mut targets = HashSet::new();
+    let mut detached = HashMap::<&str, HashSet<&str>>::new();
     let mut durations = BTreeMap::new();
     let mut edits = Vec::new();
     for (chapter, cues) in changes {
@@ -119,6 +120,7 @@ pub(super) fn edit(
             .as_ref()
             .map_or_else(String::new, |id| format!(" media-overlay=\"{id}\""));
         if let Some(old) = item.attribute_node("media-overlay") {
+            detached.entry(old.value()).or_default().insert(chapter);
             edits.push((old.range(), replacement));
         } else if id.is_some() {
             let at = editor::before_attributes(source, *item)?;
@@ -127,25 +129,32 @@ pub(super) fn edit(
     }
 
     let declared = durations_in(metadata)?;
-    let mut active = HashSet::new();
+    let mut active = BTreeMap::<&str, Vec<Node<'_, '_>>>::new();
     for item in items.values().filter(|item| !targets.contains(&item.id())) {
-        let Some(id) = item.attribute("media-overlay") else {
-            continue;
-        };
-        if !active.insert(id) {
-            continue;
+        if let Some(id) = item.attribute("media-overlay") {
+            active.entry(id).or_default().push(*item);
         }
+    }
+    #[cfg(feature = "python")]
+    let mut audio = AudioDurations::default();
+    for (id, owners) in active {
         let item = items
             .get(id)
             .ok_or_else(|| invalid("media overlay is absent from the manifest"))?;
-        let href = attribute(*item, "href")?;
-        let path = resolve(plan.package, href)?;
-        if !plan.files.contains_key(&path) {
-            if let Some(declaration) = declared.get(id) {
-                durations.insert(
-                    id.to_owned(),
-                    overlay::clock(declaration.text().unwrap_or_default().trim())?,
-                );
+        let path = resolve(plan.package, attribute(*item, "href")?)?;
+        let staged = plan.files.contains_key(&path);
+        let reported = if staged {
+            None
+        } else {
+            declared
+                .get(id)
+                .map(|node| overlay::clock(node.text().unwrap_or_default().trim()))
+                .transpose()?
+        };
+        let dropped = detached.get(id);
+        if dropped.is_none() {
+            if let Some(duration) = reported {
+                durations.insert(id.to_owned(), duration);
                 continue;
             }
         }
@@ -153,7 +162,66 @@ pub(super) fn edit(
             Some(bytes) => Cow::Borrowed(bytes.as_ref()),
             None => Cow::Owned(book.read(&path, XML_BYTES)?),
         };
-        durations.insert(id.to_owned(), smil_duration(&bytes)?);
+        let source = std::str::from_utf8(&bytes).map_err(invalid)?;
+        let mut clip_end = |src: &str| {
+            #[cfg(feature = "python")]
+            {
+                audio.end(&path, src, &local, &plan.files, book)
+            }
+            #[cfg(not(feature = "python"))]
+            {
+                let _ = src;
+                Err(unsupported(
+                    "retained media overlay requires an audio duration",
+                ))
+            }
+        };
+        if let Some(dropped) = dropped {
+            let mut split = SharedSmil::new(source, &path, dropped);
+            let xml = parse_xml(source.as_bytes())?;
+            if !split.prune(xml.root_element())? {
+                // The remaining associations had no cues of their own.
+                for owner in owners {
+                    if let Some(attribute) = owner.attribute_node("media-overlay") {
+                        edits.push((attribute.range(), String::new()));
+                    }
+                }
+                continue;
+            }
+            let mut replaced_audio = false;
+            for (src, _) in &split.kept.open {
+                if plan.files.contains_key(&overlay::local_path(&path, src)?) {
+                    replaced_audio = true;
+                    break;
+                }
+            }
+            let duration = if let Some(duration) =
+                reported.filter(|_| split.edits.is_empty() && !replaced_audio)
+            {
+                duration
+            } else {
+                match split.kept.total(&mut clip_end) {
+                    Err(EngineError::Unsupported(_))
+                        if reported.is_some()
+                            && split.removed.open.is_empty()
+                            && !replaced_audio =>
+                    {
+                        reported
+                            .and_then(|value| value.checked_sub(split.removed.known))
+                            .filter(|&value| value > split.kept.known)
+                            .ok_or_else(|| invalid("inconsistent shared media overlay duration"))?
+                    }
+                    result => result?,
+                }
+            };
+            if !split.edits.is_empty() {
+                let revised = apply_edits(source, split.edits, XML_BYTES)?;
+                plan.files.insert(path, Cow::Owned(revised.into_bytes()));
+            }
+            durations.insert(id.to_owned(), duration);
+        } else {
+            durations.insert(id.to_owned(), smil_duration(source, &mut clip_end)?);
+        }
     }
     let at = inner_range(source, manifest)?.end;
     edits.push((at..at, std::mem::take(&mut plan.manifest_additions)));
@@ -349,34 +417,193 @@ fn duration_edits(
     Ok(())
 }
 
-fn smil_duration(data: &[u8]) -> Result<u64, EngineError> {
-    let xml = parse_xml(data)?;
-    let namespace = xml.root_element().tag_name().namespace();
-    let mut total = 0;
-    for audio in xml.descendants().filter(|node| {
-        node.is_element()
-            && node.tag_name().namespace() == namespace
-            && node.tag_name().name() == "audio"
-    }) {
+#[derive(Default)]
+struct ClipTimes<'xml> {
+    known: u64,
+    open: Vec<(&'xml str, u64)>,
+}
+
+impl<'xml> ClipTimes<'xml> {
+    fn add(&mut self, audio: Node<'xml, '_>) -> Result<(), EngineError> {
         let begin = audio
             .attribute("clipBegin")
             .map(overlay::clock)
             .transpose()?
             .unwrap_or_default();
-        let end = audio
-            .attribute("clipEnd")
-            .map(overlay::clock)
-            .transpose()?
-            .ok_or_else(|| {
-                unsupported("retained media overlay has no duration or explicit clip end")
-            })?;
-        let elapsed = end
-            .checked_sub(begin)
-            .filter(|n| *n > 0)
-            .ok_or_else(|| invalid("media overlay clipEnd must be after clipBegin"))?;
-        total = add_duration(total, elapsed)?;
+        if let Some(end) = audio.attribute("clipEnd") {
+            self.known = add_duration(self.known, clip_length(begin, overlay::clock(end)?)?)?;
+        } else {
+            self.open.push((attribute(audio, "src")?, begin));
+        }
+        Ok(())
     }
-    Ok(total)
+
+    fn total(
+        &self,
+        end: &mut impl FnMut(&str) -> Result<u64, EngineError>,
+    ) -> Result<u64, EngineError> {
+        let mut total = self.known;
+        for &(source, begin) in &self.open {
+            total = add_duration(total, clip_length(begin, end(source)?)?)?;
+        }
+        Ok(total)
+    }
+}
+
+fn clip_length(begin: u64, end: u64) -> Result<u64, EngineError> {
+    end.checked_sub(begin)
+        .filter(|length| *length > 0)
+        .ok_or_else(|| invalid("media overlay clip end must be after clip begin"))
+}
+
+fn smil_duration(
+    source: &str,
+    end: &mut impl FnMut(&str) -> Result<u64, EngineError>,
+) -> Result<u64, EngineError> {
+    let xml = parse_xml(source.as_bytes())?;
+    let namespace = xml.root_element().tag_name().namespace();
+    let mut times = ClipTimes::default();
+    for audio in xml.descendants().filter(|node| {
+        node.is_element()
+            && node.tag_name().namespace() == namespace
+            && node.tag_name().name() == "audio"
+    }) {
+        times.add(audio)?;
+    }
+    times.total(end)
+}
+
+struct SharedSmil<'a, 'xml> {
+    source: &'a str,
+    path: &'a str,
+    dropped: &'a HashSet<&'a str>,
+    edits: Vec<(Range<usize>, String)>,
+    kept: ClipTimes<'xml>,
+    removed: ClipTimes<'xml>,
+}
+
+impl<'a, 'xml> SharedSmil<'a, 'xml> {
+    fn new(source: &'a str, path: &'a str, dropped: &'a HashSet<&'a str>) -> Self {
+        Self {
+            source,
+            path,
+            dropped,
+            edits: Vec::new(),
+            kept: ClipTimes::default(),
+            removed: ClipTimes::default(),
+        }
+    }
+
+    fn prune(&mut self, root: Node<'xml, '_>) -> Result<bool, EngineError> {
+        Ok(self.timing(overlay::body(root)?)?.is_some())
+    }
+
+    fn timing(&mut self, node: Node<'xml, '_>) -> Result<Option<&'xml str>, EngineError> {
+        match node.tag_name().name() {
+            "par" => {
+                let text = overlay::only_child(node, "text")?
+                    .ok_or_else(|| invalid("media overlay par requires text"))?;
+                let target = attribute(text, "src")?;
+                let remove = self
+                    .dropped
+                    .contains(overlay::local_path(self.path, target)?.as_str());
+                if let Some(audio) = overlay::only_child(node, "audio")? {
+                    let times = if remove {
+                        &mut self.removed
+                    } else {
+                        &mut self.kept
+                    };
+                    times.add(audio)?;
+                }
+                if remove {
+                    self.edits.push((node.range(), String::new()));
+                    return Ok(None);
+                }
+                Ok(Some(target))
+            }
+            "body" | "seq" => {
+                let start = self.edits.len();
+                let mut first = None;
+                for child in node.children().filter(Node::is_element) {
+                    if child.tag_name().namespace() != node.tag_name().namespace() {
+                        return Err(invalid(
+                            "media overlay timing elements require the SMIL namespace",
+                        ));
+                    }
+                    if let Some(target) = self.timing(child)? {
+                        first.get_or_insert(target);
+                    }
+                }
+                if let Some(target) = first {
+                    if let Some(textref) = node.attribute_node((EPUB, "textref")) {
+                        let path = overlay::local_path(self.path, textref.value())?;
+                        if self.dropped.contains(path.as_str()) {
+                            let range = textref.range();
+                            let (key, _) =
+                                self.source[range.clone()].split_once('=').ok_or_else(|| {
+                                    invalid("invalid media overlay textref attribute")
+                                })?;
+                            let target = target.split('#').next().unwrap_or_default();
+                            self.edits
+                                .push((range, format!(r#"{key}="{}""#, escape_attribute(target))));
+                        }
+                    }
+                } else {
+                    self.edits.truncate(start);
+                    self.edits.push((node.range(), String::new()));
+                }
+                Ok(first)
+            }
+            _ => Err(invalid("unexpected media overlay timing element")),
+        }
+    }
+}
+
+#[cfg(feature = "python")]
+#[derive(Default)]
+struct AudioDurations {
+    ends: HashMap<String, u64>,
+    bytes: usize,
+}
+
+#[cfg(feature = "python")]
+impl AudioDurations {
+    fn end(
+        &mut self,
+        base: &str,
+        src: &str,
+        items: &HashMap<String, Vec<Node<'_, '_>>>,
+        files: &super::Files<'_>,
+        book: &mut Book<'_>,
+    ) -> Result<u64, EngineError> {
+        use crate::epub::audio::{AudioSource, MAX_ENCODED_BYTES};
+
+        let path = overlay::local_path(base, src)?;
+        if let Some(&end) = self.ends.get(&path) {
+            return Ok(end);
+        }
+        let media = items
+            .get(&path)
+            .and_then(|items| items.first())
+            .and_then(|item| item.attribute("media-type"))
+            .ok_or_else(|| invalid("media overlay audio is absent from the manifest"))?;
+        let end = AudioSource::presentation_end(media, || {
+            let limit = MAX_ENCODED_BYTES.min(MAX_INPUT_SIZE.saturating_sub(self.bytes));
+            let bytes = match files.get(&path) {
+                Some(bytes) if bytes.len() <= limit => bytes.as_ref().to_vec(),
+                Some(_) => {
+                    return Err(limited(
+                        "media overlay duration audio exceeds its byte budget",
+                    ))
+                }
+                None => book.read(&path, limit)?,
+            };
+            self.bytes += bytes.len();
+            Ok(bytes)
+        })?;
+        self.ends.insert(path, end);
+        Ok(end)
+    }
 }
 
 fn add_duration(total: u64, elapsed: u64) -> Result<u64, EngineError> {

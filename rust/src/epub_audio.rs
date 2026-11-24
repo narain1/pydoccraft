@@ -13,7 +13,7 @@ mod aac;
 #[path = "epub_opus.rs"]
 mod opus;
 
-const MAX_ENCODED_BYTES: usize = 32 * 1024 * 1024;
+pub(super) const MAX_ENCODED_BYTES: usize = 32 * 1024 * 1024;
 const MAX_CLIP_SAMPLES: usize = 8 * 1024 * 1024;
 const MAX_FRAMES_PER_CLIP: usize = 120_000;
 const MP3_DECODER_DELAY: usize = 529;
@@ -48,15 +48,22 @@ pub(crate) struct AudioClip {
 
 impl AudioSource {
     pub(crate) fn open(data: &[u8], path: &str, media: &str) -> Result<Self, EngineError> {
+        Self::decode(media, || read(data, path, MAX_ENCODED_BYTES))
+    }
+
+    fn decode(
+        media: &str,
+        load: impl FnOnce() -> Result<Vec<u8>, EngineError>,
+    ) -> Result<Self, EngineError> {
         let decoder = match media {
             "audio/mpeg" | "audio/mp3" => {
-                let bytes = read(data, path, MAX_ENCODED_BYTES)?;
+                let bytes = load()?;
                 let track = std::panic::catch_unwind(|| Mp3::new(bytes))
                     .map_err(|_| invalid("malformed MPEG Layer III audio"))??;
                 Decoder::Mp3(Box::new(track))
             }
             "audio/mp4" | "audio/x-m4a" => {
-                let bytes = read(data, path, MAX_ENCODED_BYTES)?;
+                let bytes = load()?;
                 let track = std::panic::catch_unwind(|| aac::Track::open(bytes))
                     .map_err(|_| invalid("malformed MP4 audio"))??;
                 Decoder::Aac(Box::new(track))
@@ -66,13 +73,13 @@ impl AudioSource {
             | "audio/ogg; codecs=opus"
             | "application/ogg"
             | "video/ogg" => {
-                let bytes = read(data, path, MAX_ENCODED_BYTES)?;
+                let bytes = load()?;
                 let track = std::panic::catch_unwind(|| opus::Track::open(&bytes))
                     .map_err(|_| invalid("malformed Ogg Opus audio"))??;
                 Decoder::Opus(Box::new(track))
             }
             "audio/wav" | "audio/wave" | "audio/x-wav" | "audio/vnd.wave" => {
-                let bytes = read(data, path, MAX_ENCODED_BYTES)?;
+                let bytes = load()?;
                 Decoder::Wave(WavReader::new(Cursor::new(bytes)).map_err(wav_error)?)
             }
             _ => return Err(unsupported("media-overlay audio codec is unsupported")),
@@ -81,6 +88,22 @@ impl AudioSource {
             decoder,
             stream: None,
         })
+    }
+
+    pub(super) fn presentation_end(
+        media: &str,
+        load: impl FnOnce() -> Result<Vec<u8>, EngineError>,
+    ) -> Result<u64, EngineError> {
+        let mut source = Self::decode(media, load)?;
+        let (format, frames) = source.geometry()?;
+        let frames = match (&source.decoder, frames) {
+            (_, Some(frames)) => frames,
+            (Decoder::Mp3(track), None) => std::panic::catch_unwind(|| track.scan_frames(format))
+                .map_err(|_| invalid("malformed MPEG Layer III audio"))??,
+            _ => return Err(invalid("missing media-overlay audio duration")),
+        };
+        let micros = (frames as u128 * 1_000_000) / u128::from(format.sample_rate);
+        u64::try_from(micros).map_err(|_| limited("media-overlay audio duration exceeds limits"))
     }
 
     pub(crate) fn clip(&mut self, begin: u64, end: Option<u64>) -> Result<AudioClip, EngineError> {
@@ -131,15 +154,7 @@ impl AudioSource {
         if end.is_some_and(|end| end <= begin) {
             return Err(invalid("media-overlay audio end must follow its start"));
         }
-        let (spec, duration) = match &mut self.decoder {
-            Decoder::Wave(reader) => (wav_spec(reader)?, Some(reader.duration() as usize)),
-            Decoder::Aac(track) => (track.spec(), Some(track.frames())),
-            Decoder::Opus(track) => (track.spec(), Some(track.frames())),
-            Decoder::Mp3(reader) => {
-                std::panic::catch_unwind(AssertUnwindSafe(|| reader.geometry()))
-                    .map_err(|_| invalid("malformed MPEG Layer III audio"))??
-            }
-        };
+        let (spec, duration) = self.geometry()?;
         let next = frame_at(begin, spec.sample_rate)?;
         let end = end
             .map(|end| frame_at(end, spec.sample_rate))
@@ -160,6 +175,18 @@ impl AudioSource {
             next,
             end,
             started: false,
+        })
+    }
+
+    fn geometry(&mut self) -> Result<(WavSpec, Option<usize>), EngineError> {
+        Ok(match &mut self.decoder {
+            Decoder::Wave(reader) => (wav_spec(reader)?, Some(reader.duration() as usize)),
+            Decoder::Aac(track) => (track.spec(), Some(track.frames())),
+            Decoder::Opus(track) => (track.spec(), Some(track.frames())),
+            Decoder::Mp3(reader) => {
+                std::panic::catch_unwind(AssertUnwindSafe(|| reader.geometry()))
+                    .map_err(|_| invalid("malformed MPEG Layer III audio"))??
+            }
         })
     }
 
@@ -408,6 +435,35 @@ impl Mp3 {
         self.format
             .map(|format| (format, self.presentation.as_ref().map(Range::len)))
             .ok_or_else(|| invalid("empty MPEG audio stream"))
+    }
+
+    fn scan_frames(&self, format: WavSpec) -> Result<usize, EngineError> {
+        let mut scanner = mp3dec::Decoder::new();
+        let mut bytes = &self.bytes[self.first..];
+        let mut frames = 0;
+        for _ in 0..MAX_FRAMES_PER_CLIP {
+            let mut info = mp3dec::FrameInfo::default();
+            let count = scanner.decode_frame(bytes, None, &mut info);
+            if count == 0
+                || info.frame_offset != 0
+                || info.layer != 3
+                || info.hz != format.sample_rate as usize
+                || info.channels != usize::from(format.channels)
+                || info.frame_bytes == 0
+            {
+                return Err(invalid(
+                    "invalid MPEG Layer III frame in media-overlay audio",
+                ));
+            }
+            bytes = bytes
+                .get(info.frame_bytes..)
+                .ok_or_else(|| invalid("invalid MPEG audio frame size"))?;
+            frames += count;
+            if bytes.is_empty() {
+                return Ok(frames);
+            }
+        }
+        Err(limited("MPEG audio duration exceeds its frame budget"))
     }
 
     fn samples(
