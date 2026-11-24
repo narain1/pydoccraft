@@ -68,6 +68,7 @@ rust/src/
   epub_editor.rs    Bounded EPUB metadata and chapter replacement
   epub_structure.rs EPUB spine, packaged resource and navigation edits
   epub_layout.rs    Styled XHTML layout and paint
+  epub_fonts.rs     Publication-local EPUB font shaping and glyph outlines
   epub_math.rs      Presentation MathML projection into the WordCraft equation model
   epub_overlay.rs   EPUB SMIL cue, timing and target resolution
   epub_audio.rs     Bounded narration audio decoding and text targets

@@ -325,6 +325,13 @@ pub(crate) fn update_structure<'a>(
         .filter_map(|id| manifest.get(id))
         .collect();
     for (path, media, data) in resources {
+        if book
+            .obfuscated_fonts
+            .as_ref()
+            .is_some_and(|fonts| fonts.contains(path))
+        {
+            return Err(unsupported("replacing obfuscated EPUB fonts"));
+        }
         check_path(path)?;
         if plan.files.contains_key(path)
             || existing_toc.as_ref() == Some(path)

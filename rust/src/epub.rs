@@ -18,10 +18,14 @@ mod content;
 mod css;
 #[path = "epub_editor.rs"]
 mod editor;
+#[path = "epub_fonts.rs"]
+mod fonts;
 #[path = "epub_layout.rs"]
 mod layout;
 #[path = "epub_math.rs"]
 mod math;
+#[path = "epub_obfuscation.rs"]
+mod obfuscation;
 #[path = "epub_output.rs"]
 mod output;
 #[path = "epub_overlay.rs"]
@@ -352,21 +356,38 @@ struct Item<'a> {
 struct Book<'a> {
     archive: Archive<'a>,
     read_bytes: usize,
+    obfuscated_fonts: Option<obfuscation::FontObfuscation>,
 }
 
 impl<'a> Book<'a> {
     fn open(data: &'a [u8]) -> Result<Self, EngineError> {
         let archive = crate::archive_safety::open_epub(data)?;
+        let mut encryption = None;
         for path in archive.file_names() {
             validate_archive_path(path)?;
-            if path.eq_ignore_ascii_case("META-INF/encryption.xml") {
-                return Err(unsupported("encrypted resources and DRM are not supported"));
+            if path.eq_ignore_ascii_case("META-INF/encryption.xml")
+                && encryption.replace(path.to_owned()).is_some()
+            {
+                return Err(invalid("multiple EPUB encryption documents"));
             }
         }
-        Ok(Self {
+        let mut book = Self {
             archive,
             read_bytes: 0,
-        })
+            obfuscated_fonts: None,
+        };
+        if let Some(path) = encryption {
+            book.obfuscated_fonts = Some(obfuscation::load(&mut book, &path)?);
+        }
+        Ok(book)
+    }
+
+    fn read_font(&mut self, path: &str, limit: usize) -> Result<Vec<u8>, EngineError> {
+        let mut bytes = self.read(path, limit)?;
+        if let Some(fonts) = &self.obfuscated_fonts {
+            fonts.decode(path, &mut bytes);
+        }
+        Ok(bytes)
     }
 
     fn package_path(&mut self) -> Result<String, EngineError> {

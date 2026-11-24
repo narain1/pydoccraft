@@ -16,8 +16,9 @@ use wordcraft_layout::{
 use super::{
     child, content,
     css::Cascade,
+    fonts::{Fonts, Text as FontText},
     invalid, limited, name,
-    output::{Output, RasterImage},
+    output::{image_bytes, Output, RasterImage},
     parse_xml,
     style::{Paint, Styled},
     unsupported, Book, XHTML, XML_BYTES,
@@ -70,6 +71,7 @@ pub(super) fn render(
         return Ok(None);
     }
     let styles = Styled::compute(root, &mut cascade, viewport)?;
+    let fonts = Fonts::load(&cascade.fonts, &styles, &mut archive)?;
     let manifest = book
         .metadata
         .get("manifest")
@@ -92,7 +94,7 @@ pub(super) fn render(
         budget: &mut budget,
         styles: Some(&styles),
     };
-    let mut layout = Layout::new(Output::new(book, false), viewport);
+    let mut layout = Layout::new(Output::new(book, false, dpi), viewport, fonts);
     let root_id = layout.build(root, &mut context)?;
     let id = layout.boxes[root_id].id;
     let mut root_style = layout.tree.style(id).map_err(failure)?.clone();
@@ -167,6 +169,8 @@ struct Layout {
     cache: LayoutCache,
     viewport: [f32; 2],
     measure_count: usize,
+    glyph_paths_remaining: usize,
+    fonts: Option<Fonts>,
 }
 
 struct PaintBox {
@@ -183,11 +187,37 @@ struct PaintBox {
 
 enum Contents {
     Text(Blocks),
-    Image(RasterImage, String),
+    FontText(Vec<FontText>),
+    Image(Picture, String),
+}
+
+enum Picture {
+    Raster(RasterImage),
+    Svg(Box<resvg::usvg::Tree>),
+}
+
+impl Picture {
+    fn size(&self) -> [f32; 2] {
+        match self {
+            Self::Raster(image) => [image.width, image.height],
+            Self::Svg(tree) => [tree.size().width(), tree.size().height()],
+        }
+    }
+
+    fn media(&self, output: &mut Output, rect: Rect) -> Result<String, EngineError> {
+        match self {
+            Self::Raster(image) => Ok(image.media.clone()),
+            Self::Svg(tree) => output.rasterize_svg(tree, rect.w, rect.h),
+        }
+    }
+}
+
+fn is_svg(node: Node<'_, '_>) -> bool {
+    node.has_tag_name((super::svg::NS, "svg"))
 }
 
 impl Layout {
-    fn new(output: Output, viewport: [f32; 2]) -> Self {
+    fn new(output: Output, viewport: [f32; 2], fonts: Option<Fonts>) -> Self {
         let mut tree = TaffyTree::new();
         tree.disable_rounding();
         Self {
@@ -197,6 +227,8 @@ impl Layout {
             cache: LayoutCache::new(),
             viewport,
             measure_count: 0,
+            glyph_paths_remaining: 1_000_000,
+            fonts,
         }
     }
 
@@ -213,18 +245,27 @@ impl Layout {
         let mut children = Vec::new();
         let mut local = None;
         if !styled.hidden {
-            if name(node, XHTML, "img") && node.has_attribute("src") {
-                let source = content::image(
+            let image = if is_svg(node) {
+                Some(content::inline_svg(node, context)?)
+            } else if name(node, XHTML, "img") && node.has_attribute("src") {
+                Some(content::image(
                     super::attribute(node, "src")?,
                     node.attribute("alt").unwrap_or_default(),
                     None,
                     context,
-                )?;
-                let picture = self.output.load_image(&source)?;
+                )?)
+            } else {
+                None
+            };
+            if let Some(source) = image {
+                let picture = if source.media_type == "image/svg+xml" {
+                    Picture::Svg(Box::new(super::svg::embedded(&image_bytes(&source)?)?))
+                } else {
+                    Picture::Raster(self.output.load_image(&source)?)
+                };
+                let [width, height] = picture.size();
                 style.item_is_replaced = true;
-                style
-                    .aspect_ratio
-                    .get_or_insert(picture.width as f32 / picture.height as f32);
+                style.aspect_ratio.get_or_insert(width / height);
                 for (dim, value) in [
                     (&mut style.size.width, node.attribute("width")),
                     (&mut style.size.height, node.attribute("height")),
@@ -241,9 +282,15 @@ impl Layout {
                 local = Some(Contents::Image(picture, source.alt));
             } else if name(node, XHTML, "table") {
                 let blocks = content::layout_piece(node, &[], context)?;
-                local = Some(Contents::Text(
-                    self.output.blocks(&blocks, self.viewport[0])?,
-                ));
+                if self.uses_packaged_fonts(&blocks)? {
+                    let table = blocks
+                        .iter()
+                        .find_map(|block| block.table.as_ref())
+                        .ok_or_else(|| invalid("missing EPUB table grid"))?;
+                    children = self.font_table(node, table, &mut style, context)?;
+                } else {
+                    local = Some(self.text_contents(&blocks)?);
+                }
             } else {
                 let mut run = Vec::new();
                 let styles = context.styles;
@@ -255,7 +302,7 @@ impl Layout {
                 });
                 let only_image = significant
                     .next()
-                    .is_some_and(|child| name(child, XHTML, "img"))
+                    .is_some_and(|child| name(child, XHTML, "img") || is_svg(child))
                     && significant.next().is_none();
                 for child in visible {
                     let layout_child = child.is_element()
@@ -264,7 +311,8 @@ impl Layout {
                                 || matches!(style.display, Display::Flex | Display::Grid)
                                 || only_image
                         })
-                        && child.tag_name().namespace().is_none_or(|ns| ns == XHTML);
+                        && (child.tag_name().namespace().is_none_or(|ns| ns == XHTML)
+                            || is_svg(child));
                     if layout_child {
                         self.inline_run(node, &run, &mut children, context)?;
                         run.clear();
@@ -298,6 +346,97 @@ impl Layout {
         )
     }
 
+    fn font_table(
+        &mut self,
+        node: Node<'_, '_>,
+        table: &crate::model::TablePayload,
+        style: &mut Style,
+        context: &mut content::Context<'_, '_>,
+    ) -> Result<Vec<usize>, EngineError> {
+        use taffy::style_helpers::{fr, line, span};
+
+        let columns = table.rows.first().map_or(0, Vec::len);
+        if columns == 0 || columns > 128 {
+            return Err(limited("EPUB styled table exceeds 128 columns or is empty"));
+        }
+        let rows = node
+            .children()
+            .filter(Node::is_element)
+            .flat_map(|section| {
+                if name(section, XHTML, "tr") {
+                    vec![section]
+                } else if ["thead", "tbody", "tfoot"]
+                    .iter()
+                    .any(|group| name(section, XHTML, group))
+                {
+                    section.children().filter(Node::is_element).collect()
+                } else {
+                    Vec::new()
+                }
+            })
+            .collect::<Vec<_>>();
+        if rows.len() != table.cells.len() {
+            return Err(invalid("EPUB styled table row count differs from its grid"));
+        }
+        style.display = Display::Grid;
+        if style.grid_template_columns.is_empty() {
+            style.grid_template_columns = vec![fr(1.0); columns];
+        }
+        let mut children = Vec::new();
+        if let Some(caption) = super::child(node, XHTML, "caption") {
+            let index = self.build(caption, context)?;
+            let id = self.boxes[index].id;
+            let mut placement = self.tree.style(id).map_err(failure)?.clone();
+            placement.grid_column.start = line(1);
+            placement.grid_column.end = span(columns as u16);
+            placement.grid_row.start = line(1);
+            self.tree.set_style(id, placement).map_err(failure)?;
+            children.push(index);
+        }
+        let first_row = 1 + children.len();
+        for (row, (element, cells)) in rows.into_iter().zip(&table.cells).enumerate() {
+            let mut positions = element.children().filter(Node::is_element);
+            for cell in cells {
+                let element = positions
+                    .next()
+                    .ok_or_else(|| invalid("EPUB styled table cell is missing"))?;
+                let index = self.build(element, context)?;
+                let id = self.boxes[index].id;
+                let column = cell.metadata["grid_column"]
+                    .as_u64()
+                    .ok_or_else(|| invalid("EPUB styled table cell has no column"))?
+                    as usize;
+                let mut placement = self.tree.style(id).map_err(failure)?.clone();
+                placement.grid_column.start = line((column + 1) as i16);
+                placement.grid_column.end = span(cell.col_span as u16);
+                placement.grid_row.start = line((row + first_row) as i16);
+                placement.grid_row.end = span(cell.row_span as u16);
+                self.tree.set_style(id, placement).map_err(failure)?;
+                children.push(index);
+            }
+            if positions.next().is_some() {
+                return Err(invalid(
+                    "EPUB styled table cell count differs from its grid",
+                ));
+            }
+        }
+        Ok(children)
+    }
+
+    fn uses_packaged_fonts(
+        &self,
+        blocks: &[crate::model::BlockPayload],
+    ) -> Result<bool, EngineError> {
+        if let Some(fonts) = &self.fonts {
+            for block in blocks {
+                if fonts.used_in(block)? {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
     fn text<'a, 'input>(
         &mut self,
         parent: Node<'a, 'input>,
@@ -308,9 +447,27 @@ impl Layout {
         if blocks.is_empty() {
             return Ok(None);
         }
-        Ok(Some(Contents::Text(
-            self.output.blocks(&blocks, self.viewport[0])?,
-        )))
+        self.text_contents(&blocks).map(Some)
+    }
+
+    fn text_contents(
+        &mut self,
+        blocks: &[crate::model::BlockPayload],
+    ) -> Result<Contents, EngineError> {
+        if let Some(fonts) = &mut self.fonts {
+            for block in blocks {
+                if fonts.used_in(block)? {
+                    return blocks
+                        .iter()
+                        .map(|block| fonts.shape(block, &mut self.output, self.viewport[0]))
+                        .collect::<Result<Vec<_>, _>>()
+                        .map(Contents::FontText);
+                }
+            }
+        }
+        Ok(Contents::Text(
+            self.output.blocks(blocks, self.viewport[0])?,
+        ))
     }
 
     fn inline_run<'a, 'input>(
@@ -491,10 +648,16 @@ impl Layout {
                         items: draws,
                     });
                 }
+                Some(Contents::FontText(blocks)) if content_box.w > 0.0 => {
+                    let mut area = content_box;
+                    for block in blocks {
+                        area.y += block.draw(area, &mut self.glyph_paths_remaining, &mut inner)?;
+                    }
+                }
                 Some(Contents::Image(image, alt)) if content_box.w > 0.0 && content_box.h > 0.0 => {
                     inner.push(Draw::Image {
                         rect: content_box,
-                        media: image.media.clone(),
+                        media: image.media(&mut self.output, content_box)?,
                         crop: [0.0; 4],
                         alpha: 1.0,
                         alt: alt.clone(),
@@ -538,8 +701,7 @@ fn measure(
     }
     let natural = match content {
         Some(Contents::Image(image, _)) => {
-            let mut width = image.width as f32 * 0.75;
-            let mut height = image.height as f32 * 0.75;
+            let [mut width, mut height] = image.size().map(|n| n * 0.75);
             if let Some(w) = known.width {
                 height *= w / width;
                 width = w;
@@ -549,12 +711,24 @@ fn measure(
             }
             Size { width, height }
         }
+        Some(Contents::FontText(blocks)) => {
+            super::charge(
+                work,
+                blocks.len(),
+                16_000,
+                "EPUB text layout work limit exceeded",
+            )?;
+            let width = available_text_width(input);
+            let mut total = Size::<f32>::ZERO;
+            for block in blocks {
+                let [w, h] = block.size(width);
+                total.width = total.width.max(w);
+                total.height += h;
+            }
+            total
+        }
         Some(Contents::Text(blocks)) => {
-            let width = known.width.unwrap_or(match input.available_space.width {
-                AvailableSpace::Definite(width) => width,
-                AvailableSpace::MinContent => 2.0,
-                AvailableSpace::MaxContent => MAX_GEOMETRY,
-            });
+            let width = available_text_width(input);
             let page = layout_text(blocks, width, doc, cache, work)?;
             text_size(&page)
         }
@@ -564,6 +738,17 @@ fn measure(
         width: known.width.unwrap_or(natural.width),
         height: known.height.unwrap_or(natural.height),
     })
+}
+
+fn available_text_width(input: LayoutInput) -> f32 {
+    input
+        .known_dimensions
+        .width
+        .unwrap_or(match input.available_space.width {
+            AvailableSpace::Definite(width) => width,
+            AvailableSpace::MinContent => 2.0,
+            AvailableSpace::MaxContent => MAX_GEOMETRY,
+        })
 }
 
 fn layout_text(

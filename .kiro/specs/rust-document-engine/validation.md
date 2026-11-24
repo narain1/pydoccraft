@@ -2743,3 +2743,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 627 installed tests, inclu
 ## 2026-11-24 EPUB narration and XHTML doctype support
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 632 installed tests, including 37 EPUB tests. It measured 22,120,575 bytes with a 51,365,608-byte native extension. The renderer and PDF backend Git revisions are unchanged. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-offline-media-overlay-playback-and-inert-doctypes) for checksums, narration coverage, and remaining limits.
+
+## 2026-11-24 EPUB packaged fonts and embedded SVG
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 638 installed tests, including 43 EPUB tests. It measured 22,502,324 bytes with a 52,303,096-byte native extension. The locked engine revisions remain at the November 23 pins. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-packaged-fonts-and-svg-preview) for exact checksums, the font and SVG profile, and public sample validation.

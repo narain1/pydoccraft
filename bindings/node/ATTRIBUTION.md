@@ -6,9 +6,9 @@ describe attribution and bundled assets. The preview adds a direct dependency on
 already present in the core's locked graph, and does not add new assets.
 
 The independently locked graph was reviewed with `cargo metadata --offline
---locked --format-version 1` and `tools.audit_licenses.inventory`: 288 normal/build
+--locked --format-version 1` and `tools.audit_licenses.inventory`: 315 normal/build
 packages passed its license-expression allowlist and prohibited-name checks.
-Of these, 287 are third-party rows present in the regenerated root inventory;
+Of these, 314 are third-party rows present in the regenerated root inventory;
 the other is the local Apache-2.0 core. The root inventory is a superset, not an
 exact preview dependency list. Original upstream Git sources and revisions were
 checked against NOTICE. No new bundled assets were identified in this preview.

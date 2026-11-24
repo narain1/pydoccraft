@@ -418,8 +418,7 @@ fn inline(
     }
     let tag = node.tag_name();
     if tag.namespace() == Some(SVG) && tag.name() == "svg" {
-        let bytes = standalone(node, cx.source)?;
-        let mut image = svg_image(node, &bytes, cx.page, "inline.svg", cx.budget)?;
+        let mut image = inline_svg(node, cx)?;
         image
             .metadata
             .insert("inline_offset".into(), json!(run.characters));
@@ -636,6 +635,14 @@ pub(super) fn svg_page(
     })
 }
 
+pub(super) fn inline_svg(
+    node: Node<'_, '_>,
+    cx: &mut Context<'_, '_>,
+) -> Result<ImagePayload, EngineError> {
+    let bytes = standalone(node, cx.source)?;
+    svg_image(node, &bytes, cx.page, "inline.svg", cx.budget)
+}
+
 fn svg_image(
     root: Node<'_, '_>,
     data: &[u8],
@@ -693,6 +700,8 @@ pub(super) fn validate_svg(root: Node<'_, '_>) -> Result<(), EngineError> {
                 None => matches!(
                     key,
                     "id" | "role"
+                        | "class"
+                        | "style"
                         | "aria-label"
                         | "aria-hidden"
                         | "version"

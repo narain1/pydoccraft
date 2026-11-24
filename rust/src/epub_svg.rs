@@ -42,40 +42,11 @@ pub(super) fn render(
     dpi: f64,
     clip: Option<Clip>,
 ) -> Result<Vec<u8>, EngineError> {
-    content::validate_svg(root)?;
     let viewport = viewport(root);
     if fixed && viewport.is_none() {
         return Err(unsupported("fixed-layout SVG requires a numeric viewBox"));
     }
-    let mut options = usvg::Options {
-        image_href_resolver: usvg::ImageHrefResolver {
-            resolve_data: Box::new(|_, _, _| None),
-            resolve_string: Box::new(|_, _| None),
-        },
-        max_depth: 96,
-        ..Default::default()
-    };
-    if let Some([w, h]) = viewport {
-        options.default_size = usvg::Size::from_wh(w / 0.75, h / 0.75)
-            .ok_or_else(|| invalid("invalid SVG dimensions"))?;
-    }
-    if root
-        .descendants()
-        .any(|node| node.has_tag_name((NS, "text")))
-    {
-        static FONTS: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
-        options.fontdb = FONTS
-            .get_or_init(|| {
-                let mut database = usvg::fontdb::Database::new();
-                database.load_system_fonts();
-                Arc::new(database)
-            })
-            .clone();
-        if options.fontdb.faces().next().is_none() {
-            return Err(unsupported("no installed fonts available for SVG text"));
-        }
-    }
-    let tree = usvg::Tree::from_data(source, &options).map_err(invalid)?;
+    let tree = parse(root, source, viewport)?;
     let [w, h] = viewport.unwrap_or([tree.size().width() * 0.75, tree.size().height() * 0.75]);
     let scale = dpi / 72.0;
     let pixel_size = [w, h].map(|n| (f64::from(n) * scale).ceil().max(1.0));
@@ -109,4 +80,62 @@ pub(super) fn render(
     );
     resvg::render(&tree, transform, &mut image.as_mut());
     rendering::encode_png(region.width, region.height, image.data(), dpi)
+}
+
+pub(super) fn embedded(source: &[u8]) -> Result<usvg::Tree, EngineError> {
+    let xml = super::parse_xml(source)?;
+    let root = xml.root_element();
+    parse(root, source, viewport(root))
+}
+
+fn parse(
+    root: Node<'_, '_>,
+    source: &[u8],
+    viewport: Option<[f32; 2]>,
+) -> Result<usvg::Tree, EngineError> {
+    content::validate_svg(root)?;
+    let mut options = usvg::Options {
+        image_href_resolver: usvg::ImageHrefResolver {
+            resolve_data: Box::new(|_, _, _| None),
+            resolve_string: Box::new(|_, _| None),
+        },
+        max_depth: 96,
+        ..Default::default()
+    };
+    if let Some([w, h]) = viewport {
+        options.default_size = usvg::Size::from_wh(w / 0.75, h / 0.75)
+            .ok_or_else(|| invalid("invalid SVG dimensions"))?;
+    }
+    if root
+        .descendants()
+        .any(|node| node.has_tag_name((NS, "text")))
+    {
+        static FONTS: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
+        options.fontdb = FONTS
+            .get_or_init(|| {
+                let mut database = usvg::fontdb::Database::new();
+                database.load_system_fonts();
+                Arc::new(database)
+            })
+            .clone();
+        if options.fontdb.faces().next().is_none() {
+            return Err(unsupported("no installed fonts available for SVG text"));
+        }
+    }
+    usvg::Tree::from_data(source, &options).map_err(invalid)
+}
+
+pub(super) fn transparent_png(
+    tree: &usvg::Tree,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, EngineError> {
+    let mut image = tiny_skia::Pixmap::new(width, height)
+        .ok_or_else(|| limited("cannot allocate embedded SVG image"))?;
+    let scale = tiny_skia::Transform::from_scale(
+        width as f32 / tree.size().width(),
+        height as f32 / tree.size().height(),
+    );
+    resvg::render(tree, scale, &mut image.as_mut());
+    image.encode_png().map_err(invalid)
 }

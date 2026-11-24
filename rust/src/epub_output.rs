@@ -23,7 +23,7 @@ pub(super) fn render(
         .pages
         .get(page)
         .ok_or_else(|| EngineError::PageIndex("EPUB chapter is out of range".into()))?;
-    let mut output = Output::new(book, false);
+    let mut output = Output::new(book, false, dpi);
     if page
         .metadata
         .get("fixed_layout")
@@ -56,7 +56,7 @@ pub(super) fn render(
 }
 
 pub(super) fn convert(book: &DocumentPayload, target: &str) -> Result<Vec<u8>, EngineError> {
-    let mut output = Output::new(book, true);
+    let mut output = Output::new(book, true, 192.0);
     let mut body = Vec::new();
     for (index, page) in book.pages.iter().enumerate() {
         if page
@@ -94,23 +94,30 @@ pub(super) struct Output {
     pub document: Document,
     preserve_links: bool,
     pixels: u64,
-    math_nodes_remaining: usize,
+    raster_dpi: f64,
+    pub math_nodes_remaining: usize,
 }
 
 pub(super) struct RasterImage {
     pub media: String,
-    pub width: u32,
-    pub height: u32,
+    pub width: f32,
+    pub height: f32,
 }
 
-enum Inline<'a> {
+pub(super) fn image_bytes(image: &ImagePayload) -> Result<Vec<u8>, EngineError> {
+    base64::engine::general_purpose::STANDARD
+        .decode(&image.data)
+        .map_err(conversion)
+}
+
+pub(super) enum Inline<'a> {
     Image(&'a ImagePayload),
     Equation { end: usize, source: &'a str },
     Link { end: usize, link: &'a LinkPayload },
 }
 
 impl Output {
-    pub(super) fn new(book: &DocumentPayload, preserve_links: bool) -> Self {
+    pub(super) fn new(book: &DocumentPayload, preserve_links: bool, raster_dpi: f64) -> Self {
         let mut document = Document::new();
         if let Some(title) = book
             .metadata
@@ -123,6 +130,7 @@ impl Output {
             document,
             preserve_links,
             pixels: 0,
+            raster_dpi,
             math_nodes_remaining: 50_000,
         }
     }
@@ -148,9 +156,7 @@ impl Output {
 
     fn paragraph(&mut self, block: &BlockPayload, width: f32) -> Result<Paragraph, EngineError> {
         let mut p = Paragraph::new();
-        if let Some(properties) = block.metadata.get("css_paragraph") {
-            let style: CssParagraph =
-                serde_json::from_value(properties.clone()).map_err(conversion)?;
+        if let Some(style) = CssParagraph::from_block(block)? {
             p.props.align = style.align;
             p.props.line_spacing = style.line_height;
             p.props.bidi = style.bidi;
@@ -211,14 +217,14 @@ impl Output {
             width: w,
             height: h,
         } = self.load_image(image)?;
-        let scale = (width.max(6.0) / w as f32).min(600.0 / h as f32).min(0.75);
+        let scale = (width.max(6.0) / w).min(600.0 / h).min(0.75);
         paragraph
             .insert_object(
                 paragraph.len(),
                 InlineObject::Image {
                     media,
-                    w: w as f32 * scale,
-                    h: h as f32 * scale,
+                    w: w * scale,
+                    h: h * scale,
                     alt: image.alt.clone(),
                     crop: [0.0; 4],
                     float: Default::default(),
@@ -231,28 +237,63 @@ impl Output {
     }
 
     pub(super) fn load_image(&mut self, image: &ImagePayload) -> Result<RasterImage, EngineError> {
+        if self.preserve_links && image.metadata.contains_key("href") {
+            return Err(unsupported("linked images"));
+        }
+        let bytes = image_bytes(image)?;
+        if image.media_type == "image/svg+xml" {
+            let tree = super::svg::embedded(&bytes)?;
+            let width = tree.size().width();
+            let height = tree.size().height();
+            let media = self.rasterize_svg(&tree, width * 0.75, height * 0.75)?;
+            return Ok(RasterImage {
+                media,
+                width,
+                height,
+            });
+        }
         let ext = match image.media_type.as_str() {
             "image/png" => "png",
             "image/jpeg" => "jpg",
             _ => {
                 return Err(unsupported(
-                    "preview and conversion require PNG or JPEG images",
+                    "preview and conversion require PNG, JPEG, or static SVG images",
                 ))
             }
         };
-        if self.preserve_links && image.metadata.contains_key("href") {
-            return Err(unsupported("linked images"));
-        }
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(&image.data)
-            .map_err(conversion)?;
-        let (w, h) = wordcraft_render::image_size(&bytes)
+        let (width, height) = wordcraft_render::image_size(&bytes)
             .ok_or_else(|| conversion("invalid EPUB raster image"))?;
-        let pixels = u64::from(w) * u64::from(h);
-        if w == 0
-            || h == 0
-            || w > 8192
-            || h > 8192
+        self.charge_image(width, height)?;
+        if wordcraft_render::decode_pixmap(&bytes).is_none() {
+            return Err(conversion("EPUB raster image failed to decode"));
+        }
+        let media = self.document.add_media(bytes, ext);
+        Ok(RasterImage {
+            media,
+            width: width as f32,
+            height: height as f32,
+        })
+    }
+
+    pub(super) fn rasterize_svg(
+        &mut self,
+        tree: &resvg::usvg::Tree,
+        width: f32,
+        height: f32,
+    ) -> Result<String, EngineError> {
+        let scale = self.raster_dpi / 72.0;
+        let pixels = [width, height].map(|size| (f64::from(size) * scale).ceil().max(1.0) as u32);
+        self.charge_image(pixels[0], pixels[1])?;
+        let bytes = super::svg::transparent_png(tree, pixels[0], pixels[1])?;
+        Ok(self.document.add_media(bytes, "png"))
+    }
+
+    fn charge_image(&mut self, width: u32, height: u32) -> Result<(), EngineError> {
+        let pixels = u64::from(width) * u64::from(height);
+        if width == 0
+            || height == 0
+            || width > 8192
+            || height > 8192
             || pixels > 16_000_000
             || self.pixels + pixels > 32_000_000
         {
@@ -260,16 +301,8 @@ impl Output {
                 "EPUB preview exceeds its image pixel budget".into(),
             ));
         }
-        if wordcraft_render::decode_pixmap(&bytes).is_none() {
-            return Err(conversion("EPUB raster image failed to decode"));
-        }
         self.pixels += pixels;
-        let media = self.document.add_media(bytes, ext);
-        Ok(RasterImage {
-            media,
-            width: w,
-            height: h,
-        })
+        Ok(())
     }
 
     fn table(&mut self, source: &TablePayload, width: f32) -> Result<Table, EngineError> {
@@ -320,20 +353,30 @@ impl Output {
 }
 
 #[derive(serde::Deserialize)]
-struct CssParagraph {
-    align: Option<Align>,
-    line_height: Option<LineSpacing>,
-    bidi: Option<bool>,
+pub(super) struct CssParagraph {
+    pub align: Option<Align>,
+    pub line_height: Option<LineSpacing>,
+    pub bidi: Option<bool>,
 }
 
-struct StyledText<'a> {
-    value: &'a str,
-    offsets: Vec<usize>,
-    spans: Vec<(usize, usize, CharProps)>,
+impl CssParagraph {
+    pub(super) fn from_block(block: &BlockPayload) -> Result<Option<Self>, EngineError> {
+        block
+            .metadata
+            .get("css_paragraph")
+            .map(|properties| serde_json::from_value(properties.clone()).map_err(conversion))
+            .transpose()
+    }
+}
+
+pub(super) struct StyledText<'a> {
+    pub value: &'a str,
+    pub offsets: Vec<usize>,
+    pub spans: Vec<(usize, usize, CharProps)>,
 }
 
 impl<'a> StyledText<'a> {
-    fn new(block: &'a BlockPayload) -> Result<Self, EngineError> {
+    pub(super) fn new(block: &'a BlockPayload) -> Result<Self, EngineError> {
         let mut offsets = block
             .text
             .char_indices()
@@ -354,7 +397,7 @@ impl<'a> StyledText<'a> {
         })
     }
 
-    fn style_at(&self, offset: usize) -> CharProps {
+    pub(super) fn style_at(&self, offset: usize) -> CharProps {
         let position = self.spans.partition_point(|(_, end, _)| *end <= offset);
         self.spans
             .get(position)
@@ -415,7 +458,7 @@ impl<'a> StyledText<'a> {
     }
 }
 
-fn inline_items(
+pub(super) fn inline_items(
     block: &BlockPayload,
     preserve_links: bool,
 ) -> Result<Vec<(usize, Inline<'_>)>, EngineError> {

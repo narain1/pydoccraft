@@ -89,8 +89,8 @@ Cargo root repeats the parent workspace's pinned patches because dependency
 patches do not propagate. `Cargo.lock` was derived from the root lockfile; its
 only package additions are this local binding, and Python-only dependencies are
 absent. Reconcile patches and locked versions whenever the parent changes.
-An offline locked metadata review found 288 normal/build packages, all accepted by
-the repository's license-expression and prohibited-package checks. The 287
+An offline locked metadata review found 315 normal/build packages, all accepted by
+the repository's license-expression and prohibited-package checks. The 314
 third-party name/version/license rows occur in the regenerated root inventory;
 the remaining row is the local Apache-2.0 `pydoccraft-core`. No packaged binary
 is provided, and this review is not a production distribution approval.

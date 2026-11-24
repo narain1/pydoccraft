@@ -44,6 +44,7 @@ resvg = { version = "=0.50.0", default-features = false, features = ["text", "sy
 roxmltree = "=0.21.2"
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.149"
+sha1 = "=0.11.0"
 skrifa = "=0.44.0"
 taffy = { version = "=0.16.0", default-features = false, features = ["std", "taffy_tree", "block_layout", "flexbox", "grid", "content_size"] }
 thiserror = "=2.0.21"
@@ -60,6 +61,8 @@ mp3dec = { version = "=0.1.0", optional = true }
 oxideav-aac = { version = "=0.1.7", optional = true }
 oxideav-core = { version = "=0.1.43", optional = true }
 oxideav-mp4 = { version = "=0.0.11", optional = true }
+parley = { version = "=0.13.0", default-features = false, features = ["std"] }
+wordcraft-fonts = { git = "https://github.com/storytold/wordcraft", rev = "bbe3547dd11bb5f613f3aa893b12f593910644de", version = "0.14.0" }
 
 [patch.crates-io]
 hayro = { git = "https://github.com/storytold/pdfcraft", rev = "03996b10258288e723c4e07334c9cd1bae1f68a8" }

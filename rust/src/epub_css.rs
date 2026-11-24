@@ -18,6 +18,7 @@ type Specificity = [u16; 3];
 #[derive(Default)]
 pub(super) struct Cascade {
     rules: Vec<Rule>,
+    pub(super) fonts: Vec<super::fonts::Face>,
     imports: HashSet<String>,
     bytes: usize,
     work: usize,
@@ -149,6 +150,16 @@ impl Cascade {
                                 selector,
                                 declarations: values.clone(),
                             });
+                        }
+                    }
+                }
+                Statement::AtRule(rule) if rule.name.name.eq_ignore_ascii_case("font-face") => {
+                    if let Some(block) = &rule.block {
+                        if let Some(face) = font_face(block, source, base)? {
+                            if self.fonts.len() >= 32 {
+                                return Err(limited("EPUB stylesheet font-face limit exceeded"));
+                            }
+                            self.fonts.push(face);
                         }
                     }
                 }
@@ -301,6 +312,71 @@ fn update(
     {
         values.insert(name.to_owned(), (priority, value.to_owned()));
     }
+}
+
+fn font_face(
+    block: &SimpleBlock<'_>,
+    source: &str,
+    base: &str,
+) -> Result<Option<super::fonts::Face>, EngineError> {
+    let values: Properties = declarations(block, source)?
+        .into_iter()
+        .map(|(key, value, _)| (key, value))
+        .collect();
+    let Some(family) = values
+        .get("font-family")
+        .map(|family| family.trim_matches(['\'', '"']))
+    else {
+        return Ok(None);
+    };
+    if family.is_empty() || family.len() > 255 || family.contains(',') {
+        return Err(invalid("invalid EPUB font-face family"));
+    }
+    let mut urls = Vec::new();
+    for statement in &block.statements {
+        let Statement::Declaration(declaration) = statement else {
+            continue;
+        };
+        if !ident(&declaration.name).is_some_and(|name| name.eq_ignore_ascii_case("src")) {
+            continue;
+        }
+        urls.clear();
+        for value in &declaration.value {
+            if let ComponentValue::Url(url) = value {
+                match &url.value {
+                    Some(UrlValue::Raw(raw)) => urls.push(raw.value.to_string()),
+                    Some(UrlValue::Str(string)) => {
+                        if let Some(url) = string_value(string) {
+                            urls.push(url.to_owned());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    let weight = match values.get("font-weight").map(String::as_str) {
+        None | Some("normal") => Some(400.0),
+        Some("bold") => Some(700.0),
+        Some(value) => value
+            .parse::<f32>()
+            .ok()
+            .filter(|weight| (1.0..=1000.0).contains(weight)),
+    };
+    let style = match values.get("font-style").map(String::as_str) {
+        None | Some("normal") => Some(parley::FontStyle::Normal),
+        Some("italic") => Some(parley::FontStyle::Italic),
+        Some("oblique") => Some(parley::FontStyle::Oblique(None)),
+        _ => None,
+    };
+    Ok(Some(super::fonts::Face {
+        family: family.into(),
+        base: base.into(),
+        urls,
+        weight,
+        style,
+        unicode_range: values.contains_key("unicode-range"),
+    }))
 }
 
 fn declarations(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import struct
 from pathlib import Path
@@ -316,6 +317,155 @@ class EpubTests(unittest.TestCase):
         with doc_ex.open(rewrite_epub(epub_fixture(chapter_one=cycle), {"OEBPS/cycle.css": '@import "./cycle.css";'})) as document:
             with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "cyclic"):
                 document.render_page(0)
+
+    def test_epub_packaged_font_alias_shapes_and_stays_local_to_publication(self) -> None:
+        xhtml = """<html xmlns="http://www.w3.org/1999/xhtml"><head>
+        <meta name="viewport" content="width=280,height=120"/>
+        <link rel="stylesheet" href="Style/main.css"/>
+        </head><body><p>Wide W and narrow i</p></body></html>"""
+        data = epub_fixture(chapter_one=xhtml)
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        package = package.replace(b"</metadata>", b'<meta property="rendition:layout">pre-paginated</meta></metadata>')
+        package = package.replace(b'<itemref idref="two"/>', b'<itemref idref="two" properties="rendition:layout-reflowable"/>')
+        package = package.replace(b"</manifest>", b'<item id="typeface" href="Fonts/type%20face.ttf" media-type="font/ttf"/></manifest>')
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
+        declarations = b'body {margin: 0} p {margin: 0; color: #ca2300; font-family: "Book Type"; font-size: 36px; line-height: 1.1;}'
+        definition = b"""@font-face {
+            font-family: "Book Type";
+            src: local("Missing install"), url("../../Fonts/type%20face.ttf") format("truetype");
+        }"""
+        common = {"OEBPS/content.opf": package, "OEBPS/Style/main.css": b'@import "Nested/face.css"; ' + declarations}
+        baseline = rewrite_epub(data, {**common, "OEBPS/Style/Nested/face.css": b""})
+        textbook = rewrite_epub(data, {
+            **common, "OEBPS/Style/Nested/face.css": definition,
+            "OEBPS/Fonts/type face.ttf": font,
+        })
+        with doc_ex.open(baseline) as against, doc_ex.open(textbook) as book:
+            without = against.render_page(0, dpi=96)
+            with_font = book.render_page(0, dpi=96)
+            self.assertNotEqual(with_font, without)
+            self.assertEqual(against.render_page(0, dpi=96), without)
+            self.assertEqual(book.render_page(0, dpi=96), with_font)
+            width, pixels = rgba_pixels(png_chunks(with_font))
+            self.assertEqual(width, 280)
+            self.assertTrue(any(pixels[i:i+4] == bytes((202, 35, 0, 255)) for i in range(0, len(pixels), 4)))
+            self.assertIn("Wide W and narrow i", book[0].get_text())
+        bad_font = rewrite_epub(textbook, {"OEBPS/Fonts/type face.ttf": b"not a font"})
+        with doc_ex.open(bad_font) as book, self.assertRaises(doc_ex.MalformedDocumentError):
+            book.render_page(0, dpi=96)
+
+    def test_epub_packaged_fonts_preserve_inline_svg_and_math(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"
+          xmlns:m="http://www.w3.org/1998/Math/MathML" xmlns:s="http://www.w3.org/2000/svg"><head>
+        <style>@font-face {font-family: 'Local Type'; src: url('font.ttf')}
+        body {margin: 0} p {margin: 0; font-family: 'Local Type'; font-size: 24px; color: #1122cc}</style>
+        </head><body><p>Font <m:math><m:mfrac><m:mi>x</m:mi><m:mn>7</m:mn></m:mfrac></m:math>
+        <s:svg width="25" height="25"><s:rect width="25" height="25" fill="#dd5544"/></s:svg> after</p></body></html>"""
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
+        data = rewrite_epub(epub_fixture(chapter_one=chapter), {"OEBPS/font.ttf": font})
+        with doc_ex.open(data) as document:
+            self.assertIn("Font", document[0].get_text())
+            self.assertEqual(len(document[0].get_images()), 1)
+            _, pixels = rgba_pixels(png_chunks(document.render_page(0, dpi=96)))
+            colors = {pixels[offset:offset+4] for offset in range(0, len(pixels), 4)}
+            self.assertIn(bytes((221, 85, 68, 255)), colors)
+            self.assertIn(bytes((17, 34, 204, 255)), colors)
+
+    def test_epub_packaged_fonts_render_table_cells_and_spans(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head>
+        <style>@font-face {font-family: 'Local Table'; src: url('font.ttf')}
+        body {margin: 0} table {width: 160px; font-family: 'Local Table'; font-size: 18px}
+        td {padding: 3px} td.first {background: #1122cc; color: white}
+        td.last {background: #dd5544; color: white}</style></head><body>
+        <table><caption>Title</caption>
+        <tr><td class="first" rowspan="2">Left</td><td>Top</td></tr>
+        <tr><td class="last">Bottom</td></tr><tr><td colspan="2">Both columns</td></tr>
+        </table></body></html>"""
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
+        data = rewrite_epub(epub_fixture(chapter_one=chapter), {"OEBPS/font.ttf": font})
+        with doc_ex.open(data) as document:
+            _, pixels = rgba_pixels(png_chunks(document.render_page(0, dpi=96)))
+            colors = {pixels[offset:offset+4] for offset in range(0, len(pixels), 4)}
+            self.assertIn(bytes((17, 34, 204, 255)), colors)
+            self.assertIn(bytes((221, 85, 68, 255)), colors)
+            self.assertIn("Both columns", document[0].get_text())
+
+    def test_standard_font_obfuscation_is_local_and_survives_edits(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head>
+        <style>@font-face {font-family: 'Wrapped'; src: url('Typeface.ttf')}
+        p {font-family: Wrapped; font-size: 28px;}</style>
+        </head><body><p>Obfuscated font</p></body></html>"""
+        data = epub_fixture(chapter_one=chapter)
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        package = package.replace(b"</manifest>", b'<item id="font" href="Typeface.ttf" media-type="font/ttf"/></manifest>')
+        package = package.replace(b'urn:test:book</dc:identifier>', b'urn:test:  book\n</dc:identifier>')
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
+        key = hashlib.sha1(b"urn:test:book").digest()
+        wrapped = bytes(value ^ key[index % len(key)] for index, value in enumerate(font[:1040])) + font[1040:]
+        encryption = """<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container" xmlns:x="http://www.w3.org/2001/04/xmlenc#">
+        <x:EncryptedData><x:EncryptionMethod Algorithm="http://www.idpf.org/2008/embedding"/>
+        <x:CipherData><x:CipherReference URI="OEBPS/Typeface.ttf"/></x:CipherData></x:EncryptedData>
+        </encryption>"""
+        original = rewrite_epub(data, {"OEBPS/content.opf": package, "OEBPS/Typeface.ttf": font})
+        encoded = rewrite_epub(original, {"META-INF/encryption.xml": encryption, "OEBPS/Typeface.ttf": wrapped})
+        with doc_ex.open(original) as clear, doc_ex.open(encoded) as book:
+            preview = clear.render_page(0, dpi=96)
+            self.assertEqual(book.render_page(0, dpi=96), preview)
+            self.assertEqual(book.read_epub_resource("OEBPS/Typeface.ttf"), wrapped)
+            revision = book.edit_epub_structure([1, 0])
+            with self.assertRaises(doc_ex.UnsupportedFormatError):
+                book.edit_epub_structure(resources={"OEBPS/Typeface.ttf": doc_ex.EpubResource("font/ttf", font)})
+        with doc_ex.open(revision) as edited:
+            self.assertEqual(edited.render_page(1, dpi=96), preview)
+        for disallowed in (
+            encryption.replace("OEBPS/Typeface.ttf", "OEBPS/one.xhtml"),
+            encryption.replace("http://www.idpf.org/2008/embedding", "http://www.w3.org/2001/04/xmlenc#aes128-cbc"),
+        ):
+            with self.subTest(encryption=disallowed), self.assertRaises(doc_ex.UnsupportedFormatError):
+                doc_ex.open(rewrite_epub(encoded, {"META-INF/encryption.xml": disallowed}))
+
+    def test_embedded_and_linked_svg_render_in_chapter_viewport(self) -> None:
+        xhtml = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:s="http://www.w3.org/2000/svg"><head>
+        <meta name="viewport" content="width=180,height=100"/>
+        <style>
+        body {margin: 0; background: #ffeebb}
+        .art {position: absolute; left: 10px; top: 20px; width: 60px; height: 40px;}
+        img {position: absolute; left: 100px; top: 20px; width: 60px; height: 40px;}
+        </style></head><body>
+        <s:svg class="art" viewBox="0 0 30 20"><s:title>Red rectangle</s:title>
+        <s:rect x="5" y="5" width="20" height="10" fill="#dd2211"/></s:svg>
+        <img src="graphics/tile.svg" alt="Blue rectangle"/>
+        </body></html>"""
+        data = epub_fixture(chapter_one=xhtml)
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        package = package.replace(b'<itemref idref="one"/>', b'<itemref idref="one" properties="rendition:layout-pre-paginated"/>')
+        svg = '<svg xmlns="http://www.w3.org/2000/svg" width="60" height="40"><rect x="10" y="10" width="40" height="20" fill="#2244dd"/></svg>'
+        book = rewrite_epub(data, {"OEBPS/content.opf": package, "OEBPS/graphics/tile.svg": svg})
+        with doc_ex.open(book) as loaded:
+            self.assertEqual([image.alt for image in loaded[0].get_images()], ["Red rectangle", "Blue rectangle"])
+            for dpi, scale in ((96, 1), (192, 2)):
+                width, pixels = rgba_pixels(png_chunks(loaded.render_page(0, dpi=dpi)))
+                self.assertEqual(width, 180 * scale)
+                for x, y, color in ((40, 40, (221, 34, 17)), (130, 40, (34, 68, 221)), (12, 22, (255, 238, 187))):
+                    offset = ((y * scale) * width + x * scale) * 4
+                    self.assertEqual(pixels[offset:offset + 4], bytes((*color, 255)))
+            cropped = png_chunks(loaded.render_page(0, dpi=96, clip=(75, 15, 45, 30)))
+            self.assertEqual(struct.unpack_from(">II", cropped[b"IHDR"]), (60, 40))
+
+    def test_semantic_output_reopens_with_embedded_and_linked_svg(self) -> None:
+        inline = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="30"><title>Inline art</title><rect width="40" height="30" fill="green"/></svg>'
+        chapter = f'<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Art {inline} here <img src="art.svg" alt="Linked art"/></p></body></html>'
+        data = rewrite_epub(epub_fixture(chapter_one=chapter), {"OEBPS/art.svg": inline.replace('fill="green"', 'fill="purple"')})
+        with doc_ex.open(data) as book:
+            self.assertTrue(book.render_page(0, dpi=144).startswith(b"\x89PNG"))
+            for kind in ("docx", "pdf"):
+                with self.subTest(kind=kind), doc_ex.open(book.convert(kind), filetype=kind) as converted:
+                    self.assertIn("Art", converted[0].get_text())
+                    self.assertEqual(len(converted[0].get_images()), 2)
+                    self.assertTrue(converted.render_page(0, dpi=96).startswith(b"\x89PNG"))
 
     def test_fixed_svg_chapter_renders_viewbox_and_clips(self) -> None:
         source = epub_fixture()

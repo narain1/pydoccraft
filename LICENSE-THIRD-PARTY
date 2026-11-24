@@ -4,7 +4,7 @@ Generated from the committed `Cargo.lock` using `cargo metadata --locked`. This 
 
 The resolved graph was reviewed for license declarations and compatibility. GPL-, AGPL-, and LGPL-only dependencies are prohibited; SPDX `OR` expressions remain acceptable when they provide a permissive alternative. Every package in this inventory declares a license, and no GPL-, AGPL-, or LGPL-only dependency was found.
 
-The independently locked, unpublished Node preview was also reviewed using `cargo metadata --offline --locked` and the same normal/build graph checks. Its 264 third-party name/version/license rows are a subset of this inventory; its remaining normal/build package is the local Apache-2.0 `pydoccraft-core`. This inventory is a superset, not an exact Node dependency list. See `bindings/node/ATTRIBUTION.md` and NOTICE for scope and attribution.
+The independently locked, unpublished Node preview was also reviewed using `cargo metadata --offline --locked` and the same normal/build graph checks. Its third-party name/version/license rows are a subset of this inventory; its remaining normal/build package is the local Apache-2.0 `pydoccraft-core`. This inventory is a superset, not an exact Node dependency list. See `bindings/node/ATTRIBUTION.md` and NOTICE for scope and attribution.
 
 PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream repositories at the immutable revisions recorded in NOTICE.
 
@@ -97,6 +97,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `font-types` | `0.12.7` | MIT OR Apache-2.0 |
 | `fontconfig-parser` | `0.5.8` | MIT |
 | `fontdb` | `0.24.0` | MIT |
+| `fontique` | `0.13.0` | Apache-2.0 OR MIT |
 | `futures-core` | `0.3.34` | MIT OR Apache-2.0 |
 | `futures-task` | `0.3.34` | MIT OR Apache-2.0 |
 | `futures-util` | `0.3.34` | MIT OR Apache-2.0 |
@@ -126,6 +127,17 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `hybrid-array` | `0.4.15` | MIT OR Apache-2.0 |
 | `iana-time-zone` | `0.1.65` | MIT OR Apache-2.0 |
 | `iana-time-zone-haiku` | `0.1.2` | MIT OR Apache-2.0 |
+| `icu_collections` | `2.3.0` | Unicode-3.0 |
+| `icu_locale_core` | `2.4.0` | Unicode-3.0 |
+| `icu_locale_fallback` | `2.3.0` | Unicode-3.0 |
+| `icu_locale_fallback_data` | `2.3.0` | Unicode-3.0 |
+| `icu_normalizer` | `2.3.0` | Unicode-3.0 |
+| `icu_normalizer_data` | `2.3.0` | Unicode-3.0 |
+| `icu_properties` | `2.3.0` | Unicode-3.0 |
+| `icu_properties_data` | `2.3.0` | Unicode-3.0 |
+| `icu_provider` | `2.4.0` | Unicode-3.0 |
+| `icu_segmenter` | `2.3.0` | Unicode-3.0 |
+| `icu_segmenter_data` | `2.3.0` | Unicode-3.0 |
 | `image` | `0.25.10` | MIT OR Apache-2.0 |
 | `image-webp` | `0.2.4` | MIT OR Apache-2.0 |
 | `imagesize` | `0.14.0` | MIT |
@@ -141,10 +153,12 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `libc` | `0.2.191` | MIT OR Apache-2.0 |
 | `libm` | `0.2.16` | MIT |
 | `linebender_resource_handle` | `0.1.1` | Apache-2.0 OR MIT |
+| `litemap` | `0.8.3` | Unicode-3.0 |
 | `log` | `0.4.34` | MIT OR Apache-2.0 |
 | `lopdf` | `0.45.0` | MIT |
 | `md-5` | `0.11.0` | MIT OR Apache-2.0 |
 | `memchr` | `2.8.3` | Unlicense OR MIT |
+| `memmap2` | `0.9.12` | MIT OR Apache-2.0 |
 | `memoffset` | `0.9.1` | MIT |
 | `miniz_oxide` | `0.8.9` | MIT OR Zlib OR Apache-2.0 |
 | `miniz_oxide` | `0.9.1` | MIT OR Zlib OR Apache-2.0 |
@@ -159,6 +173,11 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `oxideav-aac` | `0.1.7` | MIT |
 | `oxideav-core` | `0.1.43` | MIT |
 | `oxideav-mp4` | `0.0.11` | MIT |
+| `parlance` | `0.1.1` | Apache-2.0 OR MIT |
+| `parley` | `0.13.0` | Apache-2.0 OR MIT |
+| `parley_data` | `0.13.0` | Apache-2.0 OR MIT |
+| `parley_emoji` | `0.13.0` | MIT |
+| `parley_engine` | `0.13.0` | Apache-2.0 OR MIT |
 | `pdf-writer` | `0.15.0` | MIT OR Apache-2.0 |
 | `pdfcraft-annot` | `0.15.0` | MIT OR Apache-2.0 |
 | `pdfcraft-content` | `0.15.0` | MIT OR Apache-2.0 |
@@ -185,6 +204,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `png` | `0.18.1` | MIT OR Apache-2.0 |
 | `polycool` | `0.4.0` | MIT OR Apache-2.0 |
 | `portable-atomic` | `1.15.0` | Apache-2.0 OR MIT |
+| `potential_utf` | `0.1.6` | Unicode-3.0 |
 | `proc-macro2` | `1.0.107` | MIT OR Apache-2.0 |
 | `pxfm` | `0.1.30` | BSD-3-Clause OR Apache-2.0 |
 | `pyo3` | `0.23.5` | MIT OR Apache-2.0 |
@@ -254,6 +274,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `tiff` | `0.11.3` | MIT |
 | `tiny-skia` | `0.12.0` | BSD-3-Clause |
 | `tiny-skia-path` | `0.12.0` | BSD-3-Clause |
+| `tinystr` | `0.8.5` | Unicode-3.0 |
 | `tinyvec` | `1.13.3` | Zlib OR Apache-2.0 OR MIT |
 | `ttf-parser` | `0.25.1` | MIT OR Apache-2.0 |
 | `typed-path` | `0.13.0` | MIT OR Apache-2.0 |
@@ -270,6 +291,8 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `unicode-vo` | `0.1.0` | MIT/Apache-2.0 |
 | `unindent` | `0.2.4` | MIT OR Apache-2.0 |
 | `usvg` | `0.50.0` | Apache-2.0 OR MIT |
+| `utf8_iter` | `1.1.0` | Apache-2.0 OR MIT |
+| `utf_types` | `1.0.0` | Apache-2.0 OR MIT |
 | `uuid` | `1.29.2` | Apache-2.0 OR MIT |
 | `vello_common` | `0.0.8` | Apache-2.0 OR MIT |
 | `vello_common` | `0.0.9` | Apache-2.0 OR MIT |
@@ -303,16 +326,20 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `wordcraft-proof` | `0.14.0` | MIT OR Apache-2.0 |
 | `wordcraft-render` | `0.14.0` | MIT OR Apache-2.0 |
 | `write-fonts` | `0.48.1` | MIT OR Apache-2.0 |
+| `writeable` | `0.6.4` | Unicode-3.0 |
 | `wuff` | `0.2.9` | MIT |
 | `xmlwriter` | `0.1.0` | MIT |
 | `xmp-writer` | `0.3.3` | MIT OR Apache-2.0 |
-| `yoke` | `0.8.3` | Unicode-3.0 |
+| `yoke` | `0.8.4` | Unicode-3.0 |
 | `yoke-derive` | `0.8.4` | Unicode-3.0 |
 | `zerocopy` | `0.8.63` | BSD-2-Clause OR Apache-2.0 OR MIT |
 | `zerocopy-derive` | `0.8.63` | BSD-2-Clause OR Apache-2.0 OR MIT |
 | `zerofrom` | `0.1.8` | Unicode-3.0 |
 | `zerofrom-derive` | `0.1.8` | Unicode-3.0 |
 | `zeroize` | `1.9.1` | Apache-2.0 OR MIT |
+| `zerotrie` | `0.2.5` | Unicode-3.0 |
+| `zerovec` | `0.11.9` | Unicode-3.0 |
+| `zerovec-derive` | `0.11.7` | Unicode-3.0 |
 | `zip` | `2.2.2` | MIT |
 | `zip` | `3.0.0` | MIT |
 | `zip` | `9.1.3` | MIT |
