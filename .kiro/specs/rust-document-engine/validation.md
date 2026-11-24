@@ -2823,3 +2823,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 677 installed tests, inclu
 ## 2026-11-24 Nested spanning MathML tables
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 678 installed tests, including 83 EPUB tests. It measured 23,074,002 bytes with a 53,577,912-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-nested-spanning-mathml-tables) records preview geometry, native DOCX and PDF export, and grid limits.
+
+## 2026-11-24 Surround Ogg Opus narration
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 679 installed tests, including 84 EPUB tests. It measured 23,077,723 bytes with a 53,584,824-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-surround-ogg-opus-narration) covers speaker layouts, bounded clip playback, and libopus comparisons.

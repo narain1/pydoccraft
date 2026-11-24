@@ -26,6 +26,7 @@ pub(crate) struct AudioSource {
 
 struct AudioWindow {
     spec: WavSpec,
+    speaker_mask: Option<u32>,
     next: usize,
     end: Option<usize>,
     started: bool,
@@ -82,7 +83,7 @@ impl AudioSource {
         self.stream = None;
         let window = self.window(begin, end)?;
         let samples = self.read_frames(window.next, window.end, window.end.is_none())?;
-        encode_clip(window.spec, samples)
+        encode_clip(window.spec, window.speaker_mask, samples)
     }
 
     pub(crate) fn start_stream(&mut self, begin: u64, end: Option<u64>) -> Result<(), EngineError> {
@@ -112,7 +113,7 @@ impl AudioSource {
         if samples.is_empty() && window.started && window.end.is_none() {
             return Ok(None);
         }
-        let result = encode_clip(window.spec, samples)?;
+        let result = encode_clip(window.spec, window.speaker_mask, samples)?;
         window.next += result.frames;
         window.started = true;
         // When a decoder returns fewer frames than requested, it reached EOF.
@@ -145,8 +146,13 @@ impl AudioSource {
                 "media-overlay audio clip lies outside its resource or contains no sample frames",
             ));
         }
+        let speaker_mask = match &self.decoder {
+            Decoder::Opus(track) => track.speaker_mask(),
+            _ => None,
+        };
         Ok(AudioWindow {
             spec,
+            speaker_mask,
             next,
             end,
             started: false,
@@ -180,7 +186,11 @@ impl AudioSource {
     }
 }
 
-fn encode_clip(spec: WavSpec, samples: Vec<i16>) -> Result<AudioClip, EngineError> {
+fn encode_clip(
+    spec: WavSpec,
+    speaker_mask: Option<u32>,
+    samples: Vec<i16>,
+) -> Result<AudioClip, EngineError> {
     let frames = samples.len() / usize::from(spec.channels);
     if frames == 0 {
         return Err(invalid("media-overlay audio clip has no samples"));
@@ -201,8 +211,20 @@ fn encode_clip(spec: WavSpec, samples: Vec<i16>) -> Result<AudioClip, EngineErro
     }
     writer_samples.flush().map_err(wav_error)?;
     writer.finalize().map_err(wav_error)?;
+    let mut wave = output.into_inner();
+    if let Some(mask) = speaker_mask {
+        // Hound writes a 40-byte extensible fmt chunk for more than two channels,
+        // but its default mask cannot describe layouts such as quad or 7.1.
+        if wave.get(12..22) != Some(b"fmt \x28\0\0\0\xfe\xff") {
+            return Err(invalid("missing extensible WAVE format for surround audio"));
+        }
+        let slot = wave
+            .get_mut(40..44)
+            .ok_or_else(|| invalid("missing WAVE speaker mask"))?;
+        slot.copy_from_slice(&mask.to_le_bytes());
+    }
     Ok(AudioClip {
-        wave: output.into_inner(),
+        wave,
         sample_rate: spec.sample_rate,
         channels: spec.channels,
         frames,

@@ -1500,6 +1500,71 @@ class EpubTests(unittest.TestCase):
             self.assertEqual(pcm_frames(cross.audio), expected[54720 * 4:55680 * 4])
             self.assertEqual(pcm_frames(back.audio), expected[48000 * 4:48480 * 4])
 
+    def test_media_overlay_preserves_ogg_opus_surround_speaker_layout(self) -> None:
+        source, _ = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(b"audio/wav", b"audio/ogg")
+            smil = archive.read("OEBPS/Sync/read.smil")
+        bounds = b'clipBegin="250ms" clipEnd="00:00:01.125"'
+        full = smil.replace(bounds, b'clipBegin="0s"')
+        fixtures = Path(__file__).parent / "fixtures"
+        surround = (fixtures / "epub-narration-surround.opus").read_bytes()
+        mono = (fixtures / "epub-narration-mono.opus").read_bytes()
+
+        def fixture(payload: bytes, timeline: bytes = full) -> bytes:
+            return rewrite_epub(source, {
+                "OEBPS/content.opf": package,
+                "OEBPS/Sync/read.smil": timeline,
+                "OEBPS/Media/voice.wav": payload,
+            })
+
+        def surround_pcm(audio: doc_ex.EpubAudioClip | None) -> bytes:
+            assert audio is not None
+            self.assertEqual((audio.sample_rate, audio.channels), (48000, 8))
+            self.assertEqual(audio.wave[12:20], b"fmt \x28\0\0\0")
+            self.assertEqual(struct.unpack_from("<HH", audio.wave, 20), (0xFFFE, 8))
+            self.assertEqual(struct.unpack_from("<I", audio.wave, 40), (0x63F,))
+            self.assertEqual(audio.wave[60:64], b"data")
+            self.assertEqual(struct.unpack_from("<I", audio.wave, 64), (audio.frame_count * 16,))
+            pcm = audio.wave[68:]
+            self.assertEqual(len(pcm), audio.frame_count * 16)
+            return pcm
+
+        with doc_ex.open(fixture(surround)) as book:
+            reference = surround_pcm(next(book.epub_narration(0)).audio)
+        self.assertEqual(len(reference), 19200 * 16)
+        channels = zip(*struct.iter_unpack("<8h", reference))
+        # WAVE order is FL, FR, FC, LFE, BL, BR, SL, SR.
+        for samples, frequency in zip(channels, (370, 430, 510, 70, 590, 650, 730, 810)):
+            self.assertGreater(max(samples), 1000)
+            crossings = sum(a <= 0 < b for a, b in zip(samples, samples[1:]))
+            self.assertAlmostEqual(crossings, frequency * 0.4, delta=2)
+
+        with doc_ex.open(fixture(mono)) as book:
+            audio = next(book.epub_narration(0)).audio
+            assert audio is not None
+            with wave.open(io.BytesIO(audio.wave), "rb") as pcm:
+                mono_pcm = pcm.readframes(audio.frame_count)
+        expected = reference + b"".join(
+            struct.pack("<8h", 0, 0, sample, 0, 0, 0, 0, 0)
+            for (sample,) in struct.iter_unpack("<h", mono_pcm)
+        )
+
+        chain = surround + mono
+        with doc_ex.open(fixture(chain)) as book:
+            self.assertEqual(surround_pcm(next(book.epub_narration(0)).audio), expected)
+            chunks = b"".join(
+                surround_pcm(cue.audio)
+                for cue in book.epub_narration(0, chunk_frames=773, skip_roles={"aside"})
+            )
+            self.assertEqual(chunks, expected)
+        cross = smil.replace(bounds, b'clipBegin="0.39s" clipEnd="0.41s"')
+        with doc_ex.open(fixture(chain, cross)) as book:
+            self.assertEqual(
+                surround_pcm(next(book.epub_narration(0)).audio),
+                expected[18720 * 16:19680 * 16],
+            )
+
     def test_media_overlay_rejects_damaged_ogg_transport(self) -> None:
         source, _ = narrated_epub()
         with zipfile.ZipFile(io.BytesIO(source)) as archive:
