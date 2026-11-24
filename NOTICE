@@ -60,6 +60,24 @@ Licensed under the MIT License or the Apache License, Version 2.0, at your optio
 Source: https://github.com/linebender/resvg
 Crates: resvg and usvg 0.50.0. Used to render validated EPUB SVG content documents.
 
+Hound
+Copyright (C) 2015 Ruud van Asseldonk.
+Licensed under the Apache License, Version 2.0.
+Source: https://github.com/ruuda/hound
+Crate: hound 3.5.1. Used for PCM WAVE input and output in EPUB narration.
+
+mp3dec
+Copyright (c) 2025 Raph Levien.
+Licensed under the Apache License, Version 2.0 or the MIT License.
+Source: https://github.com/raphlinus/mp3dec
+Crate: mp3dec 0.1.0. Used to decode MPEG Layer III narration. It is a Rust port of minimp3 (CC0 1.0).
+
+OxideAV
+Copyright (c) 2026 Karpelès Lab Inc.
+Licensed under the MIT License.
+Sources: https://github.com/OxideAV/oxideav-core, https://github.com/OxideAV/oxideav-aac, https://github.com/OxideAV/oxideav-mp4
+Crates: oxideav-core 0.1.43, oxideav-aac 0.1.7, and oxideav-mp4 0.0.11. Used to demux local MP4 narration and decode AAC-LC.
+
 Documentation image: website/assets/irs-1040-page-1.png is rendered from the U.S. Internal Revenue Service 2025 Form 1040 (https://www.irs.gov/pub/irs-prior/f1040--2025.pdf), a U.S. government work.
 
 Bundled and linked third-party material

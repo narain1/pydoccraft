@@ -11,6 +11,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | Crate | Version | License |
 |---|---:|---|
 | `adler2` | `2.0.1` | 0BSD OR MIT OR Apache-2.0 |
+| `aes` | `0.8.4` | MIT OR Apache-2.0 |
 | `aes` | `0.9.3` | MIT OR Apache-2.0 |
 | `alloc-no-stdlib` | `2.0.4` | BSD-3-Clause |
 | `alloc-stdlib` | `0.2.4` | BSD-3-Clause |
@@ -23,6 +24,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `base64` | `0.23.1` | MIT OR Apache-2.0 |
 | `bitflags` | `2.13.2` | MIT OR Apache-2.0 |
 | `block-buffer` | `0.12.1` | MIT OR Apache-2.0 |
+| `block-padding` | `0.3.3` | MIT OR Apache-2.0 |
 | `block-padding` | `0.4.2` | MIT OR Apache-2.0 |
 | `brotli` | `8.0.4` | BSD-3-Clause AND MIT |
 | `brotli-decompressor` | `5.0.3` | BSD-3-Clause/MIT |
@@ -31,6 +33,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `bytemuck_derive` | `1.12.1` | Zlib OR Apache-2.0 OR MIT |
 | `byteorder-lite` | `0.1.0` | Unlicense OR MIT |
 | `bytes` | `1.12.1` | MIT |
+| `cbc` | `0.1.2` | MIT OR Apache-2.0 |
 | `cbc` | `0.2.1` | MIT OR Apache-2.0 |
 | `cc` | `1.9.0` | MIT OR Apache-2.0 |
 | `cfb` | `0.15.0` | MIT |
@@ -38,6 +41,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `cfg_aliases` | `0.2.2` | MIT |
 | `chacha20` | `0.10.2` | MIT OR Apache-2.0 |
 | `chrono` | `0.4.45` | MIT OR Apache-2.0 |
+| `cipher` | `0.4.4` | MIT OR Apache-2.0 |
 | `cipher` | `0.5.2` | MIT OR Apache-2.0 |
 | `cmov` | `0.5.4` | Apache-2.0 OR MIT |
 | `color` | `0.3.3` | Apache-2.0 OR MIT |
@@ -47,6 +51,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `core_detect` | `1.0.0` | MIT/Apache-2.0 |
 | `core_maths` | `0.1.1` | MIT |
 | `cpubits` | `0.1.1` | MIT OR Apache-2.0 |
+| `cpufeatures` | `0.2.17` | MIT OR Apache-2.0 |
 | `cpufeatures` | `0.3.1` | MIT OR Apache-2.0 |
 | `craft-pdf` | `0.1.0` | MIT OR Apache-2.0 |
 | `crc32fast` | `1.5.2` | MIT OR Apache-2.0 |
@@ -55,7 +60,9 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `crossbeam-epoch` | `0.9.21` | MIT OR Apache-2.0 |
 | `crossbeam-utils` | `0.8.23` | MIT OR Apache-2.0 |
 | `crunchy` | `0.2.4` | MIT |
+| `crypto-common` | `0.1.7` | MIT OR Apache-2.0 |
 | `crypto-common` | `0.2.2` | MIT OR Apache-2.0 |
+| `ctr` | `0.9.2` | MIT OR Apache-2.0 |
 | `ctutils` | `0.4.3` | Apache-2.0 OR MIT |
 | `data-url` | `0.3.2` | MIT OR Apache-2.0 |
 | `deckcraft-anim` | `0.13.1` | MIT OR Apache-2.0 |
@@ -93,6 +100,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `futures-core` | `0.3.34` | MIT OR Apache-2.0 |
 | `futures-task` | `0.3.34` | MIT OR Apache-2.0 |
 | `futures-util` | `0.3.34` | MIT OR Apache-2.0 |
+| `generic-array` | `0.14.7` | MIT |
 | `getrandom` | `0.3.4` | MIT OR Apache-2.0 |
 | `getrandom` | `0.4.3` | MIT OR Apache-2.0 |
 | `gif` | `0.14.2` | MIT OR Apache-2.0 |
@@ -114,6 +122,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `hayro-syntax` | `0.7.2` | Apache-2.0 OR MIT |
 | `heck` | `0.5.0` | MIT OR Apache-2.0 |
 | `hmac` | `0.13.0` | MIT OR Apache-2.0 |
+| `hound` | `3.5.1` | Apache-2.0 |
 | `hybrid-array` | `0.4.15` | MIT OR Apache-2.0 |
 | `iana-time-zone` | `0.1.65` | MIT OR Apache-2.0 |
 | `iana-time-zone-haiku` | `0.1.2` | MIT OR Apache-2.0 |
@@ -123,6 +132,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `imagesize` | `0.15.0` | MIT |
 | `indexmap` | `2.14.2` | Apache-2.0 OR MIT |
 | `indoc` | `2.0.8` | MIT OR Apache-2.0 |
+| `inout` | `0.1.4` | MIT OR Apache-2.0 |
 | `inout` | `0.2.5` | MIT OR Apache-2.0 |
 | `itoa` | `1.0.18` | MIT OR Apache-2.0 |
 | `js-sys` | `0.3.106` | MIT OR Apache-2.0 |
@@ -139,12 +149,16 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `miniz_oxide` | `0.8.9` | MIT OR Zlib OR Apache-2.0 |
 | `miniz_oxide` | `0.9.1` | MIT OR Zlib OR Apache-2.0 |
 | `moxcms` | `0.8.1` | BSD-3-Clause OR Apache-2.0 |
+| `mp3dec` | `0.1.0` | Apache-2.0 OR MIT |
 | `multiversion_no_op` | `1.0.0` | Apache-2.0 OR MIT |
 | `nix` | `0.31.3` | MIT |
 | `nom` | `8.0.0` | MIT |
 | `num-traits` | `0.2.19` | MIT OR Apache-2.0 |
 | `once_cell` | `1.21.4` | MIT OR Apache-2.0 |
 | `ordered-channel` | `1.2.0` | MIT OR Apache-2.0 |
+| `oxideav-aac` | `0.1.7` | MIT |
+| `oxideav-core` | `0.1.43` | MIT |
+| `oxideav-mp4` | `0.0.11` | MIT |
 | `pdf-writer` | `0.15.0` | MIT OR Apache-2.0 |
 | `pdfcraft-annot` | `0.15.0` | MIT OR Apache-2.0 |
 | `pdfcraft-content` | `0.15.0` | MIT OR Apache-2.0 |
@@ -309,3 +323,28 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `zune-jpeg` | `0.5.15` | MIT OR Apache-2.0 OR Zlib |
 
 Documentation image: `website/assets/irs-1040-page-1.png` is rendered from the U.S. Internal Revenue Service 2025 Form 1040 (https://www.irs.gov/pub/irs-prior/f1040--2025.pdf), a U.S. government work.
+
+## EPUB narration dependencies
+
+MIT License
+
+Copyright (c) 2026 Karpelès Lab Inc. (OxideAV)
+Copyright (c) 2025 Raph Levien (mp3dec)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

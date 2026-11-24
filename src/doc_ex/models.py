@@ -26,6 +26,28 @@ class EpubResource:
     data: bytes
 
 
+@dataclass(frozen=True, slots=True)
+class EpubAudioClip:
+    """Owned signed 16-bit PCM WAVE and its sample geometry."""
+
+    wave: bytes
+    sample_rate: int
+    channels: int
+    frame_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class EpubNarrationCue:
+    """Playable narration for one SMIL target."""
+
+    id: str | None
+    path: str
+    fragment: str | None
+    roles: tuple[str, ...]
+    audio: EpubAudioClip | None = None
+    text: str | None = None
+
+
 @dataclass(slots=True)
 class Link:
     uri: str

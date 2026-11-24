@@ -129,3 +129,17 @@ The Linux x86-64 CPython 3.11.15 release wheel built with maturin 1.8.1 passed 6
 EPUBCheck 5.4.0 reported zero errors or warnings after the edition reordered and extended a local copy of the 22-entry Accessible EPUB 3 publication. The smoke test removed the source's plain HTML doctype declarations before opening because the reader currently rejects them. Acceptance of inert doctypes and a wider conformance corpus remain open. [EPUB 3 samples](https://github.com/IDPF/epub3-samples/releases/tag/20230704)
 
 Rust 1.95 formatting and warnings-denied all-target Clippy passed. The locked default suite passed 478 unit tests and 7 integration tests. The locked Python-free suite passed 401 unit tests and 8 integration tests. Both ran with 12 test threads. Public typing, the documentation link check, the support and roadmap evidence checks, and the unchanged locked license inventories passed. Cargo cleanup removed 4.3 GiB of build files across the release and debug profiles.
+
+## 2026-11-24 offline media-overlay playback and inert doctypes
+
+Five new cases exercise XHTML doctype acceptance and custom declaration rejection, half-open WAV clip boundaries, MP3 waveform and overlapping clips, AAC-LC MP4 presentation timing with encoder priming, inherited SMIL roles, text-only narration, and active-target callbacks on success and sink failure. The MP3 and M4A fixtures contain local synthetic 500 Hz tones. A separate EPUB 2 smoke test accepts the published NCX public identifier and preserves the declaration through a structural edit.
+
+The Linux x86-64 CPython 3.11.15 wheel built with maturin 1.8.1 passed 632 installed tests, including 37 EPUB tests, with zero failures, errors or skips. The validator compared installed files with the wheel. The wheel measured 22,120,575 bytes, the native extension measured 51,365,608 bytes, and wheel SHA-256 is `1ca425481e9b007ee93f4325824f8b7ef035bc54f76ccf5c4dfc75788558d08c`. The root lockfile SHA-256 is `827aa3f518e5e45639a97e34ac4358318caa560fd484a6bfdf86f90ccc911c04`. The ArtCraft engine and shared backend revisions are those listed for the in-repo EPUB reader above.
+
+The original 22-entry Accessible EPUB 3 sample now opens with its XHTML doctypes intact. A reordered copy with a new chapter reopened, rendered and passed EPUBCheck 5.4.0 with zero errors or warnings. [EPUB 3 sample release](https://github.com/IDPF/epub3-samples/releases/tag/20230704)
+
+The original narrated Moby-Dick sample opened with 144 spine entries. The installed wheel decoded all 40 AAC-LC audio cues across the two narrated chapters to 30,947,175 PCM frames. Each WAVE header agreed with the returned sample rate and frame count. [EPUB 3 sample release](https://github.com/IDPF/epub3-samples/releases/tag/20230704)
+
+Rust 1.95 formatting and warnings-denied all-target Clippy passed. The locked default suite passed 478 unit and 7 integration tests, and the locked Python-free suite passed 401 unit and 8 integration tests. The license audits reviewed 311 core and 288 Node normal/build rows. The wheel copies of NOTICE and LICENSE-THIRD-PARTY match their source files. Public typing, site links, and the roadmap and support evidence checks passed. Cargo cleanup removed 5.0 GiB across the release and debug profiles.
+
+Playback buffers one cue at a time. Ogg Opus, long-cue streaming, broader playback navigation, and the remaining CSS, MathML and authoring work are tracked in the [EPUB plan](tasks.md).

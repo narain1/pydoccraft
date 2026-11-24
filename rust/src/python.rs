@@ -368,6 +368,44 @@ fn _epub_resource(
     crate::epub::read_resource(data, path, offset, length)
 }
 
+#[pyclass(module = "doc_ex._core", name = "_EpubAudio")]
+struct NativeEpubAudio(crate::epub::audio::AudioSource);
+
+#[pymethods]
+impl NativeEpubAudio {
+    #[pyo3(signature = (begin, end))]
+    fn clip(
+        &mut self,
+        py: Python<'_>,
+        begin: u64,
+        end: Option<u64>,
+    ) -> Result<(Vec<u8>, u32, u16, usize), EngineError> {
+        let clip = py.allow_threads(|| self.0.clip(begin, end))?;
+        Ok((clip.wave, clip.sample_rate, clip.channels, clip.frames))
+    }
+}
+
+#[pyfunction]
+fn _open_epub_audio(
+    py: Python<'_>,
+    data: &[u8],
+    path: &str,
+    media: &str,
+) -> Result<NativeEpubAudio, EngineError> {
+    py.allow_threads(|| crate::epub::audio::AudioSource::open(data, path, media))
+        .map(NativeEpubAudio)
+}
+
+#[pyfunction]
+#[pyo3(signature = (data, path, fragment))]
+fn _epub_narration_text(
+    data: &[u8],
+    path: &str,
+    fragment: Option<&str>,
+) -> Result<String, EngineError> {
+    crate::epub::audio::narration_text(data, path, fragment)
+}
+
 #[pyfunction]
 fn _edit_epub_chapters(
     data: &[u8],
@@ -412,6 +450,8 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(_edit_epub_chapters, module)?)?;
     module.add_function(wrap_pyfunction!(_edit_epub_structure, module)?)?;
     module.add_function(wrap_pyfunction!(_epub_resource, module)?)?;
+    module.add_function(wrap_pyfunction!(_open_epub_audio, module)?)?;
+    module.add_function(wrap_pyfunction!(_epub_narration_text, module)?)?;
     module.add_function(wrap_pyfunction!(extract_text, module)?)?;
     module.add_function(wrap_pyfunction!(convert, module)?)?;
     module.add_function(wrap_pyfunction!(render, module)?)?;

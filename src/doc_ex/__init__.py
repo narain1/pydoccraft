@@ -19,14 +19,16 @@ from .errors import (
     UnsafeArchiveError,
     UnsupportedFormatError,
 )
-from .models import Block, Cell, EpubChapterSource, EpubResource, Image, Link, Story, Table
+from .models import (
+    Block, Cell, EpubAudioClip, EpubChapterSource, EpubNarrationCue, EpubResource, Image, Link, Story, Table,
+)
 from ._authoring import EditableDocument, EpubChapter, EpubDocument, new, pt, mm, cm, inches
 
 __all__ = [
     "open", "convert", "extract_text", "new", "pt", "mm", "cm", "inches", "EditableDocument", "EpubDocument", "EpubChapter", "Document", "Page", "Block", "Cell", "Table", "Link", "Image", "Story",
     "DocExError", "DocumentClosedError", "MalformedDocumentError", "UnsafeArchiveError",
     "UnsupportedFormatError", "ToolExecutionError", "ToolNotFoundError",
-    "EpubChapterSource", "EpubResource",
+    "EpubAudioClip", "EpubChapterSource", "EpubNarrationCue", "EpubResource",
 ]
 __version__ = "0.3.2"
 

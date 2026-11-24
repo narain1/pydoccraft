@@ -13,7 +13,10 @@ from types import SimpleNamespace
 from typing import Any, Callable, Iterator, Literal, TYPE_CHECKING, overload
 
 from .errors import DocumentClosedError, MalformedDocumentError, UnsafeArchiveError
-from .models import Block, EpubChapterSource, EpubResource, Image, Link, Story, Table, _html_text
+from .models import (
+    Block, EpubAudioClip, EpubChapterSource, EpubNarrationCue, EpubResource, Image, Link, Story, Table,
+    _html_text,
+)
 
 if TYPE_CHECKING:
     from ._authoring import PdfDocument
@@ -573,33 +576,92 @@ class Document:
 
     def epub_media_cues(self, page: int) -> list[dict[str, Any]]:
         """Return SMIL cues for a spine page, in playback order."""
+        return [cue for cue, _ in self._epub_cues(page)]
+
+    def _epub_cues(self, page: int) -> Iterator[tuple[dict[str, Any], tuple[str, ...]]]:
         self._ensure_open()
         if self._filetype != "epub":
             from .errors import UnsupportedFormatError
 
             raise UnsupportedFormatError("media cues require EPUB input")
         index = operator.index(page)
-        self._ensure_open()
-        chapter = self._pages[index].metadata
+        chapter = self.load_page(index).metadata
         overlay_id = chapter.get("media_overlay")
         if overlay_id is None:
-            return []
+            return
         overlay = self.metadata["media_overlays"][overlay_id]
-        cues: list[dict[str, Any]] = []
-        stack = [overlay["body"]]
+        stack: list[tuple[dict[str, Any], tuple[str, ...]]] = [(overlay["body"], ())]
         while stack:
-            node = stack.pop()
+            node, parent_roles = stack.pop()
+            roles = (*parent_roles, *(node.get("epub_type") or "").split())
             if node["kind"] == "par":
                 if node["text"]["path"] == chapter["chapter_path"]:
-                    cues.append({
+                    yield {
                         "id": node["id"],
                         "text": dict(node["text"]),
                         "audio": None if node["audio"] is None else dict(node["audio"]),
                         "epub_type": node["epub_type"],
-                    })
+                    }, roles
             else:
-                stack.extend(reversed(node["children"]))
-        return cues
+                stack.extend((child, roles) for child in reversed(node["children"]))
+
+    def epub_narration(
+        self,
+        page: int,
+        *,
+        skip_roles: Iterable[str] = (),
+    ) -> Iterator[EpubNarrationCue]:
+        """Decode one SMIL cue at a time and return its audio or narration text."""
+        from . import _core, _native
+
+        skipped = frozenset(skip_roles)
+        current_track = None
+        decoder = None
+        for cue, roles in self._epub_cues(page):
+            self._ensure_open()
+            if skipped.intersection(roles):
+                continue
+            target = cue["text"]
+            audio = cue["audio"]
+            if audio is None:
+                spoken = _native(lambda: _core._epub_narration_text(self._source, target["path"], target["fragment"]))
+                yield EpubNarrationCue(cue["id"], target["path"], target["fragment"], roles, text=spoken)
+                continue
+            track = (audio["path"], audio["media_type"])
+            if track != current_track:
+                decoder = None
+                decoder = _native(lambda: _core._open_epub_audio(self._source, *track))
+                current_track = track
+            wave, rate, channels, frames = _native(
+                lambda: decoder.clip(audio["clip_begin_us"], audio["clip_end_us"])
+            )
+            yield EpubNarrationCue(
+                cue["id"], target["path"], target["fragment"], roles,
+                audio=EpubAudioClip(bytes(wave), rate, channels, frames),
+            )
+
+    def play_epub_narration(
+        self,
+        page: int,
+        *,
+        play_audio: Callable[[EpubAudioClip], None],
+        speak_text: Callable[[str], None],
+        on_cue: Callable[[EpubNarrationCue | None], None] | None = None,
+        skip_roles: Iterable[str] = (),
+    ) -> None:
+        """Play ordered cues via blocking audio and speech callbacks."""
+        for cue in self.epub_narration(page, skip_roles=skip_roles):
+            if on_cue is not None:
+                on_cue(cue)
+            try:
+                self._ensure_open()
+                if cue.audio is not None:
+                    play_audio(cue.audio)
+                elif cue.text:
+                    speak_text(cue.text)
+            finally:
+                if on_cue is not None:
+                    on_cue(None)
 
     def edit_epub_metadata(self, *, title: str | None = None, description: str | None = None) -> bytes:
         """Return an EPUB copy with updated package metadata and unchanged publication resources."""

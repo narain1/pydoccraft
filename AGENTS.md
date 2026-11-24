@@ -70,6 +70,7 @@ rust/src/
   epub_layout.rs    Styled XHTML layout and paint
   epub_math.rs      Presentation MathML projection into the WordCraft equation model
   epub_overlay.rs   EPUB SMIL cue, timing and target resolution
+  epub_audio.rs     Bounded narration audio decoding and text targets
   epub_output.rs    EPUB projection into WordCraft for preview and export
   epub_style.rs     CSS typography and geometry mapping
   epub_svg.rs       Static SVG viewport rendering

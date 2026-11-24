@@ -341,6 +341,129 @@ class EpubTests(unittest.TestCase):
             self.assertEqual(struct.unpack_from(">II", cropped[b"IHDR"]), (20, 20))
             self.assertEqual(rgba_pixels(cropped)[1][:4], bytes((85, 187, 119, 255)))
 
+    def test_inert_xhtml_doctype_survives_extraction_render_and_edit(self) -> None:
+        book = epub_fixture(chapter_one="""<?xml version="1.0"?>
+        <!-- ordinary XHTML doctype -->
+        <!DOCTYPE html>
+        <html xmlns="http://www.w3.org/1999/xhtml"><body><p>Text &amp; symbols.</p></body></html>""")
+        with doc_ex.open(book) as original:
+            self.assertEqual(original[0].get_text(), "Text & symbols.")
+            self.assertTrue(original.render_page(0, dpi=72).startswith(b"\x89PNG"))
+            revised = original.edit_epub_structure([1, 0])
+        with doc_ex.open(revised) as edited:
+            self.assertEqual(edited[1].get_text(), "Text & symbols.")
+            self.assertIn(b"<!DOCTYPE html>", edited.read_epub_resource("OEBPS/one.xhtml"))
+        bad = (
+            '<!DOCTYPE html SYSTEM "custom.dtd">',
+            '<!DOCTYPE html [<!ENTITY local "custom">]>',
+            '<!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">',
+        )
+        for doctype in bad:
+            with self.subTest(doctype=doctype), self.assertRaises(doc_ex.MalformedDocumentError):
+                doc_ex.open(epub_fixture(chapter_one=doctype + '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Text</p></body></html>'))
+
+    def test_media_overlay_playback_clips_pcm_and_synchronizes_callbacks(self) -> None:
+        source, _ = narrated_epub()
+        with doc_ex.open(source) as document:
+            first, aside = list(document.epub_narration(0))
+            self.assertIsNotNone(first.audio)
+            assert first.audio is not None
+            self.assertEqual((first.audio.sample_rate, first.audio.channels, first.audio.frame_count), (8000, 1, 7000))
+            self.assertEqual((first.fragment, first.roles), ("café", ("chapter",)))
+            self.assertEqual((aside.text, aside.roles), ("Text cue", ("chapter", "aside")))
+            with wave.open(io.BytesIO(first.audio.wave), "rb") as pcm:
+                self.assertEqual((pcm.getnframes(), pcm.getsampwidth()), (7000, 2))
+                self.assertEqual(pcm.readframes(7000), b"".join(
+                    struct.pack("<h", ((index % 256) - 128) * 256) for index in range(2000, 9000)
+                ))
+            events: list[tuple[str, object]] = []
+            document.play_epub_narration(
+                0,
+                play_audio=lambda audio: events.append(("audio", audio.frame_count)),
+                speak_text=lambda text: events.append(("speech", text)),
+                on_cue=lambda cue: events.append(("target", cue and cue.fragment)),
+            )
+            self.assertEqual(events, [
+                ("target", "café"), ("audio", 7000), ("target", None),
+                ("target", "aside"), ("speech", "Text cue"), ("target", None),
+            ])
+            self.assertEqual(len(list(document.epub_narration(0, skip_roles={"aside"}))), 1)
+            self.assertEqual(list(document.epub_narration(0, skip_roles={"chapter"})), [])
+            [tail] = document.epub_narration(-1)
+            assert tail.audio is not None
+            self.assertEqual(tail.audio.frame_count, 16384 - 9000)
+
+    def test_media_overlay_decodes_mpeg_and_reuses_track_for_overlapping_clips(self) -> None:
+        source, _ = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(b"audio/wav", b"audio/mpeg")
+            smil = archive.read("OEBPS/Sync/read.smil")
+        smil = smil.replace(
+            b'<text src="../one.xhtml#aside"/>',
+            b'<text src="../one.xhtml#aside"/><audio src="../Media/voice.wav" clipBegin="500ms" clipEnd="1.5s"/>',
+        )
+        # A locally synthesized 500 Hz tone, 8000 samples/sec and one channel.
+        mp3 = (Path(__file__).parent / "fixtures" / "epub-narration-tone.mp3").read_bytes()
+        source = rewrite_epub(source, {
+            "OEBPS/content.opf": package,
+            "OEBPS/Media/voice.wav": mp3,
+            "OEBPS/Sync/read.smil": smil,
+        })
+        with doc_ex.open(source) as document:
+            a, b = [cue.audio for cue in document.epub_narration(0)]
+            assert a is not None and b is not None
+            self.assertEqual((a.sample_rate, a.channels, a.frame_count, b.frame_count), (8000, 1, 7000, 8000))
+            with wave.open(io.BytesIO(a.wave), "rb") as pcm:
+                samples = pcm.readframes(7000)
+            with wave.open(io.BytesIO(b.wave), "rb") as pcm:
+                self.assertEqual(pcm.readframes(5000), samples[4000:])
+            values = struct.unpack("<7000h", samples)
+            self.assertGreater(max(values), 1000)
+            crossings = sum(left <= 0 < right for left, right in zip(values, values[1:]))
+            self.assertAlmostEqual(crossings, 438, delta=2)
+
+    def test_media_overlay_decodes_aac_on_mp4_presentation_timeline(self) -> None:
+        source, _ = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(b"audio/wav", b"audio/mp4")
+        # The synthetic track has a 1024-sample AAC priming edit and runs for 2 seconds.
+        track = (Path(__file__).parent / "fixtures" / "epub-narration-tone.m4a").read_bytes()
+        source = rewrite_epub(source, {
+            "OEBPS/content.opf": package,
+            "OEBPS/Media/voice.wav": track,
+        })
+        with doc_ex.open(source) as document:
+            intro = next(document.epub_narration(0)).audio
+            tail = next(document.epub_narration(1)).audio
+            assert intro is not None and tail is not None
+            self.assertEqual((intro.sample_rate, intro.channels, intro.frame_count), (8000, 1, 7000))
+            self.assertEqual(tail.frame_count, 7000)
+            with wave.open(io.BytesIO(tail.wave), "rb") as pcm:
+                values = struct.unpack("<7000h", pcm.readframes(7000))
+                self.assertGreater(max(values), 1000)
+                crossings = sum(left <= 0 < right for left, right in zip(values, values[1:]))
+                self.assertAlmostEqual(crossings, 438, delta=2)
+
+    def test_media_overlay_playback_errors_and_clears_active_cue(self) -> None:
+        source, _ = narrated_epub(first_clip_end="4s")
+        with doc_ex.open(source) as document, self.assertRaises(doc_ex.MalformedDocumentError):
+            next(document.epub_narration(0))
+        source, _ = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(b"audio/wav", b"audio/flac")
+        with doc_ex.open(rewrite_epub(source, {"OEBPS/content.opf": package})) as document:
+            with self.assertRaises(doc_ex.UnsupportedFormatError):
+                list(document.epub_narration(0))
+        cues: list[doc_ex.EpubNarrationCue | None] = []
+
+        def fail(audio: doc_ex.EpubAudioClip) -> None:
+            raise RuntimeError("could not play audio")
+
+        with doc_ex.open(source) as document:
+            with self.assertRaisesRegex(RuntimeError, "could not play audio"):
+                document.play_epub_narration(0, play_audio=fail, speak_text=lambda _: None, on_cue=cues.append)
+        self.assertEqual([cue and cue.fragment for cue in cues], ["café", None])
+
     def test_media_overlay_resolves_cues_and_audio_in_spine_order(self) -> None:
         data, audio = narrated_epub()
         with doc_ex.open(data) as document:

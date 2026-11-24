@@ -29,7 +29,8 @@
 2. Retain supported native text, tables, raster images and Presentation MathML. Render supported equation structures through the native equation backend and export native DOCX equations. Return an explicit error when a structure cannot be projected safely.
 3. Render fixed-layout XHTML at its numeric viewport and static SVG at its viewBox dimensions while honoring package and spine layout declarations. Clip previews at requested DPI.
 4. Apply the supported author CSS cascade for styled XHTML. Read inline, embedded, linked and imported styles using archive-relative resolution. Exercise inherited typography, positioning, colors, box styling, and block, flex and grid layout with pixel-level acceptance tests.
-5. Full source CSS and fixed-layout fidelity, richer MathML layout, synchronized media playback, asset deletion and authoring new media overlay associations remain open. DRM, script execution and unlisted conversion pairs remain outside the scope.
+5. Decode local PCM WAVE, MPEG Layer III, and AAC-LC MP4 overlay audio to bounded PCM clips with the SMIL interval and target. Provide readable narration for text-only cues and a sequential playback API with synchronized target callbacks.
+6. Full source CSS and fixed-layout fidelity, richer MathML layout, remaining overlay codecs and playback controls, asset deletion and authoring new media overlay associations remain open. DRM, script execution and unlisted conversion pairs remain outside the scope.
 
 ## Verification
 

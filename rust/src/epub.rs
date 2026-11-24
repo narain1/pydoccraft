@@ -9,6 +9,9 @@ use serde_json::{json, Map, Value};
 
 use crate::{model::DocumentPayload, EngineError};
 
+#[cfg(feature = "python")]
+#[path = "epub_audio.rs"]
+pub(crate) mod audio;
 #[path = "epub_content.rs"]
 mod content;
 #[path = "epub_css.rs"]
@@ -422,17 +425,28 @@ impl<'a> Book<'a> {
 
 fn parse_xml(data: &[u8]) -> Result<Document<'_>, EngineError> {
     let input = std::str::from_utf8(data).map_err(invalid)?;
-    let doc = Document::parse_with_options(
-        input,
-        ParsingOptions {
-            nodes_limit: 150_000,
-            ..Default::default()
-        },
-    )
-    .map_err(|error| match error {
+    let options = |allow_dtd| ParsingOptions {
+        allow_dtd,
+        nodes_limit: 150_000,
+        ..Default::default()
+    };
+    let (doc, doctype) = match Document::parse_with_options(input, options(false)) {
+        Err(roxmltree::Error::DtdDetected) => {
+            let doctype = inert_doctype(input)?;
+            (
+                Document::parse_with_options(input, options(true)),
+                Some(doctype),
+            )
+        }
+        result => (result, None),
+    };
+    let doc = doc.map_err(|error| match error {
         roxmltree::Error::NodesLimitReached => limited("XML node count exceeds 150000"),
         _ => invalid(error),
     })?;
+    if doctype.is_some_and(|(ns, local)| !name(doc.root_element(), ns, local)) {
+        return Err(invalid("XML doctype does not match its root element"));
+    }
     // Bound recursion before any XPath-like or recursive traversal.
     for node in doc.descendants().filter(Node::is_element) {
         if node.ancestors().nth(96).is_some() {
@@ -443,6 +457,81 @@ fn parse_xml(data: &[u8]) -> Result<Document<'_>, EngineError> {
         }
     }
     Ok(doc)
+}
+
+// Only permit known declarations with no internal subset. roxmltree parses the
+// identifier as syntax and does not load external DTDs.
+fn inert_doctype(input: &str) -> Result<(&'static str, &'static str), EngineError> {
+    use quick_xml::events::Event;
+
+    let mut reader = quick_xml::Reader::from_str(input);
+    loop {
+        match reader.read_event().map_err(invalid)? {
+            Event::DocType(declaration) => {
+                let declaration = std::str::from_utf8(declaration.as_ref()).map_err(invalid)?;
+                let declaration = declaration.trim();
+                if declaration == "html" {
+                    return Ok((XHTML, "html"));
+                }
+                for (ns, root, public, system) in [
+                    (
+                        XHTML,
+                        "html",
+                        "-//W3C//DTD XHTML 1.1//EN",
+                        "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd",
+                    ),
+                    (
+                        NCX,
+                        "ncx",
+                        "-//NISO//DTD ncx 2005-1//EN",
+                        "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd",
+                    ),
+                    (
+                        svg::NS,
+                        "svg",
+                        "-//W3C (World Wide Web Consortium)//DTD SVG 1.1//EN",
+                        "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd",
+                    ),
+                    (
+                        svg::NS,
+                        "svg",
+                        "-//W3C//DTD SVG 1.1//EN",
+                        "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd",
+                    ),
+                ] {
+                    if matches_public_id(declaration, root, public, system) {
+                        return Ok((ns, root));
+                    }
+                }
+                break;
+            }
+            Event::Decl(_) | Event::Comment(_) | Event::PI(_) => {}
+            Event::Text(text) if text.trim_ascii().is_empty() => {}
+            _ => break,
+        }
+    }
+    Err(invalid(
+        "custom XML document type declarations are not supported",
+    ))
+}
+
+fn matches_public_id(declaration: &str, root: &str, public: &str, system: &str) -> bool {
+    fn consume<'a>(input: &'a str, word: &str) -> Option<&'a str> {
+        let rest = input.strip_prefix(word)?;
+        rest.starts_with([' ', '\t', '\r', '\n'])
+            .then(|| rest.trim_start())
+    }
+
+    fn quoted<'a>(input: &'a str, value: &str) -> Option<&'a str> {
+        let quote = input.chars().next().filter(|ch| matches!(ch, '\'' | '"'))?;
+        input[1..].strip_prefix(value)?.strip_prefix(quote)
+    }
+
+    let rest = consume(declaration, root).and_then(|rest| consume(rest, "PUBLIC"));
+    rest.and_then(|rest| quoted(rest, public))
+        .filter(|rest| rest.starts_with([' ', '\t', '\r', '\n']))
+        .and_then(|rest| quoted(rest.trim_start(), system))
+        == Some("")
 }
 
 fn name(node: Node<'_, '_>, namespace: &str, local: &str) -> bool {

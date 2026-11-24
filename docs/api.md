@@ -41,6 +41,21 @@ Passwords are supported for encrypted PDF and DOCX input. Encrypted PPTX and EPU
 
 For an open EPUB, `document.read_epub_resource(path, offset=0, length=None)` reads a local resource by its decoded archive path. The manifest in `document.metadata["manifest"]` lists paths, media types and resource properties. `document.epub_media_cues(page)` returns the chapter's ordered SMIL audio and text cues. `document.edit_epub_metadata(title=..., description=...)` and `document.edit_epub_chapters({page: xhtml})` return new EPUB bytes with the requested changes. `document.edit_epub_structure(order, resources=...)` reorders, inserts or removes entries in the reading order and can add or replace packaged resources. See [EPUB authoring](authoring.md#epub-creation-unreleased) and the [EPUB format profile](formats.md#epub-unreleased).
 
+`document.epub_narration(page, skip_roles=())` yields `EpubNarrationCue` values in playback order. Each value identifies a chapter path, element fragment, and inherited roles. Recorded cues carry an `EpubAudioClip` with signed 16-bit PCM WAVE bytes and sample geometry. Text-only cues carry the target's readable text.
+
+```python
+with doc_ex.open(epub_bytes) as book:
+    book.play_epub_narration(
+        0,
+        play_audio=lambda clip: audio_sink.play_until_done(clip.wave),
+        speak_text=speech_sink.speak_until_done,
+        on_cue=reader.set_active_cue,
+        skip_roles={"pagebreak"},
+    )
+```
+
+The callbacks run in sequence on the calling thread. The audio and speech callbacks return when playback ends. If supplied, `on_cue` receives the active target before playback and `None` when playback ends or the sink raises. The library decodes the audio in-process and delegates output to the supplied sinks. Pass EPUB structural roles to `skip_roles` to omit matching cues and descendants of matching sequences.
+
 ## Fast text extraction
 
 ```python
