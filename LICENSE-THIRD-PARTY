@@ -177,6 +177,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `oxideav-h264` | `0.1.12` | MIT |
 | `oxideav-mp4` | `0.0.11` | MIT |
 | `oxideav-opus` | `0.0.15` | MIT |
+| `oxideav-theora` | `0.0.13` | MIT |
 | `parlance` | `0.1.1` | Apache-2.0 OR MIT |
 | `parley` | `0.13.0` | Apache-2.0 OR MIT |
 | `parley_data` | `0.13.0` | Apache-2.0 OR MIT |

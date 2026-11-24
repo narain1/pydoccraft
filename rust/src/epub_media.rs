@@ -24,17 +24,22 @@ pub(super) fn audio_codec(media: &str) -> Option<AudioCodec> {
     }
 }
 
-fn supported_audio_hint(hint: &str) -> bool {
-    let (media, parameters) = hint.split_once(';').unwrap_or((hint, ""));
-    let Some(codec) = audio_codec(media.trim()) else {
-        return false;
-    };
-    let codecs = parameters.split(';').find_map(|parameter| {
+fn codec_hint(hint: &str) -> Option<&str> {
+    let (_, parameters) = hint.split_once(';')?;
+    parameters.split(';').find_map(|parameter| {
         let (name, value) = parameter.split_once('=')?;
         name.trim()
             .eq_ignore_ascii_case("codecs")
             .then(|| value.trim().trim_matches('"'))
-    });
+    })
+}
+
+fn supported_audio_hint(hint: &str) -> bool {
+    let media = hint.split(';').next().unwrap_or_default();
+    let Some(codec) = audio_codec(media.trim()) else {
+        return false;
+    };
+    let codecs = codec_hint(hint);
     codecs.is_none_or(|name| match codec {
         AudioCodec::Opus => name.eq_ignore_ascii_case("opus"),
         AudioCodec::Mpeg => name.eq_ignore_ascii_case("mp3"),
@@ -114,12 +119,23 @@ fn source(
     {
         return Err(invalid("embedded EPUB media type differs from its element"));
     }
+    let ogg_video = kind == "video" && matches!(media, "video/ogg" | "application/ogg");
+    let advertises = |codec: &str| {
+        hint.and_then(codec_hint).is_none_or(|list| {
+            list.split(',')
+                .any(|name| name.trim().eq_ignore_ascii_case(codec))
+        })
+    };
     let playable_audio =
         (kind == "audio" && audio_codec(media).is_some() && hint.is_none_or(supported_audio_hint))
-            || (kind == "video" && media == "video/mp4");
+            || (kind == "video" && media == "video/mp4")
+            || (ogg_video && advertises("opus"));
+    let playable_video =
+        kind == "video" && media == "video/mp4" || (ogg_video && advertises("theora"));
     Ok(json!({
         "uri": src, "path": path, "media_type": media, "playable_audio": playable_audio,
         "fragment_start_us": fragment_start_us, "fragment_end_us": fragment_end_us,
+        "playable_video": playable_video,
     }))
 }
 

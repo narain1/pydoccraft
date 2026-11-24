@@ -35,6 +35,9 @@ mod media;
 mod mp4;
 #[path = "epub_obfuscation.rs"]
 mod obfuscation;
+#[cfg(feature = "python")]
+#[path = "epub_ogg.rs"]
+mod ogg;
 #[path = "epub_output.rs"]
 mod output;
 #[path = "epub_overlay.rs"]

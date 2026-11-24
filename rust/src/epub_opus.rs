@@ -2,7 +2,6 @@
 use std::ops::Range;
 
 use hound::{SampleFormat, WavSpec};
-use ogg::reading::BasePacketReader;
 use oxideav_opus::{
     framing_self_delim::parse_self_delimited, output_samples_per_channel, MultistreamDecoder,
     OpusHead, OpusPacket, OUTPUT_SAMPLE_RATE_HZ,
@@ -10,10 +9,7 @@ use oxideav_opus::{
 
 use super::{invalid, limited, unsupported, EngineError, MAX_CLIP_SAMPLES, MAX_FRAMES_PER_CLIP};
 
-#[path = "epub_ogg.rs"]
-mod ogg_pages;
-
-const MAX_PACKETS: usize = 250_000;
+use super::super::ogg::{self as ogg_pages, Codec, MAX_PACKETS};
 
 // The decoded family-1 samples are ordered as in RFC 7845 §5.1.1.2.
 // Values are the WAVE_FORMAT_EXTENSIBLE bits for each speaker.
@@ -61,7 +57,7 @@ const VORBIS_SPEAKERS: [&[u32]; 8] = [
     ],
 ];
 
-pub(super) struct Track {
+pub(in crate::epub) struct Track {
     links: Vec<Link>,
     speakers: u32,
     frames: usize,
@@ -73,6 +69,7 @@ struct Link {
     packets: Vec<Packet>,
     head: OpusHead,
     timeline: Range<usize>,
+    playable: usize,
     wave_order: Vec<Option<usize>>,
 }
 
@@ -89,13 +86,16 @@ struct Packet {
 }
 
 impl Track {
-    pub(super) fn open(file: &[u8], opus_track: Option<usize>) -> Result<Self, EngineError> {
+    pub(in crate::epub) fn open(
+        file: &[u8],
+        opus_track: Option<usize>,
+    ) -> Result<Self, EngineError> {
         let mut links = Vec::new();
         let mut speakers = 0;
         let mut frames = 0;
         let mut coded_packets_left = MAX_PACKETS;
-        for encoded in ogg_pages::groups(file, opus_track)? {
-            let link = Link::index(encoded, frames, &mut coded_packets_left)?;
+        for encoded in ogg_pages::groups(file, Codec::Opus, opus_track)? {
+            let link = Link::index(encoded.pages, frames, &mut coded_packets_left)?;
             if link.head.channel_count > 1 {
                 for flag in link.speakers() {
                     speakers |= flag;
@@ -129,6 +129,36 @@ impl Track {
             frames,
             playback: None,
         })
+    }
+
+    pub(in crate::epub) fn link_lengths(&self) -> impl ExactSizeIterator<Item = usize> + '_ {
+        self.links.iter().map(|link| link.playable)
+    }
+
+    pub(in crate::epub) fn align_video_links(
+        &mut self,
+        video_frames: &[usize],
+    ) -> Result<(), EngineError> {
+        if video_frames.len() != self.links.len() {
+            return Err(invalid("Ogg video and audio segments disagree"));
+        }
+        let mut cursor = 0usize;
+        let last = self.links.len().saturating_sub(1);
+        for (index, (link, pictures)) in self.links.iter_mut().zip(video_frames).enumerate() {
+            let duration = if index < last {
+                link.playable.max(*pictures)
+            } else {
+                link.playable
+            };
+            let end = cursor
+                .checked_add(duration)
+                .ok_or_else(|| limited("Ogg chain duration exceeds limits"))?;
+            link.timeline = cursor..end;
+            cursor = end;
+        }
+        self.frames = cursor;
+        self.playback = None;
+        Ok(())
     }
 
     pub(super) fn spec(&self) -> WavSpec {
@@ -167,19 +197,23 @@ impl Track {
         let mut work = MAX_FRAMES_PER_CLIP;
         for index in first..last {
             let link = &self.links[index];
-            let mut state = playback
-                .take()
-                .filter(|state| state.link == index)
-                .unwrap_or_else(|| Playback {
-                    link: index,
-                    decoder: MultistreamDecoder::from_head(&link.head),
-                    next_packet: 0,
-                    pcm: Vec::new(),
-                });
             let begin = start.max(link.timeline.start) - link.timeline.start;
             let end = stop.min(link.timeline.end) - link.timeline.start;
-            state.append(link, begin..end, &mut work, &mut samples)?;
-            playback = Some(state);
+            let audible = end.min(link.playable);
+            if begin < audible {
+                let mut state = playback
+                    .take()
+                    .filter(|state| state.link == index)
+                    .unwrap_or_else(|| Playback {
+                        link: index,
+                        decoder: MultistreamDecoder::from_head(&link.head),
+                        next_packet: 0,
+                        pcm: Vec::new(),
+                    });
+                state.append(link, begin..audible, &mut work, &mut samples)?;
+                playback = Some(state);
+            }
+            samples.resize(samples.len() + (end - audible.max(begin)) * channels, 0);
         }
         self.playback = playback;
         Ok(samples)
@@ -196,16 +230,12 @@ impl Link {
         start: usize,
         coded_packets_left: &mut usize,
     ) -> Result<Self, EngineError> {
-        let mut reader = BasePacketReader::new();
-        let mut pages = pages.into_iter();
-        let mut next_packet = || loop {
-            if let Some(packet) = reader.read_packet() {
-                return Ok(packet);
-            }
-            let page = pages
+        let mut packets = ogg_pages::packets(pages);
+        let mut next_packet = || {
+            packets
                 .next()
-                .ok_or_else(|| invalid("truncated Ogg Opus stream"))?;
-            reader.push_page(page.parse()?).map_err(invalid)?;
+                .transpose()?
+                .ok_or_else(|| invalid("truncated Ogg Opus stream"))
         };
         let id = next_packet()?;
         if !id.first_in_stream() || !id.last_in_page() || id.absgp_page() != 0 {
@@ -273,6 +303,7 @@ impl Link {
             packets,
             head,
             timeline: start..end,
+            playable: duration,
             wave_order: Vec::new(),
         })
     }

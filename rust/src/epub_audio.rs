@@ -13,7 +13,7 @@ use crate::EngineError;
 #[path = "epub_aac.rs"]
 mod aac;
 #[path = "epub_opus.rs"]
-mod opus;
+pub(super) mod opus;
 
 pub(super) const MAX_ENCODED_BYTES: usize = 32 * 1024 * 1024;
 const MAX_CLIP_SAMPLES: usize = 8 * 1024 * 1024;
@@ -55,13 +55,17 @@ impl AudioSource {
         path: &str,
         media: &str,
         opus_track: Option<usize>,
+        synchronize_video: bool,
     ) -> Result<Self, EngineError> {
-        Self::decode(media, opus_track, || read(data, path, MAX_ENCODED_BYTES))
+        Self::decode(media, opus_track, synchronize_video, || {
+            read(data, path, MAX_ENCODED_BYTES)
+        })
     }
 
     fn decode(
         media: &str,
         opus_track: Option<usize>,
+        synchronize_video: bool,
         load: impl FnOnce() -> Result<Vec<u8>, EngineError>,
     ) -> Result<Self, EngineError> {
         let codec = audio_codec(media);
@@ -73,8 +77,14 @@ impl AudioSource {
         let decoder = match codec {
             Some(AudioCodec::Opus) => {
                 let bytes = load()?;
-                let track = std::panic::catch_unwind(|| opus::Track::open(&bytes, opus_track))
-                    .map_err(|_| invalid("malformed Ogg Opus audio"))??;
+                let track = std::panic::catch_unwind(|| {
+                    let mut track = opus::Track::open(&bytes, opus_track)?;
+                    if synchronize_video {
+                        super::video::align_audio(&bytes, &mut track)?;
+                    }
+                    Ok::<_, EngineError>(track)
+                })
+                .map_err(|_| invalid("malformed Ogg Opus audio"))??;
                 Decoder::Opus(Box::new(track))
             }
             Some(AudioCodec::Mpeg) => {
@@ -105,7 +115,7 @@ impl AudioSource {
         media: &str,
         load: impl FnOnce() -> Result<Vec<u8>, EngineError>,
     ) -> Result<u64, EngineError> {
-        let mut source = Self::decode(media, None, load)?;
+        let mut source = Self::decode(media, None, false, load)?;
         let (format, frames) = source.geometry()?;
         let frames = match (&source.decoder, frames) {
             (_, Some(frames)) => frames,

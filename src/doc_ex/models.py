@@ -101,6 +101,7 @@ class EpubMediaSource:
     playable_audio: bool
     fragment_start_us: int = 0
     fragment_end_us: int | None = None
+    playable_video: bool = False
 
 
 @dataclass(frozen=True, slots=True)

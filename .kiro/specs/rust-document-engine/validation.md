@@ -2879,3 +2879,7 @@ The Linux x86-64 CPython 3.11.15 wheel passed 700 installed tests, including 105
 ## 2026-11-24 Embedded text tracks and temporal media fragments
 
 The Linux x86-64 CPython 3.11.15 wheel passed 703 installed tests, including 108 EPUB tests. It measured 23,832,044 bytes with a 55,406,632-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-embedded-text-tracks-and-temporal-media-fragments) covers exact cue and frame boundaries, reopened chapter edits, and the authored and public media samples.
+
+## 2026-11-24 Embedded Ogg Theora video
+
+The Linux x86-64 CPython 3.11.15 wheel passed 704 installed tests, including 109 EPUB tests. It measured 23,917,222 bytes with a 55,584,936-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-embedded-ogg-theora-video) covers the coded picture limit, decoded colors, frame and caption intervals, synchronized Opus and the public MP4 regression.

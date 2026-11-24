@@ -1,16 +1,52 @@
-//! Validate Ogg transport and select a single Opus stream from each physical segment.
+//! Validate Ogg transport and select a logical stream from each physical segment.
 use std::collections::{HashMap, HashSet};
 
-use ogg::reading::{OggPage, PageParser};
+use ogg::{
+    reading::{BasePacketReader, OggPage, PageParser},
+    Packet,
+};
 
-use super::{invalid, limited, unsupported, EngineError, MAX_PACKETS};
+use super::{invalid, limited, unsupported, EngineError};
 
+pub(super) const MAX_PACKETS: usize = 250_000;
 const MAX_PAGES: usize = 150_000;
 const MAX_PACKET_BYTES: usize = 65_536;
 const MAX_COMMENT_BYTES: usize = 1024 * 1024;
+const MAX_VIDEO_PACKET_BYTES: usize = 2 * 1024 * 1024;
 const CONTINUED: u8 = 1;
 const BOS: u8 = 2;
 const EOS: u8 = 4;
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum Codec {
+    Opus,
+    Theora,
+}
+
+impl Codec {
+    fn from_identification(bytes: &[u8]) -> Option<Self> {
+        if bytes.starts_with(b"OpusHead") {
+            Some(Self::Opus)
+        } else if bytes.starts_with(b"\x80theora") {
+            Some(Self::Theora)
+        } else {
+            None
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Opus => "Opus",
+            Self::Theora => "Theora",
+        }
+    }
+}
+
+pub(super) struct Segment<'a> {
+    pub pages: Vec<Page<'a>>,
+    pub opus_tracks: usize,
+    pub has_other_audio: bool,
+}
 
 pub(super) struct Page<'a> {
     header: &'a [u8; 27],
@@ -57,7 +93,7 @@ impl<'a> Page<'a> {
 }
 
 struct Stream {
-    opus: bool,
+    codec: Option<Codec>,
     selected: bool,
     next_page: u32,
     partial: usize,
@@ -72,6 +108,7 @@ impl Stream {
             return Err(invalid("invalid Ogg page sequence or continuation"));
         }
         let before = self.packets;
+        let opus = self.codec == Some(Codec::Opus);
         for &length in page.lacing {
             self.partial += usize::from(length);
             let maximum = if self.packets == 1 {
@@ -79,12 +116,18 @@ impl Stream {
             } else {
                 MAX_PACKET_BYTES
             };
-            if self.opus && self.partial > maximum {
+            if opus && self.partial > maximum {
                 return Err(limited("Ogg Opus packet size exceeds its limit"));
+            }
+            if self.selected
+                && self.codec == Some(Codec::Theora)
+                && self.partial > MAX_VIDEO_PACKET_BYTES
+            {
+                return Err(limited("Ogg Theora packet exceeds 2 MiB"));
             }
             if length < 255 {
                 self.partial = 0;
-                if !self.opus || self.packets >= 2 {
+                if !opus || self.packets >= 2 {
                     *packets_left = packets_left
                         .checked_sub(1)
                         .ok_or_else(|| limited("Ogg exceeds its packet count limit"))?;
@@ -95,14 +138,11 @@ impl Stream {
         if page.flag(BOS) && (self.packets != 1 || self.partial != 0) {
             return Err(invalid("invalid Ogg identification page lacing"));
         }
-        if self.opus
-            && before == 1
-            && (self.packets > 2 || (self.packets == 2 && self.partial != 0))
-        {
+        if opus && before == 1 && (self.packets > 2 || (self.packets == 2 && self.partial != 0)) {
             return Err(invalid("invalid Ogg Opus comment page lacing"));
         }
         if page.flag(EOS)
-            && (self.partial != 0 || (self.opus && (self.packets < 3 || self.packets == before)))
+            && (self.partial != 0 || (opus && (self.packets < 3 || self.packets == before)))
         {
             return Err(invalid("invalid Ogg final page"));
         }
@@ -112,11 +152,12 @@ impl Stream {
 }
 
 /// Each segment starts with adjacent BOS pages and ends after every stream's EOS.
-/// Retain only the selected Opus page slices. Check all other pages without assembling packets.
+/// Retain the selected track's page slices. Check the other pages without assembling packets.
 pub(super) fn groups(
     mut bytes: &[u8],
-    opus_track: Option<usize>,
-) -> Result<Vec<Vec<Page<'_>>>, EngineError> {
+    codec: Codec,
+    track: Option<usize>,
+) -> Result<Vec<Segment<'_>>, EngineError> {
     if bytes.is_empty() {
         return Err(invalid("truncated Ogg header"));
     }
@@ -125,7 +166,9 @@ pub(super) fn groups(
     let mut groups = Vec::new();
     let mut selected = Vec::new();
     let mut beginning = true;
+    let mut tracks = 0;
     let mut opus_tracks = 0;
+    let mut has_other_audio = false;
     let mut packets_left = MAX_PACKETS;
     for _ in 0..MAX_PAGES {
         let (page, rest) = Page::read(bytes)?;
@@ -143,13 +186,18 @@ pub(super) fn groups(
             if !serials.insert(serial) {
                 return Err(invalid("Ogg repeats a stream serial number"));
             }
-            let opus = page.body.starts_with(b"OpusHead");
-            let selected_track = opus && opus_track.unwrap_or(0) == opus_tracks;
-            opus_tracks += usize::from(opus);
+            let identified = Codec::from_identification(page.body);
+            let matches = identified == Some(codec);
+            let selected_track = matches && track.unwrap_or(0) == tracks;
+            tracks += usize::from(matches);
+            opus_tracks += usize::from(identified == Some(Codec::Opus));
+            has_other_audio |= page.body.starts_with(b"\x01vorbis")
+                || page.body.starts_with(b"\x7fFLAC")
+                || page.body.starts_with(b"Speex   ");
             active.insert(
                 serial,
                 Stream {
-                    opus,
+                    codec: identified,
                     selected: selected_track,
                     next_page: 0,
                     partial: 0,
@@ -176,25 +224,39 @@ pub(super) fn groups(
         // the remaining identification pages of the same segment follow.
         let more_headers = beginning && bytes.get(5).is_some_and(|flags| flags & BOS != 0);
         if active.is_empty() && !more_headers {
-            if opus_tracks == 0 {
-                return Err(unsupported("Ogg segment requires an Opus stream"));
+            if tracks == 0 {
+                return Err(unsupported(match codec {
+                    Codec::Opus => "Ogg segment requires an Opus stream",
+                    Codec::Theora => "Ogg segment requires a Theora stream",
+                }));
             }
-            if opus_track.is_none() && opus_tracks > 1 {
-                return Err(unsupported(
-                    "multiple Opus tracks in one Ogg segment require an explicit selection",
-                ));
+            if track.is_none() && tracks > 1 {
+                let message = match codec {
+                    Codec::Opus => {
+                        "multiple Opus tracks in one Ogg segment require an explicit selection"
+                    }
+                    Codec::Theora => "multiple Theora tracks in one Ogg segment",
+                };
+                return Err(unsupported(message));
             }
             if selected.is_empty() {
                 return Err(EngineError::InvalidArgument(format!(
-                    "Opus track {} is absent from Ogg segment {} ({} tracks)",
-                    opus_track.unwrap_or(0),
+                    "{} track {} is absent from Ogg segment {} ({} tracks)",
+                    codec.name(),
+                    track.unwrap_or(0),
                     groups.len(),
-                    opus_tracks,
+                    tracks,
                 )));
             }
-            groups.push(std::mem::take(&mut selected));
+            groups.push(Segment {
+                pages: std::mem::take(&mut selected),
+                opus_tracks,
+                has_other_audio,
+            });
             beginning = true;
+            tracks = 0;
             opus_tracks = 0;
+            has_other_audio = false;
         }
         if bytes.is_empty() {
             if !active.is_empty() {
@@ -204,4 +266,23 @@ pub(super) fn groups(
         }
     }
     Err(limited("Ogg exceeds its page count limit"))
+}
+
+pub(super) fn packets(
+    pages: Vec<Page<'_>>,
+) -> impl Iterator<Item = Result<Packet, EngineError>> + '_ {
+    let mut pages = pages.into_iter();
+    let mut reader = BasePacketReader::new();
+    std::iter::from_fn(move || loop {
+        if let Some(packet) = reader.read_packet() {
+            return Some(Ok(packet));
+        }
+        let page = pages.next()?;
+        if let Err(error) = page
+            .parse()
+            .and_then(|page| reader.push_page(page).map_err(invalid))
+        {
+            return Some(Err(error));
+        }
+    })
 }

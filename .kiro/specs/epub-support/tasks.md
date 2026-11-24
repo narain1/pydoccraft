@@ -51,7 +51,8 @@
 - [x] Stream H.264 MP4 frames on their presentation timeline and offer the AAC-LC soundtrack on the same clip clock.
 - [x] Read local WebVTT and media-time TTML tracks and synchronize their overlapping cues and transition times with embedded video.
 - [x] Apply local normal-play-time fragments to embedded audio, video and synchronized captions.
-- [ ] Add embedded WebM and Ogg video, broaden MP4 coverage, and extend subtitle styling and media fragment dimensions.
+- [x] Stream embedded Ogg Theora and synchronize Opus and captions across sequential Ogg segments.
+- [ ] Add embedded WebM, support additional Ogg soundtracks and simultaneous video tracks, broaden MP4 coverage, and extend subtitle styling and media fragment dimensions.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
 - [x] Synchronize XHTML navigation and the spine's compatibility NCX in the same EPUB 3 chapter edit.
 - [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.

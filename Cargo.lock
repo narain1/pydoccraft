@@ -1607,6 +1607,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideav-theora"
+version = "0.0.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e85c249ddfc259d66e787da96ddfd6086a70e3f6b699f513ee198b478dc00dd"
+dependencies = [
+ "oxideav-core",
+]
+
+[[package]]
 name = "parlance"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1981,6 +1990,7 @@ dependencies = [
  "oxideav-h264",
  "oxideav-mp4",
  "oxideav-opus",
+ "oxideav-theora",
  "parley",
  "pdfcraft-annot",
  "pdfcraft-content",

@@ -1,9 +1,9 @@
-//! Decode bounded local AVC video on the MP4 presentation timeline.
+//! Stream local EPUB video on its container's presentation timeline.
 use std::{io::Cursor, ops::Range, sync::Arc};
 
 use oxideav_core::{
     CodecId, CodecParameters, CodecRegistry, Decoder, Demuxer, Frame, MediaType, Packet,
-    PixelFormat, TimeBase, VideoFrame, VideoPlane,
+    PixelFormat, TimeBase, VideoFrame,
 };
 use oxideav_h264::{
     avcc::AvcDecoderConfigurationRecord,
@@ -22,12 +22,22 @@ use super::{
 };
 use crate::EngineError;
 
+#[path = "epub_theora.rs"]
+mod theora;
+
+pub(super) use theora::align_audio;
+
 const MAX_PIXELS: u32 = 1920 * 1088;
 const MAX_PACKET: usize = 2 * 1024 * 1024;
 const MAX_NALS: usize = 256;
 const MAX_PACKETS_PER_FRAME: usize = 512;
 
-pub(crate) struct VideoSource {
+pub(crate) enum VideoSource {
+    Avc(Box<AvcSource>),
+    Theora(Box<theora::TheoraSource>),
+}
+
+pub(crate) struct AvcSource {
     bytes: Arc<[u8]>,
     samples: Vec<SampleInfo>,
     timeline: Vec<FrameTime>,
@@ -69,15 +79,35 @@ impl VideoSource {
     pub(crate) fn open(
         epub: &[u8],
         path: &str,
+        media: &str,
         start_us: u64,
         end_us: Option<u64>,
     ) -> Result<Self, EngineError> {
         validate_archive_path(path)?;
         let bytes = Book::open(epub)?.read(path, MAX_ENCODED_BYTES)?;
-        std::panic::catch_unwind(|| Self::decode(bytes, start_us, end_us))
-            .map_err(|_| invalid("malformed embedded MP4 video"))?
+        match media {
+            "video/mp4" => std::panic::catch_unwind(|| AvcSource::decode(bytes, start_us, end_us))
+                .map_err(|_| invalid("malformed embedded MP4 video"))?
+                .map(|source| Self::Avc(Box::new(source))),
+            "video/ogg" | "application/ogg" => {
+                std::panic::catch_unwind(|| theora::TheoraSource::open(&bytes, start_us, end_us))
+                    .map_err(|_| invalid("malformed embedded Ogg video"))?
+                    .map(|source| Self::Theora(Box::new(source)))
+            }
+            _ => Err(unsupported("unsupported EPUB video media type")),
+        }
     }
 
+    pub(crate) fn next(&mut self) -> Result<Option<VideoImage>, EngineError> {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match self {
+            Self::Avc(source) => source.next_image(),
+            Self::Theora(source) => source.next_image(),
+        }))
+        .map_err(|_| invalid("malformed embedded video frame"))?
+    }
+}
+
+impl AvcSource {
     fn decode(bytes: Vec<u8>, start_us: u64, end_us: Option<u64>) -> Result<Self, EngineError> {
         let guard = Mp4Bounds::inspect(&bytes)?;
         let bytes: Arc<[u8]> = bytes.into();
@@ -149,11 +179,6 @@ impl VideoSource {
         })
     }
 
-    pub(crate) fn next(&mut self) -> Result<Option<VideoImage>, EngineError> {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.next_image()))
-            .map_err(|_| invalid("malformed embedded AVC video"))?
-    }
-
     fn next_image(&mut self) -> Result<Option<VideoImage>, EngineError> {
         if self.next_frame == self.timeline.len() {
             return Ok(None);
@@ -188,7 +213,7 @@ impl VideoSource {
                     let stop = expected.interval.end.min(self.clip.end);
                     return self
                         .geometry
-                        .image(frame, start_us, stop - start_us)
+                        .avc_image(frame, start_us, stop - start_us)
                         .map(Some);
                 }
                 Ok(_) => return Err(unsupported("AVC video changed stream parameters")),
@@ -472,7 +497,7 @@ impl Geometry {
         ))
     }
 
-    fn image(
+    fn avc_image(
         &self,
         frame: VideoFrame,
         start_us: u64,
@@ -481,6 +506,27 @@ impl Geometry {
         let [y, u, v] = frame.image_planes() else {
             return Err(invalid("AVC video frame requires three image planes"));
         };
+        self.image::<2, 2>(
+            Yuv {
+                planes: [y, u, v].map(|plane| Plane {
+                    bytes: &plane.data,
+                    stride: plane.stride,
+                }),
+                x: 0,
+                y: 0,
+                bottom_up: false,
+            },
+            start_us,
+            duration_us,
+        )
+    }
+
+    fn image<const SX: usize, const SY: usize>(
+        &self,
+        picture: Yuv<'_>,
+        start_us: u64,
+        duration_us: u64,
+    ) -> Result<VideoImage, EngineError> {
         let (width, height) = (self.width as usize, self.height as usize);
         let mut rgb = Vec::with_capacity(width * height * 3);
         let (black, y_scale, uv_scale) = if self.full_range {
@@ -492,14 +538,24 @@ impl Geometry {
         let red = 2.0 * (1.0 - self.kr) * uv_scale;
         let blue = 2.0 * (1.0 - self.kb) * uv_scale;
         let byte = |v: f32| v.round().clamp(0.0, 255.0) as u8;
+        let [y, u, v] = picture.planes;
+        let chroma_start = picture.x / SX;
+        let chroma_width = (picture.x % SX + width).div_ceil(SX);
         for row in 0..height {
-            let y_line = line(y, row, width)?;
-            let u_line = line(u, row / 2, width.div_ceil(2))?;
-            let v_line = line(v, row / 2, width.div_ceil(2))?;
+            let row = picture.y
+                + if picture.bottom_up {
+                    height - 1 - row
+                } else {
+                    row
+                };
+            let y_line = y.line(row, picture.x, width)?;
+            let u_line = u.line(row / SY, chroma_start, chroma_width)?;
+            let v_line = v.line(row / SY, chroma_start, chroma_width)?;
             for (i, &luma) in y_line.iter().enumerate() {
                 let luma = (f32::from(luma) - black) * y_scale;
-                let r = red * (f32::from(v_line[i / 2]) - 128.0);
-                let b = blue * (f32::from(u_line[i / 2]) - 128.0);
+                let chroma = (picture.x % SX + i) / SX;
+                let r = red * (f32::from(v_line[chroma]) - 128.0);
+                let b = blue * (f32::from(u_line[chroma]) - 128.0);
                 rgb.extend([
                     byte(luma + r),
                     byte(luma - (self.kr * r + self.kb * b) / kg),
@@ -518,11 +574,30 @@ impl Geometry {
     }
 }
 
-fn line(plane: &VideoPlane, row: usize, width: usize) -> Result<&[u8], EngineError> {
-    if plane.stride < width {
-        return Err(invalid("AVC video plane stride is smaller than its width"));
+struct Yuv<'a> {
+    planes: [Plane<'a>; 3],
+    x: usize,
+    y: usize,
+    bottom_up: bool,
+}
+
+struct Plane<'a> {
+    bytes: &'a [u8],
+    stride: usize,
+}
+
+impl<'a> Plane<'a> {
+    fn line(&self, row: usize, left: usize, width: usize) -> Result<&'a [u8], EngineError> {
+        if left
+            .checked_add(width)
+            .is_none_or(|right| right > self.stride)
+        {
+            return Err(invalid(
+                "video plane stride is smaller than its picture window",
+            ));
+        }
+        row.checked_mul(self.stride)
+            .and_then(|start| self.bytes.get(start.checked_add(left)?..)?.get(..width))
+            .ok_or_else(|| invalid("truncated video plane"))
     }
-    row.checked_mul(plane.stride)
-        .and_then(|start| plane.data.get(start..)?.get(..width))
-        .ok_or_else(|| invalid("truncated AVC video plane"))
 }

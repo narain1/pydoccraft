@@ -778,22 +778,33 @@ class Document:
         from .errors import UnsupportedFormatError
 
         embedded = self.epub_embedded_media(page)[operator.index(media_index)]
-        if source_index is None:
-            source = next((source for source in embedded.sources if source.playable_audio), None)
-        else:
-            source = embedded.sources[operator.index(source_index)]
-        if source is None or source.path is None or source.media_type is None or not source.playable_audio:
-            raise UnsupportedFormatError("embedded audio requires a supported local source")
-        start, end = _epub_source_interval(source, start_us, end_us)
+        sources = embedded.sources if source_index is None else (embedded.sources[operator.index(source_index)],)
         frames = _epub_chunk_size(chunk_frames)
         selection = _epub_opus_index(opus_track)
-        self._ensure_open()
-        if end is not None and start >= end:
-            return
-        decoder = _native(lambda: _core._open_epub_audio(self._source, source.path, source.media_type, selection))
-        yield from self._epub_pcm_chunks(
-            decoder, start, end, frames, clamp_to_duration=source.fragment_end_us is not None
-        )
+        unsupported_source: UnsupportedFormatError | None = None
+        for source in sources:
+            if source.path is None or source.media_type is None or not source.playable_audio:
+                continue
+            start, end = _epub_source_interval(source, start_us, end_us)
+            self._ensure_open()
+            if end is not None and start >= end:
+                return
+            try:
+                decoder = _native(lambda: _core._open_epub_audio(
+                    self._source, source.path, source.media_type, selection, embedded.kind == "video"
+                ))
+            except UnsupportedFormatError as error:
+                if source_index is not None:
+                    raise
+                unsupported_source = error
+            else:
+                yield from self._epub_pcm_chunks(
+                    decoder, start, end, frames, clamp_to_duration=source.fragment_end_us is not None
+                )
+                return
+        if unsupported_source is not None:
+            raise unsupported_source
+        raise UnsupportedFormatError("embedded audio requires a supported local source")
 
     def epub_embedded_video(
         self,
@@ -805,29 +816,39 @@ class Document:
         end_us: int | None = None,
         text_track: int | None = None,
     ) -> Iterator[EpubVideoFrame]:
-        """Read AVC video frames with optional local text cues on the same timeline."""
+        """Read local AVC or Theora frames with optional synchronized text cues."""
         from . import _core, _native
         from .errors import UnsupportedFormatError
 
         embedded = self.epub_embedded_media(page)[operator.index(media_index)]
         if embedded.kind != "video":
             raise UnsupportedFormatError("video playback requires an XHTML video element")
-        if source_index is None:
-            source = next(
-                (source for source in embedded.sources if source.path is not None and source.media_type == "video/mp4"),
-                None,
-            )
-        else:
-            source = embedded.sources[operator.index(source_index)]
-        if source is None or source.path is None or source.media_type != "video/mp4":
-            raise UnsupportedFormatError("embedded video playback requires a local MP4 source")
-        start, end = _epub_source_interval(source, start_us, end_us)
         track = None if text_track is None else embedded.tracks[operator.index(text_track)]
-        self._ensure_open()
-        if end is not None and start >= end:
-            return
+        sources = embedded.sources if source_index is None else (embedded.sources[operator.index(source_index)],)
+        unsupported_source: UnsupportedFormatError | None = None
+        for source in sources:
+            if source.path is None or source.media_type is None or not source.playable_video:
+                continue
+            start, end = _epub_source_interval(source, start_us, end_us)
+            self._ensure_open()
+            if end is not None and start >= end:
+                return
+            try:
+                decoder = _native(lambda: _core._open_epub_video(
+                    self._source, source.path, source.media_type, start, end
+                ))
+            except UnsupportedFormatError as error:
+                if source_index is not None:
+                    raise
+                unsupported_source = error
+            else:
+                break
+        else:
+            if unsupported_source is not None:
+                raise unsupported_source
+            raise UnsupportedFormatError("embedded video requires a supported local MP4 or Ogg source")
+
         timeline = None if track is None else _EpubTextTimeline(self._read_epub_text(track, start, end))
-        decoder = _native(lambda: _core._open_epub_video(self._source, source.path, start, end))
         while True:
             self._ensure_open()
             result = _native(decoder.next_frame)

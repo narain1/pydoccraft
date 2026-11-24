@@ -433,13 +433,14 @@ fn pcm_clip(clip: crate::epub::audio::AudioClip) -> PcmClip {
 }
 
 #[pyfunction]
-#[pyo3(signature = (data, path, media, opus_track=None))]
+#[pyo3(signature = (data, path, media, opus_track=None, synchronize_video=false))]
 fn _open_epub_audio(
     py: Python<'_>,
     data: &[u8],
     path: &str,
     media: &str,
     opus_track: Option<u32>,
+    synchronize_video: bool,
 ) -> Result<NativeEpubAudio, EngineError> {
     py.allow_threads(|| {
         crate::epub::audio::AudioSource::open(
@@ -447,6 +448,7 @@ fn _open_epub_audio(
             path,
             media,
             opus_track.map(|index| index as usize),
+            synchronize_video,
         )
     })
     .map(NativeEpubAudio)
@@ -476,15 +478,16 @@ impl NativeEpubVideo {
 }
 
 #[pyfunction]
-#[pyo3(signature = (data, path, start, end))]
+#[pyo3(signature = (data, path, media, start, end))]
 fn _open_epub_video(
     py: Python<'_>,
     data: &[u8],
     path: &str,
+    media: &str,
     start: u64,
     end: Option<u64>,
 ) -> Result<NativeEpubVideo, EngineError> {
-    py.allow_threads(|| crate::epub::video::VideoSource::open(data, path, start, end))
+    py.allow_threads(|| crate::epub::video::VideoSource::open(data, path, media, start, end))
         .map(NativeEpubVideo)
 }
 

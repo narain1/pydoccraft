@@ -1517,8 +1517,9 @@ class EpubTests(unittest.TestCase):
 
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "local source"):
                 next(book.epub_embedded_audio(1, 0, source_index=0))
-            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "video playback"):
-                next(book.epub_embedded_video(1, 1))
+            preview = next(book.epub_embedded_video(1, 1, text_track=0))
+            self.assertEqual((preview.width, preview.height), (64, 48))
+            self.assertEqual([cue.text for cue in preview.text_cues], ["A ticking sound"])
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "semantic export"):
                 book.convert("pdf")
             with self.assertRaisesRegex(ValueError, "still referenced"):
@@ -1725,7 +1726,8 @@ first
             media, = book.epub_embedded_media(0)
             self.assertEqual([source.path for source in media.sources], ["OEBPS/clip.ogv", path])
             self.assertTrue(media.sources[1].playable_audio)
-            frames = list(book.epub_embedded_video(0, 0))
+            self.assertEqual(next(book.epub_embedded_video(0, 0)).width, 64)
+            frames = list(book.epub_embedded_video(0, 0, source_index=1))
             self.assertEqual([frame.start_us for frame in frames], [i * 1_000_000 // 12 for i in range(12)])
             self.assertEqual(sum(frame.duration_us for frame in frames), 1_000_000)
             for index, frame in enumerate(frames):
@@ -1740,15 +1742,13 @@ first
                 (480_000, 20_000), (500_000, 83_333), (583_333, 66_667),
             ])
             self.assertEqual([frame.rgb for frame in clipped], [frame.rgb for frame in frames[5:8]])
-            seek = list(book.epub_embedded_video(0, 0, start_us=750_000))
+            seek = list(book.epub_embedded_video(0, 0, source_index=1, start_us=750_000))
             self.assertEqual(seek, frames[9:])
-            audio = list(book.epub_embedded_audio(0, 0, start_us=480_000, end_us=650_000))
+            audio = list(book.epub_embedded_audio(0, 0, source_index=1, start_us=480_000, end_us=650_000))
             self.assertTrue(all((clip.sample_rate, clip.channels) == (48_000, 1) for clip in audio))
             self.assertEqual(sum(clip.frame_count for clip in audio), 8160)
-            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "local MP4"):
-                next(book.epub_embedded_video(0, 0, source_index=0))
             with self.assertRaisesRegex(ValueError, "outside its presentation"):
-                next(book.epub_embedded_video(0, 0, start_us=1_000_000))
+                next(book.epub_embedded_video(0, 0, source_index=1, start_us=1_000_000))
             with self.assertRaisesRegex(ValueError, "optional later end"):
                 next(book.epub_embedded_video(0, 0, start_us=100, end_us=50))
 
@@ -1756,6 +1756,83 @@ first
         # its chapter's authored transcript and resource metadata.
         with doc_ex.open(rewrite_epub(data, {path: resource[:-1]})) as book:
             self.assertIn("Transcript", book[0].get_text())
+            with self.assertRaises(doc_ex.MalformedDocumentError):
+                next(book.epub_embedded_video(0, 0, source_index=1))
+
+        audio_only = (fixtures / "epub-narration-mono.opus").read_bytes()
+        with doc_ex.open(rewrite_epub(data, {"OEBPS/clip.ogv": audio_only})) as book:
+            self.assertEqual(list(book.epub_embedded_video(0, 0)), frames)
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "Theora"):
+                next(book.epub_embedded_video(0, 0, source_index=0))
+
+    def test_embedded_ogg_theora_and_opus_share_the_chained_presentation_clock(self) -> None:
+        fixtures = Path(__file__).parent / "fixtures"
+        first = (fixtures / "epub-narration-theora-opus.ogv").read_bytes()
+        second = (fixtures / "epub-video-theora-tail.ogv").read_bytes()
+        path = "OEBPS/clip.ogv"
+        xhtml = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Video</title></head>
+        <body><video><source src="clip.ogv" type="application/ogg; codecs=&quot;theora, opus&quot;"/>
+        <track src="captions.vtt" kind="captions" srclang="en"/></video></body></html>"""
+        captions = b"WEBVTT\n\n00:00:01.425 --> 00:00:01.575\nAcross links\n"
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Video", xhtml, "OEBPS/new.xhtml")],
+                resources={
+                    path: doc_ex.EpubResource("application/ogg", first + second),
+                    "OEBPS/captions.vtt": doc_ex.EpubResource("text/vtt", captions),
+                },
+            )
+
+        def pcm(book: doc_ex.Document, channels: int, **clip: int) -> bytes:
+            samples = bytearray()
+            for chunk in book.epub_embedded_audio(0, 0, chunk_frames=701, **clip):
+                self.assertEqual((chunk.channels, chunk.sample_rate), (channels, 48_000))
+                with wave.open(io.BytesIO(chunk.wave), "rb") as wav:
+                    samples.extend(wav.readframes(chunk.frame_count))
+            return bytes(samples)
+
+        with doc_ex.open(rewrite_epub(data, {path: first})) as book:
+            first_pcm = pcm(book, 2)
+            self.assertEqual(len(first_pcm), 55_200 * 4)
+        with doc_ex.open(rewrite_epub(data, {path: second})) as book:
+            second_pcm = pcm(book, 1)
+            self.assertEqual(len(second_pcm), 60_000 * 2)
+        with doc_ex.open(data) as book:
+            media, = book.epub_embedded_media(0)
+            source, = media.sources
+            self.assertTrue(source.playable_audio)
+            self.assertTrue(source.playable_video)
+            frames = list(book.epub_embedded_video(0, 0))
+            self.assertEqual([(f.start_us, f.duration_us) for f in frames], [
+                *((i * 125_000, 125_000) for i in range(12)),
+                *((1_500_000 + i * 200_000, 200_000) for i in range(5)),
+            ])
+            tail = frames[12]
+            self.assertEqual((tail.width, tail.height, tail.pixel_aspect_ratio), (66, 50, (4, 3)))
+            self.assertGreater(tail.rgb[0], 245)
+            self.assertLess(sum(tail.rgb[1:3]), 10)
+            bottom = (tail.height - 1) * tail.width * 3
+            self.assertGreater(tail.rgb[bottom + 2], 245)
+            self.assertLess(sum(tail.rgb[bottom:bottom + 2]), 10)
+
+            clip = list(book.epub_embedded_video(0, 0, start_us=1_400_000, end_us=1_800_000, text_track=0))
+            self.assertEqual([(f.start_us, f.duration_us, bool(f.text_cues)) for f in clip], [
+                (1_400_000, 25_000, False), (1_425_000, 75_000, True),
+                (1_500_000, 75_000, True), (1_575_000, 125_000, False),
+                (1_700_000, 100_000, False),
+            ])
+            self.assertEqual([f.rgb for f in clip], [frames[i].rgb for i in [11, 11, 12, 12, 13]])
+            stereo = b"".join(second_pcm[i:i + 2] * 2 for i in range(0, len(second_pcm), 2))
+            expected = first_pcm + bytes(16_800 * 4) + stereo
+            self.assertEqual(pcm(book, 2), expected)
+            self.assertEqual(pcm(book, 2, start_us=1_400_000, end_us=1_600_000), expected[67_200 * 4:76_800 * 4])
+            self.assertEqual(list(book.epub_embedded_video(0, 0, start_us=2_600_000, end_us=2_700_000)), [])
+            self.assertEqual(pcm(book, 2, start_us=2_600_000, end_us=2_700_000), expected[124_800 * 4:129_600 * 4])
+
+        with doc_ex.open(rewrite_epub(data, {path: second + first})) as book:
+            frames = list(book.epub_embedded_video(0, 0, start_us=950_000, end_us=1_300_000))
+            self.assertEqual([(f.start_us, f.duration_us) for f in frames], [(950_000, 50_000), (1_250_000, 50_000)])
+        with doc_ex.open(rewrite_epub(data, {path: first + second[:-1]})) as book:
             with self.assertRaises(doc_ex.MalformedDocumentError):
                 next(book.epub_embedded_video(0, 0))
 

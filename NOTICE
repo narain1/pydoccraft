@@ -87,8 +87,8 @@ Crate: mp3dec 0.1.0. Used to decode MPEG Layer III narration. It is a Rust port 
 OxideAV
 Copyright (c) 2026 Karpelès Lab Inc.
 Licensed under the MIT License.
-Sources: https://github.com/OxideAV/oxideav-core, https://github.com/OxideAV/oxideav-aac, https://github.com/OxideAV/oxideav-mp4, https://github.com/OxideAV/oxideav-opus, https://github.com/OxideAV/oxideav-h264
-Crates: oxideav-core 0.1.43, oxideav-aac 0.1.7, oxideav-mp4 0.0.11, oxideav-opus 0.0.15, and oxideav-h264 0.1.12. Used to demux local MP4 media and decode AAC-LC, Opus, and AVC.
+Sources: https://github.com/OxideAV/oxideav-core, https://github.com/OxideAV/oxideav-aac, https://github.com/OxideAV/oxideav-mp4, https://github.com/OxideAV/oxideav-opus, https://github.com/OxideAV/oxideav-h264, https://github.com/OxideAV/oxideav-theora
+Crates: oxideav-core 0.1.43, oxideav-aac 0.1.7, oxideav-mp4 0.0.11, oxideav-opus 0.0.15, oxideav-h264 0.1.12, and oxideav-theora 0.0.13. Used to demux local MP4 media and decode AAC-LC, Opus, AVC, and Theora.
 
 RustAudio Ogg
 Copyright (c) 2016-2017 est31 <MTest31@outlook.com> and contributors.
