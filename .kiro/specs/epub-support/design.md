@@ -40,3 +40,10 @@ Broader selectors, CSS custom properties, font Unicode ranges and variable-axis 
 `epub_math.rs` projects bounded Presentation MathML to the pinned WordCraft equation model for layout and export. The equation envelope carries root size and foreground, and OMML runs carry inherited size, foreground and variant. Presentation and syntax nodes share a projection budget. Each tensor pair contributes one native script level to the depth guard, including levels generated for prescripts. Variable fences and separators use explicit math runs when the native delimiter cannot hold the full sequence.
 
 WordCraft represents zeroed `mpadded` metrics with its visible phantom node. Horizontal `mspace` uses a sized math-space run and follows native script scaling. The emitted OMML retains that run. MathML tables with spanning cells, arbitrary vertical spaces and padding shifts, HTML stylesheet rules inside the formula, and structures beyond the documented profile remain open.
+
+
+## Resource removal and media overlay authoring
+
+The structure editor rewrites the spine and navigation first, then stages narration association and duration edits. It creates one SMIL document per edited chapter with ordered text and audio cues. Durations use checked microsecond arithmetic. The package total sums each associated overlay once. Retained overlays use declared duration metadata or explicit clip ranges. Text-only cues contribute zero recorded duration.
+
+Resource removal checks the staged archive after additions, replacements, and overlay changes. It validates retained package ID references, targets in XHTML, SVG, SMIL and NCX, and stylesheet dependencies. The scan follows archive-local stylesheet links and imports regardless of media conditions. It includes recognized off-spine resources and excludes the removed members, allowing jointly removed assets to reference each other. Assets that are obfuscated or have unprovable scripted dependencies fail explicitly. Untouched ZIP members are raw-copied. The reader reopens and validates the entire result before returning bytes.

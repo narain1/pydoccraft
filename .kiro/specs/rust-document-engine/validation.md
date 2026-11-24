@@ -2755,3 +2755,7 @@ The Linux x86-64 CPython 3.11.15 wheel passed 641 installed tests, including 46 
 ## 2026-11-24 EPUB MathML presentation and equation geometry
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 644 installed tests, including 49 EPUB tests. It measured 22,683,515 bytes with a 52,692,216-byte native extension. Tests reopen both DOCX and PDF to verify MathML styling and measure native equation placement. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-inherited-mathml-styles-and-equation-geometry) for the exact wheel and public sample limitations.
+
+## 2026-11-24 EPUB resource removal and media overlay authoring
+
+The Linux x86-64 CPython 3.11.15 wheel passed 648 installed tests, including 53 EPUB tests. It measured 22,741,921 bytes with a 52,844,280-byte native extension. An EPUB with newly authored narration and a copy with its narration resources removed both passed EPUBCheck. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-resource-removal-and-media-overlay-authoring) for exact artifacts and checks.

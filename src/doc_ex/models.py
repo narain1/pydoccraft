@@ -27,6 +27,17 @@ class EpubResource:
 
 
 @dataclass(frozen=True, slots=True)
+class EpubOverlayCue:
+    """A chapter fragment and its optional local narration interval in microseconds."""
+
+    fragment: str | None = None
+    audio_path: str | None = None
+    clip_begin_us: int = 0
+    clip_end_us: int | None = None
+    epub_type: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class EpubAudioClip:
     """Owned signed 16-bit PCM WAVE and its sample geometry."""
 

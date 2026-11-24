@@ -20,11 +20,23 @@ use crate::{
     EngineError,
 };
 
+#[path = "epub_overlay_edit.rs"]
+mod narration;
+#[path = "epub_resource_removal.rs"]
+mod removal;
 #[path = "epub_toc_edit.rs"]
 mod toc;
 
 pub(crate) type SpineEdit = (Option<i64>, Option<(String, String, Option<String>, bool)>);
 pub(crate) type ResourceEdit = (String, String, Vec<u8>);
+type CueEdit = (
+    Option<String>,
+    Option<String>,
+    u64,
+    Option<u64>,
+    Option<String>,
+);
+pub(crate) type OverlayEdit = (String, Option<Vec<CueEdit>>);
 type Files<'a> = BTreeMap<String, Cow<'a, [u8]>>;
 
 pub(crate) fn update_structure<'a>(
@@ -32,8 +44,25 @@ pub(crate) fn update_structure<'a>(
     order: Option<&'a [SpineEdit]>,
     resources: &'a [ResourceEdit],
     modified: &str,
+    removed: &[String],
+    overlays: &[OverlayEdit],
 ) -> Result<Vec<u8>, EngineError> {
     let mut total = 0;
+    validate_member_count(removed.len())?;
+    narration::charge_edits(overlays, &mut total)?;
+    let mut removals = HashSet::new();
+    for path in removed {
+        check_path(path)?;
+        charge(
+            &mut total,
+            path.len(),
+            MAX_INPUT_SIZE,
+            "EPUB edits exceed their byte budget",
+        )?;
+        if !removals.insert(path.as_str()) {
+            return Err(argument("duplicate EPUB resource removal"));
+        }
+    }
     validate_member_count(order.map_or(0, <[_]>::len))?;
     validate_member_count(resources.len())?;
     for (_, resource) in order.into_iter().flatten() {
@@ -60,7 +89,7 @@ pub(crate) fn update_structure<'a>(
         )?;
     }
     let mut book = editor::open_for_edit(data)?;
-    if order.is_none() && resources.is_empty() {
+    if order.is_none() && resources.is_empty() && removed.is_empty() && overlays.is_empty() {
         return Ok(data.to_vec());
     }
     let package_path = book.package_path()?;
@@ -377,9 +406,14 @@ pub(crate) fn update_structure<'a>(
     }
     if !plan.manifest_additions.is_empty() {
         let at = inner_range(package_source, manifest_node)?.end;
-        edits.push((at..at, plan.manifest_additions));
+        edits.push((at..at, std::mem::take(&mut plan.manifest_additions)));
     }
-    if epub3 && (!edits.is_empty() || !plan.files.is_empty()) {
+    if epub3
+        && (!edits.is_empty()
+            || !plan.files.is_empty()
+            || !removed.is_empty()
+            || !overlays.is_empty())
+    {
         if modified.len() != 20
             || !modified
                 .bytes()
@@ -412,12 +446,27 @@ pub(crate) fn update_structure<'a>(
             ));
         }
     }
-    if !edits.is_empty() {
-        let package = apply_edits(package_source, edits, METADATA_BYTES)?;
-        plan.files
-            .insert(package_path.clone(), Cow::Owned(package.into_bytes()));
+    let mut revised = if edits.is_empty() {
+        Cow::Borrowed(package_source)
+    } else {
+        Cow::Owned(apply_edits(package_source, edits, METADATA_BYTES)?)
+    };
+    if !overlays.is_empty() {
+        if !epub3 {
+            return Err(unsupported("authoring media overlays requires EPUB 3"));
+        }
+        revised = Cow::Owned(narration::edit(&revised, &mut plan, &mut book, overlays)?);
     }
-    if plan.files.is_empty() {
+    if !removals.is_empty() {
+        revised = Cow::Owned(removal::apply(&revised, &plan, &mut book, &removals)?);
+    }
+    if revised != package_source {
+        plan.files.insert(
+            package_path.clone(),
+            Cow::Owned(revised.into_owned().into_bytes()),
+        );
+    }
+    if plan.files.is_empty() && removals.is_empty() {
         return Ok(data.to_vec());
     }
     let (replacements, additions) = plan
@@ -434,6 +483,7 @@ pub(crate) fn update_structure<'a>(
             .into_iter()
             .map(|(path, value)| (path.as_str(), value.as_ref()))
             .collect(),
+        &removals,
     )?;
     extract(&updated, None)?;
     Ok(updated)
@@ -533,15 +583,19 @@ fn relative_url(base: &str, path: &str) -> String {
         if i != 0 {
             url.push('/');
         }
-        for byte in part.bytes() {
-            if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
-                url.push(char::from(byte));
-            } else {
-                let _ = write!(url, "%{byte:02X}");
-            }
-        }
+        encode_url_part(part, &mut url);
     }
     url
+}
+
+fn encode_url_part(part: &str, url: &mut String) {
+    for byte in part.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+            url.push(char::from(byte));
+        } else {
+            let _ = write!(url, "%{byte:02X}");
+        }
+    }
 }
 
 fn opening_end(source: &str, node: Node<'_, '_>) -> Result<usize, EngineError> {

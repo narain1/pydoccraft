@@ -159,6 +159,161 @@ class EpubTests(unittest.TestCase):
             self.assertEqual([nav["kind"] for nav in published.metadata["navigation"]], ["toc"])
             self.assertTrue(published.read_epub_resource("OEBPS/Styles/new.css").endswith(b"/* revised */"))
 
+    def test_resource_removal_checks_the_combined_edited_archive(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head>
+          <link rel="stylesheet" href="Styles/chapter.css"/></head><body><p>Retained chapter</p></body></html>"""
+        source = epub_fixture(chapter_one=chapter)
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        package = package.replace(b"</manifest>", b"""
+          <item id="styles" href="Styles/chapter.css" media-type="text/css"/>
+          <item id="print" href="Styles/print.css" media-type="text/css"/>
+          <item id="old" href="Art/caf%C3%A9%20leaf.png" media-type="image/png"/>
+          <item id="spare" href="Art/spare.png" media-type="image/png"/>
+        </manifest>""")
+        old = "OEBPS/Art/café leaf.png"
+        spare = "OEBPS/Art/spare.png"
+        css = b"""@import "print.css" print;
+            body { --art: url("../Art/caf%C3%A9%20leaf.png"); background-image: var(--art) }"""
+        source = rewrite_epub(source, {
+            "OEBPS/content.opf": package,
+            "OEBPS/Styles/chapter.css": css,
+            "OEBPS/Styles/print.css": b"""body { background-image: image-set("../Art/spare.png" 1x); }""",
+            old: solid((11, 25, 91)),
+            spare: solid((13, 71, 35)),
+        })
+        with doc_ex.open(source) as book:
+            for paths in ((old,), (spare,), ("OEBPS/Styles/print.css",), ("OEBPS/Styles/chapter.css",)):
+                with self.subTest(paths=paths), self.assertRaisesRegex(ValueError, "still referenced"):
+                    book.edit_epub_structure(remove_resources=paths)
+            for path in ("mimetype", "META-INF/container.xml", "OEBPS/content.opf", "OEBPS/absent.png"):
+                with self.subTest(path=path), self.assertRaises(ValueError):
+                    book.edit_epub_structure(remove_resources=[path])
+            with self.assertRaisesRegex(ValueError, "replace and remove"):
+                book.edit_epub_structure(
+                    resources={spare: doc_ex.EpubResource("image/png", solid((0, 0, 0)))},
+                    remove_resources=[spare],
+                )
+            revised = book.edit_epub_structure(
+                resources={"OEBPS/Styles/chapter.css": doc_ex.EpubResource(
+                    "text/css", b"""/* url('../Art/spare.png') */ p::after { content: 'Art/spare.png'; }""",
+                )},
+                remove_resources=[old, spare, "OEBPS/Styles/print.css"],
+            )
+            self.assertEqual(book.read_epub_resource("OEBPS/Styles/chapter.css"), css)
+        with doc_ex.open(revised) as edited, zipfile.ZipFile(io.BytesIO(revised)) as archive:
+            self.assertIn("Retained chapter", edited[0].get_text())
+            self.assertEqual(archive.read("OEBPS/one.xhtml"), chapter.encode())
+            self.assertTrue({old, spare, "OEBPS/Styles/print.css"}.isdisjoint(archive.namelist()))
+            self.assertTrue({"old", "spare", "print"}.isdisjoint(item["id"] for item in edited.metadata["manifest"]))
+            self.assertTrue(edited.render_page(0, dpi=72).startswith(b"\x89PNG"))
+
+    def test_resource_removal_preserves_references_outside_the_spine(self) -> None:
+        source = epub_fixture()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        package = package.replace(b"</manifest>", b"""
+          <item id="spare" href="Art/retain.png" media-type="image/png"/>
+          <item id="vector" href="vector.svg" media-type="image/svg+xml"/>
+          <item id="alt" href="Styles/alternate.css" media-type="text/css"/>
+          <item id="hidden" href="Art/indirect.png" media-type="image/png"/>
+        </manifest>""")
+        source = rewrite_epub(source, {
+            "OEBPS/content.opf": package,
+            "OEBPS/Art/retain.png": solid((24, 25, 26)),
+            "OEBPS/Styles/alternate.css": '@import "extensionless"; rect { fill: red; }',
+            "OEBPS/Styles/extensionless": 'rect { fill: url("../Art/indirect.png") }',
+            "OEBPS/Art/indirect.png": solid((27, 28, 29)),
+            "OEBPS/vector.svg": """<?xml-stylesheet href="Styles/alternate.css" type="text/css" alternate="yes" title="Alt"?>
+              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>""",
+            "OEBPS/extras.xhtml": """<html xmlns="http://www.w3.org/1999/xhtml"><body>
+              <p><img alt="Responsive" srcset="data:image/png;base64,AA== 1x, Art/retain.png 2x"/></p></body></html>""",
+        })
+        with doc_ex.open(source) as book:
+            for path in ("OEBPS/Art/retain.png", "OEBPS/Styles/alternate.css", "OEBPS/Art/indirect.png"):
+                with self.subTest(path=path), self.assertRaisesRegex(ValueError, "still referenced"):
+                    book.edit_epub_structure(remove_resources=[path])
+            with self.assertRaisesRegex(ValueError, "still referenced"):
+                book.edit_epub_structure([0], remove_resources=["OEBPS/image.png"])
+            edited = book.edit_epub_structure([1], remove_resources=["OEBPS/one.xhtml", "OEBPS/image.png"])
+        with doc_ex.open(edited) as book:
+            self.assertIn("Second chapter", book[0].get_text())
+            self.assertEqual(len(book), 1)
+
+    def test_attach_media_overlay_to_inserted_chapter_and_keep_existing_timing(self) -> None:
+        source, old_audio = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b"</metadata>", b"""<meta property="media:duration" refines="#sync">0:00:01.798</meta>
+                   <meta property="media:duration">0:00:01.798</meta></metadata>""",
+            )
+        source = rewrite_epub(source, {"OEBPS/content.opf": package})
+        chapter = doc_ex.EpubChapterSource("Added", """<html xmlns="http://www.w3.org/1999/xhtml"><body>
+          <p id="café">Audio</p><p id="aside">Speak this</p></body></html>""", "Extra/new café.xhtml")
+        track = (Path(__file__).parent / "fixtures" / "epub-narration-tone.mp3").read_bytes()
+        cues = [
+            doc_ex.EpubOverlayCue("café", "Audio/lecture 1.mp3", 250_000, 750_000, "chapter"),
+            doc_ex.EpubOverlayCue("aside", epub_type="aside"),
+        ]
+        audio = {"Audio/lecture 1.mp3": doc_ex.EpubResource("audio/mpeg", track)}
+        with doc_ex.open(source) as original:
+            old = original.epub_media_cues(0)
+            with self.assertRaises(doc_ex.MalformedDocumentError):
+                original.edit_epub_structure([0, chapter, 1], resources=audio, overlays={
+                    chapter.path: [doc_ex.EpubOverlayCue("missing")],
+                })
+            with self.assertRaisesRegex(ValueError, "explicit later clip end"):
+                original.edit_epub_structure([0, chapter, 1], resources=audio, overlays={
+                    chapter.path: [doc_ex.EpubOverlayCue("café", "Audio/lecture 1.mp3")],
+                })
+            revised = original.edit_epub_structure([0, chapter, 1], resources=audio, overlays={chapter.path: cues})
+            self.assertEqual(original.epub_media_cues(0), old)
+            self.assertEqual(len(original), 2)
+        meta = "{http://www.idpf.org/2007/opf}meta"
+        with doc_ex.open(revised) as edited, zipfile.ZipFile(io.BytesIO(revised)) as archive:
+            self.assertEqual(edited.epub_media_cues(0), old)
+            self.assertEqual(edited.read_epub_resource("OEBPS/Media/voice.wav"), old_audio)
+            overlay_id = edited[1].metadata["media_overlay"]
+            smil = edited.metadata["media_overlays"][overlay_id]["path"]
+            self.assertIn(b"new%20caf%C3%A9.xhtml#caf%C3%A9", archive.read(smil))
+            playback = list(edited.epub_narration(1))
+            self.assertEqual([cue.fragment for cue in playback], ["café", "aside"])
+            self.assertEqual([cue.roles for cue in playback], [("chapter",), ("aside",)])
+            self.assertEqual(playback[0].audio.frame_count, 4000)
+            self.assertEqual(playback[1].text, "Speak this")
+            xml = ET.fromstring(archive.read("OEBPS/content.opf"))
+            durations = {node.attrib.get("refines"): node.text for node in xml.iter(meta)
+                         if node.attrib.get("property") == "media:duration"}
+            self.assertEqual(durations, {"#sync": "0:00:01.798", "#" + overlay_id: "0:00:00.500000",
+                                         None: "0:00:02.298000"})
+
+    def test_detach_shared_overlay_and_remove_its_package_members_atomically(self) -> None:
+        source, audio = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b"</metadata>", b"""<meta property="media:duration" refines="#sync">0:00:01.798</meta>
+                   <meta property="media:duration">0:00:01.798</meta></metadata>""",
+            )
+        source = rewrite_epub(source, {"OEBPS/content.opf": package})
+        removed = ["OEBPS/Sync/read.smil", "OEBPS/Media/voice.wav"]
+        with doc_ex.open(source) as original:
+            with self.assertRaisesRegex(ValueError, "still referenced"):
+                original.edit_epub_structure(remove_resources=[removed[0]])
+            with self.assertRaisesRegex(ValueError, "still referenced"):
+                original.edit_epub_structure(remove_resources=[removed[1]])
+            with self.assertRaises(doc_ex.MalformedDocumentError):
+                original.edit_epub_structure(overlays={"OEBPS/one.xhtml": None})
+            revised = original.edit_epub_structure(
+                overlays={"OEBPS/one.xhtml": None, "OEBPS/two.xhtml": None},
+                remove_resources=removed,
+            )
+            self.assertEqual(original.read_epub_resource(removed[1]), audio)
+        with doc_ex.open(revised) as edited, zipfile.ZipFile(io.BytesIO(revised)) as archive:
+            self.assertIsNone(edited.metadata.get("media_overlays"))
+            self.assertEqual(edited.epub_media_cues(0), [])
+            self.assertTrue(set(removed).isdisjoint(archive.namelist()))
+            self.assertNotIn(b"media:duration", archive.read("OEBPS/content.opf"))
+
     def test_spine_edit_reorders_epub2_ncx_and_creates_missing_navigation(self) -> None:
         source = epub_fixture(version="2.0")
         with zipfile.ZipFile(io.BytesIO(source)) as archive:

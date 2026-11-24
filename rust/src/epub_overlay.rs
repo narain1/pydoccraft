@@ -10,7 +10,7 @@ use super::{
 };
 use crate::EngineError;
 
-const SMIL: &str = "http://www.w3.org/ns/SMIL";
+pub(super) const SMIL: &str = "http://www.w3.org/ns/SMIL";
 const SMIL_HTTPS: &str = "https://www.w3.org/ns/SMIL";
 const MAX_OVERLAY_BYTES: usize = 8 * 1024 * 1024;
 
@@ -280,7 +280,7 @@ fn local_path(base: &str, source: &str) -> Result<String, EngineError> {
     resolve(base, source)
 }
 
-fn clock(source: &str) -> Result<u64, EngineError> {
+pub(super) fn clock(source: &str) -> Result<u64, EngineError> {
     let bad = || invalid("invalid media overlay clock value");
     let micros = if source.contains(':') {
         let mut parts = source.rsplit(':');

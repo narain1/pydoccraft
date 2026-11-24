@@ -877,3 +877,139 @@ fn checked_css(source: &str) -> Result<String, EngineError> {
     }
     String::from_utf8(bytes).map_err(invalid)
 }
+
+// For archive edits, inspect every branch regardless of viewport. A declaration
+// that is inactive in our preview can still refer to an asset in another reader.
+pub(super) fn resource_references(
+    source: &str,
+    inline: bool,
+    check: &mut impl FnMut(&str, bool) -> Result<(), EngineError>,
+) -> Result<(), EngineError> {
+    if source.len() > SHEET_BYTES {
+        return Err(limited("EPUB stylesheet exceeds 256 KiB"));
+    }
+    let inline_source;
+    let source = if inline {
+        inline_source = format!("{{{source}}}");
+        &inline_source
+    } else {
+        source.trim_start_matches('\u{feff}')
+    };
+    let source = checked_css(source)?;
+    let mut parser = raffia::ParserBuilder::new(&source)
+        .options(raffia::ParserOptions {
+            try_parsing_value_in_custom_property: true,
+            ..Default::default()
+        })
+        .build();
+    let statements = if inline {
+        let block = parser.parse::<SimpleBlock>().map_err(css_error)?;
+        if block.span.end != source.len() {
+            return Err(invalid("EPUB inline CSS has trailing input"));
+        }
+        block.statements
+    } else {
+        parser.parse::<Stylesheet>().map_err(css_error)?.statements
+    };
+    css_references(&statements, check)
+}
+
+fn css_error(error: raffia::error::Error) -> EngineError {
+    invalid(format!(
+        "CSS at byte {}: {:?}",
+        error.span.start, error.kind
+    ))
+}
+
+fn css_references(
+    statements: &[Statement<'_>],
+    check: &mut impl FnMut(&str, bool) -> Result<(), EngineError>,
+) -> Result<(), EngineError> {
+    for statement in statements {
+        match statement {
+            Statement::AtRule(rule) => {
+                if let Some(AtRulePrelude::Import(import)) = &rule.prelude {
+                    match &import.href {
+                        ImportPreludeHref::Str(value) => {
+                            if let Some(href) = string_value(value) {
+                                check(href, true)?;
+                            }
+                        }
+                        ImportPreludeHref::Url(url) => check_url(url, true, check)?,
+                    }
+                } else if rule.name.name.eq_ignore_ascii_case("import") {
+                    return Err(unsupported("checking dependencies of unparsed CSS imports"));
+                }
+                if let Some(block) = &rule.block {
+                    css_references(&block.statements, check)?;
+                }
+            }
+            Statement::QualifiedRule(rule) => css_references(&rule.block.statements, check)?,
+            Statement::Declaration(rule) => value_references(
+                &rule.value,
+                ident(&rule.name).is_some_and(|value| value.starts_with("--")),
+                check,
+            )?,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn check_url(
+    url: &Url<'_>,
+    stylesheet: bool,
+    check: &mut impl FnMut(&str, bool) -> Result<(), EngineError>,
+) -> Result<(), EngineError> {
+    match &url.value {
+        Some(UrlValue::Raw(url)) => check(url.value.as_ref(), stylesheet),
+        Some(UrlValue::Str(value)) => {
+            string_value(value).map_or(Ok(()), |href| check(href, stylesheet))
+        }
+        None => Ok(()),
+        _ => Err(unsupported("checking dependencies of unparsed CSS URLs")),
+    }
+}
+
+fn value_references(
+    values: &[ComponentValue<'_>],
+    strings: bool,
+    check: &mut impl FnMut(&str, bool) -> Result<(), EngineError>,
+) -> Result<(), EngineError> {
+    for value in values {
+        match value {
+            ComponentValue::Url(url) => check_url(url, false, check)?,
+            ComponentValue::Function(function) => {
+                let takes_url_strings = match &function.name {
+                    FunctionName::Ident(name) => ident(name).is_some_and(|name| {
+                        ["image", "image-set", "-webkit-image-set", "src"]
+                            .iter()
+                            .any(|key| name.eq_ignore_ascii_case(key))
+                    }),
+                    _ => false,
+                };
+                value_references(&function.args, takes_url_strings, check)?;
+            }
+            ComponentValue::BracketBlock(block) => value_references(&block.value, strings, check)?,
+            ComponentValue::InterpolableStr(value) if strings => {
+                if let Some(value) = string_value(value) {
+                    check(value, false)?;
+                }
+            }
+            ComponentValue::TokenWithSpan(token) => {
+                if matches!(
+                    &token.token,
+                    raffia::token::Token::Ident(_)
+                        | raffia::token::Token::Str(_)
+                        | raffia::token::Token::UrlRaw(_)
+                ) {
+                    return Err(unsupported(
+                        "checking dependencies of unparsed CSS declaration values",
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}

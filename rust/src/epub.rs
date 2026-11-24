@@ -38,7 +38,7 @@ mod style;
 mod svg;
 
 pub(crate) use editor::{update_chapters, update_metadata};
-pub(crate) use structure::{update_structure, ResourceEdit, SpineEdit};
+pub(crate) use structure::{update_structure, OverlayEdit, ResourceEdit, SpineEdit};
 
 pub(crate) fn render(
     data: &[u8],

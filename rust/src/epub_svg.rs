@@ -43,6 +43,20 @@ pub(super) fn resource_path(base: &str, href: &str) -> Result<String, EngineErro
 }
 
 pub(super) fn stylesheet(pi: roxmltree::PI<'_>) -> Result<Option<(String, String)>, EngineError> {
+    let reference = stylesheet_reference(pi)?;
+    Ok((reference.css && !reference.alternate).then_some((reference.href, reference.media)))
+}
+
+pub(super) struct StylesheetReference {
+    pub href: String,
+    pub css: bool,
+    media: String,
+    alternate: bool,
+}
+
+pub(super) fn stylesheet_reference(
+    pi: roxmltree::PI<'_>,
+) -> Result<StylesheetReference, EngineError> {
     if pi.target != "xml-stylesheet" {
         return Err(unsupported("SVG processing instructions"));
     }
@@ -69,12 +83,14 @@ pub(super) fn stylesheet(pi: roxmltree::PI<'_>) -> Result<Option<(String, String
         .remove("href")
         .filter(|s| !s.is_empty())
         .ok_or_else(|| invalid("xml-stylesheet requires href"))?;
-    if values.get("type").is_some_and(|value| value != "text/css")
-        || values.get("alternate").is_some_and(|value| value == "yes")
-    {
-        return Ok(None);
-    }
-    Ok(Some((href, values.remove("media").unwrap_or_default())))
+    Ok(StylesheetReference {
+        href,
+        css: values
+            .get("type")
+            .is_none_or(|value| value.eq_ignore_ascii_case("text/css")),
+        media: values.remove("media").unwrap_or_default(),
+        alternate: values.get("alternate").is_some_and(|value| value == "yes"),
+    })
 }
 
 pub(super) fn viewport(root: Node<'_, '_>) -> Option<[f32; 2]> {

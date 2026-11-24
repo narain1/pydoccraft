@@ -14,7 +14,7 @@ from typing import Any, Callable, Iterator, Literal, TYPE_CHECKING, overload
 
 from .errors import DocumentClosedError, MalformedDocumentError, UnsafeArchiveError
 from .models import (
-    Block, EpubAudioClip, EpubChapterSource, EpubNarrationCue, EpubResource, Image, Link, Story, Table,
+    Block, EpubAudioClip, EpubChapterSource, EpubNarrationCue, EpubOverlayCue, EpubResource, Image, Link, Story, Table,
     _html_text,
 )
 
@@ -713,8 +713,10 @@ class Document:
         order: Iterable[int | EpubChapterSource] | None = None,
         *,
         resources: Mapping[str, EpubResource] | None = None,
+        remove_resources: Iterable[str] = (),
+        overlays: Mapping[str, Iterable[EpubOverlayCue] | None] | None = None,
     ) -> bytes:
-        """Return an EPUB with a new reading order and optional local resource edits."""
+        """Return an EPUB with transactional spine, resource, or narration edits."""
         self._ensure_open()
         if self._filetype != "epub":
             from .errors import UnsupportedFormatError
@@ -764,9 +766,56 @@ class Document:
                 if total_bytes > _MAX_EPUB_EDIT_BYTES:
                     raise UnsafeArchiveError("EPUB edits exceed their byte budget")
                 changes.append((name, media, resource.data))
+        removed: list[str] = []
+        for path in remove_resources:
+            self._ensure_open()
+            if len(removed) >= 10_000:
+                raise UnsafeArchiveError("too many EPUB resource removals")
+            path = _epub_edit_text(path, 4_096, "removed resource path")
+            total_bytes += len(path.encode())
+            if total_bytes > _MAX_EPUB_EDIT_BYTES:
+                raise UnsafeArchiveError("EPUB edits exceed their byte budget")
+            removed.append(path)
+
+        narration: list[tuple[str, list[tuple[str | None, str | None, int, int | None, str | None]] | None]] = []
+        cue_count = 0
+        if overlays is not None:
+            for path, cues in overlays.items():
+                self._ensure_open()
+                if len(narration) >= 10_000:
+                    raise UnsafeArchiveError("too many EPUB media overlay edits")
+                chapter = _epub_edit_text(path, 4_096, "media overlay chapter path")
+                total_bytes += len(chapter.encode())
+                encoded = None
+                if cues is not None:
+                    encoded = []
+                    for cue in cues:
+                        self._ensure_open()
+                        if cue_count >= 10_000:
+                            raise UnsafeArchiveError("too many EPUB media overlay cues")
+                        if not isinstance(cue, EpubOverlayCue):
+                            raise TypeError("overlay cues must be EpubOverlayCue values")
+                        fragment = None if cue.fragment is None else _epub_edit_text(cue.fragment, 4_096, "cue fragment")
+                        audio = None if cue.audio_path is None else _epub_edit_text(cue.audio_path, 4_096, "cue audio path")
+                        roles = None if cue.epub_type is None else _epub_edit_text(cue.epub_type, 1_024, "cue roles")
+                        begin = operator.index(cue.clip_begin_us)
+                        end = None if cue.clip_end_us is None else operator.index(cue.clip_end_us)
+                        if not 0 <= begin < 2**53 or end is not None and not begin < end < 2**53:
+                            raise ValueError("invalid EPUB media overlay interval")
+                        total_bytes += sum(len(value.encode()) for value in (fragment, audio, roles) if value is not None)
+                        if total_bytes > _MAX_EPUB_EDIT_BYTES:
+                            raise UnsafeArchiveError("EPUB edits exceed their byte budget")
+                        encoded.append((fragment, audio, begin, end, roles))
+                        cue_count += 1
+                if total_bytes > _MAX_EPUB_EDIT_BYTES:
+                    raise UnsafeArchiveError("EPUB edits exceed their byte budget")
+                narration.append((chapter, encoded))
+
         self._ensure_open()
         modified = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-        return bytes(_native(lambda: _core._edit_epub_structure(self._source, selected, changes, modified)))
+        return bytes(_native(lambda: _core._edit_epub_structure(
+            self._source, selected, changes, modified, removed, narration,
+        )))
 
     def edit(self) -> PdfDocument:
         """Create an independent editable native PDF; unsupported preservation fails."""

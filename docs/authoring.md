@@ -984,7 +984,7 @@ added = doc_ex.EpubChapterSource(
     '<html xmlns="http://www.w3.org/1999/xhtml">'
     '<head><title>Appendix</title>'
     '<link rel="stylesheet" href="../Styles/appendix.css"/></head>'
-    '<body><h1>Appendix</h1></body></html>',
+    '<body><h1 id="intro">Appendix</h1><aside id="aside">Further reading.</aside></body></html>',
     path="Text/appendix.xhtml",
 )
 with doc_ex.open(epub_bytes) as source:
@@ -995,6 +995,25 @@ with doc_ex.open(epub_bytes) as source:
 
 The order must contain at least one entry and each selected spine index must occur once. Omitted entries leave the spine and its navigation, while their XHTML stays in the manifest and archive for surviving references. The editor preserves nested TOC groups where possible and orders siblings by their earliest spine target. It updates EPUB 3 navigation or EPUB 2 NCX and creates a primary TOC if needed. Optional chapter paths are decoded, archive-relative paths. Omit the path to allocate a unique one. Set `fixed_layout=True` to insert EPUB 3 XHTML with a declared numerical viewport.
 
-`resources` maps decoded paths to `EpubResource(media_type, data)`. It supports local stylesheets, images, fonts, audio, video and EPUB 3 SMIL files. Replacements use the existing manifest media type. Pass `order=None` for resource-only changes. Existing media-overlay associations remain in the manifest.
+`resources` maps decoded paths to `EpubResource(media_type, data)`. It supports local stylesheets, images, fonts, audio, video and EPUB 3 SMIL files. Replacements use the existing manifest media type. Pass `order=None` for resource-only changes.
+
+Pass decoded manifest paths to `remove_resources` to delete packaged files. A transaction can update a stylesheet and remove the assets it previously used, or remove a chapter from the spine and delete its file. Retained package, navigation, XML and stylesheet references block deletion. Scripted dependencies, obfuscated fonts and protected package members require preservation.
+
+Pass `overlays={chapter_path: cues}` to attach or replace EPUB 3 narration for a chapter. Use a decoded chapter path and decoded element IDs. Omit a fragment to target the entire chapter. Audio paths must be local manifest resources, and audio cues need an explicit end after the start in microseconds. Text-only cues contribute zero to the recorded duration.
+
+```python
+with doc_ex.open(revised) as source:
+    narrated = source.edit_epub_structure(
+        resources={"Audio/appendix.mp3": doc_ex.EpubResource("audio/mpeg", narration_bytes)},
+        overlays={
+            "Text/appendix.xhtml": [
+                doc_ex.EpubOverlayCue("intro", "Audio/appendix.mp3", 0, 1_500_000),
+                doc_ex.EpubOverlayCue("aside", epub_type="aside"),
+            ],
+        },
+    )
+```
+
+To detach narration, pass `None` as the chapter's overlay value. Detach or replace every affected association when a SMIL document shared by several chapters targets a chapter being detached. Old SMIL and audio stay in the archive until explicitly removed. The editor recomputes publication duration from associated overlays. For retained overlays it uses a declared duration or finite clip intervals.
 
 The edit methods return a new archive and preserve the uncompressed bytes of untouched members. A failed edit leaves the original open document usable. Signed and encrypted EPUBs are rejected.

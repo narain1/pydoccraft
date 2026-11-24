@@ -105,6 +105,7 @@ pub(crate) fn update_metadata(
         &mut book,
         HashMap::from([(package_path.as_str(), new_package.as_bytes())]),
         BTreeMap::new(),
+        &HashSet::new(),
     )
 }
 
@@ -112,8 +113,14 @@ pub(super) fn rewrite(
     book: &mut Book<'_>,
     mut replacements: HashMap<&str, &[u8]>,
     additions: BTreeMap<&str, &[u8]>,
+    removed: &HashSet<&str>,
 ) -> Result<Vec<u8>, EngineError> {
-    crate::limits::validate_member_count(book.archive.len().saturating_add(additions.len()))?;
+    crate::limits::validate_member_count(
+        book.archive
+            .len()
+            .saturating_sub(removed.len())
+            .saturating_add(additions.len()),
+    )?;
     for path in additions.keys() {
         super::validate_archive_path(path)?;
         if book.archive.index_for_name(path).is_some() {
@@ -133,7 +140,7 @@ pub(super) fn rewrite(
         writer.set_raw_comment(book.archive.comment().into());
         for index in 0..book.archive.len() {
             let member = book.archive.by_index_raw(index)?;
-            if member.name() == "mimetype" {
+            if member.name() == "mimetype" || removed.contains(member.name()) {
                 continue;
             }
             if let Some(content) = replacements.remove(member.name()) {
@@ -257,7 +264,7 @@ pub(crate) fn update_chapters(
             }
         }
     }
-    let result = rewrite(&mut book, replacements, BTreeMap::new())?;
+    let result = rewrite(&mut book, replacements, BTreeMap::new(), &HashSet::new())?;
     extract(&result, None)?;
     Ok(result)
 }

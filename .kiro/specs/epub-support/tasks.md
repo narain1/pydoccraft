@@ -22,4 +22,6 @@
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [ ] Extend overlay support for Ogg Opus, embedded audio/video, gapless MP3, long-cue streaming, and playback navigation.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
-- [ ] Add dependency-aware deletion of packaged resources and author new media-overlay associations.
+- [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.
+- [x] Attach or detach EPUB 3 media overlays and author sequential text and audio cues with package duration metadata.
+- [ ] Extend editing to obfuscated resources and author richer SMIL hierarchies.

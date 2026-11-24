@@ -21,7 +21,8 @@
 3. Limit individual images to 16 MiB, cumulative media and chapter content to 64 MiB each, and encoded EPUB output to 128 MiB.
 4. Update selected Dublin Core title and description fields in an existing unsigned book. Preserve the uncompressed bytes of untouched chapter and resource members and the unrelated OPF fields. Reject signed and encrypted packages.
 5. Replace multiple XHTML chapter resources by spine position in one transaction. Preserve the original publication's manifest, navigation and spine, and keep IDs targeted by the extracted links, navigation and overlays. Reject edits that fail validation and leave the original usable.
-6. Add, remove and reorder spine entries in one transaction. Update EPUB 3 navigation and EPUB 2 NCX, preserving unrelated package information and referenced resources. Add or replace supported local resources using decoded archive paths and validate the resulting book.
+6. Add, remove and reorder spine entries in one transaction. Update EPUB 3 navigation and EPUB 2 NCX, preserving unrelated package information and referenced resources. Add, replace and remove local resources using decoded archive paths. Reject removals that would break retained package, XML or stylesheet references in the final edit.
+7. Author EPUB 3 media overlay associations for existing or newly inserted chapters. Generate SMIL from ordered text targets and local audio clips, update package duration metadata and support detaching associations. Validate chapter targets and retained overlays when reopening the result.
 
 ## Preview and conversion
 
@@ -33,7 +34,7 @@
 6. Render local SVG CSS from prolog stylesheet instructions and embedded styles. Resolve CSS imports, packaged fonts and referenced PNG or JPEG images inside the archive. Exercise the SVG rendition in spine pages, XHTML images and semantic export while preserving the original SVG payload.
 7. Preserve inherited MathML run size, color and variant, and project supported accents, movable limits, tensor indices, separators and spacing into editable equations. Retain annotations in source markup and extract text from the primary presentation.
 8. Decode local PCM WAVE, MPEG Layer III, and AAC-LC MP4 overlay audio to bounded PCM clips with the SMIL interval and target. Provide readable narration for text-only cues and a sequential playback API with synchronized target callbacks.
-9. Full source CSS and fixed-layout fidelity, richer MathML layout, remaining overlay codecs and playback controls, asset deletion and authoring new media overlay associations remain open. DRM, script execution and unlisted conversion pairs remain outside the scope.
+9. Full source CSS and fixed-layout fidelity, richer MathML layout, remaining overlay codecs and playback controls, arbitrary authored SMIL hierarchies and edits to obfuscated resources remain open. DRM, script execution and unlisted conversion pairs remain outside the scope.
 
 ## Verification
 
