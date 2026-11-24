@@ -13,6 +13,8 @@ use crate::EngineError;
 
 #[path = "epub_math_compose.rs"]
 pub(super) mod compose;
+#[path = "epub_math_fraction.rs"]
+mod fraction;
 #[path = "epub_math_pdf.rs"]
 pub(super) mod pdf;
 #[path = "epub_math_table.rs"]
@@ -407,17 +409,17 @@ impl<'xml> Projection<'_, 'xml> {
                 let [num, den] = self.arguments(node, depth, style)?;
                 let kind = if boolean(node, "bevelled")? == Some(true) {
                     FracKind::Skewed
-                } else if node.attribute("linethickness").is_some_and(|value| {
-                    let value = value.trim();
-                    value == "none"
-                        || value
-                            .trim_end_matches(|c: char| c.is_ascii_alphabetic() || c == '%')
-                            .parse::<f32>()
-                            .is_ok_and(|value| value <= 0.0)
-                }) {
-                    FracKind::NoBar
                 } else {
-                    FracKind::Bar
+                    let viewport = self
+                        .stylesheet
+                        .map_or([super::layout::REFLOW_WIDTH, 792.0], |sheet| sheet.viewport);
+                    let fraction = fraction::Style::read(node, style.font_size(), viewport);
+                    let Some(kind) = fraction.native() else {
+                        return self.extras.push(compose::Extra::Fraction(Box::new(
+                            fraction::Fraction::new(fraction, style, num, den),
+                        )));
+                    };
+                    kind
                 };
                 MNode::Frac { kind, num, den }
             }

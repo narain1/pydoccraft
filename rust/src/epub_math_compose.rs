@@ -17,7 +17,7 @@ use crate::EngineError;
 const BOX_PREFIX: &str = "\0epub-math-box-";
 const GUIDE_FONT: &str = "Liberation Serif";
 const GUIDE_SIZE: f32 = 16.0;
-const MAX_GEOMETRY: f32 = 20_000.0;
+pub(super) const MAX_GEOMETRY: f32 = 20_000.0;
 const LIMIT_BOXES: usize = 512;
 const MAX_SAVED_DRAW_UNITS: usize = 250_000;
 
@@ -30,6 +30,7 @@ pub(in crate::epub) struct Extras {
 pub(super) enum Extra {
     Table(table::Table, Box<CharProps>),
     Padded(Box<Padding>),
+    Fraction(Box<super::fraction::Fraction>),
     Space([f32; 3]),
 }
 
@@ -63,6 +64,12 @@ pub(in crate::epub) fn selected(node: Node<'_, '_>) -> bool {
         "mspace" => ["height", "depth"]
             .iter()
             .any(|&key| node.attribute(key).is_some_and(|value| !zero_length(value))),
+        "mfrac" => {
+            node.attribute("bevelled").map(str::trim) != Some("true")
+                && super::fraction::Style::read(node, 1.0, [100.0; 2])
+                    .native()
+                    .is_none()
+        }
         "mpadded" => ["width", "height", "depth", "lspace", "voffset"]
             .iter()
             .any(|&key| node.attribute(key).is_some_and(|value| !zero_length(value))),
@@ -135,6 +142,7 @@ impl Extras {
                     table.layout(doc, &style, &measurements)?.into_math()
                 }
                 Extra::Padded(padding) => padding.layout(doc, format, &measurements)?,
+                Extra::Fraction(fraction) => fraction.layout(doc, format, &measurements)?,
                 Extra::Space([width, ascent, descent]) => MathLayout {
                     width,
                     ascent,

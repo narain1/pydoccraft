@@ -2867,3 +2867,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 693 installed tests, inclu
 ## 2026-11-24 Searchable MathML PDF and EPUB 3 compatibility navigation
 
 The Linux x86-64 CPython 3.11.15 wheel passed 696 installed tests, including 101 EPUB tests. It measured 23,757,129 bytes with a 55,226,840-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-searchable-mathml-pdf-and-epub-3-compatibility-navigation) covers reopened search and render results and the EPUBCheck validation of synchronized navigation.
+
+## 2026-11-24 MathML fraction rules and alignment
+
+The Linux x86-64 CPython 3.11.15 wheel passed 698 installed tests, including 103 EPUB tests. It measured 23,769,408 bytes with a 55,261,512-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-mathml-fraction-rules-and-alignment) covers measured rule thickness, operand alignment, searchable PDF, and the public Linear Algebra sample.

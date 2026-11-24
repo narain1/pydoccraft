@@ -2658,6 +2658,87 @@ class EpubTests(unittest.TestCase):
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "composed geometry"):
                 book.convert("docx")
 
+    def test_mathml_custom_fraction_rule_and_alignment_render_and_export(self) -> None:
+        def fraction(thickness: str, alignment: str = "center") -> str:
+            return f"""<m:math display="block" mathsize="24pt" mathcolor="#1360c8">
+            <m:mfrac linethickness="{thickness}" numalign="{alignment}">
+              <m:mtext mathcolor="#c82a31">H</m:mtext>
+              <m:mtext mathcolor="#238449">HHHHH</m:mtext>
+            </m:mfrac></m:math>"""
+
+        def page(thickness: str, alignment: str = "center") -> str:
+            return f"""<html xmlns="http://www.w3.org/1999/xhtml"
+              xmlns:m="http://www.w3.org/1998/Math/MathML"><head><title>Math rules</title>
+              <meta name="viewport" content="width=440,height=320"/></head>
+              <body><p>{fraction(thickness, alignment)}</p></body></html>"""
+
+        def bounds(png: bytes) -> dict[str, tuple[int, int, int, int]]:
+            width, pixels = rgba_pixels(png_chunks(png))
+            inks = {bytes.fromhex(color + "ff"): [] for color in ("1360c8", "c82a31", "238449")}
+            for i in range(0, len(pixels), 4):
+                points = inks.get(pixels[i:i + 4])
+                if points is not None:
+                    points.append((i // 4 % width, i // 4 // width))
+            return {
+                ink[:3].hex(): (min(x for x, _ in points), min(y for _, y in points),
+                                max(x for x, _ in points), max(y for _, y in points))
+                for ink, points in inks.items() if points
+            }
+
+        def check_thick(png: bytes) -> None:
+            ink = bounds(png)
+            rule, num, den = (ink[key] for key in ("1360c8", "c82a31", "238449"))
+            self.assertAlmostEqual(rule[3] - rule[1] + 1, 12, delta=1)
+            self.assertAlmostEqual(num[0], den[0], delta=1)
+            self.assertLess(num[3], rule[1])
+            self.assertLess(rule[3], den[1])
+
+        source = epub_fixture(chapter_one=page("6pt", "left"))
+        with doc_ex.open(source) as book:
+            check_thick(book.render_page(0, dpi=144))
+            with doc_ex.open(book.convert("pdf")) as pdf:
+                self.assertEqual(len(pdf[0].search_for("HHHHH")), 1)
+                check_thick(pdf.render_page(0, dpi=144))
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "composed geometry"):
+                book.convert("docx")
+
+        fixed = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 440, 320)])
+        fixed = rewrite_epub(fixed, {"OEBPS/s0.xhtml": page("8px", "left")})
+        with doc_ex.open(fixed) as book:
+            check_thick(book.render_page(0, dpi=144))
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=144)) as pdf:
+                check_thick(pdf.render_page(0, dpi=144))
+
+        with doc_ex.open(epub_fixture(chapter_one=page("0", "right"))) as book:
+            with doc_ex.open(book.convert("pdf")) as pdf:
+                for render in (book.render_page(0, dpi=144), pdf.render_page(0, dpi=144)):
+                    ink = bounds(render)
+                    self.assertNotIn("1360c8", ink)
+                    self.assertAlmostEqual(ink["c82a31"][2], ink["238449"][2], delta=1)
+
+    def test_mathml_fraction_percentage_and_legacy_rules(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"
+          xmlns:m="http://www.w3.org/1998/Math/MathML"><head><title>Relative rules</title></head>
+          <body><p><m:math display="block" mathsize="32pt">
+            <m:mfrac mathcolor="#b72159" linethickness="{}">
+              <m:mtext mathcolor="#231a08">Top</m:mtext>
+              <m:mtext mathcolor="#231a08">Bottom</m:mtext>
+            </m:mfrac></m:math></p></body></html>"""
+
+        def preview(thickness: str) -> bytes:
+            with doc_ex.open(epub_fixture(chapter_one=template.format(thickness))) as book:
+                return book.render_page(0, dpi=144)
+
+        self.assertEqual(preview("thick"), preview("200%"))
+        self.assertEqual(preview("thin"), preview("50%"))
+        rose = bytes.fromhex("b72159ff")
+        self.assertGreater(rgba_pixels(png_chunks(preview("thick")))[1].count(rose),
+                           rgba_pixels(png_chunks(preview("thin")))[1].count(rose))
+        for excessive in ("999999%", "30000pt"):
+            with self.subTest(excessive=excessive), doc_ex.open(epub_fixture(chapter_one=template.format(excessive))) as book:
+                with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "MathML fraction rule"):
+                    book.render_page(0)
+
     def test_mathml_composed_pdf_keeps_text_and_positions_across_pages(self) -> None:
         def grid(top: str, left: str, right: str) -> str:
             return f"""<m:mtable rowspacing="4pt" columnspacing="8pt">
