@@ -25,12 +25,7 @@ pub(super) fn render(
         .get(page)
         .ok_or_else(|| EngineError::PageIndex("EPUB chapter is out of range".into()))?;
     let mut output = Output::new(data, book, false, dpi);
-    if page
-        .metadata
-        .get("fixed_layout")
-        .and_then(serde_json::Value::as_bool)
-        == Some(true)
-    {
+    if super::rendition::fixed(page) {
         return Err(unsupported("fixed-layout spine entries"));
     }
     output.document.body = output.blocks(&page.blocks, 468.0)?;
@@ -64,12 +59,7 @@ pub(super) fn convert(
     let mut output = Output::new(data, book, true, 192.0);
     let mut body = Vec::new();
     for (index, page) in book.pages.iter().enumerate() {
-        if page
-            .metadata
-            .get("fixed_layout")
-            .and_then(serde_json::Value::as_bool)
-            == Some(true)
-        {
+        if super::rendition::fixed(page) {
             return Err(unsupported("fixed-layout spine entries"));
         }
         let mut blocks = output.blocks(&page.blocks, 468.0)?;

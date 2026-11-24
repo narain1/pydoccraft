@@ -8,14 +8,10 @@ use resvg::{tiny_skia, usvg};
 use roxmltree::Node;
 
 use super::{
-    charge, content, css::Cascade, external, fonts, invalid, limited, resolve, unsupported, Book,
+    charge, content, css::Cascade, external, fonts, invalid, limited, rendition::Region, resolve,
+    unsupported, Book,
 };
-use crate::{
-    author_epub::escape_attribute,
-    model::ImagePayload,
-    rendering::{self, Clip, RasterRegion},
-    EngineError,
-};
+use crate::{author_epub::escape_attribute, model::ImagePayload, EngineError};
 
 pub(super) const NS: &str = "http://www.w3.org/2000/svg";
 pub(super) const XLINK: &str = "http://www.w3.org/1999/xlink";
@@ -123,8 +119,8 @@ pub(super) fn render(
     book: &mut Book<'_>,
     fixed: bool,
     dpi: f64,
-    clip: Option<Clip>,
-) -> Result<Vec<u8>, EngineError> {
+    region: Region,
+) -> Result<wordcraft_render::Rendered, EngineError> {
     let viewport = viewport(root);
     if fixed && viewport.is_none() {
         return Err(unsupported("fixed-layout SVG requires a numeric viewBox"));
@@ -132,24 +128,7 @@ pub(super) fn render(
     let tree = parse(root, source, base, book, viewport)?;
     let [w, h] = viewport.unwrap_or([tree.size().width() * 0.75, tree.size().height() * 0.75]);
     let scale = dpi / 72.0;
-    let pixel_size = [w, h].map(|n| (f64::from(n) * scale).ceil().max(1.0));
-    let region = if let Some(clip) = clip {
-        RasterRegion::new(
-            clip,
-            [f64::from(w), f64::from(h)],
-            scale,
-            pixel_size,
-            wordcraft_render::MAX_SIDE,
-        )?
-    } else {
-        rendering::validate_size(pixel_size[0], pixel_size[1], wordcraft_render::MAX_SIDE)?;
-        RasterRegion {
-            x: 0,
-            y: 0,
-            width: pixel_size[0] as u32,
-            height: pixel_size[1] as u32,
-        }
-    };
+    let region = region.for_page([f64::from(w), f64::from(h)], dpi)?;
     let mut image = tiny_skia::Pixmap::new(region.width, region.height)
         .ok_or_else(|| limited("cannot allocate EPUB SVG viewport"))?;
     image.fill(tiny_skia::Color::WHITE);
@@ -162,7 +141,11 @@ pub(super) fn render(
         -(region.y as f32),
     );
     resvg::render(&tree, transform, &mut image.as_mut());
-    rendering::encode_png(region.width, region.height, image.data(), dpi)
+    Ok(wordcraft_render::Rendered {
+        width: region.width,
+        height: region.height,
+        pixels: image.take(),
+    })
 }
 
 pub(super) fn embedded(

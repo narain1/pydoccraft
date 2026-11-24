@@ -348,6 +348,28 @@ fn render(
 }
 
 #[pyfunction]
+#[pyo3(signature = (data, page, dpi, landscape, clip=None))]
+fn _render_epub_spread(
+    data: &[u8],
+    page: usize,
+    dpi: f64,
+    landscape: bool,
+    clip: Option<rendering::Clip>,
+) -> Result<Vec<u8>, EngineError> {
+    crate::epub::render_spread(data, page, dpi, landscape, clip)
+}
+
+#[pyfunction]
+#[pyo3(signature = (data, dpi, pages=None))]
+fn _export_epub_fixed_pdf(
+    data: &[u8],
+    dpi: f64,
+    pages: Option<Vec<usize>>,
+) -> Result<Vec<u8>, EngineError> {
+    crate::epub::export_fixed_pdf(data, dpi, pages.as_deref())
+}
+
+#[pyfunction]
 #[pyo3(signature = (data, title=None, description=None))]
 fn _edit_epub_metadata(
     data: &[u8],
@@ -455,6 +477,8 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(_open_pdf, module)?)?;
     module.add_function(wrap_pyfunction!(_open_office, module)?)?;
     module.add_function(wrap_pyfunction!(extract, module)?)?;
+    module.add_function(wrap_pyfunction!(_render_epub_spread, module)?)?;
+    module.add_function(wrap_pyfunction!(_export_epub_fixed_pdf, module)?)?;
     module.add_function(wrap_pyfunction!(_edit_epub_metadata, module)?)?;
     module.add_function(wrap_pyfunction!(_edit_epub_chapters, module)?)?;
     module.add_function(wrap_pyfunction!(_edit_epub_structure, module)?)?;

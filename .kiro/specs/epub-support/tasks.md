@@ -16,7 +16,9 @@
 - [x] Apply local author styles for the supported cascade and layout properties. Render fixed-layout XHTML and static SVG chapters with viewport bounds and clipping.
 - [x] Render local CSS font faces, IDPF-obfuscated fonts, and static SVG embedded in XHTML. Preserve inline equations, images and table spans with packaged fonts. Rasterize static SVG in semantic export.
 - [x] Render SVG CSS, packaged SVG fonts, and referenced PNG and JPEG resources in spine previews, XHTML and semantic export.
-- [ ] Extend source CSS and fixed-layout fidelity, including font Unicode ranges and variable axes, additional SVG features, synthetic spreads and conversion.
+- [x] Render fixed-layout spreads in both reading directions, honor spine placement and orientation-dependent spread rules, and clip across page boundaries.
+- [x] Export selected fixed-layout viewports as image-only PDF pages at their original sizes.
+- [ ] Extend source CSS and fixed-layout fidelity, including font Unicode ranges and variable axes, additional SVG features and semantic fixed-layout conversion.
 - [x] Project inherited MathML attributes, accents, movable limits, repeated script pairs, varied fences and separators, horizontal spaces, and zero-dimension padding.
 - [ ] Expand MathML layout to remaining elements and attributes, including spanning matrices, arbitrary padding and CSS within formulas.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.

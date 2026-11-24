@@ -32,7 +32,7 @@ The EPUB adapter owns author stylesheet resolution and knows only archive paths.
 
 `epub_svg.rs` applies the shared EPUB cascade to SVG prolog stylesheets and embedded declarations in source order. It sends only supported presentation properties and same-document paint references to resvg. SVG images carry their archive resolution base independently of the original markup and public image name. The renderer supplies PNG or JPEG resources through a bounded in-memory resolver. The SVG font database is scoped to the rendition and registers packaged fonts under their CSS family names. External resolvers for file and data URLs are disabled.
 
-Broader selectors, CSS custom properties, font Unicode ranges and variable-axis selection, synthetic spreads, additional SVG features and CSS-aware conversion remain open.
+Broader selectors, CSS custom properties, font Unicode ranges and variable-axis selection, additional SVG features and semantic fixed-layout conversion remain open.
 
 
 ## Presentation MathML
@@ -47,3 +47,10 @@ WordCraft represents zeroed `mpadded` metrics with its visible phantom node. Hor
 The structure editor rewrites the spine and navigation first, then stages narration association and duration edits. It creates one SMIL document per edited chapter with ordered text and audio cues. Durations use checked microsecond arithmetic. The package total sums each associated overlay once. Retained overlays use declared duration metadata or explicit clip ranges. Text-only cues contribute zero recorded duration.
 
 Resource removal checks the staged archive after additions, replacements, and overlay changes. It validates retained package ID references, targets in XHTML, SVG, SMIL and NCX, and stylesheet dependencies. The scan follows archive-local stylesheet links and imports regardless of media conditions. It includes recognized off-spine resources and excludes the removed members, allowing jointly removed assets to reference each other. Assets that are obfuscated or have unprovable scripted dependencies fail explicitly. Untouched ZIP members are raw-copied. The reader reopens and validates the entire result before returning bytes.
+
+
+## Fixed-layout spreads and visual export
+
+The reader preserves package progression and spread settings and spine-level placement and spread overrides. EPUB spread preview pairs fixed-layout entries in progression order. Centered entries, reflowable chapters and entries where the active spread policy disables facing pages use an individual viewport. Non-linear entries can be previewed individually. The first automatic placement is the trailing slot. A missing companion is a white slot with the dimensions of the present chapter.
+
+XHTML and SVG render into the shared pixel-region format. Spread composition places their original-sized rasters edge to edge, aligns their top edges, and paints only regions that intersect the requested clip. Fixed-layout visual PDF export renders each requested chapter as a full-page image and passes its original viewport to the pinned PDF writer. The export bounds aggregate pixel and encoded-image counts.

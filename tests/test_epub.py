@@ -82,6 +82,42 @@ def narrated_epub(*, first_clip_end: str = "00:00:01.125", first_target: str = "
     }), recorded
 
 
+def fixed_spread_fixture(
+    entries: list[tuple[str, str, int, int]],
+    *,
+    direction: str = "ltr",
+    policy: str = "both",
+) -> bytes:
+    source = epub_fixture()
+    with zipfile.ZipFile(io.BytesIO(source)) as archive:
+        package = archive.read("OEBPS/content.opf")
+    package = package.replace(
+        b"</metadata>",
+        (f'<meta property="rendition:layout">pre-paginated</meta>'
+         f'<meta property="rendition:spread">{policy}</meta></metadata>').encode(),
+    )
+    manifest = []
+    spine = []
+    updates = {}
+    for index, (properties, color, width, height) in enumerate(entries):
+        path = f"s{index}.xhtml"
+        manifest.append(f'<item id="s{index}" href="{path}" media-type="application/xhtml+xml"/>')
+        linear = ' linear="no"' if "nonlinear" in properties else ""
+        properties = properties.replace("nonlinear", "").strip()
+        spine.append(f'<itemref idref="s{index}" properties="{properties}"{linear}/>')
+        updates["OEBPS/" + path] = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head>
+          <title>Chapter {index + 1}</title>
+          <meta name="viewPort" content="width={width}px; height = {height}.0px width=4000, height=4000"/>
+          <meta name="viewport" content="width=90,height=90"/>
+          <style>html {{ background: {color} }}</style></head><body/></html>"""
+    package = package.replace(b"</manifest>", ("".join(manifest) + "</manifest>").encode())
+    package = package.replace(
+        b'<spine><itemref idref="one"/><itemref idref="two"/></spine>',
+        (f'<spine page-progression-direction="{direction}">' + "".join(spine) + "</spine>").encode(),
+    )
+    return rewrite_epub(source, {**updates, "OEBPS/content.opf": package})
+
+
 class EpubTests(unittest.TestCase):
     def test_spine_edit_updates_navigation_and_keeps_removed_resources_reachable(self) -> None:
         source, original_audio = narrated_epub()
@@ -384,6 +420,122 @@ class EpubTests(unittest.TestCase):
         with doc_ex.open(signed) as document, self.assertRaises(doc_ex.UnsupportedFormatError):
             document.edit_epub_structure([1, 0])
 
+    def test_fixed_spreads_pair_in_ltr_order_with_blank_and_centered_pages(self) -> None:
+        data = fixed_spread_fixture([
+            ("", "#aa2211", 120, 80),
+            ("", "#1155cc", 120, 80),
+            ("", "#33aacc", 100, 74),
+            ("rendition:page-spread-center", "#ffd411", 180, 90),
+            ("page-spread-left", "#119933", 120, 80),
+            ("rendition:page-spread-left", "#661133", 120, 80),
+            ("rendition:page-spread-right", "#225588", 120, 80),
+        ])
+        with doc_ex.open(data) as book:
+            self.assertEqual(book.metadata["page_progression_direction"], "ltr")
+            self.assertEqual(book.metadata["rendition_spread"], "both")
+            self.assertEqual(book[0].metadata["viewport"], [90, 60])
+            cover = png_chunks(book.render_epub_spread(0, dpi=96))
+            self.assertEqual(struct.unpack_from(">II", cover[b"IHDR"]), (240, 80))
+            _, pixels = rgba_pixels(cover)
+            self.assertEqual(pixels[:4], b"\xff\xff\xff\xff")
+            self.assertEqual(pixels[120*4:121*4], bytes((170, 34, 17, 255)))
+            paired = book.render_epub_spread(1, dpi=96)
+            self.assertEqual(paired, book.render_epub_spread(2, dpi=96))
+            self.assertEqual(paired, book.render_epub_spread(1, dpi=96, orientation="portrait"))
+            w, pixels = rgba_pixels(png_chunks(paired))
+            self.assertEqual(w, 220)
+            self.assertEqual(pixels[:4], bytes((17, 85, 204, 255)))
+            self.assertEqual(pixels[120*4:121*4], bytes((51, 170, 204, 255)))
+            start = (76*w+120)*4
+            self.assertEqual(pixels[start:start+4], b"\xff\xff\xff\xff")
+            cropped = png_chunks(book.render_epub_spread(1, dpi=96, clip=(85.5, 9.75, 12, 10.5)))
+            self.assertEqual(struct.unpack_from(">II", cropped[b"IHDR"]), (16, 14))
+            _, clip_pixels = rgba_pixels(cropped)
+            expected = b"".join(pixels[(y*w+114)*4:(y*w+130)*4] for y in range(13, 27))
+            self.assertEqual(clip_pixels, expected)
+            self.assertEqual(book.render_epub_spread(3, dpi=96), book.render_page(3, dpi=96))
+            _, solo = rgba_pixels(png_chunks(book.render_epub_spread(4, dpi=96)))
+            self.assertEqual(solo[120*4:121*4], b"\xff\xff\xff\xff")
+            self.assertEqual(book.render_epub_spread(5, dpi=96), book.render_epub_spread(-1, dpi=96))
+
+    def test_fixed_spreads_apply_rtl_orientation_and_linear_overrides(self) -> None:
+        data = fixed_spread_fixture([
+            ("page-spread-right", "#550000", 120, 80),
+            ("nonlinear", "#ffff00", 120, 80),
+            ("rendition:page-spread-left", "#000077", 120, 80),
+            ("rendition:spread-none page-spread-right", "#aa33aa", 120, 80),
+            ("rendition:spread-both page-spread-right", "#335577", 120, 80),
+            ("rendition:spread-both page-spread-left", "#557799", 120, 80),
+        ], direction="rtl", policy="landscape")
+        with doc_ex.open(data) as book:
+            self.assertEqual(book.metadata["page_progression_direction"], "rtl")
+            w, pixels = rgba_pixels(png_chunks(book.render_epub_spread(0, dpi=96)))
+            self.assertEqual(w, 240)
+            self.assertEqual(pixels[:4], bytes((0, 0, 119, 255)))
+            self.assertEqual(pixels[120*4:121*4], bytes((85, 0, 0, 255)))
+            self.assertEqual(book.render_epub_spread(1, dpi=96), book.render_page(1, dpi=96))
+            self.assertEqual(book.render_epub_spread(0, dpi=96, orientation="portrait"), book.render_page(0, dpi=96))
+            self.assertEqual(book.render_epub_spread(3, dpi=96), book.render_page(3, dpi=96))
+            self.assertEqual(book.render_epub_spread(4, dpi=96, orientation="portrait"), book.render_epub_spread(5, dpi=96))
+            with self.assertRaises(ValueError):
+                book.render_epub_spread(0, orientation="frames")
+            with self.assertRaises(IndexError):
+                book.render_epub_spread(-7)
+
+    def test_spread_clip_can_render_across_gutter_without_full_page_allocations(self) -> None:
+        data = fixed_spread_fixture([
+            ("page-spread-left", "#aa2211", 6_000, 180),
+            ("page-spread-right", "#1155cc", 6_000, 180),
+        ])
+        with doc_ex.open(data) as book:
+            with self.assertRaises(doc_ex.UnsafeArchiveError):
+                book.render_epub_spread(1, dpi=600)
+            clipped = png_chunks(book.render_epub_spread(1, dpi=600, clip=(4494, 18, 12, 6)))
+            self.assertEqual(struct.unpack_from(">II", clipped[b"IHDR"]), (100, 50))
+            _, pixels = rgba_pixels(clipped)
+            self.assertEqual(pixels[49*4:50*4], bytes((170, 34, 17, 255)))
+            self.assertEqual(pixels[50*4:51*4], bytes((17, 85, 204, 255)))
+
+    def test_visual_pdf_preserves_fixed_xhtml_and_svg_viewports_and_selection(self) -> None:
+        data = fixed_spread_fixture([
+            ("page-spread-left", "#13613c", 160, 100),
+            ("page-spread-right", "#cc2300", 110, 86),
+            ("rendition:layout-reflowable", "black", 150, 80),
+        ])
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        package = package.replace(b'href="s1.xhtml" media-type="application/xhtml+xml"',
+                                  b'href="s1.svg" media-type="image/svg+xml"')
+        data = rewrite_epub(data, {
+            "OEBPS/content.opf": package,
+            "OEBPS/s1.svg": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="15 13 110 86">
+                 <rect x="15" y="13" width="110" height="86" fill="#cc2300"/></svg>""",
+        })
+        with doc_ex.open(data) as book:
+            with self.assertRaises(doc_ex.UnsupportedFormatError):
+                book.export_epub_fixed_pdf()
+            with self.assertRaises(ValueError):
+                book.export_epub_fixed_pdf(pages=[])
+            with self.assertRaises(doc_ex.UnsupportedFormatError):
+                book.convert("pdf")
+            spread = png_chunks(book.render_epub_spread(0, dpi=96))
+            self.assertEqual(struct.unpack_from(">II", spread[b"IHDR"]), (270, 100))
+            w, pixels = rgba_pixels(spread)
+            self.assertEqual(pixels[159*4:160*4], bytes((19, 97, 60, 255)))
+            self.assertEqual(pixels[160*4:161*4], bytes((204, 35, 0, 255)))
+            pdf = book.export_epub_fixed_pdf(dpi=96, pages=[-2, 0])
+        with doc_ex.open(pdf) as result:
+            self.assertEqual(len(result), 2)
+            for index, (dimensions, rgb) in enumerate((((110, 86), (204, 35, 0)), ((160, 100), (19, 97, 60)))):
+                with self.subTest(index=index):
+                    raster = png_chunks(result.render_page(index, dpi=96))
+                    self.assertEqual(struct.unpack_from(">II", raster[b"IHDR"]), dimensions)
+                    _, pixels = rgba_pixels(raster)
+                    offset = (20 * dimensions[0] + 20) * 4
+                    self.assertEqual(pixels[offset:offset+4], bytes((*rgb, 255)))
+                    self.assertEqual(len(result[index].get_images()), 1)
+                    self.assertEqual(result[index].get_text().strip(), "")
+
     def test_fixed_layout_uses_viewport_and_local_stylesheet_cascade(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head>
         <meta name="viewport" content="width=320, height=240"/>
@@ -589,7 +741,9 @@ class EpubTests(unittest.TestCase):
         .art {position: absolute; left: 10px; top: 20px; width: 60px; height: 40px;}
         img {position: absolute; left: 100px; top: 20px; width: 60px; height: 40px;}
         </style></head><body>
-        <s:svg class="art" viewBox="0 0 30 20"><s:title>Red rectangle</s:title>
+        <s:svg class="art" viewBox="0 0 30 20" image-rendering="optimizeQuality"
+          shape-rendering="geometricPrecision" text-rendering="geometricPrecision"
+          color-rendering="optimizeQuality"><s:title>Red rectangle</s:title>
         <s:rect x="5" y="5" width="20" height="10" fill="#dd2211"/></s:svg>
         <img src="graphics/tile.svg" alt="Blue rectangle"/>
         </body></html>"""

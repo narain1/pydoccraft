@@ -7,7 +7,11 @@ use std::{
 use roxmltree::{Document, Node, ParsingOptions};
 use serde_json::{json, Map, Value};
 
-use crate::{model::DocumentPayload, EngineError};
+use crate::{
+    model::{DocumentPayload, PagePayload},
+    rendering::{self, Clip},
+    EngineError,
+};
 
 #[cfg(feature = "python")]
 #[path = "epub_audio.rs"]
@@ -30,6 +34,8 @@ mod obfuscation;
 mod output;
 #[path = "epub_overlay.rs"]
 mod overlay;
+#[path = "epub_rendition.rs"]
+mod rendition;
 #[path = "epub_structure.rs"]
 mod structure;
 #[path = "epub_style.rs"]
@@ -45,17 +51,49 @@ pub(crate) fn render(
     page: usize,
     dpi: f64,
     password: Option<&str>,
-    clip: Option<crate::rendering::Clip>,
+    clip: Option<Clip>,
 ) -> Result<Vec<u8>, EngineError> {
     let book = extract(data, password)?;
     let chapter = book
         .pages
         .get(page)
         .ok_or_else(|| EngineError::PageIndex("EPUB chapter is out of range".into()))?;
-    if let Some(png) = layout::render(data, &book, chapter, dpi, clip)? {
-        return Ok(png);
+    render_page(data, &book, chapter, dpi, clip)
+}
+
+fn render_page(
+    data: &[u8],
+    book: &DocumentPayload,
+    chapter: &PagePayload,
+    dpi: f64,
+    clip: Option<Clip>,
+) -> Result<Vec<u8>, EngineError> {
+    if let Some(pixels) =
+        layout::render(data, book, chapter, dpi, rendition::Region::Viewport(clip))?
+    {
+        return rendering::encode_png(pixels.width, pixels.height, &pixels.pixels, dpi);
     }
-    output::render(data, &book, page, dpi, clip)
+    output::render(data, book, chapter.number, dpi, clip)
+}
+
+#[cfg(feature = "python")]
+pub(crate) fn render_spread(
+    data: &[u8],
+    page: usize,
+    dpi: f64,
+    landscape: bool,
+    clip: Option<Clip>,
+) -> Result<Vec<u8>, EngineError> {
+    rendition::render_spread(data, &extract(data, None)?, page, dpi, landscape, clip)
+}
+
+#[cfg(feature = "python")]
+pub(crate) fn export_fixed_pdf(
+    data: &[u8],
+    dpi: f64,
+    pages: Option<&[usize]>,
+) -> Result<Vec<u8>, EngineError> {
+    rendition::export_pdf(data, &extract(data, None)?, dpi, pages)
 }
 
 pub(crate) fn convert(
@@ -137,6 +175,24 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
                 .text()
                 .is_some_and(|text| text.trim() == "pre-paginated")
     });
+    if let Some(direction @ ("ltr" | "rtl" | "default")) =
+        spine.attribute("page-progression-direction")
+    {
+        metadata.insert("page_progression_direction".into(), json!(direction));
+    }
+    if let Some(policy) = package_info
+        .children()
+        .find_map(|node| {
+            (name(node, OPF, "meta")
+                && node.attribute("property") == Some("rendition:spread")
+                && node.attribute("refines").is_none())
+            .then(|| node.text().map(str::trim))
+            .flatten()
+        })
+        .filter(|policy| matches!(*policy, "auto" | "none" | "landscape" | "portrait" | "both"))
+    {
+        metadata.insert("rendition_spread".into(), json!(policy));
+    }
     let mut items = HashMap::new();
     let mut items_by_path = HashMap::new();
     let mut navigation = None;
@@ -296,6 +352,25 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
             match property {
                 "rendition:layout-pre-paginated" => fixed = true,
                 "rendition:layout-reflowable" => fixed = false,
+                "rendition:page-spread-left" | "page-spread-left" => {
+                    page.metadata.insert("page_spread".into(), json!("left"));
+                }
+                "rendition:page-spread-right" | "page-spread-right" => {
+                    page.metadata.insert("page_spread".into(), json!("right"));
+                }
+                "rendition:page-spread-center" => {
+                    page.metadata.insert("page_spread".into(), json!("center"));
+                }
+                "rendition:spread-none"
+                | "rendition:spread-landscape"
+                | "rendition:spread-portrait"
+                | "rendition:spread-both"
+                | "rendition:spread-auto" => {
+                    page.metadata.insert(
+                        "rendition_spread".into(),
+                        json!(&property["rendition:spread-".len()..]),
+                    );
+                }
                 _ => {}
             }
         }

@@ -427,13 +427,17 @@ class Document:
         self._ensure_open()
         return len(self._pages)
 
-    def load_page(self, number: int) -> Page:
+    def _page_index(self, number: int) -> int:
         self._ensure_open()
-        if number < 0:
-            number += len(self._pages)
-        if number < 0 or number >= len(self._pages):
+        number = operator.index(number)
+        self._ensure_open()
+        count = len(self._pages)
+        if not -count <= number < count:
             raise IndexError("page index out of range")
-        return self._pages[number]
+        return number % count
+
+    def load_page(self, number: int) -> Page:
+        return self._pages[self._page_index(number)]
 
     def __len__(self) -> int:
         return self.page_count
@@ -536,11 +540,7 @@ class Document:
         return files
 
     def render_page(self, page: int, dpi: float = 144, *, clip: tuple[float, float, float, float] | None = None) -> bytes:
-        self._ensure_open()
-        if page < 0:
-            page += len(self._pages)
-        if page < 0 or page >= len(self._pages):
-            raise IndexError("page index out of range")
+        page = self._page_index(page)
         from . import _core, _native
         region = _render_clip(clip)
         session = self._render_session
@@ -548,6 +548,51 @@ class Document:
             return bytes(_native(lambda: session.render(page, dpi, region)))
         self._ensure_open()
         return bytes(_native(lambda: _core.render(self._source, self._filetype, page, dpi, self._password, region)))
+
+    def render_epub_spread(
+        self,
+        page: int,
+        dpi: float = 144,
+        *,
+        orientation: Literal["landscape", "portrait"] = "landscape",
+        clip: tuple[float, float, float, float] | None = None,
+    ) -> bytes:
+        """Render the EPUB spread containing a spine page as PNG."""
+        self._ensure_open()
+        if self._filetype != "epub":
+            from .errors import UnsupportedFormatError
+
+            raise UnsupportedFormatError("spread rendering requires EPUB input")
+        if orientation not in ("landscape", "portrait"):
+            raise ValueError("EPUB spread orientation must be landscape or portrait")
+        from . import _core, _native
+
+        page = self._page_index(page)
+        region = _render_clip(clip)
+        self._ensure_open()
+        return bytes(_native(lambda: _core._render_epub_spread(
+            self._source, page, dpi, orientation == "landscape", region,
+        )))
+
+    def export_epub_fixed_pdf(self, *, dpi: float = 144, pages: Iterable[int] | None = None) -> bytes:
+        """Export selected fixed-layout spine pages as full-page images in a PDF."""
+        self._ensure_open()
+        if self._filetype != "epub":
+            from .errors import UnsupportedFormatError
+
+            raise UnsupportedFormatError("fixed-layout visual PDF export requires EPUB input")
+        from . import _core, _native
+
+        selected = None
+        if pages is not None:
+            selected = []
+            for page in pages:
+                self._ensure_open()
+                if len(selected) >= 10_000:
+                    raise UnsafeArchiveError("too many EPUB PDF export pages")
+                selected.append(self._page_index(page))
+        self._ensure_open()
+        return bytes(_native(lambda: _core._export_epub_fixed_pdf(self._source, dpi, selected)))
 
     def convert(self, output_format: str) -> bytes:
         self._ensure_open()

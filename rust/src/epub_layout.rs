@@ -20,13 +20,13 @@ use super::{
     invalid, limited, name,
     output::{image_bytes, Output, RasterImage},
     parse_xml,
+    rendition::{fixed, Region},
     style::{Paint, Styled},
     unsupported, Book, XHTML, XML_BYTES,
 };
 use crate::{
     model::{DocumentPayload, PagePayload},
-    rendering::{self, Clip, RasterRegion},
-    EngineError,
+    rendering, EngineError,
 };
 
 const REFLOW_WIDTH: f32 = 612.0;
@@ -38,13 +38,9 @@ pub(super) fn render(
     book: &DocumentPayload,
     page: &PagePayload,
     dpi: f64,
-    clip: Option<Clip>,
-) -> Result<Option<Vec<u8>>, EngineError> {
-    let fixed = page
-        .metadata
-        .get("fixed_layout")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
+    region: Region,
+) -> Result<Option<wordcraft_render::Rendered>, EngineError> {
+    let fixed = fixed(page);
     rendering::validate_dpi(dpi)?;
     let path = page
         .metadata
@@ -56,7 +52,7 @@ pub(super) fn render(
     let doc = parse_xml(&source)?;
     let root = doc.root_element();
     if root.has_tag_name((super::svg::NS, "svg")) {
-        return super::svg::render(root, &source, path, &mut archive, fixed, dpi, clip).map(Some);
+        return super::svg::render(root, &source, path, &mut archive, fixed, dpi, region).map(Some);
     }
     let body = child(root, XHTML, "body").ok_or_else(|| invalid("XHTML chapter has no body"))?;
     let viewport = if fixed {
@@ -134,7 +130,7 @@ pub(super) fn render(
         &mut HashMap::new(),
         &mut drawing,
     )?;
-    raster(&layout.output.document, &drawing, dimension, dpi, clip).map(Some)
+    raster(&layout.output.document, &drawing, dimension, dpi, region).map(Some)
 }
 
 pub(super) fn dimensions(root: Node<'_, '_>) -> Option<[f32; 2]> {
@@ -145,21 +141,75 @@ pub(super) fn dimensions(root: Node<'_, '_>) -> Option<[f32; 2]> {
                 .attribute("name")
                 .is_some_and(|value| value.eq_ignore_ascii_case("viewport"))
     })?;
-    let mut dims = [0.0; 2];
-    for pair in meta.attribute("content")?.split(',') {
-        let Some((name, value)) = pair.split_once('=') else {
+    let mut input = meta.attribute("content")?;
+    let separator = |ch: char| ch.is_ascii_whitespace() || matches!(ch, ',' | ';');
+    let mut dims = [None; 2];
+    loop {
+        input = input.trim_start_matches(separator);
+        if input.is_empty() {
+            break;
+        }
+        let key_len = input
+            .find(|ch| separator(ch) || ch == '=')
+            .unwrap_or(input.len());
+        let (key, remaining) = input.split_at(key_len);
+        let remaining = remaining.trim_start_matches(|ch: char| ch.is_ascii_whitespace());
+        let Some(value) = remaining.strip_prefix('=') else {
+            input = remaining;
             continue;
         };
-        let index = match name.trim() {
-            "width" => 0,
-            "height" => 1,
-            _ => continue,
+        let value = value.trim_start_matches(|ch: char| ch.is_ascii_whitespace());
+        let (value, remaining) = value.split_at(value.find(separator).unwrap_or(value.len()));
+        input = remaining;
+        let index = if key.eq_ignore_ascii_case("width") {
+            0
+        } else if key.eq_ignore_ascii_case("height") {
+            1
+        } else {
+            continue;
         };
-        dims[index] = value.trim().parse::<f32>().ok()? * 0.75;
+        if dims[index].is_none() {
+            let pixels = numeric_prefix(value)?;
+            let points = pixels * 0.75;
+            if !points.is_finite() || points <= 0.0 || points > MAX_GEOMETRY {
+                return None;
+            }
+            dims[index] = Some(points);
+        }
     }
-    dims.iter()
-        .all(|n| n.is_finite() && *n > 0.0 && *n <= MAX_GEOMETRY)
-        .then_some(dims)
+    Some([dims[0]?, dims[1]?])
+}
+
+fn numeric_prefix(source: &str) -> Option<f32> {
+    let bytes = source.as_bytes();
+    let mut end = usize::from(bytes.first().is_some_and(|b| matches!(b, b'+' | b'-')));
+    end += bytes[end..]
+        .iter()
+        .take_while(|b| b.is_ascii_digit())
+        .count();
+    if bytes.get(end) == Some(&b'.') {
+        end += 1;
+        end += bytes[end..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .count();
+    }
+    if bytes.get(end).is_some_and(|b| matches!(b, b'e' | b'E')) {
+        let mut exponent = end + 1;
+        exponent += usize::from(
+            bytes
+                .get(exponent)
+                .is_some_and(|b| matches!(b, b'+' | b'-')),
+        );
+        let digits = bytes[exponent..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .count();
+        if digits != 0 {
+            end = exponent + digits;
+        }
+    }
+    source[..end].parse().ok()
 }
 
 struct Layout<'book> {
@@ -849,29 +899,12 @@ fn fill(output: &mut Vec<Draw>, rect: Rect, color: Option<Paint>) {
 fn raster(
     doc: &Document,
     drawing: &[Draw],
-    [width, height]: [f32; 2],
+    dimensions: [f32; 2],
     dpi: f64,
-    clip: Option<Clip>,
-) -> Result<Vec<u8>, EngineError> {
+    region: Region,
+) -> Result<wordcraft_render::Rendered, EngineError> {
     let scale = dpi / 72.0;
-    let pixels = [width, height].map(|n| (f64::from(n) * scale).ceil().max(1.0));
-    let region = if let Some(clip) = clip {
-        RasterRegion::new(
-            clip,
-            [f64::from(width), f64::from(height)],
-            scale,
-            pixels,
-            wordcraft_render::MAX_SIDE,
-        )?
-    } else {
-        rendering::validate_size(pixels[0], pixels[1], wordcraft_render::MAX_SIDE)?;
-        RasterRegion {
-            x: 0,
-            y: 0,
-            width: pixels[0] as u32,
-            height: pixels[1] as u32,
-        }
-    };
+    let region = region.for_page(dimensions.map(f64::from), dpi)?;
     // render_items uses its area only to determine dimensions and transform. Choose
     // dimensions inside the quantized pixel interval to absorb its f32 rounding.
     let area = Rect::new(
@@ -888,7 +921,7 @@ fn raster(
         &wordcraft_render::RenderOptions::default(),
     );
     region.validate_result(rendered.width, rendered.height)?;
-    rendering::encode_png(rendered.width, rendered.height, &rendered.pixels, dpi)
+    Ok(rendered)
 }
 
 fn failure(error: impl std::fmt::Display) -> EngineError {
