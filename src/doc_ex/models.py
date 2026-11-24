@@ -19,6 +19,15 @@ class EpubChapterSource:
 
 
 @dataclass(frozen=True, slots=True)
+class EpubSvgChapterSource:
+    """Static SVG and navigation title for a new fixed-layout spine entry."""
+
+    title: str
+    svg: str
+    path: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class EpubResource:
     """Media type and bytes for a local publication resource."""
 

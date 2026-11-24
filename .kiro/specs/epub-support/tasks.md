@@ -11,7 +11,8 @@
 - [ ] Expand the public EPUB conformance corpus.
 - [x] Open the unmodified math-heavy *Linear Algebra* sample within the semantic output budget and exercise its spine previews.
 - [ ] Validate the release wheel matrix on Linux, macOS, and Windows.
-- [x] Replace existing XHTML chapters transactionally and preserve targeted navigation and overlay anchors.
+- [x] Replace existing XHTML and SVG chapters transactionally and preserve targeted navigation and overlay anchors.
+- [x] Insert fixed-layout SVG spine chapters with packaged dependencies and optional media overlays in the same edit.
 - [x] Synchronize EPUB 3 `mathml` and `svg` resource properties after chapter insertion or replacement.
 - [x] Read SMIL timing trees and expose chapter cue order, time ranges, target IDs and bounded audio reads.
 - [x] Project supported Presentation MathML into native equations for PNG, DOCX and PDF.

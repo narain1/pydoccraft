@@ -1753,6 +1753,110 @@ class EpubTests(unittest.TestCase):
             with self.assertRaises(doc_ex.UnsupportedFormatError):
                 signed.edit_epub_chapters({0: first})
 
+    def test_insert_and_replace_fixed_svg_chapter_with_staged_resources(self) -> None:
+        chapter_path = "OEBPS/Art/Plate one.svg"
+        css_path = "OEBPS/Styles/paint.css"
+        image_path = "OEBPS/Art/tile.png"
+        graphic = """<?xml-stylesheet type="text/css" href="../Styles/paint.css"?>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 60">
+          <title>Original plate</title><rect id="plate" class="paper" width="120" height="60"/>
+          <image href="tile.png" x="40" y="10" width="20" height="20"/>
+          <text id="caption" x="10" y="45">Original caption</text>
+        </svg>"""
+        resources = {
+            css_path: doc_ex.EpubResource("text/css", b".paper { fill: #336699 }"),
+            image_path: doc_ex.EpubResource("image/png", solid((230, 44, 26))),
+        }
+        chapter = doc_ex.EpubSvgChapterSource("Plate one", graphic, chapter_path)
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [0, chapter, 1], resources=resources,
+                overlays={chapter_path: [doc_ex.EpubOverlayCue(fragment="caption")]},
+            )
+            self.assertEqual(original.page_count, 2)
+
+        with doc_ex.open(data) as book:
+            self.assertEqual(book.page_count, 3)
+            self.assertEqual(book[1].metadata["chapter_path"], chapter_path)
+            self.assertEqual(book[1].metadata["chapter_media_type"], "image/svg+xml")
+            self.assertEqual(book[1].metadata["viewport"], [90, 45])
+            self.assertEqual(book[1].get_images()[0].alt, "Original plate")
+            manifest = book.metadata["manifest"]
+            self.assertIsNone(next(item for item in manifest if item["path"] == chapter_path)["properties"])
+            nav = book.metadata["navigation"][0]["items"]
+            self.assertEqual([item["path"] for item in nav], ["OEBPS/one.xhtml", chapter_path, "OEBPS/two.xhtml"])
+            self.assertIn("Plate%20one.svg", nav[1]["href"])
+            nav_path = next(item["path"] for item in manifest if item["properties"] == "nav")
+            nav_source = book.read_epub_resource(nav_path)
+            link = nav[1]["href"].encode()
+            nav_source = nav_source.replace(b'href="' + link + b'"', b'href="' + link + b'#plate"')
+            cues = book.epub_media_cues(1)
+            self.assertEqual(next(book.epub_narration(1)).text, "Original caption")
+            rendered = book.render_page(1, dpi=96)
+            self.assertEqual(struct.unpack_from(">II", rendered, 16), (120, 60))
+            _, pixels = rgba_pixels(png_chunks(rendered))
+            self.assertIn(bytes.fromhex("336699ff"), pixels)
+            self.assertIn(bytes.fromhex("e62c1aff"), pixels)
+
+        data = rewrite_epub(data, {nav_path: nav_source})
+        revised_graphic = graphic.replace("Original", "Revised").replace("120 60", "100 80").replace(
+            'width="120" height="60"', 'width="100" height="80"',
+        )
+        with doc_ex.open(data) as book:
+            nav = book.metadata["navigation"][0]["items"]
+            self.assertEqual(nav[1]["fragment"], "plate")
+            for anchor in ("caption", "plate"):
+                with self.subTest(anchor=anchor), self.assertRaisesRegex(ValueError, "referenced anchor"):
+                    book.edit_epub_chapters({1: revised_graphic.replace(f'id="{anchor}"', '')})
+            with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "numeric viewBox"):
+                book.edit_epub_chapters({1: revised_graphic.replace('viewBox="0 0 100 80"', '')})
+            xhtml = '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>First</title></head><body><p>Replacement text</p></body></html>'
+            with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "SVG root"):
+                book.edit_epub_chapters({1: xhtml})
+            with self.assertRaises(doc_ex.MalformedDocumentError):
+                book.edit_epub_chapters({0: xhtml, 1: revised_graphic.replace("tile.png", "absent.png")})
+            self.assertEqual(book[1].get_images()[0].alt, "Original plate")
+            revised = book.edit_epub_chapters({0: xhtml, -2: revised_graphic})
+        with (
+            doc_ex.open(revised) as book,
+            zipfile.ZipFile(io.BytesIO(data)) as before,
+            zipfile.ZipFile(io.BytesIO(revised)) as after,
+        ):
+            self.assertEqual(before.namelist(), after.namelist())
+            for member in set(before.namelist()) - {"OEBPS/one.xhtml", chapter_path}:
+                self.assertEqual(before.read(member), after.read(member), member)
+            self.assertEqual(book[0].get_text(), "Replacement text")
+            self.assertEqual(book[1].get_images()[0].alt, "Revised plate")
+            self.assertEqual(book.epub_media_cues(1), cues)
+            self.assertEqual(next(book.epub_narration(1)).text, "Revised caption")
+            self.assertEqual(book.metadata["navigation"][0]["items"], nav)
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, pages=[1])) as pdf:
+                self.assertEqual(len(pdf), 1)
+                png = pdf.render_page(0, dpi=96)
+                self.assertEqual(struct.unpack_from(">II", png, 16), (100, 80))
+                self.assertIn(bytes.fromhex("e62c1aff"), rgba_pixels(png_chunks(png))[1])
+
+    def test_svg_chapter_insertion_rejects_broken_renditions(self) -> None:
+        svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><rect width="20" height="10"/></svg>'
+        with doc_ex.open(epub_fixture()) as book:
+            inputs = (
+                (svg, "wrong.xhtml", ValueError, r"end in \.svg"),
+                (svg.replace(' viewBox="0 0 20 10"', ''), None, ValueError, "numeric viewBox"),
+                (svg.replace("</svg>", "<script/></svg>"), None, doc_ex.UnsupportedFormatError, "active elements"),
+                ('<?xml-stylesheet href="absent.css" type="text/css"?>' + svg, None,
+                 doc_ex.MalformedDocumentError, r"absent\.css"),
+            )
+            for markup, path, error, message in inputs:
+                with self.subTest(message=message), self.assertRaisesRegex(error, message):
+                    book.edit_epub_structure([0, doc_ex.EpubSvgChapterSource("Plate", markup, path)])
+            result = book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Plate", svg), 0])
+            with doc_ex.open(result) as edited:
+                self.assertTrue(edited[0].metadata["chapter_path"].endswith(".svg"))
+                self.assertEqual(edited[0].metadata["viewport"], [15, 7.5])
+        with doc_ex.open(epub_fixture(version="2.0")) as legacy:
+            with self.assertRaisesRegex(ValueError, "requires EPUB 3"):
+                legacy.edit_epub_structure([doc_ex.EpubSvgChapterSource("Plate", svg), 0])
+
     def test_chapter_edits_update_mathml_and_svg_manifest_properties(self) -> None:
         plain = '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Plain text</p></body></html>'
         svg = '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="20"><rect width="50" height="20" fill="blue"/></svg>'

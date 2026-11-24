@@ -27,7 +27,8 @@ mod removal;
 #[path = "epub_toc_edit.rs"]
 mod toc;
 
-pub(crate) type SpineEdit = (Option<i64>, Option<(String, String, Option<String>, bool)>);
+type ChapterEdit = (String, String, Option<String>, bool, bool);
+pub(crate) type SpineEdit = (Option<i64>, Option<ChapterEdit>);
 pub(crate) type ResourceEdit = (String, String, Vec<u8>);
 // Depth-first timing entries keep the native boundary flat and bounded.
 type TimingEdit = (
@@ -51,6 +52,7 @@ pub(crate) fn update_structure<'a>(
     overlays: &[OverlayEdit],
 ) -> Result<Vec<u8>, EngineError> {
     let mut total = 0;
+    let mut inserted_svg = Vec::new();
     validate_member_count(removed.len())?;
     narration::charge_edits(overlays, &mut total)?;
     let mut removals = HashSet::new();
@@ -69,7 +71,7 @@ pub(crate) fn update_structure<'a>(
     validate_member_count(order.map_or(0, <[_]>::len))?;
     validate_member_count(resources.len())?;
     for (_, resource) in order.into_iter().flatten() {
-        if let Some((title, source, path, _)) = resource {
+        if let Some((title, source, path, ..)) = resource {
             charge(
                 &mut total,
                 title
@@ -216,7 +218,7 @@ pub(crate) fn update_structure<'a>(
                         METADATA_BYTES,
                     )?;
                 }
-                (None, Some((label, source, path, fixed))) => {
+                (None, Some((label, source, path, fixed, svg))) => {
                     validate_text(label, 1024, "chapter title")?;
                     if label.trim().is_empty() {
                         return Err(argument("EPUB chapter title is empty"));
@@ -225,31 +227,54 @@ pub(crate) fn update_structure<'a>(
                         return Err(limited("inserted chapter exceeds its XML byte budget"));
                     }
                     let chapter = parse_xml(source.as_bytes())?;
-                    if !name(chapter.root_element(), XHTML, "html") {
-                        return Err(argument("an inserted chapter must be XHTML"));
-                    }
+                    let root = chapter.root_element();
+                    let (extension, media) = if *svg {
+                        if !epub3 {
+                            return Err(argument("inserting an SVG spine chapter requires EPUB 3"));
+                        }
+                        if !root.has_tag_name((super::svg::NS, "svg")) {
+                            return Err(argument("an inserted SVG chapter must have an SVG root"));
+                        }
+                        ("svg", "image/svg+xml")
+                    } else {
+                        if !name(root, XHTML, "html") {
+                            return Err(argument(
+                                "an inserted XHTML chapter must have an XHTML root",
+                            ));
+                        }
+                        ("xhtml", "application/xhtml+xml")
+                    };
                     let path = if let Some(path) = path {
                         check_path(path)?;
-                        if !path.to_ascii_lowercase().ends_with(".xhtml") {
-                            return Err(argument("chapter archive path must end in .xhtml"));
+                        if !path
+                            .rsplit_once('.')
+                            .is_some_and(|(_, ext)| ext.eq_ignore_ascii_case(extension))
+                        {
+                            return Err(argument(&format!(
+                                "chapter archive path must end in .{extension}"
+                            )));
                         }
                         plan.claim_path(path)?;
                         path.clone()
                     } else {
-                        plan.new_path("chapter", "xhtml")
+                        plan.new_path("chapter", extension)
                     };
-                    let content_properties = if epub3 {
-                        editor::properties_attribute(&editor::xhtml_properties(
-                            chapter.root_element(),
-                        ))
+                    let content_properties = if epub3 && !*svg {
+                        editor::properties_attribute(&editor::xhtml_properties(root))
                     } else {
                         String::new()
                     };
-                    let id =
-                        plan.add_manifest(&path, "application/xhtml+xml", &content_properties)?;
-                    // Inserted XHTML can author a viewport independently. By default it reflows.
-                    let properties = if *fixed {
-                        if !epub3 || super::layout::dimensions(chapter.root_element()).is_none() {
+                    let id = plan.add_manifest(&path, media, &content_properties)?;
+                    let properties = if *svg {
+                        if super::svg::viewport(root).is_none() {
+                            return Err(argument(
+                                "a fixed-layout SVG chapter requires a numeric viewBox",
+                            ));
+                        }
+                        inserted_svg.push(path.clone());
+                        " properties=\"rendition:layout-pre-paginated\""
+                    } else if *fixed {
+                        if !epub3 || super::layout::dimensions(root).is_none() {
                             return Err(argument("a fixed-layout chapter requires EPUB 3 and a numeric XHTML viewport"));
                         }
                         " properties=\"rendition:layout-pre-paginated\""
@@ -515,6 +540,7 @@ pub(crate) fn update_structure<'a>(
         &removals,
     )?;
     extract(&updated, None)?;
+    editor::validate_svg_chapters(&updated, inserted_svg.iter().map(String::as_str))?;
     Ok(updated)
 }
 

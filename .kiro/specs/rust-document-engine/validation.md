@@ -2799,3 +2799,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 668 installed tests, inclu
 ## 2026-11-24 EPUB MathML table spans
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 670 installed tests, including 75 EPUB tests. It measured 23,010,957 bytes with a 53,441,784-byte native extension. Standalone spanning tables exported to reopened editable DOCX and searchable PDF. The [EPUB validation record](../epub-support/validation.md#2026-11-24-mathml-table-spans) includes the full 94-chapter corpus result.
+
+## 2026-11-24 EPUB SVG spine edits
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 672 installed tests, including 77 EPUB tests. It measured 22,996,107 bytes with a 53,399,848-byte native extension. Insertion and replacement of fixed-layout SVG spine entries retained navigation, narration and local resources in reopened books. The [EPUB validation record](../epub-support/validation.md#2026-11-24-svg-spine-chapter-editing) includes the rendering and EPUBCheck results.

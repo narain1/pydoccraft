@@ -180,7 +180,7 @@ pub(super) fn rewrite(
     Ok(result)
 }
 
-/// Replace the XHTML files at selected spine positions in one transaction.
+/// Replace the content files at selected spine positions in one transaction.
 pub(crate) fn update_chapters(
     data: &[u8],
     changes: &[(i64, String)],
@@ -203,6 +203,13 @@ pub(crate) fn update_chapters(
         return Ok(data.to_vec());
     }
     let extracted = extract(data, None)?;
+    let fixed_paths: HashSet<_> = extracted
+        .pages
+        .iter()
+        .filter(|page| super::rendition::fixed(page))
+        .filter_map(|page| page.metadata["chapter_path"].as_str())
+        .collect();
+    let mut svg_paths = HashSet::new();
     let mut replacements = HashMap::new();
     for (index, replacement) in changes {
         let count = extracted.pages.len() as i64;
@@ -215,7 +222,7 @@ pub(crate) fn update_chapters(
             .as_str()
             .ok_or_else(|| invalid("missing chapter path"))?;
         if page.metadata["chapter_media_type"] == "image/svg+xml" {
-            return Err(unsupported("chapter replacement requires XHTML content"));
+            svg_paths.insert(path);
         }
         if let Some(existing) = replacements.insert(path, replacement.as_bytes()) {
             if existing != replacement.as_bytes() {
@@ -248,11 +255,27 @@ pub(crate) fn update_chapters(
     for (&path, &replacement) in &replacements {
         let xml = parse_xml(replacement)?;
         let root = xml.root_element();
-        if !name(root, XHTML, "html") {
-            return Err(invalid("replacement chapter must be XHTML"));
-        }
-        if epub3 {
-            declarations.insert(path, xhtml_properties(root));
+        if svg_paths.contains(path) {
+            if !root.has_tag_name((super::svg::NS, "svg")) {
+                return Err(invalid("replacement SVG chapter must have an SVG root"));
+            }
+            if fixed_paths.contains(path) && super::svg::viewport(root).is_none() {
+                return Err(invalid(
+                    "replacement fixed-layout SVG chapter requires a numeric viewBox",
+                ));
+            }
+        } else {
+            if !name(root, XHTML, "html") {
+                return Err(invalid("replacement chapter must be XHTML"));
+            }
+            if fixed_paths.contains(path) && super::layout::dimensions(root).is_none() {
+                return Err(invalid(
+                    "replacement fixed-layout XHTML chapter requires a numeric viewport",
+                ));
+            }
+            if epub3 {
+                declarations.insert(path, xhtml_properties(root));
+            }
         }
         // Preserve target IDs used by existing navigation, synchronization and links.
         if let Some(required) = links.get(path) {
@@ -278,7 +301,23 @@ pub(crate) fn update_chapters(
     }
     let result = rewrite(&mut book, replacements, BTreeMap::new(), &HashSet::new())?;
     extract(&result, None)?;
+    validate_svg_chapters(&result, svg_paths.into_iter())?;
     Ok(result)
+}
+
+pub(super) fn validate_svg_chapters<'a>(
+    data: &[u8],
+    paths: impl Iterator<Item = &'a str>,
+) -> Result<(), EngineError> {
+    let mut paths = paths.peekable();
+    if paths.peek().is_some() {
+        let mut book = Book::open(data)?;
+        for path in paths {
+            let source = book.read(path, XML_BYTES)?;
+            super::svg::embedded(&source, path, &mut book)?;
+        }
+    }
+    Ok(())
 }
 
 const XHTML_PROPERTIES: [&str; 2] = ["mathml", "svg"];

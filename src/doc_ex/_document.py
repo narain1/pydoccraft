@@ -15,7 +15,7 @@ from typing import Any, Callable, Iterator, Literal, TYPE_CHECKING, overload
 
 from .errors import DocumentClosedError, MalformedDocumentError, UnsafeArchiveError
 from .models import (
-    Block, EpubAudioClip, EpubChapterSource, EpubNarrationCue, EpubOverlayCue, EpubOverlaySequence, EpubResource, Image, Link, Story, Table,
+    Block, EpubAudioClip, EpubChapterSource, EpubNarrationCue, EpubOverlayCue, EpubOverlaySequence, EpubResource, EpubSvgChapterSource, Image, Link, Story, Table,
     _html_text,
 )
 
@@ -794,7 +794,7 @@ class Document:
         return bytes(_native(lambda: _core._edit_epub_metadata(self._source, title, description)))
 
     def edit_epub_chapters(self, replacements: Mapping[int, str]) -> bytes:
-        """Replace selected XHTML chapters by spine index and return a new EPUB."""
+        """Replace XHTML or static SVG chapters by spine index and return a new EPUB."""
         self._ensure_open()
         if self._filetype != "epub":
             from .errors import UnsupportedFormatError
@@ -813,7 +813,7 @@ class Document:
             if not -page_count <= index < page_count:
                 raise IndexError("page index out of range")
             if not isinstance(markup, str):
-                raise TypeError("replacement XHTML must be a string")
+                raise TypeError("replacement chapter markup must be a string")
             markup = str.__str__(markup)
             if len(markup) > _MAX_EPUB_CHAPTER_BYTES:
                 raise UnsafeArchiveError("replacement chapter exceeds its XML byte budget")
@@ -829,7 +829,7 @@ class Document:
 
     def edit_epub_structure(
         self,
-        order: Iterable[int | EpubChapterSource] | None = None,
+        order: Iterable[int | EpubChapterSource | EpubSvgChapterSource] | None = None,
         *,
         resources: Mapping[str, EpubResource] | None = None,
         remove_resources: Iterable[str] = (),
@@ -844,7 +844,7 @@ class Document:
         from . import _core, _native
 
         total_bytes = 0
-        selected: list[tuple[int | None, tuple[str, str, str | None, bool] | None]] | None = None
+        selected: list[tuple[int | None, tuple[str, str, str | None, bool, bool] | None]] | None = None
         if order is not None:
             selected = []
             count = len(self._pages)
@@ -852,16 +852,21 @@ class Document:
                 self._ensure_open()
                 if len(selected) >= 10_000:
                     raise UnsafeArchiveError("too many EPUB spine entries")
-                if isinstance(entry, EpubChapterSource):
+                if isinstance(entry, (EpubChapterSource, EpubSvgChapterSource)):
                     title = _epub_edit_text(entry.title, 1_024, "chapter title")
-                    xhtml = _epub_edit_text(entry.xhtml, _MAX_EPUB_CHAPTER_BYTES, "chapter XHTML")
+                    if isinstance(entry, EpubSvgChapterSource):
+                        markup = _epub_edit_text(entry.svg, _MAX_EPUB_CHAPTER_BYTES, "chapter SVG")
+                        fixed, svg = True, True
+                    else:
+                        markup = _epub_edit_text(entry.xhtml, _MAX_EPUB_CHAPTER_BYTES, "chapter XHTML")
+                        if type(entry.fixed_layout) is not bool:
+                            raise TypeError("fixed_layout must be a bool")
+                        fixed, svg = entry.fixed_layout, False
                     path = None if entry.path is None else _epub_edit_text(entry.path, 4_096, "chapter path")
-                    if type(entry.fixed_layout) is not bool:
-                        raise TypeError("fixed_layout must be a bool")
-                    total_bytes += len(title.encode()) + len(xhtml.encode())
+                    total_bytes += len(title.encode()) + len(markup.encode())
                     if path is not None:
                         total_bytes += len(path.encode())
-                    selected.append((None, (title, xhtml, path, entry.fixed_layout)))
+                    selected.append((None, (title, markup, path, fixed, svg)))
                 else:
                     index = operator.index(entry)
                     self._ensure_open()
