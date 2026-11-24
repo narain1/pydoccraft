@@ -2847,3 +2847,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 685 installed tests, inclu
 ## 2026-11-24 SVG gradient templates and Gaussian blur
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 687 installed tests, including 92 EPUB tests. It measured 23,127,416 bytes with a 53,709,736-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-svg-gradient-templates-and-gaussian-blur) covers gradient and blur fidelity, raster limits, and the unmodified SVG-in-spine sample.
+
+## 2026-11-24 Explicit Opus track selection
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 688 installed tests, including 93 EPUB tests. It measured 23,124,655 bytes with a 53,695,016-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-explicit-opus-track-selection) covers selected audio across grouped links, unselected stream validation, and EPUBCheck results.

@@ -680,6 +680,7 @@ class Document:
         skip_roles: Iterable[str],
         start_cue: int,
         chunk_frames: int | None,
+        opus_tracks: Mapping[str, int] | None,
     ) -> Iterator[Iterator[EpubNarrationCue]]:
         from . import _core, _native
 
@@ -691,6 +692,7 @@ class Document:
             if not 1 <= chunk_frames <= 262_144:
                 raise ValueError("EPUB narration chunk_frames must be between 1 and 262144")
         skipped = frozenset(skip_roles)
+        selections = dict(opus_tracks) if opus_tracks is not None else {}
         current_track = None
         decoder = None
         found_start = start_cue == 0
@@ -710,8 +712,13 @@ class Document:
                 continue
             track = (audio["path"], audio["media_type"])
             if track != current_track:
+                selection = selections.get(track[0])
+                if selection is not None:
+                    selection = operator.index(selection)
+                    if not 0 <= selection <= 0xFFFFFFFF:
+                        raise ValueError("Opus track index must be an unsigned 32-bit integer")
                 decoder = None
-                decoder = _native(lambda: _core._open_epub_audio(self._source, *track))
+                decoder = _native(lambda: _core._open_epub_audio(self._source, *track, selection))
                 current_track = track
             yield self._epub_audio_group(
                 args, decoder, audio["clip_begin_us"], audio["clip_end_us"], chunk_frames,
@@ -750,9 +757,10 @@ class Document:
         skip_roles: Iterable[str] = (),
         start_cue: int = 0,
         chunk_frames: int | None = None,
+        opus_tracks: Mapping[str, int] | None = None,
     ) -> Iterator[EpubNarrationCue]:
-        """Read cues starting at a chapter cue index, optionally in bounded audio chunks."""
-        for group in self._epub_narration_groups(page, skip_roles, start_cue, chunk_frames):
+        """Read cues with optional chunking and zero-based Opus track indices by resource path."""
+        for group in self._epub_narration_groups(page, skip_roles, start_cue, chunk_frames, opus_tracks):
             yield from group
 
     def play_epub_narration(
@@ -765,9 +773,10 @@ class Document:
         skip_roles: Iterable[str] = (),
         start_cue: int = 0,
         chunk_frames: int | None = None,
+        opus_tracks: Mapping[str, int] | None = None,
     ) -> None:
-        """Play cues through blocking sinks and hold each target across its audio chunks."""
-        for group in self._epub_narration_groups(page, skip_roles, start_cue, chunk_frames):
+        """Play cues through blocking sinks, with optional Opus track indices by resource path."""
+        for group in self._epub_narration_groups(page, skip_roles, start_cue, chunk_frames, opus_tracks):
             first = next(group)
             if on_cue is not None:
                 on_cue(first)

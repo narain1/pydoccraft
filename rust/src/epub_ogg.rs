@@ -58,6 +58,7 @@ impl<'a> Page<'a> {
 
 struct Stream {
     opus: bool,
+    selected: bool,
     next_page: u32,
     partial: usize,
     packets: usize,
@@ -111,8 +112,11 @@ impl Stream {
 }
 
 /// Each segment starts with adjacent BOS pages and ends after every stream's EOS.
-/// Retain only Opus page slices. Auxiliary checksums are verified without assembling packets.
-pub(super) fn groups(mut bytes: &[u8]) -> Result<Vec<Vec<Page<'_>>>, EngineError> {
+/// Retain only the selected Opus page slices. Check all other pages without assembling packets.
+pub(super) fn groups(
+    mut bytes: &[u8],
+    opus_track: Option<usize>,
+) -> Result<Vec<Vec<Page<'_>>>, EngineError> {
     if bytes.is_empty() {
         return Err(invalid("truncated Ogg header"));
     }
@@ -121,6 +125,7 @@ pub(super) fn groups(mut bytes: &[u8]) -> Result<Vec<Vec<Page<'_>>>, EngineError
     let mut groups = Vec::new();
     let mut selected = Vec::new();
     let mut beginning = true;
+    let mut opus_tracks = 0;
     let mut packets_left = MAX_PACKETS;
     for _ in 0..MAX_PAGES {
         let (page, rest) = Page::read(bytes)?;
@@ -139,13 +144,13 @@ pub(super) fn groups(mut bytes: &[u8]) -> Result<Vec<Vec<Page<'_>>>, EngineError
                 return Err(invalid("Ogg repeats a stream serial number"));
             }
             let opus = page.body.starts_with(b"OpusHead");
-            if opus && !selected.is_empty() {
-                return Err(unsupported("multiple Opus tracks in one Ogg segment"));
-            }
+            let selected_track = opus && opus_track.unwrap_or(0) == opus_tracks;
+            opus_tracks += usize::from(opus);
             active.insert(
                 serial,
                 Stream {
                     opus,
+                    selected: selected_track,
                     next_page: 0,
                     partial: 0,
                     packets: 0,
@@ -158,11 +163,11 @@ pub(super) fn groups(mut bytes: &[u8]) -> Result<Vec<Vec<Page<'_>>>, EngineError
             .get_mut(&serial)
             .ok_or_else(|| invalid("Ogg page belongs to an inactive stream"))?;
         stream.accept(&page, &mut packets_left)?;
-        let opus = stream.opus;
+        let selected_track = stream.selected;
         if page.flag(EOS) {
             active.remove(&serial);
         }
-        if opus {
+        if selected_track {
             selected.push(page);
         } else {
             page.parse()?;
@@ -171,11 +176,25 @@ pub(super) fn groups(mut bytes: &[u8]) -> Result<Vec<Vec<Page<'_>>>, EngineError
         // the remaining identification pages of the same segment follow.
         let more_headers = beginning && bytes.get(5).is_some_and(|flags| flags & BOS != 0);
         if active.is_empty() && !more_headers {
-            if selected.is_empty() {
+            if opus_tracks == 0 {
                 return Err(unsupported("Ogg segment requires an Opus stream"));
+            }
+            if opus_track.is_none() && opus_tracks > 1 {
+                return Err(unsupported(
+                    "multiple Opus tracks in one Ogg segment require an explicit selection",
+                ));
+            }
+            if selected.is_empty() {
+                return Err(EngineError::InvalidArgument(format!(
+                    "Opus track {} is absent from Ogg segment {} ({} tracks)",
+                    opus_track.unwrap_or(0),
+                    groups.len(),
+                    opus_tracks,
+                )));
             }
             groups.push(std::mem::take(&mut selected));
             beginning = true;
+            opus_tracks = 0;
         }
         if bytes.is_empty() {
             if !active.is_empty() {

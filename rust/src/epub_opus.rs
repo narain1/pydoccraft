@@ -89,12 +89,12 @@ struct Packet {
 }
 
 impl Track {
-    pub(super) fn open(file: &[u8]) -> Result<Self, EngineError> {
+    pub(super) fn open(file: &[u8], opus_track: Option<usize>) -> Result<Self, EngineError> {
         let mut links = Vec::new();
         let mut speakers = 0;
         let mut frames = 0;
         let mut coded_packets_left = MAX_PACKETS;
-        for encoded in ogg_pages::groups(file)? {
+        for encoded in ogg_pages::groups(file, opus_track)? {
             let link = Link::index(encoded, frames, &mut coded_packets_left)?;
             if link.head.channel_count > 1 {
                 for flag in link.speakers() {

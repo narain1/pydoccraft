@@ -47,15 +47,36 @@ pub(crate) struct AudioClip {
 }
 
 impl AudioSource {
-    pub(crate) fn open(data: &[u8], path: &str, media: &str) -> Result<Self, EngineError> {
-        Self::decode(media, || read(data, path, MAX_ENCODED_BYTES))
+    pub(crate) fn open(
+        data: &[u8],
+        path: &str,
+        media: &str,
+        opus_track: Option<usize>,
+    ) -> Result<Self, EngineError> {
+        Self::decode(media, opus_track, || read(data, path, MAX_ENCODED_BYTES))
     }
 
     fn decode(
         media: &str,
+        opus_track: Option<usize>,
         load: impl FnOnce() -> Result<Vec<u8>, EngineError>,
     ) -> Result<Self, EngineError> {
         let decoder = match media {
+            "audio/ogg"
+            | "audio/opus"
+            | "audio/ogg; codecs=opus"
+            | "application/ogg"
+            | "video/ogg" => {
+                let bytes = load()?;
+                let track = std::panic::catch_unwind(|| opus::Track::open(&bytes, opus_track))
+                    .map_err(|_| invalid("malformed Ogg Opus audio"))??;
+                Decoder::Opus(Box::new(track))
+            }
+            _ if opus_track.is_some() => {
+                return Err(EngineError::InvalidArgument(
+                    "Opus track selection requires an Ogg audio resource".into(),
+                ));
+            }
             "audio/mpeg" | "audio/mp3" => {
                 let bytes = load()?;
                 let track = std::panic::catch_unwind(|| Mp3::new(bytes))
@@ -67,16 +88,6 @@ impl AudioSource {
                 let track = std::panic::catch_unwind(|| aac::Track::open(bytes))
                     .map_err(|_| invalid("malformed MP4 audio"))??;
                 Decoder::Aac(Box::new(track))
-            }
-            "audio/ogg"
-            | "audio/opus"
-            | "audio/ogg; codecs=opus"
-            | "application/ogg"
-            | "video/ogg" => {
-                let bytes = load()?;
-                let track = std::panic::catch_unwind(|| opus::Track::open(&bytes))
-                    .map_err(|_| invalid("malformed Ogg Opus audio"))??;
-                Decoder::Opus(Box::new(track))
             }
             "audio/wav" | "audio/wave" | "audio/x-wav" | "audio/vnd.wave" => {
                 let bytes = load()?;
@@ -94,7 +105,7 @@ impl AudioSource {
         media: &str,
         load: impl FnOnce() -> Result<Vec<u8>, EngineError>,
     ) -> Result<u64, EngineError> {
-        let mut source = Self::decode(media, load)?;
+        let mut source = Self::decode(media, None, load)?;
         let (format, frames) = source.geometry()?;
         let frames = match (&source.decoder, frames) {
             (_, Some(frames)) => frames,

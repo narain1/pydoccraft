@@ -41,7 +41,8 @@
 - [x] Stream sequentially chained mono and stereo Ogg Opus with a continuous sample timeline and bounded seeks.
 - [x] Decode family-1 Ogg Opus surround and preserve speaker assignments in standalone and chained WAVE playback.
 - [x] Read and author overlay cues from grouped and chained Ogg resources with one Opus track per segment. Validate auxiliary stream transport through its EOS.
-- [ ] Play embedded audio and video and support explicit selection when an Ogg segment contains several Opus tracks.
+- [x] Select an Opus track explicitly for each media overlay resource with concurrent Ogg streams. Validate the remaining streams and preserve timing across chained segments.
+- [ ] Play embedded audio and video.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
 - [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.
 - [x] Attach or detach EPUB 3 media overlays and author sequential text and audio cues with package duration metadata.

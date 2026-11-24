@@ -1824,6 +1824,101 @@ class EpubTests(unittest.TestCase):
             self.assertEqual(book.read_epub_resource(path), video)
             self.assertEqual(pcm(next(book.epub_narration(1)).audio), expected[:960 * 4])
 
+    def test_media_overlay_selects_opus_tracks_per_resource(self) -> None:
+        source, _ = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(b"audio/wav", b"application/ogg")
+            timeline = archive.read("OEBPS/Sync/read.smil")
+        full = timeline.replace(b'clipBegin="250ms" clipEnd="00:00:01.125"', b'clipBegin="0s"')
+        path = "OEBPS/Media/voice.wav"
+        fixtures = Path(__file__).parent / "fixtures"
+        video = (fixtures / "epub-narration-theora-opus.ogv").read_bytes()
+        mono = (fixtures / "epub-narration-mono.opus").read_bytes()
+        stereo = (fixtures / "epub-narration-stereo.opus").read_bytes()
+        surround = (fixtures / "epub-narration-surround.opus").read_bytes()
+
+        def pages(payload: bytes) -> list[bytes]:
+            result = []
+            offset = 0
+            while offset < len(payload):
+                body = offset + 27 + payload[offset + 26]
+                end = body + sum(payload[offset + 27:body])
+                result.append(payload[offset:end])
+                offset = end
+            return result
+
+        def group(first: bytes, second: bytes) -> bytes:
+            first_pages, second_pages = pages(first), pages(second)
+            after_bos = next(i for i, page in enumerate(first_pages) if not page[5] & 2)
+            # Both fixtures start with a single identification page per logical stream.
+            return b"".join(first_pages[:after_bos] + second_pages[:2]
+                            + first_pages[after_bos:] + second_pages[2:])
+
+        def fixture(payload: bytes) -> bytes:
+            return rewrite_epub(source, {
+                "OEBPS/content.opf": package,
+                "OEBPS/Sync/read.smil": full,
+                path: payload,
+            })
+
+        def pcm(audio: doc_ex.EpubAudioClip | None) -> bytes:
+            assert audio is not None
+            with wave.open(io.BytesIO(audio.wave), "rb") as reader:
+                return reader.readframes(audio.frame_count)
+
+        payload = group(video, mono)
+        with doc_ex.open(fixture(video)) as book:
+            expected_stereo = pcm(next(book.epub_narration(0)).audio)
+        with doc_ex.open(fixture(mono)) as book:
+            expected_mono = pcm(next(book.epub_narration(0)).audio)
+        with doc_ex.open(fixture(payload)) as book:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "explicit selection"):
+                next(book.epub_narration(0))
+            self.assertEqual(pcm(next(book.epub_narration(0, opus_tracks={path: 0})).audio), expected_stereo)
+            self.assertEqual(pcm(next(book.epub_narration(0, opus_tracks={path: 1})).audio), expected_mono)
+            with self.assertRaisesRegex(ValueError, "absent from Ogg segment 0"):
+                next(book.epub_narration(0, opus_tracks={path: 2}))
+            with self.assertRaisesRegex(ValueError, "Opus track index"):
+                next(book.epub_narration(0, opus_tracks={path: -1}))
+
+        chained = payload + group(surround, stereo)
+        with doc_ex.open(fixture(mono + stereo)) as book:
+            expected_chain = pcm(next(book.epub_narration(0)).audio)
+        with doc_ex.open(fixture(chained)) as book:
+            playback = []
+            targets = []
+            book.play_epub_narration(
+                0, opus_tracks={path: 1}, chunk_frames=751, skip_roles={"aside"},
+                play_audio=lambda audio: playback.append(pcm(audio)), speak_text=self.fail, on_cue=targets.append,
+            )
+            self.assertEqual(b"".join(playback), expected_chain)
+            self.assertEqual(len(targets), 2)
+            self.assertIsNone(targets[-1])
+        with doc_ex.open(fixture(payload + stereo)) as book:
+            with self.assertRaisesRegex(ValueError, "absent from Ogg segment 1"):
+                next(book.epub_narration(0, opus_tracks={path: 1}))
+
+        # A corrupt page on an unselected Opus stream still invalidates the resource.
+        damaged = payload[:-1] + bytes([payload[-1] ^ 1])
+        with doc_ex.open(fixture(damaged)) as book:
+            with self.assertRaises(doc_ex.MalformedDocumentError):
+                next(book.epub_narration(0, opus_tracks={path: 0}))
+
+        authored_payload = group(stereo, mono)
+        authored = "OEBPS/Media/alternate.ogg"
+        with doc_ex.open(source) as book:
+            with self.assertRaisesRegex(ValueError, "requires an Ogg"):
+                next(book.epub_narration(0, opus_tracks={path: 0}))
+            edited = book.edit_epub_structure(
+                [0, 1],
+                resources={authored: doc_ex.EpubResource("audio/ogg; codecs=opus", authored_payload)},
+                overlays={"OEBPS/one.xhtml": [doc_ex.EpubOverlayCue("café", authored, 0, 20_000)]},
+            )
+        with doc_ex.open(edited) as book:
+            self.assertEqual(book.read_epub_resource(authored), authored_payload)
+            audio = next(book.epub_narration(0, opus_tracks={authored: 1})).audio
+            self.assertEqual(pcm(audio), expected_mono[:960 * 2])
+
     def test_media_overlay_rejects_damaged_ogg_transport(self) -> None:
         source, _ = narrated_epub()
         with zipfile.ZipFile(io.BytesIO(source)) as archive:

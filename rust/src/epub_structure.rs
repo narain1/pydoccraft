@@ -636,7 +636,7 @@ fn check_path(path: &str) -> Result<(), EngineError> {
 fn editable_resource(media: &str) -> bool {
     matches!(
         media,
-        "text/css" | "application/smil+xml" | "application/ogg"
+        "text/css" | "application/smil+xml" | "application/ogg" | "audio/ogg; codecs=opus"
     ) || obfuscation::is_font(media)
         || media.split_once('/').is_some_and(|(kind, subtype)| {
             matches!(kind, "image" | "audio" | "video" | "font")
