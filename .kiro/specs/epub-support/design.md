@@ -53,6 +53,8 @@ Resource removal checks the staged archive after additions, replacements, and ov
 
 `epub_audio.rs` maps SMIL time bounds to half-open sample-frame intervals. Streaming advances that integer cursor using PCM frames returned by the decoder. It reuses the track and its decoded frame cache between reads and supports an open-ended interval through the end of the resource. The MPEG decoder verifies a supported Xing/Info tag against packet headers before applying its encoder delay, decoder delay and end padding. AAC uses the MP4 presentation edit.
 
+`epub_opus.rs` checks Ogg page boundaries, packet sizes, and stream continuity before demuxing with checksum verification. It indexes packet times at 48 kHz from their Opus frame headers and validates page granule positions against those times. The decoder applies the identification packet's output gain and uses pre-skip and the final granule to bound the presentation interval. This profile supports one logical stream with mono or stereo output.
+
 The Python iterator seeks by chapter cue index before applying role filters. It decodes each selected target as a group of chunks. Playback calls the target callback once before handing that group's audio or text to the sinks and clears the target when the group finishes or a sink fails.
 
 

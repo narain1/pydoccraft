@@ -1153,6 +1153,63 @@ class EpubTests(unittest.TestCase):
             with self.assertRaises(doc_ex.MalformedDocumentError):
                 next(document.epub_narration(0))
 
+    def test_media_overlay_preserves_ogg_opus_stereo_presentation(self) -> None:
+        source, _ = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(b"audio/wav", b"audio/ogg")
+            smil = archive.read("OEBPS/Sync/read.smil")
+        # The 1.15-second synthetic stream has 515 Hz left and 755 Hz right.
+        data = (Path(__file__).parent / "fixtures" / "epub-narration-stereo.opus").read_bytes()
+        source = rewrite_epub(source, {"OEBPS/content.opf": package, "OEBPS/Media/voice.wav": data})
+        full_smil = smil.replace(b'clipBegin="250ms" clipEnd="00:00:01.125"', b'clipBegin="0s"')
+        with doc_ex.open(rewrite_epub(source, {"OEBPS/Sync/read.smil": full_smil})) as document:
+            audio = next(document.epub_narration(0)).audio
+            assert audio is not None
+            self.assertEqual((audio.sample_rate, audio.channels, audio.frame_count), (48000, 2, 55200))
+            with wave.open(io.BytesIO(audio.wave), "rb") as pcm:
+                reference = pcm.readframes(audio.frame_count)
+            samples = [list(channel) for channel in zip(*struct.iter_unpack("<hh", reference))]
+            for channel, frequency in zip(samples, (515, 755)):
+                self.assertGreater(max(channel), 1000)
+                crossings = sum(a <= 0 < b for a, b in zip(channel, channel[1:]))
+                self.assertAlmostEqual(crossings, frequency * 1.15, delta=2)
+        with doc_ex.open(source) as document:
+            intro = bytearray()
+            for cue in document.epub_narration(0, chunk_frames=773, skip_roles={"aside"}):
+                assert cue.audio is not None
+                with wave.open(io.BytesIO(cue.audio.wave), "rb") as pcm:
+                    intro.extend(pcm.readframes(cue.audio.frame_count))
+            self.assertEqual(intro, reference[12000 * 4:54000 * 4])
+            tail = next(document.epub_narration(1)).audio
+            assert tail is not None
+            self.assertEqual(tail.frame_count, 1200)
+            with wave.open(io.BytesIO(tail.wave), "rb") as pcm:
+                self.assertEqual(pcm.readframes(tail.frame_count), reference[54000 * 4:])
+        with doc_ex.open(rewrite_epub(source, {"OEBPS/Sync/read.smil": smil.replace(
+            b"00:00:01.125", b"1.151s",
+        )})) as document:
+            with self.assertRaises(doc_ex.MalformedDocumentError):
+                next(document.epub_narration(0, chunk_frames=773))
+
+    def test_media_overlay_rejects_damaged_ogg_transport(self) -> None:
+        source, _ = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(b"audio/wav", b"audio/ogg")
+        data = (Path(__file__).parent / "fixtures" / "epub-narration-stereo.opus").read_bytes()
+        damaged = bytearray(data)
+        damaged[-1] ^= 1
+        for payload, error in (
+            (data[:-1], doc_ex.MalformedDocumentError),
+            (bytes(damaged), doc_ex.MalformedDocumentError),
+            (data + data, doc_ex.UnsupportedFormatError),
+        ):
+            source_with_audio = rewrite_epub(source, {
+                "OEBPS/content.opf": package, "OEBPS/Media/voice.wav": payload,
+            })
+            with self.subTest(error=error, size=len(payload)), doc_ex.open(source_with_audio) as document:
+                with self.assertRaises(error):
+                    next(document.epub_narration(0))
+
     def test_media_overlay_resolves_cues_and_audio_in_spine_order(self) -> None:
         data, audio = narrated_epub()
         with doc_ex.open(data) as document:

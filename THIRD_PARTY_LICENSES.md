@@ -31,6 +31,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `bumpalo` | `3.20.3` | MIT OR Apache-2.0 |
 | `bytemuck` | `1.25.2` | Zlib OR Apache-2.0 OR MIT |
 | `bytemuck_derive` | `1.12.1` | Zlib OR Apache-2.0 OR MIT |
+| `byteorder` | `1.5.0` | Unlicense OR MIT |
 | `byteorder-lite` | `0.1.0` | Unlicense OR MIT |
 | `bytes` | `1.12.1` | MIT |
 | `cbc` | `0.1.2` | MIT OR Apache-2.0 |
@@ -168,11 +169,13 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `nix` | `0.31.3` | MIT |
 | `nom` | `8.0.0` | MIT |
 | `num-traits` | `0.2.19` | MIT OR Apache-2.0 |
+| `ogg` | `0.9.2` | BSD-3-Clause |
 | `once_cell` | `1.21.4` | MIT OR Apache-2.0 |
 | `ordered-channel` | `1.2.0` | MIT OR Apache-2.0 |
 | `oxideav-aac` | `0.1.7` | MIT |
 | `oxideav-core` | `0.1.43` | MIT |
 | `oxideav-mp4` | `0.0.11` | MIT |
+| `oxideav-opus` | `0.0.15` | MIT |
 | `parlance` | `0.1.1` | Apache-2.0 OR MIT |
 | `parley` | `0.13.0` | Apache-2.0 OR MIT |
 | `parley_data` | `0.13.0` | Apache-2.0 OR MIT |
@@ -375,3 +378,35 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+### RustAudio Ogg BSD 3-Clause License
+
+Copyright (c) 2016-2017 est31 <MTest31@outlook.com> and contributors
+Copyright (c) 2002-2015 Xiph.org Foundation
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+- Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+
+- Redistributions in binary form must reproduce the above copyright
+notice, this list of conditions and the following disclaimer in the
+documentation and/or other materials provided with the distribution.
+
+- Neither the name of the Xiph.org Foundation nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION
+OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

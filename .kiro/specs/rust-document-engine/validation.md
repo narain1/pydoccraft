@@ -2767,3 +2767,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 652 installed tests, inclu
 ## 2026-11-24 EPUB streamed and seekable media overlays
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 656 installed tests, including 61 EPUB tests. It measured 22,742,307 bytes with a 52,838,312-byte native extension. The playback tests verify bounded WAV, MP3 and AAC-LC chunks, chapter cue seeking, and Xing/Info presentation timing. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-streamed-and-seekable-media-overlay-playback) for exact checks and the reference audio comparison.
+
+## 2026-11-24 EPUB Ogg Opus overlays
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 658 installed tests, including 63 EPUB tests. It measured 22,912,369 bytes with a 53,193,912-byte native extension. It decodes single-stream mono and stereo Opus in Ogg. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-ogg-opus-media-overlays) for license attribution and reference decoder comparisons.

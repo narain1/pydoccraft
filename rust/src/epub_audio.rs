@@ -10,6 +10,8 @@ use crate::EngineError;
 
 #[path = "epub_aac.rs"]
 mod aac;
+#[path = "epub_opus.rs"]
+mod opus;
 
 const MAX_ENCODED_BYTES: usize = 32 * 1024 * 1024;
 const MAX_CLIP_SAMPLES: usize = 8 * 1024 * 1024;
@@ -33,6 +35,7 @@ enum Decoder {
     Wave(WavReader<Cursor<Vec<u8>>>),
     Mp3(Box<Mp3>),
     Aac(Box<aac::Track>),
+    Opus(Box<opus::Track>),
 }
 
 pub(crate) struct AudioClip {
@@ -56,6 +59,12 @@ impl AudioSource {
                 let track = std::panic::catch_unwind(|| aac::Track::open(bytes))
                     .map_err(|_| invalid("malformed MP4 audio"))??;
                 Decoder::Aac(Box::new(track))
+            }
+            "audio/ogg" | "audio/opus" | "audio/ogg; codecs=opus" => {
+                let bytes = read(data, path, MAX_ENCODED_BYTES)?;
+                let track = std::panic::catch_unwind(|| opus::Track::open(&bytes))
+                    .map_err(|_| invalid("malformed Ogg Opus audio"))??;
+                Decoder::Opus(Box::new(track))
             }
             "audio/wav" | "audio/wave" | "audio/x-wav" | "audio/vnd.wave" => {
                 let bytes = read(data, path, MAX_ENCODED_BYTES)?;
@@ -120,6 +129,7 @@ impl AudioSource {
         let (spec, duration) = match &mut self.decoder {
             Decoder::Wave(reader) => (wav_spec(reader)?, Some(reader.duration() as usize)),
             Decoder::Aac(track) => (track.spec(), Some(track.frames())),
+            Decoder::Opus(track) => (track.spec(), Some(track.frames())),
             Decoder::Mp3(reader) => {
                 std::panic::catch_unwind(AssertUnwindSafe(|| reader.geometry()))
                     .map_err(|_| invalid("malformed MPEG Layer III audio"))??
@@ -156,6 +166,11 @@ impl AudioSource {
                 let end = known_end()?;
                 std::panic::catch_unwind(AssertUnwindSafe(|| track.samples(start, end)))
                     .map_err(|_| invalid("malformed MP4 audio"))?
+            }
+            Decoder::Opus(track) => {
+                let end = known_end()?;
+                std::panic::catch_unwind(AssertUnwindSafe(|| track.samples(start, end)))
+                    .map_err(|_| invalid("malformed Ogg Opus audio"))?
             }
             Decoder::Mp3(reader) => {
                 std::panic::catch_unwind(AssertUnwindSafe(|| reader.samples(start, end, allow_eof)))

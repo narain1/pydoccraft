@@ -174,6 +174,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "byteorder"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
+
+[[package]]
 name = "byteorder-lite"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1526,6 +1532,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ogg"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdab8dcd8d4052eaacaf8fb07a3ccd9a6e26efadb42878a413c68fc4af1dee2b"
+dependencies = [
+ "byteorder",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1569,6 +1584,15 @@ dependencies = [
  "aes 0.8.4",
  "cbc 0.1.2",
  "ctr",
+ "oxideav-core",
+]
+
+[[package]]
+name = "oxideav-opus"
+version = "0.0.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49ccdf44710c69c6351e5ad21e73307170ee94cc5a5f1cdf7c9b517f48b81093"
+dependencies = [
  "oxideav-core",
 ]
 
@@ -1941,9 +1965,11 @@ dependencies = [
  "hound",
  "kurbo",
  "mp3dec",
+ "ogg",
  "oxideav-aac",
  "oxideav-core",
  "oxideav-mp4",
+ "oxideav-opus",
  "parley",
  "pdfcraft-annot",
  "pdfcraft-content",
