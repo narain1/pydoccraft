@@ -1455,6 +1455,43 @@ class EpubTests(unittest.TestCase):
             math_text = [node.text for node in xml.iter("{http://schemas.openxmlformats.org/officeDocument/2006/math}t")]
             self.assertIn("\u00a0two terms\u00a0", math_text)
 
+    def test_large_mathml_tree_uses_equation_styles_and_bounds_xhtml_boxes(self) -> None:
+        def chapter(body: str) -> bytes:
+            return epub_fixture(chapter_one=f"""<html xmlns="http://www.w3.org/1999/xhtml"
+              xmlns:m="http://www.w3.org/1998/Math/MathML"><head><title>Chapter</title>
+              <style>p {{ font-size: 24px }} .formula .accent {{ color: #d63030 }}
+              .formula :is(.accent) {{ color: #1644df }}</style></head>
+              <body><p>{body}</p></body></html>""")
+
+        def formula(rows: int) -> str:
+            return '<m:math class="formula"><m:mrow>' + '<m:mrow/>' * rows + '<m:mi class="accent accent">X</m:mi></m:mrow></m:math>'
+
+        with doc_ex.open(chapter(formula(8100))) as large, doc_ex.open(chapter(formula(0))) as compact:
+            preview = large.render_page(0, dpi=96)
+            self.assertEqual(preview, compact.render_page(0, dpi=96))
+            _, pixels = rgba_pixels(png_chunks(preview))
+            self.assertIn(bytes((22, 68, 223, 255)), pixels)
+            with doc_ex.open(large.convert("docx")) as word:
+                _, pixels = rgba_pixels(png_chunks(word.render_page(0, dpi=96)))
+                self.assertIn(bytes((22, 68, 223, 255)), pixels)
+        with doc_ex.open(chapter('<span/>' * 8100 + 'Text')) as html:
+            with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, '8000 box elements'):
+                html.render_page(0, dpi=96)
+
+    def test_tall_reflowable_chapter_renders_with_bounded_raster(self) -> None:
+        source = epub_fixture(chapter_one="""<html xmlns="http://www.w3.org/1999/xhtml"><head>
+          <style>body { margin: 0 } .space { height: 16000px }
+          .end { height: 90px; background-color: #a93372 }</style></head>
+          <body><div class="space"/><div class="space"/><div class="end"/></body></html>""")
+        with doc_ex.open(source) as book:
+            full = png_chunks(book.render_page(0, dpi=24))
+            self.assertEqual(struct.unpack_from(">II", full[b"IHDR"]), (204, 8023))
+            with self.assertRaises(doc_ex.UnsafeArchiveError):
+                book.render_page(0, dpi=96)
+            tail = png_chunks(book.render_page(0, dpi=96, clip=(3, 24_003, 12, 15)))
+            self.assertEqual(struct.unpack_from(">II", tail[b"IHDR"]), (16, 20))
+            self.assertEqual(rgba_pixels(tail)[1], bytes((169, 51, 114, 255)) * 320)
+
     def test_mathml_applies_chapter_css_in_preview_and_native_exports(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Math styles</title><link rel="stylesheet" href="math.css"/>

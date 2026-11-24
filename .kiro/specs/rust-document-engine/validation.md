@@ -2791,3 +2791,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 665 installed tests, inclu
 ## 2026-11-24 EPUB MathML whitespace
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 666 installed tests, including 71 EPUB tests. It measured 22,977,316 bytes with a 53,341,128-byte native extension. The complete public *Linear Algebra* EPUB opened within the existing semantic budget. The [EPUB validation record](../epub-support/validation.md#2026-11-24-mathml-whitespace-and-full-linear-algebra-extraction) contains the complete spine preview results and remaining limits.
+
+## 2026-11-24 EPUB stylesheet scaling
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 668 installed tests, including 73 EPUB tests. It measured 22,985,020 bytes with a 53,376,248-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-css-scaling-and-tall-reflowable-previews) covers the larger formula stylesheets, tall chapter clipping, and full spine check.

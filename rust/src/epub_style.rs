@@ -10,6 +10,7 @@ use taffy::{
 use wordcraft_doc::props::{Align, CharProps, LineSpacing, Rgb, TextColor, Underline};
 
 use super::{
+    charge,
     css::{self, Cascade, Properties},
     limited, math, XHTML,
 };
@@ -17,6 +18,12 @@ use crate::EngineError;
 
 pub(super) type Styles = HashMap<NodeId, Styled>;
 pub(super) type Paint = (Rgb, f32);
+
+#[derive(Default)]
+pub(super) struct ChapterStyles {
+    pub boxes: Styles,
+    pub equations: HashMap<NodeId, math::Css>,
+}
 
 pub(super) struct Styled {
     pub box_style: Style,
@@ -26,7 +33,6 @@ pub(super) struct Styled {
     pub background: Option<Paint>,
     pub border: [Option<Paint>; 4],
     pub z_index: i32,
-    pub math: Option<math::Css>,
 }
 
 #[derive(Clone, Default)]
@@ -38,21 +44,55 @@ pub(super) struct Typography {
     pub invisible: bool,
 }
 
-impl Styled {
+impl ChapterStyles {
     pub(super) fn compute(
         root: Node<'_, '_>,
         cascade: &mut Cascade,
         viewport: [f32; 2],
-    ) -> Result<Styles, EngineError> {
-        let mut styles = Styles::new();
+    ) -> Result<Self, EngineError> {
+        let mut styles = Self::default();
+        let mut formula_end = 0;
+        let mut annotation_end = 0;
+        let mut equation_bytes = 0;
         for node in root.descendants().filter(Node::is_element) {
-            if styles.len() == 8_000 {
-                return Err(limited("EPUB styled chapter exceeds 8000 elements"));
+            let range = node.range();
+            if range.start < annotation_end {
+                continue;
+            }
+            let tag = node.tag_name();
+            let is_math = tag.namespace() == Some(math::MATHML);
+            let in_formula = range.start < formula_end;
+            if in_formula && is_math && matches!(tag.name(), "annotation" | "annotation-xml") {
+                annotation_end = range.end;
+                continue;
+            }
+            if in_formula && !is_math {
+                continue;
+            }
+            let values = cascade.properties(node)?;
+            if is_math {
+                if let Some(css) = math::Css::from_properties(&values) {
+                    charge(
+                        &mut equation_bytes,
+                        css.storage_bytes(),
+                        64 * 1024 * 1024,
+                        "EPUB equation styles exceed their byte budget",
+                    )?;
+                    styles.equations.insert(node.id(), css);
+                }
+                if in_formula {
+                    continue;
+                }
+                if tag.name() == "math" {
+                    formula_end = range.end;
+                }
+            }
+            if styles.boxes.len() == 8_000 {
+                return Err(limited("EPUB styled chapter exceeds 8000 box elements"));
             }
             let parent = node
                 .parent_element()
-                .and_then(|parent| styles.get(&parent.id()));
-            let values = cascade.properties(node)?;
+                .and_then(|parent| styles.boxes.get(&parent.id()));
             let mut text = parent.map(|parent| parent.text.clone()).unwrap_or_default();
             text.apply(node, &values, viewport);
             let tag = node.tag_name().name();
@@ -255,9 +295,9 @@ impl Styled {
                     .or(Some((Rgb::BLACK, 1.0)))
             });
             let z_index = value(&values, "z-index").parse().unwrap_or(0);
-            styles.insert(
+            styles.boxes.insert(
                 node.id(),
-                Self {
+                Styled {
                     box_style,
                     text,
                     inline,
@@ -265,11 +305,6 @@ impl Styled {
                     background,
                     border,
                     z_index,
-                    math: if node.tag_name().namespace() == Some(math::MATHML) {
-                        math::Css::from_properties(&values)
-                    } else {
-                        None
-                    },
                 },
             );
         }

@@ -335,7 +335,7 @@ fn extract_impl(
             {
                 let mut cascade = css::Cascade::load(root, &entry.resolved, &mut book, viewport)?;
                 if cascade.needed(root) {
-                    Some(style::Styled::compute(root, &mut cascade, viewport)?)
+                    Some(style::ChapterStyles::compute(root, &mut cascade, viewport)?)
                 } else {
                     None
                 }

@@ -18,6 +18,7 @@ type Specificity = [u16; 3];
 #[derive(Default)]
 pub(super) struct Cascade {
     rules: Vec<Rule>,
+    candidates: RuleIndex,
     pub(super) fonts: Vec<super::fonts::Face>,
     imports: HashSet<String>,
     bytes: usize,
@@ -28,6 +29,78 @@ pub(super) struct Cascade {
 struct Rule {
     selector: Selector,
     declarations: Arc<[DeclarationValue]>,
+}
+
+#[derive(Default)]
+struct RuleIndex {
+    ids: HashMap<String, Vec<usize>>,
+    classes: HashMap<String, Vec<usize>>,
+    tags: HashMap<String, Vec<usize>>,
+    other: Vec<usize>,
+}
+
+impl RuleIndex {
+    fn insert(&mut self, selector: &Selector, order: usize) {
+        // Every test in the last compound must match the subject element.
+        let key = selector
+            .steps
+            .last()
+            .into_iter()
+            .flat_map(|step| &step.tests)
+            .filter_map(Test::index_key)
+            .min_by_key(|(kind, _)| *kind);
+        if let Some((kind, value)) = key {
+            let index = match kind {
+                KeyKind::Id => &mut self.ids,
+                KeyKind::Class => &mut self.classes,
+                KeyKind::Tag => &mut self.tags,
+            };
+            index.entry(value.to_owned()).or_default().push(order);
+        } else {
+            self.other.push(order);
+        }
+    }
+
+    fn matching_keys(
+        &self,
+        node: Node<'_, '_>,
+        work: &mut usize,
+    ) -> Result<Vec<usize>, EngineError> {
+        let mut candidates = self.other.clone();
+        if let Some(tags) = self.tags.get(node.tag_name().name()) {
+            candidates.extend(tags);
+        }
+        let mut seen = HashSet::new();
+        for id in super::element_ids(node) {
+            if let Some(rules) = self.ids.get(id).filter(|_| seen.insert(id)) {
+                candidates.extend(rules);
+            }
+        }
+        seen.clear();
+        if !self.classes.is_empty() {
+            if let Some(classes) = node.attribute("class") {
+                for class in classes.split_ascii_whitespace() {
+                    charge(
+                        work,
+                        1,
+                        SELECTOR_WORK,
+                        "EPUB CSS selector work limit exceeded",
+                    )?;
+                    if let Some(rules) = self.classes.get(class).filter(|_| seen.insert(class)) {
+                        candidates.extend(rules);
+                    }
+                }
+            }
+        }
+        Ok(candidates)
+    }
+}
+
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+enum KeyKind {
+    Id,
+    Class,
+    Tag,
 }
 
 type DeclarationValue = (String, String, bool);
@@ -188,6 +261,7 @@ impl Cascade {
                             if self.rules.len() >= 4_096 {
                                 return Err(limited("EPUB stylesheet rule limit exceeded"));
                             }
+                            self.candidates.insert(&selector, self.rules.len());
                             self.rules.push(Rule {
                                 selector,
                                 declarations: values.clone(),
@@ -255,7 +329,8 @@ impl Cascade {
 
     pub(super) fn properties(&mut self, node: Node<'_, '_>) -> Result<Properties, EngineError> {
         let mut selected = HashMap::new();
-        for rule in &self.rules {
+        for order in self.candidates.matching_keys(node, &mut self.work)? {
+            let rule = &self.rules[order];
             if rule
                 .selector
                 .matches(node, rule.selector.steps.len(), &mut self.work)?
@@ -271,7 +346,7 @@ impl Cascade {
                         &mut selected,
                         key,
                         value,
-                        (*important, false, rule.selector.specificity),
+                        (*important, false, rule.selector.specificity, order),
                     );
                 }
             }
@@ -291,7 +366,7 @@ impl Cascade {
                 return Err(invalid("EPUB inline CSS has trailing input"));
             }
             for (key, value, important) in declarations(&block, &source)? {
-                update(&mut selected, &key, &value, (important, true, [0; 3]));
+                update(&mut selected, &key, &value, (important, true, [0; 3], 0));
             }
         }
         Ok(selected
@@ -340,7 +415,7 @@ impl Cascade {
     }
 }
 
-type Priority = (bool, bool, Specificity);
+type Priority = (bool, bool, Specificity, usize);
 
 fn update(
     values: &mut HashMap<String, (Priority, String)>,
@@ -722,6 +797,15 @@ impl Selector {
 }
 
 impl Test {
+    fn index_key(&self) -> Option<(KeyKind, &str)> {
+        match self {
+            Self::Id(value) => Some((KeyKind::Id, value)),
+            Self::Class(value) => Some((KeyKind::Class, value)),
+            Self::Tag(value) => Some((KeyKind::Tag, value)),
+            _ => None,
+        }
+    }
+
     fn matches(&self, node: Node<'_, '_>, work: &mut usize) -> Result<bool, EngineError> {
         let yes = match self {
             Self::Tag(tag) => node.tag_name().name() == tag,

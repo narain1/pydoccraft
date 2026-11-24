@@ -21,16 +21,18 @@ use super::{
     output::{image_bytes, Output, RasterImage},
     parse_xml,
     rendition::{fixed, Region},
-    style::{Paint, Styled},
+    style::{ChapterStyles, Paint},
     unsupported, Book, XHTML, XML_BYTES,
 };
 use crate::{
     model::{DocumentPayload, PagePayload},
-    rendering, EngineError,
+    rendering::{self, RasterRegion},
+    EngineError,
 };
 
 pub(super) const REFLOW_WIDTH: f32 = 612.0;
 const MAX_GEOMETRY: f32 = 20_000.0;
+const MAX_PAINT_COORDINATE: f32 = MAX_GEOMETRY * 4.0;
 const MAX_BOXES: usize = 8_000;
 
 pub(super) fn render(
@@ -66,8 +68,8 @@ pub(super) fn render(
     if !fixed && !cascade.needed(root) {
         return Ok(None);
     }
-    let styles = Styled::compute(root, &mut cascade, viewport)?;
-    let fonts = Fonts::load(&cascade.fonts, &styles, &mut archive)?;
+    let styles = ChapterStyles::compute(root, &mut cascade, viewport)?;
+    let fonts = Fonts::load(&cascade.fonts, &styles.boxes, &mut archive)?;
     let manifest = book
         .metadata
         .get("manifest")
@@ -88,7 +90,7 @@ pub(super) fn render(
         manifest: &manifest,
         book: &mut archive,
         budget: &mut budget,
-        styles: Some(&styles),
+        styles: Some(&styles.boxes),
         equation_styles: Some((&styles, viewport)),
     };
     let mut layout = Layout::new(Output::new(data, book, false, dpi), viewport, fonts);
@@ -102,10 +104,11 @@ pub(super) fn render(
     root_style.box_sizing = taffy::style::BoxSizing::BorderBox;
     layout.tree.set_style(id, root_style).map_err(failure)?;
     let dimension = layout.place(root_id, fixed)?;
-    let html_color = styles[&root.id()]
+    let region = region.for_page(dimension.map(f64::from), dpi)?;
+    let html_color = styles.boxes[&root.id()]
         .background
         .filter(|(_, alpha)| *alpha > 0.0);
-    let paper = html_color.or(styles[&body.id()].background);
+    let paper = html_color.or(styles.boxes[&body.id()].background);
     let mut drawing = Vec::new();
     fill(
         &mut drawing,
@@ -131,7 +134,7 @@ pub(super) fn render(
         &mut HashMap::new(),
         &mut drawing,
     )?;
-    raster(&layout.output.document, &drawing, dimension, dpi, region).map(Some)
+    raster(&layout.output.document, &drawing, dpi, region).map(Some)
 }
 
 pub(super) fn dimensions(root: Node<'_, '_>) -> Option<[f32; 2]> {
@@ -624,7 +627,7 @@ impl<'book> Layout<'book> {
         } else {
             root.scroll_height().max(root.size.height).max(1.0)
         };
-        if !height.is_finite() || height > MAX_GEOMETRY {
+        if !height.is_finite() || height > MAX_PAINT_COORDINATE {
             return Err(limited("EPUB laid-out chapter is too tall"));
         }
         Ok([self.viewport[0], height])
@@ -650,7 +653,7 @@ impl<'book> Layout<'book> {
         let rectangle = Rect::new(x, y, layout.size.width, layout.size.height);
         if ![x, y, rectangle.w, rectangle.h]
             .into_iter()
-            .all(|n| n.is_finite() && n.abs() <= MAX_GEOMETRY * 4.0)
+            .all(|n| n.is_finite() && n.abs() <= MAX_PAINT_COORDINATE)
         {
             return Err(limited("EPUB box geometry exceeds renderer limits"));
         }
@@ -900,12 +903,10 @@ fn fill(output: &mut Vec<Draw>, rect: Rect, color: Option<Paint>) {
 fn raster(
     doc: &Document,
     drawing: &[Draw],
-    dimensions: [f32; 2],
     dpi: f64,
-    region: Region,
+    region: RasterRegion,
 ) -> Result<wordcraft_render::Rendered, EngineError> {
     let scale = dpi / 72.0;
-    let region = region.for_page(dimensions.map(f64::from), dpi)?;
     // render_items uses its area only to determine dimensions and transform. Choose
     // dimensions inside the quantized pixel interval to absorb its f32 rounding.
     let area = Rect::new(

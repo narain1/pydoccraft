@@ -58,7 +58,7 @@ pub(super) struct Context<'a, 'book> {
     pub book: &'a mut Book<'book>,
     pub budget: &'a mut Budget,
     pub styles: Option<&'a super::style::Styles>,
-    pub equation_styles: Option<(&'a super::style::Styles, [f32; 2])>,
+    pub equation_styles: Option<(&'a super::style::ChapterStyles, [f32; 2])>,
 }
 
 #[derive(Default)]
@@ -427,7 +427,7 @@ fn inline(
         if let Some((styles, viewport)) = cx.equation_styles {
             let base = node
                 .parent_element()
-                .and_then(|parent| styles.get(&parent.id()))
+                .and_then(|parent| styles.boxes.get(&parent.id()))
                 .map(|style| {
                     let chars = &style.text.chars;
                     wordcraft_doc::CharProps {
@@ -444,7 +444,7 @@ fn inline(
             let nodes = node
                 .descendants()
                 .filter_map(|child| {
-                    let css = styles.get(&child.id())?.math.as_ref()?;
+                    let css = styles.equations.get(&child.id())?;
                     Some((child.id().get() - node.id().get(), css.clone()))
                 })
                 .collect();

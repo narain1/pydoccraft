@@ -34,6 +34,12 @@ pub(super) struct Css {
 }
 
 impl Css {
+    pub(super) fn storage_bytes(&self) -> usize {
+        std::mem::size_of::<(roxmltree::NodeId, Self)>()
+            + self.size.as_ref().map_or(0, String::len)
+            + self.ink.as_ref().map_or(0, String::len)
+    }
+
     pub(super) fn from_properties(values: &css::Properties) -> Option<Self> {
         let get = |key| values.get(key).map(String::as_str).unwrap_or_default();
         let bold = match get("font-weight") {
