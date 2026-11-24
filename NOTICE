@@ -42,6 +42,24 @@ Source: https://github.com/DevinSterling/rbook
 Crate: rbook 0.7.12; crates.io package source corresponds to tag revision c62988a09e5043444392fe998d5103821f545991.
 Only the `write` feature is enabled. It provides in-memory EPUB package, manifest, spine, navigation, MIME and ZIP serialization; pydoccraft does not use its filesystem writer.
 
+Raffia
+Copyright the Raffia contributors.
+Licensed under the MIT License.
+Source: https://github.com/g-plane/raffia
+Crate: raffia 0.13.0. Used to parse EPUB CSS syntax and selectors.
+
+Taffy
+Copyright the Taffy contributors.
+Licensed under the MIT License.
+Source: https://github.com/DioxusLabs/taffy
+Crate: taffy 0.16.0. Used for EPUB block, flex and grid geometry.
+
+resvg
+Copyright 2017 the Resvg Authors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option.
+Source: https://github.com/linebender/resvg
+Crates: resvg and usvg 0.50.0. Used to render validated EPUB SVG content documents.
+
 Documentation image: website/assets/irs-1040-page-1.png is rendered from the U.S. Internal Revenue Service 2025 Form 1040 (https://www.irs.gov/pub/irs-prior/f1040--2025.pdf), a U.S. government work.
 
 Bundled and linked third-party material
@@ -58,6 +76,7 @@ Bundled and linked third-party material
 - WordCraft Polish and Italian hyphenation patterns are used under MIT; Portuguese patterns are used under BSD-3-Clause. Copyright details remain in the corresponding upstream source files.
 - Krilla 0.8.2 is MIT OR Apache-2.0. Compact ICC Profiles embedded by the PDF backend are by Clinton Ingram and released under CC0-1.0.
 - Kurbo 0.13.1, by the Linebender contributors, is Apache-2.0 OR MIT. The existing native geometry dependency is also used directly for WordCraft region-render transforms and native glyph curve bounds.
+- Color 0.3.3, by the Linebender contributors, is Apache-2.0 OR MIT. The existing color dependency is also used directly for EPUB CSS colors.
 - Skrifa 0.44.0, by the Fontations Authors, is MIT OR Apache-2.0. The existing font dependency is also used directly for bounded native TrueType outline inspection. All font parsing and outline geometry use public upstream library APIs.
 
 The locked crate-by-crate license inventory is distributed as LICENSE-THIRD-PARTY and maintained in source as THIRD_PARTY_LICENSES.md.

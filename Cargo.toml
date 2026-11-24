@@ -18,6 +18,7 @@ extension-module = ["python", "pyo3/extension-module"]
 
 [dependencies]
 base64 = "=0.22.1"
+color = "=0.3.3"
 deckcraft-model = { git = "https://github.com/storytold/deckcraft", rev = "f7a7fd7f5ffda19758584908730216222e387aa6" }
 deckcraft-pdf = { git = "https://github.com/storytold/deckcraft", rev = "f7a7fd7f5ffda19758584908730216222e387aa6" }
 deckcraft-pptx = { git = "https://github.com/storytold/deckcraft", rev = "f7a7fd7f5ffda19758584908730216222e387aa6" }
@@ -37,14 +38,18 @@ pdfcraft-render = { git = "https://github.com/storytold/pdfcraft", rev = "03996b
 png = "=0.18.1"
 pyo3 = { version = "=0.23.5", optional = true }
 quick-xml = "=0.41.0"
+raffia = "=0.13.0"
 rbook = { version = "=0.7.12", default-features = false, features = ["write"] }
+resvg = { version = "=0.50.0", default-features = false, features = ["text", "system-fonts"] }
 roxmltree = "=0.21.2"
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.149"
 skrifa = "=0.44.0"
+taffy = { version = "=0.16.0", default-features = false, features = ["std", "taffy_tree", "block_layout", "flexbox", "grid", "content_size"] }
 thiserror = "=2.0.21"
 wordcraft-doc = { git = "https://github.com/storytold/wordcraft", rev = "bbe3547dd11bb5f613f3aa893b12f593910644de" }
 wordcraft-docx = { git = "https://github.com/storytold/wordcraft", rev = "bbe3547dd11bb5f613f3aa893b12f593910644de" }
+wordcraft-geom = { git = "https://github.com/storytold/wordcraft", rev = "bbe3547dd11bb5f613f3aa893b12f593910644de" }
 wordcraft-layout = { git = "https://github.com/storytold/wordcraft", rev = "bbe3547dd11bb5f613f3aa893b12f593910644de" }
 wordcraft-pdf = { git = "https://github.com/storytold/wordcraft", rev = "bbe3547dd11bb5f613f3aa893b12f593910644de" }
 wordcraft-render = { git = "https://github.com/storytold/wordcraft", rev = "bbe3547dd11bb5f613f3aa893b12f593910644de" }

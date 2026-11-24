@@ -57,6 +57,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `crunchy` | `0.2.4` | MIT |
 | `crypto-common` | `0.2.2` | MIT OR Apache-2.0 |
 | `ctutils` | `0.4.3` | Apache-2.0 OR MIT |
+| `data-url` | `0.3.2` | MIT OR Apache-2.0 |
 | `deckcraft-anim` | `0.13.1` | MIT OR Apache-2.0 |
 | `deckcraft-color` | `0.13.1` | MIT OR Apache-2.0 |
 | `deckcraft-fonts` | `0.13.1` | MIT OR Apache-2.0 |
@@ -87,6 +88,8 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `foldhash` | `0.2.0` | Zlib |
 | `font-types` | `0.11.3` | MIT OR Apache-2.0 |
 | `font-types` | `0.12.7` | MIT OR Apache-2.0 |
+| `fontconfig-parser` | `0.5.8` | MIT |
+| `fontdb` | `0.24.0` | MIT |
 | `futures-core` | `0.3.34` | MIT OR Apache-2.0 |
 | `futures-task` | `0.3.34` | MIT OR Apache-2.0 |
 | `futures-util` | `0.3.34` | MIT OR Apache-2.0 |
@@ -99,6 +102,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `half` | `2.7.1` | MIT OR Apache-2.0 |
 | `harfrust` | `0.12.0` | MIT |
 | `harfrust` | `0.13.3` | MIT |
+| `harfrust` | `0.15.0` | MIT |
 | `hashbrown` | `0.17.1` | MIT OR Apache-2.0 |
 | `hayro` | `0.7.1` | Apache-2.0 OR MIT |
 | `hayro-ccitt` | `0.3.0` | Apache-2.0 OR MIT |
@@ -116,6 +120,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `image` | `0.25.10` | MIT OR Apache-2.0 |
 | `image-webp` | `0.2.4` | MIT OR Apache-2.0 |
 | `imagesize` | `0.14.0` | MIT |
+| `imagesize` | `0.15.0` | MIT |
 | `indexmap` | `2.14.2` | Apache-2.0 OR MIT |
 | `indoc` | `2.0.8` | MIT OR Apache-2.0 |
 | `inout` | `0.2.5` | MIT OR Apache-2.0 |
@@ -161,6 +166,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `phf_macros` | `0.13.1` | MIT |
 | `phf_shared` | `0.13.1` | MIT |
 | `pic-scale` | `0.7.12` | BSD-3-Clause OR Apache-2.0 |
+| `pico-args` | `0.5.0` | MIT |
 | `pin-project-lite` | `0.2.17` | Apache-2.0 OR MIT |
 | `png` | `0.18.1` | MIT OR Apache-2.0 |
 | `polycool` | `0.4.0` | MIT OR Apache-2.0 |
@@ -178,6 +184,8 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `quote` | `1.0.47` | MIT OR Apache-2.0 |
 | `r-efi` | `5.3.0` | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
 | `r-efi` | `6.0.0` | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
+| `raffia` | `0.13.0` | MIT |
+| `raffia_macro` | `0.2.0` | MIT |
 | `rand` | `0.10.3` | MIT OR Apache-2.0 |
 | `rand_core` | `0.10.1` | MIT OR Apache-2.0 |
 | `rangemap` | `1.8.0` | MIT/Apache-2.0 |
@@ -188,6 +196,10 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `read-fonts` | `0.41.0` | MIT OR Apache-2.0 |
 | `read-fonts` | `0.43.3` | MIT OR Apache-2.0 |
 | `read-fonts` | `0.44.0` | MIT OR Apache-2.0 |
+| `read-fonts` | `0.46.0` | MIT OR Apache-2.0 |
+| `resvg` | `0.50.0` | Apache-2.0 OR MIT |
+| `rgb` | `0.8.53` | MIT |
+| `roxmltree` | `0.20.0` | MIT OR Apache-2.0 |
 | `roxmltree` | `0.21.2` | MIT OR Apache-2.0 |
 | `rustc-hash` | `2.1.3` | Apache-2.0 OR MIT |
 | `rustversion` | `1.0.23` | MIT OR Apache-2.0 |
@@ -203,24 +215,30 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `shlex` | `2.0.1` | MIT OR Apache-2.0 |
 | `simd-adler32` | `0.3.10` | MIT |
 | `simdutf8` | `0.1.5` | MIT OR Apache-2.0 |
+| `simplecss` | `0.2.2` | Apache-2.0 OR MIT |
 | `siphasher` | `1.0.4` | MIT OR Apache-2.0 |
 | `skrifa` | `0.42.1` | MIT OR Apache-2.0 |
 | `skrifa` | `0.44.0` | MIT OR Apache-2.0 |
 | `skrifa` | `0.47.0` | MIT OR Apache-2.0 |
+| `skrifa` | `0.49.0` | MIT OR Apache-2.0 |
 | `slab` | `0.4.12` | MIT |
+| `slotmap` | `1.1.1` | Zlib |
 | `smallvec` | `1.16.3` | MIT OR Apache-2.0 |
 | `stable_deref_trait` | `1.2.1` | MIT OR Apache-2.0 |
 | `strict-num` | `0.1.1` | MIT |
 | `stringprep` | `0.1.5` | MIT/Apache-2.0 |
 | `subsetter` | `0.2.6` | MIT OR Apache-2.0 |
+| `svgtypes` | `0.16.2` | Apache-2.0 OR MIT |
 | `syn` | `2.0.119` | MIT OR Apache-2.0 |
 | `syn` | `3.0.9` | MIT OR Apache-2.0 |
 | `synstructure` | `0.14.0` | MIT |
+| `taffy` | `0.16.0` | MIT |
 | `target-lexicon` | `0.12.16` | Apache-2.0 WITH LLVM-exception |
 | `thiserror` | `2.0.21` | MIT OR Apache-2.0 |
 | `thiserror-impl` | `2.0.21` | MIT OR Apache-2.0 |
 | `thread_local` | `1.1.10` | MIT OR Apache-2.0 |
 | `tiff` | `0.11.3` | MIT |
+| `tiny-skia` | `0.12.0` | BSD-3-Clause |
 | `tiny-skia-path` | `0.12.0` | BSD-3-Clause |
 | `tinyvec` | `1.13.3` | Zlib OR Apache-2.0 OR MIT |
 | `ttf-parser` | `0.25.1` | MIT OR Apache-2.0 |
@@ -235,13 +253,16 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `unicode-properties` | `0.1.4` | MIT/Apache-2.0 |
 | `unicode-script` | `0.5.8` | MIT OR Apache-2.0 |
 | `unicode-segmentation` | `1.13.3` | MIT OR Apache-2.0 |
+| `unicode-vo` | `0.1.0` | MIT/Apache-2.0 |
 | `unindent` | `0.2.4` | MIT OR Apache-2.0 |
+| `usvg` | `0.50.0` | Apache-2.0 OR MIT |
 | `uuid` | `1.29.2` | Apache-2.0 OR MIT |
 | `vello_common` | `0.0.8` | Apache-2.0 OR MIT |
 | `vello_common` | `0.0.9` | Apache-2.0 OR MIT |
 | `vello_common` | `0.2.0` | Apache-2.0 OR MIT |
 | `vello_cpu` | `0.0.8` | Apache-2.0 OR MIT |
 | `vello_cpu` | `0.2.0` | Apache-2.0 OR MIT |
+| `version_check` | `0.9.5` | MIT/Apache-2.0 |
 | `wasip2` | `1.0.4+wasi-0.2.12` | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | `wasm-bindgen` | `0.2.129` | MIT OR Apache-2.0 |
 | `wasm-bindgen-macro` | `0.2.129` | MIT OR Apache-2.0 |
@@ -269,6 +290,7 @@ PdfCraft, WordCraft, DeckCraft and craft-libs use the original upstream reposito
 | `wordcraft-render` | `0.14.0` | MIT OR Apache-2.0 |
 | `write-fonts` | `0.48.1` | MIT OR Apache-2.0 |
 | `wuff` | `0.2.9` | MIT |
+| `xmlwriter` | `0.1.0` | MIT |
 | `xmp-writer` | `0.3.3` | MIT OR Apache-2.0 |
 | `yoke` | `0.8.3` | Unicode-3.0 |
 | `yoke-derive` | `0.8.4` | Unicode-3.0 |

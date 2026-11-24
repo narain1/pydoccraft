@@ -11,7 +11,8 @@
 - [x] Replace existing XHTML chapters transactionally and preserve targeted navigation and overlay anchors.
 - [x] Read SMIL timing trees and expose chapter cue order, time ranges, target IDs and bounded audio reads.
 - [x] Project supported Presentation MathML into native equations for PNG, DOCX and PDF.
-- [ ] Apply source CSS and render fixed-layout renditions, including local stylesheet and font resolution.
+- [x] Apply local author styles for the supported cascade and layout properties. Render fixed-layout XHTML and static SVG chapters with viewport bounds and clipping.
+- [ ] Extend source CSS and fixed-layout fidelity, including archive-local fonts, embedded SVG, synthetic spreads and conversion.
 - [ ] Expand MathML layout to remaining elements, attributes and styling.
 - [ ] Decode and synchronize media overlay playback, including text-only narration cues.
 - [ ] Add structural chapter operations and edits to packaged resources.

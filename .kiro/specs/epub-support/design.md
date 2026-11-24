@@ -12,7 +12,7 @@ The existing native extraction, render, and conversion operations dispatch to EP
 
 `epub_editor.rs` handles targeted OPF metadata updates and batch XHTML replacements. It stages changes, resolves repeated spine positions to their shared file, checks existing text anchors, and rebuilds the ZIP through the bounded sink. The chapter editor validates the complete tentative book before returning its bytes. Untouched members keep their uncompressed content, with archive header details subject to the writer.
 
-`epub_output.rs` projects supported semantic blocks into the existing WordCraft model. A WordCraft web layout renders an individual chapter. The native DOCX and PDF exporters handle document pagination. The bounded `epub_math.rs` adapter substitutes an equation object at each formula's original text span and lets the pinned math engine shape it. Sources with unsupported layout or content features return explicit errors. Source CSS and physical page mapping still need their own layout path.
+`epub_output.rs` projects supported semantic blocks into the existing WordCraft model. The WordCraft web layout handles unstyled reflowable previews. The native DOCX and PDF exporters handle document pagination in the semantic profile. The bounded `epub_math.rs` adapter substitutes an equation object at each formula's original text span and lets the pinned math engine shape it.
 
 ## Creation and dependency scope
 
@@ -22,8 +22,8 @@ This design replaces LexePub and retains the existing rbook writer. It requires 
 
 Container limits, repeated metadata, namespace preservation, links, table spans, and image handling are owned by the local reader. The existing writer accepts a bounded sink and publication dates at its current pin.
 
-## Source rendition work
+## Source rendition
 
-Fixed-layout rendering requires the package default and per-item spine overrides, the XHTML viewport or SVG viewBox, and a paint surface with explicit bounds. Resolve stylesheets, imports, fonts and images relative to their owning archive members. Test source placement, clipping and image dimensions at multiple DPIs. Reflow tests must also verify the stylesheet cascade and inherited typography. These checks require original XHTML and CSS, since the normalized block model has no positioned boxes or CSS selector context.
+Source rendering reads the original target resource to retain CSS selector context and author geometry. `epub_css.rs` loads and parses local styles with Raffia and resolves the supported selectors under a work budget. `epub_style.rs` maps the cascade and inherited typography onto Taffy and native WordCraft properties. `epub_layout.rs` shapes text and math, measures and lays out boxes, then paints the composed draw list through the native renderer. SVG content documents use the validated static profile and resvg with external image loaders disabled. Raster output and clip size use the shared DPI and pixel limits.
 
-Blitz's headless components use Stylo, whose MPL-2.0 license is outside the repository's current dependency allowlist. A separate in-repo layout adapter can evaluate a permissive CSS parser and layout library while retaining the guarded package resolver. [Blitz architecture](https://github.com/DioxusLabs/blitz) [Stylo license](https://github.com/servo/stylo#license)
+The EPUB adapter owns author stylesheet resolution and knows only archive paths. It never delegates fetching to a renderer. Raffia, Taffy and resvg are locked crates with permissive licensing. Broader selectors, CSS custom properties and layout features, packaged fonts, synthetic spreads, CSS-aware conversion and SVG embedded into XHTML remain open.

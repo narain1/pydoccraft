@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use base64::Engine;
 use wordcraft_doc::para::InlineObject;
+use wordcraft_doc::props::{Align, LineSpacing};
 use wordcraft_doc::{Block, Blocks, CharProps, Document, Paragraph, Table};
 
 use crate::{
@@ -22,7 +23,7 @@ pub(super) fn render(
         .pages
         .get(page)
         .ok_or_else(|| EngineError::PageIndex("EPUB chapter is out of range".into()))?;
-    let mut output = Output::new(book, false)?;
+    let mut output = Output::new(book, false);
     if page
         .metadata
         .get("fixed_layout")
@@ -55,7 +56,7 @@ pub(super) fn render(
 }
 
 pub(super) fn convert(book: &DocumentPayload, target: &str) -> Result<Vec<u8>, EngineError> {
-    let mut output = Output::new(book, true)?;
+    let mut output = Output::new(book, true);
     let mut body = Vec::new();
     for (index, page) in book.pages.iter().enumerate() {
         if page
@@ -89,11 +90,17 @@ pub(super) fn convert(book: &DocumentPayload, target: &str) -> Result<Vec<u8>, E
     Ok(result)
 }
 
-struct Output {
-    document: Document,
+pub(super) struct Output {
+    pub document: Document,
     preserve_links: bool,
     pixels: u64,
     math_nodes_remaining: usize,
+}
+
+pub(super) struct RasterImage {
+    pub media: String,
+    pub width: u32,
+    pub height: u32,
 }
 
 enum Inline<'a> {
@@ -103,19 +110,7 @@ enum Inline<'a> {
 }
 
 impl Output {
-    fn new(book: &DocumentPayload, preserve_links: bool) -> Result<Self, EngineError> {
-        if book
-            .metadata
-            .get("package_metadata")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|entries| {
-                entries.iter().any(|entry| {
-                    entry["property"] == "rendition:layout" && entry["value"] == "pre-paginated"
-                })
-            })
-        {
-            return Err(unsupported("fixed-layout EPUB packages"));
-        }
+    pub(super) fn new(book: &DocumentPayload, preserve_links: bool) -> Self {
         let mut document = Document::new();
         if let Some(title) = book
             .metadata
@@ -124,15 +119,19 @@ impl Output {
         {
             document.core.title = title.to_owned();
         }
-        Ok(Self {
+        Self {
             document,
             preserve_links,
             pixels: 0,
             math_nodes_remaining: 50_000,
-        })
+        }
     }
 
-    fn blocks(&mut self, blocks: &[BlockPayload], width: f32) -> Result<Blocks, EngineError> {
+    pub(super) fn blocks(
+        &mut self,
+        blocks: &[BlockPayload],
+        width: f32,
+    ) -> Result<Blocks, EngineError> {
         let mut native = Vec::with_capacity(blocks.len());
         for block in blocks {
             if let Some(table) = &block.table {
@@ -149,16 +148,20 @@ impl Output {
 
     fn paragraph(&mut self, block: &BlockPayload, width: f32) -> Result<Paragraph, EngineError> {
         let mut p = Paragraph::new();
-        if let Some(level) = block.level {
+        if let Some(properties) = block.metadata.get("css_paragraph") {
+            let style: CssParagraph =
+                serde_json::from_value(properties.clone()).map_err(conversion)?;
+            p.props.align = style.align;
+            p.props.line_spacing = style.line_height;
+            p.props.bidi = style.bidi;
+            p.props.space_before = Some(0.0);
+            p.props.space_after = Some(0.0);
+            p.props.widow_control = Some(false);
+        } else if let Some(level) = block.level {
             p.props.style = Some(format!("Heading{level}"));
         }
         let mut text_cursor = 0;
-        let mut boundaries = block
-            .text
-            .char_indices()
-            .map(|(index, _)| index)
-            .collect::<Vec<_>>();
-        boundaries.push(block.text.len());
+        let text = StyledText::new(block)?;
         let mut items = inline_items(block, self.preserve_links)?
             .into_iter()
             .peekable();
@@ -166,13 +169,13 @@ impl Output {
             if start < text_cursor {
                 return Err(unsupported("overlapping EPUB links and inline objects"));
             }
-            self.text_range(&mut p, &block.text, &boundaries, text_cursor, start, None)?;
+            text.insert(&mut p, text_cursor, start, None)?;
             text_cursor = start;
             match item {
                 Inline::Image(image) => self.image(&mut p, image, width)?,
                 Inline::Equation { end, source } => {
                     let equation = super::math::equation(source, &mut self.math_nodes_remaining)?;
-                    p.insert_object(p.len(), equation, &CharProps::default())
+                    p.insert_object(p.len(), equation, &text.style_at(start))
                         .map_err(conversion)?;
                     text_cursor = end;
                 }
@@ -188,53 +191,13 @@ impl Output {
                             "internal, image-only, overlapping, or unsupported hyperlinks",
                         ));
                     }
-                    self.text_range(
-                        &mut p,
-                        &block.text,
-                        &boundaries,
-                        start,
-                        end,
-                        Some(&link.uri),
-                    )?;
+                    text.insert(&mut p, start, end, Some(&link.uri))?;
                     text_cursor = end;
                 }
             }
         }
-        self.text_range(
-            &mut p,
-            &block.text,
-            &boundaries,
-            text_cursor,
-            boundaries.len() - 1,
-            None,
-        )?;
+        text.insert(&mut p, text_cursor, text.offsets.len() - 1, None)?;
         Ok(p)
-    }
-
-    fn text_range(
-        &self,
-        para: &mut Paragraph,
-        text: &str,
-        offsets: &[usize],
-        start: usize,
-        end: usize,
-        link: Option<&str>,
-    ) -> Result<(), EngineError> {
-        let text = offsets
-            .get(start)
-            .zip(offsets.get(end))
-            .and_then(|(start, end)| text.get(*start..*end))
-            .ok_or_else(|| conversion("invalid EPUB text range"))?;
-        let props = CharProps {
-            link: link.map(str::to_owned),
-            ..Default::default()
-        };
-        let text = text.replace(['\n', '\r'], &wordcraft_doc::para::LINE_BREAK.to_string());
-        if !text.is_empty() {
-            para.insert_text(para.len(), &text, &props)
-                .map_err(conversion)?;
-        }
-        Ok(())
     }
 
     fn image(
@@ -243,6 +206,31 @@ impl Output {
         image: &ImagePayload,
         width: f32,
     ) -> Result<(), EngineError> {
+        let RasterImage {
+            media,
+            width: w,
+            height: h,
+        } = self.load_image(image)?;
+        let scale = (width.max(6.0) / w as f32).min(600.0 / h as f32).min(0.75);
+        paragraph
+            .insert_object(
+                paragraph.len(),
+                InlineObject::Image {
+                    media,
+                    w: w as f32 * scale,
+                    h: h as f32 * scale,
+                    alt: image.alt.clone(),
+                    crop: [0.0; 4],
+                    float: Default::default(),
+                    ole: None,
+                },
+                &Default::default(),
+            )
+            .map_err(conversion)?;
+        Ok(())
+    }
+
+    pub(super) fn load_image(&mut self, image: &ImagePayload) -> Result<RasterImage, EngineError> {
         let ext = match image.media_type.as_str() {
             "image/png" => "png",
             "image/jpeg" => "jpg",
@@ -276,24 +264,12 @@ impl Output {
             return Err(conversion("EPUB raster image failed to decode"));
         }
         self.pixels += pixels;
-        let scale = (width.max(6.0) / w as f32).min(600.0 / h as f32).min(0.75);
         let media = self.document.add_media(bytes, ext);
-        paragraph
-            .insert_object(
-                paragraph.len(),
-                InlineObject::Image {
-                    media,
-                    w: w as f32 * scale,
-                    h: h as f32 * scale,
-                    alt: image.alt.clone(),
-                    crop: [0.0; 4],
-                    float: Default::default(),
-                    ole: None,
-                },
-                &Default::default(),
-            )
-            .map_err(conversion)?;
-        Ok(())
+        Ok(RasterImage {
+            media,
+            width: w,
+            height: h,
+        })
     }
 
     fn table(&mut self, source: &TablePayload, width: f32) -> Result<Table, EngineError> {
@@ -340,6 +316,102 @@ impl Output {
             table.merge(row, last_row, col, last_col);
         }
         Ok(table)
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct CssParagraph {
+    align: Option<Align>,
+    line_height: Option<LineSpacing>,
+    bidi: Option<bool>,
+}
+
+struct StyledText<'a> {
+    value: &'a str,
+    offsets: Vec<usize>,
+    spans: Vec<(usize, usize, CharProps)>,
+}
+
+impl<'a> StyledText<'a> {
+    fn new(block: &'a BlockPayload) -> Result<Self, EngineError> {
+        let mut offsets = block
+            .text
+            .char_indices()
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        offsets.push(block.text.len());
+        let spans = block
+            .metadata
+            .get("css_spans")
+            .map(|spans| serde_json::from_value(spans.clone()))
+            .transpose()
+            .map_err(conversion)?
+            .unwrap_or_default();
+        Ok(Self {
+            value: &block.text,
+            offsets,
+            spans,
+        })
+    }
+
+    fn style_at(&self, offset: usize) -> CharProps {
+        let position = self.spans.partition_point(|(_, end, _)| *end <= offset);
+        self.spans
+            .get(position)
+            .filter(|(start, _, _)| *start <= offset)
+            .map(|(_, _, style)| style.clone())
+            .unwrap_or_default()
+    }
+
+    fn insert(
+        &self,
+        paragraph: &mut Paragraph,
+        start: usize,
+        end: usize,
+        link: Option<&str>,
+    ) -> Result<(), EngineError> {
+        let mut cursor = start;
+        let position = self
+            .spans
+            .partition_point(|(_, span_end, _)| *span_end <= start);
+        for (span_start, span_end, style) in &self.spans[position..] {
+            if *span_start >= end {
+                break;
+            }
+            if cursor < *span_start {
+                self.insert_run(paragraph, cursor, *span_start, link, CharProps::default())?;
+                cursor = *span_start;
+            }
+            let stop = end.min(*span_end);
+            self.insert_run(paragraph, cursor, stop, link, style.clone())?;
+            cursor = stop;
+        }
+        self.insert_run(paragraph, cursor, end, link, CharProps::default())
+    }
+
+    fn insert_run(
+        &self,
+        paragraph: &mut Paragraph,
+        start: usize,
+        end: usize,
+        link: Option<&str>,
+        mut props: CharProps,
+    ) -> Result<(), EngineError> {
+        if start == end {
+            return Ok(());
+        }
+        let text = self
+            .offsets
+            .get(start)
+            .zip(self.offsets.get(end))
+            .and_then(|(start, end)| self.value.get(*start..*end))
+            .ok_or_else(|| conversion("invalid EPUB text range"))?;
+        props.link = link.map(str::to_owned);
+        let text = text.replace(['\n', '\r'], &wordcraft_doc::para::LINE_BREAK.to_string());
+        paragraph
+            .insert_text(paragraph.len(), &text, &props)
+            .map(|_| ())
+            .map_err(conversion)
     }
 }
 

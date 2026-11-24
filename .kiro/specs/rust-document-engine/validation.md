@@ -2731,3 +2731,7 @@ The shared engine pins remain at PdfCraft `03996b10`, WordCraft `bbe3547d`, Deck
 ## 2026-11-24 EPUB chapter edits, SMIL cues and equation output
 
 The locked engine revisions are unchanged from the November 23 validation. A Linux x86-64 CPython 3.11.15 release wheel passed 620 installed tests, measured 19,665,214 bytes, and contained a 45,630,024-byte native extension. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-chapter-editing-media-overlay-cues-and-equation-output) for the exact test evidence, checksum and remaining EPUB work.
+
+## 2026-11-24 EPUB CSS and fixed-layout previews
+
+The release wheel for Linux x86-64 CPython 3.11.15 passed 623 installed tests, measured 21,546,751 bytes, and contained a 50,102,776-byte native extension. The engine pins remain unchanged. The audited lockfiles include the EPUB CSS parser, box layout, and SVG renderer. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-css-and-fixed-layout-previews) for the exact checks and supported output profile.

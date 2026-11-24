@@ -11,14 +11,22 @@ use crate::{model::DocumentPayload, EngineError};
 
 #[path = "epub_content.rs"]
 mod content;
+#[path = "epub_css.rs"]
+mod css;
 #[path = "epub_editor.rs"]
 mod editor;
+#[path = "epub_layout.rs"]
+mod layout;
 #[path = "epub_math.rs"]
 mod math;
 #[path = "epub_output.rs"]
 mod output;
 #[path = "epub_overlay.rs"]
 mod overlay;
+#[path = "epub_style.rs"]
+mod style;
+#[path = "epub_svg.rs"]
+mod svg;
 
 pub(crate) use editor::{update_chapters, update_metadata};
 
@@ -29,7 +37,15 @@ pub(crate) fn render(
     password: Option<&str>,
     clip: Option<crate::rendering::Clip>,
 ) -> Result<Vec<u8>, EngineError> {
-    output::render(&extract(data, password)?, page, dpi, clip)
+    let book = extract(data, password)?;
+    let chapter = book
+        .pages
+        .get(page)
+        .ok_or_else(|| EngineError::PageIndex("EPUB chapter is out of range".into()))?;
+    if let Some(png) = layout::render(data, &book, chapter, dpi, clip)? {
+        return Ok(png);
+    }
+    output::render(&book, page, dpi, clip)
 }
 
 pub(crate) fn convert(
@@ -101,7 +117,16 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
     }
     let manifest = required(root, "manifest")?;
     let spine = required(root, "spine")?;
-    let mut metadata = package_metadata(required(root, "metadata")?)?;
+    let package_info = required(root, "metadata")?;
+    let mut metadata = package_metadata(package_info)?;
+    let default_fixed = package_info.children().any(|node| {
+        name(node, OPF, "meta")
+            && node.attribute("property") == Some("rendition:layout")
+            && node.attribute("refines").is_none()
+            && node
+                .text()
+                .is_some_and(|text| text.trim() == "pre-paginated")
+    });
     let mut items = HashMap::new();
     let mut items_by_path = HashMap::new();
     let mut navigation = None;
@@ -252,12 +277,23 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
             "linear".into(),
             json!(reference.attribute("linear") != Some("no")),
         );
-        if reference.attribute("properties").is_some_and(|properties| {
-            properties
-                .split_ascii_whitespace()
-                .any(|p| p == "rendition:layout-pre-paginated")
-        }) {
+        let mut fixed = default_fixed;
+        for property in reference
+            .attribute("properties")
+            .unwrap_or_default()
+            .split_ascii_whitespace()
+        {
+            match property {
+                "rendition:layout-pre-paginated" => fixed = true,
+                "rendition:layout-reflowable" => fixed = false,
+                _ => {}
+            }
+        }
+        if fixed {
             page.metadata.insert("fixed_layout".into(), json!(true));
+            if let Some(viewport) = layout::dimensions(root).or_else(|| svg::viewport(root)) {
+                page.metadata.insert("viewport".into(), json!(viewport));
+            }
         }
         pages.push(page);
     }

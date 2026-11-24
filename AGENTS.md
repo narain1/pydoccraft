@@ -64,10 +64,14 @@ rust/src/
   pptx.rs           Thin DeckCraft adapter
   epub.rs           EPUB container, metadata, spine, navigation and resource I/O
   epub_content.rs   EPUB XHTML, image, SVG and table extraction
+  epub_css.rs       Bounded archive stylesheet loading and cascade
   epub_editor.rs    Bounded EPUB metadata and chapter replacement
+  epub_layout.rs    Styled XHTML layout and paint
   epub_math.rs      Presentation MathML projection into the WordCraft equation model
   epub_overlay.rs   EPUB SMIL cue, timing and target resolution
   epub_output.rs    EPUB projection into WordCraft for preview and export
+  epub_style.rs     CSS typography and geometry mapping
+  epub_svg.rs       Static SVG viewport rendering
   convert.rs        Upstream-backed conversion dispatch
 ```
 

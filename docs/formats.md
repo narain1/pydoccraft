@@ -16,7 +16,7 @@ The [operation evidence matrix](support-matrix.md) separates reading, creation, 
 | Embedded image bytes | Exportable images | Referenced images | Referenced pictures | Referenced images |
 | Notes | No dedicated model | Owned footnote/endnote stories and body references | Speaker notes | No |
 | Comments | PDF comments not normalized | Comments and replies | Comments and replies | No |
-| PNG rendering | Yes | Yes | Yes | Reflowable chapter preview |
+| PNG rendering | Yes | Yes | Yes | Reflowable and fixed-layout chapter preview |
 | Password input | Yes | Yes | Encrypted PPTX unsupported | DRM/password unsupported |
 | OCR | No | Not applicable | Not applicable | Not applicable |
 | Create a new document from scratch | Authored profile | Authored profile | Authored profile | Append-only profile |
@@ -124,7 +124,7 @@ Both methods return encoded PNG bytes.
 - PDF rendering uses PdfCraft pixels and rejects oversized output.
 - DOCX rendering uses WordCraft layout and its page renderer.
 - PPTX rendering uses DeckCraft slide rendering.
-- EPUB rendering lays out a reflowable chapter on a scrolling WordCraft surface at a fixed width of 612 points.
+- EPUB renders a fixed chapter in its declared viewport and a reflowable chapter on a scrolling surface 612 points wide.
 - `dpi / 72` is used as the native scale.
 - DPI must be finite and between 1 and 1200.
 - Out-of-range pages are rejected in Python before native dispatch.
@@ -181,10 +181,14 @@ Each spine entry maps to one compatibility `Page` in reading order, including re
 
 `Document.metadata["dublin_core"]` contains repeated Dublin Core values keyed by field name. `package_metadata` contains OPF meta records and their refinement targets. `navigation` contains nested navigation groups from an EPUB 3 navigation document or EPUB 2 NCX. `manifest` describes packaged resources. Use `Document.read_epub_resource(path, offset=0, length=None)` with a decoded, relative archive path to retrieve a resource or byte range, limited to 16 MiB per call.
 
-PNG preview, DOCX export, and PDF export use WordCraft's default typography and semantic reflow. They support headings, paragraphs, common raster images (PNG and JPEG), basic nested or merged tables, and a Presentation MathML profile. The equation adapter preserves inline and display formulas, including tokens, fractions, roots, scripts, fences, simple matrices and phantoms. DOCX contains native equations. MathML styling fidelity, custom line thickness, additional operators and remaining elements such as `mpadded` are outside this profile. Unsupported equation structures, fixed-layout packages, SVG layout, and table features that cannot be projected raise an explicit error. Conversion also rejects internal and image-only hyperlinks.
+PNG preview applies supported author CSS to XHTML. Stylesheets and imports resolve relative to their archive members. The cascade covers inline declarations, specificity, source order, `!important`, supported type, class, ID and attribute selectors, and basic media queries. Rendered properties include typography, spacing, solid borders, backgrounds, block flow, flex and simple grid, and positioned boxes. Fixed-layout EPUB honors the package default and spine overrides. XHTML uses its numeric viewport meta tag and static SVG uses its viewBox. In page metadata, `viewport` is measured in points, with one CSS pixel equal to 0.75 points. [EPUB 3.3 layout specification](https://www.w3.org/TR/epub-33/#sec-fixed-layouts)
+
+DOCX and PDF export use WordCraft's semantic reflow profile. They support headings, paragraphs, PNG/JPEG images, basic nested or merged tables, and native equations. Fixed-layout exports and source CSS projection to DOCX and PDF remain open. Conversion rejects internal, overlapping and image-only hyperlinks and features that cannot be projected.
+
+The Presentation MathML profile preserves inline and display formulas in previews and exports, including tokens, fractions, roots, scripts, fences, simple matrices and phantoms. MathML styling, custom line thickness, additional operators and remaining elements such as `mpadded` are outside the profile.
 
 EPUB 3 media overlays are exposed under `Document.metadata["media_overlays"]`, keyed by manifest ID. They retain nested SMIL sequences, structural roles, target element IDs, and local audio paths. `Document.epub_media_cues(page)` gives a chapter's ordered cues with audio clip bounds in integer microseconds. An absent clip end means the end of the source audio. A cue with no audio retains its text target for narration by the caller. Audio decoding, live synchronization and playback remain open. [EPUB 3.3 media overlay specification](https://www.w3.org/TR/epub-33/#sec-media-overlays)
 
-The reader parses bounded UTF-8 XML without fetching external resources or executing scripts. Source CSS and fixed-layout rendering, DRM, and general lossless conversion remain outside the profile. See the [EPUB specification](../.kiro/specs/epub-support/requirements.md) for details.
+The reader parses bounded UTF-8 XML without fetching external resources or executing scripts. Broader CSS coverage, packaged fonts, synthetic spreads, SVG images embedded in XHTML, and DRM remain outside the supported preview profile. See the [EPUB specification](../.kiro/specs/epub-support/requirements.md) for details.
 
 ZIP safety preflight for DOCX, PPTX and EPUB bounds raw central-directory entries and rejects duplicate names and malformed directories before constructing archive indexes. ZIP64, multi-disk archives, ZIPs with trailing data, and archives with ambiguous end records are explicitly unsupported. EPUB additionally rejects multiple package rootfiles, inconsistent local/central headers and end-record signatures in the ZIP comment. ZIP data descriptors remain supported.

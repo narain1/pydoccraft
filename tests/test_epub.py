@@ -11,6 +11,9 @@ import zipfile
 
 import doc_ex
 from fixtures import PNG, docx_fixture
+from test_pdf_underlays import solid
+from test_rendering import png_chunks
+from test_render_geometry import rgba_pixels
 
 
 def epub_fixture(*, encrypted: bool = False, version: str = "3.0", chapter_one: str | None = None) -> bytes:
@@ -78,6 +81,119 @@ def narrated_epub(*, first_clip_end: str = "00:00:01.125", first_target: str = "
 
 
 class EpubTests(unittest.TestCase):
+    def test_fixed_layout_uses_viewport_and_local_stylesheet_cascade(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head>
+        <meta name="viewport" content="width=320, height=240"/>
+        <link rel="stylesheet" href="Styles/book.css"/>
+        </head><body>
+        <section><div class="panel" id="first" data-active="YES">
+        <p>Sample <span>coloured</span> text</p><p class="hidden">Hidden filler</p>
+        </div><div class="overlay"/><img src="image.png" alt="Gold swatch"/></section>
+        </body></html>"""
+        source = epub_fixture(chapter_one=chapter)
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        package = package.replace(b"</metadata>", b'<meta property="rendition:layout">pre-paginated</meta></metadata>')
+        package = package.replace(b'<itemref idref="two"/>', b'<itemref idref="two" properties="rendition:layout-reflowable"/>')
+        source = rewrite_epub(source, {
+            "OEBPS/content.opf": package,
+            "OEBPS/Styles/book.css": """@import "theme/colors.css";
+                html { background: #eee; }
+                body { margin: 0; }
+                section { position: relative; }
+                .panel { position: absolute; left: 40px; top: 24px; width: 160px; height: 100px; padding: 6px; }
+                #first { background-color: blue; }
+                .panel p { margin: 0; font-size: 20px; }
+                .panel span { color: #008000; font-weight: bold; }
+                .panel .hidden { display: none; }
+                .overlay { position: absolute; left: 156px; top: 86px; width: 62px; height: 80px; z-index: 1; background-color: #0000dd; }
+                img { position: absolute; left: 245px; top: 130px; width: 30px; height: 24px; }
+                @media screen and (max-width: 325px) { #first { border: 4px solid black; } }
+            """,
+            "OEBPS/Styles/theme/colors.css": "section > div.panel[data-active='yes' i] { background-color: #dd4444 !important; }",
+            "OEBPS/image.png": solid((220, 170, 0)),
+        })
+        with doc_ex.open(source) as document:
+            self.assertEqual(document[0].metadata["viewport"], [240, 180])
+            self.assertTrue(document[0].metadata["fixed_layout"])
+            self.assertFalse(document[1].metadata.get("fixed_layout", False))
+            self.assertIn("Second chapter", document[1].get_text())
+            self.assertTrue(document.render_page(1, dpi=72).startswith(b"\x89PNG"))
+            for dpi, scale in ((96, 1), (192, 2)):
+                chunks = png_chunks(document.render_page(0, dpi=dpi))
+                self.assertEqual(struct.unpack_from(">II", chunks[b"IHDR"]), (320 * scale, 240 * scale))
+                width, pixels = rgba_pixels(chunks)
+
+                def pixel(x: int, y: int) -> bytes:
+                    offset = ((y * scale) * width + x * scale) * 4
+                    return pixels[offset:offset + 4]
+
+                self.assertEqual(pixel(12, 12), bytes((238, 238, 238, 255)))
+                self.assertEqual(pixel(42, 26), bytes((0, 0, 0, 255)))
+                self.assertEqual(pixel(55, 110), bytes((221, 68, 68, 255)))
+                self.assertEqual(pixel(165, 105), bytes((0, 0, 221, 255)))
+                self.assertEqual(pixel(260, 140), bytes((220, 170, 0, 255)))
+                self.assertIn(bytes((0, 128, 0, 255)), [pixels[i:i + 4] for i in range(0, len(pixels), 4)])
+            clip = png_chunks(document.render_page(0, dpi=96, clip=(37.5, 67.5, 30.0, 15.0)))
+            self.assertEqual(struct.unpack_from(">II", clip[b"IHDR"]), (40, 20))
+            _, pixels = rgba_pixels(clip)
+            self.assertEqual(pixels[:4], bytes((221, 68, 68, 255)))
+
+    def test_reflow_css_flex_layout_and_archive_only_imports(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head>
+        <style>body { margin: 0; } .row { display: flex; gap: 10px; }
+        .row div { width: 70px; height: 28px; }
+        .row div:first-child { background: #bb2233; }
+        .row div + div { background: #2244bb; } </style></head>
+        <body><section class="row"><div>Left</div><div>Right</div></section></body></html>"""
+        source = epub_fixture(chapter_one=chapter)
+        with doc_ex.open(source) as document:
+            width, pixels = rgba_pixels(png_chunks(document.render_page(0, dpi=96)))
+            offset = (22 * width + 50) * 4
+            self.assertEqual(pixels[offset:offset + 4], bytes((187, 34, 51, 255)))
+            offset = (22 * width + 136) * 4
+            self.assertEqual(pixels[offset:offset + 4], bytes((34, 68, 187, 255)))
+        grid = chapter.replace("display: flex; gap: 10px", "display: grid; grid-template-columns: 70px 70px; gap: 18px")
+        with doc_ex.open(epub_fixture(chapter_one=grid)) as document:
+            width, pixels = rgba_pixels(png_chunks(document.render_page(0, dpi=96)))
+            offset = (22 * width + 84) * 4
+            self.assertEqual(pixels[offset:offset + 4], bytes((255, 255, 255, 255)))
+            offset = (22 * width + 92) * 4
+            self.assertEqual(pixels[offset:offset + 4], bytes((34, 68, 187, 255)))
+        remote = chapter.replace("body { margin", '@import "https://example.com/style.css"; body { margin')
+        with doc_ex.open(epub_fixture(chapter_one=remote)) as document:
+            self.assertIn("Left", document[0].get_text())
+            with self.assertRaises(doc_ex.UnsupportedFormatError):
+                document.render_page(0)
+        cycle = chapter.replace("body { margin", '@import "cycle.css"; body { margin')
+        with doc_ex.open(rewrite_epub(epub_fixture(chapter_one=cycle), {"OEBPS/cycle.css": '@import "./cycle.css";'})) as document:
+            with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "cyclic"):
+                document.render_page(0)
+
+    def test_fixed_svg_chapter_renders_viewbox_and_clips(self) -> None:
+        source = epub_fixture()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        package = package.replace(
+            b'href="one.xhtml" media-type="application/xhtml+xml"',
+            b'href="cover.svg" media-type="image/svg+xml"',
+        ).replace(b'<itemref idref="one"/>', b'<itemref idref="one" properties="rendition:layout-pre-paginated"/>')
+        source = rewrite_epub(source, {
+            "OEBPS/content.opf": package,
+            "OEBPS/cover.svg": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="30 25 160 90"><rect x="50" y="35" width="100" height="50" fill="#55bb77"/></svg>',
+        })
+        with doc_ex.open(source) as document:
+            self.assertEqual(document[0].metadata["viewport"], [120, 67.5])
+            rendered = png_chunks(document.render_page(0, dpi=96))
+            self.assertEqual(struct.unpack_from(">II", rendered[b"IHDR"]), (160, 90))
+            w, pixels = rgba_pixels(rendered)
+            self.assertEqual(pixels[:4], bytes((255, 255, 255, 255)))
+            offset = (20 * w + 25) * 4
+            self.assertEqual(pixels[offset:offset + 4], bytes((85, 187, 119, 255)))
+            cropped = png_chunks(document.render_page(0, dpi=96, clip=(18.75, 15.0, 15.0, 15.0)))
+            self.assertEqual(struct.unpack_from(">II", cropped[b"IHDR"]), (20, 20))
+            self.assertEqual(rgba_pixels(cropped)[1][:4], bytes((85, 187, 119, 255)))
+
     def test_media_overlay_resolves_cues_and_audio_in_spine_order(self) -> None:
         data, audio = narrated_epub()
         with doc_ex.open(data) as document:
@@ -109,12 +225,12 @@ class EpubTests(unittest.TestCase):
 
     def test_mathml_preview_and_exports_retain_equation_structure(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML"><body>
-        <p>Before <m:math><m:mfrac><m:msup><m:mi>x</m:mi><m:mn>2</m:mn></m:msup><m:msqrt><m:mi>q</m:mi></m:msqrt></m:mfrac></m:math> After</p>
+        <p style="font-size: 16px">Before <m:math><m:mfrac><m:msup><m:mi>x</m:mi><m:mn>2</m:mn></m:msup><m:msqrt><m:mi>q</m:mi></m:msqrt></m:mfrac></m:math> After</p>
         <p><m:math display="block"><m:mfenced><m:mtable>
         <m:mtr><m:mtd><m:mn>1</m:mn></m:mtd><m:mtd><m:mn>2</m:mn></m:mtd></m:mtr>
         <m:mtr><m:mtd><m:mn>3</m:mn></m:mtd><m:mtd><m:mn>4</m:mn></m:mtd></m:mtr>
         </m:mtable></m:mfenced></m:math></p></body></html>"""
-        plain = '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Before x2q After</p><p>1234</p></body></html>'
+        plain = '<html xmlns="http://www.w3.org/1999/xhtml"><body><p style="font-size: 16px">Before x2q After</p><p>1234</p></body></html>'
         with doc_ex.open(epub_fixture(chapter_one=chapter)) as document, doc_ex.open(epub_fixture(chapter_one=plain)) as flat:
             preview = document.render_page(0, dpi=72)
             _, height = struct.unpack_from(">II", preview, 16)

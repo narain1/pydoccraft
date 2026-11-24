@@ -26,7 +26,9 @@
 
 1. Preview supported reflowable chapters as PNG with the common DPI and clipping API. Export the semantic profile to DOCX and PDF, starting each chapter on a new page.
 2. Retain supported native text, tables, raster images and Presentation MathML. Render supported equation structures through the native equation backend and export native DOCX equations. Return an explicit error when a structure cannot be projected safely.
-3. Source CSS and fixed-layout fidelity, richer MathML layout, synchronized media playback and structural chapter operations remain open. DRM, script execution and unlisted conversion pairs remain outside the scope.
+3. Render fixed-layout XHTML at its numeric viewport and static SVG at its viewBox dimensions while honoring package and spine layout declarations. Clip previews at requested DPI.
+4. Apply the supported author CSS cascade for styled XHTML. Read inline, embedded, linked and imported styles using archive-relative resolution. Exercise inherited typography, positioning, colors, box styling, and block, flex and grid layout with pixel-level acceptance tests.
+5. Full source CSS and fixed-layout fidelity, richer MathML layout, synchronized media playback and structural chapter operations remain open. DRM, script execution and unlisted conversion pairs remain outside the scope.
 
 ## Verification
 

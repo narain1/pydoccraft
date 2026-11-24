@@ -50,13 +50,14 @@ impl Budget {
     }
 }
 
-struct Context<'a, 'book> {
-    source: &'a [u8],
-    path: &'a str,
-    page: usize,
-    manifest: &'a HashMap<String, &'a str>,
-    book: &'a mut Book<'book>,
-    budget: &'a mut Budget,
+pub(super) struct Context<'a, 'book> {
+    pub source: &'a [u8],
+    pub path: &'a str,
+    pub page: usize,
+    pub manifest: &'a HashMap<String, &'a str>,
+    pub book: &'a mut Book<'book>,
+    pub budget: &'a mut Budget,
+    pub styles: Option<&'a super::style::Styles>,
 }
 
 #[derive(Default)]
@@ -66,6 +67,7 @@ struct Inline {
     links: Vec<LinkPayload>,
     images: Vec<ImagePayload>,
     math: Vec<serde_json::Value>,
+    styles: Vec<(usize, usize, wordcraft_doc::CharProps)>,
 }
 
 impl Inline {
@@ -73,6 +75,55 @@ impl Inline {
         budget.bytes(text.len())?;
         self.text.push_str(text);
         self.characters += text.chars().count();
+        Ok(())
+    }
+
+    fn styled_text(
+        &mut self,
+        text: &str,
+        typography: &super::style::Typography,
+        budget: &mut Budget,
+    ) -> Result<(), EngineError> {
+        let start = self.characters;
+        if typography.preformatted {
+            self.push(text, budget)?;
+        } else {
+            let mut collapsed = String::new();
+            let mut whitespace = self.text.is_empty() || self.text.ends_with([' ', '\n']);
+            for character in text.chars() {
+                if matches!(character, ' ' | '\t' | '\n' | '\r' | '\u{000C}') {
+                    if !whitespace {
+                        collapsed.push(' ');
+                    }
+                    whitespace = true;
+                } else {
+                    collapsed.push(character);
+                    whitespace = false;
+                }
+            }
+            self.push(&collapsed, budget)?;
+        }
+        if self.characters != start {
+            let mut props = typography.chars.clone();
+            if typography.invisible {
+                props.hidden = Some(true);
+            }
+            if let Some((_, end, last)) = self.styles.last_mut() {
+                if *end == start && *last == props {
+                    *end = self.characters;
+                    return Ok(());
+                }
+            }
+            budget.object()?;
+            budget.bytes(
+                props
+                    .font
+                    .as_ref()
+                    .map_or(0, String::len)
+                    .saturating_add(256),
+            )?;
+            self.styles.push((start, self.characters, props));
+        }
         Ok(())
     }
 
@@ -109,6 +160,12 @@ impl Inline {
                 .metadata
                 .insert("mathml".into(), serde_json::Value::Array(inline.math));
         }
+        if !inline.styles.is_empty() {
+            block.metadata.insert(
+                "css_spans".into(),
+                serde_json::to_value(inline.styles).map_err(invalid)?,
+            );
+        }
         out.push(block);
         Ok(())
     }
@@ -134,6 +191,7 @@ pub(super) fn chapter(
         manifest,
         book,
         budget,
+        styles: None,
     };
     let mut blocks = Vec::new();
     flow(body, &mut blocks, 0, &mut cx)?;
@@ -232,6 +290,16 @@ fn flow(
     table_depth: usize,
     cx: &mut Context<'_, '_>,
 ) -> Result<(), EngineError> {
+    flow_children(node, node.children(), out, table_depth, cx)
+}
+
+fn flow_children<'a, 'input>(
+    node: Node<'a, 'input>,
+    children: impl IntoIterator<Item = Node<'a, 'input>>,
+    out: &mut Vec<BlockPayload>,
+    table_depth: usize,
+    cx: &mut Context<'_, '_>,
+) -> Result<(), EngineError> {
     let tag = node.tag_name().name();
     let level = heading(tag);
     let kind = matches!(
@@ -240,11 +308,14 @@ fn flow(
     )
     .then_some(tag);
     let mut run = Inline::default();
-    for n in node.children() {
+    for n in children {
+        if styled(n, cx).is_some_and(|style| style.hidden) {
+            continue;
+        }
         let child_tag = n.tag_name();
         if n.is_element()
             && child_tag.namespace().is_none_or(|ns| ns == XHTML)
-            && block(child_tag.name())
+            && styled(n, cx).map_or_else(|| block(child_tag.name()), |style| !style.inline)
         {
             run.flush(out, level, kind, cx)?;
             if child_tag.name() == "table" {
@@ -267,7 +338,42 @@ fn flow(
             inline(n, &mut run, cx)?;
         }
     }
-    run.flush(out, level, kind, cx)
+    let start = out.len();
+    run.flush(out, level, kind, cx)?;
+    if let Some(style) = styled(node, cx) {
+        for block in &mut out[start..] {
+            block.metadata.insert(
+                "css_paragraph".into(),
+                json!({
+                    "align": style.text.align,
+                    "line_height": style.text.line_height,
+                    "bidi": style.text.chars.rtl
+                }),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn styled<'a, 'book>(
+    node: Node<'_, '_>,
+    cx: &Context<'a, 'book>,
+) -> Option<&'a super::style::Styled> {
+    cx.styles?.get(&node.id())
+}
+
+pub(super) fn layout_piece<'a, 'input>(
+    node: Node<'a, 'input>,
+    children: &[Node<'a, 'input>],
+    cx: &mut Context<'_, '_>,
+) -> Result<Vec<BlockPayload>, EngineError> {
+    let mut blocks = Vec::new();
+    if name(node, XHTML, "table") {
+        table(node, &mut blocks, 0, cx)?;
+    } else {
+        flow_children(node, children.iter().copied(), &mut blocks, 0, cx)?;
+    }
+    Ok(blocks)
 }
 
 fn link_blocks(
@@ -301,9 +407,13 @@ fn inline(
     cx: &mut Context<'_, '_>,
 ) -> Result<(), EngineError> {
     if node.is_text() {
-        return run.push(node.text().unwrap_or_default(), cx.budget);
+        let text = node.text().unwrap_or_default();
+        if let Some(style) = node.parent_element().and_then(|parent| styled(parent, cx)) {
+            return run.styled_text(text, &style.text, cx.budget);
+        }
+        return run.push(text, cx.budget);
     }
-    if !node.is_element() {
+    if !node.is_element() || styled(node, cx).is_some_and(|style| style.hidden) {
         return Ok(());
     }
     let tag = node.tag_name();
@@ -322,7 +432,11 @@ fn inline(
         cx.budget.bytes(markup.len())?;
         let text = node_text(node);
         let start = run.characters;
-        run.push(&text, cx.budget)?;
+        if let Some(style) = styled(node, cx) {
+            run.styled_text(&text, &style.text, cx.budget)?;
+        } else {
+            run.push(&text, cx.budget)?;
+        }
         run.math.push(json!({"start": start, "end": run.characters, "source": String::from_utf8(markup).map_err(invalid)?}));
         return Ok(());
     }
@@ -434,7 +548,7 @@ fn link(
     Ok(link)
 }
 
-fn image(
+pub(super) fn image(
     src: &str,
     alt: &str,
     declared: Option<&str>,

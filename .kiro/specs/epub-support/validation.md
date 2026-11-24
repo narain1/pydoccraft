@@ -109,3 +109,13 @@ Rust 1.95 formatting and warnings-denied Clippy passed. The full suites before t
 Wheel size was 19,665,214 bytes and native extension size was 45,630,024 bytes. Wheel SHA-256 is `dea85aa834601919aa51005368f5b86d4fdb99081eed7d08841530a655dfaa0d`. The Cargo build directories and local documentation build output were removed after validation.
 
 Source CSS and fixed layout, remaining MathML elements and styling, real-time narration playback, and structural chapter operations are tracked in the [EPUB plan](tasks.md).
+
+## 2026-11-24 CSS and fixed-layout previews
+
+The EPUB renderer now uses the source XHTML cascade for supported author styles and renders XHTML and SVG spine documents in their declared fixed viewports. Three new cases verify fixed XHTML and SVG geometry, a reflowable spine override, local linked and imported styles, selector precedence and inheritance, media queries, positioned PNGs, overlapping colored boxes, flex and grid placement, and bounded clipping. The existing MathML round-trip fixture now also exercises the styled preview path. Remote and cyclic stylesheet imports fail explicitly.
+
+The final Linux x86-64 CPython 3.11.15 release wheel passed all 623 installed tests, including 28 EPUB tests, with zero failures, errors or skips. The validator compared installed files with the exact wheel and split tests by module. Wheel size was 21,546,751 bytes, its native extension was 50,102,776 bytes, and SHA-256 was `21347dd5c4d13fd74e0282e3c3dd3253db79b43cc2e793af24d1852b006745b7`.
+
+Rust 1.95 formatting, warnings-denied Clippy, and the locked default suite passed (478 unit and 7 integration tests). The locked Python-free suite (401 unit and 8 integration tests), Go preview (15 with race detection) and Node preview (17) passed before the final Clippy-only delimiter refactor. Public typing, the documentation link check, and the roadmap and support evidence checks passed. All engine revisions remain unchanged. Audited graphs contain 297 core and 288 Node normal/build packages. Both license inventories match. The root lockfile SHA-256 is `4512d701d5a1a5e0e9c78bdc8c75ba0c4df76a98b45c931e495b8be9f04cdf94`.
+
+The branch keeps broader CSS and fixed-layout fidelity, packaged fonts, CSS-aware export, and the remaining equation, overlay and chapter editing work in the [EPUB plan](tasks.md). Temporary Cargo and documentation build output was pruned.
