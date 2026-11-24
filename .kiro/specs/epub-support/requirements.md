@@ -6,6 +6,7 @@
 2. Preserve ordered Dublin Core values, OPF meta refinements, manifest records, and hierarchical EPUB 3 navigation or EPUB 2 NCX. Resolve UTF-8 resource paths using archive separators on every host.
 3. Preserve semantic headings, paragraphs, preformatted text, inline link labels and character offsets, nested tables, captions, spans, row groups and headers. Preserve referenced raster or validated static SVG images, their alternative text and link metadata, and MathML text and source markup.
 4. Return owned extraction values. Support bounded byte retrieval for a particular archive resource while the document is open.
+5. Resolve EPUB 3 media-overlay associations, sequence order, roles, text anchors and local audio clip boundaries. Expose a chapter's ordered cues and bounded reads of the corresponding audio bytes.
 
 ## Safety and errors
 
@@ -13,17 +14,19 @@
 2. Parse UTF-8 XML without custom DTDs. Reject unsupported package selection, archive traversal, remote resource loading, and encrypted content. Never execute active content.
 3. Report malformed source and unsupported operations through stable errors. Reject authoring mutations atomically when they would violate limits or input validation.
 
-## Creation and metadata editing
+## Creation and editing
 
 1. Create reflowable EPUB 3 with title, identifier, language, ordered authors and chapters, and optional publication date. Support headings, paragraphs, lists, tables, preformatted text, inert links, common raster images, and validated static SVG.
 2. Use the existing editable-document bytes, path/stream save, copy, context manager, and close lifecycle. Reopen created bytes through the extraction path.
 3. Limit individual images to 16 MiB, cumulative media and chapter content to 64 MiB each, and encoded EPUB output to 128 MiB.
 4. Update selected Dublin Core title and description fields in an existing unsigned book. Preserve the uncompressed bytes of untouched chapter and resource members and the unrelated OPF fields. Reject signed and encrypted packages.
+5. Replace multiple XHTML chapter resources by spine position in one transaction. Preserve the original publication's manifest, navigation and spine, and keep IDs targeted by the extracted links, navigation and overlays. Reject edits that fail validation and leave the original usable.
 
 ## Preview and conversion
 
 1. Preview supported reflowable chapters as PNG with the common DPI and clipping API. Export the semantic profile to DOCX and PDF, starting each chapter on a new page.
-2. Retain supported native text, tables and raster images. Return an explicit unsupported error when a semantic feature cannot be projected safely. Source CSS and fixed-layout fidelity, DRM, script execution, media overlay playback, arbitrary imported chapter edits, and other conversion pairs remain outside the supported profile.
+2. Retain supported native text, tables, raster images and Presentation MathML. Render supported equation structures through the native equation backend and export native DOCX equations. Return an explicit error when a structure cannot be projected safely.
+3. Source CSS and fixed-layout fidelity, richer MathML layout, synchronized media playback and structural chapter operations remain open. DRM, script execution and unlisted conversion pairs remain outside the scope.
 
 ## Verification
 

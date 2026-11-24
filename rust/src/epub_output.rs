@@ -7,7 +7,7 @@ use wordcraft_doc::{Block, Blocks, CharProps, Document, Paragraph, Table};
 
 use crate::{
     docx,
-    model::{BlockPayload, DocumentPayload, ImagePayload, TablePayload},
+    model::{BlockPayload, DocumentPayload, ImagePayload, LinkPayload, TablePayload},
     rendering, EngineError,
 };
 
@@ -93,6 +93,13 @@ struct Output {
     document: Document,
     preserve_links: bool,
     pixels: u64,
+    math_nodes_remaining: usize,
+}
+
+enum Inline<'a> {
+    Image(&'a ImagePayload),
+    Equation { end: usize, source: &'a str },
+    Link { end: usize, link: &'a LinkPayload },
 }
 
 impl Output {
@@ -121,6 +128,7 @@ impl Output {
             document,
             preserve_links,
             pixels: 0,
+            math_nodes_remaining: 50_000,
         })
     }
 
@@ -140,9 +148,6 @@ impl Output {
     }
 
     fn paragraph(&mut self, block: &BlockPayload, width: f32) -> Result<Paragraph, EngineError> {
-        if block.metadata.contains_key("mathml") {
-            return Err(unsupported("MathML layout"));
-        }
         let mut p = Paragraph::new();
         if let Some(level) = block.level {
             p.props.style = Some(format!("Heading{level}"));
@@ -154,61 +159,45 @@ impl Output {
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
         boundaries.push(block.text.len());
-        let mut links = block.links.iter().peekable();
-        let mut images = block.images.iter().peekable();
-        while links.peek().is_some() || images.peek().is_some() {
-            let next_link = links
-                .peek()
-                .and_then(|link| link.metadata["start"].as_u64())
-                .map(|n| n as usize);
-            let next_image = images.peek().map(|image| {
-                image
-                    .metadata
-                    .get("inline_offset")
-                    .and_then(serde_json::Value::as_u64)
-                    .map_or(text_cursor, |n| n as usize)
-            });
-            if next_image.is_some_and(|offset| next_link.is_none_or(|start| offset <= start)) {
-                let offset = next_image.unwrap_or(text_cursor);
-                self.text_range(&mut p, &block.text, &boundaries, text_cursor, offset, None)?;
-                text_cursor = offset;
-                let image = images
-                    .next()
-                    .ok_or_else(|| conversion("missing mapped image"))?;
-                self.image(&mut p, image, width)?;
-            } else {
-                let link = links
-                    .next()
-                    .ok_or_else(|| conversion("missing mapped link"))?;
-                let start = next_link.ok_or_else(|| conversion("missing EPUB link offset"))?;
-                let end = link.metadata["end"]
-                    .as_u64()
-                    .ok_or_else(|| conversion("missing EPUB link end"))?
-                    as usize;
-                if !self.preserve_links {
-                    continue;
+        let mut items = inline_items(block, self.preserve_links)?
+            .into_iter()
+            .peekable();
+        while let Some((start, item)) = items.next() {
+            if start < text_cursor {
+                return Err(unsupported("overlapping EPUB links and inline objects"));
+            }
+            self.text_range(&mut p, &block.text, &boundaries, text_cursor, start, None)?;
+            text_cursor = start;
+            match item {
+                Inline::Image(image) => self.image(&mut p, image, width)?,
+                Inline::Equation { end, source } => {
+                    let equation = super::math::equation(source, &mut self.math_nodes_remaining)?;
+                    p.insert_object(p.len(), equation, &CharProps::default())
+                        .map_err(conversion)?;
+                    text_cursor = end;
                 }
-                let lower = link.uri.to_ascii_lowercase();
-                if start == end
-                    || next_image.is_some_and(|offset| offset < end)
-                    || !(lower.starts_with("https://")
-                        || lower.starts_with("http://")
-                        || lower.starts_with("mailto:"))
-                {
-                    return Err(unsupported(
-                        "internal, image-only, or unsupported hyperlinks",
-                    ));
+                Inline::Link { end, link } => {
+                    let lower = link.uri.to_ascii_lowercase();
+                    if start == end
+                        || items.peek().is_some_and(|(next, _)| *next < end)
+                        || !(lower.starts_with("https://")
+                            || lower.starts_with("http://")
+                            || lower.starts_with("mailto:"))
+                    {
+                        return Err(unsupported(
+                            "internal, image-only, overlapping, or unsupported hyperlinks",
+                        ));
+                    }
+                    self.text_range(
+                        &mut p,
+                        &block.text,
+                        &boundaries,
+                        start,
+                        end,
+                        Some(&link.uri),
+                    )?;
+                    text_cursor = end;
                 }
-                self.text_range(&mut p, &block.text, &boundaries, text_cursor, start, None)?;
-                self.text_range(
-                    &mut p,
-                    &block.text,
-                    &boundaries,
-                    start,
-                    end,
-                    Some(&link.uri),
-                )?;
-                text_cursor = end;
             }
         }
         self.text_range(
@@ -352,6 +341,63 @@ impl Output {
         }
         Ok(table)
     }
+}
+
+fn inline_items(
+    block: &BlockPayload,
+    preserve_links: bool,
+) -> Result<Vec<(usize, Inline<'_>)>, EngineError> {
+    let mut items = Vec::new();
+    for image in &block.images {
+        let offset = image
+            .metadata
+            .get("inline_offset")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default() as usize;
+        items.push((offset, Inline::Image(image)));
+    }
+    if let Some(math) = block
+        .metadata
+        .get("mathml")
+        .and_then(serde_json::Value::as_array)
+    {
+        for entry in math {
+            let start = inline_offset(&entry["start"])?;
+            let end = inline_offset(&entry["end"])?;
+            let source = entry["source"]
+                .as_str()
+                .ok_or_else(|| conversion("missing MathML source"))?;
+            items.push((start, Inline::Equation { end, source }));
+        }
+    }
+    if preserve_links {
+        for link in &block.links {
+            let start = link
+                .metadata
+                .get("start")
+                .ok_or_else(|| conversion("missing EPUB link offset"))?;
+            let end = link
+                .metadata
+                .get("end")
+                .ok_or_else(|| conversion("missing EPUB link end"))?;
+            items.push((
+                inline_offset(start)?,
+                Inline::Link {
+                    end: inline_offset(end)?,
+                    link,
+                },
+            ));
+        }
+    }
+    items.sort_by_key(|item| item.0);
+    Ok(items)
+}
+
+fn inline_offset(value: &serde_json::Value) -> Result<usize, EngineError> {
+    value
+        .as_u64()
+        .and_then(|offset| usize::try_from(offset).ok())
+        .ok_or_else(|| conversion("invalid EPUB inline offset"))
 }
 
 fn unsupported(reason: &str) -> EngineError {

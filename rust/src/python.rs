@@ -358,8 +358,22 @@ fn _edit_epub_metadata(
 }
 
 #[pyfunction]
-fn _epub_resource(data: &[u8], path: &str) -> Result<Vec<u8>, EngineError> {
-    crate::epub::read_resource(data, path)
+#[pyo3(signature = (data, path, offset=0, length=None))]
+fn _epub_resource(
+    data: &[u8],
+    path: &str,
+    offset: u64,
+    length: Option<usize>,
+) -> Result<Vec<u8>, EngineError> {
+    crate::epub::read_resource(data, path, offset, length)
+}
+
+#[pyfunction]
+fn _edit_epub_chapters(
+    data: &[u8],
+    replacements: Vec<(i64, String)>,
+) -> Result<Vec<u8>, EngineError> {
+    crate::epub::update_chapters(data, &replacements)
 }
 
 #[pyfunction]
@@ -384,6 +398,7 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(_open_office, module)?)?;
     module.add_function(wrap_pyfunction!(extract, module)?)?;
     module.add_function(wrap_pyfunction!(_edit_epub_metadata, module)?)?;
+    module.add_function(wrap_pyfunction!(_edit_epub_chapters, module)?)?;
     module.add_function(wrap_pyfunction!(_epub_resource, module)?)?;
     module.add_function(wrap_pyfunction!(extract_text, module)?)?;
     module.add_function(wrap_pyfunction!(convert, module)?)?;

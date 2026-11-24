@@ -8,4 +8,10 @@
 - [x] Add semantic reflow preview and DOCX/PDF conversion with explicit errors for unsupported features.
 - [x] Update locked dependencies, license inventories, and format and authoring documentation.
 - [ ] Validate the release wheel matrix on Linux, macOS, and Windows.
-- [ ] Extend layout fidelity to CSS and fixed-layout renditions, add MathML layout and media overlay support, and expand imported-book editing and conversion.
+- [x] Replace existing XHTML chapters transactionally and preserve targeted navigation and overlay anchors.
+- [x] Read SMIL timing trees and expose chapter cue order, time ranges, target IDs and bounded audio reads.
+- [x] Project supported Presentation MathML into native equations for PNG, DOCX and PDF.
+- [ ] Apply source CSS and render fixed-layout renditions, including local stylesheet and font resolution.
+- [ ] Expand MathML layout to remaining elements, attributes and styling.
+- [ ] Decode and synchronize media overlay playback, including text-only narration cues.
+- [ ] Add structural chapter operations and edits to packaged resources.

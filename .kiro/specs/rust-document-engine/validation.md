@@ -2727,3 +2727,7 @@ Updated the Python and Rust package versions, public `doc_ex.__version__`, and r
 ## 2026-11-23 EPUB reader, metadata editing and semantic output
 
 The shared engine pins remain at PdfCraft `03996b10`, WordCraft `bbe3547d`, DeckCraft `f7a7fd7f`, and craft-libs `92d392cf`. The EPUB reader now runs locally over the bounded ZIP and XML libraries. The exact locked audits cover 275 core and 265 Node normal/build packages. Linux x86-64 CPython 3.11 and 3.13 release wheels measure 19,625,782 and 19,618,416 bytes, with uncompressed native extensions of 45,550,904 and 45,527,256 bytes. See [the EPUB validation record](../epub-support/validation.md#2026-11-23-in-repo-epub-reader-and-semantic-output) for the corpus results, checksums, and output limits.
+
+## 2026-11-24 EPUB chapter edits, SMIL cues and equation output
+
+The locked engine revisions are unchanged from the November 23 validation. A Linux x86-64 CPython 3.11.15 release wheel passed 620 installed tests, measured 19,665,214 bytes, and contained a 45,630,024-byte native extension. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-chapter-editing-media-overlay-cues-and-equation-output) for the exact test evidence, checksum and remaining EPUB work.

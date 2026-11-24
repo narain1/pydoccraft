@@ -97,3 +97,15 @@ The locked license audit passed for 275 core and 265 Node normal/build packages.
 Each clean installed wheel passed all 616 Python tests, with zero failures, errors, or skips, on CPython 3.11.15 and 3.13.13. The validator verified every installed package file against its wheel and ran the corpus with module-level process parallelism. The 21 EPUB tests cover EPUB 2 NCX and EPUB 3 navigation, ZIP limits and archive paths, repeated and XML-sensitive OPF metadata, nested tables, inline linked images, inert SVG and MathML extraction, authoring round trips, preserving untouched members during metadata edits, PNG clipping, and reopened DOCX and PDF conversions.
 
 These are local Linux wheels. The cross-platform release matrix, CSS fidelity, fixed-layout output, and media overlay playback remain open.
+
+## 2026-11-24 chapter editing, media overlay cues and equation output
+
+The continuation adds archive-preserving XHTML replacements, a bounded SMIL reader and local resource ranges, and native output for the supported Presentation MathML structures. The original engine pins and lockfiles are unchanged. The license inventory audit still covers 275 core normal/build packages and 265 for the Node preview.
+
+The Linux x86-64 CPython 3.11.15 release wheel passed all 620 installed tests, including 25 EPUB cases, with zero failures, errors or skips. The validator compared the installed files with the wheel and ran the corpus in parallel by module. The narrated EPUB fixture exercises shared overlays, nested sequence roles, both published SMIL namespace spellings, element IDs, time ranges, bounded reads and unchanged audio bytes after a chapter edit. The equation fixture expands the PNG height relative to plain text, verifies native fraction, script, radical and matrix structures in DOCX, and reopens both DOCX and PDF.
+
+Rust 1.95 formatting and warnings-denied Clippy passed. The full suites before the final SMIL namespace compatibility change passed 478 unit and 7 integration tests with the default feature set, and 401 unit and 8 integration tests with Python disabled. All integration tests passed again with the final change. Public typing, documentation links, and roadmap and support evidence checks passed.
+
+Wheel size was 19,665,214 bytes and native extension size was 45,630,024 bytes. Wheel SHA-256 is `dea85aa834601919aa51005368f5b86d4fdb99081eed7d08841530a655dfaa0d`. The Cargo build directories and local documentation build output were removed after validation.
+
+Source CSS and fixed layout, remaining MathML elements and styling, real-time narration playback, and structural chapter operations are tracked in the [EPUB plan](tasks.md).

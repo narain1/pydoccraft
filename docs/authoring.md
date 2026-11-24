@@ -41,7 +41,7 @@ A new PDF starts with one Letter page unless `size` is supplied. `pdf.pages.add(
 
 `doc_ex.new("epub" | "ebook")` creates a reflowable EPUB 3 book. Set the title, identifier, and language, add ordered chapters, and append headings, paragraphs, lists, tables, preformatted text, links, and images. The lifecycle includes `copy()`, bytes/path/stream saving, context management, and close.
 
-Existing books support targeted title and description edits. See [EPUB creation](#epub-creation-unreleased) and the [EPUB format profile](formats.md#epub-unreleased) for the supported content and output.
+Existing books support targeted title and description edits and batch chapter replacement. See [EPUB creation](#epub-creation-unreleased) and the [EPUB format profile](formats.md#epub-unreleased) for the supported content and output.
 
 ## Typing and inspection
 
@@ -974,4 +974,6 @@ with doc_ex.new("epub") as book:
 
 EPUB creation appends semantic content. Title, identifier, and language are required. Links accept ASCII-case-insensitive HTTP(S), mailto, and safe fragments. The document can store signature-checked PNG, JPEG, GIF, and WebP, and validated static SVG. Each image is limited to 16 MiB. The media and chapter-content budgets are 64 MiB each, and the estimated and actual archive limits are 128 MiB.
 
-For an existing book, `doc_ex.open("original.epub").edit_epub_metadata(title="New title", description="New description")` returns EPUB bytes with the supplied Dublin Core fields updated. The chapter and resource members retain their uncompressed bytes. A field left at `None` keeps its original value. Signed and encrypted packages are rejected. The editor does not expose arbitrary chapter changes or allow raw XHTML, OPF, CSS, scripts, or archive paths in the creation API.
+For an existing book, `document.edit_epub_metadata(title="New title", description="New description")` returns EPUB bytes with the supplied Dublin Core fields updated. A field left at `None` keeps its original value. `document.edit_epub_chapters({0: first_chapter_xhtml, -1: last_chapter_xhtml})` replaces complete XHTML resources by spine index. Each replacement is a UTF-8 XML document. Keep the IDs targeted by existing navigation links and media overlays. When a spine resource appears more than once, the replacement applies at each occurrence.
+
+Both editors return a new archive and preserve the uncompressed bytes of untouched members. A failed edit leaves the original open document usable. Signed and encrypted EPUBs are rejected. Chapter replacement keeps the publication's existing resource names, manifest, navigation, and spine. Resource insertion and chapter reordering remain open.

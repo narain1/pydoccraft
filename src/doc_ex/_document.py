@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import operator
+from collections.abc import Mapping
 from numbers import Real
 from html import escape
 from types import SimpleNamespace
@@ -20,6 +21,8 @@ if TYPE_CHECKING:
 _MAX_EXPORT_BYTES = 128 * 1024 * 1024
 _MAX_EXPORT_NODES = 100_000
 _MAX_EXPORT_DEPTH = 32
+_MAX_EPUB_CHAPTER_BYTES = 8 * 1024 * 1024
+_MAX_EPUB_EDIT_BYTES = 128 * 1024 * 1024
 _MEDIA_EXTENSIONS = {
     "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
     "image/webp": "webp", "image/tiff": "tiff", "image/bmp": "bmp",
@@ -538,8 +541,8 @@ class Document:
         from . import convert
         return convert(self._source, output_format, filetype=self._filetype, password=self._password)
 
-    def read_epub_resource(self, path: str) -> bytes:
-        """Read up to 16 MiB from a local EPUB member by its decoded archive path."""
+    def read_epub_resource(self, path: str, *, offset: int = 0, length: int | None = None) -> bytes:
+        """Read up to 16 MiB from a local EPUB member, optionally by byte range."""
         self._ensure_open()
         if self._filetype != "epub":
             from .errors import UnsupportedFormatError
@@ -547,7 +550,46 @@ class Document:
             raise UnsupportedFormatError("EPUB resource access requires EPUB input")
         from . import _core, _native
 
-        return bytes(_native(lambda: _core._epub_resource(self._source, path)))
+        offset = operator.index(offset)
+        length = None if length is None else operator.index(length)
+        if offset < 0 or (length is not None and length < 0):
+            raise ValueError("resource offset and length must be nonnegative")
+        if offset > 128 * 1024 * 1024:
+            raise ValueError("resource offset is out of range")
+        if length is not None and length > 16 * 1024 * 1024:
+            raise UnsafeArchiveError("resource slice exceeds 16 MiB")
+        self._ensure_open()
+        return bytes(_native(lambda: _core._epub_resource(self._source, path, offset, length)))
+
+    def epub_media_cues(self, page: int) -> list[dict[str, Any]]:
+        """Return SMIL cues for a spine page, in playback order."""
+        self._ensure_open()
+        if self._filetype != "epub":
+            from .errors import UnsupportedFormatError
+
+            raise UnsupportedFormatError("media cues require EPUB input")
+        index = operator.index(page)
+        self._ensure_open()
+        chapter = self._pages[index].metadata
+        overlay_id = chapter.get("media_overlay")
+        if overlay_id is None:
+            return []
+        overlay = self.metadata["media_overlays"][overlay_id]
+        cues: list[dict[str, Any]] = []
+        stack = [overlay["body"]]
+        while stack:
+            node = stack.pop()
+            if node["kind"] == "par":
+                if node["text"]["path"] == chapter["chapter_path"]:
+                    cues.append({
+                        "id": node["id"],
+                        "text": dict(node["text"]),
+                        "audio": None if node["audio"] is None else dict(node["audio"]),
+                        "epub_type": node["epub_type"],
+                    })
+            else:
+                stack.extend(reversed(node["children"]))
+        return cues
 
     def edit_epub_metadata(self, *, title: str | None = None, description: str | None = None) -> bytes:
         """Return an EPUB copy with updated package metadata and unchanged publication resources."""
@@ -559,6 +601,40 @@ class Document:
         from . import _core, _native
 
         return bytes(_native(lambda: _core._edit_epub_metadata(self._source, title, description)))
+
+    def edit_epub_chapters(self, replacements: Mapping[int, str]) -> bytes:
+        """Replace selected XHTML chapters by spine index and return a new EPUB."""
+        self._ensure_open()
+        if self._filetype != "epub":
+            from .errors import UnsupportedFormatError
+
+            raise UnsupportedFormatError("chapter editing requires EPUB input")
+        from . import _core, _native
+
+        changes: list[tuple[int, str]] = []
+        total_bytes = 0
+        page_count = len(self._pages)
+        for page, markup in replacements.items():
+            if len(changes) >= 10_000:
+                raise UnsafeArchiveError("too many EPUB chapter replacements")
+            index = operator.index(page)
+            self._ensure_open()
+            if not -page_count <= index < page_count:
+                raise IndexError("page index out of range")
+            if not isinstance(markup, str):
+                raise TypeError("replacement XHTML must be a string")
+            markup = str.__str__(markup)
+            if len(markup) > _MAX_EPUB_CHAPTER_BYTES:
+                raise UnsafeArchiveError("replacement chapter exceeds its XML byte budget")
+            byte_count = len(markup.encode("utf-8"))
+            if byte_count > _MAX_EPUB_CHAPTER_BYTES:
+                raise UnsafeArchiveError("replacement chapter exceeds its XML byte budget")
+            total_bytes += byte_count
+            if total_bytes > _MAX_EPUB_EDIT_BYTES:
+                raise UnsafeArchiveError("chapter replacements exceed their byte budget")
+            changes.append((index, markup))
+        self._ensure_open()
+        return bytes(_native(lambda: _core._edit_epub_chapters(self._source, changes)))
 
     def edit(self) -> PdfDocument:
         """Create an independent editable native PDF; unsupported preservation fails."""

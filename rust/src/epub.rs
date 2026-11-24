@@ -11,8 +11,16 @@ use crate::{model::DocumentPayload, EngineError};
 
 #[path = "epub_content.rs"]
 mod content;
+#[path = "epub_editor.rs"]
+mod editor;
+#[path = "epub_math.rs"]
+mod math;
 #[path = "epub_output.rs"]
 mod output;
+#[path = "epub_overlay.rs"]
+mod overlay;
+
+pub(crate) use editor::{update_chapters, update_metadata};
 
 pub(crate) fn render(
     data: &[u8],
@@ -141,6 +149,7 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
             media,
             local,
             fallback: item.attribute("fallback"),
+            media_overlay: item.attribute("media-overlay"),
         };
         if items.insert(id, item).is_some() {
             return Err(invalid("duplicate manifest id"));
@@ -151,6 +160,7 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
         }
     }
     metadata.insert("manifest".into(), Value::Array(resources));
+    let mut overlays = overlay::read(&mut book, &items, &items_by_path)?;
     if let Some(id) = navigation.or_else(|| spine.attribute("toc")) {
         let entry = items
             .get(id)
@@ -160,6 +170,7 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
         }
         let bytes = book.read(&entry.resolved, XML_BYTES)?;
         let doc = parse_xml(&bytes)?;
+        overlays.check_chapter(&entry.resolved, &doc)?;
         let root = doc.root_element();
         let groups = if navigation.is_some() {
             read_navigation(root, &entry.resolved)?
@@ -212,6 +223,7 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
         let bytes = book.read(&entry.resolved, XML_BYTES)?;
         let doc = parse_xml(&bytes)?;
         let number = pages.len();
+        overlays.check_chapter(&entry.resolved, &doc)?;
         let root = doc.root_element();
         let mut page = if entry.media == "image/svg+xml" {
             content::svg_page(root, &bytes, number, &entry.resolved, &mut budget)?
@@ -231,6 +243,11 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
             .insert("chapter_href".into(), json!(entry.href));
         page.metadata
             .insert("chapter_path".into(), json!(entry.resolved));
+        page.metadata
+            .insert("chapter_media_type".into(), json!(entry.media));
+        if let Some(overlay) = entry.media_overlay {
+            page.metadata.insert("media_overlay".into(), json!(overlay));
+        }
         page.metadata.insert(
             "linear".into(),
             json!(reference.attribute("linear") != Some("no")),
@@ -263,7 +280,12 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
         .map(str::to_owned)
         .collect();
     for path in names {
-        parse_xml(&book.read(&path, XML_BYTES)?)?;
+        let bytes = book.read(&path, XML_BYTES)?;
+        overlays.check_chapter(&path, &parse_xml(&bytes)?)?;
+    }
+    overlays.check_remaining(&mut book)?;
+    if !overlays.documents.is_empty() {
+        metadata.insert("media_overlays".into(), Value::Object(overlays.documents));
     }
     metadata.insert("epub_version".into(), json!(version));
     metadata.insert("chapter_count".into(), json!(pages.len()));
@@ -282,6 +304,7 @@ struct Item<'a> {
     media: &'a str,
     local: bool,
     fallback: Option<&'a str>,
+    media_overlay: Option<&'a str>,
 }
 
 struct Book<'a> {
@@ -388,6 +411,12 @@ fn name(node: Node<'_, '_>, namespace: &str, local: &str) -> bool {
     node.is_element()
         && node.tag_name().name() == local
         && node.tag_name().namespace().is_none_or(|ns| ns == namespace)
+}
+
+fn element_ids<'a>(node: Node<'a, '_>) -> impl Iterator<Item = &'a str> {
+    [node.attribute("id"), node.attribute((XML, "id"))]
+        .into_iter()
+        .flatten()
 }
 
 fn child<'a, 'input>(node: Node<'a, 'input>, ns: &str, local: &str) -> Option<Node<'a, 'input>> {
@@ -705,7 +734,14 @@ fn nav_target(
         4 * METADATA_BYTES,
         "navigation byte budget exceeded",
     )?;
-    Ok(json!({"label": label.trim(), "href": href, "path": path}))
+    let fragment = if path.is_some() {
+        href.and_then(|href| href.split_once('#'))
+            .map(|(_, fragment)| percent_decode(fragment))
+            .transpose()?
+    } else {
+        None
+    };
+    Ok(json!({"label": label.trim(), "href": href, "path": path, "fragment": fragment}))
 }
 
 pub(crate) fn validate_svg_resource(data: &[u8]) -> Result<(), EngineError> {
@@ -713,131 +749,49 @@ pub(crate) fn validate_svg_resource(data: &[u8]) -> Result<(), EngineError> {
     content::validate_svg(xml.root_element())
 }
 
-/// Change selected Dublin Core values while retaining other XML and ZIP members.
-pub(crate) fn update_metadata(
+pub(crate) fn read_resource(
     data: &[u8],
-    title: Option<&str>,
-    description: Option<&str>,
+    path: &str,
+    offset: u64,
+    length: Option<usize>,
 ) -> Result<Vec<u8>, EngineError> {
-    use crate::author_epub::{escape_text, validate_text, BoundedOutput};
-    use std::io::Write;
-    let mut book = Book::open(data)?;
-    if book
-        .archive
-        .file_names()
-        .any(|path| path.eq_ignore_ascii_case("META-INF/signatures.xml"))
-    {
-        return Err(unsupported("metadata edits on signed packages"));
-    }
-    let package_path = book.package_path()?;
-    let package = book.read(&package_path, METADATA_BYTES)?;
-    let xml = parse_xml(&package)?;
-    let root = required(xml.root_element(), "metadata")?;
-    let source = std::str::from_utf8(&package).map_err(invalid)?;
-    let mut edits = Vec::new();
-    for (tag, value) in [("title", title), ("description", description)] {
-        let Some(value) = value else {
-            continue;
-        };
-        validate_text(value, 65_536, tag)?;
-        if tag == "title" && value.trim().is_empty() {
-            return Err(EngineError::InvalidArgument(
-                "EPUB title cannot be empty".into(),
-            ));
-        }
-        let escaped = escape_text(value);
-        let existing = root.children().rfind(|node| node.has_tag_name((DC, tag)));
-        if let Some(node) = existing {
-            if node.children().any(|node| !node.is_text()) {
-                return Err(unsupported(
-                    "editing Dublin Core entries with structured content",
-                ));
-            }
-            let range = node.range();
-            let raw = &source[range.clone()];
-            let mut reader = quick_xml::Reader::from_str(raw);
-            let event = reader.read_event().map_err(invalid)?;
-            let end_of_open = reader.buffer_position() as usize;
-            match event {
-                quick_xml::events::Event::Start(_) => {
-                    let end = raw
-                        .rfind("</")
-                        .ok_or_else(|| invalid("invalid source metadata element"))?;
-                    edits.push((range.start + end_of_open..range.start + end, escaped));
-                }
-                quick_xml::events::Event::Empty(node) => {
-                    let name = std::str::from_utf8(node.name().into_inner()).map_err(invalid)?;
-                    edits.push((range.end - 2..range.end, format!(">{escaped}</{name}>")));
-                }
-                _ => return Err(invalid("invalid source metadata element")),
-            }
-        } else {
-            let range = root.range();
-            let end = source[range.clone()]
-                .rfind("</")
-                .ok_or_else(|| unsupported("empty metadata elements"))?;
-            let start = range.start + end;
-            edits.push((
-                start..start,
-                format!("<dc:{tag} xmlns:dc=\"{DC}\">{escaped}</dc:{tag}>"),
-            ));
-        }
-    }
-    if edits.is_empty() {
-        return Ok(data.to_vec());
-    }
-    edits.sort_by_key(|(range, _)| std::cmp::Reverse(range.start));
-    let mut new_package = source.to_owned();
-    for (range, replacement) in edits {
-        new_package.replace_range(range, &replacement);
-    }
-    if new_package.len() > METADATA_BYTES {
-        return Err(limited("edited package exceeds its byte budget"));
-    }
-    parse_xml(new_package.as_bytes())?;
-    let mut sink = BoundedOutput::default();
-    let result = (|| {
-        let mut writer = zip::ZipWriter::new(&mut sink);
-        // OCF requires a stored mimetype as the first member.
-        writer.start_file(
-            "mimetype",
-            zip::write::SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Stored),
-        )?;
-        writer.write_all(MIME.as_bytes())?;
-        writer.set_raw_comment(book.archive.comment().into());
-        for index in 0..book.archive.len() {
-            let member = book.archive.by_index_raw(index)?;
-            if member.name() == "mimetype" {
-                continue;
-            }
-            if member.name() == package_path {
-                writer.start_file(
-                    &package_path,
-                    zip::write::SimpleFileOptions::default()
-                        .compression_method(zip::CompressionMethod::Deflated),
-                )?;
-                writer.write_all(new_package.as_bytes())?;
-            } else {
-                writer.raw_copy_file(member)?;
-            }
-        }
-        writer.finish()?;
-        Ok::<(), zip::result::ZipError>(())
-    })();
-    if let Err(error) = result {
-        return Err(if sink.exceeded {
-            limited("edited EPUB exceeds its output budget")
-        } else {
-            invalid(error)
-        });
-    }
-    let result = sink.into_bytes();
-    crate::archive_safety::open_epub(&result)?;
-    Ok(result)
-}
+    use std::io;
 
-pub(crate) fn read_resource(data: &[u8], path: &str) -> Result<Vec<u8>, EngineError> {
+    const LIMIT: usize = 16 * 1024 * 1024;
     validate_archive_path(path)?;
-    Book::open(data)?.read(path, 16 * 1024 * 1024)
+    let mut book = Book::open(data)?;
+    if offset == 0 && length.is_none() {
+        return book.read(path, LIMIT);
+    }
+    let mut member = book.archive.by_name(path).map_err(invalid)?;
+    if member.is_dir() || offset > member.size() {
+        return Err(EngineError::InvalidArgument(
+            "resource offset is out of range".into(),
+        ));
+    }
+    let remaining = member.size() - offset;
+    let count = length.map_or(remaining, |length| (length as u64).min(remaining));
+    if length.is_some_and(|length| length > LIMIT) || count > LIMIT as u64 {
+        return Err(limited("resource slice exceeds 16 MiB"));
+    }
+    if count == 0 {
+        return Ok(Vec::new());
+    }
+    let consumed = io::copy(&mut member.by_ref().take(offset), &mut io::sink()).map_err(invalid)?;
+    if consumed != offset {
+        return Err(invalid("resource shorter than its declared size"));
+    }
+    let read_limit = count + u64::from(count == remaining);
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(read_limit as usize)
+        .map_err(|_| limited("cannot allocate resource slice"))?;
+    member
+        .take(read_limit)
+        .read_to_end(&mut bytes)
+        .map_err(invalid)?;
+    if bytes.len() as u64 != count {
+        return Err(invalid("resource slice size disagrees with the directory"));
+    }
+    Ok(bytes)
 }

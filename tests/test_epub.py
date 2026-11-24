@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import warnings
+import wave
 import zipfile
 
 import doc_ex
@@ -51,7 +52,127 @@ def rewrite_epub(data: bytes, updates: dict[str, bytes | str]) -> bytes:
     return output.getvalue()
 
 
+def narrated_epub(*, first_clip_end: str = "00:00:01.125", first_target: str = "../one.xhtml#caf%C3%A9") -> tuple[bytes, bytes]:
+    source = epub_fixture(chapter_one='<html xmlns="http://www.w3.org/1999/xhtml"><body id="chapter"><p id="café">Original narration</p><p id="aside">Text cue</p></body></html>')
+    with zipfile.ZipFile(io.BytesIO(source)) as archive:
+        package = archive.read("OEBPS/content.opf")
+    package = package.replace(b'<item id="one" ', b'<item id="one" media-overlay="sync" ')
+    package = package.replace(b'<item id="two" ', b'<item id="two" media-overlay="sync" ')
+    package = package.replace(b"</manifest>", b'<item id="sync" href="Sync/read.smil" media-type="application/smil+xml"/><item id="voice" href="Media/voice.wav" media-type="audio/wav"/></manifest>')
+    overlay = f"""<smil xmlns="http://www.w3.org/ns/SMIL" xmlns:epub="http://www.idpf.org/2007/ops" version="3.0">
+    <body><seq epub:textref="../one.xhtml#chapter" epub:type="chapter">
+      <par id="start"><text src="{first_target}"/><audio src="../Media/voice.wav" clipBegin="250ms" clipEnd="{first_clip_end}"/></par>
+      <par id="pause" epub:type="aside"><text src="../one.xhtml#aside"/></par>
+    </seq><par id="next"><audio src="../Media/voice.wav" clipBegin="1.125s"/><text src="../two.xhtml"/></par></body>
+    </smil>"""
+    audio = io.BytesIO()
+    with wave.open(audio, "wb") as wav:
+        wav.setparams((1, 1, 8000, 0, "NONE", "not compressed"))
+        wav.writeframes(bytes(range(256)) * 64)
+    recorded = audio.getvalue()
+    return rewrite_epub(source, {
+        "OEBPS/content.opf": package,
+        "OEBPS/Sync/read.smil": overlay,
+        "OEBPS/Media/voice.wav": recorded,
+    }), recorded
+
+
 class EpubTests(unittest.TestCase):
+    def test_media_overlay_resolves_cues_and_audio_in_spine_order(self) -> None:
+        data, audio = narrated_epub()
+        with doc_ex.open(data) as document:
+            overlays = document.metadata["media_overlays"]
+            self.assertEqual(list(overlays), ["sync"])
+            self.assertEqual(overlays["sync"]["body"]["children"][0]["epub_type"], "chapter")
+            first, pause = document.epub_media_cues(0)
+            self.assertEqual(first["text"], {"path": "OEBPS/one.xhtml", "fragment": "café"})
+            self.assertEqual(first["audio"]["clip_begin_us"], 250_000)
+            self.assertEqual(first["audio"]["clip_end_us"], 1_125_000)
+            self.assertIsNone(pause["audio"])
+            self.assertEqual(pause["epub_type"], "aside")
+            next_cue, = document.epub_media_cues(-1)
+            self.assertEqual(next_cue["id"], "next")
+            self.assertIsNone(next_cue["audio"]["clip_end_us"])
+            voice = next_cue["audio"]["path"]
+            self.assertEqual(document.read_epub_resource(voice), audio)
+            self.assertEqual(document.read_epub_resource(voice, offset=29, length=90), audio[29:119])
+            self.assertEqual(document.read_epub_resource(voice, offset=len(audio) - 5), audio[-5:])
+            self.assertEqual(document.read_epub_resource(voice, offset=len(audio), length=1), b"")
+            with self.assertRaises(ValueError):
+                document.read_epub_resource(voice, offset=len(audio) + 1)
+            expected = document.epub_media_cues(0)
+            overlay_path = overlays["sync"]["path"]
+            smil = document.read_epub_resource(overlay_path)
+        https = rewrite_epub(data, {overlay_path: smil.replace(b"http://www.w3.org/ns/SMIL", b"https://www.w3.org/ns/SMIL")})
+        with doc_ex.open(https) as document:
+            self.assertEqual(document.epub_media_cues(0), expected)
+
+    def test_mathml_preview_and_exports_retain_equation_structure(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML"><body>
+        <p>Before <m:math><m:mfrac><m:msup><m:mi>x</m:mi><m:mn>2</m:mn></m:msup><m:msqrt><m:mi>q</m:mi></m:msqrt></m:mfrac></m:math> After</p>
+        <p><m:math display="block"><m:mfenced><m:mtable>
+        <m:mtr><m:mtd><m:mn>1</m:mn></m:mtd><m:mtd><m:mn>2</m:mn></m:mtd></m:mtr>
+        <m:mtr><m:mtd><m:mn>3</m:mn></m:mtd><m:mtd><m:mn>4</m:mn></m:mtd></m:mtr>
+        </m:mtable></m:mfenced></m:math></p></body></html>"""
+        plain = '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Before x2q After</p><p>1234</p></body></html>'
+        with doc_ex.open(epub_fixture(chapter_one=chapter)) as document, doc_ex.open(epub_fixture(chapter_one=plain)) as flat:
+            preview = document.render_page(0, dpi=72)
+            _, height = struct.unpack_from(">II", preview, 16)
+            _, flat_height = struct.unpack_from(">II", flat.render_page(0, dpi=72), 16)
+            self.assertTrue(preview.startswith(b"\x89PNG"))
+            self.assertGreater(height, flat_height)
+            docx = document.convert("docx")
+            with zipfile.ZipFile(io.BytesIO(docx)) as archive:
+                word = archive.read("word/document.xml")
+                for tag in (b"<m:f>", b"<m:sSup>", b"<m:rad>", b"<m:m>", b"<m:oMathPara>"):
+                    self.assertIn(tag, word)
+            with doc_ex.open(docx) as converted:
+                self.assertIn("Before", converted[0].get_text())
+                self.assertIn("After", converted[0].get_text())
+            with doc_ex.open(document.convert("pdf")) as converted:
+                self.assertIn("Before", converted[0].get_text())
+                self.assertIn("After", converted[0].get_text())
+
+    def test_invalid_media_overlay_references_and_timing_are_explicit(self) -> None:
+        for options, error in (
+            ({"first_target": "../one.xhtml#missing"}, doc_ex.MalformedDocumentError),
+            ({"first_target": "https://example.com/foreign.xhtml"}, doc_ex.UnsupportedFormatError),
+            ({"first_clip_end": "100ms"}, doc_ex.MalformedDocumentError),
+            ({"first_clip_end": "1e2s"}, doc_ex.MalformedDocumentError),
+        ):
+            with self.subTest(options=options), self.assertRaises(error):
+                doc_ex.open(narrated_epub(**options)[0])
+
+    def test_batch_chapter_replacement_preserves_package_and_overlay(self) -> None:
+        data, _ = narrated_epub()
+        first = '<html xmlns="http://www.w3.org/1999/xhtml"><body id="chapter"><p id="café">Revised narration</p><p id="aside">Short aside</p></body></html>'
+        last = '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Last chapter</p></body></html>'
+        with doc_ex.open(data) as original:
+            revised = original.edit_epub_chapters({0: first, -1: last})
+            self.assertIn("Original narration", original[0].get_text())
+            with doc_ex.open(revised) as edited:
+                self.assertEqual(edited.page_count, 2)
+                self.assertIn("Revised narration", edited[0].get_text())
+                self.assertEqual(edited[-1].get_text(), "Last chapter")
+                self.assertEqual(edited.epub_media_cues(0), original.epub_media_cues(0))
+            with self.assertRaisesRegex(ValueError, "referenced anchor"):
+                original.edit_epub_chapters({0: first.replace('id="café"', "")})
+            with self.assertRaises(doc_ex.MalformedDocumentError):
+                original.edit_epub_chapters({0: first, 1: "<broken"})
+            with self.assertRaises(IndexError):
+                original.edit_epub_chapters({2: last})
+            with self.assertRaisesRegex(ValueError, "conflicting replacements"):
+                original.edit_epub_chapters({0: first, -2: last})
+            self.assertEqual(original.edit_epub_chapters({}), data)
+        with zipfile.ZipFile(io.BytesIO(data)) as before, zipfile.ZipFile(io.BytesIO(revised)) as after:
+            self.assertEqual(before.namelist(), after.namelist())
+            self.assertEqual(after.infolist()[0].compress_type, zipfile.ZIP_STORED)
+            for path in set(before.namelist()) - {"mimetype", "OEBPS/one.xhtml", "OEBPS/two.xhtml"}:
+                self.assertEqual(after.read(path), before.read(path), path)
+        with doc_ex.open(rewrite_epub(data, {"META-INF/signatures.xml": "<signatures/>"})) as signed:
+            with self.assertRaises(doc_ex.UnsupportedFormatError):
+                signed.edit_epub_chapters({0: first})
+
     def test_xml_sensitive_metadata_roundtrips(self) -> None:
         with doc_ex.new("epub") as book:
             book.set_metadata(title="A & <B>", identifier="urn:a&b", language="en", authors=["A & B", "C <D>"])
