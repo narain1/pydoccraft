@@ -55,6 +55,7 @@ struct Measured {
 pub(in crate::epub) struct Measurements {
     boxes: Vec<Measured>,
     markers: HashMap<[u8; 3], usize>,
+    draw_units: usize,
 }
 
 pub(in crate::epub) fn selected(node: Node<'_, '_>) -> bool {
@@ -165,6 +166,7 @@ impl Extras {
                 layout,
             });
         }
+        measurements.draw_units = draw_units;
         Ok(measurements)
     }
 }
@@ -466,8 +468,7 @@ impl Measurements {
                 &mut 0,
             ));
         }
-        let mut native = math.clone();
-        native.nodes = self.substitute(native.nodes);
+        let native = self.native(math.clone());
         let mut result = layout_equation(
             &native,
             linear,
@@ -477,6 +478,20 @@ impl Measurements {
             &Default::default(),
             &mut 0,
         );
+        self.resolve(&mut result)?;
+        Ok(result)
+    }
+
+    pub(in crate::epub) fn native(&self, mut math: Math) -> Math {
+        math.nodes = self.substitute(math.nodes);
+        math
+    }
+
+    pub(in crate::epub) fn draw_units(&self) -> usize {
+        self.draw_units
+    }
+
+    pub(in crate::epub) fn resolve(&self, result: &mut MathLayout) -> Result<(), EngineError> {
         let old = std::mem::take(&mut result.items);
         for item in old {
             if let MItem::Glyphs {
@@ -503,7 +518,7 @@ impl Measurements {
             }
             result.items.push(item);
         }
-        Ok(result)
+        Ok(())
     }
 
     fn substitute(&self, nodes: Arg) -> Arg {

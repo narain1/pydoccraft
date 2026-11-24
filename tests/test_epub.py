@@ -532,6 +532,35 @@ class EpubTests(unittest.TestCase):
                     self.assertEqual(edited[0].get_text(), "Fresh content")
                     self.assertEqual(edited.metadata["navigation"][0]["items"][0]["label"], "Added")
 
+    def test_spine_edit_synchronizes_epub3_navigation_and_compatibility_ncx(self) -> None:
+        with doc_ex.new("epub") as book:
+            book.set_metadata(title="Hybrid navigation", identifier="urn:test:hybrid-nav")
+            book.add_chapter("First").add_paragraph("First chapter")
+            book.add_chapter("Second").add_paragraph("Second chapter")
+            book.add_chapter("Third").add_paragraph("Third chapter")
+            source = book.to_bytes()
+
+        chapter = doc_ex.EpubChapterSource(
+            "Inserted", '<html xmlns="http://www.w3.org/1999/xhtml"><head>'
+            '<title>Inserted</title></head><body><p>New chapter</p></body></html>',
+        )
+        with doc_ex.open(source) as original:
+            old_ncx = original.read_epub_resource("OEBPS/toc.ncx")
+            self.assertEqual(original.edit_epub_structure([0, 1, 2]), source)
+            result = original.edit_epub_structure([2, chapter, 0])
+            self.assertEqual(original.read_epub_resource("OEBPS/toc.ncx"), old_ncx)
+
+        with doc_ex.open(result) as edited:
+            html_items = edited.metadata["navigation"][0]["items"]
+            self.assertEqual([item["label"] for item in html_items], ["Third", "Inserted", "First"])
+            ncx = ET.fromstring(edited.read_epub_resource("OEBPS/toc.ncx"))
+            entries = ncx.findall("./{*}navMap/{*}navPoint")
+            self.assertEqual([entry.findtext("./{*}navLabel/{*}text") for entry in entries],
+                             ["Third", "Inserted", "First"])
+            self.assertEqual([entry.attrib["playOrder"] for entry in entries], ["1", "2", "3"])
+            self.assertEqual([f'OEBPS/{entry.find("./{*}content").get("src")}' for entry in entries],
+                             [page.metadata["chapter_path"] for page in edited])
+
     def test_spine_edit_promotes_nested_navigation_with_inherited_namespaces(self) -> None:
         source = epub_fixture()
         with zipfile.ZipFile(io.BytesIO(source)) as archive:
@@ -2624,8 +2653,70 @@ class EpubTests(unittest.TestCase):
                 check_layout(pdf.render_page(0, dpi=120))
         with doc_ex.open(epub_fixture(chapter_one=xhtml)) as book:
             self.assertIn("TopLeftRight", book[0].get_text())
+            with doc_ex.open(book.convert("pdf")) as pdf:
+                check_layout(pdf.render_page(0, dpi=120))
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "composed geometry"):
                 book.convert("docx")
+
+    def test_mathml_composed_pdf_keeps_text_and_positions_across_pages(self) -> None:
+        def grid(top: str, left: str, right: str) -> str:
+            return f"""<m:mtable rowspacing="4pt" columnspacing="8pt">
+              <m:mtr><m:mtd columnspan="2" mathcolor="#a32785"><m:mtext>{top}</m:mtext></m:mtd></m:mtr>
+              <m:mtr><m:mtd mathcolor="#d52b37"><m:mtext>{left}</m:mtext></m:mtd>
+              <m:mtd mathcolor="#158245"><m:mtext>{right}</m:mtext></m:mtd></m:mtr></m:mtable>"""
+
+        inline = grid("Canopy", "Aspen", "Birch")
+        nested = grid("Orchard", "Cherry", "Damson")
+        chapter = f"""<html xmlns="http://www.w3.org/1999/xhtml"
+          xmlns:m="http://www.w3.org/1998/Math/MathML"><head><title>PDF math</title></head><body>
+          <p><a href="https://example.com">Before</a> <m:math mathsize="18pt">{inline}</m:math> <m:math mathsize="18pt"><m:mtext mathcolor="#1428d7">After</m:mtext></m:math></p>
+          {"<p>Separate paragraphs allow the next equation to land on a later page.</p>" * 60}
+          <table><tbody><tr><td><p>Cell <m:math mathsize="18pt">
+            <m:mfrac><m:mpadded width="+2pt" lspace="2pt">{nested}</m:mpadded>
+              <m:msqrt><m:mtext>Radicand</m:mtext></m:msqrt></m:mfrac>
+            <m:mtext mathcolor="#000001">Ink</m:mtext></m:math> end</p></td></tr></tbody></table>
+          </body></html>"""
+        with doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+            result = book.convert("pdf")
+        with doc_ex.open(result) as pdf:
+            texts = [page.get_text() for page in pdf]
+            for token in ("Before", "Canopy", "Aspen", "Birch", "After"):
+                self.assertIn(token, texts[0])
+            cell_page = next(i for i, text in enumerate(texts) if "Orchard" in text)
+            self.assertGreater(cell_page, 0)
+            for token in ("Orchard", "Cherry", "Damson", "Radicand", "Ink"):
+                self.assertIn(token, texts[cell_page])
+            for token in ("Canopy", "Aspen", "Birch", "Orchard", "Cherry", "Damson", "Radicand", "Ink", "After"):
+                self.assertEqual(" ".join(texts).count(token), 1, token)
+            self.assertEqual(pdf[0].get_links()[0].uri, "https://example.com")
+            self.assertEqual(len(pdf[0].search_for("Canopy")), 1)
+            self.assertEqual(len(pdf[cell_page].search_for("Orchard")), 1)
+
+            for page_index in (0, cell_page):
+                width, pixels = rgba_pixels(png_chunks(pdf.render_page(page_index, dpi=120)))
+
+                def bounds(color: str) -> tuple[int, int, int, int]:
+                    rgba = bytes.fromhex(color + "ff")
+                    points = [(i // 4 % width, i // 4 // width)
+                              for i in range(0, len(pixels), 4) if pixels[i:i + 4] == rgba]
+                    self.assertTrue(points, color)
+                    return min(x for x, _ in points), min(y for _, y in points), max(x for x, _ in points), max(y for _, y in points)
+
+                top, left, right = map(bounds, ("a32785", "d52b37", "158245"))
+                self.assertLess(top[3], min(left[1], right[1]))
+                self.assertLess(left[2], right[0])
+                following = bounds("1428d7" if page_index == 0 else "000001")
+                self.assertLess(right[2], following[0], (page_index, right, following))
+
+    def test_mathml_composed_pdf_rejects_equations_wider_than_the_text_area(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"
+          xmlns:m="http://www.w3.org/1998/Math/MathML"><head><title>Wide PDF math</title></head>
+          <body><p>Before <m:math><m:mpadded width="600pt"><m:mtext>Wide</m:mtext>
+          </m:mpadded></m:math> after</p></body></html>"""
+        with doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+            self.assertIn("Wide", book[0].get_text())
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "exceeds the PDF text area"):
+                book.convert("pdf")
 
     def test_mathml_relative_padding_and_vertical_space(self) -> None:
         red = '<m:mi mathcolor="#d61020">H</m:mi>'

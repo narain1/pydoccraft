@@ -57,6 +57,9 @@ pub(super) fn convert(
     target: &str,
 ) -> Result<Vec<u8>, EngineError> {
     let mut output = Output::new(data, book, true, 192.0);
+    if target == "pdf" {
+        output.pdf_math = Some(Default::default());
+    }
     let mut body = Vec::new();
     for (index, page) in book.pages.iter().enumerate() {
         if super::rendition::fixed(page) {
@@ -78,9 +81,8 @@ pub(super) fn convert(
         body.extend(blocks);
     }
     output.document.body = body;
-    let result = if target == "pdf" {
-        wordcraft_pdf::export(&output.document, &wordcraft_pdf::PdfOptions::default())
-            .map_err(conversion)?
+    let result = if let Some(pdf_math) = output.pdf_math.take() {
+        pdf_math.export(&output.document)?
     } else {
         wordcraft_docx::write(&output.document).map_err(conversion)?
     };
@@ -96,6 +98,7 @@ pub(super) struct Output<'a> {
     pixels: u64,
     raster_dpi: f64,
     math_nodes_remaining: usize,
+    pdf_math: Option<super::math::pdf::PdfMath>,
 }
 
 pub(super) struct RasterImage {
@@ -146,6 +149,7 @@ impl<'a> Output<'a> {
             pixels: 0,
             raster_dpi,
             math_nodes_remaining: 50_000,
+            pdf_math: None,
         }
     }
 
@@ -158,10 +162,12 @@ impl<'a> Output<'a> {
         for block in blocks {
             if let Some(table) = &block.table {
                 native.push(Arc::new(Block::Table(self.table(table, width)?)));
-            } else if let Some(table) = self.spanning_table(block, width)? {
-                native.push(Arc::new(Block::Table(table)));
+            } else if let Some(block) = self.spanning_block(block, width)? {
+                native.push(block);
             } else {
-                native.push(wordcraft_doc::para_block(self.paragraph(block, width)?));
+                native.push(wordcraft_doc::para_block(
+                    self.paragraph(block, width, None)?,
+                ));
             }
         }
         if native.is_empty() {
@@ -170,11 +176,11 @@ impl<'a> Output<'a> {
         Ok(native)
     }
 
-    fn spanning_table(
+    fn spanning_block(
         &mut self,
         block: &BlockPayload,
         width: f32,
-    ) -> Result<Option<Table>, EngineError> {
+    ) -> Result<Option<Arc<Block>>, EngineError> {
         if !has_spanning_table(block) {
             return Ok(None);
         }
@@ -187,26 +193,64 @@ impl<'a> Output<'a> {
                 && text.value[text.offsets[*end]..].trim().is_empty()
             {
                 let mut format = text.style_at(*start);
-                let super::math::Equation::SpanningTable(table, extras) =
-                    self.equation(source, *css, &mut format)?
-                else {
-                    return Err(unsupported("MathML composed geometry in semantic export"));
-                };
-                if !extras.is_empty() {
-                    return Err(unsupported("MathML composed geometry in semantic export"));
+                let equation = self.equation(source, *css, &mut format)?;
+                match equation {
+                    super::math::Equation::SpanningTable { table, extras, .. }
+                        if extras.is_empty() =>
+                    {
+                        let align = CssParagraph::from_block(block)?.and_then(|style| style.align);
+                        return table
+                            .export(&self.document, &format, width, align)
+                            .map(|table| Some(Arc::new(Block::Table(table))));
+                    }
+                    equation if self.pdf_math.is_some() => {
+                        let object = self.equation_object(equation, &format)?;
+                        return self
+                            .paragraph(block, width, Some((object, format)))
+                            .map(wordcraft_doc::para_block)
+                            .map(Some);
+                    }
+                    _ => return Err(unsupported("MathML composed geometry in semantic export")),
                 }
-                let align = CssParagraph::from_block(block)?.and_then(|style| style.align);
-                return table
-                    .export(&self.document, &format, width, align)
-                    .map(Some);
             }
+        }
+        if self.pdf_math.is_some() {
+            return Ok(None);
         }
         Err(unsupported(
             "MathML table spans mixed with other paragraph content in semantic export",
         ))
     }
 
-    fn paragraph(&mut self, block: &BlockPayload, width: f32) -> Result<Paragraph, EngineError> {
+    fn equation_object(
+        &mut self,
+        equation: super::math::Equation,
+        format: &CharProps,
+    ) -> Result<InlineObject, EngineError> {
+        match equation {
+            super::math::Equation::Native {
+                linear,
+                display,
+                math,
+            } => Ok(InlineObject::Equation {
+                linear,
+                display,
+                math,
+            }),
+            equation => self
+                .pdf_math
+                .as_mut()
+                .ok_or_else(|| unsupported("MathML composed geometry in semantic export"))?
+                .object(&self.document, equation, format),
+        }
+    }
+
+    fn paragraph(
+        &mut self,
+        block: &BlockPayload,
+        width: f32,
+        mut prepared: Option<(InlineObject, CharProps)>,
+    ) -> Result<Paragraph, EngineError> {
         let mut p = Paragraph::new();
         if let Some(style) = CssParagraph::from_block(block)? {
             p.props.align = style.align;
@@ -232,25 +276,15 @@ impl<'a> Output<'a> {
             match item {
                 Inline::Image(image) => self.image(&mut p, image, width)?,
                 Inline::Equation { end, source, css } => {
-                    let mut style = text.style_at(start);
-                    let super::math::Equation::Native {
-                        linear,
-                        display,
-                        math,
-                    } = self.equation(source, css, &mut style)?
-                    else {
-                        return Err(unsupported("MathML composed geometry in semantic export"));
+                    let (object, style) = if let Some(prepared) = prepared.take() {
+                        prepared
+                    } else {
+                        let mut style = text.style_at(start);
+                        let equation = self.equation(source, css, &mut style)?;
+                        (self.equation_object(equation, &style)?, style)
                     };
-                    p.insert_object(
-                        p.len(),
-                        InlineObject::Equation {
-                            linear,
-                            display,
-                            math,
-                        },
-                        &style,
-                    )
-                    .map_err(conversion)?;
+                    p.insert_object(p.len(), object, &style)
+                        .map_err(conversion)?;
                     text_cursor = end;
                 }
                 Inline::Link { end, link } => {

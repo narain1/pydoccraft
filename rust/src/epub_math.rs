@@ -13,6 +13,8 @@ use crate::EngineError;
 
 #[path = "epub_math_compose.rs"]
 pub(super) mod compose;
+#[path = "epub_math_pdf.rs"]
+pub(super) mod pdf;
 #[path = "epub_math_table.rs"]
 pub(super) mod table;
 
@@ -141,7 +143,11 @@ pub(super) enum Equation {
         display: bool,
         math: Math,
     },
-    SpanningTable(table::Table, compose::Extras),
+    SpanningTable {
+        table: table::Table,
+        extras: compose::Extras,
+        display: bool,
+    },
     Composed {
         math: Math,
         display: bool,
@@ -190,7 +196,11 @@ pub(super) fn equation(
         projection.extras.remember(ink);
     }
     if let Some(table) = table::project_group(&mut projection, root, 0, style)? {
-        return Ok(Equation::SpanningTable(table, projection.extras));
+        return Ok(Equation::SpanningTable {
+            table,
+            extras: projection.extras,
+            display,
+        });
     }
     let nodes = math::merge_runs(projection.elements(root, 0, style)?);
     if !projection.extras.is_empty() {

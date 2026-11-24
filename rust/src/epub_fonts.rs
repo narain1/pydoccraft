@@ -480,7 +480,7 @@ fn equation(
             &Default::default(),
             &mut 0,
         ),
-        Equation::SpanningTable(table, extras) => {
+        Equation::SpanningTable { table, extras, .. } => {
             let measured = extras.measure(&output.document, &style)?;
             table
                 .layout(&output.document, &style, &measured)?

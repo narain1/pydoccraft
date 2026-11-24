@@ -113,6 +113,7 @@ pub(crate) fn update_structure<'a>(
     let mut manifest = HashMap::new();
     let mut paths = HashMap::new();
     let mut existing_toc = None;
+    let mut compatibility_ncx = None;
     for item in manifest_node
         .children()
         .filter(|node| name(*node, OPF, "item"))
@@ -131,6 +132,9 @@ pub(crate) fn update_structure<'a>(
                 .is_some_and(|old| old != media)
         {
             return Err(invalid("conflicting EPUB manifest resources"));
+        }
+        if epub3 && spine.attribute("toc") == Some(id) && media == "application/x-dtbncx+xml" {
+            compatibility_ncx = Some(path.clone());
         }
         let is_toc = if epub3 {
             item.attribute("properties")
@@ -380,6 +384,11 @@ pub(crate) fn update_structure<'a>(
                     .unwrap_or_default();
                 let nav = toc::create(&path, epub3, title, uid, &selected)?;
                 plan.files.insert(path, Cow::Owned(nav.into_bytes()));
+            }
+            if let Some(path) = compatibility_ncx {
+                let bytes = book.read(&path, XML_BYTES)?;
+                let ncx = toc::edit(&bytes, &path, false, &selected, &old_paths)?;
+                plan.files.insert(path, Cow::Owned(ncx.into_bytes()));
             }
         }
     }

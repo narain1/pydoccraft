@@ -36,7 +36,8 @@
 - [x] Render nested spanning MathML tables that are the sole expression in a containing cell. Export native nested tables in DOCX and searchable cell text in PDF.
 - [x] Compose spanning tables inside larger MathML formulas and table cells, including fractions, radicals and scripts.
 - [x] Apply MathML padding dimensions, relative padding offsets and vertical space in chapter previews and fixed-layout PDF.
-- [ ] Export composed MathML semantically, including tables mixed with surrounding paragraph content, and expand the remaining MathML visual properties.
+- [x] Export composed MathML, including tables mixed with paragraph content, as searchable reflowable PDF.
+- [ ] Export composed MathML as editable DOCX and expand the remaining MathML visual properties.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.
 - [x] Decode and stream single-track mono and stereo Ogg Opus overlays with the correct presentation bounds and gain.
@@ -48,6 +49,7 @@
 - [x] Stream H.264 MP4 frames on their presentation timeline and offer the AAC-LC soundtrack on the same clip clock.
 - [ ] Add embedded WebM and Ogg video and broader MP4 coverage, present timed text and handle local media fragments.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
+- [x] Synchronize XHTML navigation and the spine's compatibility NCX in the same EPUB 3 chapter edit.
 - [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.
 - [x] Attach or detach EPUB 3 media overlays and author sequential text and audio cues with package duration metadata.
 - [x] Edit a subset of chapters that share a SMIL resource while retaining the other chapters' cues and recalculating duration metadata.
