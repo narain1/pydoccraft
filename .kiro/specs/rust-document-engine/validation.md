@@ -2751,3 +2751,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 638 installed tests, inclu
 ## 2026-11-24 EPUB archive-local SVG resources
 
 The Linux x86-64 CPython 3.11.15 wheel passed 641 installed tests, including 46 EPUB tests. It measured 22,682,725 bytes with a 52,700,856-byte native extension. All 13 SVG-in-spine pages of the official *Sous le Vent* sample rendered at their declared viewports. The ArtCraft engine and shared backend revisions remain at the November 23 pins. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-archive-local-svg-resources) for exact checksums, license counts and output limits.
+
+## 2026-11-24 EPUB MathML presentation and equation geometry
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 644 installed tests, including 49 EPUB tests. It measured 22,683,515 bytes with a 52,692,216-byte native extension. Tests reopen both DOCX and PDF to verify MathML styling and measure native equation placement. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-inherited-mathml-styles-and-equation-geometry) for the exact wheel and public sample limitations.

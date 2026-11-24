@@ -4,7 +4,7 @@
 
 The in-repo reader uses the existing shared ZIP preflight and locked rust libraries for ZIP and XML. The preflight bounds central directory work and checks local/central consistency before indexing. The EPUB layer compares the archive readers' entry views, opens the single declared package, then bounds each resource read and the cumulative read budget. Paths use `/` and resolve only inside the publication. Runtime operations are in-process and offline.
 
-`epub.rs` owns the OPF metadata, manifest and spine, EPUB 3 navigation and EPUB 2 NCX, and guarded resource I/O. `epub_content.rs` maps namespace-aware XHTML onto ordered document blocks. Tables carry semantic cells with nested blocks, spans, headings and row-group metadata. Images retain source bytes, alternative text and inline position. SVG uses a restricted static profile. MathML extraction retains a namespace-complete source fragment and readable text. `epub_overlay.rs` reads each referenced SMIL timing tree once, resolves local text and audio paths, and validates target IDs when their XML members are parsed.
+`epub.rs` owns the OPF metadata, manifest and spine, EPUB 3 navigation and EPUB 2 NCX, and guarded resource I/O. `epub_content.rs` maps namespace-aware XHTML onto ordered document blocks. Tables carry semantic cells with nested blocks, spans, headings and row-group metadata. Images retain source bytes, alternative text and inline position. SVG uses a restricted static profile. MathML extraction retains a namespace-complete source fragment and readable text from the primary presentation branch. `epub_overlay.rs` reads each referenced SMIL timing tree once, resolves local text and audio paths, and validates target IDs when their XML members are parsed.
 
 ## Public API and output
 
@@ -33,3 +33,10 @@ The EPUB adapter owns author stylesheet resolution and knows only archive paths.
 `epub_svg.rs` applies the shared EPUB cascade to SVG prolog stylesheets and embedded declarations in source order. It sends only supported presentation properties and same-document paint references to resvg. SVG images carry their archive resolution base independently of the original markup and public image name. The renderer supplies PNG or JPEG resources through a bounded in-memory resolver. The SVG font database is scoped to the rendition and registers packaged fonts under their CSS family names. External resolvers for file and data URLs are disabled.
 
 Broader selectors, CSS custom properties, font Unicode ranges and variable-axis selection, synthetic spreads, additional SVG features and CSS-aware conversion remain open.
+
+
+## Presentation MathML
+
+`epub_math.rs` projects bounded Presentation MathML to the pinned WordCraft equation model for layout and export. The equation envelope carries root size and foreground, and OMML runs carry inherited size, foreground and variant. Presentation and syntax nodes share a projection budget. Each tensor pair contributes one native script level to the depth guard, including levels generated for prescripts. Variable fences and separators use explicit math runs when the native delimiter cannot hold the full sequence.
+
+WordCraft represents zeroed `mpadded` metrics with its visible phantom node. Horizontal `mspace` uses a sized math-space run and follows native script scaling. The emitted OMML retains that run. MathML tables with spanning cells, arbitrary vertical spaces and padding shifts, HTML stylesheet rules inside the formula, and structures beyond the documented profile remain open.

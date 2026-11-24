@@ -102,7 +102,7 @@ pub(super) struct Output<'a> {
     preserve_links: bool,
     pixels: u64,
     raster_dpi: f64,
-    pub math_nodes_remaining: usize,
+    math_nodes_remaining: usize,
 }
 
 pub(super) struct RasterImage {
@@ -194,8 +194,9 @@ impl<'a> Output<'a> {
             match item {
                 Inline::Image(image) => self.image(&mut p, image, width)?,
                 Inline::Equation { end, source } => {
-                    let equation = super::math::equation(source, &mut self.math_nodes_remaining)?;
-                    p.insert_object(p.len(), equation, &text.style_at(start))
+                    let mut style = text.style_at(start);
+                    let equation = self.equation(source, &mut style)?;
+                    p.insert_object(p.len(), equation, &style)
                         .map_err(conversion)?;
                     text_cursor = end;
                 }
@@ -248,6 +249,15 @@ impl<'a> Output<'a> {
             )
             .map_err(conversion)?;
         Ok(())
+    }
+
+    pub(super) fn equation(
+        &mut self,
+        source: &str,
+        style: &mut CharProps,
+    ) -> Result<InlineObject, EngineError> {
+        let base_size = self.document.styles.resolve_char(None, style).size;
+        super::math::equation(source, style, base_size, &mut self.math_nodes_remaining)
     }
 
     pub(super) fn load_image(&mut self, image: &ImagePayload) -> Result<RasterImage, EngineError> {

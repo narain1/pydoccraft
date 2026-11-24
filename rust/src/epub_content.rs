@@ -429,7 +429,7 @@ fn inline(
         cx.budget.object()?;
         let markup = standalone(node, cx.source)?;
         cx.budget.bytes(markup.len())?;
-        let text = node_text(node);
+        let text = super::math::presentation_text(node);
         let start = run.characters;
         if let Some(style) = styled(node, cx) {
             run.styled_text(&text, &style.text, cx.budget)?;

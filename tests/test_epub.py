@@ -769,6 +769,106 @@ class EpubTests(unittest.TestCase):
                 self.assertIn("Before", converted[0].get_text())
                 self.assertIn("After", converted[0].get_text())
 
+    def test_mathml_inherits_presentation_styles_without_duplicating_annotations(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+        <body><p style="font-size: 18px">Before
+          <m:math mathcolor="#b52040" mathsize="24px">
+            <m:semantics><m:mrow><m:mi>H</m:mi><m:mo>+</m:mo>
+              <m:mstyle mathcolor="#1659b0" mathsize="150%" mathvariant="bold">
+                <m:mi>N</m:mi><m:mi mathvariant="normal" mathcolor="currentColor">R</m:mi>
+              </m:mstyle><m:mo>&amp;</m:mo><m:mi>Z</m:mi></m:mrow>
+              <m:annotation encoding="text/plain">duplicate alternative representation</m:annotation>
+            </m:semantics>
+          </m:math> After</p>
+        </body></html>"""
+        namespaces = {
+            "m": "http://schemas.openxmlformats.org/officeDocument/2006/math",
+            "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+        }
+        w = "{" + namespaces["w"] + "}"
+        with doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+            text = book[0].get_text()
+            self.assertIn("Before", text)
+            self.assertIn("After", text)
+            self.assertNotIn("duplicate alternative", text)
+            data = book.convert("docx")
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                xml = ET.fromstring(archive.read("word/document.xml"))
+            runs = {run.findtext("m:t", namespaces=namespaces): run for run in xml.findall(".//m:r", namespaces)}
+            for token, ink, half_points in (("H", "B52040", "36"), ("N", "1659B0", "54"), ("R", "1659B0", "54")):
+                with self.subTest(token=token):
+                    self.assertEqual(runs[token].find("w:rPr/w:color", namespaces).get(w + "val").upper(), ink)
+                    self.assertEqual(runs[token].find("w:rPr/w:sz", namespaces).get(w + "val"), half_points)
+            self.assertIn("&", runs)
+            self.assertIsNotNone(runs["&"].find("m:rPr/m:lit", namespaces))
+            with doc_ex.open(data) as word, doc_ex.open(book.convert("pdf")) as pdf:
+                for output in (book, word, pdf):
+                    _, pixels = rgba_pixels(png_chunks(output.render_page(0, dpi=96)))
+                    self.assertTrue(bytes((181, 32, 64, 255)) in pixels, "missing equation foreground")
+                    self.assertTrue(bytes((22, 89, 176, 255)) in pixels, "missing nested run color")
+                self.assertIn("Before", pdf[0].get_text())
+                self.assertIn("After", word[0].get_text())
+
+    def test_mathml_projects_accents_movable_limits_fences_and_tensor_pairs(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+        <body><p><m:math>
+          <m:mover accent="true"><m:mi>x</m:mi><m:mo>^</m:mo></m:mover>
+          <m:munder accentunder="true"><m:mi>y</m:mi><m:mo>⏟</m:mo></m:munder>
+          <m:mover accent="false"><m:mi>z</m:mi><m:mo>¯</m:mo></m:mover>
+          <m:munder><m:mo movablelimits="true" largeop="false">∑</m:mo><m:mn>2</m:mn></m:munder>
+          <m:munder><m:mo movablelimits="false">∑</m:mo><m:mn>3</m:mn></m:munder>
+          <m:munder><m:mo movablelimits="true">lim</m:mo><m:mi>x</m:mi></m:munder>
+          <m:mfenced open="[" close="]" separators=",;"><m:mn>1</m:mn><m:mn>2</m:mn><m:mn>3</m:mn><m:mn>4</m:mn></m:mfenced>
+          <m:mmultiscripts><m:mi>T</m:mi><m:mi>i</m:mi><m:none/><m:mi>j</m:mi><m:mi>k</m:mi>
+            <m:mprescripts/><m:none/><m:mi>l</m:mi><m:mi>m</m:mi><m:none/></m:mmultiscripts>
+          <m:menclose notation="radical"><m:mi>q</m:mi></m:menclose>
+        </m:math></p></body></html>"""
+        namespace = "{http://schemas.openxmlformats.org/officeDocument/2006/math}"
+        with doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+            word = book.convert("docx")
+            with zipfile.ZipFile(io.BytesIO(word)) as archive:
+                xml = ET.fromstring(archive.read("word/document.xml"))
+            for tag, count in (("acc", 1), ("groupChr", 1), ("limUpp", 1), ("nary", 2), ("sSub", 1), ("sSubSup", 2), ("sPre", 2), ("rad", 1)):
+                self.assertEqual(len(xml.findall(".//" + namespace + tag)), count, tag)
+            limit_modes = xml.findall(".//" + namespace + "limLoc")
+            self.assertEqual([mode.get(namespace + "val") for mode in limit_modes], ["subSup", "undOvr"])
+            self.assertIn("1,2;3;4", "".join(xml.itertext()))
+            for target, data in (("docx", word), ("pdf", book.convert("pdf"))):
+                with self.subTest(target=target), doc_ex.open(data) as converted:
+                    self.assertEqual(len(converted), 2)
+                    preview = converted.render_page(0, dpi=96)
+                    self.assertTrue(preview.startswith(b"\x89PNG"))
+
+    def test_mathml_space_and_zero_width_padding_affect_rendered_geometry(self) -> None:
+        def fixture(math: str) -> bytes:
+            return epub_fixture(chapter_one=f"""<html xmlns="http://www.w3.org/1999/xhtml"
+              xmlns:m="http://www.w3.org/1998/Math/MathML"><body><p>
+              <m:math mathsize="18pt" mathvariant="normal">{math}</m:math></p></body></html>""")
+
+        red = '<m:mi mathcolor="#d61020">H</m:mi>'
+        blue = '<m:mi mathcolor="#2344cc">M</m:mi>'
+        ink = bytes((35, 68, 204, 255))
+
+        def left(preview: bytes) -> int:
+            width, pixels = rgba_pixels(png_chunks(preview))
+            return min((offset // 4) % width for offset in range(0, len(pixels), 4) if pixels[offset:offset+4] == ink)
+
+        with (
+            doc_ex.open(fixture(red + blue)) as baseline,
+            doc_ex.open(fixture(red + '<m:mspace width="1em"/>' + blue)) as spaced,
+            doc_ex.open(fixture('<m:mpadded width="0">' + red + '</m:mpadded>' + blue)) as padded,
+        ):
+            start = left(baseline.render_page(0, dpi=96))
+            self.assertAlmostEqual(left(spaced.render_page(0, dpi=96)) - start, 24, delta=1)
+            self.assertLess(left(padded.render_page(0, dpi=96)), start - 8)
+            with zipfile.ZipFile(io.BytesIO(padded.convert("docx"))) as archive:
+                self.assertIn(b'<m:zeroWid m:val="1"/>', archive.read("word/document.xml"))
+        for math in ('<m:mspace width="1em" height="2px"/>',
+                     '<m:mpadded voffset="1em"><m:mi>x</m:mi></m:mpadded>'):
+            with self.subTest(math=math), doc_ex.open(fixture(red + math)) as unsupported:
+                with self.assertRaises(doc_ex.UnsupportedFormatError):
+                    unsupported.render_page(0, dpi=96)
+
     def test_invalid_media_overlay_references_and_timing_are_explicit(self) -> None:
         for options, error in (
             ({"first_target": "../one.xhtml#missing"}, doc_ex.MalformedDocumentError),

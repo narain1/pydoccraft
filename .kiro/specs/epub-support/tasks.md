@@ -8,7 +8,7 @@
 - [x] Add semantic reflow preview and DOCX/PDF conversion with explicit errors for unsupported features.
 - [x] Update locked dependencies, license inventories, and format and authoring documentation.
 - [x] Accept inert XHTML and selected legacy doctypes. Reopen and edit the original W3C Accessible EPUB 3 sample.
-- [ ] Expand the public EPUB conformance corpus.
+- [ ] Expand the public EPUB conformance corpus. Exercise math-heavy books that exceed the eager semantic output budget.
 - [ ] Validate the release wheel matrix on Linux, macOS, and Windows.
 - [x] Replace existing XHTML chapters transactionally and preserve targeted navigation and overlay anchors.
 - [x] Read SMIL timing trees and expose chapter cue order, time ranges, target IDs and bounded audio reads.
@@ -17,7 +17,8 @@
 - [x] Render local CSS font faces, IDPF-obfuscated fonts, and static SVG embedded in XHTML. Preserve inline equations, images and table spans with packaged fonts. Rasterize static SVG in semantic export.
 - [x] Render SVG CSS, packaged SVG fonts, and referenced PNG and JPEG resources in spine previews, XHTML and semantic export.
 - [ ] Extend source CSS and fixed-layout fidelity, including font Unicode ranges and variable axes, additional SVG features, synthetic spreads and conversion.
-- [ ] Expand MathML layout to remaining elements, attributes and styling.
+- [x] Project inherited MathML attributes, accents, movable limits, repeated script pairs, varied fences and separators, horizontal spaces, and zero-dimension padding.
+- [ ] Expand MathML layout to remaining elements and attributes, including spanning matrices, arbitrary padding and CSS within formulas.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [ ] Extend overlay support for Ogg Opus, embedded audio/video, gapless MP3, long-cue streaming, and playback navigation.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.

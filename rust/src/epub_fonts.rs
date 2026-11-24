@@ -352,7 +352,7 @@ fn equation(
         linear,
         display,
         math: equation,
-    } = super::math::equation(markup, &mut output.math_nodes_remaining)?
+    } = output.equation(markup, &mut style)?
     else {
         return Err(invalid("invalid EPUB equation"));
     };
