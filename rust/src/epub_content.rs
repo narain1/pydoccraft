@@ -30,7 +30,7 @@ pub(super) struct Budget {
 }
 
 impl Budget {
-    fn bytes(&mut self, bytes: usize) -> Result<(), EngineError> {
+    pub(super) fn bytes(&mut self, bytes: usize) -> Result<(), EngineError> {
         charge(
             &mut self.bytes,
             bytes,
@@ -39,7 +39,7 @@ impl Budget {
         )
     }
 
-    fn object(&mut self) -> Result<(), EngineError> {
+    pub(super) fn object(&mut self) -> Result<(), EngineError> {
         charge(
             &mut self.objects,
             1,
@@ -198,6 +198,7 @@ pub(super) fn chapter(
         return Err(invalid("spine entry is not XHTML"));
     }
     let body = child(root, XHTML, "body").ok_or_else(|| invalid("XHTML chapter has no body"))?;
+    let media = super::media::inventory(body, cx)?;
     let mut blocks = Vec::new();
     flow(body, &mut blocks, 0, cx)?;
     let title = child(root, XHTML, "head")
@@ -218,6 +219,11 @@ pub(super) fn chapter(
         ..Default::default()
     };
     result.metadata.insert("chapter_title".into(), json!(title));
+    if !media.is_empty() {
+        result
+            .metadata
+            .insert("embedded_media".into(), media.into());
+    }
     if let Some(language) = root
         .attribute((XML, "lang"))
         .or_else(|| root.attribute("lang"))
@@ -286,7 +292,10 @@ fn block(tag: &str) -> bool {
 }
 
 fn ignored(tag: &str) -> bool {
-    matches!(tag, "style" | "script" | "template" | "head")
+    matches!(
+        tag,
+        "style" | "script" | "template" | "head" | "source" | "track"
+    )
 }
 
 fn flow(
@@ -482,6 +491,14 @@ fn inline(
         run.math.push(equation);
         return Ok(());
     }
+    if node.has_tag_name((super::EPUB, "trigger")) {
+        if node.children().any(|child| {
+            child.is_element() || child.text().is_some_and(|text| !text.trim().is_empty())
+        }) {
+            return Err(invalid("legacy EPUB trigger must be empty"));
+        }
+        return Ok(());
+    }
     if tag.namespace().is_some_and(|ns| ns != XHTML) {
         return Err(unsupported("unknown XHTML extension element"));
     }
@@ -515,7 +532,16 @@ fn inline(
             run.images.push(image);
             return Ok(());
         }
-        "audio" | "video" | "iframe" | "embed" | "canvas" | "picture" => {
+        "video" if super::media::poster(node).is_some() => {
+            if let Some(mut image) = media_poster(node, cx)? {
+                image
+                    .metadata
+                    .insert("inline_offset".into(), json!(run.characters));
+                run.images.push(image);
+            }
+            return Ok(());
+        }
+        "iframe" | "embed" | "canvas" | "picture" => {
             return Err(unsupported(
                 "embedded XHTML media or alternate image sources",
             ));
@@ -588,6 +614,15 @@ fn link(
         }
     }
     Ok(link)
+}
+
+pub(super) fn media_poster(
+    node: Node<'_, '_>,
+    cx: &mut Context<'_, '_>,
+) -> Result<Option<ImagePayload>, EngineError> {
+    super::media::poster(node)
+        .map(|src| image(src, super::media::label(node).unwrap_or_default(), None, cx))
+        .transpose()
 }
 
 pub(super) fn image(

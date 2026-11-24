@@ -1327,6 +1327,121 @@ class EpubTests(unittest.TestCase):
             with self.subTest(doctype=doctype), self.assertRaises(doc_ex.MalformedDocumentError):
                 doc_ex.open(epub_fixture(chapter_one=doctype + '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Text</p></body></html>'))
 
+    def test_embedded_epub_media_survives_chapter_edits_and_plays_audio(self) -> None:
+        _, wav = narrated_epub()
+        ogv = (Path(__file__).parent / "fixtures/epub-narration-theora-opus.ogv").read_bytes()
+        caption = b"WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nA ticking sound\n"
+        chapter_path = "OEBPS/Media/chapter.xhtml"
+        audio_path = "OEBPS/Media/sample audio.wav"
+        unsupported_path = "OEBPS/Media/teaser.ogg"
+        video_path = "OEBPS/Media/teaser.ogv"
+        caption_path = "OEBPS/Media/teaser.en.vtt"
+        xhtml = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Highlights</title></head>
+        <body><p>Start.</p>
+        <audio id="sample" title="A ticking sound">
+          <source src="teaser.ogg" type="audio/ogg; codecs=vorbis"/>
+          <source src="sample%20audio.wav"/>
+          <span>A written transcript.</span>
+        </audio>
+        <video id="teaser" aria-label="Preview" src="teaser.ogv" poster="../image.png"
+            style="display:block; width:60px; height:40px">
+          <track src="teaser.en.vtt" kind="captions" srclang="en" label="English" default="default"/>
+          <source src="ignored-invalid-fallback.ogv"/>
+        </video><epub:trigger action="pause" ref="teaser"/><p>End.</p></body></html>"""
+        with doc_ex.open(epub_fixture()) as original:
+            edited = original.edit_epub_structure(
+                [0, doc_ex.EpubChapterSource("Highlights", xhtml, chapter_path), 1],
+                resources={
+                    "OEBPS/image.png": doc_ex.EpubResource("image/png", solid((255, 0, 0))),
+                    audio_path: doc_ex.EpubResource("audio/wav", wav),
+                    unsupported_path: doc_ex.EpubResource("audio/ogg", ogv),
+                    video_path: doc_ex.EpubResource("video/ogg", ogv),
+                    caption_path: doc_ex.EpubResource("text/vtt", caption),
+                },
+            )
+
+        with doc_ex.open(edited) as book:
+            self.assertEqual(book.epub_embedded_media(0), [])
+            audio, video = book.epub_embedded_media(1)
+            self.assertEqual(audio, doc_ex.EpubEmbeddedMedia(
+                "audio", "sample", "A ticking sound",
+                (
+                    doc_ex.EpubMediaSource("teaser.ogg", unsupported_path, "audio/ogg", False),
+                    doc_ex.EpubMediaSource("sample%20audio.wav", audio_path, "audio/wav", True),
+                ),
+                (), None,
+            ))
+            self.assertEqual(video.id, "teaser")
+            self.assertEqual(video.poster_path, "OEBPS/image.png")
+            self.assertEqual([source.path for source in video.sources], [video_path])
+            self.assertEqual(video.tracks, (
+                doc_ex.EpubMediaTrack(caption_path, "text/vtt", "captions", "English", "en", True),
+            ))
+            self.assertEqual(book.read_epub_resource(video.tracks[0].path), caption)
+            self.assertIn("A written transcript.", book[1].get_text())
+            self.assertEqual([image.alt for image in book[1].get_images()], ["Preview"])
+            png = book.render_page(1, dpi=96)
+            self.assertIn(bytes.fromhex("ff0000ff"), rgba_pixels(png_chunks(png))[1])
+
+            chunks = list(book.epub_embedded_audio(1, 0, start_us=200_000, end_us=450_000, chunk_frames=701))
+            self.assertEqual([clip.frame_count for clip in chunks], [701, 701, 598])
+            self.assertTrue(all((clip.channels, clip.sample_rate) == (1, 8000) for clip in chunks))
+            decoded = []
+            for clip in chunks:
+                with wave.open(io.BytesIO(clip.wave), "rb") as reader:
+                    decoded.append(reader.readframes(clip.frame_count))
+            with wave.open(io.BytesIO(wav), "rb") as reader:
+                reader.setpos(1600)
+                expected = b"".join(struct.pack("<h", (sample - 128) << 8) for sample in reader.readframes(2000))
+                self.assertEqual(b"".join(decoded), expected)
+
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "local source"):
+                next(book.epub_embedded_audio(1, 0, source_index=0))
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "video playback"):
+                next(book.epub_embedded_audio(1, 1))
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "semantic export"):
+                book.convert("pdf")
+            with self.assertRaisesRegex(ValueError, "still referenced"):
+                book.edit_epub_structure(remove_resources=[caption_path])
+            retained = book.edit_epub_chapters({1: xhtml.replace("Start.", "Revised.")})
+        with doc_ex.open(retained) as book:
+            self.assertEqual(book.epub_embedded_media(1), [audio, video])
+            self.assertIn("Revised.", book[1].get_text())
+            with self.assertRaisesRegex(ValueError, "still referenced"):
+                book.edit_epub_structure([0, 2], remove_resources=[audio_path, video_path, caption_path, unsupported_path])
+            cleared = book.edit_epub_chapters({
+                1: '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Cleared</title></head>'
+                   '<body><p>Retained chapter.</p></body></html>',
+            })
+        with doc_ex.open(cleared) as book:
+            trimmed = book.edit_epub_structure([0, 2], remove_resources=[audio_path, video_path, caption_path, unsupported_path])
+        with doc_ex.open(trimmed) as book:
+            self.assertEqual(len(book), 2)
+            self.assertEqual(book.epub_embedded_media(1), [])
+
+    def test_embedded_epub_media_rejects_broken_local_references(self) -> None:
+        def chapter(src: str) -> str:
+            return (
+                '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>One</title></head><body>'
+                f'<audio id="sample" src="{src}">A transcript.</audio></body></html>'
+            )
+
+        for src, error, message in (
+            ("missing.ogg", doc_ex.MalformedDocumentError, "absent from the manifest"),
+            ("image.png", doc_ex.MalformedDocumentError, "type differs"),
+            ("%2e%2e/audio.ogg", doc_ex.UnsafeArchiveError, "encoded EPUB parent"),
+            ("image.png#t=1", doc_ex.UnsupportedFormatError, "query or fragment"),
+        ):
+            with self.subTest(src=src), self.assertRaisesRegex(error, message):
+                doc_ex.open(epub_fixture(chapter_one=chapter(src)))
+
+        with doc_ex.open(epub_fixture(chapter_one=chapter("https://example.invalid/test.ogg"))) as book:
+            source, = book.epub_embedded_media(0)[0].sources
+            self.assertIsNone(source.path)
+            self.assertIn("A transcript.", book[0].get_text())
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "local source"):
+                next(book.epub_embedded_audio(0, 0))
+
     def test_media_overlay_playback_clips_pcm_and_synchronizes_callbacks(self) -> None:
         source, _ = narrated_epub()
         with doc_ex.open(source) as document:

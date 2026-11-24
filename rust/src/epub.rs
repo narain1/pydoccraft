@@ -28,6 +28,8 @@ mod fonts;
 mod layout;
 #[path = "epub_math.rs"]
 mod math;
+#[path = "epub_media.rs"]
+mod media;
 #[path = "epub_obfuscation.rs"]
 mod obfuscation;
 #[path = "epub_output.rs"]

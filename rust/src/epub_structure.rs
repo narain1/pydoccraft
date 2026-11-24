@@ -403,16 +403,21 @@ pub(crate) fn update_structure<'a>(
         if data.is_empty() {
             return Err(argument("EPUB resource data cannot be empty"));
         }
-        if media == "text/css" {
+        if matches!(media.as_str(), "text/css" | "text/vtt") {
             std::str::from_utf8(data).map_err(invalid)?;
         } else if matches!(
             media.as_str(),
             "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/svg+xml"
         ) {
             validate_image(data, media)?;
-        } else if media == "application/smil+xml" {
+        } else if matches!(
+            media.as_str(),
+            "application/smil+xml" | "application/ttml+xml"
+        ) {
             if data.len() > XML_BYTES {
-                return Err(limited("SMIL resource exceeds its XML byte budget"));
+                return Err(limited(
+                    "EPUB timed media resource exceeds its XML byte budget",
+                ));
             }
             parse_xml(data)?;
         }
@@ -636,7 +641,12 @@ fn check_path(path: &str) -> Result<(), EngineError> {
 fn editable_resource(media: &str) -> bool {
     matches!(
         media,
-        "text/css" | "application/smil+xml" | "application/ogg" | "audio/ogg; codecs=opus"
+        "text/css"
+            | "text/vtt"
+            | "application/smil+xml"
+            | "application/ttml+xml"
+            | "application/ogg"
+            | "audio/ogg; codecs=opus"
     ) || obfuscation::is_font(media)
         || media.split_once('/').is_some_and(|(kind, subtype)| {
             matches!(kind, "image" | "audio" | "video" | "font")

@@ -15,7 +15,7 @@ from typing import Any, Callable, Iterator, Literal, TYPE_CHECKING, overload
 
 from .errors import DocumentClosedError, MalformedDocumentError, UnsafeArchiveError
 from .models import (
-    Block, EpubAudioClip, EpubChapterSource, EpubNarrationCue, EpubOverlayCue, EpubOverlaySequence, EpubResource, EpubSvgChapterSource, Image, Link, Story, Table,
+    Block, EpubAudioClip, EpubChapterSource, EpubEmbeddedMedia, EpubMediaSource, EpubMediaTrack, EpubNarrationCue, EpubOverlayCue, EpubOverlaySequence, EpubResource, EpubSvgChapterSource, Image, Link, Story, Table,
     _html_text,
 )
 
@@ -33,6 +33,22 @@ _MEDIA_EXTENSIONS = {
     "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
     "image/webp": "webp", "image/tiff": "tiff", "image/bmp": "bmp",
 }
+
+
+def _epub_chunk_size(frames: int) -> int:
+    frames = operator.index(frames)
+    if not 1 <= frames <= 262_144:
+        raise ValueError("EPUB audio chunk_frames must be between 1 and 262144")
+    return frames
+
+
+def _epub_opus_index(index: int | None) -> int | None:
+    if index is None:
+        return None
+    index = operator.index(index)
+    if not 0 <= index <= 0xFFFFFFFF:
+        raise ValueError("Opus track index must be an unsigned 32-bit integer")
+    return index
 
 
 def _epub_edit_text(value: str, limit: int, label: str) -> str:
@@ -643,6 +659,59 @@ class Document:
         self._ensure_open()
         return bytes(_native(lambda: _core._epub_resource(self._source, path, offset, length)))
 
+    def epub_embedded_media(self, page: int) -> list[EpubEmbeddedMedia]:
+        """List the chapter's audio and video elements in XHTML source order."""
+        self._ensure_open()
+        if self._filetype != "epub":
+            from .errors import UnsupportedFormatError
+
+            raise UnsupportedFormatError("embedded media requires EPUB input")
+        chapter = self.load_page(operator.index(page))
+        return [
+            EpubEmbeddedMedia(
+                item["kind"], item["id"], item["label"],
+                tuple(EpubMediaSource(**source) for source in item["sources"]),
+                tuple(EpubMediaTrack(**track) for track in item["tracks"]),
+                item["poster_path"],
+            )
+            for item in chapter.metadata.get("embedded_media", ())
+        ]
+
+    def epub_embedded_audio(
+        self,
+        page: int,
+        media_index: int,
+        *,
+        source_index: int | None = None,
+        start_us: int = 0,
+        end_us: int | None = None,
+        chunk_frames: int = 65_536,
+        opus_track: int | None = None,
+    ) -> Iterator[EpubAudioClip]:
+        """Stream PCM from an XHTML audio element by its source-order index."""
+        from . import _core, _native
+        from .errors import UnsupportedFormatError
+
+        embedded = self.epub_embedded_media(page)[operator.index(media_index)]
+        if embedded.kind != "audio":
+            raise UnsupportedFormatError("embedded video playback is unsupported")
+        if source_index is None:
+            source = next((source for source in embedded.sources if source.playable_audio), None)
+        else:
+            source = embedded.sources[operator.index(source_index)]
+        if source is None or source.path is None or source.media_type is None or not source.playable_audio:
+            raise UnsupportedFormatError("embedded audio requires a supported local source")
+        start = operator.index(start_us)
+        end = None if end_us is None else operator.index(end_us)
+        if not 0 <= start <= 0xFFFFFFFFFFFFFFFF or (
+            end is not None and not start < end <= 0xFFFFFFFFFFFFFFFF
+        ):
+            raise ValueError("EPUB audio requires a nonnegative start and an optional later end")
+        frames = _epub_chunk_size(chunk_frames)
+        selection = _epub_opus_index(opus_track)
+        decoder = _native(lambda: _core._open_epub_audio(self._source, source.path, source.media_type, selection))
+        yield from self._epub_pcm_chunks(decoder, start, end, frames)
+
     def epub_media_cues(self, page: int) -> list[dict[str, Any]]:
         """Return SMIL cues for a spine page, in playback order."""
         return [cue for cue, _ in self._epub_cues(page)]
@@ -688,9 +757,7 @@ class Document:
         if start_cue < 0:
             raise IndexError("EPUB narration cue index out of range")
         if chunk_frames is not None:
-            chunk_frames = operator.index(chunk_frames)
-            if not 1 <= chunk_frames <= 262_144:
-                raise ValueError("EPUB narration chunk_frames must be between 1 and 262144")
+            chunk_frames = _epub_chunk_size(chunk_frames)
         skipped = frozenset(skip_roles)
         selections = dict(opus_tracks) if opus_tracks is not None else {}
         current_track = None
@@ -712,11 +779,7 @@ class Document:
                 continue
             track = (audio["path"], audio["media_type"])
             if track != current_track:
-                selection = selections.get(track[0])
-                if selection is not None:
-                    selection = operator.index(selection)
-                    if not 0 <= selection <= 0xFFFFFFFF:
-                        raise ValueError("Opus track index must be an unsigned 32-bit integer")
+                selection = _epub_opus_index(selections.get(track[0]))
                 decoder = None
                 decoder = _native(lambda: _core._open_epub_audio(self._source, *track, selection))
                 current_track = track
@@ -734,12 +797,22 @@ class Document:
         end: int | None,
         chunk_frames: int | None,
     ) -> Iterator[EpubNarrationCue]:
+        for clip in self._epub_pcm_chunks(decoder, begin, end, chunk_frames):
+            yield EpubNarrationCue(*args, audio=clip)
+
+    def _epub_pcm_chunks(
+        self,
+        decoder: Any,
+        begin: int,
+        end: int | None,
+        chunk_frames: int | None,
+    ) -> Iterator[EpubAudioClip]:
         from . import _native
 
         self._ensure_open()
         if chunk_frames is None:
             wave, rate, channels, frames = _native(lambda: decoder.clip(begin, end))
-            yield EpubNarrationCue(*args, audio=EpubAudioClip(bytes(wave), rate, channels, frames))
+            yield EpubAudioClip(bytes(wave), rate, channels, frames)
             return
         _native(lambda: decoder.start_stream(begin, end))
         while True:
@@ -748,7 +821,7 @@ class Document:
             if chunk is None:
                 return
             wave, rate, channels, frames = chunk
-            yield EpubNarrationCue(*args, audio=EpubAudioClip(bytes(wave), rate, channels, frames))
+            yield EpubAudioClip(bytes(wave), rate, channels, frames)
 
     def epub_narration(
         self,

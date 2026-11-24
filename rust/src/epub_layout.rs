@@ -313,7 +313,7 @@ impl<'book> Layout<'book> {
                     context,
                 )?)
             } else {
-                None
+                content::media_poster(node, context)?
             };
             if let Some(source) = image {
                 let picture = if source.media_type == "image/svg+xml" {

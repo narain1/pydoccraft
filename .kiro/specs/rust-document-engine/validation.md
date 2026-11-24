@@ -2851,3 +2851,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 687 installed tests, inclu
 ## 2026-11-24 Explicit Opus track selection
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 688 installed tests, including 93 EPUB tests. It measured 23,124,655 bytes with a 53,695,016-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-explicit-opus-track-selection) covers selected audio across grouped links, unselected stream validation, and EPUBCheck results.
+
+## 2026-11-24 Embedded XHTML media and audio playback
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 690 installed tests, including 95 EPUB tests. It measured 23,133,097 bytes with a 53,721,400-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-embedded-xhtml-media-and-audio-playback) covers embedded playback, transactional chapter edits, EPUBCheck and the original Shared Culture EPUB.

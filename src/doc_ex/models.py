@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from html import escape
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Literal
 from urllib.parse import urlsplit
 
 BBox = tuple[float, float, float, float]
@@ -63,6 +63,40 @@ class EpubAudioClip:
     sample_rate: int
     channels: int
     frame_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class EpubMediaSource:
+    """An authored URL and its optional local publication resource."""
+
+    uri: str
+    path: str | None
+    media_type: str | None
+    playable_audio: bool
+
+
+@dataclass(frozen=True, slots=True)
+class EpubMediaTrack:
+    """A local caption, subtitle, description or metadata track."""
+
+    path: str
+    media_type: str
+    kind: str
+    label: str | None
+    language: str | None
+    default: bool
+
+
+@dataclass(frozen=True, slots=True)
+class EpubEmbeddedMedia:
+    """An XHTML audio or video element and its ordered resource references."""
+
+    kind: Literal["audio", "video"]
+    id: str | None
+    label: str | None
+    sources: tuple[EpubMediaSource, ...]
+    tracks: tuple[EpubMediaTrack, ...]
+    poster_path: str | None
 
 
 @dataclass(frozen=True, slots=True)

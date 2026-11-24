@@ -62,6 +62,9 @@ pub(super) fn convert(
         if super::rendition::fixed(page) {
             return Err(unsupported("fixed-layout spine entries"));
         }
+        if page.metadata.contains_key("embedded_media") {
+            return Err(unsupported("semantic export of embedded audio or video"));
+        }
         let mut blocks = output.blocks(&page.blocks, 468.0)?;
         if index > 0 {
             if let Some(Block::Para(p)) = blocks.first_mut().map(Arc::make_mut) {

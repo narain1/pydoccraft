@@ -4,7 +4,9 @@ use std::{io::Cursor, ops::Range, panic::AssertUnwindSafe};
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 
 use super::{
-    invalid, limited, parse_xml, unsupported, validate_archive_path, Book, XHTML, XML_BYTES,
+    invalid, limited,
+    media::{audio_codec, AudioCodec},
+    parse_xml, unsupported, validate_archive_path, Book, XHTML, XML_BYTES,
 };
 use crate::EngineError;
 
@@ -61,39 +63,36 @@ impl AudioSource {
         opus_track: Option<usize>,
         load: impl FnOnce() -> Result<Vec<u8>, EngineError>,
     ) -> Result<Self, EngineError> {
-        let decoder = match media {
-            "audio/ogg"
-            | "audio/opus"
-            | "audio/ogg; codecs=opus"
-            | "application/ogg"
-            | "video/ogg" => {
+        let codec = audio_codec(media);
+        if opus_track.is_some() && !matches!(codec, Some(AudioCodec::Opus)) {
+            return Err(EngineError::InvalidArgument(
+                "Opus track selection requires an Ogg audio resource".into(),
+            ));
+        }
+        let decoder = match codec {
+            Some(AudioCodec::Opus) => {
                 let bytes = load()?;
                 let track = std::panic::catch_unwind(|| opus::Track::open(&bytes, opus_track))
                     .map_err(|_| invalid("malformed Ogg Opus audio"))??;
                 Decoder::Opus(Box::new(track))
             }
-            _ if opus_track.is_some() => {
-                return Err(EngineError::InvalidArgument(
-                    "Opus track selection requires an Ogg audio resource".into(),
-                ));
-            }
-            "audio/mpeg" | "audio/mp3" => {
+            Some(AudioCodec::Mpeg) => {
                 let bytes = load()?;
                 let track = std::panic::catch_unwind(|| Mp3::new(bytes))
                     .map_err(|_| invalid("malformed MPEG Layer III audio"))??;
                 Decoder::Mp3(Box::new(track))
             }
-            "audio/mp4" | "audio/x-m4a" => {
+            Some(AudioCodec::Aac) => {
                 let bytes = load()?;
                 let track = std::panic::catch_unwind(|| aac::Track::open(bytes))
                     .map_err(|_| invalid("malformed MP4 audio"))??;
                 Decoder::Aac(Box::new(track))
             }
-            "audio/wav" | "audio/wave" | "audio/x-wav" | "audio/vnd.wave" => {
+            Some(AudioCodec::Wave) => {
                 let bytes = load()?;
                 Decoder::Wave(WavReader::new(Cursor::new(bytes)).map_err(wav_error)?)
             }
-            _ => return Err(unsupported("media-overlay audio codec is unsupported")),
+            None => return Err(unsupported("EPUB audio codec is unsupported")),
         };
         Ok(Self {
             decoder,
