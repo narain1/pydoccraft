@@ -4,12 +4,11 @@ use std::{io::Cursor, ops::Range, sync::Arc};
 use hound::{SampleFormat, WavSpec};
 use oxideav_aac::{asc::AudioSpecificConfig, decode::StreamDecoder};
 use oxideav_core::{CodecRegistry, Demuxer, MediaType};
-use oxideav_mp4::{boxes::read_box_header, demux::open_typed};
+use oxideav_mp4::demux::open_typed;
 
 use super::{invalid, limited, unsupported, EngineError, MAX_CLIP_SAMPLES};
 
-const MAX_METADATA_BYTES: usize = 4 * 1024 * 1024;
-const MAX_ACCESS_UNITS: usize = 250_000;
+use super::super::mp4::{Mp4Bounds, MAX_ACCESS_UNITS};
 const MAX_PACKET_BYTES: usize = 32_768;
 
 pub(super) struct Track {
@@ -25,8 +24,7 @@ pub(super) struct Track {
 
 impl Track {
     pub(super) fn open(bytes: Vec<u8>) -> Result<Self, EngineError> {
-        let mut guard = Mp4Bounds::default();
-        guard.check(&bytes, 0, 0)?;
+        let guard = Mp4Bounds::inspect(&bytes)?;
         let bytes: Arc<[u8]> = bytes.into();
         let demux = open_typed(Box::new(Cursor::new(bytes.clone())), &CodecRegistry::new())
             .map_err(invalid)?;
@@ -242,76 +240,4 @@ fn scale(value: u64, multiplier: u64, divisor: u64) -> Result<usize, EngineError
     let result = (u128::from(value) * u128::from(multiplier) + u128::from(divisor / 2))
         / u128::from(divisor);
     usize::try_from(result).map_err(|_| limited("MP4 audio time exceeds limits"))
-}
-
-#[derive(Default)]
-struct Mp4Bounds {
-    boxes: usize,
-    metadata: usize,
-    samples: usize,
-    media: Vec<Range<usize>>,
-}
-
-impl Mp4Bounds {
-    fn contains_media(&self, range: Range<usize>) -> bool {
-        let index = self.media.partition_point(|mdat| mdat.end <= range.start);
-        self.media
-            .get(index)
-            .is_some_and(|mdat| mdat.start <= range.start && range.end <= mdat.end)
-    }
-
-    fn check(&mut self, bytes: &[u8], base: usize, depth: usize) -> Result<(), EngineError> {
-        if depth > 8 {
-            return Err(limited("MP4 audio box nesting exceeds limits"));
-        }
-        let mut cursor = Cursor::new(bytes);
-        while cursor.position() < bytes.len() as u64 {
-            let header = read_box_header(&mut cursor)
-                .map_err(invalid)?
-                .ok_or_else(|| invalid("truncated MP4 box"))?;
-            let start = cursor.position() as usize;
-            let length = usize::try_from(
-                header
-                    .payload_size()
-                    .unwrap_or((bytes.len() - start) as u64),
-            )
-            .map_err(invalid)?;
-            let end = start
-                .checked_add(length)
-                .filter(|end| *end <= bytes.len())
-                .ok_or_else(|| invalid("MP4 audio box extends outside its parent"))?;
-            self.boxes += 1;
-            if self.boxes > 20_000 {
-                return Err(limited("too many MP4 audio boxes"));
-            }
-            if depth == 0 && header.fourcc == *b"mdat" {
-                self.media.push(base + start..base + end);
-            } else if depth == 0 {
-                self.metadata += length;
-                if self.metadata > MAX_METADATA_BYTES {
-                    return Err(limited("MP4 audio metadata exceeds 4 MiB"));
-                }
-            }
-            match &header.fourcc {
-                b"moov" | b"trak" | b"mdia" | b"minf" | b"stbl" | b"edts" => {
-                    self.check(&bytes[start..end], base + start, depth + 1)?;
-                }
-                b"stsz" | b"stz2" => {
-                    let raw = bytes[start..end]
-                        .get(8..12)
-                        .ok_or_else(|| invalid("truncated MP4 sample count"))?;
-                    self.samples += u32::from_be_bytes(raw.try_into().map_err(invalid)?) as usize;
-                    if self.samples > MAX_ACCESS_UNITS {
-                        return Err(limited("too many MP4 audio access units"));
-                    }
-                }
-                b"moof" | b"mvex" => {
-                    return Err(unsupported("fragmented MP4 narration is unsupported"))
-                }
-                _ => {}
-            }
-            cursor.set_position(end as u64);
-        }
-        Ok(())
-    }
 }

@@ -66,6 +66,18 @@ class EpubAudioClip:
 
 
 @dataclass(frozen=True, slots=True)
+class EpubVideoFrame:
+    """Owned packed RGB8 pixels and a frame interval on the presentation timeline."""
+
+    rgb: bytes
+    width: int
+    height: int
+    pixel_aspect_ratio: tuple[int, int]
+    start_us: int
+    duration_us: int
+
+
+@dataclass(frozen=True, slots=True)
 class EpubMediaSource:
     """An authored URL and its optional local publication resource."""
 

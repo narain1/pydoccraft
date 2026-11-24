@@ -1398,7 +1398,7 @@ class EpubTests(unittest.TestCase):
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "local source"):
                 next(book.epub_embedded_audio(1, 0, source_index=0))
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "video playback"):
-                next(book.epub_embedded_audio(1, 1))
+                next(book.epub_embedded_video(1, 1))
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "semantic export"):
                 book.convert("pdf")
             with self.assertRaisesRegex(ValueError, "still referenced"):
@@ -1441,6 +1441,60 @@ class EpubTests(unittest.TestCase):
             self.assertIn("A transcript.", book[0].get_text())
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "local source"):
                 next(book.epub_embedded_audio(0, 0))
+
+    def test_embedded_mp4_video_frames_follow_presentation_order_and_clip_bounds(self) -> None:
+        path = "OEBPS/clip.mp4"
+        fixtures = Path(__file__).parent / "fixtures"
+        resource = (fixtures / "epub-video-h264.mp4").read_bytes()
+        ogg = (fixtures / "epub-narration-theora-opus.ogv").read_bytes()
+        xhtml = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Video</title></head>
+        <body><video id="clip"><source src="clip.ogv" type="video/ogg"/>
+        <source src="clip.mp4" type="video/mp4"/>Transcript</video></body></html>"""
+        with doc_ex.open(epub_fixture()) as source:
+            data = source.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Video", xhtml, "OEBPS/new.xhtml")],
+                resources={
+                    "OEBPS/clip.ogv": doc_ex.EpubResource("video/ogg", ogg),
+                    path: doc_ex.EpubResource("video/mp4", resource),
+                },
+            )
+        with doc_ex.open(data) as book:
+            media, = book.epub_embedded_media(0)
+            self.assertEqual([source.path for source in media.sources], ["OEBPS/clip.ogv", path])
+            self.assertTrue(media.sources[1].playable_audio)
+            frames = list(book.epub_embedded_video(0, 0))
+            self.assertEqual([frame.start_us for frame in frames], [i * 1_000_000 // 12 for i in range(12)])
+            self.assertEqual(sum(frame.duration_us for frame in frames), 1_000_000)
+            for index, frame in enumerate(frames):
+                self.assertEqual((frame.width, frame.height, frame.pixel_aspect_ratio), (96, 64, (4, 3)))
+                self.assertEqual(len(frame.rgb), 96 * 64 * 3)
+                red, green, blue = frame.rgb[:3]
+                self.assertGreater(red if index < 6 else blue, 248)
+                self.assertLess(green + (blue if index < 6 else red), 8)
+
+            clipped = list(book.epub_embedded_video(0, 0, source_index=1, start_us=480_000, end_us=650_000))
+            self.assertEqual([(f.start_us, f.duration_us) for f in clipped], [
+                (480_000, 20_000), (500_000, 83_333), (583_333, 66_667),
+            ])
+            self.assertEqual([frame.rgb for frame in clipped], [frame.rgb for frame in frames[5:8]])
+            seek = list(book.epub_embedded_video(0, 0, start_us=750_000))
+            self.assertEqual(seek, frames[9:])
+            audio = list(book.epub_embedded_audio(0, 0, start_us=480_000, end_us=650_000))
+            self.assertTrue(all((clip.sample_rate, clip.channels) == (48_000, 1) for clip in audio))
+            self.assertEqual(sum(clip.frame_count for clip in audio), 8160)
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "local MP4"):
+                next(book.epub_embedded_video(0, 0, source_index=0))
+            with self.assertRaisesRegex(ValueError, "outside its presentation"):
+                next(book.epub_embedded_video(0, 0, start_us=1_000_000))
+            with self.assertRaisesRegex(ValueError, "optional later end"):
+                next(book.epub_embedded_video(0, 0, start_us=100, end_us=50))
+
+        # MP4 validation runs upon playback, so a malformed source can retain
+        # its chapter's authored transcript and resource metadata.
+        with doc_ex.open(rewrite_epub(data, {path: resource[:-1]})) as book:
+            self.assertIn("Transcript", book[0].get_text())
+            with self.assertRaises(doc_ex.MalformedDocumentError):
+                next(book.epub_embedded_video(0, 0))
 
     def test_media_overlay_playback_clips_pcm_and_synchronizes_callbacks(self) -> None:
         source, _ = narrated_epub()

@@ -15,7 +15,7 @@ from typing import Any, Callable, Iterator, Literal, TYPE_CHECKING, overload
 
 from .errors import DocumentClosedError, MalformedDocumentError, UnsafeArchiveError
 from .models import (
-    Block, EpubAudioClip, EpubChapterSource, EpubEmbeddedMedia, EpubMediaSource, EpubMediaTrack, EpubNarrationCue, EpubOverlayCue, EpubOverlaySequence, EpubResource, EpubSvgChapterSource, Image, Link, Story, Table,
+    Block, EpubAudioClip, EpubChapterSource, EpubEmbeddedMedia, EpubMediaSource, EpubMediaTrack, EpubNarrationCue, EpubOverlayCue, EpubOverlaySequence, EpubResource, EpubSvgChapterSource, EpubVideoFrame, Image, Link, Story, Table,
     _html_text,
 )
 
@@ -49,6 +49,16 @@ def _epub_opus_index(index: int | None) -> int | None:
     if not 0 <= index <= 0xFFFFFFFF:
         raise ValueError("Opus track index must be an unsigned 32-bit integer")
     return index
+
+
+def _epub_playback_interval(start_us: int, end_us: int | None) -> tuple[int, int | None]:
+    start = operator.index(start_us)
+    end = None if end_us is None else operator.index(end_us)
+    if not 0 <= start <= 0xFFFFFFFFFFFFFFFF or (
+        end is not None and not start < end <= 0xFFFFFFFFFFFFFFFF
+    ):
+        raise ValueError("EPUB playback requires a nonnegative start and an optional later end")
+    return start, end
 
 
 def _epub_edit_text(value: str, limit: int, label: str) -> str:
@@ -688,29 +698,57 @@ class Document:
         chunk_frames: int = 65_536,
         opus_track: int | None = None,
     ) -> Iterator[EpubAudioClip]:
-        """Stream PCM from an XHTML audio element by its source-order index."""
+        """Stream PCM from an XHTML audio element or a supported video soundtrack."""
         from . import _core, _native
         from .errors import UnsupportedFormatError
 
         embedded = self.epub_embedded_media(page)[operator.index(media_index)]
-        if embedded.kind != "audio":
-            raise UnsupportedFormatError("embedded video playback is unsupported")
         if source_index is None:
             source = next((source for source in embedded.sources if source.playable_audio), None)
         else:
             source = embedded.sources[operator.index(source_index)]
         if source is None or source.path is None or source.media_type is None or not source.playable_audio:
             raise UnsupportedFormatError("embedded audio requires a supported local source")
-        start = operator.index(start_us)
-        end = None if end_us is None else operator.index(end_us)
-        if not 0 <= start <= 0xFFFFFFFFFFFFFFFF or (
-            end is not None and not start < end <= 0xFFFFFFFFFFFFFFFF
-        ):
-            raise ValueError("EPUB audio requires a nonnegative start and an optional later end")
+        start, end = _epub_playback_interval(start_us, end_us)
         frames = _epub_chunk_size(chunk_frames)
         selection = _epub_opus_index(opus_track)
         decoder = _native(lambda: _core._open_epub_audio(self._source, source.path, source.media_type, selection))
         yield from self._epub_pcm_chunks(decoder, start, end, frames)
+
+    def epub_embedded_video(
+        self,
+        page: int,
+        media_index: int,
+        *,
+        source_index: int | None = None,
+        start_us: int = 0,
+        end_us: int | None = None,
+    ) -> Iterator[EpubVideoFrame]:
+        """Read local AVC video frames in presentation order, with bounded seeking."""
+        from . import _core, _native
+        from .errors import UnsupportedFormatError
+
+        embedded = self.epub_embedded_media(page)[operator.index(media_index)]
+        if embedded.kind != "video":
+            raise UnsupportedFormatError("video playback requires an XHTML video element")
+        if source_index is None:
+            source = next(
+                (source for source in embedded.sources if source.path is not None and source.media_type == "video/mp4"),
+                None,
+            )
+        else:
+            source = embedded.sources[operator.index(source_index)]
+        if source is None or source.path is None or source.media_type != "video/mp4":
+            raise UnsupportedFormatError("embedded video playback requires a local MP4 source")
+        start, end = _epub_playback_interval(start_us, end_us)
+        decoder = _native(lambda: _core._open_epub_video(self._source, source.path, start, end))
+        while True:
+            self._ensure_open()
+            result = _native(decoder.next_frame)
+            if result is None:
+                return
+            rgb, width, height, aspect, timestamp, duration = result
+            yield EpubVideoFrame(bytes(rgb), width, height, aspect, timestamp, duration)
 
     def epub_media_cues(self, page: int) -> list[dict[str, Any]]:
         """Return SMIL cues for a spine page, in playback order."""

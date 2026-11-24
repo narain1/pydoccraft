@@ -2855,3 +2855,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 688 installed tests, inclu
 ## 2026-11-24 Embedded XHTML media and audio playback
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 690 installed tests, including 95 EPUB tests. It measured 23,133,097 bytes with a 53,721,400-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-embedded-xhtml-media-and-audio-playback) covers embedded playback, transactional chapter edits, EPUBCheck and the original Shared Culture EPUB.
+
+## 2026-11-24 Embedded MP4 video playback
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 691 installed tests, including 96 EPUB tests. It measured 23,719,606 bytes with a 55,150,280-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-embedded-mp4-video-playback) covers video and audio timing, EPUBCheck, the coded-frame budget, and complete playback of the public Shared Culture MP4.

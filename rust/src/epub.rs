@@ -30,6 +30,9 @@ mod layout;
 mod math;
 #[path = "epub_media.rs"]
 mod media;
+#[cfg(feature = "python")]
+#[path = "epub_mp4.rs"]
+mod mp4;
 #[path = "epub_obfuscation.rs"]
 mod obfuscation;
 #[path = "epub_output.rs"]
@@ -44,6 +47,9 @@ mod structure;
 mod style;
 #[path = "epub_svg.rs"]
 mod svg;
+#[cfg(feature = "python")]
+#[path = "epub_video.rs"]
+pub(crate) mod video;
 
 pub(crate) use editor::{update_chapters, update_metadata};
 pub(crate) use structure::{update_structure, OverlayEdit, ResourceEdit, SpineEdit};

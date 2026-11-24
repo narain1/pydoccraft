@@ -1576,6 +1576,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideav-h264"
+version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f509707312399382fbf8d45443ed31ccc41182e1713a92bd24f4f72ce902488"
+dependencies = [
+ "oxideav-core",
+ "thiserror",
+]
+
+[[package]]
 name = "oxideav-mp4"
 version = "0.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1968,6 +1978,7 @@ dependencies = [
  "ogg",
  "oxideav-aac",
  "oxideav-core",
+ "oxideav-h264",
  "oxideav-mp4",
  "oxideav-opus",
  "parley",

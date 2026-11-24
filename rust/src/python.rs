@@ -451,6 +451,42 @@ fn _open_epub_audio(
     .map(NativeEpubAudio)
 }
 
+#[pyclass(module = "doc_ex._core", name = "_EpubVideo")]
+struct NativeEpubVideo(crate::epub::video::VideoSource);
+
+type RgbFrame = (Vec<u8>, u32, u32, (u32, u32), u64, u64);
+
+#[pymethods]
+impl NativeEpubVideo {
+    fn next_frame(&mut self, py: Python<'_>) -> Result<Option<RgbFrame>, EngineError> {
+        py.allow_threads(|| self.0.next()).map(|frame| {
+            frame.map(|frame| {
+                (
+                    frame.rgb,
+                    frame.width,
+                    frame.height,
+                    frame.aspect,
+                    frame.start_us,
+                    frame.duration_us,
+                )
+            })
+        })
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (data, path, start, end))]
+fn _open_epub_video(
+    py: Python<'_>,
+    data: &[u8],
+    path: &str,
+    start: u64,
+    end: Option<u64>,
+) -> Result<NativeEpubVideo, EngineError> {
+    py.allow_threads(|| crate::epub::video::VideoSource::open(data, path, start, end))
+        .map(NativeEpubVideo)
+}
+
 #[pyfunction]
 #[pyo3(signature = (data, path, fragment))]
 fn _epub_narration_text(
@@ -517,6 +553,7 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(_edit_epub_structure, module)?)?;
     module.add_function(wrap_pyfunction!(_epub_resource, module)?)?;
     module.add_function(wrap_pyfunction!(_open_epub_audio, module)?)?;
+    module.add_function(wrap_pyfunction!(_open_epub_video, module)?)?;
     module.add_function(wrap_pyfunction!(_epub_narration_text, module)?)?;
     module.add_function(wrap_pyfunction!(extract_text, module)?)?;
     module.add_function(wrap_pyfunction!(convert, module)?)?;

@@ -15,7 +15,7 @@ pub(super) enum AudioCodec {
 pub(super) fn audio_codec(media: &str) -> Option<AudioCodec> {
     match media {
         "audio/mpeg" | "audio/mp3" => Some(AudioCodec::Mpeg),
-        "audio/mp4" | "audio/x-m4a" => Some(AudioCodec::Aac),
+        "audio/mp4" | "audio/x-m4a" | "video/mp4" => Some(AudioCodec::Aac),
         "audio/ogg" | "audio/opus" | "audio/ogg; codecs=opus" | "application/ogg" | "video/ogg" => {
             Some(AudioCodec::Opus)
         }
@@ -111,7 +111,8 @@ fn source(
         return Err(invalid("embedded EPUB media type differs from its element"));
     }
     let playable_audio =
-        kind == "audio" && audio_codec(media).is_some() && hint.is_none_or(supported_audio_hint);
+        (kind == "audio" && audio_codec(media).is_some() && hint.is_none_or(supported_audio_hint))
+            || (kind == "video" && media == "video/mp4");
     Ok(json!({"uri": src, "path": path, "media_type": media, "playable_audio": playable_audio}))
 }
 

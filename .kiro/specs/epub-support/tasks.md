@@ -43,7 +43,8 @@
 - [x] Read and author overlay cues from grouped and chained Ogg resources with one Opus track per segment. Validate auxiliary stream transport through its EOS.
 - [x] Select an Opus track explicitly for each media overlay resource with concurrent Ogg streams. Validate the remaining streams and preserve timing across chained segments.
 - [x] Inspect chapter media, preview video posters, preserve local source and caption references during editing, and stream embedded audio.
-- [ ] Decode and play embedded video, present timed text and handle local media fragments.
+- [x] Stream H.264 MP4 frames on their presentation timeline and offer the AAC-LC soundtrack on the same clip clock.
+- [ ] Add embedded WebM and Ogg video and broader MP4 coverage, present timed text and handle local media fragments.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
 - [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.
 - [x] Attach or detach EPUB 3 media overlays and author sequential text and audio cues with package duration metadata.
