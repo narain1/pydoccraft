@@ -194,13 +194,14 @@ impl Fonts {
                 Inline::Equation {
                     end,
                     source: markup,
+                    css,
                 } => {
                     if end < start || end >= source.offsets.len() {
                         return Err(invalid("invalid EPUB equation text range"));
                     }
                     (
                         end,
-                        equation(markup, source.style_at(start), output, width)?,
+                        equation(markup, css, source.style_at(start), output, width)?,
                     )
                 }
                 Inline::Link { .. } => {
@@ -344,6 +345,7 @@ fn append_span<'a>(
 
 fn equation(
     markup: &str,
+    css: Option<&str>,
     mut style: CharProps,
     output: &mut Output<'_>,
     width: f32,
@@ -352,7 +354,7 @@ fn equation(
         linear,
         display,
         math: equation,
-    } = output.equation(markup, &mut style)?
+    } = output.equation(markup, css, &mut style)?
     else {
         return Err(invalid("invalid EPUB equation"));
     };

@@ -109,8 +109,15 @@ pub(super) fn image_bytes(image: &ImagePayload) -> Result<Vec<u8>, EngineError> 
 
 pub(super) enum Inline<'a> {
     Image(&'a ImagePayload),
-    Equation { end: usize, source: &'a str },
-    Link { end: usize, link: &'a LinkPayload },
+    Equation {
+        end: usize,
+        source: &'a str,
+        css: Option<&'a str>,
+    },
+    Link {
+        end: usize,
+        link: &'a LinkPayload,
+    },
 }
 
 impl<'a> Output<'a> {
@@ -183,9 +190,9 @@ impl<'a> Output<'a> {
             text_cursor = start;
             match item {
                 Inline::Image(image) => self.image(&mut p, image, width)?,
-                Inline::Equation { end, source } => {
+                Inline::Equation { end, source, css } => {
                     let mut style = text.style_at(start);
-                    let equation = self.equation(source, &mut style)?;
+                    let equation = self.equation(source, css, &mut style)?;
                     p.insert_object(p.len(), equation, &style)
                         .map_err(conversion)?;
                     text_cursor = end;
@@ -244,10 +251,27 @@ impl<'a> Output<'a> {
     pub(super) fn equation(
         &mut self,
         source: &str,
+        css: Option<&str>,
         style: &mut CharProps,
     ) -> Result<InlineObject, EngineError> {
+        let css: Option<super::math::FormulaCss> = css
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(conversion)?;
+        if let Some(css) = &css {
+            style.size = css.base.size;
+            style.color = css.base.color;
+            style.bold = css.base.bold;
+            style.italic = css.base.italic;
+        }
         let base_size = self.document.styles.resolve_char(None, style).size;
-        super::math::equation(source, style, base_size, &mut self.math_nodes_remaining)
+        super::math::equation(
+            source,
+            css.as_ref(),
+            style,
+            base_size,
+            &mut self.math_nodes_remaining,
+        )
     }
 
     pub(super) fn load_image(&mut self, image: &ImagePayload) -> Result<RasterImage, EngineError> {
@@ -504,7 +528,14 @@ pub(super) fn inline_items(
             let source = entry["source"]
                 .as_str()
                 .ok_or_else(|| conversion("missing MathML source"))?;
-            items.push((start, Inline::Equation { end, source }));
+            items.push((
+                start,
+                Inline::Equation {
+                    end,
+                    source,
+                    css: entry["css"].as_str(),
+                },
+            ));
         }
     }
     if preserve_links {

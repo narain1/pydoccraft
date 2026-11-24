@@ -1,5 +1,8 @@
 //! Project bounded Presentation MathML onto the existing WordCraft equation model.
+use std::collections::BTreeMap;
+
 use roxmltree::Node;
+use serde::{Deserialize, Serialize};
 use wordcraft_doc::{
     math::{self, Arg, ColJc, FracKind, LimLoc, MNode, MRun, MScr, MSty, Math, ScriptKind},
     para::InlineObject,
@@ -9,10 +12,68 @@ use wordcraft_doc::{
 use super::{css, invalid, limited, parse_xml, unsupported};
 use crate::EngineError;
 
-const MATHML: &str = "http://www.w3.org/1998/Math/MathML";
+pub(super) const MATHML: &str = "http://www.w3.org/1998/Math/MathML";
 const DEPTH: usize = 24;
 const MAX_EQUATION_BYTES: usize = 256 * 1024;
 const MAX_MATRIX_SIZE: usize = 32;
+
+#[derive(Deserialize, Serialize)]
+pub(super) struct FormulaCss {
+    pub base: CharProps,
+    pub viewport: [f32; 2],
+    pub nodes: BTreeMap<u32, Css>,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+pub(super) struct Css {
+    size: Option<String>,
+    ink: Option<String>,
+    bold: Option<bool>,
+    italic: Option<bool>,
+    display_style: Option<bool>,
+}
+
+impl Css {
+    pub(super) fn from_properties(values: &css::Properties) -> Option<Self> {
+        let get = |key| values.get(key).map(String::as_str).unwrap_or_default();
+        let bold = match get("font-weight") {
+            "bold" | "bolder" => Some(true),
+            "normal" | "lighter" => Some(false),
+            weight => weight
+                .parse::<f32>()
+                .ok()
+                .filter(|weight| (1.0..=1000.0).contains(weight))
+                .map(|weight| weight >= 600.0),
+        };
+        let italic = match get("font-style") {
+            "italic" | "oblique" => Some(true),
+            "normal" => Some(false),
+            _ => None,
+        };
+        let display_style = match get("math-style") {
+            "normal" => Some(true),
+            "compact" => Some(false),
+            _ => None,
+        };
+        let size = values.get("font-size").cloned();
+        let ink = values.get("color").cloned();
+        if size.is_none()
+            && ink.is_none()
+            && bold.is_none()
+            && italic.is_none()
+            && display_style.is_none()
+        {
+            return None;
+        }
+        Some(Self {
+            size,
+            ink,
+            bold,
+            italic,
+            display_style,
+        })
+    }
+}
 
 pub(super) fn presentation_text(root: Node<'_, '_>) -> String {
     fn append(node: Node<'_, '_>, output: &mut String) {
@@ -37,6 +98,7 @@ pub(super) fn presentation_text(root: Node<'_, '_>) -> String {
 
 pub(super) fn equation(
     source: &str,
+    stylesheet: Option<&FormulaCss>,
     format: &mut CharProps,
     base_size: f32,
     remaining: &mut usize,
@@ -50,12 +112,14 @@ pub(super) fn equation(
         return Err(invalid("MathML equation must have a math root"));
     }
     let display = root.attribute("display") == Some("block");
+    let root_css = stylesheet.and_then(|css| css.nodes.get(&0));
+    let viewport = stylesheet.map_or([0.0; 2], |css| css.viewport);
     let style = Presentation {
         base_size,
         display_style: display,
         ..Default::default()
     }
-    .on(root)?;
+    .on(root, root_css, viewport)?;
     if let Some(size) = style.size {
         format.size = Some(size);
     }
@@ -64,6 +128,8 @@ pub(super) fn equation(
     }
     let mut projection = Projection {
         root: style,
+        root_id: root.id().get(),
+        stylesheet,
         remaining,
     };
     let nodes = math::merge_runs(projection.elements(root, 0, style)?);
@@ -83,13 +149,26 @@ struct Presentation<'a> {
     size: Option<f32>,
     ink: Option<Rgb>,
     variant: Option<&'a str>,
+    bold: Option<bool>,
+    italic: Option<bool>,
     display_style: bool,
 }
 
 impl<'a> Presentation<'a> {
-    fn on(mut self, node: Node<'a, '_>) -> Result<Self, EngineError> {
-        if let Some(color) = node.attribute("mathcolor") {
-            if !color.eq_ignore_ascii_case("currentcolor") {
+    fn on(
+        mut self,
+        node: Node<'a, '_>,
+        stylesheet: Option<&Css>,
+        viewport: [f32; 2],
+    ) -> Result<Self, EngineError> {
+        let inherits_color = |value: &str| {
+            value.eq_ignore_ascii_case("currentcolor") || matches!(value, "inherit" | "unset")
+        };
+        let css_color = stylesheet
+            .and_then(|style| style.ink.as_deref())
+            .filter(|value| inherits_color(value) || css::color(value).is_some());
+        if let Some(color) = css_color.or_else(|| node.attribute("mathcolor")) {
+            if !inherits_color(color) {
                 let ([r, g, b], alpha) =
                     css::color(color).ok_or_else(|| invalid("invalid MathML mathcolor"))?;
                 if alpha != 1.0 {
@@ -98,34 +177,38 @@ impl<'a> Presentation<'a> {
                 self.ink = Some(Rgb(r, g, b));
             }
         }
-        if let Some(size) = node
+        let parent = self.font_size();
+        let css_size = stylesheet.and_then(|style| style.size.as_deref());
+        let specified_size = css_size
+            .and_then(|value| size_points(value, parent, viewport))
+            .filter(|size| *size >= 0.0);
+        if specified_size.is_some() {
+            self.size = Some(checked_size(specified_size)?);
+        } else if let Some(size) = node
             .attribute("mathsize")
             .map(str::trim)
-            .filter(|size| *size != "normal")
+            .filter(|size| *size != "normal" && !matches!(css_size, Some("inherit" | "unset")))
         {
-            let parent = self.font_size();
             let points = match size {
                 "small" => Some(parent / 1.2),
                 "big" => Some(parent * 1.2),
-                _ => size
-                    .strip_suffix('%')
-                    .and_then(|v| v.trim().parse::<f32>().ok())
-                    .map(|percent| percent / 100.0 * parent)
-                    .or_else(|| css::points(size, parent, [0.0; 2])),
+                _ => size_points(size, parent, viewport),
             };
-            self.size = Some(
-                points
-                    .filter(|size| (1.0..=1638.0).contains(size))
-                    .ok_or_else(|| {
-                        unsupported("MathML mathsize outside the native length range")
-                    })?,
-            );
+            self.size = Some(checked_size(points)?);
         }
         if let Some(variant) = node.attribute("mathvariant") {
             self.variant = Some(variant);
         }
-        if let Some(display) = boolean(node, "displaystyle")? {
+        let display = match stylesheet.and_then(|style| style.display_style) {
+            Some(display) => Some(display),
+            None => boolean(node, "displaystyle")?,
+        };
+        if let Some(display) = display {
             self.display_style = display;
+        }
+        if let Some(stylesheet) = stylesheet {
+            self.bold = stylesheet.bold.or(self.bold);
+            self.italic = stylesheet.italic.or(self.italic);
         }
         Ok(self)
     }
@@ -140,12 +223,40 @@ impl<'a> Presentation<'a> {
     }
 }
 
+fn size_points(value: &str, parent: f32, viewport: [f32; 2]) -> Option<f32> {
+    value
+        .strip_suffix('%')
+        .and_then(|value| value.trim().parse::<f32>().ok())
+        .map(|percent| percent / 100.0 * parent)
+        .or_else(|| css::points(value, parent, viewport))
+        .filter(|size| size.is_finite())
+}
+
+fn checked_size(size: Option<f32>) -> Result<f32, EngineError> {
+    size.filter(|size| (1.0..=1638.0).contains(size))
+        .ok_or_else(|| unsupported("MathML font size outside the native length range"))
+}
+
 struct Projection<'a, 'xml> {
     root: Presentation<'xml>,
+    root_id: u32,
+    stylesheet: Option<&'a FormulaCss>,
     remaining: &'a mut usize,
 }
 
 impl<'xml> Projection<'_, 'xml> {
+    fn style(
+        &self,
+        node: Node<'xml, '_>,
+        parent: Presentation<'xml>,
+    ) -> Result<Presentation<'xml>, EngineError> {
+        let css = self
+            .stylesheet
+            .and_then(|sheet| sheet.nodes.get(&(node.id().get() - self.root_id)));
+        let viewport = self.stylesheet.map_or([0.0; 2], |sheet| sheet.viewport);
+        parent.on(node, css, viewport)
+    }
+
     fn charge(&mut self, depth: usize) -> Result<(), EngineError> {
         if depth > DEPTH || *self.remaining == 0 {
             return Err(limited("MathML structure exceeds its layout budget"));
@@ -177,7 +288,7 @@ impl<'xml> Projection<'_, 'xml> {
         if node.tag_name().namespace() != Some(MATHML) {
             return Err(unsupported("foreign elements in MathML equations"));
         }
-        let style = style.on(node)?;
+        let style = self.style(node, style)?;
         let tag = node.tag_name().name();
         let native = match tag {
             "mi" | "mn" | "mo" | "ms" | "mtext" => token(node, style)?,
@@ -365,7 +476,18 @@ fn token(node: Node<'_, '_>, style: Presentation<'_>) -> Result<MNode, EngineErr
         Some("monospace") => (MSty::Plain, MScr::Monospace),
         Some(_) => return Err(unsupported("MathML token variant")),
     };
-    run.sty = Some(variant);
+    let bold = style
+        .bold
+        .unwrap_or(matches!(variant, MSty::Bold | MSty::BoldItalic));
+    let italic = style
+        .italic
+        .unwrap_or(matches!(variant, MSty::Italic | MSty::BoldItalic));
+    run.sty = Some(match (bold, italic) {
+        (true, true) => MSty::BoldItalic,
+        (true, false) => MSty::Bold,
+        (false, true) => MSty::Italic,
+        (false, false) => MSty::Plain,
+    });
     run.scr = alphabet;
     Ok(MNode::Run(run))
 }
@@ -668,7 +790,7 @@ impl<'xml> Projection<'_, 'xml> {
                 return Err(unsupported("MathML table row type"));
             }
             self.charge(depth + 1)?;
-            let row_style = style.on(row)?;
+            let row_style = self.style(row, style)?;
             let mut cells = Vec::new();
             for cell in row.children().filter(Node::is_element) {
                 if !cell.has_tag_name((MATHML, "mtd")) {
@@ -684,7 +806,7 @@ impl<'xml> Projection<'_, 'xml> {
                     return Err(limited("MathML matrix exceeds its layout budget"));
                 }
                 self.charge(depth + 2)?;
-                cells.push(self.elements(cell, depth + 2, row_style.on(cell)?)?);
+                cells.push(self.elements(cell, depth + 2, self.style(cell, row_style)?)?);
             }
             if rows.len() == MAX_MATRIX_SIZE {
                 return Err(limited("MathML matrix exceeds its layout budget"));

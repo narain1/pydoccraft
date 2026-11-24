@@ -11,7 +11,7 @@ use wordcraft_doc::props::{Align, CharProps, LineSpacing, Rgb, TextColor, Underl
 
 use super::{
     css::{self, Cascade, Properties},
-    limited, XHTML,
+    limited, math, XHTML,
 };
 use crate::EngineError;
 
@@ -26,6 +26,7 @@ pub(super) struct Styled {
     pub background: Option<Paint>,
     pub border: [Option<Paint>; 4],
     pub z_index: i32,
+    pub math: Option<math::Css>,
 }
 
 #[derive(Clone, Default)]
@@ -264,6 +265,11 @@ impl Styled {
                     background,
                     border,
                     z_index,
+                    math: if node.tag_name().namespace() == Some(math::MATHML) {
+                        math::Css::from_properties(&values)
+                    } else {
+                        None
+                    },
                 },
             );
         }

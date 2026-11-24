@@ -2779,3 +2779,7 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 659 installed tests, inclu
 ## 2026-11-24 EPUB nested SMIL authoring
 
 The Linux x86-64 CPython 3.11.15 release wheel passed 661 installed tests, including 66 EPUB tests. It measured 22,911,408 bytes with a 53,190,488-byte native extension. EPUBCheck accepted the authored EPUB and its nested media overlay. The [EPUB validation record](../epub-support/validation.md#2026-11-24-nested-smil-authoring) includes the test results and sample checksum.
+
+## 2026-11-24 EPUB MathML styled by chapter CSS
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 663 installed tests, including 68 EPUB tests. It measured 22,969,631 bytes with a 53,339,640-byte native extension. Formula styling carried through EPUB previews and reopened native DOCX and PDF exports. The [EPUB validation record](../epub-support/validation.md#2026-11-24-css-for-mathml-equations) includes the fixed-layout and corpus checks.

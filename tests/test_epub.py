@@ -1426,6 +1426,88 @@ class EpubTests(unittest.TestCase):
                 self.assertIn("Before", pdf[0].get_text())
                 self.assertIn("After", word[0].get_text())
 
+    def test_mathml_applies_chapter_css_in_preview_and_native_exports(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Math styles</title><link rel="stylesheet" href="math.css"/>
+            <style>.compact { math-style: compact } .raised { math-style: normal }</style>
+          </head><body><p>Before
+            <m:math class="formula" mathsize="40px" mathcolor="#770077">
+              <m:mi>H</m:mi><m:mo>+</m:mo>
+              <m:mrow class="emphasis"><m:mi>N</m:mi>
+                <m:mi mathcolor="#770077" style="font-size: 50%; color: currentColor; font-weight: normal; font-style: italic">R</m:mi>
+                <m:mi mathsize="8pt" mathcolor="#770077" style="font-size: inherit; color: inherit; font-weight: normal">I</m:mi>
+              </m:mrow>
+              <m:munder class="compact" displaystyle="true"><m:mo movablelimits="true">∑</m:mo><m:mn>2</m:mn></m:munder>
+              <m:munder class="raised" displaystyle="false"><m:mo movablelimits="true">∑</m:mo><m:mn>3</m:mn></m:munder>
+            </m:math> After
+          </p></body></html>"""
+        source = epub_fixture(chapter_one=chapter)
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b"</manifest>", b'<item id="css" href="math.css" media-type="text/css"/></manifest>',
+            )
+        source = rewrite_epub(source, {
+            "OEBPS/content.opf": package,
+            "OEBPS/math.css": "body {font-size: 20px} .formula {font-size: 200%; color: #d02444} "
+            ".formula .emphasis {font-size: 150%; color: #1444cc; font-weight: 700; font-style: normal}",
+        })
+        ns = {
+            "m": "http://schemas.openxmlformats.org/officeDocument/2006/math",
+            "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+        }
+        with doc_ex.open(source) as book:
+            entry = book[0].blocks[0].metadata["mathml"][0]
+            self.assertIn('mathcolor="#770077"', entry["source"])
+            self.assertNotIn("css", entry)
+            docx = book.convert("docx")
+            with zipfile.ZipFile(io.BytesIO(docx)) as archive:
+                xml = ET.fromstring(archive.read("word/document.xml"))
+            runs = {run.findtext("m:t", namespaces=ns): run for run in xml.findall(".//m:r", ns)}
+            for token, color, half_points, style in (
+                ("H", "D02444", "60", "i"), ("N", "1444CC", "90", "b"), ("R", "1444CC", "45", "i"),
+                ("I", "1444CC", "90", "p"),
+            ):
+                with self.subTest(token=token):
+                    self.assertEqual(runs[token].find("w:rPr/w:color", ns).get("{" + ns["w"] + "}val").upper(), color)
+                    self.assertEqual(runs[token].find("w:rPr/w:sz", ns).get("{" + ns["w"] + "}val"), half_points)
+                    self.assertEqual(runs[token].find("m:rPr/m:sty", ns).get("{" + ns["m"] + "}val"), style)
+            modes = [node.get("{" + ns["m"] + "}val") for node in xml.findall(".//m:limLoc", ns)]
+            self.assertEqual(modes, ["subSup", "undOvr"])
+            with doc_ex.open(docx) as word, doc_ex.open(book.convert("pdf")) as pdf:
+                for output in (book, word, pdf):
+                    width, pixels = rgba_pixels(png_chunks(output.render_page(0, dpi=96)))
+                    self.assertGreater(width, 0)
+                    for color in (bytes((208, 36, 68, 255)), bytes((20, 68, 204, 255))):
+                        self.assertIn(color, pixels)
+                    self.assertNotIn(bytes((119, 0, 119, 255)), pixels)
+
+    def test_fixed_layout_mathml_css_uses_chapter_viewport(self) -> None:
+        def fixed_math(formula: str) -> bytes:
+            source = epub_fixture(chapter_one=f"""<html xmlns="http://www.w3.org/1999/xhtml"
+              xmlns:m="http://www.w3.org/1998/Math/MathML"><head><title>Viewport math</title>
+              <meta name="viewport" content="width=300,height=200"/></head><body><p>
+              {formula}</p></body></html>""")
+            with zipfile.ZipFile(io.BytesIO(source)) as archive:
+                package = archive.read("OEBPS/content.opf").replace(
+                    b'<itemref idref="one"/>',
+                    b'<itemref idref="one" properties="rendition:layout-pre-paginated"/>',
+                )
+            return rewrite_epub(source, {"OEBPS/content.opf": package})
+
+        formula = "<m:mfrac><m:mi>X</m:mi><m:mn>7</m:mn></m:mfrac>"
+        source = fixed_math(f'<m:math style="font-size: 10vw; color: #1245db">{formula}</m:math>')
+        expected = fixed_math(f'<m:math mathsize="22.5pt" mathcolor="#1245db">{formula}</m:math>')
+        with doc_ex.open(source) as styled, doc_ex.open(expected) as control:
+            preview = styled.render_page(0, dpi=96)
+            self.assertEqual(preview, control.render_page(0, dpi=96))
+            self.assertEqual(struct.unpack_from(">II", preview, 16), (300, 200))
+            with doc_ex.open(styled.export_epub_fixed_pdf(dpi=96, pages=[0])) as visual:
+                self.assertEqual(len(visual), 1)
+                image = visual.render_page(0, dpi=96)
+                self.assertEqual(struct.unpack_from(">II", image, 16), (300, 200))
+                _, pixels = rgba_pixels(png_chunks(image))
+                self.assertIn(bytes((18, 69, 219, 255)), pixels)
+
     def test_mathml_projects_accents_movable_limits_fences_and_tensor_pairs(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
         <body><p><m:math>

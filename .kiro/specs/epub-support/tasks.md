@@ -11,6 +11,7 @@
 - [ ] Expand the public EPUB conformance corpus. Exercise math-heavy books that exceed the eager semantic output budget.
 - [ ] Validate the release wheel matrix on Linux, macOS, and Windows.
 - [x] Replace existing XHTML chapters transactionally and preserve targeted navigation and overlay anchors.
+- [ ] Synchronize EPUB 3 content properties in the manifest after chapter insertion or replacement, including `mathml` and `svg`.
 - [x] Read SMIL timing trees and expose chapter cue order, time ranges, target IDs and bounded audio reads.
 - [x] Project supported Presentation MathML into native equations for PNG, DOCX and PDF.
 - [x] Apply local author styles for the supported cascade and layout properties. Render fixed-layout XHTML and static SVG chapters with viewport bounds and clipping.
@@ -20,7 +21,8 @@
 - [x] Export selected fixed-layout viewports as image-only PDF pages at their original sizes.
 - [ ] Extend source CSS and fixed-layout fidelity, including font Unicode ranges and variable axes, additional SVG features and semantic fixed-layout conversion.
 - [x] Project inherited MathML attributes, accents, movable limits, repeated script pairs, varied fences and separators, horizontal spaces, and zero-dimension padding.
-- [ ] Expand MathML layout to remaining elements and attributes, including spanning matrices, arbitrary padding and CSS within formulas.
+- [x] Apply chapter CSS to MathML colors, font sizes, bold and italic runs, and movable limit placement in previews and native exports.
+- [ ] Expand MathML layout to remaining elements and attributes, including spanning matrices, arbitrary padding and visual properties beyond the supported cascade.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.
 - [x] Decode and stream single-track mono and stereo Ogg Opus overlays with the correct presentation bounds and gain.

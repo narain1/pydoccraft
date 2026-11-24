@@ -101,7 +101,7 @@ pub(crate) fn convert(
     target: &str,
     password: Option<&str>,
 ) -> Result<Vec<u8>, EngineError> {
-    output::convert(data, &extract(data, password)?, target)
+    output::convert(data, &extract_impl(data, password, true)?, target)
 }
 
 const XHTML: &str = "http://www.w3.org/1999/xhtml";
@@ -141,6 +141,14 @@ pub fn is_epub(data: &[u8]) -> Result<bool, EngineError> {
 }
 
 pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, EngineError> {
+    extract_impl(data, password, false)
+}
+
+fn extract_impl(
+    data: &[u8],
+    password: Option<&str>,
+    project_equation_css: bool,
+) -> Result<DocumentPayload, EngineError> {
     if password.is_some() {
         return Err(unsupported("passwords and DRM are not supported"));
     }
@@ -319,14 +327,33 @@ pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, E
         let mut page = if entry.media == "image/svg+xml" {
             content::svg_page(root, &bytes, number, &entry.resolved, &mut budget)?
         } else {
+            let viewport = [layout::REFLOW_WIDTH, 792.0];
+            let equation_styles = if project_equation_css
+                && root
+                    .descendants()
+                    .any(|node| node.has_tag_name((math::MATHML, "math")))
+            {
+                let mut cascade = css::Cascade::load(root, &entry.resolved, &mut book, viewport)?;
+                if cascade.needed(root) {
+                    Some(style::Styled::compute(root, &mut cascade, viewport)?)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
             content::chapter(
                 root,
-                &bytes,
-                number,
-                &entry.resolved,
-                &items_by_path,
-                &mut book,
-                &mut budget,
+                &mut content::Context {
+                    source: &bytes,
+                    path: &entry.resolved,
+                    page: number,
+                    manifest: &items_by_path,
+                    book: &mut book,
+                    budget: &mut budget,
+                    styles: None,
+                    equation_styles: equation_styles.as_ref().map(|styles| (styles, viewport)),
+                },
             )?
         };
         page.metadata.insert("spine_index".into(), json!(number));

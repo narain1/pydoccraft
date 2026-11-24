@@ -58,6 +58,7 @@ pub(super) struct Context<'a, 'book> {
     pub book: &'a mut Book<'book>,
     pub budget: &'a mut Budget,
     pub styles: Option<&'a super::style::Styles>,
+    pub equation_styles: Option<(&'a super::style::Styles, [f32; 2])>,
 }
 
 #[derive(Default)]
@@ -173,28 +174,14 @@ impl Inline {
 
 pub(super) fn chapter(
     root: Node<'_, '_>,
-    source: &[u8],
-    page: usize,
-    path: &str,
-    manifest: &HashMap<String, &str>,
-    book: &mut Book<'_>,
-    budget: &mut Budget,
+    cx: &mut Context<'_, '_>,
 ) -> Result<PagePayload, EngineError> {
     if !name(root, XHTML, "html") {
         return Err(invalid("spine entry is not XHTML"));
     }
     let body = child(root, XHTML, "body").ok_or_else(|| invalid("XHTML chapter has no body"))?;
-    let mut cx = Context {
-        source,
-        path,
-        page,
-        manifest,
-        book,
-        budget,
-        styles: None,
-    };
     let mut blocks = Vec::new();
-    flow(body, &mut blocks, 0, &mut cx)?;
+    flow(body, &mut blocks, 0, cx)?;
     let title = child(root, XHTML, "head")
         .and_then(|head| child(head, XHTML, "title"))
         .map(node_text)
@@ -208,7 +195,7 @@ pub(super) fn chapter(
     let title = title.as_deref().map(str::trim).unwrap_or("Untitled");
     cx.budget.bytes(title.len().saturating_mul(3))?;
     let mut result = PagePayload {
-        number: page,
+        number: cx.page,
         blocks,
         ..Default::default()
     };
@@ -436,7 +423,41 @@ fn inline(
         } else {
             run.push(&text, cx.budget)?;
         }
-        run.math.push(json!({"start": start, "end": run.characters, "source": String::from_utf8(markup).map_err(invalid)?}));
+        let mut equation = json!({"start": start, "end": run.characters, "source": String::from_utf8(markup).map_err(invalid)?});
+        if let Some((styles, viewport)) = cx.equation_styles {
+            let base = node
+                .parent_element()
+                .and_then(|parent| styles.get(&parent.id()))
+                .map(|style| {
+                    let chars = &style.text.chars;
+                    wordcraft_doc::CharProps {
+                        size: chars.size,
+                        color: chars.color,
+                        bold: chars.bold,
+                        italic: chars.italic,
+                        ..Default::default()
+                    }
+                })
+                .unwrap_or_default();
+            // Detaching the fragment adds namespace declarations only, so
+            // its node IDs retain their order and distance from the root.
+            let nodes = node
+                .descendants()
+                .filter_map(|child| {
+                    let css = styles.get(&child.id())?.math.as_ref()?;
+                    Some((child.id().get() - node.id().get(), css.clone()))
+                })
+                .collect();
+            let stylesheet = super::math::FormulaCss {
+                base,
+                viewport,
+                nodes,
+            };
+            let encoded = crate::limits::bounded_json(&stylesheet, 512 * 1024)?;
+            cx.budget.bytes(encoded.len())?;
+            equation["css"] = encoded.into();
+        }
+        run.math.push(equation);
         return Ok(());
     }
     if tag.namespace().is_some_and(|ns| ns != XHTML) {

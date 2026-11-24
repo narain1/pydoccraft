@@ -29,7 +29,7 @@ use crate::{
     rendering, EngineError,
 };
 
-const REFLOW_WIDTH: f32 = 612.0;
+pub(super) const REFLOW_WIDTH: f32 = 612.0;
 const MAX_GEOMETRY: f32 = 20_000.0;
 const MAX_BOXES: usize = 8_000;
 
@@ -89,6 +89,7 @@ pub(super) fn render(
         book: &mut archive,
         budget: &mut budget,
         styles: Some(&styles),
+        equation_styles: Some((&styles, viewport)),
     };
     let mut layout = Layout::new(Output::new(data, book, false, dpi), viewport, fonts);
     let root_id = layout.build(root, &mut context)?;

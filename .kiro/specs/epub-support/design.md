@@ -39,7 +39,9 @@ Broader selectors, CSS custom properties, font Unicode ranges and variable-axis 
 
 `epub_math.rs` projects bounded Presentation MathML to the pinned WordCraft equation model for layout and export. The equation envelope carries root size and foreground, and OMML runs carry inherited size, foreground and variant. Presentation and syntax nodes share a projection budget. Each tensor pair contributes one native script level to the depth guard, including levels generated for prescripts. Variable fences and separators use explicit math runs when the native delimiter cannot hold the full sequence.
 
-WordCraft represents zeroed `mpadded` metrics with its visible phantom node. Horizontal `mspace` uses a sized math-space run and follows native script scaling. The emitted OMML retains that run. MathML tables with spanning cells, arbitrary vertical spaces and padding shifts, HTML stylesheet rules inside the formula, and structures beyond the documented profile remain open.
+The EPUB stylesheet cascade resolves declarations on the source chapter before detaching an equation. The preview and export paths attach a bounded snapshot of the supported declarations and the enclosing font size and foreground. The equation projector applies those declarations over same-element presentation hints and evaluates relative sizes in the equation's inherited context. Fixed-layout previews use the chapter viewport. The semantic export path applies these styles within equations. Public extraction retains the original MathML markup.
+
+WordCraft represents zeroed `mpadded` metrics with its visible phantom node. Horizontal `mspace` uses a sized math-space run and follows native script scaling. The emitted OMML retains that run. MathML tables with spanning cells, custom rule thickness, arbitrary vertical spaces and padding shifts, and structures beyond the documented profile remain open.
 
 
 ## Resource removal and media overlay authoring
