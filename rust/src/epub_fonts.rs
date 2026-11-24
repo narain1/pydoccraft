@@ -13,19 +13,19 @@ use skrifa::{
     outline::{DrawSettings, OutlinePen},
     FontRef, GlyphId, MetadataProvider,
 };
-use wordcraft_doc::{
-    para::InlineObject,
-    props::{Align, CharProps, LineSpacing, Rgb, TextColor, TextDirection, Underline},
+use wordcraft_doc::props::{
+    Align, CharProps, LineSpacing, Rgb, TextColor, TextDirection, Underline,
 };
 use wordcraft_geom::Rect;
 use wordcraft_layout::{
     display::{Draw, Stroke},
-    math::{self, MItem},
+    math::{self, MItem, MathLayout},
 };
 
 use super::{
     charge, external, invalid, limited,
-    output::{inline_items, CssParagraph, Inline, Output, StyledText},
+    math::Equation,
+    output::{has_spanning_table, inline_items, CssParagraph, Inline, Output, StyledText},
     resolve,
     style::Styles,
     unsupported, Book,
@@ -52,6 +52,29 @@ pub(super) struct Fonts {
 }
 
 impl Fonts {
+    fn empty() -> Self {
+        Self {
+            names: HashSet::new(),
+            fonts: FontContext::new(),
+            layout: LayoutContext::new(),
+            shaping_bytes: 0,
+        }
+    }
+
+    pub(super) fn bundled() -> Self {
+        let mut fonts = Self::empty();
+        fonts.register_bundled();
+        fonts
+    }
+
+    fn register_bundled(&mut self) {
+        for &data in wordcraft_fonts::bundled() {
+            self.fonts
+                .collection
+                .register_fonts(Blob::new(Arc::new(data)), None);
+        }
+    }
+
     pub(super) fn load(
         faces: &[Face],
         styles: &Styles,
@@ -72,12 +95,7 @@ impl Fonts {
                     .map(str::to_ascii_lowercase)
             })
             .collect();
-        let mut result = Self {
-            names: HashSet::new(),
-            fonts: FontContext::new(),
-            layout: LayoutContext::new(),
-            shaping_bytes: 0,
-        };
+        let mut result = Self::empty();
         let mut budget = 0;
         for face in faces {
             let key = face.family.to_ascii_lowercase();
@@ -114,12 +132,7 @@ impl Fonts {
         if result.names.is_empty() {
             return Ok(None);
         }
-        for &data in wordcraft_fonts::bundled() {
-            result
-                .fonts
-                .collection
-                .register_fonts(Blob::new(Arc::new(data)), None);
-        }
+        result.register_bundled();
         Ok(Some(result))
     }
 
@@ -132,6 +145,9 @@ impl Fonts {
                     }
                 }
             }
+        }
+        if has_spanning_table(block) {
+            return Ok(true);
         }
         Ok(StyledText::new(block)?.spans.iter().any(|(_, _, style)| {
             style
@@ -350,13 +366,31 @@ fn equation(
     output: &mut Output<'_>,
     width: f32,
 ) -> Result<Fragment, EngineError> {
-    let InlineObject::Equation {
-        linear,
-        display,
-        math: equation,
-    } = output.equation(markup, css, &mut style)?
-    else {
-        return Err(invalid("invalid EPUB equation"));
+    let (linear, display, equation) = match output.equation(markup, css, &mut style)? {
+        Equation::Native {
+            linear,
+            display,
+            math,
+        } => (linear, display, math),
+        Equation::SpanningTable(table) => {
+            let layout = table.layout(&output.document, &style)?;
+            let items = layout
+                .cells
+                .into_iter()
+                .map(|(x, y, cell)| Draw::Turned {
+                    x,
+                    y,
+                    turn: TextDirection::Horizontal,
+                    items: equation_items(cell),
+                })
+                .collect();
+            return Ok(Fragment {
+                width: layout.width,
+                height: layout.height,
+                baseline: Some(layout.baseline),
+                items,
+            });
+        }
     };
     style.font = None;
     let style = output.document.styles.resolve_char(None, &style);
@@ -369,6 +403,15 @@ fn equation(
         &Default::default(),
         &mut 0,
     );
+    Ok(Fragment {
+        width: layout.width,
+        height: layout.ascent + layout.descent,
+        baseline: Some(layout.ascent),
+        items: equation_items(layout),
+    })
+}
+
+fn equation_items(layout: MathLayout) -> Vec<Draw> {
     let base = layout.ascent;
     let mut items = Vec::new();
     for item in layout.items {
@@ -430,12 +473,7 @@ fn equation(
             MItem::ScreenOnly(_) => {}
         }
     }
-    Ok(Fragment {
-        width: layout.width,
-        height: base + layout.descent,
-        baseline: Some(base),
-        items,
-    })
+    items
 }
 
 pub(super) fn read_face(face: &Face, book: &mut Book<'_>) -> Result<Vec<u8>, EngineError> {

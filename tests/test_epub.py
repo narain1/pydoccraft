@@ -1604,6 +1604,85 @@ class EpubTests(unittest.TestCase):
                     preview = converted.render_page(0, dpi=96)
                     self.assertTrue(preview.startswith(b"\x89PNG"))
 
+    def test_mathml_spanning_table_retains_geometry_and_editable_cells(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"
+          xmlns:m="http://www.w3.org/1998/Math/MathML"><head><title>Spans</title>
+          <style>body, p {margin:0;font-size:24px} .wide {color:#8343cd}</style></head>
+          <body><p><m:math><m:semantics><m:mtable columnspacing="18pt" rowspacing="10pt">
+          <m:mtr><m:mtd rowspan="2" rowalign="center" mathcolor="#bf222d"><m:mtext>Red</m:mtext></m:mtd>
+            <m:mtd mathcolor="#198144"><m:mtext>Green</m:mtext></m:mtd>
+            <m:mtd mathcolor="#1644df"><m:mtext>Blue</m:mtext></m:mtd></m:mtr>
+          <m:mtr><m:mtd columnspan="2" columnalign="right" class="wide"><m:mtext>Right</m:mtext></m:mtd></m:mtr>
+          <m:mtr><m:mtd columnspan="3" mathcolor="#ac661b"><m:mfrac><m:mtext>Total</m:mtext>
+            <m:mn>7</m:mn></m:mfrac></m:mtd></m:mtr>
+          </m:mtable><m:annotation>annotation marker</m:annotation></m:semantics></m:math></p></body></html>"""
+        with doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+            self.assertIn("RedGreenBlueRightTotal7", book[0].get_text())
+            self.assertNotIn("annotation marker", book[0].get_text())
+            width, pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+
+            def bounds(color: str) -> tuple[int, int, int, int]:
+                target = bytes.fromhex(color + "ff")
+                points = [(i // 4 % width, i // 4 // width) for i in range(0, len(pixels), 4)
+                          if pixels[i:i+4] == target]
+                self.assertTrue(points, color)
+                return min(x for x, _ in points), min(y for _, y in points), max(x for x, _ in points), max(y for _, y in points)
+
+            red, green, blue, purple, orange = map(bounds, ("bf222d", "198144", "1644df", "8343cd", "ac661b"))
+            self.assertLess(red[2], green[0])
+            self.assertLess(green[2], blue[0])
+            self.assertLess(green[1], red[1])
+            self.assertLess(red[1], purple[1])
+            self.assertAlmostEqual(blue[2], purple[2], delta=4)
+            self.assertLess(purple[3], orange[1])
+            # Ink bounds include glyph bearings, so allow six pixels at the center.
+            self.assertAlmostEqual(red[0] + blue[2], orange[0] + orange[2], delta=12)
+
+            word_bytes = book.convert("docx")
+            with zipfile.ZipFile(io.BytesIO(word_bytes)) as archive:
+                root = ET.fromstring(archive.read("word/document.xml"))
+            ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+                  "m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+            self.assertEqual([n.attrib[f"{{{ns['w']}}}val"] for n in root.findall(".//w:gridSpan", ns)], ["2", "3"])
+            self.assertEqual(len(root.findall(".//w:vMerge", ns)), 2)
+            self.assertEqual(len(root.findall(".//m:f", ns)), 1)
+            self.assertEqual(len(root.findall(".//m:oMath", ns)), 5)
+            for data in (word_bytes, book.convert("pdf")):
+                with doc_ex.open(data) as reopened:
+                    first = reopened[0].get_text()
+                    for value in ("Red", "Green", "Blue", "Right", "Total"):
+                        self.assertEqual(first.count(value), 1, first)
+                    self.assertTrue(reopened.render_page(0, dpi=96).startswith(b"\x89PNG"))
+
+    def test_mathml_spanning_table_inline_preview_and_invalid_grid(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"
+          xmlns:m="http://www.w3.org/1998/Math/MathML"><head><title>Math spans</title></head>
+          <body><p>{}</p></body></html>"""
+        table = """<m:math><m:mtable><m:mtr><m:mtd columnspan="2"><m:mi>X</m:mi></m:mtd></m:mtr>
+          <m:mtr><m:mtd><m:mi>A</m:mi></m:mtd><m:mtd><m:mi>B</m:mi></m:mtd></m:mtr></m:mtable></m:math>"""
+        with doc_ex.open(epub_fixture(chapter_one=template.format("Before " + table + " after"))) as book:
+            self.assertIn("Before XAB after", book[0].get_text())
+            self.assertTrue(book.render_page(0, dpi=96).startswith(b"\x89PNG"))
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "mixed with other paragraph content"):
+                book.convert("docx")
+        fixed = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 300, 200)])
+        viewport = '<meta name="viewport" content="width=300,height=200"/>'
+        chapter = template.format(table.replace("<m:math>", '<m:math mathcolor="#1644df">'))
+        fixed = rewrite_epub(fixed, {"OEBPS/s0.xhtml": chapter.replace("</head>", viewport + "</head>")})
+        with doc_ex.open(fixed) as book:
+            png = book.render_page(0, dpi=96)
+            self.assertEqual(struct.unpack_from(">II", png, 16), (300, 200))
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96)) as pdf:
+                _, pixels = rgba_pixels(png_chunks(pdf.render_page(0, dpi=96)))
+                self.assertIn(bytes.fromhex("1644dfff"), pixels)
+
+        invalid = """<m:math><m:mtable>
+          <m:mtr><m:mtd><m:mi>A</m:mi></m:mtd><m:mtd rowspan="2"><m:mi>B</m:mi></m:mtd></m:mtr>
+          <m:mtr><m:mtd columnspan="2"><m:mi>X</m:mi></m:mtd></m:mtr></m:mtable></m:math>"""
+        with doc_ex.open(epub_fixture(chapter_one=template.format(invalid))) as book:
+            with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "MathML table spans overlap"):
+                book.render_page(0, dpi=96)
+
     def test_mathml_space_and_zero_width_padding_affect_rendered_geometry(self) -> None:
         def fixture(math: str) -> bytes:
             return epub_fixture(chapter_one=f"""<html xmlns="http://www.w3.org/1999/xhtml"

@@ -424,6 +424,10 @@ fn inline(
             run.push(&text, cx.budget)?;
         }
         let mut equation = json!({"start": start, "end": run.characters, "source": String::from_utf8(markup).map_err(invalid)?});
+
+        if super::math::table::has_spans(node) {
+            equation["spanning_table"] = true.into();
+        }
         if let Some((styles, viewport)) = cx.equation_styles {
             let base = node
                 .parent_element()

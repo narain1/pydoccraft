@@ -155,6 +155,8 @@ impl<'a> Output<'a> {
         for block in blocks {
             if let Some(table) = &block.table {
                 native.push(Arc::new(Block::Table(self.table(table, width)?)));
+            } else if let Some(table) = self.spanning_table(block, width)? {
+                native.push(Arc::new(Block::Table(table)));
             } else {
                 native.push(wordcraft_doc::para_block(self.paragraph(block, width)?));
             }
@@ -163,6 +165,39 @@ impl<'a> Output<'a> {
             native.push(wordcraft_doc::para_block(Paragraph::new()));
         }
         Ok(native)
+    }
+
+    fn spanning_table(
+        &mut self,
+        block: &BlockPayload,
+        width: f32,
+    ) -> Result<Option<Table>, EngineError> {
+        if !has_spanning_table(block) {
+            return Ok(None);
+        }
+        let items = inline_items(block, self.preserve_links)?;
+        if let [(start, Inline::Equation { end, source, css })] = items.as_slice() {
+            let text = StyledText::new(block)?;
+            if *start <= *end
+                && *end < text.offsets.len()
+                && text.value[..text.offsets[*start]].trim().is_empty()
+                && text.value[text.offsets[*end]..].trim().is_empty()
+            {
+                let mut format = text.style_at(*start);
+                let super::math::Equation::SpanningTable(table) =
+                    self.equation(source, *css, &mut format)?
+                else {
+                    return Err(conversion("missing EPUB MathML table grid"));
+                };
+                let align = CssParagraph::from_block(block)?.and_then(|style| style.align);
+                return table
+                    .export(&self.document, &format, width, align)
+                    .map(Some);
+            }
+        }
+        Err(unsupported(
+            "MathML table spans mixed with other paragraph content in semantic export",
+        ))
     }
 
     fn paragraph(&mut self, block: &BlockPayload, width: f32) -> Result<Paragraph, EngineError> {
@@ -192,9 +227,24 @@ impl<'a> Output<'a> {
                 Inline::Image(image) => self.image(&mut p, image, width)?,
                 Inline::Equation { end, source, css } => {
                     let mut style = text.style_at(start);
-                    let equation = self.equation(source, css, &mut style)?;
-                    p.insert_object(p.len(), equation, &style)
-                        .map_err(conversion)?;
+                    let super::math::Equation::Native {
+                        linear,
+                        display,
+                        math,
+                    } = self.equation(source, css, &mut style)?
+                    else {
+                        return Err(unsupported("MathML table spans in semantic export"));
+                    };
+                    p.insert_object(
+                        p.len(),
+                        InlineObject::Equation {
+                            linear,
+                            display,
+                            math,
+                        },
+                        &style,
+                    )
+                    .map_err(conversion)?;
                     text_cursor = end;
                 }
                 Inline::Link { end, link } => {
@@ -253,7 +303,7 @@ impl<'a> Output<'a> {
         source: &str,
         css: Option<&str>,
         style: &mut CharProps,
-    ) -> Result<InlineObject, EngineError> {
+    ) -> Result<super::math::Equation, EngineError> {
         let css: Option<super::math::FormulaCss> = css
             .map(serde_json::from_str)
             .transpose()
@@ -504,6 +554,18 @@ impl<'a> StyledText<'a> {
     }
 }
 
+pub(super) fn has_spanning_table(block: &BlockPayload) -> bool {
+    block
+        .metadata
+        .get("mathml")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|entries| {
+            entries
+                .iter()
+                .any(|entry| entry["spanning_table"].as_bool() == Some(true))
+        })
+}
+
 pub(super) fn inline_items(
     block: &BlockPayload,
     preserve_links: bool,
@@ -571,6 +633,6 @@ fn inline_offset(value: &serde_json::Value) -> Result<usize, EngineError> {
 fn unsupported(reason: &str) -> EngineError {
     EngineError::Unsupported(format!("EPUB output does not support {reason}"))
 }
-fn conversion(error: impl std::fmt::Display) -> EngineError {
+pub(super) fn conversion(error: impl std::fmt::Display) -> EngineError {
     EngineError::Conversion(format!("EPUB output: {error}"))
 }

@@ -5,12 +5,14 @@ use roxmltree::Node;
 use serde::{Deserialize, Serialize};
 use wordcraft_doc::{
     math::{self, Arg, ColJc, FracKind, LimLoc, MNode, MRun, MScr, MSty, Math, ScriptKind},
-    para::InlineObject,
     props::{CharProps, Rgb, TextColor},
 };
 
 use super::{css, invalid, limited, parse_xml, unsupported};
 use crate::EngineError;
+
+#[path = "epub_math_table.rs"]
+pub(super) mod table;
 
 pub(super) const MATHML: &str = "http://www.w3.org/1998/Math/MathML";
 const DEPTH: usize = 24;
@@ -131,13 +133,22 @@ fn append_token_text(node: Node<'_, '_>, output: &mut String) {
     }
 }
 
+pub(super) enum Equation {
+    Native {
+        linear: String,
+        display: bool,
+        math: Math,
+    },
+    SpanningTable(table::Table),
+}
+
 pub(super) fn equation(
     source: &str,
     stylesheet: Option<&FormulaCss>,
     format: &mut CharProps,
     base_size: f32,
     remaining: &mut usize,
-) -> Result<InlineObject, EngineError> {
+) -> Result<Equation, EngineError> {
     if source.len() > MAX_EQUATION_BYTES {
         return Err(limited("MathML equation exceeds its byte budget"));
     }
@@ -167,8 +178,38 @@ pub(super) fn equation(
         stylesheet,
         remaining,
     };
+    if table::has_spans(root) {
+        let mut node = root;
+        let mut style = style;
+        let mut depth = 0;
+        loop {
+            let mut children = node.children().filter(Node::is_element);
+            let child = children
+                .next()
+                .ok_or_else(|| invalid("empty MathML spanning equation"))?;
+            if (node.has_tag_name((MATHML, "semantics")) || children.next().is_none())
+                && child.tag_name().namespace() == Some(MATHML)
+            {
+                depth += 1;
+                projection.charge(depth)?;
+                style = projection.style(child, style)?;
+                match child.tag_name().name() {
+                    "mtable" => {
+                        return table::project(&mut projection, child, depth, style)
+                            .map(Equation::SpanningTable)
+                    }
+                    "mrow" | "mstyle" | "semantics" => {
+                        node = child;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            return Err(unsupported("MathML table spans nested inside an equation"));
+        }
+    }
     let nodes = math::merge_runs(projection.elements(root, 0, style)?);
-    Ok(InlineObject::Equation {
+    Ok(Equation::Native {
         linear: math::to_linear(&nodes),
         display,
         math: Math {
@@ -829,10 +870,10 @@ impl<'xml> Projection<'_, 'xml> {
                 if !cell.has_tag_name((MATHML, "mtd")) {
                     return Err(invalid("unexpected MathML table child"));
                 }
-                if ["rowspan", "columnspan"]
-                    .iter()
-                    .any(|name| cell.attribute(*name).is_some_and(|span| span != "1"))
-                {
+                if ["rowspan", "columnspan"].iter().any(|name| {
+                    cell.attribute(*name)
+                        .is_some_and(|span| span.trim().parse::<usize>() != Ok(1))
+                }) {
                     return Err(unsupported("MathML table spans"));
                 }
                 if cells.len() == MAX_MATRIX_SIZE {

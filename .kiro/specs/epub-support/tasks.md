@@ -25,7 +25,8 @@
 - [x] Render tall reflowable chapters within the paint coordinate budget and apply raster limits to the requested DPI and clip.
 - [x] Project inherited MathML attributes, accents, movable limits, repeated script pairs, varied fences and separators, horizontal spaces, and zero-dimension padding.
 - [x] Apply chapter CSS to MathML colors, font sizes, bold and italic runs, and movable limit placement in previews and native exports.
-- [ ] Expand MathML layout to remaining elements and attributes, including spanning matrices, arbitrary padding and visual properties beyond the supported cascade.
+- [x] Preview top-level MathML tables with row and column spans. Export standalone tables with editable DOCX cell equations and searchable PDF text.
+- [ ] Expand MathML layout to nested spanning tables, inline semantic export, arbitrary padding and remaining visual properties.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.
 - [x] Decode and stream single-track mono and stereo Ogg Opus overlays with the correct presentation bounds and gain.
