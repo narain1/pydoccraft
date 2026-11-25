@@ -497,7 +497,15 @@ pub(crate) fn update_structure<'a>(
                 })
                 .collect();
             if let Some(path) = &existing_toc {
-                reorder_navigation(&mut plan, &mut book, path, epub3, &selected, &old_paths)?;
+                reorder_navigation(
+                    &mut plan,
+                    &mut book,
+                    path,
+                    epub3,
+                    &selected,
+                    &old_paths,
+                    (&mut removed_anchors, &mut anchor_bytes),
+                )?;
             } else {
                 let (extension, media, properties) = if epub3 {
                     ("xhtml", "application/xhtml+xml", " properties=\"nav\"")
@@ -528,7 +536,15 @@ pub(crate) fn update_structure<'a>(
                 plan.files.insert(path, Cow::Owned(nav.into_bytes()));
             }
             if let Some(path) = compatibility_ncx.as_deref() {
-                reorder_navigation(&mut plan, &mut book, path, false, &selected, &old_paths)?;
+                reorder_navigation(
+                    &mut plan,
+                    &mut book,
+                    path,
+                    false,
+                    &selected,
+                    &old_paths,
+                    (&mut removed_anchors, &mut anchor_bytes),
+                )?;
             }
             reordered_ncx = ncx_path.map(|path| (path, selected));
         } else {
@@ -560,7 +576,7 @@ pub(crate) fn update_structure<'a>(
         }
     }
     for (authored, epub3_nav) in [(authored_nav, true), (authored_ncx, false)] {
-        let Some((path, _, authored)) = authored else {
+        let Some((path, _, _)) = authored else {
             continue;
         };
         let data = plan
@@ -591,16 +607,6 @@ pub(crate) fn update_structure<'a>(
             &mut removed_anchors,
             &mut anchor_bytes,
         )?;
-        if authored.as_slice() != data.as_ref() {
-            let authored = parse(authored)?;
-            editor::collect_removed_xml_anchors(
-                path,
-                &authored,
-                &xml,
-                &mut removed_anchors,
-                &mut anchor_bytes,
-            )?;
-        }
     }
     let mut supplemental = HashSet::new();
     let mut supplemental_properties = HashMap::new();
@@ -908,13 +914,14 @@ fn navigation_replacement<'a>(
     Ok(replacement)
 }
 
-fn reorder_navigation(
+fn reorder_navigation<'a>(
     plan: &mut Plan<'_>,
     book: &mut Book<'_>,
-    path: &str,
+    path: &'a str,
     epub3: bool,
     selected: &[toc::Chapter],
     old_paths: &HashSet<&str>,
+    anchors: (&mut editor::RemovedAnchors<'a>, &mut usize),
 ) -> Result<(), EngineError> {
     let original;
     let source = if let Some(replacement) = plan.files.get(path) {
@@ -923,7 +930,7 @@ fn reorder_navigation(
         original = book.read(path, XML_BYTES)?;
         &original
     };
-    let revised = toc::edit(source, path, epub3, selected, old_paths)?;
+    let revised = toc::edit(source, path, epub3, selected, old_paths, anchors)?;
     plan.files
         .insert(path.to_owned(), Cow::Owned(revised.into_bytes()));
     Ok(())

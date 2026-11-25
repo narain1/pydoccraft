@@ -8,8 +8,8 @@ use roxmltree::{Document, Node};
 use serde_json::{Map, Value};
 
 use super::{
-    append, apply_edits, child, escape_text, external, inner_range, invalid, name, opening_end,
-    parse_xml, relative_url, resolve, Book, EPUB, NCX, XHTML, XML_BYTES,
+    append, apply_edits, child, editor, escape_text, external, inner_range, invalid, name,
+    opening_end, parse_xml, relative_url, resolve, Book, EPUB, NCX, XHTML, XML_BYTES,
 };
 use crate::EngineError;
 
@@ -165,12 +165,13 @@ fn validate_targets(
     Ok(())
 }
 
-pub(super) fn edit(
+pub(super) fn edit<'a>(
     data: &[u8],
-    path: &str,
+    path: &'a str,
     epub3: bool,
     chapters: &[Chapter],
     old_paths: &HashSet<&str>,
+    (removed_anchors, anchor_bytes): (&mut editor::RemovedAnchors<'a>, &mut usize),
 ) -> Result<String, EngineError> {
     let source = std::str::from_utf8(data).map_err(invalid)?;
     let xml = parse_xml(data)?;
@@ -254,7 +255,14 @@ pub(super) fn edit(
         let range = inner_range(source, container)?;
         edits.push((range.end..range.end, flat(path, epub3, chapters)?));
     }
-    apply_edits(source, edits, XML_BYTES)
+    let revised = apply_edits(source, edits, XML_BYTES)?;
+    if revised != source {
+        // Pruning and promoting items can delete IDs even when the caller
+        // only edited the spine. Check those IDs against the final package.
+        let reordered = parse_xml(revised.as_bytes())?;
+        editor::collect_removed_xml_anchors(path, &xml, &reordered, removed_anchors, anchor_bytes)?;
+    }
+    Ok(revised)
 }
 
 pub(super) fn create(

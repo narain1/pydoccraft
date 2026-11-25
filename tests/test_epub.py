@@ -12320,6 +12320,31 @@ Trailing
                     resources={nav_path: doc_ex.EpubResource("application/xhtml+xml", nav.encode())},
                 )
 
+    def test_structure_checks_ids_removed_by_implicit_navigation_updates(self) -> None:
+        source, nav_path, nav, html = self.nonspine_navigation_fixture()
+        for navigation, removed, kept in (
+            ("Nav/contents.xhtml", "part-a", "old-nav"),
+            ("toc.ncx", "ncx-1", "ncx-2"),
+        ):
+            chapter = html.format(
+                f'<h1 id="other">Second text</h1><a href="{navigation}#{removed}">Index entry</a>',
+            )
+            retained = chapter.replace(f"#{removed}", f"#{kept}")
+            with self.subTest(navigation=navigation):
+                with doc_ex.open(rewrite_epub(source, {"OEBPS/two.xhtml": chapter})) as original:
+                    with self.assertRaisesRegex(ValueError, "referenced anchor"):
+                        original.edit_epub_structure([1])
+                    self.assertEqual(original.read_epub_resource(nav_path), nav.encode())
+                    self.assertEqual(original.read_epub_resource("OEBPS/two.xhtml"), chapter.encode())
+                    revised = original.edit_epub_structure([1], replacements={1: retained})
+                with doc_ex.open(revised) as book:
+                    self.assertEqual(len(book), 1)
+                    self.assertEqual(book[0].get_links()[0].metadata["target_fragment"], kept)
+                    navigation_xml = ET.fromstring(book.read_epub_resource("OEBPS/" + navigation))
+                    anchors = {node.get("id") for node in navigation_xml.iter()}
+                    self.assertIn(kept, anchors)
+                    self.assertNotIn(removed, anchors)
+
     def test_structure_replaces_epub2_ncx_with_spine_and_chapter_edits(self) -> None:
         html = '<html xmlns="http://www.w3.org/1999/xhtml"><body>{}</body></html>'
         source = epub_fixture(version="2.0", chapter_one=html.format('<h1 id="old">First</h1>'))
