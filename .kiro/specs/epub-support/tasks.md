@@ -111,9 +111,10 @@
 - [x] Align up to eight MathML sibling groups per data cell with ordinary run boundaries. Apply ordinal alignment lists and preserve missing trailing groups, baseline geometry, searchable text and editable equation operands.
 - [x] Align groups that cross MathML row and style wrappers and the selected presentation branch of semantics. Keep inherited styles, operand order and native editability.
 - [x] Preserve direct decimal and explicit alignment carets after bounded composed geometry in searchable PDF and editable DOCX.
-- [ ] Extend multi-group MathML alignment through operator spacing and nontransparent wrappers. Support marks and decimal points inside nontransparent operands, editable caret groups that consume preceding space for negative padding, right-to-left groups and cross-table scopes.
+- [ ] Extend multi-group MathML alignment through operator spacing and nontransparent wrappers. Support marks and decimal points inside nontransparent operands, right-to-left groups and cross-table scopes.
 - [x] Preserve editable negative MathML padding offsets that fit within the preceding horizontal math space, including nested superscripts.
-- [ ] Expand editable negative leading offsets beyond preceding space and inside caret-aligned groups, and cover remaining MathML visual properties.
+- [x] Retain direct editable MathML carets before and after bounded negative padding that uses preceding space.
+- [ ] Expand editable negative leading offsets beyond preceding space or with carets inside the borrowed spacing, and cover remaining MathML visual properties.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.
 - [x] Decode and stream single-track mono and stereo Ogg Opus overlays with the correct presentation bounds and gain.

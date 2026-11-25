@@ -9407,11 +9407,36 @@ Trailing
 
         signed = source.replace('<m:mpadded width="+14pt" lspace="6pt">',
             '<m:mspace width="12pt"/><m:mpadded width="+14pt" lspace="-4pt">')
-        with doc_ex.open(epub_fixture(chapter_one=signed)) as book:
-            with doc_ex.open(book.convert("pdf")) as pdf:
-                positions(pdf)
-            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "alignment carets across negative padding"):
-                book.convert("docx")
+        numerator = '<m:mspace width="12pt"/><m:mpadded width="+14pt" lspace="-4pt">'
+        nested = signed.replace(numerator, "<m:mfrac><m:mrow>" + numerator).replace(
+            '<m:mtext>Warm</m:mtext></m:mpadded><m:mn',
+            '<m:mtext>Warm</m:mtext></m:mpadded></m:mrow><m:mtext>Under</m:mtext></m:mfrac><m:mn',
+        )
+        for label, chapter in (("direct", signed), ("nested fraction", nested)):
+            with self.subTest(label=label), doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+                with doc_ex.open(book.convert("pdf")) as pdf:
+                    reference = positions(pdf)
+                exported = book.convert("docx")
+                with zipfile.ZipFile(io.BytesIO(exported)) as archive:
+                    xml = ET.fromstring(archive.read("word/document.xml"))
+                matrix = xml.find(".//m:oMath//m:m", ns)
+                if label == "nested fraction":
+                    self.assertIsNotNone(matrix.find(".//m:f/m:num", ns))
+                with doc_ex.open(exported) as word, doc_ex.open(word.convert("pdf")) as pdf:
+                    actual = positions(pdf, tolerance=0.25)
+                    self.assertNotIn("⁢", word[0].get_text())
+                    for term in terms[:4]:
+                        self.assertEqual(word[0].get_text().count(term), 1)
+                    for term in terms:
+                        self.assertAlmostEqual(actual[term][0], reference[term][0], delta=0.35)
+                with doc_ex.open(rewrite_epub(fixed, {"OEBPS/s0.xhtml": chapter})) as book:
+                    preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                    with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                        self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+                        actual = positions(pdf, fixed=True)
+                        for term in terms:
+                            self.assertAlmostEqual(actual[term][0] - actual[".625"][0],
+                                                   reference[term][0] - reference[".625"][0], delta=0.65)
 
     def test_mathml_multiple_alignment_groups_share_editable_geometry(self) -> None:
         source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
@@ -10729,15 +10754,18 @@ Trailing
                 for original, actual in zip(before[label], after[label]):
                     self.assertAlmostEqual(original, actual, delta=0.25)
 
-        aligned = (
-            '<m:mtable groupalign="{left}"><m:mtr><m:mtd><m:maligngroup/>'
-            "<m:mn>1<m:malignmark/>2</m:mn>" + row("-6pt") + "</m:mtd></m:mtr></m:mtable>"
-        )
+        grouped = '<m:mtable groupalign="{{left}}"><m:mtr><m:mtd><m:maligngroup/>{}</m:mtd></m:mtr></m:mtable>'
+        anchored_before = grouped.format("<m:mn>12<m:malignmark/>.31</m:mn>" + row("-6pt"))
+        reference, reopened = projection(anchored_before, ("12.31", "Lead", "Upper", "Lower", "Tail"), "f")
+        for term, expected in reference.items():
+            for direct, native in zip(expected, reopened[term]):
+                self.assertAlmostEqual(direct, native, delta=0.35)
+        inside = grouped.format(row("-6pt").replace(gap, gap + '<m:malignmark edge="right"/>'))
         for body, message in (
             (row("-6pt", ""), "requires preceding math space"),
             (row("-6pt", '<m:mspace width="4pt"/>'), "requires preceding math space"),
             (row("-3.8pt", '<m:mspace width="4pt"/>'), "spacing resolution"),
-            (aligned, "alignment carets across negative padding"),
+            (inside, "alignment caret inside borrowed spacing"),
         ):
             with self.subTest(message=message), doc_ex.open(epub_fixture(chapter_one=template.format(body))) as book:
                 self.assertIn("Tail", boxes(book, ("Tail",)))

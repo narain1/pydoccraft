@@ -284,7 +284,7 @@ impl Editable {
         math: &mut Math,
         caret: Option<&mut usize>,
     ) -> Result<(), EngineError> {
-        let nodes = self.substitute(std::mem::take(&mut math.nodes), caret.is_some(), caret)?;
+        let nodes = self.substitute(std::mem::take(&mut math.nodes), caret)?;
         let too_deep = Cell::new(false);
         let node_count = Cell::new(0);
         math.nodes = check_editable_bounds(nodes, 0, &too_deep, &node_count);
@@ -301,19 +301,10 @@ impl Editable {
         Ok(())
     }
 
-    fn substitute(
-        &self,
-        body: Arg,
-        preserve_carets: bool,
-        mut caret: Option<&mut usize>,
-    ) -> Result<Arg, EngineError> {
-        let original_caret = caret.as_deref().copied();
-        let mut original_end = 0;
+    fn substitute(&self, body: Arg, mut caret: Option<&mut usize>) -> Result<Arg, EngineError> {
+        let mut native_end = 0;
         let mut result = Vec::with_capacity(body.len());
         for node in body {
-            if original_caret.is_some() {
-                original_end += argument_units(&node);
-            }
             if let Some(index) = box_index(&node) {
                 let EditableBox { node, borrow } = self
                     .boxes
@@ -321,38 +312,54 @@ impl Editable {
                     .and_then(Cell::take)
                     .ok_or_else(|| invalid("missing editable MathML box"))?;
                 if borrow > 0.0 {
-                    if preserve_carets {
-                        return Err(unsupported(
-                            "MathML alignment carets across negative padding in DOCX export",
-                        ));
-                    }
+                    let preceding = caret
+                        .as_ref()
+                        .and_then(|_| result.last())
+                        .map_or(0, argument_units);
                     recompose_borrowed_padding(&mut result, node, borrow)?;
-                } else {
-                    if original_caret.is_some_and(|offset| original_end <= offset) {
-                        if let Some(caret) = &mut caret {
-                            // The composed marker counted as one character.
-                            // An editable replacement may have no run characters or several.
-                            **caret = **caret - 1 + argument_units(&node);
+                    if let Some(offset) = caret.as_deref_mut() {
+                        let start = native_end - preceding;
+                        let end = native_end + 1;
+                        if (start + 1..end).contains(offset) {
+                            return Err(unsupported(
+                                "MathML alignment caret inside borrowed spacing in DOCX export",
+                            ));
                         }
+                        if *offset >= end {
+                            *offset -= preceding;
+                        }
+                        // The old space run and the padding marker now occupy one box.
+                        native_end = start + 1;
+                    }
+                } else {
+                    if let Some(offset) = caret.as_deref_mut() {
+                        let replacement = argument_units(&node);
+                        // The marker occupies one source argument unit.
+                        if *offset > native_end {
+                            *offset = *offset - 1 + replacement;
+                        }
+                        native_end += replacement;
                     }
                     result.push(node);
                 }
                 continue;
             }
             let error = Cell::new(None);
-            let node = map_args(
-                node,
-                &|arg| match self.substitute(arg, preserve_carets, None) {
-                    Ok(arg) => arg,
-                    Err(found) => {
-                        let first = error.take().unwrap_or(found);
-                        error.set(Some(first));
-                        Arg::new()
-                    }
-                },
-            );
+            // Child arguments have their own caret paths. Their internal
+            // rewrites leave the compound node's single outer unit intact.
+            let node = map_args(node, &|arg| match self.substitute(arg, None) {
+                Ok(arg) => arg,
+                Err(found) => {
+                    let first = error.take().unwrap_or(found);
+                    error.set(Some(first));
+                    Arg::new()
+                }
+            });
             if let Some(error) = error.into_inner() {
                 return Err(error);
+            }
+            if caret.is_some() {
+                native_end += argument_units(&node);
             }
             result.push(node);
         }
@@ -553,7 +560,7 @@ impl Padding {
         // Keep native width when adding a fixed horizontal gap. Other dimensions
         // may use any measured extent of the original operand as their basis.
         let additive_width = width.filter(|l| l.basis.is_none() && l.relative && l.value >= 0.0);
-        let body = editable.substitute(self.body, false, None)?;
+        let body = editable.substitute(self.body, None)?;
         let need_shift = shift.is_some_and(|length| length.value != 0.0);
         let need_overhang_width = (additive_width.is_some() || zeroed(width, 0) == Some(false))
             && left.is_some_and(|length| {
