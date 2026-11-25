@@ -3978,7 +3978,7 @@ class EpubTests(unittest.TestCase):
         }
 
         def preview(
-            length: str, *, inline: bool = False, positions: str = "144",
+            length: str, *, inline: bool = False, positions: str = "144", content: str = "éBBé",
         ) -> tuple[list[int], tuple[float, ...], tuple[float, ...]]:
             svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 100">
               <style>
@@ -3991,7 +3991,7 @@ class EpubTests(unittest.TestCase):
               </style>
               <a href="#label"><rect x="8" y="8" width="12" height="12" fill="#027180"/></a>
               <g transform="translate(9 3)">
-                <text x="{positions}" y="70" {length}><a href="https://example.org/length"><tspan id="label">éBBé</tspan></a></text>
+                <text x="{positions}" y="70" {length}><a href="https://example.org/length"><tspan id="label">{content}</tspan></a></text>
               </g>
               </svg>"""
             if inline:
@@ -4066,6 +4066,8 @@ class EpubTests(unittest.TestCase):
                 default = preview('textLength="84"', inline=inline)
                 explicit = preview('textLength="84" lengthAdjust="spacing"', inline=inline)
                 self.assertEqual(default, explicit)
+                authored = preview('textLength="84" style="letter-spacing:3px"', inline=inline)
+                self.assertEqual(default, authored)
                 loose = preview('textLength="90px" lengthAdjust="spacing"', inline=inline)
                 close_ink, close_link, close_search = default
                 loose_ink, loose_link, loose_search = loose
@@ -4083,8 +4085,8 @@ class EpubTests(unittest.TestCase):
             self.assertLess(compressed[2] - compressed[0], natural[2] - natural[0] - 5)
             self.assertAlmostEqual(compressed[2] + compressed[0], natural[2] + natural[0], delta=0.5)
 
-        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "authored letter or word spacing"):
-            preview('textLength="84" style="letter-spacing:1px"')
+        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "uniform authored letter spacing"):
+            preview('textLength="84"', content='é<tspan style="letter-spacing:2px">B</tspan>Bé')
         with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "spacing and glyph geometry"):
             preview('textLength="3" lengthAdjust="spacing"')
         with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "invalid lengthAdjust"):
@@ -4102,12 +4104,14 @@ class EpubTests(unittest.TestCase):
         labels = ("B\u0301", "é", "B\u0301", "é")
         colors = ((162, 32, 34), (34, 133, 48), (40, 66, 151), (137, 42, 139))
 
-        def render(length: int | None) -> tuple:
+        def render(length: int | None, *, separated: bool = False, spacing: str = "") -> tuple:
             measure = f' textLength="{length}"' if length else ""
-            elements = "".join(
+            elements = [
                 f'<tspan fill="#{bytes(rgb).hex()}"><a href="https://example.org/{index}">{label}</a></tspan>'
                 for index, (rgb, label) in enumerate(zip(colors, labels))
-            )
+            ]
+            if separated:
+                elements.insert(2, " ")
             svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 95">
               <style>
                 @font-face {{font-family:Layout;src:url(variable.ttf);unicode-range:U+00E9;
@@ -4116,7 +4120,7 @@ class EpubTests(unittest.TestCase):
                              font-variation-settings:"wght" 760}}
                 text {{font-family:Layout;font-size:34px;font-optical-sizing:none}}
               </style>
-              <text x="18" y="70"{measure}>{elements}</text></svg>"""
+              <text x="18" y="70" style="{spacing}"{measure}>{"".join(elements)}</text></svg>"""
             with doc_ex.open(epub_fixture()) as original:
                 data = original.edit_epub_structure(
                     [doc_ex.EpubSvgChapterSource("Accents", svg, "OEBPS/accents.svg"), 0], resources=resources,
@@ -4127,7 +4131,8 @@ class EpubTests(unittest.TestCase):
             with doc_ex.open(output) as pdf:
                 self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
                 self.assertEqual("".join(pdf[0].get_text().split()), "".join(labels))
-                self.assertEqual(len(pdf[0].search_for("B\u0301")), 2)
+                search = {label: sorted(pdf[0].search_for(label), key=lambda box: box[0]) for label in set(labels)}
+                self.assertEqual({label: len(boxes) for label, boxes in search.items()}, {"B\u0301": 2, "é": 2})
                 boxes = {int(link.uri.rsplit("/", 1)[1]): link.bbox
                          for link in pdf[0].get_links() if link.uri and link.uri.startswith("https://example.org/")}
                 self.assertEqual(set(boxes), set(range(4)))
@@ -4135,11 +4140,11 @@ class EpubTests(unittest.TestCase):
                     if pixels[offset:offset + 4] == bytes((*color, 255))}
                    for color in colors]
             self.assertTrue(all(ink))
-            return ink, boxes
+            return ink, boxes, search
 
-        native, _ = render(None)
-        normal, boxes = render(104)
-        expanded, enlarged = render(128)
+        native, _, _ = render(None)
+        normal, boxes, _ = render(104)
+        expanded, enlarged, _ = render(128)
         for index, (original, before, after) in enumerate(zip(native, normal, expanded)):
             # The first cluster keeps the ordinary native origin. The
             # other origins can have a different subpixel phase.
@@ -4152,6 +4157,23 @@ class EpubTests(unittest.TestCase):
             self.assertEqual({(x + dx, y) for x, y in before}, after, index)
             for coordinate, (old, current) in enumerate(zip(boxes[index], enlarged[index])):
                 self.assertAlmostEqual(current - old, dx * .75 if coordinate % 2 == 0 else 0, delta=.05)
+
+        plain_ink, plain_links, plain_search = render(132, separated=True)
+        styled_ink, styled_links, styled_search = render(
+            132, separated=True, spacing="letter-spacing:3px;word-spacing:16px",
+        )
+        # The internal space adds a fifth cluster. The extra 16 px reduce
+        # the common adjustment at its four boundaries by 4 px each.
+        shifts = (0, -4, 4, 0)
+        for index, dx in enumerate(shifts):
+            self.assertEqual({(x + dx, y) for x, y in plain_ink[index]}, styled_ink[index], index)
+            for edge, (before, after) in enumerate(zip(plain_links[index], styled_links[index])):
+                self.assertAlmostEqual(after - before, dx * .75 if edge % 2 == 0 else 0, delta=.05)
+        for label, indices in ((labels[0], (0, 2)), (labels[1], (1, 3))):
+            for index, before, after in zip(indices, plain_search[label], styled_search[label], strict=True):
+                for edge in range(4):
+                    self.assertAlmostEqual(after[edge] - before[edge],
+                                           shifts[index] * .75 if edge % 2 == 0 else 0, delta=.05)
 
     def test_epub_svg_nested_mixed_face_text_length_preserves_neighbor_layout(self) -> None:
         font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()

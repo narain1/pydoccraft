@@ -50,6 +50,7 @@
 - [x] Retain anchored spacingAndGlyphs textLength for directly painted mixed-face runs in fixed-layout SVG, including searchable PDF text and links.
 - [x] Fit spacing-only textLength between verifiable mixed-face clusters without changing their glyph shapes or losing searchable PDF text and links.
 - [x] Fit textLength on a sole nested tspan and spacing on an independently positioned nested owner while preserving sibling ink and PDF geometry.
+- [x] Include uniform authored letter spacing and native word spacing in the original advances for fitting one SVG length owner per chunk.
 - [x] Fit independently positioned sibling spacing owners in one mixed-face SVG text element, including an owner that fills a positioned branch through transparent wrappers and a branch that carries its previous baseline.
 - [x] Fit verified left-to-right multi-glyph clusters and keep their native ink in searchable SVG PDF text and links.
 - [x] Resolve up to eight nested SVG spacing owners before fitting their outer text length. Keep unpositioned tspan and anchor wrappers and verify final native glyphs.

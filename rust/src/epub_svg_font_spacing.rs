@@ -21,7 +21,11 @@ pub(super) struct SpacingCheck {
 }
 
 enum Shift {
-    Even { gap: f32, anchor: f32 },
+    Even {
+        gap: f32,
+        anchor: f32,
+        letter_spacing: f32,
+    },
     Explicit(Vec<f32>),
 }
 
@@ -34,13 +38,17 @@ impl SpacingCheck {
         offset: usize,
         verify_full_width: bool,
     ) -> Result<Self, EngineError> {
+        let authored = chunk
+            .spans()
+            .first()
+            .map_or(0.0, usvg::TextSpan::letter_spacing);
         if chunk
             .spans()
             .iter()
-            .any(|span| span.letter_spacing() != 0.0 || span.word_spacing() != 0.0)
+            .any(|span| span.letter_spacing() != authored)
         {
             return Err(unsupported(
-                "EPUB SVG mixed-font spacing textLength with authored letter or word spacing",
+                "EPUB SVG mixed-font textLength requires uniform authored letter spacing",
             ));
         }
         if !svg::logical_glyph_clusters(text) {
@@ -55,8 +63,15 @@ impl SpacingCheck {
             return Err(spacing_error());
         }
         let gaps = (count - 1) as f32;
+        // Native width already includes CSS spacing. Add only the fitted
+        // correction, leaving the original word spacing in the SVG tree.
         let gap = (target - text.bounding_box().width()) / gaps;
-        if !gap.is_finite() || gap.abs() > MAX_LENGTH {
+        let letter_spacing = authored + gap;
+        if !gap.is_finite()
+            || gap.abs() > MAX_LENGTH
+            || !letter_spacing.is_finite()
+            || letter_spacing.abs() > MAX_LENGTH
+        {
             return Err(limited(
                 "EPUB SVG mixed-font textLength exceeds its spacing budget",
             ));
@@ -70,7 +85,11 @@ impl SpacingCheck {
             index,
             width: verify_full_width.then_some(target),
             cluster_range: offset..offset + count,
-            shift: Shift::Even { gap, anchor },
+            shift: Shift::Even {
+                gap,
+                anchor,
+                letter_spacing,
+            },
             absolute: None,
             preserve_order: false,
         })
@@ -100,6 +119,7 @@ impl SpacingCheck {
             shift: Shift::Even {
                 gap: 0.0,
                 anchor: 0.0,
+                letter_spacing: 0.0,
             },
             absolute: Some(absolute),
             preserve_order: true,
@@ -113,7 +133,7 @@ impl SpacingCheck {
     fn offset(&self, cluster: usize) -> f32 {
         let index = cluster - self.cluster_range.start;
         match &self.shift {
-            Shift::Even { gap, anchor } => *gap * (index as f32 - *anchor),
+            Shift::Even { gap, anchor, .. } => *gap * (index as f32 - *anchor),
             Shift::Explicit(offsets) => offsets[index],
         }
     }
@@ -125,7 +145,7 @@ impl SpacingCheck {
         edits: &mut Vec<Edit>,
         bytes: &mut usize,
     ) -> Result<(), EngineError> {
-        let Shift::Even { gap, .. } = self.shift else {
+        let Shift::Even { letter_spacing, .. } = self.shift else {
             return Err(spacing_error());
         };
         for parent in node
@@ -139,7 +159,7 @@ impl SpacingCheck {
             };
             let separator = if style.is_empty() { "" } else { ";" };
             let value = format!(
-                r#" style="{}{separator}letter-spacing:{gap}px;""#,
+                r#" style="{}{separator}letter-spacing:{letter_spacing}px;""#,
                 escape_attribute(style),
             );
             charge(
