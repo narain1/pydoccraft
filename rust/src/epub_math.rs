@@ -184,6 +184,7 @@ pub(super) fn equation(
     stylesheet: Option<&FormulaCss>,
     format: &mut CharProps,
     base_size: f32,
+    line_width: f32,
     remaining: &mut usize,
 ) -> Result<Equation, EngineError> {
     if source.len() > MAX_EQUATION_BYTES {
@@ -213,6 +214,7 @@ pub(super) fn equation(
         root: style,
         root_id: root.id().get(),
         stylesheet,
+        line_width,
         remaining,
         extras: compose::Extras::default(),
     };
@@ -345,6 +347,7 @@ struct Projection<'a, 'xml> {
     root: Presentation<'xml>,
     root_id: u32,
     stylesheet: Option<&'a FormulaCss>,
+    line_width: f32,
     remaining: &'a mut usize,
     extras: compose::Extras,
 }

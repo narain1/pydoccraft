@@ -5556,7 +5556,7 @@ voice
 
         for attributes, diagnostic in (
             (columns, "require a definite table width"),
-            ('width="50%"', "requires a definite length"),
+            ('width="50vw"', "requires a definite length"),
             ('width="4pt" ' + columns, "smaller than its gaps"),
             ('width="240pt" columnwidth="20% 50pt 135pt fit fit"', "exceed the authored width"),
             ('width="280pt" columnwidth="20% 50pt 130pt fit fit"', "exceeds fitted column widths"),
@@ -5564,6 +5564,87 @@ voice
             with self.subTest(attributes=attributes), doc_ex.open(fixture(attributes)) as book:
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, diagnostic):
                     book.render_page(0)
+
+    def test_mathml_relative_table_width_uses_the_containing_line(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Relative MathML table</title><style>
+            body {{margin:0}} div {{width:320px; box-sizing:border-box; padding:10px 20px; border:5px solid black}}
+          </style></head><body>{}</body></html>"""
+        grid = """<m:mtable width="{}" columnwidth="50% fit" columnalign="left" columnspacing="10pt">
+          <m:mtr><m:mtd><m:mtext mathcolor="#bf222d">H</m:mtext></m:mtd>
+            <m:mtd><m:mtext mathcolor="#1644df">H</m:mtext></m:mtd></m:mtr>
+          </m:mtable>"""
+
+        def expression(width: str) -> str:
+            return ('<m:math mathsize="18pt"><m:mrow>' + grid.format(width)
+                    + '<m:mtext mathcolor="#198144">H</m:mtext></m:mrow></m:math>')
+
+        def positions(doc: doc_ex.Document) -> tuple[int, int]:
+            width, pixels = rgba_pixels(png_chunks(doc.render_page(0, dpi=96)))
+            starts = []
+            for color in ("bf222d", "1644df", "198144"):
+                ink = bytes.fromhex(color + "ff")
+                points = [i // 4 % width for i in range(0, len(pixels), 4) if pixels[i:i + 4] == ink]
+                self.assertTrue(points, color)
+                starts.append(min(points))
+            return starts[1] - starts[0], starts[2] - starts[0]
+
+        chapter = template.format("<div><p>" + expression("50%") + "</p></div>")
+        with doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+            first, total = positions(book)
+            # The CSS border box leaves 270 pixels of content. The matrix uses half.
+            self.assertAlmostEqual(first, 270 / 4 + 10 * 96 / 72, delta=1)
+            self.assertAlmostEqual(total, 135, delta=1)
+            for target in ("pdf", "docx"):
+                with self.subTest(target=target), doc_ex.open(book.convert(target)) as reopened:
+                    first, total = positions(reopened)
+                    # Reflow exports use the 468-point page text area.
+                    self.assertAlmostEqual(first, (468 / 4 + 10) * 96 / 72, delta=2)
+                    self.assertAlmostEqual(total, 468 / 2 * 96 / 72, delta=2)
+        equivalent = template.format("<div><p>" + expression("0.5") + "</p></div>")
+        with doc_ex.open(epub_fixture(chapter_one=equivalent)) as book:
+            self.assertAlmostEqual(positions(book)[1], 135, delta=1)
+        direct = template.format("<div>" + expression("50%") + "</div>")
+        with doc_ex.open(epub_fixture(chapter_one=direct)) as book:
+            self.assertAlmostEqual(positions(book)[1], 135, delta=1)
+
+        viewport = '<meta name="viewport" content="width=400,height=260"/>'
+        fixed = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 400, 260)])
+        chapter = chapter.replace("</head>", viewport + "</head>")
+        with doc_ex.open(rewrite_epub(fixed, {"OEBPS/s0.xhtml": chapter})) as book:
+            preview = positions(book)
+            self.assertAlmostEqual(preview[1], 135, delta=1)
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as reopened:
+                self.assertEqual(positions(reopened), preview)
+
+        cell = "<table><tr><td><p>" + expression("50%") + "</p></td><td>other</td></tr></table>"
+        styled_cell = cell.replace("<table>", '<table style="width:300px">').replace(
+            "<td>", '<td style="padding:0px 10px">'
+        )
+        with doc_ex.open(epub_fixture(chapter_one=template.format(styled_cell))) as book:
+            first, total = positions(book)
+            self.assertAlmostEqual(first, 130 / 4 + 10 * 96 / 72, delta=1)
+            self.assertAlmostEqual(total, 65, delta=1)
+        with doc_ex.open(epub_fixture(chapter_one=template.format(cell))) as book:
+            for target in ("pdf", "docx"):
+                with self.subTest(target=target), doc_ex.open(book.convert(target)) as reopened:
+                    first, total = positions(reopened)
+                    self.assertAlmostEqual(first, ((234 - 10.8) / 4 + 10) * 96 / 72, delta=2)
+                    self.assertAlmostEqual(total, (234 - 10.8) / 2 * 96 / 72, delta=2)
+
+        nested = '<m:math><m:mfrac>' + grid.format("50%") + '<m:mi>x</m:mi></m:mfrac></m:math>'
+        with doc_ex.open(epub_fixture(chapter_one=template.format(nested))) as book:
+            for operation in (lambda: book.render_page(0), lambda: book.convert("docx"), lambda: book.convert("pdf")):
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "definite containing line width"):
+                    operation()
+        collapsed = direct.replace("width:320px", "width:0px")
+        with doc_ex.open(epub_fixture(chapter_one=collapsed)) as book:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "definite containing text box"):
+                book.render_page(0)
+        beyond = direct.replace('width="50%"', 'width="125%"', 1)
+        with doc_ex.open(epub_fixture(chapter_one=beyond)) as book:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "outside the containing line"):
+                book.render_page(0)
 
     def test_mathml_table_rules_and_frame_preserve_spans(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">

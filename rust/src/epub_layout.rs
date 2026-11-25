@@ -22,14 +22,14 @@ use super::{
     css::Cascade,
     fonts::{Fonts, Text as FontText},
     invalid, limited, name,
-    output::{image_bytes, Output, RasterImage},
+    output::{has_relative_math, image_bytes, Output, RasterImage},
     parse_xml,
     rendition::{capture_anchor, fixed, intersection, Capture, Region},
     style::{ChapterStyles, Paint},
     unsupported, Book, XHTML, XML_BYTES,
 };
 use crate::{
-    model::{DocumentPayload, PagePayload},
+    model::{BlockPayload, DocumentPayload, PagePayload},
     rendering::{self, RasterRegion},
     EngineError,
 };
@@ -398,7 +398,62 @@ struct PaintBox {
 enum Contents {
     Text(Blocks),
     FontText(Vec<FontText>),
+    RelativeMath(RelativeMath),
     Image(Picture, String),
+}
+
+struct RelativeMath {
+    blocks: Vec<BlockPayload>,
+    layouts: Vec<RelativeMathLayout>,
+}
+
+struct RelativeMathLayout {
+    width: f32,
+    text: Result<Vec<FontText>, EngineError>,
+}
+
+impl RelativeMath {
+    fn measure(
+        &mut self,
+        available: AvailableSpace,
+        fonts: &mut Fonts,
+        output: &mut Output<'_>,
+        work: &mut usize,
+    ) -> Result<Size<f32>, EngineError> {
+        let AvailableSpace::Definite(width) = available else {
+            // Intrinsic width probes cannot resolve a percentage table.
+            return Ok(Size::ZERO);
+        };
+        if !width.is_finite() || width <= 0.0 {
+            return Ok(Size::ZERO);
+        }
+        let index = self
+            .layouts
+            .iter()
+            .position(|layout| (layout.width - width).abs() <= 0.005);
+        let index = if let Some(index) = index {
+            index
+        } else {
+            let text = self
+                .blocks
+                .iter()
+                .map(|block| fonts.shape(block, output, width))
+                .collect::<Result<_, _>>();
+            // A narrower probe may have conflicting width constraints even
+            // when the final containing width would fit the exact same table.
+            let text = match text {
+                Err(error) if !matches!(error, EngineError::Unsupported(_)) => return Err(error),
+                text => text,
+            };
+            self.layouts.push(RelativeMathLayout { width, text });
+            self.layouts.len() - 1
+        };
+        let height = match &self.layouts[index].text {
+            Ok(text) => font_text_size(text, width, work)?.height,
+            Err(_) => 0.0,
+        };
+        Ok(Size { width, height })
+    }
 }
 
 enum Picture {
@@ -698,6 +753,12 @@ impl<'book> Layout<'book> {
         &mut self,
         blocks: &[crate::model::BlockPayload],
     ) -> Result<Contents, EngineError> {
+        if blocks.iter().any(has_relative_math) {
+            return Ok(Contents::RelativeMath(RelativeMath {
+                blocks: blocks.to_vec(),
+                layouts: Vec::new(),
+            }));
+        }
         if let Some(fonts) = &mut self.fonts {
             for block in blocks {
                 if fonts.used_in(block)? {
@@ -781,11 +842,44 @@ impl<'book> Layout<'book> {
                         AvailableSpace::MaxContent
                     },
                 },
-                |input, _, index, _| {
+                |input, _, index, style| {
                     let size = if error.is_none() {
-                        let content = index.and_then(|index| self.boxes[*index].content.as_ref());
+                        let content = index.and_then(|index| self.boxes[*index].content.as_mut());
+                        if let Some(Contents::RelativeMath(relative)) = content {
+                            return taffy::compute_leaf_layout(
+                                input,
+                                style,
+                                |_, _| 0.0,
+                                |_, available| {
+                                    if input.known_dimensions.width.is_some()
+                                        && !input.known_dimensions_are_definite.width
+                                    {
+                                        return Size::ZERO;
+                                    }
+                                    let measured = self
+                                        .fonts
+                                        .as_mut()
+                                        .ok_or_else(|| invalid("missing EPUB MathML fonts"))
+                                        .and_then(|fonts| {
+                                            relative.measure(
+                                                available.width,
+                                                fonts,
+                                                &mut self.output,
+                                                &mut self.measure_count,
+                                            )
+                                        });
+                                    match measured {
+                                        Ok(value) => value,
+                                        Err(err) => {
+                                            error = Some(err);
+                                            Size::ZERO
+                                        }
+                                    }
+                                },
+                            );
+                        }
                         match measure(
-                            content,
+                            content.as_deref(),
                             input,
                             &mut self.output.document,
                             &mut self.cache,
@@ -806,6 +900,28 @@ impl<'book> Layout<'book> {
             .map_err(failure)?;
         if let Some(error) = error {
             return Err(error);
+        }
+        for node in &mut self.boxes {
+            if let Some(Contents::RelativeMath(relative)) = node.content.as_mut() {
+                let layout = self.tree.layout(node.id).map_err(failure)?;
+                let width = layout.size.width
+                    - layout.border.left
+                    - layout.border.right
+                    - layout.padding.left
+                    - layout.padding.right;
+                let index = relative
+                    .layouts
+                    .iter()
+                    .position(|layout| (layout.width - width).abs() <= 0.005)
+                    .ok_or_else(|| {
+                        unsupported(
+                            "MathML relative table width requires a definite containing text box",
+                        )
+                    })?;
+                node.content = Some(Contents::FontText(
+                    relative.layouts.swap_remove(index).text?,
+                ));
+            }
         }
         let root = self.tree.layout(self.boxes[root].id).map_err(failure)?;
         let height = if fixed {
@@ -1020,32 +1136,39 @@ fn measure(
             Size { width, height }
         }
         Some(Contents::FontText(blocks)) => {
-            super::charge(
-                work,
-                blocks.len(),
-                16_000,
-                "EPUB text layout work limit exceeded",
-            )?;
-            let width = available_text_width(input);
-            let mut total = Size::<f32>::ZERO;
-            for block in blocks {
-                let [w, h] = block.size(width);
-                total.width = total.width.max(w);
-                total.height += h;
-            }
-            total
+            font_text_size(blocks, available_text_width(input), work)?
         }
         Some(Contents::Text(blocks)) => {
             let width = available_text_width(input);
             let page = layout_text(blocks, width, doc, cache, work)?;
             text_size(&page)
         }
-        None => Size::ZERO,
+        None | Some(Contents::RelativeMath(_)) => Size::ZERO,
     };
     Ok(Size {
         width: known.width.unwrap_or(natural.width),
         height: known.height.unwrap_or(natural.height),
     })
+}
+
+fn font_text_size(
+    blocks: &[FontText],
+    width: f32,
+    work: &mut usize,
+) -> Result<Size<f32>, EngineError> {
+    super::charge(
+        work,
+        blocks.len(),
+        16_000,
+        "EPUB text layout work limit exceeded",
+    )?;
+    let mut total = Size::<f32>::ZERO;
+    for block in blocks {
+        let [w, h] = block.size(width);
+        total.width = total.width.max(w);
+        total.height += h;
+    }
+    Ok(total)
 }
 
 fn available_text_width(input: LayoutInput) -> f32 {

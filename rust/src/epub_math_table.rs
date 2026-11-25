@@ -138,6 +138,18 @@ pub(in crate::epub) fn has_rule_requests(root: Node<'_, '_>) -> bool {
     })
 }
 
+pub(in crate::epub) fn has_relative_widths(root: Node<'_, '_>) -> bool {
+    root.descendants().any(|node| {
+        node.has_tag_name((MATHML, "mtable"))
+            && node
+                .attribute("width")
+                .map(str::trim)
+                .and_then(relative_width)
+                .is_some()
+            && is_presentation(node)
+    })
+}
+
 fn is_presentation(node: Node<'_, '_>) -> bool {
     !node.ancestors().any(|ancestor| {
         ancestor.tag_name().namespace() == Some(MATHML)
@@ -288,13 +300,7 @@ pub(super) fn project<'xml>(
     let mut row_gaps = gaps(table, "rowspacing", rows.len(), em, "1ex")?;
     let mut column_gaps = gaps(table, "columnspacing", column_count, em, "0.8em")?;
     let rules = Rules::read(table, em, &mut row_gaps, &mut column_gaps)?;
-    let width = match table.attribute("width").map(str::trim) {
-        None | Some("auto") => None,
-        Some(value) => Some(
-            fixed_length(value, em)
-                .ok_or_else(|| unsupported("MathML table width requires a definite length"))?,
-        ),
-    };
+    let width = table_width(table, em, projection.line_width)?;
     Ok(Table {
         cells,
         row_gaps,
@@ -412,6 +418,59 @@ fn fixed_length(value: &str, em: f32) -> Option<f32> {
         return None;
     }
     length(value, em)
+}
+
+fn relative_width(value: &str) -> Option<f32> {
+    if let Some(percent) = value.strip_suffix('%') {
+        return percent.parse::<f32>().ok().map(|value| value / 100.0);
+    }
+    if value == "0" {
+        return None;
+    }
+    value.parse::<f32>().ok()
+}
+
+fn table_width(table: Node<'_, '_>, em: f32, line_width: f32) -> Result<Option<f32>, EngineError> {
+    let Some(value) = table
+        .attribute("width")
+        .map(str::trim)
+        .filter(|value| *value != "auto")
+    else {
+        return Ok(None);
+    };
+    if let Some(fraction) = relative_width(value) {
+        // Only transparent MathML grouping has the same target width as
+        // the surrounding line. A table cell or an operator's argument
+        // would need its own layout width to resolve a relative length.
+        let grouped = table
+            .ancestors()
+            .skip(1)
+            .filter(Node::is_element)
+            .all(|node| {
+                matches!(
+                    node.tag_name().name(),
+                    "math" | "mrow" | "mstyle" | "merror" | "semantics"
+                )
+            });
+        if !grouped || !line_width.is_finite() || line_width <= 0.0 {
+            return Err(unsupported(
+                "MathML relative table width requires a definite containing line width",
+            ));
+        }
+        if !(0.0..=1.0).contains(&fraction) {
+            return Err(unsupported(
+                "MathML relative table width is outside the containing line",
+            ));
+        }
+        let width = line_width * fraction;
+        if width > MAX_DIMENSION {
+            return Err(limited("MathML table exceeds its geometry budget"));
+        }
+        return Ok(Some(width));
+    }
+    fixed_length(value, em)
+        .map(Some)
+        .ok_or_else(|| unsupported("MathML table width requires a definite length"))
 }
 
 fn length(value: &str, em: f32) -> Option<f32> {

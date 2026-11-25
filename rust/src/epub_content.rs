@@ -486,6 +486,9 @@ fn inline(
         if super::math::table::has_rule_requests(node) {
             equation["ruled_table"] = true.into();
         }
+        if super::math::table::has_relative_widths(node) {
+            equation["relative_table"] = true.into();
+        }
         if super::math::compose::needs_layout(node) {
             equation["composed_math"] = true.into();
         }

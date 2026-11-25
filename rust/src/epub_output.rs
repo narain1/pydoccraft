@@ -203,7 +203,7 @@ impl<'a> Output<'a> {
                 && text.value[text.offsets[*end]..].trim().is_empty()
             {
                 let mut format = text.style_at(*start);
-                let equation = self.equation(source, *css, &mut format)?;
+                let equation = self.equation(source, *css, &mut format, width)?;
                 match equation {
                     Equation::SpanningTable {
                         mut table, extras, ..
@@ -327,7 +327,7 @@ impl<'a> Output<'a> {
                         prepared
                     } else {
                         let mut style = text.style_at(start);
-                        let equation = self.equation(source, css, &mut style)?;
+                        let equation = self.equation(source, css, &mut style, width)?;
                         (equation, style)
                     };
                     let object =
@@ -398,6 +398,7 @@ impl<'a> Output<'a> {
         source: &str,
         css: Option<&str>,
         style: &mut CharProps,
+        width: f32,
     ) -> Result<super::math::Equation, EngineError> {
         let css: Option<super::math::FormulaCss> = css
             .map(serde_json::from_str)
@@ -415,6 +416,7 @@ impl<'a> Output<'a> {
             css.as_ref(),
             style,
             base_size,
+            width,
             &mut self.math_nodes_remaining,
         )
     }
@@ -623,6 +625,20 @@ impl<'a> Output<'a> {
             ));
         }
         let mut table = Table::new(source.cells.len(), columns, width);
+        let relative = source
+            .cells
+            .iter()
+            .flatten()
+            .flat_map(|cell| &cell.blocks)
+            .any(has_relative_math);
+        // Relative tables need the actual width of the native cell. Pin the
+        // existing equal grid and default horizontal cell margins for them.
+        const CELL_MARGINS: [f32; 4] = [0.0, 5.4, 0.0, 5.4];
+        if relative {
+            table.props.fixed = true;
+            table.props.width = Some(width);
+            table.props.cell_margins = Some(CELL_MARGINS);
+        }
         let mut merges = Vec::new();
         for (row, cells) in source.cells.iter().enumerate() {
             for cell in cells {
@@ -632,8 +648,13 @@ impl<'a> Output<'a> {
                     as usize;
                 let last_col = col + cell.col_span - 1;
                 let last_row = row + cell.row_span - 1;
-                let blocks =
-                    self.blocks(&cell.blocks, width * cell.col_span as f32 / columns as f32)?;
+                let cell_width = width * cell.col_span as f32 / columns as f32;
+                let content_width = if relative {
+                    (cell_width - CELL_MARGINS[1] - CELL_MARGINS[3]).max(4.0)
+                } else {
+                    cell_width
+                };
+                let blocks = self.blocks(&cell.blocks, content_width)?;
                 table.rows[row].cells[col].blocks = blocks;
                 if row != last_row || col != last_col {
                     merges.push((row, last_row, col, last_col));
@@ -792,6 +813,26 @@ pub(super) fn has_composed_math(block: &BlockPayload) -> bool {
                     .iter()
                     .any(|entry| entry["composed_math"].as_bool() == Some(true))
             })
+}
+
+pub(super) fn has_relative_math(block: &BlockPayload) -> bool {
+    block
+        .metadata
+        .get("mathml")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|entries| {
+            entries
+                .iter()
+                .any(|entry| entry["relative_table"].as_bool() == Some(true))
+        })
+        || block.table.as_ref().is_some_and(|table| {
+            table
+                .cells
+                .iter()
+                .flatten()
+                .flat_map(|cell| &cell.blocks)
+                .any(has_relative_math)
+        })
 }
 
 pub(super) fn inline_items(

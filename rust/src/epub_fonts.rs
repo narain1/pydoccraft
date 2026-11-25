@@ -848,7 +848,7 @@ fn equation(
     output: &mut Output<'_>,
     width: f32,
 ) -> Result<Fragment, EngineError> {
-    let equation = output.equation(markup, css, &mut style)?;
+    let equation = output.equation(markup, css, &mut style, width)?;
     style.font = None;
     let resolved = output.document.styles.resolve_char(None, &style);
     let layout = match equation {
