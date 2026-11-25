@@ -204,6 +204,7 @@ pub(crate) fn read(
     start: u64,
     end: Option<u64>,
     language: Option<&str>,
+    video_context: bool,
 ) -> Result<Vec<Cue>, EngineError> {
     validate_archive_path(path)?;
     let bytes = Book::open(epub)?.read(path, MAX_TRACK_BYTES)?;
@@ -213,6 +214,7 @@ pub(crate) fn read(
             &bytes,
             &mut track,
             language.filter(|value| !value.is_empty()),
+            video_context,
         )?,
         "application/ttml+xml" => ttml::parse(&bytes, &mut track)?,
         _ => {
@@ -233,7 +235,12 @@ pub(crate) fn read(
     Ok(track.cues)
 }
 
-fn webvtt(bytes: &[u8], track: &mut Track, language: Option<&str>) -> Result<(), EngineError> {
+fn webvtt(
+    bytes: &[u8],
+    track: &mut Track,
+    language: Option<&str>,
+    video_context: bool,
+) -> Result<(), EngineError> {
     let source = std::str::from_utf8(bytes)
         .map_err(invalid)?
         .trim_start_matches('\u{feff}')
@@ -325,6 +332,9 @@ fn webvtt(bytes: &[u8], track: &mut Track, language: Option<&str>) -> Result<(),
             return Err(invalid("out-of-order or empty EPUB WebVTT cue"));
         }
         previous = start;
+        if track.cues.is_empty() && video_context {
+            regions.style(&mut cascade)?;
+        }
         let settings = parts.collect::<Vec<_>>().join(" ");
         let region = settings
             .split_ascii_whitespace()
@@ -563,7 +573,11 @@ impl<'a> WebvttCue<'a> {
     ) -> Result<(StyledText, Option<[u8; 4]>), EngineError> {
         let mut out = StyledText::default();
         let mut styles = Vec::<Arc<TextStyle>>::new();
-        let inherited = TextStyle::default();
+        let mut inherited = self
+            .region_layout
+            .as_ref()
+            .map_or_else(TextStyle::default, |region| region.paint.style.clone());
+        inherited.background_color = None;
         let mut fallback = inherited.clone();
         let background_color = cascade
             .paint(webvtt_css::Target {

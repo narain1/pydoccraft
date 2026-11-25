@@ -61,6 +61,11 @@ def _epub_playback_interval(start_us: int, end_us: int | None) -> tuple[int, int
     return start, end
 
 
+def _epub_text_style(native_style: tuple[Any, ...]) -> EpubTextStyle:
+    *properties, classes, voice, language = native_style
+    return EpubTextStyle(*properties, tuple(classes), voice, language)
+
+
 class _EpubTextTimeline:
     def __init__(self, cues: list[EpubTextCue]) -> None:
         self._cues = cues
@@ -756,26 +761,31 @@ class Document:
         start, end = _epub_playback_interval(start_us, end_us)
         if track is None:
             return []
-        cues = self._read_epub_text(track, start, end)
+        cues = self._read_epub_text(track, start, end, video_context=embedded.kind == "video")
         if track.media_type == "text/vtt":
             cues.sort(key=operator.attrgetter("start_us"))
         return cues
 
-    def _read_epub_text(self, track: EpubMediaTrack, start: int, end: int | None) -> list[EpubTextCue]:
+    def _read_epub_text(
+        self, track: EpubMediaTrack, start: int, end: int | None, *, video_context: bool = True
+    ) -> list[EpubTextCue]:
         from . import _core, _native
 
         self._ensure_open()
         result = _native(lambda: _core._epub_text_track(
-            self._source, track.path, track.media_type, start, end, track.language
+            self._source, track.path, track.media_type, start, end, track.language, video_context
         ))
         cues = []
         for *legacy_fields, native_runs, background_color, native_region, native_ttml in result:
             runs = []
             for text, native_style, timestamp in native_runs:
-                *properties, classes, voice, language = native_style
-                style = EpubTextStyle(*properties, tuple(classes), voice, language)
-                runs.append(EpubTextRun(text, style, timestamp))
-            region_layout = None if native_region is None else EpubTextRegion(*native_region)
+                runs.append(EpubTextRun(text, _epub_text_style(native_style), timestamp))
+            region_layout = None
+            if native_region is not None:
+                *geometry, native_style, opacity, visibility = native_region
+                region_layout = EpubTextRegion(
+                    *geometry, style=_epub_text_style(native_style), opacity=opacity, visibility=visibility
+                )
             ttml_region_layout = None if native_ttml is None else EpubTtmlRegion(*native_ttml)
             cues.append(EpubTextCue(
                 *legacy_fields, runs=tuple(runs), background_color=background_color,

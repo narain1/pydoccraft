@@ -4249,6 +4249,111 @@ Late region
             self.assertEqual(reopened.read_epub_resource("OEBPS/styled.vtt"), raw)
             self.assertEqual(reopened.epub_embedded_text(0, 0)[0].region_layout, region)
 
+    def test_webvtt_region_styles_cascade_and_reach_cropped_video(self) -> None:
+        video = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        vtt = r'''WEBVTT
+
+REGION
+id:port:é width:40% scroll:up
+
+STYLE
+::cue-region { color: orange; background-color: #202020; font-weight: bold; font-style: italic;
+              text-decoration: overline; opacity: 25%; visibility: hidden; width: 10%; }
+::cue-region(#port\:é) { color: #112233 !important; background: currentColor; visibility: visible; }
+video::cue-region(#port\:é) { color: lime !important; }
+::cue-region(#port\:é) { color: red !important; }
+::cue-region(.unsupported) { color: purple !important; }
+::cue(#lead) { color: teal; font-weight: normal; background: rgba(0,0,0,.5); }
+::cue(c:future) { color: cyan; }
+
+REGION
+id:plain
+
+STYLE
+video::cue-region(#port\:é) { color: #123456 !important; opacity: 120%; }
+
+lead
+00:00:00.160 --> 00:00:00.205 region:port:é
+<c>Before</c><00:00:00.175><c>After</c>
+
+00:00:00.180 --> 00:00:00.195 region:plain
+Concurrent
+
+00:00:00.200 --> 00:00:00.220 region:port:é line:8
+Detached
+
+00:00:00.220 --> 00:00:00.230 region:port:é
+Inherited
+'''.encode()
+        ttml = b'''<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling">
+          <head><layout><region xml:id="plain" tts:origin="10% 25%" tts:extent="75% 50%"/></layout></head>
+          <body region="plain"><p begin="0s" end="1s">TTML</p></body>
+        </tt>'''
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Styled regions</title></head>
+          <body><video src="clip.mp4#t=0.167,0.187&amp;xywh=1,1,6,4">
+          <track src="caption.vtt" kind="captions" srclang="en"/>
+          <track src="caption.ttml" kind="subtitles" srclang="en"/>
+          </video><audio><track src="caption.vtt" kind="captions" srclang="en"/></audio></body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Styled regions", chapter, "OEBPS/region.xhtml")],
+                resources={
+                    "OEBPS/clip.mp4": doc_ex.EpubResource("video/mp4", video),
+                    "OEBPS/caption.vtt": doc_ex.EpubResource("text/vtt", vtt),
+                    "OEBPS/caption.ttml": doc_ex.EpubResource("application/ttml+xml", ttml),
+                },
+            )
+        port_style = doc_ex.EpubTextStyle(
+            bold=True, font_style="italic", overline=True,
+            color=(18, 52, 86, 255), background_color=(18, 52, 86, 255),
+        )
+        port = doc_ex.EpubTextRegion(
+            "port:é", width_percent=40, scroll="up", style=port_style, opacity=1, visibility="visible",
+        )
+        plain = doc_ex.EpubTextRegion(
+            "plain",
+            style=doc_ex.EpubTextStyle(
+                bold=True, font_style="italic", overline=True,
+                color=(255, 165, 0, 255), background_color=(32, 32, 32, 255),
+            ),
+            opacity=0.25, visibility="hidden",
+        )
+        with doc_ex.open(data) as book:
+            lead, second, other, detached, default = book.epub_embedded_text(0, 0, start_us=167_000)
+            self.assertEqual((lead.start_us, lead.end_us, lead.text), (167_000, 175_000, "BeforeAfter"))
+            self.assertEqual((second.start_us, second.end_us, second.text), (175_000, 205_000, "BeforeAfter"))
+            self.assertEqual(lead.region_layout, port)
+            self.assertEqual(second.region_layout, port)
+            self.assertEqual(other.region_layout, plain)
+            self.assertEqual(default.region_layout, port)
+            self.assertIsNone(detached.region_layout)
+            self.assertIsNone(detached.runs[0].style.color)
+            self.assertEqual(port.viewport_bounds(200, 100), (0, 82, 80, 18))
+            self.assertEqual(lead.runs[0].style, doc_ex.EpubTextStyle(
+                font_style="italic", overline=True, color=(0, 128, 128, 255),
+            ))
+            self.assertEqual(lead.runs[1].style.color, (0, 255, 255, 255))
+            self.assertEqual(second.runs[1].style, lead.runs[0].style)
+            self.assertEqual(second.runs[1].timestamp_us, 175_000)
+            self.assertEqual(lead.background_color, (0, 0, 0, 128))
+            self.assertIsNone(default.background_color)
+            self.assertEqual(default.runs[0].style, doc_ex.EpubTextStyle(
+                bold=True, font_style="italic", overline=True, color=(18, 52, 86, 255),
+            ))
+
+            frames = list(book.epub_embedded_video(0, 0, start_us=165_000, end_us=190_000, text_track=0))
+            self.assertEqual([(f.start_us, f.duration_us) for f in frames],
+                             [(167_000, 8_000), (175_000, 5_000), (180_000, 7_000)])
+            self.assertTrue(all((f.width, f.height) == (6, 4) and f.rgb is frames[0].rgb for f in frames))
+            self.assertEqual([[cue.region_layout for cue in f.text_cues] for f in frames],
+                             [[port], [port], [port, plain]])
+            ttml_cue, = book.epub_embedded_text(0, 0, track_index=1)
+            self.assertEqual(ttml_cue.ttml_region_layout, doc_ex.EpubTtmlRegion("plain", (10, 25), (75, 50)))
+            self.assertIsNone(ttml_cue.region_layout)
+            audio = book.epub_embedded_text(0, 1)[0]
+            self.assertEqual(audio.region_layout, doc_ex.EpubTextRegion("port:é", width_percent=40, scroll="up"))
+            self.assertEqual(audio.runs[0].style.font_style, "normal")
+
     def test_webvtt_region_layout_limits_block_bytes_identifiers_and_lines(self) -> None:
         chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Caption regions</title></head>
           <body><video><track src="style.vtt" kind="captions" srclang="en"/></video></body></html>'''
@@ -4395,11 +4500,17 @@ overlay
             )
         large = b"".join(hashlib.sha256(str(i).encode()).hexdigest().encode() for i in range(1024))
         regular = b"::cue(b){color:red}\n"
+        regions = b"".join(f"REGION\nid:r{i}\n\n".encode() for i in range(256))
+        region_work = (b"::cue-region(#" + b"a" * 512 + b"){color:red}\n") * 100
         for sheet, payload, error, message in (
             (b'STYLE\n::cue { background: url(https://example.invalid/test.png); }\n\n',
              cue, doc_ex.UnsupportedFormatError, "cannot reference resources"),
             (b'STYLE\n::cue(#never) { --asset: url(../picture.png); }\n\n',
              cue, doc_ex.UnsupportedFormatError, "cannot reference resources"),
+            (b'STYLE\n::cue-region(#never) { background: url(../picture.png); }\n\n',
+             cue, doc_ex.UnsupportedFormatError, "cannot reference resources"),
+            (regions + b'STYLE\n' + region_work + b'\n',
+             cue, doc_ex.UnsafeArchiveError, "stylesheet selector work exceeds"),
             (b'STYLE\n@import "caption.css";\n\n',
              cue, doc_ex.UnsupportedFormatError, "cannot reference resources"),
             (b'STYLE\n@media (width > 0px) { ::cue {color:red} }\n\n',

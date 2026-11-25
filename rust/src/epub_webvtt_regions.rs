@@ -1,13 +1,18 @@
 //! Bounded WebVTT region definitions and cue-to-region association.
 use std::{collections::HashMap, sync::Arc};
 
-use super::{charge, limited, EngineError};
+use super::{
+    charge, limited,
+    webvtt_css::{Cascade, RegionPaint},
+    EngineError,
+};
 
 const MAX_REGION_BLOCKS: usize = 256;
 const MAX_REGION_BYTES: usize = 4096;
 const MAX_TRACK_REGION_BYTES: usize = 64 * 1024;
 const MAX_REGION_ID_BYTES: usize = 1024;
 
+#[derive(Clone)]
 pub(crate) struct Region {
     pub id: String,
     pub width_percent: f64,
@@ -15,6 +20,7 @@ pub(crate) struct Region {
     pub region_anchor_percent: (f64, f64),
     pub viewport_anchor_percent: (f64, f64),
     pub scroll_up: bool,
+    pub paint: RegionPaint,
 }
 
 #[derive(Default)]
@@ -45,6 +51,7 @@ impl<'a> Regions<'a> {
             region_anchor_percent: (0.0, 100.0),
             viewport_anchor_percent: (0.0, 100.0),
             scroll_up: false,
+            paint: RegionPaint::default(),
         };
         for line in lines {
             let bytes = line.len() + 1;
@@ -102,6 +109,14 @@ impl<'a> Regions<'a> {
         if let Some(id) = id.filter(|_| !malformed) {
             region.id = id.to_owned();
             self.entries.insert(id, Arc::new(region));
+        }
+        Ok(())
+    }
+
+    pub(super) fn style(&mut self, cascade: &mut Cascade) -> Result<(), EngineError> {
+        for region in self.entries.values_mut() {
+            let paint = cascade.paint_region(&region.id)?;
+            Arc::make_mut(region).paint = paint;
         }
         Ok(())
     }

@@ -113,6 +113,9 @@ class EpubTextRegion:
     region_anchor_percent: tuple[float, float] = (0.0, 100.0)
     viewport_anchor_percent: tuple[float, float] = (0.0, 100.0)
     scroll: Literal["up"] | None = None
+    style: EpubTextStyle = field(default_factory=EpubTextStyle)
+    opacity: float | None = None
+    visibility: Literal["visible", "hidden", "collapse"] | None = None
 
     def viewport_bounds(
         self, viewport_width: float, viewport_height: float

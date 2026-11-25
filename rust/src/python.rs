@@ -539,23 +539,26 @@ type TimedTextStyle = (
 );
 type TimedTextRun = (String, TimedTextStyle, Option<u64>);
 
-fn timed_text_run(run: crate::epub::text_tracks::TextRun) -> TimedTextRun {
-    let style = std::sync::Arc::unwrap_or_clone(run.style);
+fn timed_text_style(style: crate::epub::text_tracks::TextStyle) -> TimedTextStyle {
     let rgba = |[r, g, b, a]: [u8; 4]| (r, g, b, a);
     (
+        style.bold,
+        style.font_style.as_str(),
+        style.underline,
+        style.line_through,
+        style.overline,
+        style.color.map(rgba),
+        style.background_color.map(rgba),
+        style.classes,
+        style.voice,
+        style.language,
+    )
+}
+
+fn timed_text_run(run: crate::epub::text_tracks::TextRun) -> TimedTextRun {
+    (
         run.text,
-        (
-            style.bold,
-            style.font_style.as_str(),
-            style.underline,
-            style.line_through,
-            style.overline,
-            style.color.map(rgba),
-            style.background_color.map(rgba),
-            style.classes,
-            style.voice,
-            style.language,
-        ),
+        timed_text_style(std::sync::Arc::unwrap_or_clone(run.style)),
         run.timestamp,
     )
 }
@@ -566,6 +569,9 @@ type TimedTextRegion = (
     u32,
     (f64, f64),
     (f64, f64),
+    Option<&'static str>,
+    TimedTextStyle,
+    Option<f64>,
     Option<&'static str>,
 );
 
@@ -597,7 +603,8 @@ type TimedTextCue = (
 );
 
 #[pyfunction]
-#[pyo3(signature = (data, path, media, start, end, language=None))]
+#[pyo3(signature = (data, path, media, start, end, language=None, video_context=true))]
+#[allow(clippy::too_many_arguments)]
 fn _epub_text_track(
     py: Python<'_>,
     data: &[u8],
@@ -606,50 +613,56 @@ fn _epub_text_track(
     start: u64,
     end: Option<u64>,
     language: Option<&str>,
+    video_context: bool,
 ) -> Result<Vec<TimedTextCue>, EngineError> {
-    py.allow_threads(|| crate::epub::text_tracks::read(data, path, media, start, end, language))
-        .map(|cues| {
-            cues.into_iter()
-                .map(|cue| {
-                    (
-                        cue.start,
-                        cue.end,
-                        cue.text,
-                        cue.id,
-                        cue.settings,
-                        cue.region,
-                        cue.markup,
-                        cue.runs.into_iter().map(timed_text_run).collect(),
-                        cue.background_color
-                            .map(|[r, g, b, a]: [u8; 4]| (r, g, b, a)),
-                        cue.region_layout.map(|region| {
-                            (
-                                region.id.clone(),
-                                region.width_percent,
-                                region.lines,
-                                region.region_anchor_percent,
-                                region.viewport_anchor_percent,
-                                region.scroll_up.then_some("up"),
-                            )
-                        }),
-                        cue.ttml_region_layout.map(|region| {
-                            (
-                                region.id.clone(),
-                                region.origin_percent,
-                                region.extent_percent,
-                                region.padding_percent,
-                                region.display_align,
-                                region.writing_mode,
-                                region.overflow,
-                                region.background_color.map(|[r, g, b, a]| (r, g, b, a)),
-                                region.show_background,
-                                region.z_index,
-                            )
-                        }),
-                    )
-                })
-                .collect()
-        })
+    py.allow_threads(|| {
+        crate::epub::text_tracks::read(data, path, media, start, end, language, video_context)
+    })
+    .map(|cues| {
+        cues.into_iter()
+            .map(|cue| {
+                (
+                    cue.start,
+                    cue.end,
+                    cue.text,
+                    cue.id,
+                    cue.settings,
+                    cue.region,
+                    cue.markup,
+                    cue.runs.into_iter().map(timed_text_run).collect(),
+                    cue.background_color
+                        .map(|[r, g, b, a]: [u8; 4]| (r, g, b, a)),
+                    cue.region_layout.map(|region| {
+                        (
+                            region.id.clone(),
+                            region.width_percent,
+                            region.lines,
+                            region.region_anchor_percent,
+                            region.viewport_anchor_percent,
+                            region.scroll_up.then_some("up"),
+                            timed_text_style(region.paint.style.clone()),
+                            region.paint.opacity,
+                            region.paint.visibility,
+                        )
+                    }),
+                    cue.ttml_region_layout.map(|region| {
+                        (
+                            region.id.clone(),
+                            region.origin_percent,
+                            region.extent_percent,
+                            region.padding_percent,
+                            region.display_align,
+                            region.writing_mode,
+                            region.overflow,
+                            region.background_color.map(|[r, g, b, a]| (r, g, b, a)),
+                            region.show_background,
+                            region.z_index,
+                        )
+                    }),
+                )
+            })
+            .collect()
+    })
 }
 
 #[pyfunction]

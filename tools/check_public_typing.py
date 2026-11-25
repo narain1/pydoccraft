@@ -32,6 +32,9 @@ def verify_epub_tracks(source: bytes) -> None:
             assert_type(region.viewport_bounds(1280, 720), tuple[float, float, float, float])
             assert_type(region.viewport_anchor_percent, tuple[float, float])
             assert_type(region.scroll, Literal["up"] | None)
+            assert_type(region.style, doc_ex.EpubTextStyle)
+            assert_type(region.opacity, float | None)
+            assert_type(region.visibility, Literal["visible", "hidden", "collapse"] | None)
         ttml_region = cues[0].ttml_region_layout
         assert_type(ttml_region, doc_ex.EpubTtmlRegion | None)
         if ttml_region is not None:

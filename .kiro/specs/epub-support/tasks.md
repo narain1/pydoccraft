@@ -122,7 +122,8 @@
 - [x] Preserve surround Vorbis speaker assignments in Ogg and WebM audio, video soundtracks, and narration. Reject undefined speaker layouts.
 - [ ] Extend WebM to additional AV1 profiles, high dynamic range and alpha.
 - [ ] Support additional Ogg soundtracks, simultaneous video tracks and more MP4 profiles.
-- [ ] Support WebVTT region styling and scrolling and extend TTML to inline, animated and mixed-region captions, region text-style inheritance, and subtitle painting.
+- [x] Apply bounded WebVTT region selectors and carry typed region paint and cue styles into standalone captions and synchronized video.
+- [ ] Support WebVTT region scrolling and extend TTML to inline, animated and mixed-region captions, region text-style inheritance, and subtitle painting.
 - [ ] Support more media fragment track combinations and ID fragments in additional containers.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
 - [x] Synchronize XHTML navigation and the spine's compatibility NCX in the same EPUB 3 chapter edit.

@@ -23,6 +23,7 @@ type Rank = (bool, Specificity);
 #[derive(Default)]
 pub(super) struct Cascade {
     rules: Vec<Rule>,
+    region_rules: Vec<Rule>,
     bytes: usize,
     blocks: usize,
     selectors: usize,
@@ -45,6 +46,13 @@ pub(super) struct Target<'a> {
     pub language: Option<&'a str>,
     pub language_attribute: Option<&'a str>,
     pub playback: PlaybackState,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct RegionPaint {
+    pub style: TextStyle,
+    pub opacity: Option<f64>,
+    pub visibility: Option<&'static str>,
 }
 
 struct Rule {
@@ -106,11 +114,17 @@ enum Value {
     Bold(bool),
     Slant(FontStyle),
     Decoration([bool; 3]),
+    Opacity(f64),
+    Visibility(&'static str),
 }
 
 impl Value {
+    fn region_only(self) -> bool {
+        matches!(self, Self::Opacity(_) | Self::Visibility(_))
+    }
+
     fn applies_to_timed_selector(self) -> bool {
-        !matches!(self, Self::Bold(_) | Self::Slant(_))
+        !(self.region_only() || matches!(self, Self::Bold(_) | Self::Slant(_)))
     }
 
     fn slot(self) -> usize {
@@ -120,11 +134,13 @@ impl Value {
             Self::Bold(_) => 2,
             Self::Slant(_) => 3,
             Self::Decoration(_) => 4,
+            Self::Opacity(_) => 5,
+            Self::Visibility(_) => 6,
         }
     }
 }
 
-pub(super) struct Paint([Option<(Rank, Value)>; 5]);
+pub(super) struct Paint([Option<(Rank, Value)>; 7]);
 
 #[derive(Clone, Copy)]
 struct Declaration {
@@ -166,11 +182,21 @@ impl Cascade {
                 "WebVTT stylesheets exceed their selector count budget",
             )?;
             let declarations: Arc<[_]> = declarations(&rule.block, &source)?.into();
+            let mut cue_declarations: Option<Arc<[Declaration]>> = None;
             let mut timed_declarations: Option<Arc<[Declaration]>> = None;
             for selector in &rule.selector.selectors {
-                let Some(selector) = Selector::from_css(selector)? else {
+                let Some((selector, region)) = Selector::from_css(selector)? else {
                     continue;
                 };
+                if region {
+                    if !declarations.is_empty() {
+                        self.region_rules.push(Rule {
+                            selector,
+                            declarations: declarations.clone(),
+                        });
+                    }
+                    continue;
+                }
                 let past = selector.tests.iter().any(|test| matches!(test, Test::Past));
                 let future = selector
                     .tests
@@ -185,7 +211,19 @@ impl Cascade {
                             .collect()
                     })
                 } else {
-                    &declarations
+                    cue_declarations.get_or_insert_with(|| {
+                        if declarations
+                            .iter()
+                            .all(|declaration| !declaration.value.region_only())
+                        {
+                            return declarations.clone();
+                        }
+                        declarations
+                            .iter()
+                            .copied()
+                            .filter(|declaration| !declaration.value.region_only())
+                            .collect()
+                    })
                 };
                 if !declarations.is_empty() {
                     self.timed.past |= past;
@@ -205,33 +243,63 @@ impl Cascade {
     }
 
     pub(super) fn paint(&mut self, target: Target<'_>) -> Result<Paint, EngineError> {
-        let mut winners: [Option<(Rank, Value)>; 5] = [None; 5];
-        for rule in &self.rules {
-            charge(
-                &mut self.work,
-                1,
-                MAX_MATCH_WORK,
-                "WebVTT stylesheet selector work exceeds its budget",
-            )?;
-            if !rule.selector.matches(&target, &mut self.work)? {
-                continue;
-            }
-            charge(
-                &mut self.work,
-                rule.declarations.len(),
-                MAX_MATCH_WORK,
-                "WebVTT stylesheet cascade exceeds its work budget",
-            )?;
-            for declaration in rule.declarations.iter() {
-                let rank = (declaration.important, rule.selector.specificity);
-                let slot = &mut winners[declaration.value.slot()];
-                if slot.is_none_or(|(previous, _)| previous <= rank) {
-                    *slot = Some((rank, declaration.value));
-                }
+        paint_rules(&self.rules, target, &mut self.work)
+    }
+
+    pub(super) fn paint_region(&mut self, id: &str) -> Result<RegionPaint, EngineError> {
+        let mut paint = paint_rules(
+            &self.region_rules,
+            Target {
+                id: Some(id),
+                ..Default::default()
+            },
+            &mut self.work,
+        )?;
+        let opacity = match paint.0[5].take() {
+            Some((_, Value::Opacity(value))) => Some(value),
+            _ => None,
+        };
+        let visibility = match paint.0[6].take() {
+            Some((_, Value::Visibility(value))) => Some(value),
+            _ => None,
+        };
+        let mut style = TextStyle::default();
+        style.background_color = paint.apply(&TextStyle::default(), &mut style);
+        Ok(RegionPaint {
+            style,
+            opacity,
+            visibility,
+        })
+    }
+}
+
+fn paint_rules(rules: &[Rule], target: Target<'_>, work: &mut usize) -> Result<Paint, EngineError> {
+    let mut winners: [Option<(Rank, Value)>; 7] = [None; 7];
+    for rule in rules {
+        charge(
+            work,
+            1,
+            MAX_MATCH_WORK,
+            "WebVTT stylesheet selector work exceeds its budget",
+        )?;
+        if !rule.selector.matches(&target, work)? {
+            continue;
+        }
+        charge(
+            work,
+            rule.declarations.len(),
+            MAX_MATCH_WORK,
+            "WebVTT stylesheet cascade exceeds its work budget",
+        )?;
+        for declaration in rule.declarations.iter() {
+            let rank = (declaration.important, rule.selector.specificity);
+            let slot = &mut winners[declaration.value.slot()];
+            if slot.is_none_or(|(previous, _)| previous <= rank) {
+                *slot = Some((rank, declaration.value));
             }
         }
-        Ok(Paint(winners))
     }
+    Ok(Paint(winners))
 }
 
 impl Paint {
@@ -250,6 +318,7 @@ impl Paint {
                     style.line_through = inherited.line_through || line_through;
                     style.overline = inherited.overline || overline;
                 }
+                Value::Opacity(_) | Value::Visibility(_) => {}
             }
         }
         background
@@ -257,22 +326,36 @@ impl Paint {
 }
 
 impl Selector {
-    fn from_css(selector: &ComplexSelector<'_>) -> Result<Option<Self>, EngineError> {
+    fn from_css(selector: &ComplexSelector<'_>) -> Result<Option<(Self, bool)>, EngineError> {
         let [ComplexSelectorChild::CompoundSelector(compound)] = selector.children.as_slice()
         else {
             return Ok(None);
         };
-        let [SimpleSelector::PseudoElement(cue)] = compound.children.as_slice() else {
-            return Ok(None);
+        let (cue, video_qualified) = match compound.children.as_slice() {
+            [SimpleSelector::PseudoElement(cue)] => (cue, false),
+            [SimpleSelector::Type(TypeSelector::TagName(tag)), SimpleSelector::PseudoElement(cue)]
+                if tag.name.prefix.is_none() && css::ident(&tag.name.name) == Some("video") =>
+            {
+                (cue, true)
+            }
+            _ => return Ok(None),
         };
-        if !css::ident(&cue.name).is_some_and(|name| name.eq_ignore_ascii_case("cue")) {
+        let name = css::ident(&cue.name).unwrap_or_default();
+        if name.eq_ignore_ascii_case("cue-region") {
+            return Self::region(cue, video_qualified)
+                .map(|value| value.map(|selector| (selector, true)));
+        }
+        if video_qualified || !name.eq_ignore_ascii_case("cue") {
             return Ok(None);
         }
         let Some(argument) = &cue.arg else {
-            return Ok(Some(Self {
-                tests: vec![Test::Root],
-                specificity: [0, 0, 1],
-            }));
+            return Ok(Some((
+                Self {
+                    tests: vec![Test::Root],
+                    specificity: [0, 0, 1],
+                },
+                false,
+            )));
         };
         let PseudoElementSelectorArgKind::CompoundSelector(compound) = &argument.kind else {
             return Err(unsupported("unsupported WebVTT ::cue selector"));
@@ -291,7 +374,33 @@ impl Selector {
             }
             tests.push(test);
         }
-        Ok(Some(Self { tests, specificity }))
+        Ok(Some((Self { tests, specificity }, false)))
+    }
+
+    fn region(
+        cue: &PseudoElementSelector<'_>,
+        video_qualified: bool,
+    ) -> Result<Option<Self>, EngineError> {
+        let mut specificity = [0, 0, 1 + u16::from(video_qualified)];
+        let test = if let Some(argument) = &cue.arg {
+            let PseudoElementSelectorArgKind::CompoundSelector(compound) = &argument.kind else {
+                return Ok(None);
+            };
+            if compound.children.len() > MAX_SELECTOR_TERMS {
+                return Err(limited("WebVTT ::cue-region has too many selector terms"));
+            }
+            let [SimpleSelector::Id(id)] = compound.children.as_slice() else {
+                return Ok(None);
+            };
+            specificity[0] = 1;
+            Test::Id(label(css::ident(&id.name))?)
+        } else {
+            Test::Universal
+        };
+        Ok(Some(Self {
+            tests: vec![test],
+            specificity,
+        }))
     }
 
     fn matches(&self, target: &Target<'_>, work: &mut usize) -> Result<bool, EngineError> {
@@ -548,6 +657,22 @@ fn declaration_value(name: &str, value: &str) -> Option<Value> {
             "normal" => FontStyle::Normal,
             "italic" => FontStyle::Italic,
             "oblique" => FontStyle::Oblique,
+            _ => return None,
+        })),
+        "opacity" => {
+            let (number, scale) = value
+                .strip_suffix('%')
+                .map_or((value, 1.0), |number| (number, 0.01));
+            number
+                .parse::<f64>()
+                .ok()
+                .filter(|number| number.is_finite())
+                .map(|number| Value::Opacity((number * scale).clamp(0.0, 1.0)))
+        }
+        "visibility" => Some(Value::Visibility(match keyword.as_str() {
+            "visible" => "visible",
+            "hidden" => "hidden",
+            "collapse" => "collapse",
             _ => return None,
         })),
         "text-decoration" | "text-decoration-line" => {
