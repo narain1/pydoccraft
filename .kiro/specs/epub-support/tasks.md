@@ -21,6 +21,7 @@
 - [x] Project supported Presentation MathML into native equations for PNG, DOCX and PDF.
 - [x] Apply local author styles for the supported cascade and layout properties. Render fixed-layout XHTML and static SVG chapters with viewport bounds and clipping.
 - [x] Cascade horizontal logical sizes, spacing, offsets, overflow and solid borders against their physical aliases, including RTL inheritance and custom properties. Resolve HTML automatic direction for horizontal boxes and paragraph base direction.
+- [x] Resolve bounded XHTML box calc expressions using lengths or percentages as well as viewport and font-relative units. Preserve computed values through logical inheritance.
 - [x] Preserve independently directed inline spans and their Unicode bidi isolation through text shaping, link offsets and PDF capture.
 - [x] Render local CSS font faces, IDPF-obfuscated fonts, and static SVG embedded in XHTML. Preserve inline equations, images and table spans with packaged fonts. Rasterize static SVG in semantic export.
 - [x] Render SVG CSS, packaged SVG fonts, and referenced PNG and JPEG resources in spine previews, XHTML and semantic export.
@@ -55,7 +56,7 @@
 - [x] Transport fixed-layout PDF text, annotations and destinations along provable single-layer SVG offset chains using native raster transforms and clipping.
 - [x] Compose nested axis-aligned SVG offsets for one painted source and capture surviving search, links and fragments from the whole native stack.
 - [x] Render bounded native SVG blend and component transfer and retain searchable text, links and fragments through provable alpha and offset chains.
-- [ ] Extend the supported EPUB CSS and fixed-layout rendering profile.
+- [ ] Extend the supported EPUB CSS and fixed-layout rendering profile, including calculations that mix lengths and layout-dependent percentages.
 - [ ] Add SVG filter primitives and retain PDF text and links for multi-source, non-axis-aligned or ambiguous spatial filter results.
 - [ ] Extend mixed-font SVG text fallback to spacing across ambiguous clusters, nested length owners and glyph positioning.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.

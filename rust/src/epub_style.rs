@@ -85,7 +85,7 @@ impl ChapterStyles {
             {
                 box_context.pop();
             }
-            let (values, flow) =
+            let (mut values, flow) =
                 cascade.properties(node, box_context.last().map(|(_, parent)| parent))?;
             if is_math {
                 if let Some(css) = math::Css::from_properties(&values) {
@@ -133,6 +133,8 @@ impl ChapterStyles {
             }
             text.apply(node, &values, viewport, font);
             text.chars.rtl = flow.rtl;
+            let font = text.chars.size.unwrap_or(12.0);
+            css::logical::resolve_calculated_geometry(&mut values, flow, font, viewport)?;
             let tag = node.tag_name().name();
             let position = match value(&values, "position") {
                 "fixed" => Position::Fixed,
@@ -160,7 +162,6 @@ impl ChapterStyles {
                 values.get("unicode-bidi").map(String::as_str),
                 parent.map_or(super::bidi::Mode::Normal, |parent| parent.bidi),
             );
-            let font = text.chars.size.unwrap_or(12.0);
             let auto = |key| dimension::<LengthPercentageAuto>(value(&values, key), font, viewport);
             let dim = |key| dimension::<Dimension>(value(&values, key), font, viewport);
             let len = |key| length(value(&values, key), font, viewport);

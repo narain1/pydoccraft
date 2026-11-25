@@ -1117,6 +1117,66 @@ class EpubTests(unittest.TestCase):
         for color in ("c94b39ff", "215caaff", "fcd011ff", "9444b4ff"):
             self.assertIn(bytes.fromhex(color), pixels)
 
+    def test_epub_css_calc_matches_resolved_geometry_and_preserves_inheritance(self) -> None:
+        source = fixed_spread_fixture([("", "white", 280, 180)])
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Calculated geometry</title>
+          <meta name="viewport" content="width=280,height=180"/>
+          <style>html,body,p{margin:0} #box{position:absolute;background:#c94b39;font-size:20px}
+           #inner{font-size:10px;background:#24b781;height:22px} #note{position:absolute;top:100px}
+           STYLES</style></head><body>
+           <div id="box" dir="rtl"><p id="inner"><a href="https://example.org/calc">Visible label</a></p></div>
+           <p id="note"><a href="#inner">Target</a></p></body></html>"""
+        calculated = """
+          #box{--gap:12px; inset-inline-start:calc(28px / 2); inset-block-start:CALC(18px - 4px);
+               inline-size:calc(2 * (60px - 10px)); block-size:calc(25vh + 3px);
+               padding-inline:calc(var(--gap) - 2px) calc(1.5em - 10px);
+               padding-block-end:calc(2px - 4px); border-inline-start:calc(1px * 2) solid #3b2b7d}
+          #inner{width:calc(100% - 25%); padding-inline-end:inherit; margin-inline-start:calc(3px - 7px)}
+          #note{left:5px;left:calc(2 + 4px)}
+        """
+        explicit = """
+          #box{right:14px; top:14px; width:100px; height:48px;
+               padding-right:10px; padding-left:20px; padding-bottom:0;
+               border-right:2px solid #3b2b7d}
+          #inner{width:75%; padding-left:20px; margin-right:-4px}
+          #note{left:5px}
+        """
+        outcomes = []
+        for css in (calculated, explicit):
+            xhtml = chapter.replace("STYLES", css)
+            with doc_ex.open(source) as book:
+                edited = book.edit_epub_structure(replacements={0: xhtml})
+            with doc_ex.open(edited) as book:
+                pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                pdf = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+                self.assertIn("Visible label", book[0].get_text())
+            with doc_ex.open(pdf) as document, document.edit() as editor:
+                reopened = rgba_pixels(png_chunks(document.render_page(0, dpi=96)))
+                self.assertEqual(reopened, pixels)
+                hits = document[0].search_for("Visible label")
+                self.assertEqual(len(hits), 1)
+                external, internal = document[0].get_links()
+                self.assertEqual(external.uri, "https://example.org/calc")
+                self.assertEqual(internal.metadata["target_page"], 0)
+                destination = re.search(rb"/XYZ\s+([0-9.]+)\s+([0-9.]+)\s+null",
+                                        editor.to_bytes(object_streams=False))
+                assert destination is not None
+                outcomes.append((pixels, hits, external.bbox, destination.groups()))
+        self.assertEqual(outcomes[0], outcomes[1])
+
+    def test_epub_css_calc_rejects_unresolved_bases_and_excess_geometry(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Calculated geometry</title>
+          <style>div {background:green; CSS}</style></head><body><div>Panel</div></body></html>"""
+        cases = (
+            ("inline-size:calc(50% - 1px)", doc_ex.UnsupportedFormatError, "unsupported EPUB CSS calc"),
+            ("width:calc(18000px * 3)", doc_ex.UnsafeArchiveError, "CSS calc exceeds"),
+            ("padding-inline-start:calc(" + "1px + " * 90 + "1px)", doc_ex.UnsafeArchiveError, "CSS calc exceeds"),
+        )
+        for css, error, message in cases:
+            with self.subTest(css=css), doc_ex.open(epub_fixture(chapter_one=chapter.replace("CSS", css))) as book:
+                with self.assertRaisesRegex(error, message):
+                    book.render_page(0, dpi=96)
+
     def test_logical_css_var_failure_resets_alias_and_vertical_writing_fails(self) -> None:
         markup = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Logical flow</title>
           <style>body{margin:0} #outer{width:64px;height:40px;background:#c94b39}

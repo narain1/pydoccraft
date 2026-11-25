@@ -1,7 +1,8 @@
 //! Horizontal flow-relative box properties, resolved before native layout.
 use roxmltree::Node;
 
-use super::{html_direction, points, Properties};
+use super::{calc, html_direction, points, Properties};
+use crate::EngineError;
 
 #[derive(Clone, Copy, Default)]
 pub(in crate::epub) struct Flow {
@@ -62,6 +63,20 @@ pub(super) struct Pair(
 );
 
 impl Pair {
+    pub(super) fn is_length(&self) -> bool {
+        !self.0.starts_with("overflow-")
+            && !self.0.ends_with("-color")
+            && !self.0.ends_with("-style")
+    }
+
+    fn allows_negative(&self) -> bool {
+        self.0.starts_with("inset-") || self.0.starts_with("margin-")
+    }
+
+    pub(super) fn accepts_percentage(&self) -> bool {
+        !self.0.starts_with("border-")
+    }
+
     pub(super) fn physical(&self, flow: Flow) -> &'static str {
         if flow.rtl == Some(true) {
             self.2
@@ -175,6 +190,23 @@ pub(super) fn pair(name: &str) -> Option<&'static Pair> {
 
 pub(super) fn physical_pair(name: &str, flow: Flow) -> Option<&'static Pair> {
     PAIRS.iter().find(|pair| pair.physical(flow) == name)
+}
+
+pub(in crate::epub) fn resolve_calculated_geometry(
+    values: &mut Properties,
+    flow: Flow,
+    font: f32,
+    viewport: [f32; 2],
+) -> Result<(), EngineError> {
+    for (name, value) in values {
+        if !calc::is_calc(value) {
+            continue;
+        }
+        if let Some(pair) = physical_pair(name, flow).filter(|pair| pair.is_length()) {
+            *value = calc::resolve(value, font, viewport, pair.allows_negative())?;
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn shorthand(name: &str) -> Option<[&'static str; 2]> {
@@ -291,12 +323,15 @@ pub(super) fn value_kind(name: &str, value: &str) -> ValueKind {
     {
         return Supported;
     }
+    if calc::is_calc(value) {
+        return classified(calc::valid(value, !border));
+    }
     if size
         && matches!(
             value,
             "min-content" | "max-content" | "fit-content" | "stretch"
         )
-        || ["calc(", "min(", "max(", "clamp(", "fit-content("]
+        || ["min(", "max(", "clamp(", "fit-content("]
             .iter()
             .any(|prefix| value.starts_with(prefix) && value.ends_with(')'))
     {

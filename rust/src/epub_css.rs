@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use super::{charge, external, invalid, limited, name, resolve, unsupported, Book, XHTML};
 use crate::EngineError;
 
+#[path = "epub_css_calc.rs"]
+mod calc;
 #[path = "epub_html_direction.rs"]
 mod html_direction;
 #[path = "epub_css_logical.rs"]
@@ -1230,6 +1232,8 @@ fn valid_literal(
         _ if logical::pair(name).is_some() => {
             css_wide(value) || logical::value_kind(name, value) != logical::ValueKind::Invalid
         }
+        _ if calc::is_calc(value) => logical::physical_pair(name, logical::Flow::default())
+            .is_none_or(|pair| !pair.is_length() || calc::valid(value, pair.accepts_percentage())),
         "font-optical-sizing" => {
             optical_sizing(value).is_some()
                 || matches!(
@@ -1345,7 +1349,9 @@ fn expand(name: &str, value: &str) -> Vec<(String, String)> {
         let mut style = "none";
         let flow_relative = name.starts_with("border-inline") || name.starts_with("border-block");
         for word in value_components(value) {
-            if points(word, 12.0, [0.0; 2]).is_some() || matches!(word, "thin" | "medium" | "thick")
+            if points(word, 12.0, [0.0; 2]).is_some()
+                || calc::is_calc(word) && calc::valid(word, false)
+                || matches!(word, "thin" | "medium" | "thick")
             {
                 width = word;
             } else if color(word).is_some() || word.eq_ignore_ascii_case("currentcolor") {
