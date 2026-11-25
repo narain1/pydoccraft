@@ -763,11 +763,25 @@ pub(super) fn inline_svg(
 ) -> Result<ImagePayload, EngineError> {
     let bytes = standalone(node, cx.source)?;
     let mut image = svg_image(node, &bytes, cx.page, "inline.svg", cx.path, cx.budget)?;
-    if node
+    image.metadata.insert("epub_svg_inline".into(), json!(true));
+    let mut targets = Vec::new();
+    for href in node
         .descendants()
-        .any(|node| name(node, SVG, "a") && super::svg::image_href(node).is_some())
+        .filter(|node| name(*node, SVG, "a"))
+        .filter_map(super::svg::image_href)
     {
         image.metadata.insert("epub_svg_links".into(), json!(true));
+        let link = link_in_chapter(href, "", 0, 0, cx.path, cx.page, cx.budget)?;
+        if let Some(path) = link.metadata.get("target_path") {
+            if let Some(fragment) = link.metadata.get("target_fragment") {
+                targets.push(json!([path, fragment]));
+            }
+        }
+    }
+    if !targets.is_empty() {
+        image
+            .metadata
+            .insert("epub_svg_targets".into(), json!(targets));
     }
     Ok(image)
 }

@@ -95,7 +95,7 @@ pub(super) struct Output<'a> {
     archive: Option<super::Book<'a>>,
     pub document: Document,
     preserve_links: bool,
-    pub svg_text: Option<super::rendition::text::SvgImages>,
+    pub svg_images: Option<super::rendition::text::SvgImages>,
     pub navigation: Option<std::collections::HashMap<u64, super::layout::InlineNavigation>>,
     pixels: u64,
     raster_dpi: f64,
@@ -148,7 +148,7 @@ impl<'a> Output<'a> {
             archive: None,
             document,
             preserve_links,
-            svg_text: None,
+            svg_images: None,
             navigation: None,
             pixels: 0,
             raster_dpi,
@@ -422,10 +422,14 @@ impl<'a> Output<'a> {
                 .archive
                 .as_mut()
                 .ok_or_else(|| conversion("missing EPUB archive"))?;
-            let tree = super::svg::embedded(&bytes, base, archive)?;
+            let interactive =
+                self.svg_images.is_some() && image.metadata.contains_key("epub_svg_inline");
+            let (tree, geometry) =
+                super::svg::embedded_with_links(&bytes, base, archive, interactive)?;
             let width = tree.size().width();
             let height = tree.size().height();
-            let media = self.rasterize_svg(&tree, width * 0.75, height * 0.75)?;
+            let media =
+                self.rasterize_svg(&tree, width * 0.75, height * 0.75, geometry.map(Arc::new))?;
             return Ok(RasterImage {
                 media,
                 width,
@@ -460,23 +464,24 @@ impl<'a> Output<'a> {
         tree: &resvg::usvg::Tree,
         width: f32,
         height: f32,
+        geometry: Option<Arc<super::svg::LinkGeometry>>,
     ) -> Result<String, EngineError> {
         let scale = self.raster_dpi / 72.0;
         let pixels = [width, height].map(|size| (f64::from(size) * scale).ceil().max(1.0) as u32);
         self.charge_image(pixels[0], pixels[1])?;
         let bytes = super::svg::transparent_png(tree, pixels[0], pixels[1])?;
         let media = self.add_preview_media(bytes, "png");
-        if let Some(capture) = self.svg_text.as_mut() {
-            capture.record(&media, tree, [width, height])?;
+        if let Some(capture) = self.svg_images.as_mut() {
+            capture.record(&media, tree, [width, height], geometry)?;
         }
         Ok(media)
     }
 
     fn add_preview_media(&mut self, bytes: Vec<u8>, ext: &str) -> String {
-        if self.svg_text.is_none() {
+        if self.svg_images.is_none() {
             return self.document.add_media(bytes, ext);
         }
-        // Two images can have identical pixels and different searchable text.
+        // Identical raster images can carry different text, anchors or links.
         let media = format!("image{}.{ext}", self.document.media.len() + 1);
         self.document.media.insert(media.clone(), Arc::new(bytes));
         media

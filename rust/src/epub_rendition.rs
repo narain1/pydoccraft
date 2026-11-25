@@ -21,8 +21,8 @@ pub(super) struct Capture<'a, 'key> {
 #[derive(Default)]
 pub(super) struct LinkAreas {
     page: usize,
-    entries: Vec<(usize, Rect, Arc<str>)>,
-    bytes: usize,
+    pub(super) entries: Vec<(usize, Rect, Arc<str>)>,
+    pub(super) bytes: usize,
 }
 
 impl LinkAreas {

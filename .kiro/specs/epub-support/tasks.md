@@ -25,7 +25,7 @@
 - [x] Preserve the fixed-layout preview pixel grid in reopened PDF pages. Partial edge pixels can differ when the PDF viewport clips them.
 - [x] Preserve nested EPUB navigation in fixed-layout PDF outlines, with destinations remapped to the exported page order.
 - [x] Preserve clickable links and fragment destinations on fixed-layout XHTML content and standalone SVG objects.
-- [ ] Extend fixed-layout link geometry to SVG text spans and SVG embedded in XHTML, and resolve remaining inline fragment cases.
+- [x] Preserve fixed-layout PDF links on SVG text spans and inline SVG inside XHTML, including local text-span destinations.
 - [x] Offer searchable fixed-layout PDF export for XHTML, native MathML, and standalone and embedded SVG.
 - [ ] Match searchable SVG text geometry to nonrectangular clipping and masks.
 - [x] Scope packaged XHTML font faces using CSS Unicode ranges, overlap order and glyph fallback.

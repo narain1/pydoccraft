@@ -980,6 +980,82 @@ class EpubTests(unittest.TestCase):
             self.assertRegex(editor.to_bytes(object_streams=False),
                              rb"/XYZ\s+60(?:\.0+)?\s+30(?:\.0+)?\s+null")
 
+    def test_fixed_layout_pdf_links_use_positioned_svg_text_spans(self) -> None:
+        data = fixed_spread_fixture([("", "white", 320, 160)])
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'href="s0.xhtml" media-type="application/xhtml+xml"',
+                b'href="s0.svg" media-type="image/svg+xml"',
+            )
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 160">
+            <style>.active {fill:#92004c} .quiet { visibility:hidden }</style>
+            <defs><g id="callout"><text font-size="18"><a href="https://example.org/reused">Repeated</a></text></g></defs>
+            <g transform="translate(8 6)" font-family="Liberation Serif" font-size="18">
+              <text x="12" y="38">Before <a href="https://example.org/text" x="86">
+                <tspan class="active">See</tspan><tspan> details</tspan></a><tspan x="220" fill="#000001"> After</tspan></text>
+              <text x="16" y="78"><a href="#caf%C3%A9">Jump</a>
+                <tspan x="130" id="café">the fragment</tspan></text>
+              <text x="16" y="118"><a class="quiet" href="https://example.org/hidden">Invisible</a>
+                <a x="130" fill-opacity="0" href="https://example.org/clear">Transparent</a></text>
+              <text x="16" y="142"><a href="#pydoccraft-pdf-link-2">Missing</a></text>
+            </g><use href="#callout" x="178" y="118"/></svg>"""
+        data = rewrite_epub(data, {"OEBPS/content.opf": package, "OEBPS/s0.svg": svg})
+        with doc_ex.open(data) as book:
+            preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+            output = book.export_epub_fixed_pdf(dpi=96, pages=[0, 0], searchable=True)
+        with doc_ex.open(output) as pdf, pdf.edit() as editor:
+            for i in range(2):
+                external, jump, instance = pdf[i].get_links()
+                self.assertEqual(external.uri, "https://example.org/text")
+                self.assertAlmostEqual(external.bbox[0], 70.5, delta=1)
+                self.assertLess(external.bbox[2], 160)
+                self.assertEqual(jump.metadata["target_page"], i)
+                self.assertLess(jump.bbox[2], 90)
+                self.assertEqual(instance.uri, "https://example.org/reused")
+                self.assertAlmostEqual(instance.bbox[0], 133.5, delta=1)
+                self.assertIn("the fragment", pdf[i].get_text())
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(i, dpi=96))), preview)
+            self.assertRegex(editor.to_bytes(object_streams=False), rb"/XYZ\s+103\.5\s+[0-9.]+\s+null")
+
+    def test_fixed_layout_pdf_links_inside_inline_svg_use_xhtml_placement(self) -> None:
+        data = fixed_spread_fixture([("", "white", 360, 180)])
+        packaged = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 48" width="120" height="48">
+            <a href="https://example.org/plot"><rect x="8" y="5" width="24" height="16" fill="#04b"/></a>
+            <text x="42" y="32" font-size="14"><a href="#detail">Read</a></text></svg>"""
+        for family in ("serif", "Local"):
+            with self.subTest(font=family):
+                chapter = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Inline SVG</title>
+                    <meta name="viewport" content="width=360,height=180"/>
+                    <style>@font-face {{font-family:Local;src:url(font.ttf)}}
+                    body {{margin:0;font-family:{family};font-size:16px}}
+                    p {{position:absolute;left:16px;top:10px;margin:0}}
+                    #clip {{position:absolute;left:48px;top:76px;width:22px;height:48px;overflow:hidden}}
+                    #target {{position:absolute;left:152px;top:132px}}
+                    img {{position:absolute;left:224px;top:10px}}</style></head>
+                    <body><p>Label {svg} after</p><div id="clip">{svg}</div>
+                    <img src="picture.svg" alt="Inert image"/>
+                    <svg id="target" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40" width="120" height="40">
+                    <text x="12" y="24"><tspan id="detail">Detail</tspan></text></svg></body></html>"""
+                source = rewrite_epub(data, {"OEBPS/s0.xhtml": chapter, "OEBPS/font.ttf": packaged,
+                                                 "OEBPS/picture.svg": svg})
+                with doc_ex.open(source) as book:
+                    output = book.export_epub_fixed_pdf(dpi=96)
+                    preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                with doc_ex.open(output) as pdf, pdf.edit() as editor:
+                    links = pdf[0].get_links()
+                    plot = [link for link in links if link.uri == "https://example.org/plot"]
+                    self.assertEqual(len(plot), 2, links)
+                    inline, clipped = sorted(plot, key=lambda link: link.bbox[1])
+                    self.assertGreater(inline.bbox[0], 18)
+                    self.assertLess(inline.bbox[1], 45)
+                    self.assertEqual(tuple(clipped.bbox), (42, 60.75, 52.5, 72.75))
+                    jump, = [link for link in links if link.metadata.get("target_kind") == "page"]
+                    self.assertEqual(jump.metadata["target_page"], 0)
+                    self.assertEqual(len(links), 3)
+                    self.assertRegex(editor.to_bytes(object_streams=False), rb"/XYZ\s+123(?:\.0+)?\s+[0-9.]+\s+null")
+                    self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+
     def test_fixed_layout_pdf_searchable_text_preserves_rendering_and_selection(self) -> None:
         source = fixed_spread_fixture([("", "white", 320, 200)] * 3)
         font = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()

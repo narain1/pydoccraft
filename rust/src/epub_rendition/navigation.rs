@@ -95,6 +95,16 @@ impl<'a> Navigation<'a> {
                 let fragment = link.metadata.get("target_fragment").and_then(Value::as_str);
                 navigation.request_anchor(target, fragment);
             }
+            for image in &page.images {
+                for target in image
+                    .metadata
+                    .get("epub_svg_targets")
+                    .map(items)
+                    .unwrap_or_default()
+                {
+                    navigation.request_anchor(target[0].as_str(), target[1].as_str());
+                }
+            }
         }
         let mut pending = toc.iter().collect::<Vec<_>>();
         while let Some(item) = pending.pop() {

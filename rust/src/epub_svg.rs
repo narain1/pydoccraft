@@ -1,6 +1,6 @@
 //! Rasterize a validated EPUB SVG content document on its declared viewport.
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap},
     sync::Arc,
 };
 
@@ -15,8 +15,11 @@ use crate::{author_epub::escape_attribute, model::ImagePayload, EngineError};
 
 #[path = "epub_svg_effects.rs"]
 pub(super) mod effects;
+#[path = "epub_svg_links.rs"]
+mod links;
 #[path = "epub_svg_fonts.rs"]
 mod svg_fonts;
+pub(super) use links::Geometry as LinkGeometry;
 #[path = "epub_svg_use.rs"]
 pub(super) mod use_refs;
 
@@ -147,8 +150,8 @@ pub(super) fn render(
     if fixed && viewport.is_none() {
         return Err(unsupported("fixed-layout SVG requires a numeric viewBox"));
     }
-    let links = navigation.is_some().then(|| SvgLinks::new(root));
-    let tree = parse(
+    let links = navigation.is_some().then(|| links::Links::new(root));
+    let (tree, geometry) = parse(
         root,
         root.document().input_text().as_bytes(),
         base,
@@ -157,11 +160,18 @@ pub(super) fn render(
         links.as_ref(),
     )?;
     let [w, h] = viewport.unwrap_or([tree.size().width() * 0.75, tree.size().height() * 0.75]);
-    if let Some((capture, links)) = navigation.as_mut().zip(links.as_ref()) {
-        if capture.anchors.is_some() || capture.text.is_some() || !links.targets.is_empty() {
-            let clip = wordcraft_geom::Rect::new(0.0, 0.0, w, h);
-            let scale = [w / tree.size().width(), h / tree.size().height()];
-            capture_svg(&tree, links, scale, clip, capture)?;
+    if let Some((capture, geometry)) = navigation.as_mut().zip(geometry.as_ref()) {
+        let clip = wordcraft_geom::Rect::new(0.0, 0.0, w, h);
+        geometry.place(
+            kurbo::Affine::scale_non_uniform(
+                f64::from(w / tree.size().width()),
+                f64::from(h / tree.size().height()),
+            ),
+            clip,
+            capture,
+        )?;
+        if let Some(text) = capture.text.as_deref_mut() {
+            collect_image_text(&tree, [w, h], text)?;
         }
     }
     let scale = dpi / 72.0;
@@ -186,79 +196,6 @@ pub(super) fn render(
     })
 }
 
-struct SvgLinks<'a> {
-    generated_ids: HashMap<roxmltree::NodeId, String>,
-    targets: HashMap<String, &'a str>,
-}
-
-impl<'a> SvgLinks<'a> {
-    fn new(root: Node<'a, '_>) -> Self {
-        let mut result = Self {
-            generated_ids: HashMap::new(),
-            targets: HashMap::new(),
-        };
-        let used = root
-            .descendants()
-            .filter_map(|node| node.attribute("id"))
-            .collect::<HashSet<_>>();
-        let mut next = 0;
-        for node in root
-            .descendants()
-            .filter(|node| node.has_tag_name((NS, "a")))
-        {
-            let Some(href) = image_href(node) else {
-                continue;
-            };
-            let id = match node.attribute("id") {
-                Some("") => continue,
-                Some(id) => id.to_owned(),
-                None => loop {
-                    let id = format!("pydoccraft-pdf-link-{next}");
-                    next += 1;
-                    if !used.contains(id.as_str()) {
-                        result.generated_ids.insert(node.id(), id.clone());
-                        break id;
-                    }
-                },
-            };
-            result.targets.entry(id).or_insert(href);
-        }
-        result
-    }
-}
-
-fn capture_svg(
-    tree: &usvg::Tree,
-    links: &SvgLinks<'_>,
-    scale: [f32; 2],
-    clip: wordcraft_geom::Rect,
-    capture: &mut super::rendition::Capture<'_, '_>,
-) -> Result<(), EngineError> {
-    let geometry = |rect: usvg::Rect| {
-        wordcraft_geom::Rect::new(
-            rect.x() * scale[0],
-            rect.y() * scale[1],
-            rect.width() * scale[0],
-            rect.height() * scale[1],
-        )
-    };
-    let mut metrics = HashMap::new();
-    visit_painted_svg(tree, scale, clip, |node, clip| {
-        if let Some(rect) = node.abs_bounding_box() {
-            super::rendition::capture_anchor(&mut capture.anchors, node.id(), geometry(rect), clip);
-        }
-        if let (Some(text), usvg::Node::Text(source)) = (capture.text.as_deref_mut(), node) {
-            capture_svg_text(tree.fontdb(), source, scale, clip, &mut metrics, text)?;
-        }
-        if let Some(href) = links.targets.get(node.id()) {
-            if let Some(rect) = node.abs_stroke_bounding_box() {
-                capture.links.add(geometry(rect), clip, (*href).into())?;
-            }
-        }
-        Ok(())
-    })
-}
-
 pub(super) fn collect_image_text(
     tree: &usvg::Tree,
     size: [f32; 2],
@@ -278,11 +215,11 @@ pub(super) fn collect_image_text(
     })
 }
 
-fn visit_painted_svg(
-    tree: &usvg::Tree,
+fn visit_painted_svg<'tree>(
+    tree: &'tree usvg::Tree,
     scale: [f32; 2],
     clip: wordcraft_geom::Rect,
-    mut visit: impl FnMut(&usvg::Node, wordcraft_geom::Rect) -> Result<(), EngineError>,
+    mut visit: impl FnMut(&'tree usvg::Node, wordcraft_geom::Rect) -> Result<(), EngineError>,
 ) -> Result<(), EngineError> {
     let geometry = |rect: usvg::Rect| {
         wordcraft_geom::Rect::new(
@@ -326,12 +263,40 @@ fn capture_svg_text(
     metrics: &mut SvgGlyphMetrics,
     output: &mut super::rendition::text::TextLayer,
 ) -> Result<(), EngineError> {
+    visit_glyphs(
+        fonts,
+        node,
+        scale,
+        metrics,
+        |_| true,
+        |_, text, rect| output.add(text, rect, clip),
+    )
+}
+
+fn visit_glyphs(
+    fonts: &usvg::fontdb::Database,
+    node: &usvg::Text,
+    scale: [f32; 2],
+    metrics: &mut SvgGlyphMetrics,
+    select: impl Fn(usize) -> bool,
+    mut visit: impl FnMut(usize, &str, wordcraft_geom::Rect) -> Result<(), EngineError>,
+) -> Result<(), EngineError> {
     use skrifa::{
         instance::{LocationRef, Size},
         FontRef, GlyphId, MetadataProvider,
     };
-    for span in node.layouted() {
-        if !span.visible || span.fill.is_none() && span.stroke.is_none() {
+    for (index, span) in node.layouted().iter().enumerate() {
+        if !select(index)
+            || !span.visible
+            || span
+                .fill
+                .as_ref()
+                .is_none_or(|fill| fill.opacity().get() == 0.0)
+                && span
+                    .stroke
+                    .as_ref()
+                    .is_none_or(|stroke| stroke.opacity().get() == 0.0)
+        {
             continue;
         }
         for glyph in &span.positioned_glyphs {
@@ -369,7 +334,7 @@ fn capture_svg_text(
                 wordcraft_geom::Rect::new(0.0, descent, advance, ascent - descent),
                 page,
             );
-            output.add(&glyph.text, rect, clip)?;
+            visit(index, &glyph.text, rect)?;
         }
     }
     Ok(())
@@ -380,9 +345,19 @@ pub(super) fn embedded(
     base: &str,
     book: &mut Book<'_>,
 ) -> Result<usvg::Tree, EngineError> {
+    embedded_with_links(source, base, book, false).map(|(tree, _)| tree)
+}
+
+pub(super) fn embedded_with_links(
+    source: &[u8],
+    base: &str,
+    book: &mut Book<'_>,
+    capture_links: bool,
+) -> Result<(usvg::Tree, Option<LinkGeometry>), EngineError> {
     let xml = super::parse_xml(source)?;
     let root = xml.root_element();
-    parse(root, source, base, book, viewport(root), None)
+    let links = capture_links.then(|| links::Links::new(root));
+    parse(root, source, base, book, viewport(root), links.as_ref())
 }
 
 fn parse(
@@ -391,8 +366,8 @@ fn parse(
     base: &str,
     book: &mut Book<'_>,
     viewport: Option<[f32; 2]>,
-    links: Option<&SvgLinks<'_>>,
-) -> Result<usvg::Tree, EngineError> {
+    links: Option<&links::Links<'_>>,
+) -> Result<(usvg::Tree, Option<LinkGeometry>), EngineError> {
     let has_uses = content::validate_svg(root, Some(base))?;
     let images = raster_images(root, base, book)?;
     let mut options = usvg::Options {
@@ -429,18 +404,39 @@ fn parse(
         None
     };
     let result = native_tree(&styled, &options, has_uses);
-    let Some(fonts) = fonts else { return result };
-    fonts.check()?;
-    let tree = result?;
-    let Some(fallback) = fonts.split_fallback_runs(&styled, &tree)? else {
-        return Ok(tree);
+    if let Some(fonts) = &fonts {
+        fonts.check()?;
+    }
+    let mut tree = result?;
+    let fallback = if let Some(fonts) = &fonts {
+        if let Some(fallback) = fonts.split_fallback_runs(&styled, &tree)? {
+            options.fontdb = tree.fontdb().clone();
+            let result = native_tree(fallback.as_bytes(), &options, has_uses);
+            fonts.check()?;
+            tree = result?;
+            fonts.check_rendered(&tree)?;
+            Some(fallback)
+        } else {
+            None
+        }
+    } else {
+        None
     };
     options.fontdb = tree.fontdb().clone();
-    let result = native_tree(fallback.as_bytes(), &options, has_uses);
-    fonts.check()?;
-    let tree = result?;
-    fonts.check_rendered(&tree)?;
-    Ok(tree)
+    let geometry = links
+        .map(|links| {
+            links.collect(
+                fallback.as_ref().map_or(&styled, |xml| xml.as_bytes()),
+                &tree,
+                &options,
+                has_uses,
+            )
+        })
+        .transpose()?;
+    if let Some(fonts) = &fonts {
+        fonts.check()?;
+    }
+    Ok((tree, geometry))
 }
 
 fn native_tree(
@@ -462,7 +458,7 @@ fn apply_styles(
     root: Node<'_, '_>,
     source: &[u8],
     cascade: &mut Cascade,
-    links: Option<&SvgLinks<'_>>,
+    links: Option<&links::Links<'_>>,
 ) -> Result<(Vec<u8>, svg_fonts::Families), EngineError> {
     let mut output = Vec::with_capacity(source.len());
     let mut cursor = 0;
@@ -564,12 +560,7 @@ fn apply_styles(
         let range = if let Some(attribute) = node.attribute_node("style") {
             attribute.range()
         } else if id.is_some() || !style.is_empty() {
-            let start = node.range().start + 1;
-            let len = source[start..]
-                .iter()
-                .position(|byte| byte.is_ascii_whitespace() || matches!(byte, b'/' | b'>'))
-                .ok_or_else(|| invalid("invalid SVG opening tag"))?;
-            (start + len)..(start + len)
+            style_insertion(source, node)?
         } else {
             continue;
         };
@@ -589,6 +580,18 @@ fn apply_styles(
     }
     output.extend_from_slice(&source[cursor..]);
     Ok((output, families))
+}
+
+fn style_insertion(
+    source: &[u8],
+    node: Node<'_, '_>,
+) -> Result<std::ops::Range<usize>, EngineError> {
+    let start = node.range().start + 1;
+    let len = source[start..]
+        .iter()
+        .position(|byte| byte.is_ascii_whitespace() || matches!(byte, b'/' | b'>'))
+        .ok_or_else(|| invalid("invalid SVG opening tag"))?;
+    Ok((start + len)..(start + len))
 }
 
 fn svg_property(key: &str) -> bool {

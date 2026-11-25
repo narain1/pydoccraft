@@ -663,7 +663,11 @@ impl Fonts {
             super::layout::InlineNavigation::default()
         };
         Ok(Text {
-            search_text: output.svg_text.is_some().then_some(text),
+            search_text: output
+                .svg_images
+                .as_ref()
+                .is_some_and(|images| images.searchable())
+                .then_some(text),
             layout: RefCell::new(layout),
             align,
             navigation,
@@ -962,10 +966,9 @@ impl Text {
         let mut layout = self.layout.borrow_mut();
         layout.set_alignment(self.align, AlignmentOptions::default());
         for line in layout.lines() {
-            if let Some((capture, clip)) = capture
-                .as_mut()
-                .filter(|_| !self.navigation.is_empty() || self.search_text.is_some())
-            {
+            if let Some((capture, clip)) = capture.as_mut().filter(|_| {
+                !self.navigation.is_empty() || self.search_text.is_some() || images.is_some()
+            }) {
                 self.capture_line(&line, area, *clip, capture, images)?;
             }
             for item in line.items() {
@@ -1137,14 +1140,19 @@ impl Text {
         // boxes, so a linked formula (or a bidi run) remains alongside its surrounding text.
         geometry.sort_by_key(|(range, _, _)| range.start);
         for (range, rect, object) in geometry {
-            if let Some(text) = capture.text.as_deref_mut() {
-                if let Some(id) = object {
-                    text.draw_text(&self.inline[id].1, [rect.x, rect.y], clip, images)?;
-                } else if let Some(value) =
-                    self.search_text.as_ref().and_then(|s| s.get(range.clone()))
-                {
-                    text.add(value, rect, clip)?;
-                }
+            if let Some(id) = object {
+                super::rendition::text::draw_text(
+                    &self.inline[id].1,
+                    [rect.x, rect.y],
+                    clip,
+                    images,
+                    capture,
+                )?;
+            } else if let (Some(text), Some(value)) = (
+                capture.text.as_deref_mut(),
+                self.search_text.as_ref().and_then(|s| s.get(range.clone())),
+            ) {
+                text.add(value, rect, clip)?;
             }
             self.navigation.capture(range, rect, clip, capture)?;
         }

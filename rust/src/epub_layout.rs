@@ -126,13 +126,10 @@ pub(super) fn render_with_navigation(
         equation_styles: Some((&styles, viewport)),
     };
     let mut output = Output::new(data, book, false, dpi);
-    if navigation
-        .as_ref()
-        .is_some_and(|capture| capture.text.is_some())
-    {
-        output.svg_text = Some(Default::default());
-    }
-    if navigation.is_some() {
+    if let Some(capture) = &navigation {
+        output.svg_images = Some(super::rendition::text::SvgImages::new(
+            capture.text.is_some(),
+        ));
         output.navigation = Some(HashMap::new());
     }
     let mut layout = Layout::new(output, viewport, fonts);
@@ -317,21 +314,26 @@ enum Contents {
 
 enum Picture {
     Raster(RasterImage),
-    Svg(Box<resvg::usvg::Tree>),
+    Svg {
+        tree: Box<resvg::usvg::Tree>,
+        geometry: Option<Arc<super::svg::LinkGeometry>>,
+    },
 }
 
 impl Picture {
     fn size(&self) -> [f32; 2] {
         match self {
             Self::Raster(image) => [image.width, image.height],
-            Self::Svg(tree) => [tree.size().width(), tree.size().height()],
+            Self::Svg { tree, .. } => [tree.size().width(), tree.size().height()],
         }
     }
 
     fn media(&self, output: &mut Output<'_>, rect: Rect) -> Result<String, EngineError> {
         match self {
             Self::Raster(image) => Ok(image.media.clone()),
-            Self::Svg(tree) => output.rasterize_svg(tree, rect.w, rect.h),
+            Self::Svg { tree, geometry } => {
+                output.rasterize_svg(tree, rect.w, rect.h, geometry.clone())
+            }
         }
     }
 }
@@ -384,11 +386,18 @@ impl<'book> Layout<'book> {
             if let Some(source) = image {
                 let picture = if source.media_type == "image/svg+xml" {
                     let base = super::svg::image_base(&source)?;
-                    Picture::Svg(Box::new(super::svg::embedded(
+                    let interactive = self.output.svg_images.is_some()
+                        && source.metadata.contains_key("epub_svg_inline");
+                    let (tree, geometry) = super::svg::embedded_with_links(
                         &image_bytes(&source)?,
                         base,
                         context.book,
-                    )?))
+                        interactive,
+                    )?;
+                    Picture::Svg {
+                        tree: Box::new(tree),
+                        geometry: geometry.map(Arc::new),
+                    }
                 } else {
                     Picture::Raster(self.output.load_image(&source)?)
                 };
@@ -807,16 +816,13 @@ impl<'book> Layout<'book> {
                         &page,
                         &wordcraft_layout::display::DisplayOptions::default(),
                     );
-                    if let Some(text) = positions
-                        .navigation
-                        .as_mut()
-                        .and_then(|capture| capture.text.as_deref_mut())
-                    {
-                        text.draw_text(
+                    if let Some(capture) = positions.navigation.as_mut() {
+                        super::rendition::text::draw_text(
                             &draws,
                             [content_box.x, content_box.y],
                             child_clip,
-                            self.output.svg_text.as_ref(),
+                            self.output.svg_images.as_ref(),
+                            capture,
                         )?;
                     }
                     inner.push(Draw::Turned {
@@ -837,22 +843,20 @@ impl<'book> Layout<'book> {
                                 .navigation
                                 .as_mut()
                                 .map(|capture| (capture, child_clip)),
-                            self.output.svg_text.as_ref(),
+                            self.output.svg_images.as_ref(),
                         )?;
                     }
                 }
                 Some(Contents::Image(image, alt)) if content_box.w > 0.0 && content_box.h > 0.0 => {
                     let media = image.media(&mut self.output, content_box)?;
-                    if let Some(text) = positions
-                        .navigation
-                        .as_mut()
-                        .and_then(|capture| capture.text.as_deref_mut())
-                    {
-                        text.draw_image(
-                            self.output.svg_text.as_ref(),
+                    if let Some(capture) = positions.navigation.as_mut() {
+                        super::rendition::text::draw_image(
+                            self.output.svg_images.as_ref(),
                             &media,
                             content_box,
+                            kurbo::Affine::IDENTITY,
                             child_clip,
+                            capture,
                         )?;
                     }
                     inner.push(Draw::Image {

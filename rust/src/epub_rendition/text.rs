@@ -1,11 +1,12 @@
 //! Collect text from the same positioned glyphs and clusters used by the EPUB preview.
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use kurbo::Affine;
 use wordcraft_geom::Rect;
 use wordcraft_layout::display::Draw;
 
-use super::intersection;
+use super::{intersection, Capture};
+use crate::epub::svg::LinkGeometry;
 use crate::EngineError;
 
 const MAX_CLUSTERS: usize = 250_000;
@@ -23,9 +24,10 @@ pub(super) struct TextCluster {
     pub rect: Rect,
 }
 
-#[derive(Default)]
 pub(in crate::epub) struct SvgImages {
     images: HashMap<String, SvgImage>,
+    searchable: bool,
+    geometry_bytes: usize,
     clusters: usize,
     bytes: usize,
 }
@@ -33,22 +35,49 @@ pub(in crate::epub) struct SvgImages {
 struct SvgImage {
     size: [f32; 2],
     text: Vec<TextCluster>,
+    geometry: Option<Arc<LinkGeometry>>,
+    tree_size: [f32; 2],
 }
 
 impl SvgImages {
+    pub(in crate::epub) fn new(searchable: bool) -> Self {
+        Self {
+            images: HashMap::new(),
+            searchable,
+            geometry_bytes: 0,
+            clusters: 0,
+            bytes: 0,
+        }
+    }
+
+    pub(in crate::epub) fn searchable(&self) -> bool {
+        self.searchable
+    }
+
     pub(in crate::epub) fn record(
         &mut self,
         media: &str,
         tree: &resvg::usvg::Tree,
         size: [f32; 2],
+        geometry: Option<Arc<LinkGeometry>>,
     ) -> Result<(), EngineError> {
         if self.images.contains_key(media) {
             return Ok(());
         }
         let mut capture = TextLayer::default();
-        capture.begin_page();
-        crate::epub::svg::collect_image_text(tree, size, &mut capture)?;
-        if capture.clusters > 0 {
+        if self.searchable {
+            capture.begin_page();
+            crate::epub::svg::collect_image_text(tree, size, &mut capture)?;
+        }
+        if let Some(geometry) = &geometry {
+            super::super::charge(
+                &mut self.geometry_bytes,
+                geometry.byte_cost(),
+                super::super::XML_BYTES,
+                "EPUB SVG image annotations exceed 8 MiB",
+            )?;
+        }
+        if capture.clusters > 0 || geometry.is_some() {
             super::super::charge(
                 &mut self.clusters,
                 capture.clusters,
@@ -66,6 +95,8 @@ impl SvgImages {
                 SvgImage {
                     size,
                     text: capture.pages.pop().unwrap_or_default(),
+                    geometry,
+                    tree_size: [tree.size().width(), tree.size().height()],
                 },
             );
         }
@@ -114,122 +145,131 @@ impl TextLayer {
         });
         Ok(())
     }
+}
 
-    pub(in crate::epub) fn draw_text(
-        &mut self,
-        drawing: &[Draw],
-        origin: [f32; 2],
-        clip: Rect,
-        images: Option<&SvgImages>,
-    ) -> Result<(), EngineError> {
-        self.walk_draws(
-            drawing,
-            Affine::translate((f64::from(origin[0]), f64::from(origin[1]))),
-            clip,
-            images,
-        )
-    }
+pub(in crate::epub) fn draw_text(
+    drawing: &[Draw],
+    origin: [f32; 2],
+    clip: Rect,
+    images: Option<&SvgImages>,
+    capture: &mut Capture<'_, '_>,
+) -> Result<(), EngineError> {
+    walk_draws(
+        drawing,
+        Affine::translate((f64::from(origin[0]), f64::from(origin[1]))),
+        clip,
+        images,
+        capture,
+    )
+}
 
-    pub(in crate::epub) fn draw_image(
-        &mut self,
-        images: Option<&SvgImages>,
-        media: &str,
-        rect: Rect,
-        clip: Rect,
-    ) -> Result<(), EngineError> {
-        self.image_text(images, media, rect, Affine::IDENTITY, clip)
-    }
-
-    fn image_text(
-        &mut self,
-        images: Option<&SvgImages>,
-        media: &str,
-        rect: Rect,
-        transform: Affine,
-        clip: Rect,
-    ) -> Result<(), EngineError> {
-        if let Some(image) = images.and_then(|images| images.images.get(media)) {
-            let matrix = transform
-                * Affine::translate((f64::from(rect.x), f64::from(rect.y)))
+pub(in crate::epub) fn draw_image(
+    images: Option<&SvgImages>,
+    media: &str,
+    rect: Rect,
+    transform: Affine,
+    clip: Rect,
+    capture: &mut Capture<'_, '_>,
+) -> Result<(), EngineError> {
+    if let Some(image) = images.and_then(|images| images.images.get(media)) {
+        let position = transform * Affine::translate((f64::from(rect.x), f64::from(rect.y)));
+        if let Some(geometry) = &image.geometry {
+            let matrix = position
+                * Affine::scale_non_uniform(
+                    f64::from(rect.w / image.tree_size[0]),
+                    f64::from(rect.h / image.tree_size[1]),
+                );
+            geometry.place(matrix, clip, capture)?;
+        }
+        if let Some(text) = capture.text.as_deref_mut() {
+            let matrix = position
                 * Affine::scale_non_uniform(
                     f64::from(rect.w / image.size[0]),
                     f64::from(rect.h / image.size[1]),
                 );
             for cluster in &image.text {
-                self.add(&cluster.text, transformed(cluster.rect, matrix), clip)?;
+                text.add(&cluster.text, transformed(cluster.rect, matrix), clip)?;
             }
         }
-        Ok(())
     }
+    Ok(())
+}
 
-    fn walk_draws(
-        &mut self,
-        drawing: &[Draw],
-        transform: Affine,
-        clip: Rect,
-        images: Option<&SvgImages>,
-    ) -> Result<(), EngineError> {
-        use std::collections::BTreeMap;
-        for draw in drawing {
-            match draw {
-                Draw::Glyphs {
-                    face,
-                    size,
-                    glyphs,
-                    text,
-                    alpha,
-                    ranges,
-                    x_scale,
-                    ..
-                } if *alpha > 0.0 && !text.is_empty() && !glyphs.is_empty() => {
-                    let em = f64::from(*size) / face.upem.max(1.0);
-                    let ascent = (face.ascent * em) as f32;
-                    let descent = (face.descent * em) as f32;
-                    let bounds = |&(id, x, baseline): &(u32, f32, f32)| {
-                        let width = (face.advance(id) * em) as f32 * x_scale;
-                        Rect::new(x, baseline - ascent, width, ascent - descent)
-                    };
-                    if ranges.len() == glyphs.len() {
-                        let mut clusters = BTreeMap::<_, Rect>::new();
-                        for (glyph, range) in glyphs.iter().zip(ranges) {
-                            if !range.is_empty() {
-                                let rect = bounds(glyph);
-                                clusters
-                                    .entry((range.start, range.end))
-                                    .and_modify(|r| *r = r.union(&rect))
-                                    .or_insert(rect);
-                            }
+fn walk_draws(
+    drawing: &[Draw],
+    transform: Affine,
+    clip: Rect,
+    images: Option<&SvgImages>,
+    capture: &mut Capture<'_, '_>,
+) -> Result<(), EngineError> {
+    use std::collections::BTreeMap;
+    for draw in drawing {
+        match draw {
+            Draw::Glyphs {
+                face,
+                size,
+                glyphs,
+                text,
+                alpha,
+                ranges,
+                x_scale,
+                ..
+            } if *alpha > 0.0 && !text.is_empty() && !glyphs.is_empty() => {
+                let Some(layer) = capture.text.as_deref_mut() else {
+                    continue;
+                };
+                let em = f64::from(*size) / face.upem.max(1.0);
+                let ascent = (face.ascent * em) as f32;
+                let descent = (face.descent * em) as f32;
+                let bounds = |&(id, x, baseline): &(u32, f32, f32)| {
+                    let width = (face.advance(id) * em) as f32 * x_scale;
+                    Rect::new(x, baseline - ascent, width, ascent - descent)
+                };
+                if ranges.len() == glyphs.len() {
+                    let mut clusters = BTreeMap::<_, Rect>::new();
+                    for (glyph, range) in glyphs.iter().zip(ranges) {
+                        if !range.is_empty() {
+                            let rect = bounds(glyph);
+                            clusters
+                                .entry((range.start, range.end))
+                                .and_modify(|r| *r = r.union(&rect))
+                                .or_insert(rect);
                         }
-                        for ((start, end), rect) in clusters {
-                            if let Some(cluster) = text.get(start..end) {
-                                self.add(cluster, transformed(rect, transform), clip)?;
-                            }
+                    }
+                    for ((start, end), rect) in clusters {
+                        if let Some(cluster) = text.get(start..end) {
+                            layer.add(cluster, transformed(rect, transform), clip)?;
                         }
-                    } else if let Some(rect) = glyphs.iter().map(bounds).reduce(|a, b| a.union(&b))
-                    {
-                        // Equation display items provide Unicode per painted atom.
-                        self.add(text, transformed(rect, transform), clip)?;
                     }
+                } else if let Some(rect) = glyphs.iter().map(bounds).reduce(|a, b| a.union(&b)) {
+                    // Equation display items provide Unicode per painted atom.
+                    layer.add(text, transformed(rect, transform), clip)?;
                 }
-                Draw::Clip { rect, items } => {
-                    let clip = intersection(clip, transformed(*rect, transform));
-                    if clip.w > 0.0 && clip.h > 0.0 {
-                        self.walk_draws(items, transform, clip, images)?;
-                    }
-                }
-                Draw::Turned { x, y, turn, items } => {
-                    let matrix = Draw::turn_matrix(*turn, *x, *y).map(f64::from);
-                    self.walk_draws(items, transform * Affine::new(matrix), clip, images)?;
-                }
-                Draw::Image {
-                    rect, media, alpha, ..
-                } if *alpha > 0.0 => self.image_text(images, media, *rect, transform, clip)?,
-                Draw::Figure { draws, .. } => self.walk_draws(draws, transform, clip, images)?,
-                _ => {}
             }
+            Draw::Clip { rect, items } => {
+                let clip = intersection(clip, transformed(*rect, transform));
+                if clip.w > 0.0 && clip.h > 0.0 {
+                    walk_draws(items, transform, clip, images, capture)?;
+                }
+            }
+            Draw::Turned { x, y, turn, items } => {
+                let matrix = Draw::turn_matrix(*turn, *x, *y).map(f64::from);
+                walk_draws(
+                    items,
+                    transform * Affine::new(matrix),
+                    clip,
+                    images,
+                    capture,
+                )?;
+            }
+            Draw::Image {
+                rect, media, alpha, ..
+            } if *alpha > 0.0 => draw_image(images, media, *rect, transform, clip, capture)?,
+            Draw::Figure { draws, .. } => walk_draws(draws, transform, clip, images, capture)?,
+            _ => {}
         }
-        Ok(())
     }
+    Ok(())
 }
 
 pub(in crate::epub) fn transformed(rect: Rect, transform: Affine) -> Rect {
