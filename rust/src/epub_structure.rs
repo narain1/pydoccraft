@@ -808,20 +808,28 @@ pub(crate) fn update_structure<'a>(
     } else {
         Cow::Owned(apply_edits(package_source, edits, METADATA_BYTES)?)
     };
-    let staged_overlay = epub3
-        && manifest_node
-            .children()
-            .filter(|item| name(*item, OPF, "item"))
-            .filter_map(|item| item.attribute("media-overlay"))
-            .filter_map(|id| manifest.get(id))
-            .any(|path| {
-                paths.get(path) == Some(&"application/smil+xml") && plan.files.contains_key(path)
-            });
-    if !overlays.is_empty() || staged_overlay {
+    let staged_audio: HashSet<_> = resources
+        .iter()
+        .filter(|(path, media, _)| {
+            super::overlay::audio_media_type(media) && !removals.contains(path.as_str())
+        })
+        .map(|(path, ..)| path.as_str())
+        .collect();
+    let staged_timing = !staged_audio.is_empty()
+        || resources
+            .iter()
+            .any(|(_, media, _)| media == "application/smil+xml");
+    if !overlays.is_empty() || epub3 && staged_timing {
         if !epub3 {
             return Err(unsupported("authoring media overlays requires EPUB 3"));
         }
-        revised = Cow::Owned(narration::edit(&revised, &mut plan, &mut book, overlays)?);
+        revised = Cow::Owned(narration::edit(
+            &revised,
+            &mut plan,
+            &mut book,
+            overlays,
+            &staged_audio,
+        )?);
     }
     if !removals.is_empty() {
         revised = Cow::Owned(removal::apply(&revised, &plan, &mut book, &removals)?);

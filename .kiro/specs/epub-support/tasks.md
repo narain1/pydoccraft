@@ -195,7 +195,7 @@
 - [x] Attach or detach EPUB 3 media overlays and author sequential text and audio cues with package duration metadata.
 - [x] Edit a subset of chapters that share a SMIL resource while retaining the other chapters' cues and recalculating duration metadata.
 - [x] Replace IDPF-obfuscated fonts from plain font bytes and update their declarations after resource removal.
-- [x] Author nested SMIL sequences with chapter targets, inherited roles and clip-based durations. Recompute durations for a staged replacement of an associated SMIL resource.
+- [x] Author nested SMIL sequences with chapter targets, inherited roles and clip-based durations. Recompute durations for a staged associated SMIL replacement or changed audio that supplies an open SMIL clip.
 
 ## Current implementation limits
 

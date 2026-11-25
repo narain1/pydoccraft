@@ -12952,6 +12952,73 @@ Trailing
                          if node.get("property") == "media:duration"}
             self.assertEqual(durations, {"#sync": "0:00:01.050000", None: "0:00:01.050000"})
 
+    def test_structure_refreshes_open_smil_clips_when_audio_alone_is_replaced(self) -> None:
+        source, original_audio = narrated_epub()
+        smil_path = "OEBPS/Sync/read.smil"
+        voice_path = "OEBPS/Media/voice.wav"
+        spare_path = "OEBPS/Media/spare.wav"
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            smil = archive.read(smil_path)
+            package = archive.read("OEBPS/content.opf").replace(b"</manifest>", (
+                b'<item id="spare" href="Media/spare.wav" media-type="audio/wav"/></manifest>'
+            )).replace(b"</metadata>", (
+                b'<meta property="media:duration" refines="#sync">0:00:01.798</meta>'
+                b'<meta property="media:duration">0:00:01.798</meta></metadata>'
+            ))
+        source = rewrite_epub(source, {
+            "OEBPS/content.opf": package, spare_path: original_audio,
+        })
+
+        def wav(frames: int) -> doc_ex.EpubResource:
+            stream = io.BytesIO()
+            with wave.open(stream, "wb") as sample:
+                sample.setparams((1, 1, 8000, 0, "NONE", "not compressed"))
+                sample.writeframes(bytes(frames))
+            return doc_ex.EpubResource("audio/wav", stream.getvalue())
+
+        def durations(book: doc_ex.Document) -> dict[str | None, str | None]:
+            root = ET.fromstring(book.read_epub_resource("OEBPS/content.opf"))
+            return {node.get("refines"): node.text for node in root.iter("{http://www.idpf.org/2007/opf}meta")
+                    if node.get("property") == "media:duration"}
+
+        longer = wav(20000)
+        original_durations = {"#sync": "0:00:01.798", None: "0:00:01.798"}
+        with doc_ex.open(source) as original:
+            revised = original.edit_epub_structure(
+                [1, 0], resources={voice_path: longer}, remove_resources=[spare_path],
+            )
+            untouched = original.edit_epub_structure(resources={spare_path: longer})
+            with self.assertRaisesRegex(ValueError, "cannot replace and remove the same resource"):
+                original.edit_epub_structure(resources={voice_path: longer}, remove_resources=[voice_path])
+            with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "clip end must be after clip begin"):
+                original.edit_epub_structure(resources={voice_path: wav(8000)})
+            self.assertEqual(original.read_epub_resource(voice_path), original_audio)
+            self.assertEqual(durations(original), original_durations)
+
+        with doc_ex.open(revised) as book, zipfile.ZipFile(io.BytesIO(revised)) as archive:
+            self.assertEqual([page.metadata["chapter_path"] for page in book], ["OEBPS/two.xhtml", "OEBPS/one.xhtml"])
+            self.assertEqual(book.read_epub_resource(smil_path), smil)
+            self.assertEqual(book.read_epub_resource(voice_path), longer.data)
+            self.assertNotIn(spare_path, archive.namelist())
+            earlier, later = next(book.epub_narration(0)), next(book.epub_narration(1))
+            assert earlier.audio is not None and later.audio is not None
+            self.assertEqual((earlier.audio.frame_count, later.audio.frame_count), (11000, 7000))
+            self.assertEqual(durations(book), {"#sync": "0:00:02.250000", None: "0:00:02.250000"})
+        with doc_ex.open(untouched) as book:
+            self.assertEqual(book.read_epub_resource(spare_path), longer.data)
+            self.assertEqual(durations(book), original_durations)
+
+        closed = rewrite_epub(source, {
+            smil_path: smil.replace(b'clipBegin="1.125s"', b'clipBegin="1.125s" clipEnd="1.425s"'),
+            "OEBPS/content.opf": package.replace(b"0:00:01.798", b"0:00:01.175"),
+        })
+        with doc_ex.open(closed) as book:
+            revised_closed = book.edit_epub_structure(resources={voice_path: wav(4000)})
+        with doc_ex.open(revised_closed) as book:
+            clip = book.epub_media_cues(1)[0]["audio"]
+            self.assertEqual((clip["clip_begin_us"], clip["clip_end_us"]), (1125000, 1425000))
+            self.assertEqual(durations(book), {"#sync": "0:00:01.175", None: "0:00:01.175"})
+
     def test_structure_reorders_staged_navigation_chapter_markup(self) -> None:
         def toc(label: str, anchor: str) -> str:
             return f'''<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">

@@ -64,6 +64,7 @@ pub(super) fn edit(
     plan: &mut Plan<'_>,
     book: &mut Book<'_>,
     changes: &[OverlayEdit],
+    staged_audio: &HashSet<&str>,
 ) -> Result<String, EngineError> {
     let xml = parse_xml(source.as_bytes())?;
     let root = xml.root_element();
@@ -128,21 +129,43 @@ pub(super) fn edit(
         }
     }
 
-    let declared = durations_in(metadata)?;
     let mut active = BTreeMap::<&str, Vec<Node<'_, '_>>>::new();
     for item in items.values().filter(|item| !targets.contains(&item.id())) {
         if let Some(id) = item.attribute("media-overlay") {
             active.entry(id).or_default().push(*item);
         }
     }
+    let active = active
+        .into_iter()
+        .map(|(id, owners)| {
+            let item = items
+                .get(id)
+                .ok_or_else(|| invalid("media overlay is absent from the manifest"))?;
+            let path = resolve(plan.package, attribute(*item, "href")?)?;
+            Ok((id, path, owners))
+        })
+        .collect::<Result<Vec<_>, EngineError>>()?;
+    let changed_audio = open_audio_changes(
+        active.iter().filter_map(|(id, path, _)| {
+            (!plan.files.contains_key(path) && !detached.contains_key(id)).then_some(path.as_str())
+        }),
+        book,
+        staged_audio,
+    )?;
+    if changes.is_empty()
+        && changed_audio.is_empty()
+        && !active
+            .iter()
+            .any(|(_, path, _)| plan.files.contains_key(path))
+    {
+        return Ok(source.to_owned());
+    }
+
+    let declared = durations_in(metadata)?;
     #[cfg(feature = "python")]
     let mut audio = AudioDurations::default();
-    for (id, owners) in active {
-        let item = items
-            .get(id)
-            .ok_or_else(|| invalid("media overlay is absent from the manifest"))?;
-        let path = resolve(plan.package, attribute(*item, "href")?)?;
-        let staged = plan.files.contains_key(&path);
+    for (id, path, owners) in active {
+        let staged = plan.files.contains_key(&path) || changed_audio.contains(&path);
         let reported = if staged {
             None
         } else {
@@ -461,17 +484,49 @@ fn smil_duration(
     end: &mut impl FnMut(&str) -> Result<u64, EngineError>,
 ) -> Result<u64, EngineError> {
     let xml = parse_xml(source.as_bytes())?;
-    let body = overlay::body(xml.root_element())?;
-    let namespace = body.tag_name().namespace();
     let mut times = ClipTimes::default();
-    for audio in body.descendants().filter(|node| {
-        node.is_element()
-            && node.tag_name().namespace() == namespace
-            && node.tag_name().name() == "audio"
-    }) {
+    for audio in timing_audio(xml.root_element())? {
         times.add(audio)?;
     }
     times.total(end)
+}
+
+fn timing_audio<'a, 'input>(
+    root: Node<'a, 'input>,
+) -> Result<impl Iterator<Item = Node<'a, 'input>>, EngineError> {
+    let body = overlay::body(root)?;
+    let namespace = body.tag_name().namespace();
+    Ok(body
+        .descendants()
+        .filter(move |node| namespace.is_some_and(|ns| name(*node, ns, "audio"))))
+}
+
+fn open_audio_changes<'a>(
+    paths: impl Iterator<Item = &'a str>,
+    book: &mut Book<'_>,
+    staged_audio: &HashSet<&str>,
+) -> Result<HashSet<String>, EngineError> {
+    let mut changed = HashSet::new();
+    if staged_audio.is_empty() {
+        return Ok(changed);
+    }
+    let mut seen = HashSet::new();
+    for path in paths.filter(|path| seen.insert(*path)) {
+        // Use the package reader's per-member and aggregate XML read budgets.
+        let data = book.read(path, XML_BYTES)?;
+        let xml = parse_xml(&data)?;
+        for audio in timing_audio(xml.root_element())? {
+            // Explicit clipEnd values retain their authored duration.
+            if !audio.has_attribute("clipEnd")
+                && staged_audio
+                    .contains(overlay::local_path(path, attribute(audio, "src")?)?.as_str())
+            {
+                changed.insert(path.to_owned());
+                break;
+            }
+        }
+    }
+    Ok(changed)
 }
 
 struct SharedSmil<'a, 'xml> {

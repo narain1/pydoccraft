@@ -1369,3 +1369,7 @@ Both lockfiles, the dependency inventory and the upstream revisions match the pr
 ## Replacement SMIL duration after a chapter edit
 
 The installed baseline reopened a transaction with reordered chapters, a renamed Unicode fragment, replacement shared SMIL, new WAV audio and removal of the old soundtrack. Reopened playback followed the new clips, but both duration declarations kept the previous 1.798 seconds. The regression checks that the same transaction preserves staged SMIL and audio bytes, plays the original-order cues on their new spine positions, and reports the new 1.050-second overlay and publication durations. A missing replacement fragment or an open-ended clip starting after the new WAV ends rejects the transaction. [EPUB overlay duration metadata](https://www.w3.org/TR/epub-33/#sec-mo-package-metadata)
+
+## Audio replacement and unchanged SMIL timing
+
+The installed baseline reopened reordered chapters with the replacement WAV and original shared SMIL, but both duration declarations retained 1.798 seconds. The regression verifies the new 2.250-second duration, the original SMIL bytes, the reopened cue frame counts, and removal of an unreferenced audio member in the same edit. Replacing an unrelated WAV or replacing audio used only by closed clips leaves the duration declarations intact. A replacement shorter than an open clip start and a simultaneous replacement and removal of the same member reject the transaction. [EPUB overlay duration metadata](https://www.w3.org/TR/epub-33/#sec-mo-package-metadata)
