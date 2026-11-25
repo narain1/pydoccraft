@@ -461,9 +461,10 @@ fn smil_duration(
     end: &mut impl FnMut(&str) -> Result<u64, EngineError>,
 ) -> Result<u64, EngineError> {
     let xml = parse_xml(source.as_bytes())?;
-    let namespace = xml.root_element().tag_name().namespace();
+    let body = overlay::body(xml.root_element())?;
+    let namespace = body.tag_name().namespace();
     let mut times = ClipTimes::default();
-    for audio in xml.descendants().filter(|node| {
+    for audio in body.descendants().filter(|node| {
         node.is_element()
             && node.tag_name().namespace() == namespace
             && node.tag_name().name() == "audio"

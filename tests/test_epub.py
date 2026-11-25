@@ -12893,6 +12893,65 @@ Trailing
             self.assertNotIn(old_smil, archive.namelist())
             self.assertEqual(next(book.epub_narration(0)).text, "Revised narration")
 
+    def test_structure_reconciles_replacement_smil_with_staged_audio_and_chapters(self) -> None:
+        source, original_audio = narrated_epub()
+        chapter_path = "OEBPS/one.xhtml"
+        smil_path = "OEBPS/Sync/read.smil"
+        old_audio_path = "OEBPS/Media/voice.wav"
+        new_audio_path = "OEBPS/Media/revised.wav"
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            original_smil = archive.read(smil_path)
+            package = archive.read("OEBPS/content.opf").replace(b"</metadata>", (
+                b'<meta property="media:duration" refines="#sync">0:00:01.798</meta>'
+                b'<meta property="media:duration">0:00:01.798</meta></metadata>'
+            ))
+        audio = io.BytesIO()
+        with wave.open(audio, "wb") as pcm:
+            pcm.setparams((1, 1, 8000, 0, "NONE", "not compressed"))
+            pcm.writeframes(bytes(8000))
+        staged_audio = audio.getvalue()
+        staged_chapter = ('<html xmlns="http://www.w3.org/1999/xhtml"><body id="new-chapter">'
+                          '<p id="fresh-é">Revised narration</p><p id="aside">Retained aside</p></body></html>')
+        staged_smil = original_smil.replace(b"#chapter", b"#new-chapter").replace(
+            b"#caf%C3%A9", b"#fresh-%C3%A9",
+        ).replace(b"Media/voice.wav", b"Media/revised.wav").replace(
+            b'clipBegin="250ms" clipEnd="00:00:01.125"', b'clipBegin="100ms" clipEnd="400ms"',
+        ).replace(b'clipBegin="1.125s"', b'clipBegin="250ms"')
+        with doc_ex.open(rewrite_epub(source, {"OEBPS/content.opf": package})) as original:
+            def edit(smil: bytes) -> bytes:
+                return original.edit_epub_structure(
+                    [1, 0], replacements={0: staged_chapter},
+                    resources={
+                        smil_path: doc_ex.EpubResource("application/smil+xml", smil),
+                        new_audio_path: doc_ex.EpubResource("audio/wav", staged_audio),
+                    },
+                    remove_resources=[old_audio_path],
+                )
+
+            with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "missing element ID"):
+                edit(staged_smil.replace(b"#fresh-%C3%A9", b"#unpublished"))
+            with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "clip end must be after clip begin"):
+                edit(staged_smil.replace(b'clipBegin="250ms"', b'clipBegin="2s"'))
+            revised = edit(staged_smil)
+            self.assertEqual(original.read_epub_resource(smil_path), original_smil)
+            self.assertEqual(original.read_epub_resource(old_audio_path), original_audio)
+            self.assertEqual(original.epub_media_cues(0)[0]["text"]["fragment"], "café")
+
+        with doc_ex.open(revised) as book, zipfile.ZipFile(io.BytesIO(revised)) as archive:
+            self.assertEqual([page.metadata["chapter_path"] for page in book],
+                             ["OEBPS/two.xhtml", chapter_path])
+            self.assertEqual(book.read_epub_resource(smil_path), staged_smil)
+            self.assertEqual(book.read_epub_resource(new_audio_path), staged_audio)
+            self.assertNotIn(old_audio_path, archive.namelist())
+            self.assertEqual(book.epub_media_cues(1)[0]["text"]["fragment"], "fresh-é")
+            earlier, first = next(book.epub_narration(0)), next(book.epub_narration(1))
+            assert earlier.audio is not None and first.audio is not None
+            self.assertEqual((earlier.audio.frame_count, first.audio.frame_count), (6000, 2400))
+            root = ET.fromstring(archive.read("OEBPS/content.opf"))
+            durations = {node.get("refines"): node.text for node in root.iter("{http://www.idpf.org/2007/opf}meta")
+                         if node.get("property") == "media:duration"}
+            self.assertEqual(durations, {"#sync": "0:00:01.050000", None: "0:00:01.050000"})
+
     def test_structure_reorders_staged_navigation_chapter_markup(self) -> None:
         def toc(label: str, anchor: str) -> str:
             return f'''<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">

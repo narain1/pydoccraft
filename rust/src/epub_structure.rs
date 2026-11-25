@@ -808,7 +808,16 @@ pub(crate) fn update_structure<'a>(
     } else {
         Cow::Owned(apply_edits(package_source, edits, METADATA_BYTES)?)
     };
-    if !overlays.is_empty() {
+    let staged_overlay = epub3
+        && manifest_node
+            .children()
+            .filter(|item| name(*item, OPF, "item"))
+            .filter_map(|item| item.attribute("media-overlay"))
+            .filter_map(|id| manifest.get(id))
+            .any(|path| {
+                paths.get(path) == Some(&"application/smil+xml") && plan.files.contains_key(path)
+            });
+    if !overlays.is_empty() || staged_overlay {
         if !epub3 {
             return Err(unsupported("authoring media overlays requires EPUB 3"));
         }
