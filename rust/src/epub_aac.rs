@@ -125,6 +125,10 @@ impl Track {
         };
         let edit = linear_edit(
             demux.edit_list(stream.index),
+            movie.timescale,
+            demux
+                .track_header(stream.index)
+                .map_or(0, |track| track.media_timescale),
             "MP4 audio edit lists must have one continuous segment",
         )?;
         let tail = edit

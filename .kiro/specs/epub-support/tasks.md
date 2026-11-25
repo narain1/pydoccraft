@@ -171,6 +171,7 @@
 - [x] Resolve local MP4 and M4A media fragment IDs by exact QuickTime chapter title, preserving movie edits, AAC, cropped picture and caption timing.
 - [x] Play a leading empty MP4 edit followed by one rate-1 segment, preserving AVC, AAC silence, chapter IDs, and cropped caption seeks on the original clock.
 - [x] Preserve the implicit empty MP4 tail of a shorter continuous edited track with bounded AAC silence and the original chapter and caption clock.
+- [x] Combine multiple MP4 rate-1 edits that are exactly contiguous in the source clock, preserving empty intervals and matching a single edited AVC, AAC and chapter interval.
 - [x] Resolve local MP4 and M4A media fragment IDs from bounded Nero chapter tables, validate coexistence with QuickTime and preserve time-fragment playback.
 - [x] Resolve legacy Adobe F4V chapter tables on the movie clock and synchronize cropped H.264, AAC and captions while preserving Nero and QuickTime behavior.
 - [x] Stream embedded Ogg Theora and synchronize Opus and captions across sequential Ogg segments. Select one Theora video ordinal across every link of a multiplexed chain.

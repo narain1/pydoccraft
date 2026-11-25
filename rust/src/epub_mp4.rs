@@ -14,6 +14,7 @@ mod chapters;
 pub(crate) use chapters::chapter_interval;
 
 const MAX_METADATA_BYTES: usize = 4 * 1024 * 1024;
+const MAX_EDIT_LIST_ENTRIES: u32 = 64;
 pub(super) const MAX_ACCESS_UNITS: usize = 250_000;
 
 pub(super) struct LinearEdit {
@@ -40,29 +41,56 @@ impl LinearEdit {
     }
 }
 
-/// One rate-1 media segment, optionally preceded by an empty movie interval.
+/// One continuous rate-1 media interval, optionally preceded by an empty edit.
 pub(super) fn linear_edit(
     edits: &[EditListEntry],
+    movie_timescale: u32,
+    media_timescale: u32,
     unsupported_layout: &str,
 ) -> Result<Option<LinearEdit>, EngineError> {
     let rate_one =
         |edit: &EditListEntry| edit.media_rate_integer == 1 && edit.media_rate_fraction == 0;
-    let (movie_start, edit) = match edits {
-        [] => return Ok(None),
-        [edit] => (0, edit),
-        [gap, edit] if gap.is_empty_edit() && rate_one(gap) => (gap.segment_duration, edit),
-        _ => return Err(unsupported(unsupported_layout)),
+    let Some((head, rest)) = edits.split_first() else {
+        return Ok(None);
     };
-    if edit.media_time < 0 || !rate_one(edit) {
-        return Err(unsupported(unsupported_layout));
+    let (movie_start, playable) = if head.is_empty_edit() && rate_one(head) {
+        (head.segment_duration, rest)
+    } else {
+        (0, edits)
+    };
+    let (first, rest) = playable
+        .split_first()
+        .filter(|(first, _)| first.media_time >= 0 && rate_one(first))
+        .ok_or_else(|| unsupported(unsupported_layout))?;
+    if !rest.is_empty() && (movie_timescale == 0 || media_timescale == 0) {
+        return Err(invalid("invalid MP4 edit-list timescale"));
+    }
+
+    let mut duration = first.segment_duration;
+    for edit in rest {
+        let elapsed_media = i128::from(edit.media_time) - i128::from(first.media_time);
+        // Compare exact boundaries in the two clocks before rounding to
+        // microseconds, samples or the demuxer's presentation ticks.
+        if edit.media_time < 0
+            || !rate_one(edit)
+            || duration == 0
+            || edit.segment_duration == 0
+            || elapsed_media * i128::from(movie_timescale)
+                != i128::from(duration) * i128::from(media_timescale)
+        {
+            return Err(unsupported(unsupported_layout));
+        }
+        duration = duration
+            .checked_add(edit.segment_duration)
+            .ok_or_else(|| invalid("MP4 edit duration overflow"))?;
     }
     let movie_end = movie_start
-        .checked_add(edit.segment_duration)
+        .checked_add(duration)
         .ok_or_else(|| invalid("MP4 edit duration overflow"))?;
     Ok(Some(LinearEdit {
         movie_start,
         movie_end,
-        media_start: edit.media_time,
+        media_start: first.media_time,
     }))
 }
 
@@ -177,6 +205,16 @@ impl Mp4Bounds {
                         return Err(invalid("duplicate MP4 track reference box"));
                     }
                     self.check(&bytes[start..end], base + start, depth + 1, child_parent)?;
+                }
+                b"elst" => {
+                    let count = bytes[start..end]
+                        .get(4..8)
+                        .ok_or_else(|| invalid("truncated MP4 edit count"))?;
+                    if u32::from_be_bytes(count.try_into().map_err(invalid)?)
+                        > MAX_EDIT_LIST_ENTRIES
+                    {
+                        return Err(limited("MP4 edit list exceeds 64 entries"));
+                    }
                 }
                 b"stsz" | b"stz2" => {
                     let raw = bytes[start..end]

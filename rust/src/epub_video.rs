@@ -12,13 +12,13 @@ use oxideav_h264::{
     pps::Pps,
     sps::Sps,
 };
-use oxideav_mp4::demux::{open_typed, EditListEntry, MovieHeader, SampleInfo};
+use oxideav_mp4::demux::{open_typed, MovieHeader, SampleInfo};
 
 use super::{
     audio::MAX_ENCODED_BYTES,
     invalid, limited,
     media::{SpatialFragment, MAX_TIME},
-    mp4::{linear_edit, Mp4Bounds, MAX_ACCESS_UNITS},
+    mp4::{linear_edit, LinearEdit, Mp4Bounds, MAX_ACCESS_UNITS},
     unsupported, validate_archive_path, Book,
 };
 use crate::EngineError;
@@ -207,10 +207,8 @@ impl AvcSource {
             return Err(unsupported("embedded MP4 requires a local AVC video track"));
         }
         const IDENTITY: [i32; 9] = [65536, 0, 0, 0, 65536, 0, 0, 0, 1073741824];
-        if demux
-            .track_header(stream.index)
-            .is_some_and(|track| track.matrix != IDENTITY)
-        {
+        let track = demux.track_header(stream.index);
+        if track.is_some_and(|track| track.matrix != IDENTITY) {
             return Err(unsupported("rotated or transformed embedded MP4 video"));
         }
         let extra = &stream.params.extradata;
@@ -230,14 +228,15 @@ impl AvcSource {
                 return Err(invalid("invalid MP4 video access unit"));
             }
         }
-        let (timeline, clip, first_packet) = playback_range(
-            &samples,
-            stream.time_base,
+        let movie = demux.movie_header();
+        let edit = linear_edit(
             demux.edit_list(stream.index),
-            demux.movie_header(),
-            start_us,
-            end_us,
+            movie.timescale,
+            track.map_or(0, |track| track.media_timescale),
+            "MP4 video edit lists require a continuous presentation",
         )?;
+        let (timeline, clip, first_packet) =
+            playback_range(&samples, stream.time_base, edit, movie, start_us, end_us)?;
         let mut decoder = H264CodecDecoder::new(CodecId::new("h264"));
         decoder.consume_extradata(extra).map_err(invalid)?;
         Ok(Self {
@@ -398,7 +397,7 @@ fn shifted_us(
 fn playback_range(
     samples: &[SampleInfo],
     base: TimeBase,
-    edits: &[EditListEntry],
+    edit: Option<LinearEdit>,
     movie: MovieHeader,
     start_us: u64,
     end_us: Option<u64>,
@@ -413,10 +412,6 @@ fn playback_range(
             .checked_add(sample.duration)
             .ok_or_else(|| invalid("MP4 video duration overflow"))?
     };
-    let edit = linear_edit(
-        edits,
-        "MP4 video edit lists require a continuous presentation",
-    )?;
     let (origin, movie_start) = edit
         .as_ref()
         .map_or((first, 0), |edit| (edit.media_start, edit.movie_start));

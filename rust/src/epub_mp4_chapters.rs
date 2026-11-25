@@ -332,6 +332,8 @@ impl ChapterClock {
         }
         let (movie_start, media_origin, movie_end) = linear_edit(
             edits,
+            movie.timescale,
+            media_timescale,
             "MP4 chapter track has a noncontinuous edit list",
         )?
         .map_or((0, 0, movie.duration), |edit| {
