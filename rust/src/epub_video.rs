@@ -750,12 +750,50 @@ impl Geometry {
         for row in y..y + height {
             let line = plane.line(row, x * BYTES, width * BYTES)?;
             for col in 0..width {
-                let luma = video_sample::<BYTES>(line, col)
-                    .saturating_sub(black)
-                    .min(span);
-                let intensity =
-                    ((u32::from(luma) * 255 + u32::from(span) / 2) / u32::from(span)) as u8;
+                let luma = video_sample::<BYTES>(line, col).saturating_sub(black);
+                let intensity = scale_video_sample(luma, span);
                 rgb.extend([intensity; 3]);
+            }
+        }
+        Ok(VideoImage {
+            rgb,
+            width: width as u32,
+            height: height as u32,
+            aspect: self.aspect,
+            start_us,
+            duration_us,
+        })
+    }
+
+    fn gbr_image<const BYTES: usize>(
+        &self,
+        [green, blue, red]: [Plane<'_>; 3],
+        origin: (usize, usize),
+        depth: u8,
+        start_us: u64,
+        duration_us: u64,
+    ) -> Result<VideoImage, EngineError> {
+        let Region {
+            left,
+            top,
+            width,
+            height,
+        } = self.visible_region();
+        let span = (1u16 << depth) - 1;
+        let x = (origin.0 + left) * BYTES;
+        let y = origin.1 + top;
+        let columns = width * BYTES;
+        let mut rgb = Vec::with_capacity(width * height * 3);
+        for row in y..y + height {
+            let lines = [
+                red.line(row, x, columns)?,
+                green.line(row, x, columns)?,
+                blue.line(row, x, columns)?,
+            ];
+            for column in 0..width {
+                rgb.extend(
+                    lines.map(|line| scale_video_sample(video_sample::<BYTES>(line, column), span)),
+                );
             }
         }
         Ok(VideoImage {
@@ -784,6 +822,12 @@ fn video_sample<const BYTES: usize>(line: &[u8], col: usize) -> u16 {
     } else {
         u16::from_le_bytes([line[2 * col], line[2 * col + 1]])
     }
+}
+
+fn scale_video_sample(value: u16, span: u16) -> u8 {
+    let value = u32::from(value.min(span));
+    let span = u32::from(span);
+    ((value * 255 + span / 2) / span) as u8
 }
 
 fn spatial_axis(

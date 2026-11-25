@@ -425,3 +425,5 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ## Project-authored AV1 test fixtures
 
 The synthetic WebM files `tests/fixtures/epub-video-av1-mono-{8,10,12}.webm` contain only project-authored numeric sample patterns under Apache-2.0. libaom via FFmpeg was used to encode the fixtures. libdav1d independently verified the decoded samples during fixture preparation.
+
+The synthetic RGB WebM files `tests/fixtures/epub-video-av1-rgb-{8,10,12}.webm` contain project-authored numeric sample patterns under Apache-2.0. libaom via FFmpeg was used to encode the fixtures. libdav1d independently verified the decoded samples during fixture preparation.

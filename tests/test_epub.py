@@ -7880,6 +7880,93 @@ Trailing
         with doc_ex.open(rewrite_epub(data, {path: fallback})) as book:
             self.assertEqual(list(book.epub_embedded_video(0, 0)), frames)
 
+    def test_embedded_webm_av1_rgb_matches_identity_plane_order_and_timing(self) -> None:
+        fixtures = Path(__file__).parent / "fixtures"
+        levels = (0, 37, 90, 175, 231, 255)
+        for depth, profile in ((8, 1), (10, 1), (12, 2)):
+            with self.subTest(depth=depth):
+                asset = (fixtures / f"epub-video-av1-rgb-{depth}.webm").read_bytes()
+                chapter = f'''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>RGB AV1</title></head>
+                  <body><video>
+                    <source src="clip.webm" type="video/webm; codecs=av01.{profile}.00M.{depth:02d}"/>
+                    <source src="clip.webm#t=0.145,0.385&amp;xywh=percent:25,25,50,50"/>
+                    <track kind="captions" srclang="en" src="captions.vtt"/>
+                  </video></body></html>'''
+                with doc_ex.open(epub_fixture()) as original:
+                    data = original.edit_epub_structure(
+                        [doc_ex.EpubChapterSource("RGB AV1", chapter, "OEBPS/clip.xhtml")],
+                        resources={
+                            "OEBPS/clip.webm": doc_ex.EpubResource("video/webm", asset),
+                            "OEBPS/captions.vtt": doc_ex.EpubResource(
+                                "text/vtt", b"WEBVTT\n\n00:00:00.180 --> 00:00:00.290\nRGB\n",
+                            ),
+                        },
+                    )
+
+                def reference(frame: int, x: int, y: int, width: int, height: int) -> bytes:
+                    # Independently decoded lossless GBR samples, projected in packed RGB order.
+                    maximum = (1 << depth) - 1
+                    rgb = bytearray()
+                    for row in range(y, y + height):
+                        for col in range(x, x + width):
+                            for plane in (2, 0, 1):
+                                level = levels[(col // 8 + 3 * (row // 8) + frame + 2 * plane) % len(levels)]
+                                sample = level * maximum // 255
+                                rgb.append(int(sample * 255 / maximum + 0.5))
+                    return bytes(rgb)
+
+                with doc_ex.open(data) as book:
+                    frames = list(book.epub_embedded_video(0, 0, source_index=0))
+                    self.assertEqual([(f.start_us, f.duration_us) for f in frames],
+                                     [(i * 125_000, 125_000) for i in range(4)])
+                    self.assertTrue(all((f.width, f.height, f.pixel_aspect_ratio) == (40, 26, (4, 3))
+                                        for f in frames))
+                    self.assertEqual([f.rgb for f in frames], [reference(i, 3, 2, 40, 26) for i in range(4)])
+                    clipped = list(book.epub_embedded_video(0, 0, source_index=1, text_track=0))
+                    self.assertEqual([(f.start_us, f.duration_us) for f in clipped],
+                                     [(145_000, 35_000), (180_000, 70_000), (250_000, 40_000),
+                                      (290_000, 85_000), (375_000, 10_000)])
+                    self.assertTrue(all((f.width, f.height, f.pixel_aspect_ratio) == (20, 13, (4, 3))
+                                        for f in clipped))
+                    self.assertEqual([f.rgb for f in clipped],
+                                     [reference(i, 13, 8, 20, 13) for i in (1, 1, 2, 2, 3)])
+                    self.assertIs(clipped[0].rgb, clipped[1].rgb)
+                    self.assertEqual([[cue.text for cue in f.text_cues] for f in clipped],
+                                     [[], ["RGB"], ["RGB"], [], []])
+                    sought, = book.epub_embedded_video(
+                        0, 0, source_index=1, start_us=261_123, end_us=277_002, text_track=0,
+                    )
+                    self.assertEqual((sought.start_us, sought.duration_us, sought.rgb),
+                                     (261_123, 15_879, clipped[2].rgb))
+                    self.assertEqual([(cue.start_us, cue.end_us, cue.text) for cue in sought.text_cues],
+                                     [(261_123, 277_002, "RGB")])
+
+    def test_embedded_webm_av1_rgb_rejects_conflicting_colour_signals(self) -> None:
+        asset = (Path(__file__).parent / "fixtures/epub-video-av1-rgb-10.webm").read_bytes()
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>RGB AV1</title></head>
+          <body><video src="clip.webm"/></body></html>'''
+        path = "OEBPS/clip.webm"
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("RGB AV1", chapter, "OEBPS/clip.xhtml")],
+                resources={path: doc_ex.EpubResource("video/webm", asset)},
+            )
+        for field, current, changed, message in (
+            ("55b181", 0, 1, "RGB container colour conflicts"),
+            ("55b981", 2, 1, "RGB container colour conflicts"),
+            ("55bb81", 1, 9, "RGB container colour conflicts"),
+            ("55ba81", 13, 1, "RGB container colour conflicts"),
+            ("55ba81", 13, 16, "HDR colour"),
+            ("53c081", 0, 1, "WebM alpha"),
+        ):
+            with self.subTest(field=field, changed=changed):
+                key = bytes.fromhex(field)
+                self.assertEqual(asset.count(key + bytes([current])), 1)
+                altered = asset.replace(key + bytes([current]), key + bytes([changed]))
+                with doc_ex.open(rewrite_epub(data, {path: altered})) as book:
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
+                        next(book.epub_embedded_video(0, 0, source_index=0))
+
     def test_embedded_webm_vp9_retains_colour_and_depth(self) -> None:
         fixtures = Path(__file__).parent / "fixtures"
         for filename, codecs, geometry, fps, count in (

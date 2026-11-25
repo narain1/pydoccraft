@@ -5,7 +5,7 @@ use oxideav_core::{
     CodecId, Decoder, Demuxer, Error, Frame, MediaType, Packet, PixelFormat, VideoFrame,
 };
 use oxideav_mkv::demux::{
-    AlphaMode, ColourRange, FlagInterlaced, MatrixCoefficients, TransferCharacteristics,
+    AlphaMode, ColourRange, FlagInterlaced, MatrixCoefficients, Primaries, TransferCharacteristics,
 };
 use oxideav_vp8::{parse_header, Vp8Decoder};
 use oxideav_vp9::{
@@ -251,14 +251,33 @@ impl WebmSource {
                     .gray_image::<2>(plane, self.crop, depth, start, duration)
             };
         }
-        let [y, u, v] = frame.planes.as_slice() else {
+        let [first, second, third] = frame.planes.as_slice() else {
             return Err(invalid("WebM decoder returned unexpected picture planes"));
         };
+        let planes = [first, second, third].map(|plane| Plane {
+            bytes: &plane.data,
+            stride: plane.stride,
+        });
+        match format {
+            Some(PixelFormat::Gbrp8) => {
+                return self
+                    .geometry
+                    .gbr_image::<1>(planes, self.crop, 8, start, duration);
+            }
+            Some(PixelFormat::Gbrp10Le) => {
+                return self
+                    .geometry
+                    .gbr_image::<2>(planes, self.crop, 10, start, duration);
+            }
+            Some(PixelFormat::Gbrp12Le) => {
+                return self
+                    .geometry
+                    .gbr_image::<2>(planes, self.crop, 12, start, duration);
+            }
+            _ => {}
+        }
         let picture = Yuv {
-            planes: [y, u, v].map(|plane| Plane {
-                bytes: &plane.data,
-                stride: plane.stride,
-            }),
+            planes,
             x: self.crop.0,
             y: self.crop.1,
             bottom_up: false,
@@ -293,7 +312,7 @@ impl WebmSource {
                 .geometry
                 .image_depth::<1, 2, 2>(picture, 12, start, duration),
             _ => Err(unsupported(
-                "WebM video requires planar YUV or monochrome pictures",
+                "WebM video requires planar YUV, monochrome or RGB pictures",
             )),
         }
     }
@@ -541,6 +560,28 @@ fn colour(
             )
     }) {
         return Err(unsupported("WebM HDR colour or inconsistent sample depth"));
+    }
+    if signal.matrix == MatrixCoefficients::Identity {
+        if declared.is_some_and(|colour| {
+            !matches!(
+                colour.matrix_coefficients(),
+                MatrixCoefficients::Unspecified | MatrixCoefficients::Identity
+            ) || !matches!(colour.range(), ColourRange::Unspecified | ColourRange::Full)
+                || !matches!(
+                    colour.primaries(),
+                    Primaries::Unspecified | Primaries::BT709
+                )
+                || !matches!(
+                    colour.transfer_characteristics(),
+                    TransferCharacteristics::Unspecified | TransferCharacteristics::Iec61966_2_1
+                )
+        }) {
+            return Err(unsupported(
+                "WebM AV1 RGB container colour conflicts with its sequence",
+            ));
+        }
+        // RGB bypasses the luma/chroma matrix.
+        return Ok((0.2126, 0.0722, true));
     }
     let matrix = declared
         .map(|colour| colour.matrix_coefficients())

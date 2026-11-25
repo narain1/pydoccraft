@@ -120,6 +120,22 @@ impl Track {
         if matches!(signal.transfer_characteristics, 16 | 18) {
             return Err(unsupported("WebM AV1 HDR transfer characteristic"));
         }
+        if signal.matrix_coefficients == 0
+            && (signal.mono_chrome
+                || signal.subsampling_x
+                || signal.subsampling_y
+                || !signal.color_range
+                || signal.color_primaries != 1
+                || signal.transfer_characteristics != 13
+                || !matches!(
+                    (sequence.seq_profile, signal.bit_depth),
+                    (1, 8 | 10) | (2, 12)
+                ))
+        {
+            return Err(unsupported(
+                "WebM AV1 RGB requires full-range BT.709/sRGB 4:4:4",
+            ));
+        }
         matrix(signal.matrix_coefficients)?;
         if let Some(previous) = &self.sequence {
             if previous != &sequence {
@@ -150,25 +166,34 @@ impl Track {
             .sequence
             .ok_or_else(|| invalid("missing WebM AV1 sequence header"))?;
         let signal = sequence.color_config;
-        let format = match (
-            signal.mono_chrome,
-            signal.bit_depth,
-            signal.subsampling_x,
-            signal.subsampling_y,
-        ) {
-            (true, 8, true, true) => PixelFormat::Gray8,
-            (true, 10, true, true) => PixelFormat::Gray10Le,
-            (true, 12, true, true) => PixelFormat::Gray12Le,
-            (false, 8, true, true) => PixelFormat::Yuv420P,
-            (false, 8, true, false) => PixelFormat::Yuv422P,
-            (false, 8, false, false) => PixelFormat::Yuv444P,
-            (false, 10, true, true) => PixelFormat::Yuv420P10Le,
-            (false, 10, true, false) => PixelFormat::Yuv422P10Le,
-            (false, 10, false, false) => PixelFormat::Yuv444P10Le,
-            (false, 12, true, true) => PixelFormat::Yuv420P12Le,
-            (false, 12, true, false) => PixelFormat::Yuv422P12Le,
-            (false, 12, false, false) => PixelFormat::Yuv444P12Le,
-            _ => return Err(unsupported("WebM AV1 chroma sampling or depth")),
+        let format = if signal.matrix_coefficients == 0 {
+            match signal.bit_depth {
+                8 => PixelFormat::Gbrp8,
+                10 => PixelFormat::Gbrp10Le,
+                12 => PixelFormat::Gbrp12Le,
+                _ => return Err(unsupported("WebM AV1 RGB sample depth")),
+            }
+        } else {
+            match (
+                signal.mono_chrome,
+                signal.bit_depth,
+                signal.subsampling_x,
+                signal.subsampling_y,
+            ) {
+                (true, 8, true, true) => PixelFormat::Gray8,
+                (true, 10, true, true) => PixelFormat::Gray10Le,
+                (true, 12, true, true) => PixelFormat::Gray12Le,
+                (false, 8, true, true) => PixelFormat::Yuv420P,
+                (false, 8, true, false) => PixelFormat::Yuv422P,
+                (false, 8, false, false) => PixelFormat::Yuv444P,
+                (false, 10, true, true) => PixelFormat::Yuv420P10Le,
+                (false, 10, true, false) => PixelFormat::Yuv422P10Le,
+                (false, 10, false, false) => PixelFormat::Yuv444P10Le,
+                (false, 12, true, true) => PixelFormat::Yuv420P12Le,
+                (false, 12, true, false) => PixelFormat::Yuv422P12Le,
+                (false, 12, false, false) => PixelFormat::Yuv444P12Le,
+                _ => return Err(unsupported("WebM AV1 chroma sampling or depth")),
+            }
         };
         let mut session = SpecDecodeSession::new();
         session.set_max_picture_size(MAX_PIXELS);
@@ -209,7 +234,8 @@ impl Playback {
             || frame.bit_depth != self.depth
             || frame.planes.len() != planes
             || frame.plane_dims.len() != planes
-            || (planes == 1 && frame.plane_dims[0] != self.coded)
+            || ((planes == 1 || self.format.is_rgb())
+                && frame.plane_dims.iter().any(|&size| size != self.coded))
         {
             return Err(unsupported(
                 "WebM AV1 changes decoded picture geometry or depth",
@@ -255,6 +281,7 @@ fn show_frame(sequence: &SequenceHeader, payload: &[u8]) -> Result<(bool, bool),
 
 fn matrix(code: u8) -> Result<MatrixCoefficients, EngineError> {
     match code {
+        0 => Ok(MatrixCoefficients::Identity),
         1 => Ok(MatrixCoefficients::BT709),
         2 => Ok(MatrixCoefficients::Unspecified),
         4 => Ok(MatrixCoefficients::UsFcc73682),

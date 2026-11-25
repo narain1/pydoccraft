@@ -120,6 +120,8 @@ Bundled and linked third-party material
 
 The synthetic AV1 monochrome WebM fixtures in tests/fixtures/epub-video-av1-mono-{8,10,12}.webm contain project-authored sample patterns under Apache-2.0. libaom through FFmpeg was used solely to encode the source-tree test fixtures.
 
+The synthetic AV1 RGB WebM fixtures in tests/fixtures/epub-video-av1-rgb-{8,10,12}.webm contain project-authored sample patterns under Apache-2.0. libaom through FFmpeg was used solely to encode the source-tree test fixtures.
+
 The locked crate-by-crate license inventory is distributed as LICENSE-THIRD-PARTY and maintained in source as THIRD_PARTY_LICENSES.md.
 
 The ArtCraft, PdfCraft, WordCraft, and DeckCraft names, wordmarks, and logos are trademarks of their respective owners. No trademark license is granted. No upstream logos or brand assets are included in pydoccraft.
