@@ -77,15 +77,15 @@ pub(super) fn prepare(
         let enclosing = owner.parent_element().ok_or_else(error)?;
         let parent = if enclosing == text {
             None
-        } else if enclosing.parent_element() == Some(text) {
+        } else {
+            // The parent must already be in the depth-first owner order.
+            // The shared owner limit bounds both branching and depth.
             Some(
                 nested[..index]
                     .iter()
                     .position(|&node| node == enclosing)
                     .ok_or_else(error)?,
             )
-        } else {
-            return Err(error());
         };
         let (id, temporary_id) = measurement_id(owner, ids, next_id, source, edits)?;
         children.push(Owner {

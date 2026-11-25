@@ -4434,19 +4434,57 @@ class EpubTests(unittest.TestCase):
                     independent = render(deeper(outer, parent, separate=True), inline)
                     self.assertEqual(render(deeper(outer, parent), inline), independent)
 
-        too_deep = deeper(248, 176).replace(
+        one_unit = deeper(248, 176).replace(
             '<tspan textLength="176">', '<tspan textLength="176"><tspan textLength="168">',
         ).replace('</a></tspan></tspan><a href="https://example.org/tail"',
                   '</a></tspan></tspan></tspan><a href="https://example.org/tail"')
-        for source in (too_deep, deeper(248, 140)):
+        for source in (one_unit, deeper(248, 140)):
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "overlapping textLength owners"):
                 render(source, False)
+
+        def chain(depth: int, *, separate: bool = False) -> str:
+            markup = svg(None, 92).split('<text x="134"', 1)[0].replace("font-size:34px", "font-size:17px")
+            widths = range(80, 60 + 20 * depth + 1, 20)
+            ink = "".join(f'<tspan fill="#{bytes(rgb).hex()}">{part}</tspan>' for rgb, part in zip(colors, labels))
+            leaf = f'<tspan id="inner" textLength="60"><a href="https://example.org/inner">{ink}</a></tspan>'
+            tail = f'<a fill="#{bytes(sides[1]).hex()}" href="https://example.org/tail-{{}}">B</a>'
+            outer = widths[-1]
+            if separate:
+                left = 134 - outer / 2
+                # Every owner begins at the same left edge. Its trailing
+                # glyph ends at the independently authored right edge.
+                controls = [f'<text x="{left}" y="70" style="text-anchor:start">{leaf}</text>']
+                controls.extend(f'<text x="{left + width}" y="70" style="text-anchor:end">{tail.format(width)}</text>'
+                                for width in widths)
+                return markup + "".join(controls) + "</svg>"
+            for width in widths[:-1]:
+                leaf = f'<tspan textLength="{width}">{leaf}{tail.format(width)}</tspan>'
+            return markup + f'<text x="134" y="70" textLength="{outer}">{leaf}{tail.format(outer)}</text></svg>'
+
+        for inline in (False, True):
+            for depth in (3, 8):
+                with self.subTest(inline=inline, depth=depth):
+                    ink, search, links, target = render(chain(depth), inline)
+                    reference_ink, reference_search, reference_links, reference_target = render(
+                        chain(depth, separate=True), inline,
+                    )
+                    self.assertEqual(ink, reference_ink)
+                    self.assertEqual(links.keys(), reference_links.keys())
+                    geometry = (*search, *(links[name] for name in reference_links), target)
+                    reference_geometry = (*reference_search, *reference_links.values(), reference_target)
+                    for measured, authored in zip(geometry, reference_geometry, strict=True):
+                        for actual, expected in zip(measured, authored, strict=True):
+                            self.assertAlmostEqual(actual, expected, delta=.001)
+
+        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "overlapping textLength owners"):
+            render(chain(3).replace(' textLength="100"', ""), False)
 
         oversized = peers(224).replace(
             "</text></svg>", '<tspan textLength="78">B́é</tspan>' * 7 + "</text></svg>",
         )
-        with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "more than eight overlapping textLength"):
-            render(oversized, False)
+        for source in (oversized, chain(9)):
+            with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "more than eight overlapping textLength"):
+                render(source, False)
 
     def test_epub_svg_use_instances_keep_inherited_variable_font_requests(self) -> None:
         font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
