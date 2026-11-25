@@ -1,4 +1,4 @@
-//! Resolve local QuickTime and Nero chapter titles on the MP4 movie timeline.
+//! Resolve local QuickTime, Nero and Adobe F4V chapter titles on the MP4 movie timeline.
 use std::{borrow::Cow, io::Cursor, ops::Range, sync::Arc};
 
 use oxideav_core::{CodecRegistry, Demuxer, StreamInfo};
@@ -33,30 +33,33 @@ fn resolve(bytes: Vec<u8>, id: &str) -> Result<Range<u64>, EngineError> {
     let demux =
         open_typed(Box::new(Cursor::new(bytes.clone())), &CodecRegistry::new()).map_err(invalid)?;
     let track = chapter_stream(&demux)?;
-    let table = bounds
-        .chapter_list
-        .as_ref()
-        .map(|range| &bytes[range.clone()]);
-    if track.is_none() && table.is_none() {
+    let tables = [
+        (TableKind::Nero, bounds.chapter_list.as_ref()),
+        (TableKind::F4v, bounds.f4v_chapter_list.as_ref()),
+    ];
+    if track.is_none() && tables.iter().all(|(_, table)| table.is_none()) {
         return Err(unsupported(
             "MP4 fragment IDs require a local QuickTime chapter track or chapter table",
         ));
     }
-    let track_interval = track
+    let mut selected = track
         .map(|track| track_interval(&bytes, &bounds, &demux, track, id))
         .transpose()?
         .flatten();
-    let table_interval = table
-        .map(|table| table_interval(table, demux.movie_header(), id))
-        .transpose()?
-        .flatten();
-    match (track_interval, table_interval) {
-        (Some(track), Some(table)) if track != table => Err(invalid(format!(
-            "MP4 chapter ID {id:?} is ambiguous across chapter indexes"
-        ))),
-        (Some(interval), _) | (_, Some(interval)) => Ok(interval),
-        _ => Err(invalid(format!("MP4 chapter ID {id:?} is absent"))),
+    let movie = demux.movie_header();
+    for (kind, range) in tables {
+        if let Some(range) = range {
+            if let Some(candidate) = table_interval(&bytes[range.clone()], movie, kind, id)? {
+                if selected.as_ref().is_some_and(|result| *result != candidate) {
+                    return Err(invalid(format!(
+                        "MP4 chapter ID {id:?} is ambiguous across chapter indexes"
+                    )));
+                }
+                selected = Some(candidate);
+            }
+        }
     }
+    selected.ok_or_else(|| invalid(format!("MP4 chapter ID {id:?} is absent")))
 }
 
 fn track_interval(
@@ -163,9 +166,15 @@ fn chapter_stream(demux: &Mp4Demuxer) -> Result<Option<&StreamInfo>, EngineError
     Ok(Some(stream))
 }
 
+enum TableKind {
+    Nero,
+    F4v,
+}
+
 fn table_interval(
     table: &[u8],
     movie: MovieHeader,
+    kind: TableKind,
     id: &str,
 ) -> Result<Option<Range<u64>>, EngineError> {
     let malformed = || invalid("malformed MP4 chapter table");
@@ -173,12 +182,12 @@ fn table_interval(
     if *flags != [0; 3] {
         return Err(malformed());
     }
-    let (count, mut entries) = match version {
-        0 => {
+    let (count, mut entries) = match (&kind, version) {
+        (_, 0) => {
             let (count, entries) = table.split_first().ok_or_else(malformed)?;
             (usize::from(*count), entries)
         }
-        1 => {
+        (TableKind::Nero, 1) => {
             let ([reserved, count @ ..], entries) =
                 table.split_first_chunk::<5>().ok_or_else(malformed)?;
             if *reserved != 0 {
@@ -198,24 +207,27 @@ fn table_interval(
             Err(malformed())
         };
     }
-    let clock = ChapterClock::new(movie, NERO_TIMESCALE, &[])?;
+    // The identical compact records use different clocks based on their box location.
+    let timescale = match kind {
+        TableKind::Nero => NERO_TIMESCALE,
+        TableKind::F4v if movie.timescale <= i32::MAX as u32 => movie.timescale,
+        TableKind::F4v => return Err(invalid("invalid F4V chapter movie timescale")),
+    };
+    let clock = ChapterClock::new(movie, timescale, &[])?;
     let mut previous = None;
     let mut selected = None;
-    let mut end = i64::MAX;
+    let mut end = clock.movie_end;
     for _ in 0..count {
         let (header, payload) = entries.split_first_chunk::<9>().ok_or_else(malformed)?;
         let (time, length) = header.split_first_chunk::<8>().ok_or_else(malformed)?;
-        let ticks = u64::from_be_bytes(*time);
-        if u128::from(ticks).div_ceil(10) > MAX_TIME {
-            return Err(limited("MP4 chapter time exceeds its clock budget"));
-        }
-        let start = ticks as i64;
+        let start = u128::from(u64::from_be_bytes(*time)) * clock.units_per_media_tick;
+        clock.micros(start)?;
         if previous.is_some_and(|previous| start <= previous) {
             return Err(invalid(
                 "MP4 chapter table starts must be strictly increasing",
             ));
         }
-        if u128::from(ticks) * clock.units_per_media_tick >= clock.movie_end {
+        if start >= clock.movie_end {
             return Err(invalid("MP4 chapter table start lies outside the movie"));
         }
         let (title, rest) = payload
@@ -239,7 +251,9 @@ fn table_interval(
     if !entries.is_empty() {
         return Err(malformed());
     }
-    selected.map(|start| clock.interval(start..end)).transpose()
+    selected
+        .map(|start| clock.movie_interval(start..end))
+        .transpose()
 }
 
 fn title<'a>(
@@ -353,14 +367,21 @@ impl ChapterClock {
     fn interval(&self, source: Range<i64>) -> Result<Range<u64>, EngineError> {
         let bound = |time: i64| {
             let ticks = time.saturating_sub(self.media_origin).max(0) as u128;
-            let movie = (self.movie_start + ticks * self.units_per_media_tick).min(self.movie_end);
-            let micros = (movie * 1_000_000).div_ceil(self.denominator);
-            if micros > MAX_TIME {
-                return Err(limited("MP4 chapter time exceeds its clock budget"));
-            }
-            Ok(micros as u64)
+            (self.movie_start + ticks * self.units_per_media_tick).min(self.movie_end)
         };
-        let interval = bound(source.start)?..bound(source.end)?;
+        self.movie_interval(bound(source.start)..bound(source.end))
+    }
+
+    fn micros(&self, time: u128) -> Result<u64, EngineError> {
+        let micros = (time * 1_000_000).div_ceil(self.denominator);
+        if micros > MAX_TIME {
+            return Err(limited("MP4 chapter time exceeds its clock budget"));
+        }
+        Ok(micros as u64)
+    }
+
+    fn movie_interval(&self, source: Range<u128>) -> Result<Range<u64>, EngineError> {
+        let interval = self.micros(source.start)?..self.micros(source.end)?;
         if interval.is_empty() {
             return Err(unsupported("MP4 chapter has no playable interval"));
         }

@@ -18,7 +18,7 @@ pub(super) enum AudioCodec {
 pub(super) fn audio_codec(media: &str) -> Option<AudioCodec> {
     match media {
         "audio/mpeg" | "audio/mp3" => Some(AudioCodec::Mpeg),
-        "audio/mp4" | "audio/x-m4a" | "video/mp4" => Some(AudioCodec::Aac),
+        "audio/mp4" | "audio/x-m4a" | "video/mp4" | "video/x-f4v" => Some(AudioCodec::Aac),
         "audio/opus" | "audio/ogg; codecs=opus" => Some(AudioCodec::Opus),
         "audio/ogg; codecs=vorbis" => Some(AudioCodec::Vorbis),
         "audio/ogg" | "application/ogg" | "video/ogg" => Some(AudioCodec::Ogg),
@@ -149,13 +149,14 @@ fn source(
     if chapter_id.is_some()
         && !matches!(
             media,
-            "audio/webm" | "video/webm" | "audio/mp4" | "audio/x-m4a" | "video/mp4"
+            "audio/webm" | "video/webm" | "audio/mp4" | "audio/x-m4a" | "video/mp4" | "video/x-f4v"
         )
     {
         return Err(unsupported(
             "media fragment IDs require a local WebM or MP4 source",
         ));
     }
+    let mp4_video = kind == "video" && matches!(media, "video/mp4" | "video/x-f4v");
     let ogg_video = kind == "video" && matches!(media, "video/ogg" | "application/ogg");
     let webm_video = kind == "video" && media == "video/webm";
     let advertises = |codec: &str| {
@@ -170,9 +171,9 @@ fn source(
     };
     let playable_audio =
         (kind == "audio" && audio_codec(media).is_some() && hint.is_none_or(supported_audio_hint))
-            || (kind == "video" && media == "video/mp4")
+            || mp4_video
             || ((ogg_video || webm_video) && (advertises("opus") || advertises("vorbis")));
-    let playable_video = kind == "video" && media == "video/mp4"
+    let playable_video = mp4_video
         || (ogg_video && advertises("theora"))
         || (webm_video
             && ["av01", "av1", "vp8", "vp9", "vp09"]

@@ -20,6 +20,7 @@ pub(super) struct Mp4Bounds {
     samples: usize,
     media: Vec<Range<usize>>,
     chapter_list: Option<Range<usize>>,
+    f4v_chapter_list: Option<Range<usize>>,
 }
 
 impl Mp4Bounds {
@@ -93,16 +94,21 @@ impl Mp4Bounds {
             {
                 return Err(invalid("invalid or repeated MP4 chapter reference"));
             }
-            if parent == Some(*b"udta") && &header.fourcc == b"chpl" {
-                if header.payload_size().is_none() {
-                    return Err(invalid("MP4 chapter table requires an explicit box size"));
-                }
-                if self
-                    .chapter_list
-                    .replace(base + start..base + end)
-                    .is_some()
-                {
-                    return Err(invalid("duplicate MP4 chapter table"));
+            if &header.fourcc == b"chpl" {
+                let table = match parent {
+                    Some(parent) if &parent == b"udta" => Some(&mut self.chapter_list),
+                    Some(parent) if &parent == b"moov" && depth == 1 => {
+                        Some(&mut self.f4v_chapter_list)
+                    }
+                    _ => None,
+                };
+                if let Some(table) = table {
+                    if header.payload_size().is_none() {
+                        return Err(invalid("MP4 chapter table requires an explicit box size"));
+                    }
+                    if table.replace(base + start..base + end).is_some() {
+                        return Err(invalid("duplicate MP4 chapter table"));
+                    }
                 }
             }
             let child_parent = parent.map(|_| header.fourcc);

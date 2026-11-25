@@ -141,9 +141,11 @@ impl VideoSource {
         validate_archive_path(path)?;
         let bytes = Book::open(epub)?.read(path, MAX_ENCODED_BYTES)?;
         match media {
-            "video/mp4" => std::panic::catch_unwind(|| AvcSource::decode(bytes, start_us, end_us))
-                .map_err(|_| invalid("malformed embedded MP4 video"))?
-                .map(|source| Self::Avc(Box::new(source))),
+            "video/mp4" | "video/x-f4v" => {
+                std::panic::catch_unwind(|| AvcSource::decode(bytes, start_us, end_us))
+                    .map_err(|_| invalid("malformed embedded MP4 video"))?
+                    .map(|source| Self::Avc(Box::new(source)))
+            }
             "video/ogg" | "application/ogg" => std::panic::catch_unwind(|| {
                 theora::TheoraSource::open(&bytes, start_us, end_us, names)
             })

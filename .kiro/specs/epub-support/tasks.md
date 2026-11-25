@@ -146,6 +146,7 @@
 - [x] Resolve local WebM media fragment IDs through simple Matroska chapters and synchronize the selected picture, soundtrack, crop, and captions.
 - [x] Resolve local MP4 and M4A media fragment IDs by exact QuickTime chapter title, preserving movie edits, AAC, cropped picture and caption timing.
 - [x] Resolve local MP4 and M4A media fragment IDs from bounded Nero chapter tables, validate coexistence with QuickTime and preserve time-fragment playback.
+- [x] Resolve legacy Adobe F4V chapter tables on the movie clock and synchronize cropped H.264, AAC and captions while preserving Nero and QuickTime behavior.
 - [x] Stream embedded Ogg Theora and synchronize Opus and captions across sequential Ogg segments.
 - [x] Stream mono and stereo Ogg Vorbis for embedded audio and SMIL narration. Preserve page granule timing across same-format chains and synchronize a Vorbis soundtrack with chained Theora and captions.
 - [x] Stream VP8 and SDR VP9 video, Opus soundtracks, and synchronized local captions from packaged WebM sources.
@@ -160,7 +161,7 @@
 - [x] Apply bounded WebVTT region selectors and carry typed region paint and cue styles into standalone captions and synchronized video.
 - [x] Apply TTML initial and inherited region styles to typed runs, including bounded paragraph and division inline regions, content overrides and time-based restores.
 - [ ] Support WebVTT region scrolling, conditional TTML captions, interleaved or ambiguous region ownership, and advanced TTML animation, additional TTML typography and subtitle painting.
-- [ ] Support more media fragment track combinations, the F4V chapter metadata profile and ID fragments in additional containers.
+- [ ] Support more media fragment track combinations and ID fragments in additional containers.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
 - [x] Synchronize XHTML navigation and the spine's compatibility NCX in the same EPUB 3 chapter edit.
 - [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.
