@@ -458,23 +458,29 @@ impl<'xml> Projection<'_, 'xml> {
         for child in node.children().filter(Node::is_element) {
             let seeking = self
                 .alignment_group
-                .is_some_and(|scope| scope.mark.is_some() && scope.caret.is_none());
+                .is_some_and(table::alignment::Scope::seeking_caret);
             let nodes = self.element(child, depth + 1, style)?;
             if seeking {
-                if let Some(caret) = self
-                    .alignment_group
-                    .as_mut()
-                    .and_then(|group| group.caret.as_mut())
-                {
-                    // WordCraft counts one caret unit per run character or
-                    // compound node in the containing equation argument.
-                    *caret += rows
-                        .iter()
-                        .map(|node| match node {
-                            MNode::Run(run) => run.text.chars().count(),
-                            _ => 1,
-                        })
-                        .sum::<usize>();
+                if let Some(scope) = &mut self.alignment_group {
+                    let numeric = scope.has_numeric_cursor();
+                    if let Some(caret) = &mut scope.caret {
+                        // Composed Word boxes can replace one marker with a
+                        // differently sized run, changing later caret offsets.
+                        if numeric && rows.iter().any(compose::is_box_marker) {
+                            return Err(unsupported(
+                                "MathML decimal alignment after composed geometry",
+                            ));
+                        }
+                        // WordCraft counts one unit per run character or
+                        // compound node in the containing equation argument.
+                        *caret += rows
+                            .iter()
+                            .map(|node| match node {
+                                MNode::Run(run) => run.text.chars().count(),
+                                _ => 1,
+                            })
+                            .sum::<usize>();
+                    }
                 }
             }
             rows.extend(nodes);
@@ -488,14 +494,16 @@ impl<'xml> Projection<'_, 'xml> {
         style: Presentation<'xml>,
         depth: usize,
     ) -> Result<MNode, EngineError> {
-        let mut caret = None;
+        let mut caret = self
+            .alignment_group
+            .and_then(|scope| scope.numeric_offset(node));
         for child in node.children().filter(Node::is_element) {
             let Some(scope) = self.alignment_group.filter(|scope| scope.removes(child)) else {
                 return Err(unsupported("nested content in a MathML token"));
             };
             table::alignment::check_mark_empty(child)?;
             self.charge(depth + 1)?;
-            if scope.mark == Some(child.id()) {
+            if scope.is_selected_mark(child) {
                 caret = Some(token_mark_offset(node, child));
             }
         }
@@ -505,6 +513,8 @@ impl<'xml> Projection<'_, 'xml> {
                 scope.caret = Some(caret);
             }
             if node.has_tag_name((MATHML, "mn")) {
+                // Keep punctuation inside an aligned number in the same
+                // searchable and editable run as its adjacent digits.
                 run.lit = true;
             }
         }
@@ -523,7 +533,7 @@ impl<'xml> Projection<'_, 'xml> {
                 if node.has_tag_name((MATHML, "malignmark")) {
                     table::alignment::check_mark_empty(node)?;
                 }
-                if scope.mark == Some(node.id()) {
+                if scope.is_selected_mark(node) {
                     scope.caret = Some(0);
                 }
                 return Ok(Vec::new());

@@ -92,7 +92,8 @@
 - [ ] Extend overflow placement to ruled MathML grids and vertical spans, and support ruled labeled grids inside larger DOCX equations.
 - [x] Align a single MathML group per data cell to its edge, center or decimal point in previews, searchable PDF and editable DOCX.
 - [x] Preserve explicit MathML alignment marks on the group baseline and inside its tokens in searchable PDF and editable DOCX.
-- [ ] Extend MathML alignment to multiple groups per cell, marks inside operator arguments, automatic decimal alignment in compound numeric expressions, right-to-left groups and cross-table scopes.
+- [x] Align the first baseline number in supported compound expressions, including native operators and trailing units, in searchable PDF and editable DOCX.
+- [ ] Extend MathML alignment to multiple groups per cell, marks and decimal points inside nontransparent operands, decimal alignment after composed geometry, right-to-left groups and cross-table scopes.
 - [ ] Extend editable DOCX export to negative leading offsets and expand the remaining MathML visual properties.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.

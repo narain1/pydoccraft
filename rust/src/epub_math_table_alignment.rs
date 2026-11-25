@@ -1,6 +1,5 @@
 //! Measure MathML table alignment points without changing editable runs.
 use roxmltree::{Node, NodeId};
-use wordcraft_doc::math::MNode;
 use wordcraft_layout::math::MathLayout;
 
 use super::super::{append_token_text, xml_space, DEPTH};
@@ -12,7 +11,7 @@ pub(super) enum Anchor {
     Left,
     Center,
     Right,
-    Decimal(Option<usize>),
+    Decimal(usize, Edge),
     Marked(usize, Edge),
 }
 
@@ -27,8 +26,8 @@ impl Anchor {
         match self {
             Self::Left => Ok(0.0),
             Self::Center => Ok(layout.width / 2.0),
-            Self::Right | Self::Decimal(None) => Ok(layout.width),
-            Self::Decimal(Some(offset)) => Edge::Right
+            Self::Right => Ok(layout.width),
+            Self::Decimal(offset, edge) => edge
                 .caret(layout, offset)
                 .ok_or_else(|| unsupported("MathML decimal alignment caret position")),
             Self::Marked(offset, edge) => edge
@@ -64,43 +63,58 @@ pub(super) struct Group {
 #[derive(Clone, Copy)]
 enum RequestedAnchor {
     Automatic(Anchor),
+    Decimal(Edge),
     Explicit(Edge),
 }
 
 impl Group {
-    pub(super) fn resolve(
-        self,
-        caret: Option<usize>,
-        nodes: &mut [MNode],
-    ) -> Result<Anchor, EngineError> {
-        let anchor = match self.anchor {
-            RequestedAnchor::Explicit(edge) => {
-                let offset =
-                    caret.ok_or_else(|| invalid("MathML alignment mark was not projected"))?;
-                Anchor::Marked(offset, edge)
-            }
-            RequestedAnchor::Automatic(anchor) => anchor,
-        };
-        if matches!(anchor, Anchor::Decimal(_)) {
-            let [MNode::Run(run)] = nodes else {
-                return Err(invalid("MathML decimal alignment token projection differs"));
-            };
-            // A decimal separator belongs to the single editable numeric token.
-            run.lit = true;
+    pub(super) fn resolve(self, caret: Option<usize>) -> Result<Anchor, EngineError> {
+        match self.anchor {
+            RequestedAnchor::Automatic(anchor) => Ok(anchor),
+            RequestedAnchor::Decimal(edge) => caret
+                .map(|offset| Anchor::Decimal(offset, edge))
+                .ok_or_else(|| invalid("MathML decimal alignment number was not projected")),
+            RequestedAnchor::Explicit(edge) => caret
+                .map(|offset| Anchor::Marked(offset, edge))
+                .ok_or_else(|| invalid("MathML alignment mark was not projected")),
         }
-        Ok(anchor)
     }
+}
+
+#[derive(Clone, Copy)]
+enum Cursor {
+    Mark(NodeId),
+    Number(NodeId, usize),
 }
 
 #[derive(Clone, Copy)]
 pub(in crate::epub::math) struct Scope {
     cell: NodeId,
     opening: NodeId,
-    pub(in crate::epub::math) mark: Option<NodeId>,
+    cursor: Option<Cursor>,
     pub(in crate::epub::math) caret: Option<usize>,
 }
 
 impl Scope {
+    pub(in crate::epub::math) fn seeking_caret(self) -> bool {
+        self.cursor.is_some() && self.caret.is_none()
+    }
+
+    pub(in crate::epub::math) fn has_numeric_cursor(self) -> bool {
+        matches!(self.cursor, Some(Cursor::Number(..)))
+    }
+
+    pub(in crate::epub::math) fn is_selected_mark(self, node: Node<'_, '_>) -> bool {
+        matches!(self.cursor, Some(Cursor::Mark(mark)) if mark == node.id())
+    }
+
+    pub(in crate::epub::math) fn numeric_offset(self, node: Node<'_, '_>) -> Option<usize> {
+        match self.cursor {
+            Some(Cursor::Number(number, offset)) if number == node.id() => Some(offset),
+            _ => None,
+        }
+    }
+
     pub(in crate::epub::math) fn removes(self, node: Node<'_, '_>) -> bool {
         node.id() == self.opening
             || tag(node) == Some("malignmark")
@@ -165,11 +179,11 @@ pub(super) fn read(
     let mut scope = Scope {
         cell: cell.id(),
         opening: marker.id(),
-        mark: None,
+        cursor: None,
         caret: None,
     };
     if let Some(mark) = first_mark(cell, 0)? {
-        scope.mark = Some(mark.id());
+        scope.cursor = Some(Cursor::Mark(mark.id()));
         return Ok(Group {
             scope,
             anchor: RequestedAnchor::Explicit(mark_edge(cell, mark)?),
@@ -189,17 +203,24 @@ pub(super) fn read(
     } else {
         "left"
     };
-    let automatic = match requested {
-        "left" => Anchor::Left,
-        "center" => Anchor::Center,
-        "right" => Anchor::Right,
-        "decimalpoint" => decimal(cell, marker)?,
+    let anchor = match requested {
+        "left" => RequestedAnchor::Automatic(Anchor::Left),
+        "center" => RequestedAnchor::Automatic(Anchor::Center),
+        "right" => RequestedAnchor::Automatic(Anchor::Right),
+        "decimalpoint" => match first_baseline_number(cell, 0)? {
+            Some(number) => {
+                let offset = decimal_offset(cell, number)?;
+                scope.cursor = Some(Cursor::Number(number.id(), offset));
+                // A leading separator uses the start of its own run after
+                // any native spacing around the preceding operator.
+                let edge = if offset == 0 { Edge::Left } else { Edge::Right };
+                RequestedAnchor::Decimal(edge)
+            }
+            None => RequestedAnchor::Automatic(Anchor::Right),
+        },
         _ => return Err(unsupported("MathML group alignment")),
     };
-    Ok(Group {
-        scope,
-        anchor: RequestedAnchor::Automatic(automatic),
-    })
+    Ok(Group { scope, anchor })
 }
 
 fn first_mark<'xml, 'input>(
@@ -308,18 +329,27 @@ fn column_alignment(mut values: &str, column: usize) -> Result<&str, EngineError
     selected.ok_or_else(|| invalid("empty MathML group alignment list"))
 }
 
-fn decimal(cell: Node<'_, '_>, marker: Node<'_, '_>) -> Result<Anchor, EngineError> {
-    let number = sole_number(cell, marker);
-    let Some(number) = number else {
-        // Numeric content outside the supported single-token layout may
-        // have its alignment point within an operator or a styled group.
-        if cell.descendants().any(|node| tag(node) == Some("mn")) {
-            return Err(unsupported(
-                "MathML decimal alignment requires a single numeric token",
-            ));
-        }
-        return Ok(Anchor::Right);
-    };
+fn decimal_offset(cell: Node<'_, '_>, number: Node<'_, '_>) -> Result<usize, EngineError> {
+    if number
+        .ancestors()
+        .skip(1)
+        .take_while(|node| *node != cell)
+        .any(|node| !matches!(tag(node), Some("mrow" | "mstyle" | "semantics")))
+    {
+        return Err(unsupported(
+            "MathML decimal alignment inside a nontransparent operator",
+        ));
+    }
+    if number
+        .ancestors()
+        .take_while(|node| *node != cell)
+        .any(|node| {
+            node.attribute("dir")
+                .is_some_and(|direction| direction.trim() == "rtl")
+        })
+    {
+        return Err(unsupported("right-to-left MathML decimal alignment"));
+    }
     let point = number
         .ancestors()
         .filter(|node| matches!(tag(*node), Some("mstyle" | "math")))
@@ -332,27 +362,34 @@ fn decimal(cell: Node<'_, '_>, marker: Node<'_, '_>) -> Result<Anchor, EngineErr
         .ok_or_else(|| invalid("invalid MathML decimal point"))?;
     let mut text = String::new();
     append_token_text(number, &mut text);
-    Ok(Anchor::Decimal(
-        text.chars().position(|character| character == point),
-    ))
+    Ok(text
+        .chars()
+        .take_while(|&character| character != point)
+        .count())
 }
 
-fn sole_number<'xml, 'input>(
-    mut node: Node<'xml, 'input>,
-    marker: Node<'xml, 'input>,
-) -> Option<Node<'xml, 'input>> {
-    loop {
-        let mut children = node
-            .children()
-            .filter(|child| child.is_element() && *child != marker);
-        let child = children.next()?;
-        if tag(node) != Some("semantics") && children.next().is_some() {
-            return None;
-        }
-        match tag(child)? {
-            "mn" => return Some(child),
-            "mrow" | "mstyle" | "semantics" => node = child,
-            _ => return None,
+fn first_baseline_number<'xml, 'input>(
+    node: Node<'xml, 'input>,
+    depth: usize,
+) -> Result<Option<Node<'xml, 'input>>, EngineError> {
+    if depth > DEPTH {
+        return Err(limited("MathML structure exceeds its layout budget"));
+    }
+    let count = match tag(node) {
+        Some("mn") => return Ok(Some(node)),
+        Some(
+            "mtd" | "mrow" | "mstyle" | "mpadded" | "mphantom" | "menclose" | "mfenced" | "msqrt",
+        ) => usize::MAX,
+        Some(
+            "msub" | "msup" | "msubsup" | "munder" | "mover" | "munderover" | "mmultiscripts"
+            | "mroot" | "semantics",
+        ) => 1,
+        _ => return Ok(None),
+    };
+    for child in node.children().filter(Node::is_element).take(count) {
+        if let Some(number) = first_baseline_number(child, depth + 1)? {
+            return Ok(Some(number));
         }
     }
+    Ok(None)
 }

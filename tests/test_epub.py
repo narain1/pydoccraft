@@ -7428,7 +7428,8 @@ overlay
         intrinsic = outer.replace('width="260pt" columnwidth="100pt fit 50pt"',
                                   'columnwidth="100pt auto 50pt"')
         unknown_operand = outer.replace(span, "<m:mfrac><m:mrow>" + span + "</m:mrow><m:mi>x</m:mi></m:mfrac>")
-        for source in (intrinsic, unknown_operand):
+        padded_advance = outer.replace(span, '<m:mpadded width="140pt">' + span + "</m:mpadded>")
+        for source in (intrinsic, unknown_operand, padded_advance):
             with doc_ex.open(epub_fixture(chapter_one=template.format(source))) as book:
                 for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
                     with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "definite containing line width"):
@@ -7531,9 +7532,12 @@ overlay
             (source.replace('<m:mtable groupalign=', '<m:mtable alignmentscope="false" groupalign='),
              "MathML alignment groups across table scopes"),
             (source.replace('<m:maligngroup/><m:mn', '<m:maligngroup/><m:maligngroup/><m:mn', 1),
-             "MathML decimal alignment requires a single numeric token"),
-            (source.replace('<m:maligngroup/><m:mn', '<m:maligngroup/><m:mo>+</m:mo><m:mn', 1),
-             "MathML decimal alignment requires a single numeric token"),
+             "MathML element maligngroup"),
+            (source.replace('<m:mn mathcolor="#bf222d">12.345</m:mn>',
+                            '<m:msqrt><m:mn>12.345</m:mn></m:msqrt>'),
+             "MathML decimal alignment inside a nontransparent operator"),
+            (source.replace('<m:maligngroup/><m:mn', '<m:maligngroup/><m:mpadded width="2pt"/><m:mn', 1),
+             "MathML decimal alignment after composed geometry"),
             (source.replace('columnwidth="140pt 100pt"', 'columnwidth="60pt 100pt"'),
              "MathML cell exceeds fixed column widths"),
         ):
@@ -7541,6 +7545,89 @@ overlay
                 for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
                     with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
                         operation()
+
+    def test_mathml_aligns_the_first_number_on_a_compound_group_baseline(self) -> None:
+        source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Compound decimal groups</title><meta name="viewport" content="width=500,height=370"/>
+            <style>body {margin:0}</style></head><body><p>
+            <m:math mathsize="12pt"><m:mtable groupalign="{decimalpoint}" columnwidth="245pt" rowspacing="11pt">
+              <m:mtr><m:mtd><m:maligngroup/><m:mo>−</m:mo>
+                <m:mstyle><m:mrow><m:mn mathcolor="#bf222d">12.345</m:mn></m:mrow></m:mstyle>
+                <m:mtext>Meters</m:mtext></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/>
+                <m:mfrac><m:mtext>Above</m:mtext><m:mn>999.7</m:mn></m:mfrac>
+                <m:mo>+</m:mo><m:mstyle decimalpoint=","><m:mn mathcolor="#198144">7,89</m:mn></m:mstyle>
+                <m:mtext>Amps</m:mtext></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:mn mathcolor="#1644df">8401</m:mn><m:mtext>Ounce</m:mtext></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:mtext>Force</m:mtext><m:mo>+</m:mo><m:mn>.625</m:mn></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/>
+                <m:msup><m:mi>x</m:mi><m:mn>99.1</m:mn></m:msup><m:mtext>Guard</m:mtext></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:mn>26.5</m:mn><m:mo>+</m:mo><m:mn>763.25</m:mn></m:mtd></m:mtr>
+            </m:mtable></m:math>
+          </p></body></html>"""
+        labels = ("12.345", "7,89", "8401", ".625", "Above", "Guard", "26.5", "763.25", "Meters", "Amps")
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+
+        def boxes(doc, terms):
+            result = {}
+            for term in terms:
+                result[term], = doc[0].search_for(term)
+            return result
+
+        def geometry(doc, delta):
+            rects = boxes(doc, (*labels, "12", "26", "Ounce", "−"))
+            whole = rects["7,89"]
+            rects["7"], = [rect for rect in doc[0].search_for("7")
+                            if whole[0] - delta <= rect[0] <= whole[2] + delta
+                            and abs(rect[1] - whole[1]) < delta]
+            anchor = rects["12"][2]
+            for term in ("7", "26", "8401", "Guard"):
+                self.assertAlmostEqual(rects[term][2], anchor, delta=delta)
+            self.assertAlmostEqual(rects[".625"][0], anchor, delta=delta)
+            self.assertAlmostEqual(rects["−"][2], rects["12.345"][0], delta=delta)
+            self.assertGreater(rects["Ounce"][2], anchor + 10)
+            self.assertGreater(rects["763.25"][0], anchor + 20)
+            return rects
+
+        with doc_ex.open(epub_fixture(chapter_one=source)) as book:
+            with doc_ex.open(book.convert("pdf")) as pdf:
+                expected = geometry(pdf, 0.06)
+                self.assertFalse(pdf[0].get_images())
+            exported = book.convert("docx")
+            with zipfile.ZipFile(io.BytesIO(exported)) as archive:
+                package = ET.fromstring(archive.read("word/document.xml"))
+            matrix = package.find(".//m:oMath//m:m", ns)
+            self.assertIsNotNone(matrix)
+            self.assertIsNotNone(matrix.find(".//m:f", ns))
+            self.assertIsNotNone(matrix.find(".//m:sSup", ns))
+            tokens = [run.text for run in matrix.findall(".//m:t", ns)]
+            for number in ("12.345", "7,89", "8401", ".625", "26.5"):
+                self.assertEqual(tokens.count(number), 1)
+            with doc_ex.open(exported) as word, doc_ex.open(word.convert("pdf")) as pdf:
+                actual = geometry(pdf, 0.25)
+                visible = word[0].get_text()
+                for label in labels:
+                    self.assertEqual(visible.count(label), 1)
+                    for direct, native in zip(expected[label], actual[label]):
+                        self.assertAlmostEqual(direct, native, delta=0.35)
+
+        larger = source.replace('mathsize="12pt"', 'mathsize="16pt"')
+        with doc_ex.open(epub_fixture(chapter_one=larger)) as book, doc_ex.open(book.convert("docx")) as word:
+            with doc_ex.open(word.convert("pdf")) as pdf:
+                geometry(pdf, 0.25)
+
+        fixed = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 500, 370)])
+        with doc_ex.open(rewrite_epub(fixed, {"OEBPS/s0.xhtml": source})) as book:
+            preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+                actual = boxes(pdf, labels)
+                for label in labels:
+                    self.assertAlmostEqual(
+                        actual[label][0] - actual["Above"][0],
+                        expected[label][0] - expected["Above"][0],
+                        delta=0.65,
+                    )
 
     def test_mathml_explicit_alignment_marks_preserve_editable_edges_and_tokens(self) -> None:
         source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">

@@ -26,6 +26,10 @@ const MAX_SAVED_DRAW_UNITS: usize = 250_000;
 // The pinned WordCraft equation shaper stops at this many native nodes.
 const MAX_EDITABLE_NODES: usize = 200_000;
 
+pub(super) fn is_box_marker(node: &MNode) -> bool {
+    matches!(node, MNode::Run(run) if run.font.as_deref().is_some_and(|font| font.starts_with(BOX_PREFIX)))
+}
+
 #[derive(Default)]
 pub(in crate::epub) struct Extras {
     nodes: Vec<Extra>,

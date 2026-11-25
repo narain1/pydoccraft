@@ -419,11 +419,8 @@ pub(super) fn project<'xml>(
                     .with_alignment_group(cell.group.map(|group| group.scope), |projection| {
                         projection.elements(cell.node, depth + 2, cell.style)
                     })?;
-                let mut nodes = math::merge_runs(nodes);
-                let anchor = cell
-                    .group
-                    .map(|group| group.resolve(caret, &mut nodes))
-                    .transpose()?;
+                let nodes = math::merge_runs(nodes);
+                let anchor = cell.group.map(|group| group.resolve(caret)).transpose()?;
                 Ok((
                     CellContent::Equation(Math {
                         nodes,
@@ -1239,11 +1236,11 @@ impl Table {
         let mut heights = vec![0.0; row_count];
         let mut measures = Vec::with_capacity(self.cells.len());
         let mut anchors = vec![[0.0f32; 2]; self.column_widths.len()];
-        let mut marked_columns = [false; MAX_MATRIX_SIZE];
+        let mut caret_columns = [false; MAX_MATRIX_SIZE];
         if editable_carrier.is_some() {
             for cell in &self.cells {
-                if matches!(cell.anchor, Some(Anchor::Marked(..))) {
-                    marked_columns[cell.columns.start] = true;
+                if matches!(cell.anchor, Some(Anchor::Marked(..) | Anchor::Decimal(..))) {
+                    caret_columns[cell.columns.start] = true;
                 }
             }
         }
@@ -1255,7 +1252,7 @@ impl Table {
                 ..Default::default()
             };
             let resolved = if let Some(carrier) = editable_carrier
-                .filter(|_| cell.anchor.is_some() && marked_columns[cell.columns.start])
+                .filter(|_| cell.anchor.is_some() && caret_columns[cell.columns.start])
             {
                 // A native operator's spacing follows the Word paragraph's
                 // math size even when its runs have authored point sizes.
