@@ -328,7 +328,9 @@ fn scan_groups<'a>(
                     Codec::Opus => {
                         "multiple Opus tracks in one Ogg segment require an explicit selection"
                     }
-                    Codec::Theora => "multiple Theora tracks in one Ogg segment",
+                    Codec::Theora => {
+                        "multiple Theora tracks in one Ogg segment require an explicit selection"
+                    }
                     Codec::Vorbis => "multiple Vorbis tracks in one Ogg segment",
                 };
                 return Err(unsupported(message));
@@ -378,7 +380,10 @@ struct DefaultLink {
 
 /// Look for a codec change between links with one genuine default soundtrack.
 /// Uniform and ambiguous selections keep the existing per-codec rules.
-pub(super) fn default_mixed_tracks(encoded: &[u8]) -> Result<Option<SelectedTracks>, EngineError> {
+pub(super) fn default_mixed_tracks(
+    encoded: &[u8],
+    video_track: Option<usize>,
+) -> Result<Option<SelectedTracks>, EngineError> {
     if encoded.is_empty() {
         return Ok(None);
     }
@@ -387,6 +392,7 @@ pub(super) fn default_mixed_tracks(encoded: &[u8]) -> Result<Option<SelectedTrac
     let mut links = Vec::<DefaultLink>::new();
     let mut audio = None;
     let mut video = None;
+    let mut video_tracks = 0;
     let mut skeleton = None;
     let mut repeated_skeleton = false;
     let mut beginning = true;
@@ -410,7 +416,10 @@ pub(super) fn default_mixed_tracks(encoded: &[u8]) -> Result<Option<SelectedTrac
                     audio = Some((serial, codec));
                 }
                 Some(Codec::Theora) => {
-                    video.get_or_insert(serial);
+                    if video_track.unwrap_or(0) == video_tracks {
+                        video = Some(serial);
+                    }
+                    video_tracks += 1;
                 }
                 _ if page.identifies_other_audio() => return Ok(None),
                 _ if page.body.starts_with(b"fishead\0") => {
@@ -446,6 +455,7 @@ pub(super) fn default_mixed_tracks(encoded: &[u8]) -> Result<Option<SelectedTrac
                 });
             }
             video = None;
+            video_tracks = 0;
             skeleton = None;
             repeated_skeleton = false;
             beginning = true;

@@ -50,12 +50,13 @@ impl TheoraSource {
         bytes: &[u8],
         start_us: u64,
         end_us: Option<u64>,
+        video_track: Option<usize>,
         names: &[String],
     ) -> Result<Self, EngineError> {
         let named = (!names.is_empty())
             .then(|| ogg::named_tracks(bytes, names))
             .transpose()?;
-        let segments = ogg::groups(bytes, Codec::Theora, None, named.as_ref())?;
+        let segments = ogg::groups(bytes, Codec::Theora, video_track, named.as_ref())?;
         let audio: Option<(u32, Vec<_>)> = match soundtrack(&segments, named.as_ref())? {
             Some(Soundtrack::Uniform(Codec::Opus)) => Some((
                 OUTPUT_SAMPLE_RATE_HZ,
@@ -72,7 +73,7 @@ impl TheoraSource {
                 let selection = if let Some(tracks) = &named {
                     tracks
                 } else {
-                    automatic = ogg::default_mixed_tracks(bytes)?
+                    automatic = ogg::default_mixed_tracks(bytes, video_track)?
                         .ok_or_else(|| invalid("Ogg video and soundtrack segments disagree"))?;
                     &automatic
                 };
@@ -81,6 +82,12 @@ impl TheoraSource {
             }
             _ => None,
         };
+        if audio
+            .as_ref()
+            .is_some_and(|(_, sound)| sound.len() != segments.len())
+        {
+            return Err(invalid("Ogg video and soundtrack segments disagree"));
+        }
         let mut offset = 0;
         let mut clock = 0usize;
         let mut links = Vec::with_capacity(segments.len());

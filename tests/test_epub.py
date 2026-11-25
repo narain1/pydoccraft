@@ -5249,6 +5249,88 @@ first
             with self.assertRaisesRegex(ValueError, "audio track ordinal"):
                 next(book.epub_embedded_audio(0, 0, opus_track=0))
 
+    def test_theora_selects_video_ordinals_per_link_with_a_shared_clock(self) -> None:
+        encoded = (Path(__file__).parent / "fixtures/epub-video-named-tracks.ogv").read_bytes()
+        pages = ogg_pages(encoded)
+        _, boundary = (index for index, page in enumerate(pages) if ogg_page_body(page).startswith(b"fishead"))
+
+        def first(*names: bytes) -> bytes:
+            return ogg_named_subset(pages[:boundary], (*names, b"Cloche"), skeleton=True)
+
+        def second(*names: bytes) -> bytes:
+            link = ogg_named_subset(pages[boundary:], (*names, b"Spoken"), skeleton=True)
+            # Both links identify the default soundtrack by the same Skeleton name.
+            return b"".join(checked_ogg_page(page.replace(b"Name: Spoken\r\n", b"Name: Cloche\r\n"))
+                            if b"Name: Spoken\r\n" in ogg_page_body(page) else page for page in ogg_pages(link))
+
+        opening, closing = first(b"Ruby", b"Azur"), second(b"Azur", b"Ruby")
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Theora angles</title></head>
+          <body>{}<video src="choice.ogv#track=Azur"/></body></html>""".format("".join(
+            f'<video src="{name}.ogv#t=0.45,0.92"><track src="caps.vtt" kind="captions" srclang="en"/></video>'
+            for name in ("choice", "first-angle", "second-angle")
+        ))
+        path = "OEBPS/choice.ogv"
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Angles", chapter, "OEBPS/angles.xhtml")],
+                resources={
+                    path: doc_ex.EpubResource("application/ogg", opening + closing),
+                    "OEBPS/first-angle.ogv": doc_ex.EpubResource("video/ogg", first(b"Ruby") + second(b"Azur")),
+                    "OEBPS/second-angle.ogv": doc_ex.EpubResource("video/ogg", first(b"Azur") + second(b"Ruby")),
+                    "OEBPS/caps.vtt": doc_ex.EpubResource(
+                        "text/vtt", b"WEBVTT\n\n00:00:00.470 --> 00:00:00.520\nEarly\n"
+                        b"\n00:00:00.735 --> 00:00:00.770\nLate\n",
+                    ),
+                },
+            )
+
+        with doc_ex.open(data) as book:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "multiple Theora tracks"):
+                next(book.epub_embedded_video(0, 0))
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "multiple Theora tracks"):
+                next(book.epub_embedded_audio(0, 0))
+            with self.assertRaisesRegex(ValueError, "Theora track 2 is absent from Ogg segment 0"):
+                next(book.epub_embedded_video(0, 0, video_track=2))
+            with self.assertRaisesRegex(ValueError, "cannot be combined with a video track ordinal"):
+                next(book.epub_embedded_video(0, 3, video_track=0))
+            for ordinal, change_us, before, after in ((0, 750_000, (48, 32), (56, 36)),
+                                                      (1, 500_000, (64, 40), (48, 32))):
+                with self.subTest(ordinal=ordinal):
+                    pictures = list(book.epub_embedded_video(0, 0, video_track=ordinal, text_track=0))
+                    control = list(book.epub_embedded_video(0, ordinal + 1, text_track=0))
+                    self.assertEqual(pictures, control)
+                    self.assertEqual(pictures[0].start_us, 450_000)
+                    self.assertEqual((pictures[0].width, pictures[0].height), before)
+                    self.assertEqual((pictures[-1].width, pictures[-1].height), after)
+                    seek = list(book.epub_embedded_video(0, 0, video_track=ordinal,
+                                                         start_us=change_us, text_track=0))
+                    self.assertEqual(seek, list(book.epub_embedded_video(
+                        0, ordinal + 1, start_us=change_us, text_track=0,
+                    )))
+                    self.assertEqual(seek[0].start_us, change_us)
+                    cue, = seek[0].text_cues
+                    self.assertEqual((cue.start_us, cue.end_us, cue.text),
+                                     (750_000, 770_000, "Late") if ordinal == 0 else (500_000, 520_000, "Early"))
+                    self.assertEqual(seek[-1].start_us + seek[-1].duration_us, 920_000)
+
+        missing = opening + second(b"Azur")
+        with doc_ex.open(rewrite_epub(data, {path: missing})) as book:
+            with self.assertRaisesRegex(ValueError, "Theora track 1 is absent from Ogg segment 1"):
+                next(book.epub_embedded_video(0, 0, video_track=1, end_us=470_000))
+
+        damaged = []
+        for page in ogg_pages(closing):
+            body = ogg_page_body(page)
+            if body.startswith(b"fisbone\x00") and b"Name: Ruby\r\n" in body:
+                altered = bytearray(page)
+                altered[len(page) - len(body) + 36] = 1
+                page = checked_ogg_page(altered)
+            damaged.append(page)
+        with doc_ex.open(rewrite_epub(data, {path: opening + b"".join(damaged)})) as book:
+            self.assertGreater(len(list(book.epub_embedded_video(0, 0, video_track=0))), 0)
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "zero Skeleton track base granule"):
+                next(book.epub_embedded_video(0, 0, video_track=1))
+
     def test_named_ogg_changes_soundtrack_codec_on_the_selected_picture_clock(self) -> None:
         source = (Path(__file__).parent / "fixtures/epub-video-named-tracks.ogv").read_bytes()
         pages = ogg_pages(source)
@@ -8028,8 +8110,8 @@ Trailing
         with doc_ex.open(data) as book:
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "multiple WebM tracks"):
                 next(book.epub_embedded_video(0, 0, source_index=1))
-            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "WebM video track selection"):
-                next(book.epub_embedded_video(0, 0, source_index=0, video_track=0))
+            self.assertEqual(list(book.epub_embedded_video(0, 0, source_index=0, video_track=0)),
+                             list(book.epub_embedded_video(0, 0, source_index=0)))
             with self.assertRaisesRegex(ValueError, "WebM video track 2 is absent"):
                 next(book.epub_embedded_video(0, 0, video_track=2))
             for track, size, channel in ((0, (48, 32), 0), (1, (64, 40), 2)):

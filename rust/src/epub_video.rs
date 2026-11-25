@@ -133,9 +133,10 @@ impl VideoSource {
                 "named media fragments require local WebM or Ogg",
             ));
         }
-        if video_track.is_some() && media != "video/webm" {
+        if video_track.is_some() && !matches!(media, "video/webm" | "video/ogg" | "application/ogg")
+        {
             return Err(unsupported(
-                "WebM video track selection requires a local WebM source",
+                "video track selection requires a local WebM or Ogg source",
             ));
         }
         validate_archive_path(path)?;
@@ -147,7 +148,7 @@ impl VideoSource {
                     .map(|source| Self::Avc(Box::new(source)))
             }
             "video/ogg" | "application/ogg" => std::panic::catch_unwind(|| {
-                theora::TheoraSource::open(&bytes, start_us, end_us, names)
+                theora::TheoraSource::open(&bytes, start_us, end_us, video_track, names)
             })
             .map_err(|_| invalid("malformed embedded Ogg video"))?
             .map(|source| Self::Theora(Box::new(source))),

@@ -161,7 +161,7 @@
 - [x] Resolve local MP4 and M4A media fragment IDs by exact QuickTime chapter title, preserving movie edits, AAC, cropped picture and caption timing.
 - [x] Resolve local MP4 and M4A media fragment IDs from bounded Nero chapter tables, validate coexistence with QuickTime and preserve time-fragment playback.
 - [x] Resolve legacy Adobe F4V chapter tables on the movie clock and synchronize cropped H.264, AAC and captions while preserving Nero and QuickTime behavior.
-- [x] Stream embedded Ogg Theora and synchronize Opus and captions across sequential Ogg segments.
+- [x] Stream embedded Ogg Theora and synchronize Opus and captions across sequential Ogg segments. Select one Theora video ordinal across every link of a multiplexed chain.
 - [x] Stream mono and stereo Ogg Vorbis for embedded audio and SMIL narration. Preserve page granule timing across same-format chains and synchronize a Vorbis soundtrack with chained Theora and captions.
 - [x] Stream VP8 and SDR VP9 video, Opus soundtracks, and synchronized local captions from packaged WebM sources.
 - [x] Stream mono and stereo WebM Vorbis audio on the original presentation clock, including audio-only resources and soundtracks synchronized with video and captions.

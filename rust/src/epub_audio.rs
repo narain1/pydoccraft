@@ -172,7 +172,7 @@ impl AudioSource {
                         && opus_track.is_none()
                         && matches!(codec, Some(AudioCodec::Ogg))
                     {
-                        ogg::default_mixed_tracks(&bytes)?
+                        ogg::default_mixed_tracks(&bytes, None)?
                     } else {
                         None
                     };
