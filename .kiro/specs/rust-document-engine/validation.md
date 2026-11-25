@@ -3084,3 +3084,7 @@ The Linux x86-64 CPython 3.11 host wheel passed 929 installed tests, including 3
 ## 2026-11-25 EPUB subgrid edges, native MathML borrowing, shared lighting and narration escape
 
 The Linux x86-64 CPython 3.11 host wheel passed 932 installed tests, including 337 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-subgrid-edges-native-mathml-borrowing-shared-lighting-and-narration-escape)
+
+## 2026-11-25 EPUB subgrid line names, navigation titles, shared flood masks and inline narration
+
+The Linux x86-64 CPython 3.11 host wheel passed 935 installed tests, including 340 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-subgrid-line-names-navigation-titles-shared-flood-masks-and-inline-narration)
