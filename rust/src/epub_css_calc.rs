@@ -20,6 +20,8 @@ use trigonometry::{Input, Trig};
 #[path = "epub_css_exp.rs"]
 mod exponential;
 use exponential::{Interval, Operation};
+#[path = "epub_css_ratio.rs"]
+mod ratio;
 
 const MAX_EXPRESSION_BYTES: usize = 512;
 const MAX_RESULT: f32 = 25_000.0;
@@ -108,6 +110,7 @@ enum Expression {
         denominator: [f32; 2],
         bounds: Interval,
     },
+    PercentageRatio(Box<Expression>, Box<Expression>, Interval),
     Step(Step, Box<Expression>, Box<Expression>),
     Trig(Trig, Box<Expression>),
     Atan2(Box<Expression>, Box<Expression>),
@@ -144,6 +147,9 @@ impl Expression {
                 let linear =
                     |&[points, percent]: &[f32; 2]| f64::from(points) + f64::from(percent) * extent;
                 (linear(numerator) / linear(denominator)) as f32
+            }
+            Self::PercentageRatio(numerator, denominator, _) => {
+                ratio::evaluate(numerator, denominator, basis)
             }
             Self::Step(step, value, interval) => step.evaluate(value.at(basis), interval.at(basis)),
             Self::Trig(operation, value) => operation.evaluate(value.at(basis)),
@@ -183,7 +189,9 @@ impl Expression {
             Self::Abs(value) => value.scalar_bounds()?.absolute(),
             Self::Sign(_) => Interval::signed(1.0),
             Self::Product(one, other) => one.scalar_bounds()?.product(other.scalar_bounds()?),
-            Self::Reciprocal(_, bounds) | Self::AffineRatio { bounds, .. } => *bounds,
+            Self::Reciprocal(_, bounds)
+            | Self::AffineRatio { bounds, .. }
+            | Self::PercentageRatio(_, _, bounds) => *bounds,
             Self::Step(operation, value, interval) => {
                 let bound = interval.scalar_bounds()?.absolute().high;
                 match operation {
@@ -336,6 +344,26 @@ impl Calculation {
         })
     }
 
+    fn percentage_ratio(self, denominator: Self) -> Result<Self, Issue> {
+        if matches!(&self.expression, Expression::Linear(..))
+            && matches!(&denominator.expression, Expression::Linear(..))
+        {
+            return self.affine_ratio(denominator);
+        }
+        let bounds = ratio::bounds(&self.expression, &denominator.expression)?;
+        Ok(Self {
+            expression: Expression::PercentageRatio(
+                Box::new(self.expression),
+                Box::new(denominator.expression),
+                bounds,
+            ),
+            point_bound: Some(bounds.absolute().high),
+            percent_bound: None,
+            relative_scalar: true,
+            nodes: self.nodes + denominator.nodes + 1,
+        })
+    }
+
     fn affine_ratio(self, denominator: Self) -> Result<Self, Issue> {
         let coefficients = |expression: Expression| match expression {
             Expression::Linear(points, percent) => {
@@ -485,7 +513,7 @@ impl Value {
             return Err(Issue::Invalid);
         }
         let ratio = if value.percent_bound.is_some() || denominator.percent_bound.is_some() {
-            value.affine_ratio(denominator)?
+            value.percentage_ratio(denominator)?
         } else {
             value.multiply(denominator.reciprocal()?)
         };

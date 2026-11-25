@@ -1727,7 +1727,7 @@ class EpubTests(unittest.TestCase):
         for source in (
             "calc(((25% + 8px) / (25% - 15px)) * 2px)",
             "calc((15px / 25%) * 10px)",
-            "calc((min(60%, 25px) / (15% + 15px)) * 2px)",
+            "calc(((15% + 15px) / abs(25% - 15px)) * 2px)",
         ):
             with self.subTest(source=source):
                 with doc_ex.open(publication(120, f"p{{width:{source}}}")) as book:
@@ -1738,6 +1738,56 @@ class EpubTests(unittest.TestCase):
         with doc_ex.open(publication(120, excessive)) as book:
             with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "CSS calc exceeds"):
                 book.render_page(0, dpi=96)
+
+    def test_epub_css_nonlinear_percentage_ratios_preserve_geometry(self) -> None:
+        original = fixed_spread_fixture([("", "white", 290, 120)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Bounded ratios</title>
+          <meta name="viewport" content="width=290,height=120"/><style>
+          html,body,p{{margin:0;font-size:10px}} section{{position:absolute;left:20px;top:14px;
+          width:{width}px;height:55px;background:#dde3d9}} p{{position:absolute;background:#9abe87}}
+          {css}</style></head><body><section><p><a href="https://example.org/ratio">Q</a></p>
+          </section></body></html>"""
+
+        def publication(width: int, css: str) -> bytes:
+            chapter = template.format(width=width, css=css)
+            return rewrite_epub(original, {"OEBPS/s0.xhtml": chapter})
+
+        computed = """p{
+          width:calc(40px * (clamp(0px,50%,30px) / max(25%,20px)));
+          left:calc(16px * (min(25%,40px) / 10px));
+          top:3px;padding-left:calc(16px * (abs(20% - 4px) / (10% + 4px)));
+          height:calc(26px / (max(25% + 10px,15% + 5px) / (25% + 10px)))
+        }"""
+        negative = computed.replace(
+            "40px * (clamp(0px,50%,30px) / max(25%,20px))",
+            "-40px * (clamp(0px,50%,30px) / min(-25%,-20px))",
+        )
+        self.assertNotEqual(computed, negative)
+        for width, size, left, padding in ((40, 40, 16, 8), (80, 60, 32, 16), (120, 40, 48, 20)):
+            result = []
+            control = f"p{{width:{size}px;left:{left}px;top:3px;padding-left:{padding}px;height:26px}}"
+            for css in (computed, negative, control):
+                with doc_ex.open(publication(width, css)) as book:
+                    pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                    frozen = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+                with doc_ex.open(frozen) as pdf:
+                    self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), pixels)
+                    hit, = pdf[0].search_for("Q")
+                    link, = pdf[0].get_links()
+                    self.assertEqual(link.uri, "https://example.org/ratio")
+                    result.append((pixels, hit, link.bbox))
+            with self.subTest(width=width):
+                self.assertTrue(result[0] == result[1] == result[2], "bounded ratio changed PDF geometry")
+
+        for expression in (
+            "calc(5px * ((10% + 8px) / max(25% - 15px,0px)))",
+            "calc(5px * ((10% + 8px) / min(25%,10px)))",
+        ):
+            with self.subTest(expression=expression), doc_ex.open(
+                publication(120, f"p{{width:{expression}}}")
+            ) as book:
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "unsupported EPUB CSS calc"):
+                    book.render_page(0, dpi=96)
 
     def test_epub_css_calc_rejects_unsupported_operations_and_excess_geometry(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Calculated geometry</title>
