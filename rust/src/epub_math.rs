@@ -375,6 +375,14 @@ fn shares_line_width(node: Node<'_, '_>) -> bool {
         )
 }
 
+// WordCraft addresses a run by characters and each compound node as one unit.
+fn argument_units(node: &MNode) -> usize {
+    match node {
+        MNode::Run(run) => run.text.chars().count(),
+        _ => 1,
+    }
+}
+
 impl<'xml> Projection<'_, 'xml> {
     fn with_cell_width<T>(
         &mut self,
@@ -474,24 +482,8 @@ impl<'xml> Projection<'_, 'xml> {
         let nodes = self.element(child, depth, style)?;
         if seeking {
             if let Some(scope) = &mut self.alignment_group {
-                let numeric = scope.has_numeric_cursor();
                 if let Some(caret) = &mut scope.caret {
-                    // Composed Word boxes can replace one marker with a
-                    // differently sized run, changing later caret offsets.
-                    if numeric && rows.iter().any(compose::is_box_marker) {
-                        return Err(unsupported(
-                            "MathML decimal alignment after composed geometry",
-                        ));
-                    }
-                    // WordCraft counts one unit per run character or
-                    // compound node in the containing equation argument.
-                    *caret += rows
-                        .iter()
-                        .map(|node| match node {
-                            MNode::Run(run) => run.text.chars().count(),
-                            _ => 1,
-                        })
-                        .sum::<usize>();
+                    *caret += rows.iter().map(argument_units).sum::<usize>();
                 }
             }
         }

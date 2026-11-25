@@ -15,7 +15,9 @@ use wordcraft_doc::{
 use wordcraft_fonts::math::{resolve_math, C};
 use wordcraft_layout::math::{layout_equation, MItem, MathLayout};
 
-use super::{css, invalid, limited, table, unsupported, zero_length, Presentation, MATHML};
+use super::{
+    argument_units, css, invalid, limited, table, unsupported, zero_length, Presentation, MATHML,
+};
 use crate::{docx::math_spacing, EngineError};
 
 const BOX_PREFIX: &str = "\0epub-math-box-";
@@ -274,15 +276,15 @@ impl Extras {
 
 impl Editable {
     pub(in crate::epub) fn apply(&self, math: &mut Math) -> Result<(), EngineError> {
-        self.apply_with_carets(math, false)
+        self.apply_with_caret(math, None)
     }
 
-    pub(super) fn apply_with_carets(
+    pub(super) fn apply_with_caret(
         &self,
         math: &mut Math,
-        preserve_carets: bool,
+        caret: Option<&mut usize>,
     ) -> Result<(), EngineError> {
-        let nodes = self.substitute(std::mem::take(&mut math.nodes), preserve_carets)?;
+        let nodes = self.substitute(std::mem::take(&mut math.nodes), caret.is_some(), caret)?;
         let too_deep = Cell::new(false);
         let node_count = Cell::new(0);
         math.nodes = check_editable_bounds(nodes, 0, &too_deep, &node_count);
@@ -299,9 +301,19 @@ impl Editable {
         Ok(())
     }
 
-    fn substitute(&self, body: Arg, preserve_carets: bool) -> Result<Arg, EngineError> {
+    fn substitute(
+        &self,
+        body: Arg,
+        preserve_carets: bool,
+        mut caret: Option<&mut usize>,
+    ) -> Result<Arg, EngineError> {
+        let original_caret = caret.as_deref().copied();
+        let mut original_end = 0;
         let mut result = Vec::with_capacity(body.len());
         for node in body {
+            if original_caret.is_some() {
+                original_end += argument_units(&node);
+            }
             if let Some(index) = box_index(&node) {
                 let EditableBox { node, borrow } = self
                     .boxes
@@ -316,19 +328,29 @@ impl Editable {
                     }
                     recompose_borrowed_padding(&mut result, node, borrow)?;
                 } else {
+                    if original_caret.is_some_and(|offset| original_end <= offset) {
+                        if let Some(caret) = &mut caret {
+                            // The composed marker counted as one character.
+                            // An editable replacement may have no run characters or several.
+                            **caret = **caret - 1 + argument_units(&node);
+                        }
+                    }
                     result.push(node);
                 }
                 continue;
             }
             let error = Cell::new(None);
-            let node = map_args(node, &|arg| match self.substitute(arg, preserve_carets) {
-                Ok(arg) => arg,
-                Err(found) => {
-                    let first = error.take().unwrap_or(found);
-                    error.set(Some(first));
-                    Arg::new()
-                }
-            });
+            let node = map_args(
+                node,
+                &|arg| match self.substitute(arg, preserve_carets, None) {
+                    Ok(arg) => arg,
+                    Err(found) => {
+                        let first = error.take().unwrap_or(found);
+                        error.set(Some(first));
+                        Arg::new()
+                    }
+                },
+            );
             if let Some(error) = error.into_inner() {
                 return Err(error);
             }
@@ -531,7 +553,7 @@ impl Padding {
         // Keep native width when adding a fixed horizontal gap. Other dimensions
         // may use any measured extent of the original operand as their basis.
         let additive_width = width.filter(|l| l.basis.is_none() && l.relative && l.value >= 0.0);
-        let body = editable.substitute(self.body, false)?;
+        let body = editable.substitute(self.body, false, None)?;
         let need_shift = shift.is_some_and(|length| length.value != 0.0);
         let need_overhang_width = (additive_width.is_some() || zeroed(width, 0) == Some(false))
             && left.is_some_and(|length| {

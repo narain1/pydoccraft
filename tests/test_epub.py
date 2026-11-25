@@ -8977,8 +8977,6 @@ Trailing
             (source.replace('<m:mn mathcolor="#bf222d">12.345</m:mn>',
                             '<m:msqrt><m:mn>12.345</m:mn></m:msqrt>'),
              "MathML decimal alignment inside a nontransparent operator"),
-            (source.replace('<m:maligngroup/><m:mn', '<m:maligngroup/><m:mpadded width="2pt"/><m:mn', 1),
-             "MathML decimal alignment after composed geometry"),
             (source.replace('columnwidth="140pt 100pt"', 'columnwidth="60pt 100pt"'),
              "MathML cell exceeds fixed column widths"),
         ):
@@ -9069,6 +9067,90 @@ Trailing
                         expected[label][0] - expected["Above"][0],
                         delta=0.65,
                     )
+
+    def test_mathml_baseline_decimal_carets_survive_composed_prefixes(self) -> None:
+        source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Decimals after composed math</title><meta name="viewport" content="width=540,height=390"/>
+            <style>body {margin:0}</style></head><body><p>
+            <m:math mathsize="12pt"><m:mtable groupalign="{decimalpoint}" columnwidth="245pt" rowspacing="11pt">
+              <m:mtr><m:mtd><m:maligngroup/><m:mpadded width="+14pt" lspace="6pt">
+                <m:mtext>Warm</m:mtext></m:mpadded><m:mn mathcolor="#bf222d">12.345</m:mn>
+                <m:mtext>Meters</m:mtext></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:mtext>Cold</m:mtext><m:mpadded lspace="10pt"/>
+                <m:mspace width="10pt" height="9pt"/><m:mstyle decimalpoint=","><m:mrow>
+                  <m:mn mathcolor="#198144">7,89</m:mn></m:mrow></m:mstyle>
+                <m:mtext>Amps</m:mtext></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:mtable columnwidth="40pt" rowspacing="5pt" columnalign="left">
+                <m:mtr><m:mtd><m:mtext>Meter</m:mtext></m:mtd></m:mtr>
+                </m:mtable><m:mn mathcolor="#1644df">.625</m:mn><m:mtext>Volts</m:mtext></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:mpadded width="4pt"/><m:mpadded lspace="10pt"/>
+                <m:mn mathcolor="#5920ac">42<m:malignmark/>:95</m:mn><m:mtext>Hertz</m:mtext></m:mtd></m:mtr>
+            </m:mtable></m:math>
+          </p></body></html>"""
+        terms = ("12.345", "7,89", ".625", "42:95", "Warm", "Cold", "Meter", "Meters", "Amps", "Volts", "Hertz")
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math",
+              "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+
+        def positions(pdf: doc_ex.Document, *, fixed: bool = False, tolerance: float = 0.05
+                      ) -> dict[str, tuple[float, float, float, float]]:
+            output = {}
+            for term in terms:
+                # Both Meter and Meters are present as distinct authored runs.
+                matches = pdf[0].search_for(term)
+                if term == "Meter":
+                    output[term] = max(matches, key=lambda box: box[1])
+                else:
+                    output[term], = matches
+            if not fixed:
+                leading = []
+                for prefix in ("12", "7", "42"):
+                    found, = pdf[0].search_for(prefix)
+                    leading.append(found[2])
+                for x in leading:
+                    self.assertAlmostEqual(x, output[".625"][0], delta=tolerance)
+            return output
+
+        with doc_ex.open(epub_fixture(chapter_one=source)) as book:
+            self.assertTrue(book.render_page(0))
+            with doc_ex.open(book.convert("pdf")) as pdf:
+                expected = positions(pdf)
+                self.assertFalse(pdf[0].get_images())
+            converted = book.convert("docx")
+        with zipfile.ZipFile(io.BytesIO(converted)) as archive:
+            xml = ET.fromstring(archive.read("word/document.xml"))
+        matrix = xml.find(".//m:oMath//m:m", ns)
+        self.assertIsNotNone(matrix.find(".//m:m", ns))
+        colors = ("BF222D", "198144", "1644DF", "5920AC")
+        val = "{" + ns["w"] + "}val"
+        for number, color in zip(terms[:4], colors):
+            run, = [run for run in matrix.findall(".//m:r", ns) if run.findtext("m:t", namespaces=ns) == number]
+            self.assertEqual(run.find("./w:rPr/w:color", ns).get(val).upper(), color)
+        with doc_ex.open(converted) as word, doc_ex.open(word.convert("pdf")) as pdf:
+            text = word[0].get_text()
+            self.assertNotIn("⟡H", text)
+            for term in terms[:4]:
+                self.assertEqual(text.count(term), 1)
+            actual = positions(pdf, tolerance=0.25)
+            for term in terms:
+                self.assertAlmostEqual(actual[term][0], expected[term][0], delta=0.35)
+
+        fixed = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 540, 390)])
+        with doc_ex.open(rewrite_epub(fixed, {"OEBPS/s0.xhtml": source})) as book:
+            preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+                actual = positions(pdf, fixed=True)
+                for term in terms:
+                    self.assertAlmostEqual(actual[term][0] - actual[".625"][0],
+                                           expected[term][0] - expected[".625"][0], delta=0.65)
+
+        signed = source.replace('<m:mpadded width="+14pt" lspace="6pt">',
+            '<m:mspace width="12pt"/><m:mpadded width="+14pt" lspace="-4pt">')
+        with doc_ex.open(epub_fixture(chapter_one=signed)) as book:
+            with doc_ex.open(book.convert("pdf")) as pdf:
+                positions(pdf)
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "alignment carets across negative padding"):
+                book.convert("docx")
 
     def test_mathml_multiple_alignment_groups_share_editable_geometry(self) -> None:
         source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">

@@ -27,6 +27,13 @@ impl Anchor {
         matches!(self, Self::Marked(..) | Self::Decimal(..))
     }
 
+    pub(super) fn caret_offset_mut(&mut self) -> Option<&mut usize> {
+        match self {
+            Self::Decimal(offset, _) | Self::Marked(offset, _) => Some(offset),
+            _ => None,
+        }
+    }
+
     pub(super) fn measure(self, layout: &MathLayout) -> Result<f32, EngineError> {
         match self {
             Self::Left => Ok(0.0),
@@ -249,10 +256,6 @@ pub(in crate::epub::math) struct Scope {
 impl Scope {
     pub(in crate::epub::math) fn seeking_caret(self) -> bool {
         self.cursor.is_some() && self.caret.is_none()
-    }
-
-    pub(in crate::epub::math) fn has_numeric_cursor(self) -> bool {
-        matches!(self.cursor, Some(Cursor::Number(..)))
     }
 
     pub(in crate::epub::math) fn is_selected_mark(self, node: Node<'_, '_>) -> bool {

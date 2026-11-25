@@ -841,11 +841,13 @@ impl Table {
         for cell in &mut self.cells {
             match &mut cell.content {
                 CellContent::Equation(math) => {
-                    editable.apply_with_carets(math, cell.anchor.is_some_and(Anchor::uses_caret))?
+                    let caret = cell.anchor.as_mut().and_then(Anchor::caret_offset_mut);
+                    editable.apply_with_caret(math, caret)?
                 }
                 CellContent::Aligned(groups) => {
                     for group in groups {
-                        editable.apply_with_carets(&mut group.math, group.anchor.uses_caret())?;
+                        editable
+                            .apply_with_caret(&mut group.math, group.anchor.caret_offset_mut())?;
                     }
                 }
                 CellContent::Table(table) => table.apply_editable(editable)?,
