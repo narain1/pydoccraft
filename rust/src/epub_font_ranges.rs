@@ -19,6 +19,34 @@ const MAPPING_LIMIT: usize = 2 * 0x110000;
 // The SFNT directory stores its binary-search range in 16 bits.
 const MAX_SFNT_TABLES: usize = u16::MAX as usize / 16;
 
+pub(in crate::epub) enum RewriteError {
+    ByteLimit,
+    Engine(EngineError),
+}
+
+impl From<EngineError> for RewriteError {
+    fn from(error: EngineError) -> Self {
+        Self::Engine(error)
+    }
+}
+
+impl RewriteError {
+    pub(in crate::epub) fn into_engine(self) -> EngineError {
+        match self {
+            Self::ByteLimit => limited("EPUB Unicode-restricted font exceeds 8 MiB"),
+            Self::Engine(error) => error,
+        }
+    }
+}
+
+fn reserve_font_bytes(rewritten: &mut usize, amount: usize) -> Result<(), RewriteError> {
+    *rewritten = rewritten
+        .checked_add(amount)
+        .filter(|&bytes| bytes <= MAX_FONT_BYTES)
+        .ok_or(RewriteError::ByteLimit)?;
+    Ok(())
+}
+
 pub(in crate::epub) fn register(
     data: &[u8],
     ranges: &[(u32, u32)],
@@ -45,7 +73,9 @@ pub(in crate::epub) fn register(
             &covered,
             work,
             &mut rewritten,
-        )? {
+        )
+        .map_err(RewriteError::into_engine)?
+        {
             register(bytes)?;
         }
     }
@@ -57,7 +87,7 @@ pub(in crate::epub) fn filter_face(
     index: u32,
     covered: impl Fn(u32) -> bool,
     work: &mut usize,
-) -> Result<Option<Vec<u8>>, EngineError> {
+) -> Result<Option<Vec<u8>>, RewriteError> {
     rewrite(
         TableFont::from_index(data, index).map_err(invalid)?,
         FontRef::from_index(data, index).map_err(invalid)?,
@@ -73,11 +103,9 @@ fn rewrite(
     covered: &dyn Fn(u32) -> bool,
     work: &mut usize,
     rewritten: &mut usize,
-) -> Result<Option<Vec<u8>>, EngineError> {
+) -> Result<Option<Vec<u8>>, RewriteError> {
     if source.table_directory().table_records().len() > MAX_SFNT_TABLES {
-        return Err(limited(
-            "EPUB font table count exceeds the SFNT directory limit",
-        ));
+        return Err(limited("EPUB font table count exceeds the SFNT directory limit").into());
     }
     let chars = font.charmap();
     let mut groups: Vec<SequentialMapGroup> = Vec::new();
@@ -162,12 +190,7 @@ fn rewrite(
     records.push(EncodingRecord::new(PlatformId::Windows, 10, full));
     let cmap = dump_table(&Cmap::new(records)).map_err(invalid)?;
     let mut builder = FontBuilder::new();
-    charge(
-        rewritten,
-        cmap.len() + 32,
-        MAX_FONT_BYTES,
-        "EPUB Unicode-restricted font exceeds 8 MiB",
-    )?;
+    reserve_font_bytes(rewritten, cmap.len() + 32)?;
     builder.add_raw(write_fonts::types::Tag::new(b"cmap"), cmap);
     for record in source.table_directory().table_records() {
         let tag = record.tag();
@@ -180,12 +203,7 @@ fn rewrite(
         let bytes = source
             .data_for_tag(tag)
             .ok_or_else(|| invalid("invalid EPUB font table"))?;
-        charge(
-            rewritten,
-            bytes.len() + 19,
-            MAX_FONT_BYTES,
-            "EPUB Unicode-restricted font exceeds 8 MiB",
-        )?;
+        reserve_font_bytes(rewritten, bytes.len() + 19)?;
         builder.add_raw(tag, bytes.as_bytes());
     }
     Ok(Some(builder.build()))

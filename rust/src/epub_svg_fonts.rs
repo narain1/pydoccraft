@@ -299,11 +299,17 @@ struct Selection {
     direct_fonts: HashMap<ID, String>,
     direct_names: HashMap<String, ID>,
     coverage: HashMap<ID, Arc<[u32]>>,
-    restricted: HashMap<(ID, Vec<ID>), ID>,
+    restricted: HashMap<(ID, Vec<ID>), FallbackFace>,
     comparison_work: usize,
     rewrite_work: usize,
     font_bytes: usize,
     error: Option<EngineError>,
+}
+
+#[derive(Clone, Copy)]
+enum FallbackFace {
+    Native(ID),
+    DirectRun,
 }
 
 impl Selection {
@@ -475,9 +481,8 @@ impl Selection {
         };
         let code = u32::from(ch);
         for (ordinal, &candidate) in candidates.iter().enumerate().skip(1) {
-            if let Some(id) = self.choose(candidate, code, &candidates[..ordinal], used, db)? {
-                self.remember_fallback(base, ch, candidate)?;
-                return Ok(Some(id));
+            if let Some(face) = self.choose(candidate, code, &candidates[..ordinal], used, db)? {
+                return self.remember_fallback(base, ch, candidate, face);
             }
         }
         let best = face_info(db, base)?;
@@ -502,15 +507,20 @@ impl Selection {
             {
                 continue;
             }
-            if let Some(id) = self.choose(candidate, code, &preferred, used, db)? {
-                self.remember_fallback(base, ch, candidate)?;
-                return Ok(Some(id));
+            if let Some(face) = self.choose(candidate, code, &preferred, used, db)? {
+                return self.remember_fallback(base, ch, candidate, face);
             }
         }
         Ok(None)
     }
 
-    fn remember_fallback(&mut self, base: ID, ch: char, candidate: ID) -> Result<(), EngineError> {
+    fn remember_fallback(
+        &mut self,
+        base: ID,
+        ch: char,
+        candidate: ID,
+        face: FallbackFace,
+    ) -> Result<Option<ID>, EngineError> {
         if self.attempted.len() >= MAX_FALLBACK_CHARACTERS
             && !self.attempted.contains_key(&(base, ch))
         {
@@ -519,7 +529,10 @@ impl Selection {
             ));
         }
         self.attempted.insert((base, ch), candidate);
-        Ok(())
+        match face {
+            FallbackFace::Native(id) => Ok(Some(id)),
+            FallbackFace::DirectRun => Ok(None),
+        }
     }
 
     fn choose(
@@ -529,7 +542,7 @@ impl Selection {
         preferred: &[ID],
         used: &[ID],
         db: &mut Arc<Database>,
-    ) -> Result<Option<ID>, EngineError> {
+    ) -> Result<Option<FallbackFace>, EngineError> {
         charge(
             &mut self.comparison_work,
             1,
@@ -540,8 +553,20 @@ impl Selection {
             return Ok(None);
         }
         let key = (candidate, preferred.to_vec());
-        if let Some(&id) = self.restricted.get(&key) {
-            return Ok((!used.contains(&id) && self.supports(db, id, code)).then_some(id));
+        if let Some(&face) = self.restricted.get(&key) {
+            let eligible = match face {
+                FallbackFace::Native(id) => !used.contains(&id) && self.supports(db, id, code),
+                FallbackFace::DirectRun => {
+                    charge(
+                        &mut self.comparison_work,
+                        preferred.len(),
+                        MAX_WORK,
+                        "EPUB SVG font fallback exceeds its work budget",
+                    )?;
+                    preferred.iter().all(|&id| !self.supports(db, id, code))
+                }
+            };
+            return Ok(eligible.then_some(face));
         }
         let covered = preferred
             .iter()
@@ -562,8 +587,8 @@ impl Selection {
             MAX_WORK,
             "EPUB SVG font fallback exceeds its work budget",
         )?;
-        let id = if original.iter().copied().all(eligible) {
-            candidate
+        let face = if original.iter().copied().all(eligible) {
+            FallbackFace::Native(candidate)
         } else {
             if self.restricted.len() >= MAX_FACES {
                 return Err(limited("EPUB SVG font fallback exceeds 512 face variants"));
@@ -574,23 +599,35 @@ impl Selection {
                 .with_face_data(candidate, |data, index| {
                     ranges::filter_face(data, index, eligible, &mut self.rewrite_work)
                 })
-                .ok_or_else(|| invalid("missing EPUB SVG fallback font data"))??
-                .ok_or_else(|| invalid("EPUB SVG fallback font lost its character map"))?;
-            charge(
-                &mut self.font_bytes,
-                data.len(),
-                FONT_BYTES,
-                "EPUB SVG registered fonts exceed 16 MiB",
-            )?;
+                .ok_or_else(|| invalid("missing EPUB SVG fallback font data"))?;
             let mut info = face_info(db, candidate)?;
-            info.source = Source::Binary(Arc::new(data));
-            info.index = 0;
-            add_private_face(db, info)
+            match data {
+                Ok(Some(data)) => {
+                    charge(
+                        &mut self.font_bytes,
+                        data.len(),
+                        FONT_BYTES,
+                        "EPUB SVG registered fonts exceed 16 MiB",
+                    )?;
+                    info.source = Source::Binary(Arc::new(data));
+                    info.index = 0;
+                    FallbackFace::Native(add_private_face(db, info))
+                }
+                Ok(None) => return Err(invalid("EPUB SVG fallback font lost its character map")),
+                Err(ranges::RewriteError::ByteLimit)
+                    if !matches!(info.source, Source::Binary(_)) =>
+                {
+                    // Native shaping probes the whole chunk for each span. Retry a large
+                    // installed face directly only if its missing glyph survives that probe.
+                    FallbackFace::DirectRun
+                }
+                Err(error) => return Err(error.into_engine()),
+            }
         };
         if self.restricted.len() < MAX_FACES {
-            self.restricted.insert(key, id);
+            self.restricted.insert(key, face);
         }
-        Ok(Some(id))
+        Ok(Some(face))
     }
 
     fn supports(&self, db: &Database, id: ID, code: u32) -> bool {
