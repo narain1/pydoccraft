@@ -1,5 +1,5 @@
 //! Retry mixed-font text when native glyph replacement cannot match shaping clusters.
-use std::collections::{hash_map::Entry, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use resvg::usvg::{
     self,
@@ -9,7 +9,7 @@ use roxmltree::Node;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
-    length::{prepare_length, TextLength},
+    length::{prepare_lengths, TextLength},
     CssFont, Resolver, Selection, MAX_FACES, MAX_WORK,
 };
 use crate::{
@@ -46,7 +46,8 @@ impl Resolver {
         let xml = parse_xml(source.as_bytes())?;
         let mut edits = Vec::new();
         let mut bytes = 0;
-        let mut lengths = HashMap::new();
+        let mut length_roots = HashMap::new();
+        let mut length_owners = HashSet::new();
         let mut ids = HashMap::new();
         for id in xml.descendants().filter_map(|node| node.attribute("id")) {
             ids.entry(id)
@@ -134,17 +135,12 @@ impl Resolver {
                 }
                 _ => {
                     let (root, owner) = split_text(parent)?;
-                    if let Some(owner) = owner {
-                        if let Entry::Vacant(entry) = lengths.entry(root.id()) {
-                            entry.insert(prepare_length(
-                                root,
-                                owner,
-                                &ids,
-                                &mut next_id,
-                                source,
-                                &mut edits,
-                            )?);
-                        }
+                    if let Some(owner) = owner.filter(|owner| length_owners.insert(owner.id())) {
+                        length_roots
+                            .entry(root.id())
+                            .or_insert((root, Vec::new()))
+                            .1
+                            .push(owner);
                     }
                     (node.range(), state.encode_runs(runs, request.as_ref())?)
                 }
@@ -166,9 +162,17 @@ impl Resolver {
                 ))
             };
         }
+        let mut owners = length_roots.into_values().collect::<Vec<_>>();
+        owners.sort_unstable_by_key(|(root, _)| root.range().start);
+        let lengths = owners
+            .into_iter()
+            .map(|(root, owners)| {
+                prepare_lengths(root, owners, &ids, &mut next_id, source, &mut edits)
+            })
+            .collect::<Result<_, _>>()?;
         Ok(Some(FallbackRuns {
             source: apply_edits(source, edits, XML_BYTES)?,
-            lengths: lengths.into_values().collect(),
+            lengths,
         }))
     }
 

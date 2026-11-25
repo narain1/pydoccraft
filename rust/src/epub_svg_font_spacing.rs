@@ -197,9 +197,10 @@ pub(super) fn verify(
     if original.len() != fitted.len() {
         return Err(spacing_error());
     }
-    for check in spacing {
-        let before = original[check.index];
-        let after = fitted[check.index];
+    for checks in spacing.chunk_by(|left, right| left.index == right.index) {
+        let index = checks[0].index;
+        let before = original[index];
+        let after = fitted[index];
         if before.chunks().len() != after.chunks().len()
             || before
                 .chunks()
@@ -207,9 +208,14 @@ pub(super) fn verify(
                 .zip(after.chunks())
                 .any(|(old, new)| !same_chunk(old, new))
             || before.abs_transform() != after.abs_transform()
-            || check
-                .width
-                .is_some_and(|width| !close(after.bounding_box().width(), width))
+            || checks.iter().any(|check| {
+                check
+                    .width
+                    .is_some_and(|width| !close(after.bounding_box().width(), width))
+            })
+            || checks
+                .windows(2)
+                .any(|pair| pair[0].glyph_range.end > pair[1].glyph_range.start)
         {
             return Err(spacing_error());
         }
@@ -233,15 +239,23 @@ pub(super) fn verify(
             .layouted()
             .iter()
             .flat_map(|span| &span.positioned_glyphs);
+        let mut checks = checks.iter().peekable();
         for (index, glyph) in originals.enumerate() {
             let adjusted = revised.next().ok_or_else(spacing_error)?;
             let mut old = glyph.transform();
             let new = adjusted.transform();
-            let expected = if check.glyph_range.contains(&index) {
-                old.tx + check.gap * ((index - check.glyph_range.start) as f32 - check.anchor)
-            } else {
-                old.tx
-            };
+            while checks
+                .peek()
+                .is_some_and(|check| check.glyph_range.end <= index)
+            {
+                checks.next();
+            }
+            let expected = checks
+                .peek()
+                .filter(|check| check.glyph_range.contains(&index))
+                .map_or(old.tx, |check| {
+                    old.tx + check.gap * ((index - check.glyph_range.start) as f32 - check.anchor)
+                });
             old.tx = new.tx;
             if glyph.id != adjusted.id
                 || glyph.font != adjusted.font

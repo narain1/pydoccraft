@@ -3375,6 +3375,86 @@ class EpubTests(unittest.TestCase):
         with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "overlapping textLength"):
             render("84", root='textLength="120"')
 
+    def test_epub_svg_independent_sibling_length_owners_match_separate_text(self) -> None:
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
+        resources = {"OEBPS/variable.ttf": doc_ex.EpubResource("font/ttf", font)}
+        fixture = fixed_spread_fixture([("", "white", 340, 112)])
+
+        def svg(*, combined: bool, first: int, second: int) -> str:
+            elements = (
+                f'<tspan x="110" y="38" id="first-owner" textLength="{first}" fill="#a03020">'
+                '<a href="https://example.org/first">éBBé</a></tspan>',
+                f'<tspan x="270" y="68" id="second-owner" textLength="{second}" text-anchor="end" fill="#204090">'
+                '<a href="https://example.org/second">BééB</a></tspan>',
+                '<tspan x="152" y="99" textLength="80" style="font-family:sans-serif;fill:#305010">'
+                '<a href="https://example.org/neighbor">Neighbor</a></tspan>',
+            )
+            text = ("<text>" + "".join(elements) + "</text>" if combined else
+                    "".join(f"<text>{element}</text>" for element in elements))
+            return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 112">
+              <style>
+                @font-face {{font-family:Layout;src:url(variable.ttf);unicode-range:U+00E9;
+                             font-variation-settings:"wght" 340}}
+                @font-face {{font-family:Layout;src:url(variable.ttf);unicode-range:U+0042;
+                             font-variation-settings:"wght" 760}}
+                text {{font-family:Layout;font-size:32px;font-optical-sizing:none;text-anchor:middle;
+                       transform:translate(7 3)}}
+              </style>
+              <a href="#first-owner"><rect x="10" y="8" width="7" height="7" fill="green"/></a>
+              <a href="#second-owner"><rect x="25" y="8" width="7" height="7" fill="purple"/></a>
+              {text}</svg>"""
+
+        def render(source: str, inline: bool) -> tuple:
+            if inline:
+                path = "OEBPS/s0.xhtml"
+                authored = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Lengths</title>
+                    <meta name="viewport" content="width=340,height=112"/>
+                    <style>body {{margin:0}} svg {{width:340px;height:112px}}</style>
+                    </head><body>{source}</body></html>"""
+                with doc_ex.open(rewrite_epub(fixture, {path: authored})) as book:
+                    data = book.edit_epub_structure([0], resources=resources)
+            else:
+                path, authored = "OEBPS/lengths.svg", source
+                with doc_ex.open(epub_fixture()) as book:
+                    data = book.edit_epub_structure(
+                        [doc_ex.EpubSvgChapterSource("Lengths", authored, path), 0], resources=resources,
+                    )
+            with doc_ex.open(data) as book:
+                self.assertEqual(book.read_epub_resource(path), authored.encode())
+                png = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                output = book.export_epub_fixed_pdf(dpi=96, pages=[0], searchable=True)
+            with doc_ex.open(output) as pdf, pdf.edit() as edit:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), png)
+                words = ("éBBé", "BééB", "Neighbor")
+                labels = pdf[0].get_text().split()
+                self.assertCountEqual(labels, words)
+                links = pdf[0].get_links()
+                self.assertEqual(sum(link.metadata.get("target_page") == 0 for link in links), 2)
+                search = {word: pdf[0].search_for(word) for word in words}
+                annotations = {name: [link.bbox for link in links if link.uri == f"https://example.org/{name}"]
+                               for name in ("first", "second", "neighbor")}
+                self.assertTrue(all(search.values()) and all(annotations.values()))
+                coordinates = edit.to_bytes(object_streams=False)
+                destinations = sorted(re.findall(rb"/XYZ[ ]+([1-9][0-9.]*)[ ]+([0-9.]+)[ ]+null", coordinates))
+                self.assertEqual(len(destinations), 2)
+                return png, search, annotations, destinations, labels
+
+        for inline in (False, True):
+            with self.subTest(inline=inline):
+                control = render(svg(combined=False, first=94, second=78), inline)
+                combined = render(svg(combined=True, first=94, second=78), inline)
+                self.assertEqual(combined, control)
+                adjusted = render(svg(combined=True, first=80, second=78), inline)
+                self.assertNotEqual(adjusted[1]["éBBé"], combined[1]["éBBé"])
+                for word in ("BééB", "Neighbor"):
+                    self.assertEqual(adjusted[1][word], combined[1][word])
+                for link in ("second", "neighbor"):
+                    self.assertEqual(adjusted[2][link], combined[2][link])
+
+        unsupported = svg(combined=True, first=94, second=78).replace('x="270" y="68"', 'x="270"')
+        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "independently positioned"):
+            render(unsupported, False)
+
     def test_epub_svg_use_instances_keep_inherited_variable_font_requests(self) -> None:
         font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
         resources = {

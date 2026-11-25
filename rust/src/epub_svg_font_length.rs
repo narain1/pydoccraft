@@ -1,5 +1,5 @@
 //! Fit explicit inline lengths after native mixed-face shaping.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use resvg::usvg;
 use roxmltree::Node;
@@ -22,14 +22,19 @@ mod spacing;
 use spacing::SpacingCheck;
 
 const MAX_LENGTH: f32 = 25_000.0;
+const MAX_OWNERS: usize = 64;
 type Edit = (std::ops::Range<usize>, String);
 
 pub(in crate::epub::svg) struct TextLength {
     id: String,
+    temporary_id: bool,
+    owners: Vec<LengthOwner>,
+}
+
+struct LengthOwner {
     target: f32,
     adjust: usvg::LengthAdjust,
     chunk: Option<PositionedChunk>,
-    temporary_id: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -43,36 +48,30 @@ pub(in crate::epub::svg) struct FittedLengths {
     spacing: Vec<SpacingCheck>,
 }
 
-pub(super) fn prepare_length(
+pub(super) fn prepare_lengths(
     root: Node<'_, '_>,
-    owner: Node<'_, '_>,
+    owners: Vec<Node<'_, '_>>,
     ids: &HashMap<&str, bool>,
     next_id: &mut usize,
     source: &str,
     edits: &mut Vec<Edit>,
 ) -> Result<TextLength, EngineError> {
-    let adjust = match owner.attribute("lengthAdjust") {
-        None | Some("spacing") => usvg::LengthAdjust::Spacing,
-        Some("spacingAndGlyphs") => usvg::LengthAdjust::SpacingAndGlyphs,
-        Some(_) => {
-            return Err(unsupported(
-                "EPUB SVG mixed-font textLength has an invalid lengthAdjust",
-            ))
-        }
-    };
+    if owners.len() > MAX_OWNERS {
+        return Err(limited(
+            "EPUB SVG text has more than 64 mixed-font length owners",
+        ));
+    }
     if root.descendants().filter(Node::is_element).any(|node| {
         ["dx", "dy", "rotate"]
             .iter()
             .any(|attribute| node.has_attribute(*attribute))
-            || node != owner && node.has_attribute("textLength")
             || node != root && node.has_tag_name((NS, "text"))
             || node.has_tag_name((NS, "textPath"))
     }) {
         return Err(unsupported(
-            "EPUB SVG mixed-font textLength requires one linear run without per-glyph positioning or nested lengths",
+            "EPUB SVG mixed-font textLength requires linear chunks without per-glyph positioning",
         ));
     }
-    let chunk = nested_chunk(root, owner, adjust)?;
     for effect in ["filter", "clip-path", "mask"] {
         if root.attribute(effect).is_some_and(|value| value != "none") {
             return Err(unsupported(
@@ -91,24 +90,6 @@ pub(super) fn prepare_length(
     {
         return Err(unsupported(
             "EPUB SVG mixed-font textLength with an effect on the text element",
-        ));
-    }
-    let length = owner
-        .attribute_node("textLength")
-        .ok_or_else(|| invalid("missing SVG textLength"))?;
-    let raw = length.value().trim();
-    let target = raw
-        .strip_suffix("px")
-        .unwrap_or(raw)
-        .parse::<f32>()
-        .ok()
-        .filter(|value| value.is_finite() && *value > 0.0)
-        .ok_or_else(|| {
-            unsupported("EPUB SVG mixed-font textLength requires positive user units or px")
-        })?;
-    if target > MAX_LENGTH {
-        return Err(limited(
-            "EPUB SVG mixed-font textLength exceeds its geometry budget",
         ));
     }
     let id_attribute = root.attribute_node("id");
@@ -136,13 +117,64 @@ pub(super) fn prepare_length(
         edits.push((position, format!(" id=\"{id}\"")));
         id
     };
-    edits.push((length.range(), String::new()));
+    let owners = owners
+        .into_iter()
+        .map(|owner| prepare_owner(root, owner, edits))
+        .collect::<Result<_, _>>()?;
     Ok(TextLength {
         id,
+        temporary_id,
+        owners,
+    })
+}
+
+fn prepare_owner(
+    root: Node<'_, '_>,
+    owner: Node<'_, '_>,
+    edits: &mut Vec<Edit>,
+) -> Result<LengthOwner, EngineError> {
+    let adjust = match owner.attribute("lengthAdjust") {
+        None | Some("spacing") => usvg::LengthAdjust::Spacing,
+        Some("spacingAndGlyphs") => usvg::LengthAdjust::SpacingAndGlyphs,
+        Some(_) => {
+            return Err(unsupported(
+                "EPUB SVG mixed-font textLength has an invalid lengthAdjust",
+            ))
+        }
+    };
+    if owner
+        .descendants()
+        .skip(1)
+        .any(|node| node.has_attribute("textLength"))
+    {
+        return Err(unsupported(
+            "EPUB SVG mixed-font overlapping textLength owners",
+        ));
+    }
+    let chunk = nested_chunk(root, owner, adjust)?;
+    let length = owner
+        .attribute_node("textLength")
+        .ok_or_else(|| invalid("missing SVG textLength"))?;
+    let raw = length.value().trim();
+    let target = raw
+        .strip_suffix("px")
+        .unwrap_or(raw)
+        .parse::<f32>()
+        .ok()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .ok_or_else(|| {
+            unsupported("EPUB SVG mixed-font textLength requires positive user units or px")
+        })?;
+    if target > MAX_LENGTH {
+        return Err(limited(
+            "EPUB SVG mixed-font textLength exceeds its geometry budget",
+        ));
+    }
+    edits.push((length.range(), String::new()));
+    Ok(LengthOwner {
         target,
         adjust,
         chunk,
-        temporary_id,
     })
 }
 
@@ -238,7 +270,7 @@ pub(in crate::epub::svg) fn fit_lengths(
     // Native use expansion drops IDs, and each instance can have a different
     // resolved origin or font scale. Measure only directly drawn text here.
     let uses = svg::use_refs::used_sources(xml.root_element());
-    let probe = probe_chunks(source, xml.root_element(), &remaining, measure)?;
+    let (probe, probe_ids) = probe_chunks(source, xml.root_element(), &remaining, measure)?;
     let probes: HashMap<_, _> = probe
         .as_ref()
         .into_iter()
@@ -275,69 +307,74 @@ pub(in crate::epub::svg) fn fit_lengths(
         let &(index, text) = measured.get(id).ok_or_else(|| {
             unsupported("EPUB SVG mixed-font textLength source has no native layout")
         })?;
-        let (chunk, start, owner) = if let Some(origin) = length.chunk {
-            if text.chunks().len() != origin.count {
-                return Err(nested_error());
-            }
-            let owner = positioned_owner(node, origin)?;
-            let probe = probes.get(id).copied().ok_or_else(nested_error)?;
-            let [chunk] = probe.chunks() else {
-                return Err(nested_error());
+        for adjustment in &length.owners {
+            let (chunk, start, owner) = if let Some(origin) = adjustment.chunk {
+                if text.chunks().len() != origin.count {
+                    return Err(nested_error());
+                }
+                let owner = positioned_owner(node, origin)?;
+                let probe = probe_ids
+                    .get(&(id, origin.index))
+                    .and_then(|id| probes.get(id.as_str()).copied())
+                    .ok_or_else(nested_error)?;
+                let [chunk] = probe.chunks() else {
+                    return Err(nested_error());
+                };
+                let start = spacing::verify_probe(text, origin.index, probe)?;
+                (chunk, Some((start, probe)), owner)
+            } else {
+                let [chunk] = text.chunks() else {
+                    return Err(unsupported(
+                        "EPUB SVG mixed-font textLength requires one positioned native chunk",
+                    ));
+                };
+                (chunk, None, node)
             };
-            let start = spacing::verify_probe(text, origin.index, probe)?;
-            (chunk, Some((start, probe)), owner)
-        } else {
-            let [chunk] = text.chunks() else {
+            if text.writing_mode() != usvg::WritingMode::LeftToRight
+                || !matches!(chunk.text_flow(), usvg::TextFlow::Linear)
+                || chunk.spans().iter().any(|span| {
+                    let decoration = span.decoration();
+                    span.letter_spacing() < 0.0
+                        || span.word_spacing() < 0.0
+                        || !solid_fill(span.fill(), span.stroke())
+                        || [
+                            decoration.underline(),
+                            decoration.overline(),
+                            decoration.line_through(),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .any(|style| !solid_fill(style.fill(), style.stroke()))
+                })
+            {
                 return Err(unsupported(
-                    "EPUB SVG mixed-font textLength requires one positioned native chunk",
+                    "EPUB SVG mixed-font textLength requires horizontal solid-fill text with nonnegative spacing",
                 ));
-            };
-            (chunk, None, node)
-        };
-        if text.writing_mode() != usvg::WritingMode::LeftToRight
-            || !matches!(chunk.text_flow(), usvg::TextFlow::Linear)
-            || chunk.spans().iter().any(|span| {
-                let decoration = span.decoration();
-                span.letter_spacing() < 0.0
-                    || span.word_spacing() < 0.0
-                    || !solid_fill(span.fill(), span.stroke())
-                    || [
-                        decoration.underline(),
-                        decoration.overline(),
-                        decoration.line_through(),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .any(|style| !solid_fill(style.fill(), style.stroke()))
-            })
-        {
-            return Err(unsupported(
-                "EPUB SVG mixed-font textLength requires horizontal solid-fill text with nonnegative spacing",
-            ));
-        }
-        match length.adjust {
-            usvg::LengthAdjust::Spacing => {
-                let (offset, measured) = start.unwrap_or((0, text));
-                let check = SpacingCheck::new(
-                    index,
-                    length.target,
-                    measured,
-                    chunk,
-                    offset,
-                    start.is_none(),
-                )?;
-                check.apply(source, owner, &mut edits, &mut bytes)?;
-                spacing.push(check);
             }
-            usvg::LengthAdjust::SpacingAndGlyphs => {
-                let edit = scale_glyphs(source, node, text, chunk, length.target)?;
-                charge(
-                    &mut bytes,
-                    edit.1.len(),
-                    XML_BYTES,
-                    "EPUB SVG textLength edits exceed 8 MiB",
-                )?;
-                edits.push(edit);
+            match adjustment.adjust {
+                usvg::LengthAdjust::Spacing => {
+                    let (offset, measured) = start.unwrap_or((0, text));
+                    let check = SpacingCheck::new(
+                        index,
+                        adjustment.target,
+                        measured,
+                        chunk,
+                        offset,
+                        start.is_none(),
+                    )?;
+                    check.apply(source, owner, &mut edits, &mut bytes)?;
+                    spacing.push(check);
+                }
+                usvg::LengthAdjust::SpacingAndGlyphs => {
+                    let edit = scale_glyphs(source, node, text, chunk, adjustment.target)?;
+                    charge(
+                        &mut bytes,
+                        edit.1.len(),
+                        XML_BYTES,
+                        "EPUB SVG textLength edits exceed 8 MiB",
+                    )?;
+                    edits.push(edit);
+                }
             }
         }
         if length.temporary_id {
@@ -370,34 +407,74 @@ fn positioned_owner<'a, 'input>(
         .ok_or_else(nested_error)
 }
 
-fn probe_chunks(
+type ProbeIds<'a> = HashMap<(&'a str, usize), String>;
+
+fn probe_chunks<'a>(
     source: &str,
     root: Node<'_, '_>,
-    lengths: &HashMap<&str, &TextLength>,
+    lengths: &HashMap<&'a str, &TextLength>,
     measure: impl FnOnce(&[u8]) -> Result<usvg::Tree, EngineError>,
-) -> Result<Option<usvg::Tree>, EngineError> {
-    if !lengths.values().any(|length| length.chunk.is_some()) {
-        return Ok(None);
+) -> Result<(Option<usvg::Tree>, ProbeIds<'a>), EngineError> {
+    if !lengths
+        .values()
+        .any(|length| length.owners.iter().any(|owner| owner.chunk.is_some()))
+    {
+        return Ok((None, HashMap::new()));
     }
+    let ids: HashSet<_> = root
+        .descendants()
+        .filter_map(|node| node.attribute("id"))
+        .collect();
+    let mut next_id = 0;
+    let mut probe_ids = HashMap::new();
     let mut edits = Vec::new();
+    let mut bytes = 0;
     for text in root
         .descendants()
         .filter(|node| node.has_tag_name((NS, "text")))
     {
-        let Some(origin) = text
-            .attribute("id")
-            .and_then(|id| lengths.get(id))
-            .and_then(|length| length.chunk)
-        else {
+        let Some(attr) = text.attribute_node("id") else {
             continue;
         };
-        let owner = positioned_owner(text, origin)?;
-        for child in text.children().filter(|child| *child != owner) {
-            edits.push((child.range(), String::new()));
+        let Some((&id, length)) = lengths.get_key_value(attr.value()) else {
+            continue;
+        };
+        let range = text.range();
+        let local = |range: std::ops::Range<usize>| {
+            range.start - text.range().start..range.end - text.range().start
+        };
+        let mut replacement = String::new();
+        for origin in length.owners.iter().filter_map(|owner| owner.chunk) {
+            let owner = positioned_owner(text, origin)?;
+            let probe_id = loop {
+                let id = format!("pydoccraft-svg-spacing-probe-{next_id}");
+                next_id += 1;
+                if !ids.contains(id.as_str()) {
+                    break id;
+                }
+            };
+            let mut copy_edits: Vec<Edit> = text
+                .children()
+                .filter(|child| *child != owner)
+                .map(|child| (local(child.range()), String::new()))
+                .collect();
+            copy_edits.push((local(attr.range_value()), probe_id.clone()));
+            let copy = apply_edits(&source[range.clone()], copy_edits, XML_BYTES)?;
+            charge(
+                &mut bytes,
+                copy.len(),
+                XML_BYTES,
+                "EPUB SVG textLength probes exceed 8 MiB",
+            )?;
+            append(&mut replacement, &copy, XML_BYTES)?;
+            probe_ids.insert((id, origin.index), probe_id);
+        }
+        if !replacement.is_empty() {
+            edits.push((range, replacement));
         }
     }
     let source = apply_edits(source, edits, XML_BYTES)?;
-    measure(source.as_bytes()).map(Some)
+    Ok((Some(measure(source.as_bytes())?), probe_ids))
 }
 
 fn direct_texts(tree: &usvg::Tree) -> Vec<&usvg::Text> {
