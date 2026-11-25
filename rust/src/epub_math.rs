@@ -454,8 +454,17 @@ impl<'xml> Projection<'_, 'xml> {
         depth: usize,
         style: Presentation<'xml>,
     ) -> Result<Arg, EngineError> {
+        self.sequence(node.children().filter(Node::is_element), depth, style)
+    }
+
+    fn sequence<'input: 'xml>(
+        &mut self,
+        children: impl IntoIterator<Item = Node<'xml, 'input>>,
+        depth: usize,
+        style: Presentation<'xml>,
+    ) -> Result<Arg, EngineError> {
         let mut rows = Vec::new();
-        for child in node.children().filter(Node::is_element) {
+        for child in children {
             let seeking = self
                 .alignment_group
                 .is_some_and(table::alignment::Scope::seeking_caret);

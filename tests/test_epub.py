@@ -8125,6 +8125,94 @@ Trailing
                         delta=0.65,
                     )
 
+    def test_mathml_multiple_alignment_groups_share_editable_geometry(self) -> None:
+        source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Multiple math groups</title><meta name="viewport" content="width=550,height=340"/>
+            <style>body {margin:0}</style></head><body><p>
+            <m:math mathsize="12pt"><m:mtable groupalign="{decimalpoint center right} {right}"
+                columnwidth="277pt 60pt" columnspacing="16pt" rowspacing="12pt">
+              <m:mtr><m:mtd><m:maligngroup/><m:mn>12.345</m:mn>
+                <m:maligngroup/><m:mtext>RedMarker</m:mtext>
+                <m:maligngroup/><m:malignmark/><m:mtext mathcolor="#174923">North</m:mtext>
+                <m:mfrac><m:mtext>Above</m:mtext><m:mtext>Below</m:mtext></m:mfrac></m:mtd>
+                <m:mtd><m:maligngroup/><m:mtext>Tally</m:mtext></m:mtd></m:mtr>
+              <m:mtr groupalign="{left right} {right}"><m:mtd groupalign="decimalpoint center right"><m:maligngroup/><m:mn>7.89</m:mn>
+                <m:maligngroup/><m:mtext>LongerGreen</m:mtext>
+                <m:maligngroup/><m:malignmark/><m:mtext mathcolor="#174923">Western</m:mtext>
+                <m:msup><m:mi>x</m:mi><m:mn>2</m:mn></m:msup></m:mtd>
+                <m:mtd><m:maligngroup/><m:mtext>End</m:mtext></m:mtd></m:mtr>
+              <m:mtr groupalign="{decimalpoint} {right}"><m:mtd><m:mstyle mathcolor="#22177d"><m:mrow>
+                <m:maligngroup/><m:mn>80.7</m:mn><m:maligngroup groupalign="center"/><m:mtext>Blue</m:mtext></m:mrow></m:mstyle></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:mtext>Ungrouped heading</m:mtext></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:mn>900.06</m:mn></m:mtd></m:mtr>
+            </m:mtable></m:math>
+          </p></body></html>"""
+        terms = ("12.345", "7.89", "80.7", "900.06", "RedMarker", "LongerGreen", "Blue",
+                 "North", "Western", "Above", "Below", "Tally", "End", "Ungrouped heading")
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+
+        def geometry(doc: doc_ex.Document, delta: float, *, fixed: bool = False
+                     ) -> dict[str, tuple[float, float, float, float]]:
+            result = {}
+            for label in terms:
+                result[label], = doc[0].search_for(label)
+            if not fixed:
+                anchor, = doc[0].search_for(".345")
+                for suffix in (".89", ".7", ".06"):
+                    match, = doc[0].search_for(suffix)
+                    self.assertAlmostEqual(match[0], anchor[0], delta=delta)
+            centers = [(result[label][0] + result[label][2]) / 2
+                       for label in ("RedMarker", "LongerGreen", "Blue")]
+            self.assertAlmostEqual(max(centers), min(centers), delta=delta)
+            self.assertAlmostEqual(result["North"][0], result["Western"][0], delta=delta)
+            self.assertAlmostEqual(result["Tally"][2], result["End"][2], delta=delta)
+            self.assertGreater(result["Above"][0], result["North"][2])
+            self.assertGreater(result["North"][0], result["RedMarker"][2])
+            return result
+
+        chapter = epub_fixture(chapter_one=source)
+        with doc_ex.open(chapter) as book:
+            with doc_ex.open(book.convert("pdf")) as pdf:
+                reference = geometry(pdf, 0.05)
+                self.assertFalse(pdf[0].get_images())
+            converted = book.convert("docx")
+            with zipfile.ZipFile(io.BytesIO(converted)) as archive:
+                xml = ET.fromstring(archive.read("word/document.xml"))
+            matrix = xml.find(".//m:oMath//m:m", ns)
+            self.assertIsNotNone(matrix)
+            self.assertIsNotNone(matrix.find(".//m:f", ns))
+            self.assertIsNotNone(matrix.find(".//m:sSup", ns))
+            runs = [element.text for element in matrix.findall(".//m:t", ns)]
+            for label in terms:
+                self.assertEqual(runs.count(label), 1, runs)
+            with doc_ex.open(converted) as word, doc_ex.open(word.convert("pdf")) as pdf:
+                text = word[0].get_text()
+                for label in terms:
+                    self.assertEqual(text.count(label), 1, text)
+                self.assertNotIn("⟡H", text)
+                reopened = geometry(pdf, 0.25)
+                for label in terms:
+                    for expected, actual in zip(reference[label], reopened[label]):
+                        self.assertAlmostEqual(actual, expected, delta=0.35)
+
+        fixture = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 550, 340)])
+        with doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": source})) as book:
+            image = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), image)
+                # The fixed PDF maps a native math run to one invisible text box.
+                # Compare its full origin to the individually positioned vector glyphs.
+                fixed = geometry(pdf, 0.65, fixed=True)
+                for label in terms:
+                    self.assertAlmostEqual(fixed[label][0] - fixed["North"][0],
+                                           reference[label][0] - reference["North"][0], delta=0.65)
+
+        unsafe = source.replace("<m:maligngroup/><m:mtext>RedMarker", "<m:maligngroup/><m:mo>+</m:mo><m:mtext>RedMarker")
+        with doc_ex.open(epub_fixture(chapter_one=unsafe)) as book:
+            for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "alignment group boundary through operator spacing"):
+                    operation()
+
     def test_mathml_explicit_alignment_marks_preserve_editable_edges_and_tokens(self) -> None:
         source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Math alignment marks</title><meta name="viewport" content="width=500,height=300"/>

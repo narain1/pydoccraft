@@ -97,7 +97,8 @@
 - [x] Align a single MathML group per data cell to its edge, center or decimal point in previews, searchable PDF and editable DOCX.
 - [x] Preserve explicit MathML alignment marks on the group baseline and inside its tokens in searchable PDF and editable DOCX.
 - [x] Align the first baseline number in supported compound expressions, including native operators and trailing units, in searchable PDF and editable DOCX.
-- [ ] Extend MathML alignment to multiple groups per cell, marks and decimal points inside nontransparent operands, decimal alignment after composed geometry, right-to-left groups and cross-table scopes.
+- [x] Align up to eight MathML sibling groups per data cell with ordinary run boundaries. Apply ordinal alignment lists and preserve missing trailing groups, baseline geometry, searchable text and editable equation operands.
+- [ ] Extend multi-group MathML alignment across nested wrappers and operator boundaries. Support marks and decimal points inside nontransparent operands, decimal alignment after composed geometry, right-to-left groups and cross-table scopes.
 - [x] Preserve editable negative MathML padding offsets that fit within the preceding horizontal math space, including nested superscripts.
 - [ ] Expand editable negative leading offsets beyond preceding space and inside caret-aligned groups, and cover remaining MathML visual properties.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.

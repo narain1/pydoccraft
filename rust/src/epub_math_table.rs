@@ -26,6 +26,7 @@ use alignment::Anchor;
 use rules::{Occupancy, Rules};
 
 const MAX_ROWS: usize = 128;
+const MAX_GROUPS: usize = 8;
 const MAX_DIMENSION: f32 = 20_000.0;
 const WIDTH_EPSILON: f32 = 0.0001;
 const TABLE_WIDTH_EPSILON: f32 = 0.01;
@@ -66,12 +67,99 @@ struct CellPlacement<'xml, 'input> {
     horizontal: ColJc,
     vertical: Vertical,
     label_above: bool,
-    group: Option<alignment::Group>,
+    groups: Option<Groups<'xml, 'input>>,
     style: Presentation<'xml>,
+}
+
+enum Groups<'xml, 'input> {
+    Single(alignment::Group),
+    Multiple {
+        wrappers: Vec<Node<'xml, 'input>>,
+        parts: Vec<GroupSource<'xml, 'input>>,
+    },
+}
+
+struct GroupSource<'xml, 'input> {
+    group: alignment::Group,
+    content: Vec<Node<'xml, 'input>>,
+}
+
+impl<'xml, 'input> Groups<'xml, 'input> {
+    fn read(
+        table: Node<'xml, 'input>,
+        row: Node<'xml, 'input>,
+        cell: Node<'xml, 'input>,
+        marker: Node<'xml, 'input>,
+        column: usize,
+    ) -> Result<Self, EngineError> {
+        let is_marker = |node: &Node<'_, '_>| node.has_tag_name((MATHML, "maligngroup"));
+        if !marker.next_siblings().skip(1).any(|node| is_marker(&node)) {
+            return alignment::read(table, row, cell, marker, column, 0, &[cell]).map(Self::Single);
+        }
+        let mut wrappers = Vec::new();
+        for wrapper in marker.ancestors().skip(1).take_while(|node| *node != cell) {
+            let parent = wrapper
+                .parent_element()
+                .ok_or_else(|| invalid("missing MathML cell"))?;
+            if !parent.has_tag_name((MATHML, "semantics"))
+                && wrapper
+                    .next_siblings()
+                    .skip(1)
+                    .any(|node| node.is_element())
+            {
+                return Err(unsupported(
+                    "MathML alignment groups across nested wrappers",
+                ));
+            }
+            wrappers.push(wrapper);
+        }
+        wrappers.reverse();
+        let mut groups = Vec::new();
+        let mut opening = marker;
+        let mut content = Vec::new();
+        for node in marker.next_siblings().skip(1).filter(Node::is_element) {
+            if is_marker(&node) {
+                if groups.len() + 1 == MAX_GROUPS {
+                    return Err(limited("MathML table cell exceeds eight alignment groups"));
+                }
+                if content.is_empty() {
+                    return Err(unsupported(
+                        "MathML element maligngroup in an empty alignment group",
+                    ));
+                }
+                let group =
+                    alignment::read(table, row, cell, opening, column, groups.len(), &content)?;
+                groups.push(GroupSource {
+                    group,
+                    content: std::mem::take(&mut content),
+                });
+                opening = node;
+            } else {
+                content.push(node);
+            }
+        }
+        if content.is_empty() {
+            return Err(unsupported(
+                "MathML element maligngroup in an empty alignment group",
+            ));
+        }
+        let group = alignment::read(table, row, cell, opening, column, groups.len(), &content)?;
+        groups.push(GroupSource { group, content });
+        Ok(Self::Multiple {
+            wrappers,
+            parts: groups,
+        })
+    }
+}
+
+struct AlignedEquation {
+    math: Math,
+    anchor: Anchor,
 }
 
 enum CellContent {
     Equation(Math),
+    Aligned(Vec<AlignedEquation>),
     Table(Table),
 }
 
@@ -313,14 +401,14 @@ pub(super) fn project<'xml>(
             let style = projection.style(cell, row_style)?;
             let rows_spanned = span(cell, "rowspan")?;
             let columns_spanned = span(cell, "columnspan")?;
-            let group = alignment::leading_group(cell)
+            let groups = alignment::leading_group(cell)
                 .map(|marker| {
                     if label || columns_spanned != 1 {
                         return Err(unsupported(
                             "MathML alignment group without one data column",
                         ));
                     }
-                    alignment::read(table, row, cell, marker, column)
+                    Groups::read(table, row, cell, marker, column)
                 })
                 .transpose()?;
             if label {
@@ -334,7 +422,7 @@ pub(super) fn project<'xml>(
                     horizontal,
                     vertical,
                     label_above: row_alignment.trim() == "top",
-                    group,
+                    groups,
                     style,
                 });
                 continue;
@@ -357,7 +445,7 @@ pub(super) fn project<'xml>(
                 horizontal,
                 vertical,
                 label_above: false,
-                group,
+                groups,
                 style,
             });
             column = right;
@@ -408,19 +496,49 @@ pub(super) fn project<'xml>(
         };
         let (content, anchor) =
             projection.with_cell_width(cell.node, content_width, |projection| {
-                if cell.group.is_none() {
-                    if let Some(table) =
-                        project_group(projection, cell.node, depth + 2, cell.style)?
-                    {
-                        return Ok((CellContent::Table(table), None));
+                let group = match cell.groups {
+                    Some(Groups::Multiple { wrappers, parts }) => {
+                        let mut scope_depth = depth + 2;
+                        let mut style = cell.style;
+                        for wrapper in wrappers {
+                            scope_depth += 1;
+                            projection.charge(scope_depth)?;
+                            style = projection.style(wrapper, style)?;
+                        }
+                        let mut aligned = Vec::with_capacity(parts.len());
+                        for GroupSource { group, content } in parts {
+                            projection.charge(scope_depth + 1)?;
+                            let (nodes, caret) = projection
+                                .with_alignment_group(Some(group.scope), |projection| {
+                                    projection.sequence(content, scope_depth, style)
+                                })?;
+                            aligned.push(AlignedEquation {
+                                math: Math {
+                                    nodes: math::merge_runs(nodes),
+                                    ..Default::default()
+                                },
+                                anchor: group.resolve(caret)?,
+                            });
+                        }
+                        alignment::check_boundaries(aligned.iter().map(|group| &group.math))?;
+                        return Ok((CellContent::Aligned(aligned), None));
                     }
-                }
+                    Some(Groups::Single(group)) => Some(group),
+                    None => {
+                        if let Some(table) =
+                            project_group(projection, cell.node, depth + 2, cell.style)?
+                        {
+                            return Ok((CellContent::Table(table), None));
+                        }
+                        None
+                    }
+                };
                 let (nodes, caret) = projection
-                    .with_alignment_group(cell.group.map(|group| group.scope), |projection| {
+                    .with_alignment_group(group.map(|group| group.scope), |projection| {
                         projection.elements(cell.node, depth + 2, cell.style)
                     })?;
                 let nodes = math::merge_runs(nodes);
-                let anchor = cell.group.map(|group| group.resolve(caret)).transpose()?;
+                let anchor = group.map(|group| group.resolve(caret)).transpose()?;
                 Ok((
                     CellContent::Equation(Math {
                         nodes,
@@ -664,6 +782,7 @@ pub(in crate::epub) struct Layout {
     pub height: f32,
     pub baseline: f32,
     pub cells: Vec<(f32, f32, CellDrawing)>,
+    aligned_offsets: Vec<Vec<f32>>,
     widths: Vec<f32>,
     heights: Vec<f32>,
     row_positions: Vec<f32>,
@@ -716,17 +835,9 @@ pub(in crate::epub) enum CellDrawing {
 struct MeasuredCell {
     drawing: CellDrawing,
     baseline_offset: Option<f32>,
+    width: f32,
     anchor: Option<f32>,
-}
-
-impl MeasuredCell {
-    fn width(&self, column: usize, anchors: &[[f32; 2]]) -> f32 {
-        if self.anchor.is_some() {
-            anchors[column].iter().sum()
-        } else {
-            self.drawing.size().0
-        }
-    }
+    groups: Vec<(MathLayout, f32)>,
 }
 
 impl CellDrawing {
@@ -740,6 +851,20 @@ impl CellDrawing {
             ),
         }
     }
+}
+
+fn shifted_cell(
+    body: Arg,
+    offset: f32,
+    editor: &compose::EditableLayout<'_>,
+) -> Result<MNode, EngineError> {
+    Ok(MNode::Phant {
+        show: true,
+        zero_wid: true,
+        zero_asc: true,
+        zero_desc: true,
+        e: vec![editor.shift(body, offset)?],
+    })
 }
 
 impl Table {
@@ -757,10 +882,14 @@ impl Table {
     ) -> Result<(), EngineError> {
         for cell in &mut self.cells {
             match &mut cell.content {
-                CellContent::Equation(math) => editable.apply_with_carets(
-                    math,
-                    matches!(cell.anchor, Some(Anchor::Marked(..) | Anchor::Decimal(..))),
-                )?,
+                CellContent::Equation(math) => {
+                    editable.apply_with_carets(math, cell.anchor.is_some_and(Anchor::uses_caret))?
+                }
+                CellContent::Aligned(groups) => {
+                    for group in groups {
+                        editable.apply_with_carets(&mut group.math, group.anchor.uses_caret())?;
+                    }
+                }
                 CellContent::Table(table) => table.apply_editable(editable)?,
             }
         }
@@ -925,7 +1054,6 @@ impl Table {
     fn size_columns(
         &self,
         measures: &[MeasuredCell],
-        anchors: &[[f32; 2]],
         label_inset: f32,
     ) -> Result<Vec<f32>, EngineError> {
         let mut widths: Vec<_> = self
@@ -945,7 +1073,7 @@ impl Table {
                 .zip(measures)
                 .filter(|(cell, _)| !cell.columns.is_empty())
                 .map(|(cell, measure)| {
-                    let width = measure.width(cell.columns.start, anchors);
+                    let width = measure.width;
                     equal_track_size(&self.column_gaps, &cell.columns, width)
                 })
                 .fold(0.0, f32::max);
@@ -967,11 +1095,7 @@ impl Table {
                 fitted.push(index);
                 continue;
             }
-            self.grow_columns(
-                &mut widths,
-                span,
-                measures[index].width(span.start, anchors),
-            )?;
+            self.grow_columns(&mut widths, span, measures[index].width)?;
         }
         if let Some(total) = fill {
             self.fill_width(&mut widths, total)?;
@@ -979,7 +1103,7 @@ impl Table {
         for index in fitted {
             let span = &self.cells[index].columns;
             let room = extent(&widths, &self.column_gaps, span);
-            if measures[index].width(span.start, anchors) > room + TABLE_WIDTH_EPSILON {
+            if measures[index].width > room + TABLE_WIDTH_EPSILON {
                 return Err(unsupported("MathML cell exceeds fitted column widths"));
             }
         }
@@ -989,7 +1113,6 @@ impl Table {
     fn layout_columns(
         &self,
         measures: &[MeasuredCell],
-        anchors: &[[f32; 2]],
         label_width: f32,
     ) -> Result<ColumnsLayout, EngineError> {
         let grid_width = |widths: &[f32]| {
@@ -1002,28 +1125,26 @@ impl Table {
             .labels
             .as_ref()
             .map_or(0.0, |labels| label_width + labels.gap);
-        let ordinary = self
-            .size_columns(measures, anchors, minimum)
-            .and_then(|widths| {
-                let data = grid_width(&widths);
-                let inset = if let Some(width) = self.width.filter(|_| self.labels.is_some()) {
-                    let available = (width - data) / 2.0;
-                    if available < minimum - TABLE_WIDTH_EPSILON {
-                        return Err(unsupported(
-                            "MathML labeled contents exceed the authored table width",
-                        ));
-                    }
-                    available.max(minimum)
-                } else {
-                    minimum
-                };
-                Ok(ColumnsLayout {
-                    widths,
-                    inset,
-                    width: data + 2.0 * inset,
-                    overlapping_labels: false,
-                })
-            });
+        let ordinary = self.size_columns(measures, minimum).and_then(|widths| {
+            let data = grid_width(&widths);
+            let inset = if let Some(width) = self.width.filter(|_| self.labels.is_some()) {
+                let available = (width - data) / 2.0;
+                if available < minimum - TABLE_WIDTH_EPSILON {
+                    return Err(unsupported(
+                        "MathML labeled contents exceed the authored table width",
+                    ));
+                }
+                available.max(minimum)
+            } else {
+                minimum
+            };
+            Ok(ColumnsLayout {
+                widths,
+                inset,
+                width: data + 2.0 * inset,
+                overlapping_labels: false,
+            })
+        });
         let Some(labels) = self.labels.as_ref().filter(|labels| labels.overlap) else {
             return ordinary;
         };
@@ -1041,7 +1162,7 @@ impl Table {
             Err(error) if !matches!(error, EngineError::Unsupported(_)) => return Err(error),
             _ => {}
         }
-        let widths = self.size_columns(measures, anchors, 0.0)?;
+        let widths = self.size_columns(measures, 0.0)?;
         let data = grid_width(&widths);
         let width = self.width.unwrap_or_else(|| data.max(label_width));
         if data.max(label_width) > width + TABLE_WIDTH_EPSILON
@@ -1100,7 +1221,12 @@ impl Table {
         // Native matrices have no cell spans. Give the logical slots their
         // measured widths independently of the expressions' painted bounds.
         // Each expression can then extend into slots covered by its span.
-        for (cell, (left, top, drawing)) in self.cells.into_iter().zip(layout.cells) {
+        for ((cell, (left, top, drawing)), groups) in self
+            .cells
+            .into_iter()
+            .zip(layout.cells)
+            .zip(layout.aligned_offsets)
+        {
             let row = cell.rows.start;
             let column = match &self.labels {
                 Some(_) if layout.overlapping_labels => cell.columns.start,
@@ -1115,7 +1241,18 @@ impl Table {
                 None => cell.columns.start,
             };
             let (_, ascent, _) = drawing.size();
+            let matrix_baseline = first_baseline - row as f32 * row_pitch;
+            let offset = layout.baseline - top - ascent - matrix_baseline;
+            let advance = (left - origins[column]).max(0.0);
             let nodes = match (cell.content, drawing) {
+                (CellContent::Aligned(parts), CellDrawing::Equation(_)) => {
+                    for (part, start) in parts.into_iter().zip(groups) {
+                        let mut body = compose::group_leading_space(advance + start)?;
+                        body.extend(part.math.nodes);
+                        contents[row][column].push(shifted_cell(body, offset, editor)?);
+                    }
+                    continue;
+                }
                 (CellContent::Equation(math), CellDrawing::Equation(_)) => math.nodes,
                 (CellContent::Table(table), CellDrawing::Table(nested)) => {
                     vec![table.editable_matrix(nested, editor)?]
@@ -1125,22 +1262,13 @@ impl Table {
             if nodes.is_empty() {
                 continue;
             }
-            let matrix_baseline = first_baseline - row as f32 * row_pitch;
-            let offset = layout.baseline - top - ascent - matrix_baseline;
-            let advance = (left - origins[column]).max(0.0);
             let mut cell_body = if cell.anchor.is_some() || layout.overlapping_labels {
                 compose::group_leading_space(advance)?
             } else {
                 compose::grid_gap(advance)?.into_iter().collect()
             };
             cell_body.extend(nodes);
-            contents[row][column].push(MNode::Phant {
-                show: true,
-                zero_wid: true,
-                zero_asc: true,
-                zero_desc: true,
-                e: vec![editor.shift(cell_body, offset)?],
-            });
+            contents[row][column].push(shifted_cell(cell_body, offset, editor)?);
         }
         for row in &mut contents {
             for (cell, &advance) in row.iter_mut().zip(&advances) {
@@ -1238,11 +1366,14 @@ impl Table {
         let mut row_baselines = vec![false; row_count];
         let mut heights = vec![0.0; row_count];
         let mut measures = Vec::with_capacity(self.cells.len());
-        let mut anchors = vec![[0.0f32; 2]; self.column_widths.len()];
+        let mut anchors = vec![vec![[0.0f32; 2]]; self.column_widths.len()];
         let mut caret_columns = [false; MAX_MATRIX_SIZE];
         if editable_carrier.is_some() {
             for cell in &self.cells {
-                if matches!(cell.anchor, Some(Anchor::Marked(..) | Anchor::Decimal(..))) {
+                if cell.anchor.is_some_and(Anchor::uses_caret)
+                    || matches!(&cell.content, CellContent::Aligned(groups)
+                        if groups.iter().any(|group| group.anchor.uses_caret()))
+                {
                     caret_columns[cell.columns.start] = true;
                 }
             }
@@ -1254,9 +1385,10 @@ impl Table {
                 color: cell.format.color.or(format.color),
                 ..Default::default()
             };
-            let resolved = if let Some(carrier) = editable_carrier
-                .filter(|_| cell.anchor.is_some() && caret_columns[cell.columns.start])
-            {
+            let resolved = if let Some(carrier) = editable_carrier.filter(|_| {
+                (cell.anchor.is_some() || matches!(cell.content, CellContent::Aligned(_)))
+                    && caret_columns[cell.columns.start]
+            }) {
                 // A native operator's spacing follows the Word paragraph's
                 // math size even when its runs have authored point sizes.
                 let mut resolved = carrier.clone();
@@ -1265,6 +1397,8 @@ impl Table {
             } else {
                 doc.styles.resolve_char(None, &chars)
             };
+            let layout_math = |math| measurements.layout(math, "", &resolved, false, MAX_DIMENSION);
+            let mut groups = Vec::new();
             let measure = match &cell.content {
                 CellContent::Table(table) => CellDrawing::Table(table.layout_with_rules(
                     doc,
@@ -1276,13 +1410,24 @@ impl Table {
                 CellContent::Equation(math) if math.nodes.is_empty() => {
                     CellDrawing::Equation(MathLayout::default())
                 }
-                CellContent::Equation(math) => CellDrawing::Equation(measurements.layout(
-                    math,
-                    "",
-                    &resolved,
-                    false,
-                    MAX_DIMENSION,
-                )?),
+                CellContent::Equation(math) => CellDrawing::Equation(layout_math(math)?),
+                CellContent::Aligned(parts) => {
+                    let extents = &mut anchors[cell.columns.start];
+                    if extents.len() < parts.len() {
+                        extents.resize(parts.len(), [0.0; 2]);
+                    }
+                    for (part, [left, right]) in parts.iter().zip(extents) {
+                        if part.math.nodes.is_empty() {
+                            return Err(unsupported("empty MathML alignment group"));
+                        }
+                        let layout = layout_math(&part.math)?;
+                        let anchor = part.anchor.measure(&layout)?;
+                        *left = left.max(anchor);
+                        *right = right.max(layout.width - anchor);
+                        groups.push((layout, anchor));
+                    }
+                    CellDrawing::Equation(MathLayout::default())
+                }
             };
             let (cell_width, _, _) = measure.size();
             let anchor = if let Some(anchor) = cell.anchor {
@@ -1290,7 +1435,7 @@ impl Table {
                     return Err(invalid("MathML alignment group has no equation"));
                 };
                 let anchor = anchor.measure(equation)?;
-                let [left, right] = &mut anchors[cell.columns.start];
+                let [left, right] = &mut anchors[cell.columns.start][0];
                 *left = left.max(anchor);
                 *right = right.max(cell_width - anchor);
                 Some(anchor)
@@ -1308,15 +1453,50 @@ impl Table {
             measures.push(MeasuredCell {
                 drawing: measure,
                 baseline_offset: offset,
+                width: cell_width,
                 anchor,
+                groups,
             });
         }
+        let aligned_offsets = self
+            .cells
+            .iter()
+            .zip(&mut measures)
+            .map(|(cell, measure)| {
+                let mut offsets = Vec::new();
+                if measure.anchor.is_some() || !measure.groups.is_empty() {
+                    let sides = &anchors[cell.columns.start];
+                    measure.width = sides.iter().flatten().sum();
+                    if let CellDrawing::Equation(combined) = &mut measure.drawing {
+                        let mut x = 0.0;
+                        for ((part, anchor), &[left, right]) in measure.groups.drain(..).zip(sides)
+                        {
+                            let offset = x + left - anchor;
+                            offsets.push(offset);
+                            combined.ascent = combined.ascent.max(part.ascent);
+                            combined.descent = combined.descent.max(part.descent);
+                            combined
+                                .items
+                                .extend(part.items.into_iter().map(|mut item| {
+                                    compose::position(&mut item, offset, 0.0, 1.0);
+                                    item
+                                }));
+                            x += left + right;
+                        }
+                        if !offsets.is_empty() {
+                            combined.width = measure.width;
+                        }
+                    }
+                }
+                offsets
+            })
+            .collect();
         let ColumnsLayout {
             widths,
             inset: label_inset,
             width,
             overlapping_labels,
-        } = self.layout_columns(&measures, &anchors, label_width)?;
+        } = self.layout_columns(&measures, label_width)?;
         let mut label_bands = vec![[0.0f32; 2]; row_count];
         for (cell, measure) in self.cells.iter().zip(&measures) {
             let row = cell.rows.start;
@@ -1389,7 +1569,7 @@ impl Table {
             .iter()
             .zip(measures)
             .map(|(cell, measure)| {
-                let cell_width = measure.width(cell.columns.start, &anchors);
+                let cell_width = measure.width;
                 let (_, cell_ascent, cell_descent) = measure.drawing.size();
                 let (left, track_width) = match &self.labels {
                     Some(labels) if cell.columns.is_empty() => (
@@ -1408,7 +1588,7 @@ impl Table {
                 let horizontal_room = track_width - cell_width;
                 let anchor_shift = measure
                     .anchor
-                    .map_or(0.0, |anchor| anchors[cell.columns.start][0] - anchor);
+                    .map_or(0.0, |anchor| anchors[cell.columns.start][0][0] - anchor);
                 let vertical_room =
                     extent(&heights, &self.row_gaps, &cell.rows) - cell_ascent - cell_descent;
                 let left = left
@@ -1491,6 +1671,7 @@ impl Table {
             height,
             baseline,
             cells,
+            aligned_offsets,
             widths,
             heights,
             row_positions: y.into_iter().map(|start| start + top_inset).collect(),

@@ -1,9 +1,10 @@
 //! Measure MathML table alignment points without changing editable runs.
 use roxmltree::{Node, NodeId};
+use wordcraft_doc::math::{math_class, MClass, MNode, Math};
 use wordcraft_layout::math::MathLayout;
 
 use super::super::{append_token_text, xml_space, DEPTH};
-use super::{indexed, invalid, limited, unsupported, MATHML};
+use super::{compose, indexed, invalid, limited, unsupported, MATHML};
 use crate::EngineError;
 
 #[derive(Clone, Copy)]
@@ -22,6 +23,10 @@ pub(super) enum Edge {
 }
 
 impl Anchor {
+    pub(super) fn uses_caret(self) -> bool {
+        matches!(self, Self::Marked(..) | Self::Decimal(..))
+    }
+
     pub(super) fn measure(self, layout: &MathLayout) -> Result<f32, EngineError> {
         match self {
             Self::Left => Ok(0.0),
@@ -52,6 +57,43 @@ impl Edge {
         x.or_else(|| (offset == 0 && layout.width == 0.0).then_some(0.0))
             .filter(|x| (0.0..=layout.width).contains(x))
     }
+}
+
+pub(super) fn check_boundaries<'a>(
+    groups: impl IntoIterator<Item = &'a Math>,
+) -> Result<(), EngineError> {
+    fn ordinary(node: Option<&MNode>, first: bool) -> bool {
+        let Some(node @ MNode::Run(run)) = node else {
+            return false;
+        };
+        if compose::is_box_marker(node) {
+            return false;
+        }
+        let mut chars = run.text.chars();
+        let ch = if first {
+            chars.next()
+        } else {
+            chars.next_back()
+        };
+        ch.is_some_and(|ch| {
+            !ch.is_whitespace()
+                && !matches!(ch, '\u{2061}'..='\u{2063}' | '\u{200b}')
+                && (run.nor || run.lit || math_class(ch) == MClass::Ord)
+        })
+    }
+    let mut groups = groups.into_iter().peekable();
+    while let Some(left) = groups.next() {
+        if let Some(right) = groups.peek() {
+            // An ordinary-to-ordinary boundary adds no native operator glue
+            // and supplies the same binary-operator context on either side.
+            if !ordinary(left.nodes.last(), false) || !ordinary(right.nodes.first(), true) {
+                return Err(unsupported(
+                    "MathML alignment group boundary through operator spacing",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -151,12 +193,14 @@ pub(super) fn table_has_groups(table: Node<'_, '_>) -> bool {
         .any(|cell| leading_group(cell).is_some())
 }
 
-pub(super) fn read(
-    table: Node<'_, '_>,
-    row: Node<'_, '_>,
-    cell: Node<'_, '_>,
-    marker: Node<'_, '_>,
+pub(super) fn read<'xml, 'input>(
+    table: Node<'xml, 'input>,
+    row: Node<'xml, 'input>,
+    cell: Node<'xml, 'input>,
+    marker: Node<'xml, 'input>,
     column: usize,
+    ordinal: usize,
+    content: &[Node<'xml, 'input>],
 ) -> Result<Group, EngineError> {
     if marker
         .children()
@@ -167,6 +211,7 @@ pub(super) fn read(
     if marker
         .ancestors()
         .find_map(|ancestor| ancestor.attribute("dir"))
+        .map(str::trim)
         == Some("rtl")
     {
         return Err(unsupported("right-to-left MathML alignment groups"));
@@ -182,7 +227,7 @@ pub(super) fn read(
         cursor: None,
         caret: None,
     };
-    if let Some(mark) = first_mark(cell, 0)? {
+    if let Some(mark) = first_in(content, first_mark)? {
         scope.cursor = Some(Cursor::Mark(mark.id()));
         return Ok(Group {
             scope,
@@ -192,14 +237,11 @@ pub(super) fn read(
     let requested = if let Some(value) = marker.attribute("groupalign") {
         value.trim()
     } else if let Some(value) = cell.attribute("groupalign") {
-        value
-            .split_ascii_whitespace()
-            .next()
-            .ok_or_else(|| invalid("empty MathML group alignment list"))?
+        indexed(Some(value), ordinal).ok_or_else(|| invalid("empty MathML group alignment list"))?
     } else if let Some(value) = row.attribute("groupalign") {
-        column_alignment(value, column)?
+        column_alignment(value, column, ordinal)?
     } else if let Some(value) = table.attribute("groupalign") {
-        column_alignment(value, column)?
+        column_alignment(value, column, ordinal)?
     } else {
         "left"
     };
@@ -207,7 +249,7 @@ pub(super) fn read(
         "left" => RequestedAnchor::Automatic(Anchor::Left),
         "center" => RequestedAnchor::Automatic(Anchor::Center),
         "right" => RequestedAnchor::Automatic(Anchor::Right),
-        "decimalpoint" => match first_baseline_number(cell, 0)? {
+        "decimalpoint" => match first_in(content, first_baseline_number)? {
             Some(number) => {
                 let offset = decimal_offset(cell, number)?;
                 scope.cursor = Some(Cursor::Number(number.id(), offset));
@@ -221,6 +263,18 @@ pub(super) fn read(
         _ => return Err(unsupported("MathML group alignment")),
     };
     Ok(Group { scope, anchor })
+}
+
+fn first_in<'xml, 'input>(
+    content: &[Node<'xml, 'input>],
+    find: impl Fn(Node<'xml, 'input>, usize) -> Result<Option<Node<'xml, 'input>>, EngineError>,
+) -> Result<Option<Node<'xml, 'input>>, EngineError> {
+    for &node in content {
+        if let Some(found) = find(node, 0)? {
+            return Ok(Some(found));
+        }
+    }
+    Ok(None)
 }
 
 fn first_mark<'xml, 'input>(
@@ -300,14 +354,31 @@ fn mark_edge(cell: Node<'_, '_>, mark: Node<'_, '_>) -> Result<Edge, EngineError
     };
     // At an empty side of an explicit group, choose the stop inside that
     // group rather than the opposite side of its surrounding operator gap.
+    let in_group = |node: &Node<'_, '_>| tag(*node) != Some("maligngroup");
     Ok(match edge {
-        Edge::Left if !mark.next_siblings().skip(1).any(visible) => Edge::Right,
-        Edge::Right if !mark.prev_siblings().skip(1).any(visible) => Edge::Left,
+        Edge::Left
+            if !mark
+                .next_siblings()
+                .skip(1)
+                .take_while(in_group)
+                .any(visible) =>
+        {
+            Edge::Right
+        }
+        Edge::Right
+            if !mark
+                .prev_siblings()
+                .skip(1)
+                .take_while(in_group)
+                .any(visible) =>
+        {
+            Edge::Left
+        }
         _ => edge,
     })
 }
 
-fn column_alignment(mut values: &str, column: usize) -> Result<&str, EngineError> {
+fn column_alignment(mut values: &str, column: usize, ordinal: usize) -> Result<&str, EngineError> {
     let mut selected = None;
     let mut index = 0;
     while !values.trim().is_empty() {
@@ -316,9 +387,7 @@ fn column_alignment(mut values: &str, column: usize) -> Result<&str, EngineError
             .strip_prefix('{')
             .and_then(|values| values.split_once('}'))
             .ok_or_else(|| invalid("invalid MathML group alignment list"))?;
-        let value = group
-            .split_ascii_whitespace()
-            .next()
+        let value = indexed(Some(group), ordinal)
             .ok_or_else(|| invalid("empty MathML group alignment list"))?;
         if index <= column {
             selected = Some(value);
