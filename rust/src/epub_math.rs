@@ -703,20 +703,19 @@ impl<'xml> Projection<'_, 'xml> {
                 .as_ref()
                 .is_some_and(table::alignment::Scope::seeking_caret);
             let body = self.elements(node, depth, style)?;
-            if seeking
-                && self
-                    .alignment_group
-                    .as_ref()
-                    .is_some_and(|scope| scope.caret.is_some())
-            {
-                return Err(unsupported(
-                    "MathML alignment caret inside composed padding",
-                ));
-            }
+            let caret = self
+                .alignment_group
+                .as_mut()
+                .filter(|_| seeking)
+                .and_then(|scope| {
+                    let caret = scope.caret.take()?;
+                    scope.caret = Some(MathPos::new(vec![(0, compose::BOX_CARET_ARGUMENT)], 0));
+                    Some(caret)
+                });
             let viewport = self.stylesheet.map_or([0.0; 2], |sheet| sheet.viewport);
             return self
                 .extras
-                .push(compose::padding(node, body, style, viewport)?);
+                .push(compose::padding(node, body, style, viewport, caret)?);
         }
         let [zero_wid, zero_asc, zero_desc] = padded_metrics(node)?;
         if !zero_wid && !zero_asc && !zero_desc {

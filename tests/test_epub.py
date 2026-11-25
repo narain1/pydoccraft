@@ -13103,6 +13103,126 @@ Final cue
                     with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
                         operation()
 
+    def test_mathml_alignment_preserves_carets_inside_positive_composed_padding(self) -> None:
+        template = '''<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>MathML inset alignment</title><meta name="viewport" content="width=540,height=340"/>
+            <style>body {margin:0;padding-top:12pt}</style></head><body><p><m:math mathsize="12pt">
+            <m:mtable groupalign="{decimalpoint}" columnwidth="250pt" columnalign="left" rowspacing="14pt">
+              ROWS
+            </m:mtable>
+          </m:math></p></body></html>'''
+        group = "<m:maligngroup/>"
+        left_mark = '<m:malignmark edge="left"/>'
+        right_mark = '<m:malignmark edge="right"/>'
+        cells = (
+            group + '''<m:mtext>Front</m:mtext><m:mpadded width="+18pt" lspace="6pt">
+              <m:mn>12.345</m:mn></m:mpadded><m:mtext>Rear</m:mtext>''',
+            group + f'''<m:mtext>Prefix</m:mtext><m:mpadded width="108pt" lspace="8pt"><m:mtext>West</m:mtext>
+              {left_mark}<m:mo>+</m:mo><m:mtext>Arm</m:mtext></m:mpadded><m:mtext>Suffix</m:mtext>''',
+            group + f'''<m:mtext>Lead</m:mtext><m:mpadded width="+20pt" lspace="4pt">
+              <m:mpadded width="+12pt" lspace="6pt"><m:mtext>East</m:mtext>{right_mark}
+              <m:mo>+</m:mo><m:mtext>Wing</m:mtext></m:mpadded></m:mpadded><m:mtext>Outer</m:mtext>''',
+            group + '''<m:msub><m:mi>t</m:mi><m:mpadded width="+10pt" lspace="4pt">
+              <m:mn>63<m:malignmark/>:925</m:mn></m:mpadded></m:msub>''',
+            group + '<m:mn>.418</m:mn>',
+        )
+        tokens = ("Front", "12.345", "Rear", "Prefix", "West", "Arm", "Suffix",
+                  "Lead", "East", "Wing", "Outer", "63:925", ".418")
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+
+        def chapter(contents: tuple[str, ...]) -> str:
+            rows = "".join(f"<m:mtr><m:mtd>{cell}</m:mtd></m:mtr>" for cell in contents)
+            return template.replace("ROWS", rows)
+
+        def boxes(pdf: doc_ex.Document, names: tuple[str, ...]) -> dict[str, tuple[float, float, float, float]]:
+            result = {}
+            for name in names:
+                result[name], = pdf[0].search_for(name)
+            return result
+
+        def operator_gaps(positions, first, second, plus):
+            return plus[0] - positions[first][2], positions[second][0] - plus[2]
+
+        controls = {}
+        for cell, mark, first, second in ((cells[1], left_mark, "West", "Arm"),
+                                           (cells[2], right_mark, "East", "Wing")):
+            unmarked = cell.replace(group, "").replace(mark, "")
+            with doc_ex.open(epub_fixture(chapter_one=chapter((unmarked,)))) as book:
+                image = book.render_page(0, dpi=96)
+                with doc_ex.open(book.convert("pdf")) as pdf:
+                    positions = boxes(pdf, (first, second, "+"))
+                    controls[first] = operator_gaps(positions, first, second, positions["+"])
+            self.assertGreater(min(controls[first]), 1.0)
+            with doc_ex.open(epub_fixture(chapter_one=chapter((cell,)))) as book:
+                self.assertEqual(book.render_page(0, dpi=96), image)
+
+        def geometry(pdf: doc_ex.Document, delta: float) -> dict[str, tuple[float, float, float, float]]:
+            positions = boxes(pdf, (*tokens, "12", "63"))
+            west, east = sorted(pdf[0].search_for("+"), key=lambda bounds: bounds[1])
+            origin = positions[".418"][0]
+            for coordinate in (positions["12"][2], west[0], positions["East"][2], positions["63"][2]):
+                self.assertAlmostEqual(coordinate, origin, delta=delta)
+            for first, second, operator in (("West", "Arm", west), ("East", "Wing", east)):
+                for actual, expected in zip(operator_gaps(positions, first, second, operator), controls[first]):
+                    self.assertAlmostEqual(actual, expected, delta=delta)
+            for actual, expected in (
+                (positions["12.345"][0] - positions["Front"][2], 6),
+                (positions["Rear"][0] - positions["12.345"][2], 12),
+                (positions["West"][0] - positions["Prefix"][2], 8),
+                (positions["Suffix"][0] - positions["Prefix"][2], 108),
+                (positions["East"][0] - positions["Lead"][2], 10),
+                (positions["Outer"][0] - positions["Wing"][2], 22),
+            ):
+                self.assertAlmostEqual(actual, expected, delta=delta)
+            return positions
+
+        source = chapter(cells)
+        with doc_ex.open(epub_fixture(chapter_one=source)) as book:
+            with doc_ex.open(book.convert("pdf")) as pdf:
+                self.assertFalse(pdf[0].get_images())
+                reference = geometry(pdf, 0.06)
+            editable = book.convert("docx")
+        with zipfile.ZipFile(io.BytesIO(editable)) as archive:
+            xml = ET.fromstring(archive.read("word/document.xml"))
+        matrix = xml.find(".//m:oMath//m:m", ns)
+        self.assertIsNotNone(matrix)
+        for path, token in (
+            (".//m:box/m:e/m:r/m:t", "12.345"),
+            (".//m:box/m:e/m:phant/m:e/m:r/m:t", "West"),
+            (".//m:box/m:e/m:box/m:e/m:r/m:t", "East"),
+            (".//m:sSub/m:sub/m:box/m:e/m:r/m:t", "63:925"),
+        ):
+            self.assertIn(token, [element.text for element in matrix.findall(path, ns)])
+        with doc_ex.open(editable) as word, doc_ex.open(word.convert("pdf")) as pdf:
+            text = word[0].get_text()
+            actual = geometry(pdf, 0.28)
+            self.assertNotIn("⟡H", text)
+            for token in tokens:
+                self.assertEqual(text.count(token), 1, text)
+                for first, second in zip(reference[token], actual[token]):
+                    self.assertAlmostEqual(first, second, delta=0.38)
+
+        fixture = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 540, 340)])
+        with doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": source})) as book:
+            preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+                fixed = boxes(pdf, tokens)
+                for token in tokens:
+                    self.assertAlmostEqual(fixed[token][0] - fixed[".418"][0],
+                                           reference[token][0] - reference[".418"][0], delta=0.65)
+
+        for unsupported, message in (
+            (cells[0].replace('lspace="6pt"', 'lspace="-6pt"'), "alignment caret inside composed padding"),
+            (cells[0].replace('lspace="6pt"', 'lspace="6.07pt"'), "requires exact DOCX spacing"),
+            (cells[0].replace('lspace="6pt"', 'lspace="6pt" voffset="2pt"'),
+             "alignment caret inside composed padding"),
+        ):
+            with doc_ex.open(epub_fixture(chapter_one=chapter((unsupported,)))) as book:
+                for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
+                        operation()
+
     def test_mathml_alignment_retains_native_tensor_script_operands(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>MathML tensor alignment</title><meta name="viewport" content="width=520,height=400"/>

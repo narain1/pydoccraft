@@ -27,7 +27,14 @@ pub(super) enum Edge {
 
 impl Anchor {
     pub(super) fn uses_caret(&self) -> bool {
-        matches!(self, Self::Marked(..) | Self::Decimal(..))
+        self.caret().is_some()
+    }
+
+    pub(super) fn caret(&self) -> Option<&MathPos> {
+        match self {
+            Self::Decimal(offset, _) | Self::Marked(offset, _) => Some(offset),
+            _ => None,
+        }
     }
 
     pub(super) fn caret_mut(&mut self) -> Option<&mut MathPos> {
@@ -89,19 +96,24 @@ pub(super) fn merge_aligned_runs(
         .ok_or_else(|| invalid("MathML alignment operand is missing"))?;
     let mut result = math::merge_runs(nodes);
     *index = result.len();
-    let children = math_edit::child_count(&operator);
-    if *argument >= children {
-        return Err(invalid("MathML alignment operand is missing"));
-    }
-    for child in 0..children {
-        let slot = math_edit::child_mut(&mut operator, child)
-            .ok_or_else(|| invalid("MathML alignment operand is missing"))?;
-        let body = std::mem::take(slot);
-        *slot = if child == *argument {
-            merge_aligned_runs(body, rest)?
-        } else {
-            math::merge_runs(body)
-        };
+    if !(*argument == compose::BOX_CARET_ARGUMENT
+        && rest.is_empty()
+        && compose::is_box_marker(&operator))
+    {
+        let children = math_edit::child_count(&operator);
+        if *argument >= children {
+            return Err(invalid("MathML alignment operand is missing"));
+        }
+        for child in 0..children {
+            let slot = math_edit::child_mut(&mut operator, child)
+                .ok_or_else(|| invalid("MathML alignment operand is missing"))?;
+            let body = std::mem::take(slot);
+            *slot = if child == *argument {
+                merge_aligned_runs(body, rest)?
+            } else {
+                math::merge_runs(body)
+            };
+        }
     }
     result.push(operator);
     result.extend(math::merge_runs(tail.collect()));

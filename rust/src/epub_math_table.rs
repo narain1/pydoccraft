@@ -1470,7 +1470,9 @@ impl Table {
             } else {
                 doc.styles.resolve_char(None, &chars)
             };
-            let layout_math = |math| measurements.layout(math, "", &resolved, false, MAX_DIMENSION);
+            let layout_math = |math, caret| {
+                measurements.layout_with_caret(math, "", &resolved, false, MAX_DIMENSION, caret)
+            };
             let mut groups = Vec::new();
             let measure = match &cell.content {
                 CellContent::Table(table) => CellDrawing::Table(table.layout_with_rules(
@@ -1483,7 +1485,10 @@ impl Table {
                 CellContent::Equation(math) if math.nodes.is_empty() => {
                     CellDrawing::Equation(MathLayout::default())
                 }
-                CellContent::Equation(math) => CellDrawing::Equation(layout_math(math)?),
+                CellContent::Equation(math) => CellDrawing::Equation(layout_math(
+                    math,
+                    cell.anchor.as_ref().and_then(Anchor::caret),
+                )?),
                 CellContent::Aligned(parts) => {
                     let extents = &mut anchors[cell.columns.start];
                     if extents.len() < parts.len() {
@@ -1493,7 +1498,7 @@ impl Table {
                         if part.math.nodes.is_empty() {
                             return Err(unsupported("empty MathML alignment group"));
                         }
-                        let layout = layout_math(&part.math)?;
+                        let layout = layout_math(&part.math, part.anchor.caret())?;
                         let anchor = part.anchor.measure(&layout)?;
                         *left = left.max(anchor);
                         *right = right.max(layout.width - anchor);

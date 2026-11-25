@@ -14,7 +14,7 @@ use wordcraft_doc::{
     Document,
 };
 use wordcraft_fonts::math::{resolve_math, C};
-use wordcraft_layout::math::{layout_equation, MItem, MathLayout};
+use wordcraft_layout::math::{layout_equation, MItem, MathLayout, Slot};
 
 use super::{
     argument_units, css, invalid, limited, table, unsupported, zero_length, Presentation, MATHML,
@@ -22,6 +22,9 @@ use super::{
 use crate::{docx::math_spacing, EngineError};
 
 const BOX_PREFIX: &str = "\0epub-math-box-";
+// A projected box marker is still a run. Reserve an otherwise impossible
+// operand index until the preview or editable path replaces the marker.
+pub(super) const BOX_CARET_ARGUMENT: usize = usize::MAX;
 const GUIDE_SIZE: f32 = 16.0;
 pub(super) const MAX_GEOMETRY: f32 = 20_000.0;
 const LIMIT_BOXES: usize = 512;
@@ -54,9 +57,10 @@ pub(in crate::epub) struct Editable {
 struct EditableBox {
     node: MNode,
     borrow: f32,
+    caret: Option<MathPos>,
 }
 
-type CaretSuffix = [(usize, usize); 2];
+type CaretSuffix = Vec<(usize, usize)>;
 type ArgumentCaret<'a> = (
     &'a mut [(usize, usize)],
     &'a mut usize,
@@ -82,6 +86,7 @@ pub(in crate::epub) struct Padding {
     body: Arg,
     format: CharProps,
     lengths: [Option<Length>; 5],
+    caret: Option<MathPos>,
 }
 
 #[derive(Clone, Copy)]
@@ -105,6 +110,7 @@ impl Length {
 struct Measured {
     placeholder: MNode,
     layout: MathLayout,
+    caret: Option<(Rgb, [f32; 2])>,
 }
 
 #[derive(Default)]
@@ -201,7 +207,7 @@ impl Extras {
                 }
                 // The only composed box belongs to this label. Its native
                 // operands cannot reference the fitted track or another box.
-                let visual = padding.clone().layout(document, format, &measurements)?;
+                let (visual, _) = padding.clone().layout(document, format, &measurements)?;
                 let editable = padding
                     .clone()
                     .editable(&Editable::default(), &EditableLayout::new(document, None))?;
@@ -258,6 +264,7 @@ impl Extras {
                     EditableBox {
                         node: table.editable_matrix(measured, &layout)?,
                         borrow: 0.0,
+                        caret: None,
                     }
                 }
                 Extra::Padded(padding) => padding.editable(&editable, &layout)?,
@@ -269,7 +276,11 @@ impl Extras {
                     } else {
                         MNode::Boxed { e: nodes }
                     };
-                    EditableBox { node, borrow: 0.0 }
+                    EditableBox {
+                        node,
+                        borrow: 0.0,
+                        caret: None,
+                    }
                 }
                 _ => return Err(unsupported("MathML composed geometry in DOCX export")),
             };
@@ -307,23 +318,26 @@ impl Extras {
             } else {
                 "MathML composed box exceeds the native vertical extent"
             };
-            let mut layout = match extra {
+            let (mut layout, caret) = match extra {
                 Extra::Table(grid) => {
                     let (table, local) = *grid;
                     let style = CharProps {
                         color: local.color.or(format.color),
                         ..local
                     };
-                    table.layout(doc, &style, &measurements)?.into_math()
+                    (table.layout(doc, &style, &measurements)?.into_math(), None)
                 }
                 Extra::Padded(padding) => padding.layout(doc, format, &measurements)?,
-                Extra::Fraction(fraction) => fraction.layout(doc, format, &measurements)?,
-                Extra::Space([width, ascent, descent]) => MathLayout {
-                    width,
-                    ascent,
-                    descent,
-                    ..Default::default()
-                },
+                Extra::Fraction(fraction) => (fraction.layout(doc, format, &measurements)?, None),
+                Extra::Space([width, ascent, descent]) => (
+                    MathLayout {
+                        width,
+                        ascent,
+                        descent,
+                        ..Default::default()
+                    },
+                    None,
+                ),
             };
             layout.slots.clear();
             let units = layout
@@ -347,6 +361,7 @@ impl Extras {
             measurements.boxes.push(Measured {
                 placeholder,
                 layout,
+                caret: caret.map(|stops| (color, stops)),
             });
         }
         measurements.draw_units = draw_units;
@@ -362,16 +377,9 @@ impl Editable {
     pub(super) fn apply_with_caret(
         &self,
         math: &mut Math,
-        mut caret: Option<&mut MathPos>,
+        caret: Option<&mut MathPos>,
     ) -> Result<(), EngineError> {
-        let mut suffix = None;
-        let argument = caret
-            .as_deref_mut()
-            .map(|pos| (pos.path.as_mut_slice(), &mut pos.off, &mut suffix));
-        let nodes = self.substitute(std::mem::take(&mut math.nodes), argument)?;
-        if let (Some(caret), Some(suffix)) = (caret, suffix) {
-            caret.path.extend(suffix);
-        }
+        let nodes = self.substitute_with_caret(std::mem::take(&mut math.nodes), caret)?;
         let too_deep = Cell::new(false);
         let node_count = Cell::new(0);
         math.nodes = check_editable_bounds(nodes, 0, &too_deep, &node_count);
@@ -386,6 +394,22 @@ impl Editable {
             ));
         }
         Ok(())
+    }
+
+    fn substitute_with_caret(
+        &self,
+        body: Arg,
+        mut caret: Option<&mut MathPos>,
+    ) -> Result<Arg, EngineError> {
+        let mut suffix = None;
+        let argument = caret
+            .as_deref_mut()
+            .map(|pos| (pos.path.as_mut_slice(), &mut pos.off, &mut suffix));
+        let nodes = self.substitute(body, argument)?;
+        if let (Some(caret), Some(suffix)) = (caret, suffix) {
+            caret.path.extend(suffix);
+        }
+        Ok(nodes)
     }
 
     fn substitute(&self, body: Arg, caret: Option<ArgumentCaret<'_>>) -> Result<Arg, EngineError> {
@@ -403,15 +427,33 @@ impl Editable {
                     .take()
                     .ok_or_else(|| invalid("MathML alignment operand is missing"))?;
                 path[0].0 = result.len();
-                result.push(self.substitute_operand(node, path, offset, suffix)?);
+                if path[0].1 == BOX_CARET_ARGUMENT && path.len() == 1 {
+                    let EditableBox {
+                        node,
+                        borrow,
+                        caret,
+                    } = box_index(&node)
+                        .and_then(|index| self.boxes.get(index))
+                        .and_then(Cell::take)
+                        .ok_or_else(|| invalid("missing editable MathML caret box"))?;
+                    let caret = caret
+                        .filter(|_| borrow == 0.0)
+                        .ok_or_else(|| invalid("missing editable MathML box caret"))?;
+                    path[0].1 = 0;
+                    *offset = caret.off;
+                    *suffix = Some(caret.path);
+                    result.push(node);
+                } else {
+                    result.push(self.substitute_operand(node, path, offset, suffix)?);
+                }
                 continue;
             }
             if let Some(index) = box_index(&node) {
-                let EditableBox { node, borrow } = self
-                    .boxes
-                    .get(index)
-                    .and_then(Cell::take)
-                    .ok_or_else(|| invalid("missing editable MathML box"))?;
+                let EditableBox { node, borrow, .. } =
+                    self.boxes
+                        .get(index)
+                        .and_then(Cell::take)
+                        .ok_or_else(|| invalid("missing editable MathML box"))?;
                 if borrow > 0.0 {
                     if let Some((offset, suffix)) = caret.as_mut() {
                         let offset = &mut **offset;
@@ -429,7 +471,7 @@ impl Editable {
                         if keep_caret {
                             // Address the end of the original space inside
                             // the zero-extent phantom at the front of the box.
-                            **suffix = Some([(result.len() - 1, 0), (0, 0)]);
+                            **suffix = Some(vec![(result.len() - 1, 0), (0, 0)]);
                             *offset = 1;
                             caret = None;
                         } else if *offset >= end {
@@ -598,6 +640,7 @@ pub(super) fn padding(
     body: Arg,
     style: Presentation<'_>,
     viewport: [f32; 2],
+    caret: Option<MathPos>,
 ) -> Result<Extra, EngineError> {
     let mut lengths = [None; 5];
     for (index, name) in ["width", "height", "depth", "lspace", "voffset"]
@@ -608,11 +651,46 @@ pub(super) fn padding(
             lengths[index] = Some(length(value, index, style.font_size(), viewport)?);
         }
     }
+    if caret.is_some() {
+        check_padding_caret(&lengths, &body)?;
+    }
     Ok(Extra::Padded(Box::new(Padding {
         body,
         format: format(style),
         lengths,
+        caret,
     })))
+}
+
+fn check_padding_caret(lengths: &[Option<Length>; 5], body: &[MNode]) -> Result<(), EngineError> {
+    let [width, height, depth, left, shift] = *lengths;
+    let unsupported_padding = || unsupported("MathML alignment caret inside composed padding");
+    let width = width
+        .filter(|length| length.basis.is_none() && length.value > 0.0)
+        .ok_or_else(unsupported_padding)?;
+    let inset = left.map_or(0.0, |length| length.value);
+    let trailing = if width.relative {
+        width.value - inset
+    } else {
+        width.value
+    };
+    if body.is_empty()
+        || height.is_some()
+        || depth.is_some()
+        || shift.is_some_and(|length| length.value != 0.0)
+        || left.is_some_and(|length| length.value != 0.0 && length.basis.is_some())
+        || !(0.0..=width.value).contains(&inset)
+    {
+        return Err(unsupported_padding());
+    }
+    for gap in [inset, trailing] {
+        if gap != 0.0 && (gap < 0.4 || (gap * 5.0 - (gap * 5.0).round()).abs() > 0.0001) {
+            return Err(unsupported(
+                "MathML alignment caret in padding requires exact DOCX spacing",
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn space(
@@ -710,7 +788,8 @@ impl Padding {
         // Keep native width when adding a fixed horizontal gap. Other dimensions
         // may use any measured extent of the original operand as their basis.
         let additive_width = width.filter(|l| l.basis.is_none() && l.relative && l.value >= 0.0);
-        let body = editable.substitute(self.body, None)?;
+        let mut caret = self.caret;
+        let body = editable.substitute_with_caret(self.body, caret.as_mut())?;
         let need_shift = shift.is_some_and(|length| length.value != 0.0);
         let need_overhang_width = (additive_width.is_some() || zeroed(width, 0) == Some(false))
             && left.is_some_and(|length| {
@@ -776,6 +855,7 @@ impl Padding {
             return Ok(EditableBox {
                 node: editable_gap(advance)?.unwrap_or_else(|| MNode::Run(MRun::plain(""))),
                 borrow: 0.0,
+                caret: None,
             });
         }
         let mut contents = Vec::new();
@@ -786,7 +866,15 @@ impl Padding {
         };
         let leading = if body.is_empty() { 0.0 } else { left.max(0.0) };
         if !body.is_empty() {
-            contents.extend(editable_gap(leading)?);
+            let gap = editable_gap(leading)?;
+            if let Some((caret, gap)) = caret.as_mut().zip(gap.as_ref()) {
+                if let Some((index, _)) = caret.path.first_mut() {
+                    *index += 1;
+                } else {
+                    caret.off += argument_units(gap);
+                }
+            }
+            contents.extend(gap);
             contents.extend(body);
             if shift != 0.0 {
                 contents = vec![layout.shift(contents, shift)?];
@@ -795,6 +883,9 @@ impl Padding {
                 }
             }
             if absolute_width || vertical.iter().any(Option::is_some) {
+                if let Some(caret) = &mut caret {
+                    caret.path.insert(0, (0, 0));
+                }
                 contents = vec![MNode::Phant {
                     show: true,
                     zero_wid: absolute_width,
@@ -818,6 +909,7 @@ impl Padding {
         Ok(EditableBox {
             node: MNode::Boxed { e: contents },
             borrow,
+            caret,
         })
     }
 
@@ -826,7 +918,7 @@ impl Padding {
         doc: &Document,
         inherited: &CharProps,
         measured: &Measurements,
-    ) -> Result<MathLayout, EngineError> {
+    ) -> Result<(MathLayout, Option<[f32; 2]>), EngineError> {
         if self.body.is_empty() {
             return self.bounds(MathLayout::default());
         }
@@ -836,11 +928,21 @@ impl Padding {
             nodes: std::mem::take(&mut self.body),
             ..Default::default()
         };
-        let body = measured.layout(&math, "", &resolved, false, MAX_GEOMETRY)?;
+        let body = measured.layout_with_caret(
+            &math,
+            "",
+            &resolved,
+            false,
+            MAX_GEOMETRY,
+            self.caret.as_ref(),
+        )?;
         self.bounds(body)
     }
 
-    fn bounds(&self, mut layout: MathLayout) -> Result<MathLayout, EngineError> {
+    fn bounds(
+        &self,
+        mut layout: MathLayout,
+    ) -> Result<(MathLayout, Option<[f32; 2]>), EngineError> {
         let original = [layout.width, layout.ascent, layout.descent];
         let mut result = [original[0], original[1], original[2], 0.0, 0.0];
         for (index, length) in self.lengths.iter().enumerate() {
@@ -861,7 +963,28 @@ impl Padding {
         for item in &mut layout.items {
             position(item, x, y, 1.0);
         }
-        Ok(layout)
+        let caret = self
+            .caret
+            .as_ref()
+            .map(|caret| {
+                let stops = layout
+                    .slots
+                    .iter()
+                    .filter(|slot| slot.path == caret.path && slot.off == caret.off)
+                    .fold([f32::INFINITY, f32::NEG_INFINITY], |[min, max], slot| {
+                        [min.min(slot.x), max.max(slot.x)]
+                    })
+                    .map(|stop| stop + x);
+                if stops.into_iter().all(f32::is_finite) {
+                    Ok(stops)
+                } else {
+                    Err(unsupported(
+                        "MathML alignment caret missing from the composed padding operand",
+                    ))
+                }
+            })
+            .transpose()?;
+        Ok((layout, caret))
     }
 }
 
@@ -1248,6 +1371,18 @@ impl Measurements {
         display: bool,
         width: f32,
     ) -> Result<MathLayout, EngineError> {
+        self.layout_with_caret(math, linear, resolved, display, width, None)
+    }
+
+    pub(super) fn layout_with_caret(
+        &self,
+        math: &Math,
+        linear: &str,
+        resolved: &ResolvedChar,
+        display: bool,
+        width: f32,
+        caret: Option<&MathPos>,
+    ) -> Result<MathLayout, EngineError> {
         if self.boxes.is_empty() {
             return Ok(layout_equation(
                 math,
@@ -1269,8 +1404,63 @@ impl Measurements {
             &Default::default(),
             &mut 0,
         );
+        if let Some(caret) = caret {
+            self.place_caret(math, caret, &mut result)?;
+        }
         self.resolve(&mut result)?;
         Ok(result)
+    }
+
+    fn place_caret(
+        &self,
+        math: &Math,
+        caret: &MathPos,
+        layout: &mut MathLayout,
+    ) -> Result<(), EngineError> {
+        let Some((&(index, BOX_CARET_ARGUMENT), ancestors)) = caret.path.split_last() else {
+            return Ok(());
+        };
+        let row = ancestors
+            .iter()
+            .try_fold(math.nodes.as_slice(), |row, &(node, argument)| {
+                math_edit::child(row.get(node)?, argument).map(Vec::as_slice)
+            });
+        let (color, stops) = row
+            .and_then(|row| row.get(index))
+            .and_then(box_index)
+            .and_then(|index| self.boxes.get(index))
+            .and_then(|measure| measure.caret)
+            .ok_or_else(|| invalid("missing measured MathML box caret"))?;
+        let mut origins = layout.items.iter().filter_map(|item| {
+            if let MItem::Glyphs {
+                color: ink,
+                glyphs,
+                size,
+                text,
+                ..
+            } = item
+            {
+                if let &[(_, x, y)] = glyphs.as_slice() {
+                    if *ink == color && text == "H" {
+                        return Some((x, y, *size / GUIDE_SIZE));
+                    }
+                }
+            }
+            None
+        });
+        let (x, y, scale) = origins
+            .next()
+            .filter(|_| origins.next().is_none())
+            .ok_or_else(|| invalid("MathML composed caret lost its guide position"))?;
+        layout.slots.extend(stops.map(|stop| Slot {
+            path: caret.path.clone(),
+            off: caret.off,
+            x: x + stop * scale,
+            y,
+            a: 0.0,
+            d: 0.0,
+        }));
+        Ok(())
     }
 
     pub(in crate::epub) fn native(&self, mut math: Math) -> Math {
