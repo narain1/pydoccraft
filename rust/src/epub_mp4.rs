@@ -15,6 +15,7 @@ pub(crate) use chapters::chapter_interval;
 
 const MAX_METADATA_BYTES: usize = 4 * 1024 * 1024;
 const MAX_EDIT_LIST_ENTRIES: u32 = 64;
+const MAX_EDIT_SPANS: usize = 8;
 pub(super) const MAX_ACCESS_UNITS: usize = 250_000;
 
 #[derive(Clone, Copy)]
@@ -42,7 +43,7 @@ impl LinearEdit {
     }
 }
 
-/// Collapse adjacent source edits and allow one boundary with a source jump or movie gap.
+/// Collapse adjacent source edits and retain bounded source jumps and movie gaps.
 pub(super) fn edit_spans(
     edits: &[EditListEntry],
     movie_timescale: u32,
@@ -63,7 +64,7 @@ pub(super) fn edit_spans(
         .split_first()
         .filter(|(first, _)| first.media_time >= 0 && rate_one(first))
         .ok_or_else(|| unsupported(unsupported_layout))?;
-    if !rest.is_empty() && (movie_timescale == 0 || media_timescale == 0) {
+    if movie_timescale == 0 || media_timescale == 0 {
         return Err(invalid("invalid MP4 edit-list timescale"));
     }
 
@@ -102,9 +103,9 @@ pub(super) fn edit_spans(
         let media_distance = elapsed_media * i128::from(movie_timescale);
         let movie_distance = elapsed_movie * i128::from(media_timescale);
         if media_distance != movie_distance || gap != 0 {
-            if !spans.is_empty() {
-                return Err(unsupported(
-                    "MP4 edit lists support one source jump or interior empty interval",
+            if spans.len() == MAX_EDIT_SPANS - 1 {
+                return Err(limited(
+                    "MP4 edit presentation exceeds eight playable spans",
                 ));
             }
             spans.push(span);
@@ -124,6 +125,9 @@ pub(super) fn edit_spans(
         .movie_end
         .checked_add(previous.segment_duration)
         .ok_or_else(|| invalid("MP4 edit duration overflow"))?;
+    if u128::from(span.movie_end) * 1_000_000 > MAX_TIME * u128::from(movie_timescale) {
+        return Err(limited("MP4 presentation exceeds its clock budget"));
+    }
     spans.push(span);
     Ok(spans)
 }

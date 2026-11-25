@@ -47,6 +47,7 @@ pub(crate) struct AvcSource {
     timeline: Vec<FrameTime>,
     next_packet: usize,
     next_frame: usize,
+    packets_left: usize,
     decoder: H264CodecDecoder,
     extra: Vec<u8>,
     flushed: bool,
@@ -239,6 +240,12 @@ impl AvcSource {
         )?;
         let (timeline, clip, first_packet) =
             playback_range(&samples, stream.time_base, &edits, movie, start_us, end_us)?;
+        let spans = timeline
+            .iter()
+            .filter(|frame| frame.restart.is_some())
+            .count();
+        // A restart can feed pictures before or after its selected output.
+        let packets_left = timeline.len() + spans * 2 * MAX_PACKETS_PER_FRAME;
         let mut decoder = H264CodecDecoder::new(CodecId::new("h264"));
         decoder.consume_extradata(extra).map_err(invalid)?;
         Ok(Self {
@@ -247,6 +254,7 @@ impl AvcSource {
             timeline,
             next_packet: first_packet,
             next_frame: 0,
+            packets_left,
             decoder,
             extra: extra.to_vec(),
             flushed: false,
@@ -315,6 +323,10 @@ impl AvcSource {
 
     fn feed(&mut self) -> Result<(), EngineError> {
         if let Some(sample) = self.samples.get(self.next_packet) {
+            self.packets_left = self
+                .packets_left
+                .checked_sub(1)
+                .ok_or_else(|| limited("MP4 video exceeds its total access unit budget"))?;
             let data = &self.bytes[sample_range(sample)?];
             let mut idr = false;
             let mut picture = false;
@@ -500,14 +512,14 @@ fn playback_range(
             |pts: i64| projection(movie_start, (i128::from(pts) - i128::from(origin)).max(0));
         let first_frame = timeline.len();
         let mut first_packet = samples.len();
-        for (ordinal, &index) in display.iter().enumerate() {
+        let first_display = display
+            .partition_point(|&index| samples[index].composition_time <= origin)
+            .saturating_sub(1);
+        for (ordinal, &index) in display.iter().enumerate().skip(first_display) {
             let pts = samples[index].composition_time;
             let next = display
                 .get(ordinal + 1)
                 .map_or(stop, |&i| samples[i].composition_time);
-            if next <= origin {
-                continue;
-            }
             let interval = since_origin(pts)?..since_origin(next)?.min(active.end);
             if interval.start >= bounds.end {
                 break;
@@ -527,11 +539,14 @@ fn playback_range(
                 });
             }
         }
+        let first = timeline
+            .get_mut(first_frame)
+            .ok_or_else(|| invalid("MP4 video edit has no picture for its selected interval"))?;
         let first_packet = samples
             .get(..=first_packet)
             .and_then(|slice| slice.iter().rposition(|sample| sample.sync))
             .ok_or_else(|| invalid("MP4 video clip has no preceding sync sample"))?;
-        timeline[first_frame].restart = Some(first_packet);
+        first.restart = Some(first_packet);
     }
     let first_packet = timeline
         .first()

@@ -234,6 +234,7 @@ impl Track {
             return Err(limited("media-overlay audio clip exceeds 16 MiB of PCM"));
         }
         let mut samples = Vec::with_capacity((stop - start) * channels);
+        let mut packets_left = super::MAX_FRAMES_PER_CLIP;
         for index in 0..self.media.len() {
             let (movie_start, range) = &self.media[index];
             let left = start.max(*movie_start);
@@ -243,7 +244,13 @@ impl Track {
                 let source_end = right - *movie_start + range.start;
                 samples.resize((left - start) * channels, 0);
                 let reset = self.active_span != Some(index);
-                self.append_media(source_start, source_end, reset, &mut samples)?;
+                self.append_media(
+                    source_start,
+                    source_end,
+                    reset,
+                    &mut packets_left,
+                    &mut samples,
+                )?;
                 self.active_span = Some(index);
             }
         }
@@ -256,6 +263,7 @@ impl Track {
         start: usize,
         stop: usize,
         reset: bool,
+        packets_left: &mut usize,
         samples: &mut Vec<i16>,
     ) -> Result<(), EngineError> {
         let rate = self.spec.sample_rate;
@@ -269,9 +277,9 @@ impl Track {
         if reset || first < self.next_packet.saturating_sub(1) || preroll > self.next_packet {
             self.reset(preroll);
         }
-        if last.saturating_sub(self.next_packet) >= super::MAX_FRAMES_PER_CLIP {
-            return Err(limited("MP4 clip exceeds its access unit decoding budget"));
-        }
+        *packets_left = packets_left
+            .checked_sub((last + 1).saturating_sub(self.next_packet))
+            .ok_or_else(|| limited("MP4 clip exceeds its access unit decoding budget"))?;
         for index in first..=last {
             while self.next_packet <= index {
                 let payload = &self.bytes[self.packets[self.next_packet].clone()];
