@@ -685,7 +685,16 @@ impl<'xml> Projection<'_, 'xml> {
                 zero_desc: false,
                 e: self.elements(node, depth, style)?,
             },
-            "menclose" => enclosure(node, self.elements(node, depth, style)?)?,
+            "menclose" => {
+                let notation = node.attribute("notation").unwrap_or("longdiv");
+                // Border boxes address their content at slot 0. Radical
+                // enclosures use slot 1 because slot 0 holds the index.
+                let argument = usize::from(notation.trim() == "radical");
+                let contents = self.with_operand_caret(argument, |projection| {
+                    projection.elements(node, depth, style)
+                })?;
+                enclosure(notation, contents)?
+            }
             _ => return Err(unsupported(&format!("MathML element {tag}"))),
         };
         Ok(vec![native])
@@ -1347,8 +1356,7 @@ fn padded(node: Node<'_, '_>, e: Arg) -> Result<Arg, EngineError> {
     }])
 }
 
-fn enclosure(node: Node<'_, '_>, e: Arg) -> Result<MNode, EngineError> {
-    let notation = node.attribute("notation").unwrap_or("longdiv");
+fn enclosure(notation: &str, e: Arg) -> Result<MNode, EngineError> {
     if notation.trim() == "radical" {
         return Ok(MNode::Rad {
             deg: Vec::new(),

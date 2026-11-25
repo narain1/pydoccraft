@@ -512,7 +512,10 @@ fn mark_edge(cell: Node<'_, '_>, mark: Node<'_, '_>) -> Result<Edge, EngineError
         .next()
         .ok_or_else(|| invalid("MathML alignment mark has no parent"))?;
     let token = matches!(tag(parent), Some("mi" | "mn" | "mo" | "ms" | "mtext"));
-    if !token && parent != cell && !matches!(tag(parent), Some("mrow" | "mstyle" | "msqrt")) {
+    if !token
+        && parent != cell
+        && !matches!(tag(parent), Some("mrow" | "mstyle" | "msqrt" | "menclose"))
+    {
         return Err(unsupported(
             "MathML alignment mark outside the cell baseline",
         ));
@@ -530,6 +533,7 @@ fn mark_edge(cell: Node<'_, '_>, mark: Node<'_, '_>) -> Result<Edge, EngineError
                             | "mfrac"
                             | "msqrt"
                             | "mroot"
+                            | "menclose"
                             | "msub"
                             | "msup"
                             | "msubsup"
@@ -622,6 +626,7 @@ fn decimal_offset(cell: Node<'_, '_>, number: Node<'_, '_>) -> Result<usize, Eng
                         | "semantics"
                         | "msqrt"
                         | "mroot"
+                        | "menclose"
                         | "msub"
                         | "msup"
                         | "msubsup"
