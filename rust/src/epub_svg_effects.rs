@@ -1047,11 +1047,12 @@ impl CaptureGeometry {
             {
                 filter = FilterGeometry::Unproven;
             }
-            let sample_shared = filter == FilterGeometry::Unproven
-                && shared_sources
-                && !additive
+            let sample_shared = shared_sources
                 && !status.filters_subtree
-                && shared::pointwise_layer(group, false);
+                && (shared::morphology_radii(group).is_some()
+                    || filter == FilterGeometry::Unproven
+                        && !additive
+                        && shared::pointwise_layer(group, false));
             if sample_shared {
                 filter = FilterGeometry::Sample;
             }

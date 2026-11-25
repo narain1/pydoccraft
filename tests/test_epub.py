@@ -19753,6 +19753,8 @@ Resume
         cut = '<feFlood x="24" y="13" width="106" height="22" result="wash"/>'
         flood_cutout = cut + '<feComposite operator="out" in="SourceGraphic" in2="wash"/>'
         flood_overlay = flood + '<feComposite operator="atop" in="wash" in2="SourceGraphic"/>'
+        erode = '<feMorphology operator="erode" in="SourceGraphic" radius=".9 1.1"/>'
+        dilate = '<feMorphology operator="dilate" in="SourceAlpha" radius="2.6 3.1"/>'
         cases = (
             ("sheared", shared, independent),
             ("scaled", axis(shared), axis(independent)),
@@ -19767,6 +19769,10 @@ Resume
             ("in-place affine flood mask", in_place(shared, flood_mask), in_place(independent, flood_mask)),
             ("in-place affine flood cutout", in_place(shared, flood_cutout), in_place(independent, flood_cutout)),
             ("in-place affine flood overlay", in_place(shared, flood_overlay), in_place(independent, flood_overlay)),
+            ("scaled erosion", in_place(axis(shared), erode), in_place(axis(independent), erode)),
+            ("affine erosion", in_place(shared, erode), in_place(independent, erode)),
+            ("scaled dilation", in_place(axis(shared), dilate), in_place(axis(independent), dilate)),
+            ("affine dilation", in_place(shared, dilate), in_place(independent, dilate)),
         )
         for mode, markup, control in cases:
             for inline in (False, True):
@@ -19816,9 +19822,19 @@ Resume
         in_place_painted_clear = in_place(shared, in_place_transfer).replace('tableValues="0 0 .6 .8"', 'tableValues=".1 0 .6 .8"')
         reversed_out = cut + '<feComposite operator="out" in="wash" in2="SourceGraphic"/>'
         reversed_atop = flood + '<feComposite operator="atop" in="SourceGraphic" in2="wash"/>'
+        near = axis(shared).replace('id="graphic" mask="url(#cut)"', 'id="graphic" transform="translate(-60 0)"')
+        wide_dilate = dilate.replace('radius="2.6 3.1"', 'radius="12 3"')
+        # The unexpanded source footprints still allow a pointwise ownership
+        # proof. The wider spatial kernel makes those branches ambiguous.
+        with book(in_place(near, in_place_matrix), False) as source:
+            self.assertTrue(source.export_epub_fixed_pdf(dpi=96, searchable=True).startswith(b"%PDF"))
+        with book(in_place(near, wide_dilate), False) as source:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):
+                source.export_epub_fixed_pdf(dpi=96, searchable=False)
         for markup in (touching, overlap, mixed, split, painted_clear,
                        in_place(overlap, in_place_matrix), in_place_mixed, in_place_painted_clear,
                        in_place(overlap, flood_tint), in_place(overlap, flood_cutout), in_place(overlap, flood_overlay),
+                       in_place(overlap, erode), in_place(near, wide_dilate),
                        in_place(shared, reversed_out), in_place(shared, reversed_atop),
                        in_place(shared, flood_tint.replace('operator="in"', 'operator="out"'))):
             with self.subTest(markup=markup), book(markup, False) as source:

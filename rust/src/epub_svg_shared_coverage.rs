@@ -22,11 +22,18 @@ impl Sources {
 
 pub(super) fn common_stack(mut group: &usvg::Group) -> Option<&usvg::Group> {
     let mut filters = 0;
+    let mut spatial = false;
     loop {
         if !group.filters().is_empty() {
             filters += 1;
-            if filters > MAX_LAYERS || !pointwise_layer(group, true) {
+            if spatial || filters > MAX_LAYERS {
                 return None;
+            }
+            if !pointwise_layer(group, true) {
+                if filters != 1 || morphology_radii(group).is_none() {
+                    return None;
+                }
+                spatial = true;
             }
         }
         match group.children() {
@@ -70,6 +77,25 @@ pub(super) fn pointwise_layer(group: &usvg::Group, offsets: bool) -> bool {
             }
             _ => false,
         })
+}
+
+pub(super) fn morphology_radii(group: &usvg::Group) -> Option<[f32; 2]> {
+    use usvg::filter::{Input, Kind};
+
+    let [filter] = group.filters() else {
+        return None;
+    };
+    let [primitive] = filter.primitives() else {
+        return None;
+    };
+    let Kind::Morphology(morphology) = primitive.kind() else {
+        return None;
+    };
+    matches!(
+        morphology.input(),
+        Input::SourceGraphic | Input::SourceAlpha
+    )
+    .then_some([morphology.radius_x().get(), morphology.radius_y().get()])
 }
 
 fn masked_flood(primitives: &[usvg::filter::Primitive]) -> bool {
@@ -199,8 +225,17 @@ impl CaptureGeometry {
                 // Map the native layer's bilinear and antialias support back
                 // into page pixels. Three pixels per plane also cover roundoff
                 // from the checked affine decomposition and integer origins.
-                pad[0] += 3.0 * x;
-                pad[1] += 3.0 * y;
+                let [rx, ry] = morphology_radii(group).map_or([0.0; 2], |[rx, ry]| {
+                    // resvg rounds its kernel radii on this isolated plane.
+                    // Round upward to enclose both sampled inputs and dilated ink.
+                    let (sx, sy) = axes.local.get_scale();
+                    [(rx * sx).ceil(), (ry * sy).ceil()]
+                });
+                if ![rx, ry].into_iter().all(f32::is_finite) {
+                    return None;
+                }
+                pad[0] += (3.0 + rx) * map.sx.abs() + (3.0 + ry) * map.kx.abs();
+                pad[1] += (3.0 + rx) * map.ky.abs() + (3.0 + ry) * map.sy.abs();
             }
             if std::ptr::eq(group, split) {
                 break;
