@@ -107,6 +107,7 @@
 - [x] Resolve default and stylesheet-selected linearRGB for lighting. Preserve the sRGB override and proved original-alpha PDF attribution.
 - [x] Attribute flat diffuse or specular lighting through an immediate original-alpha mask in a shared layer with separated native source supports.
 - [x] Preserve disjoint source attribution through a shared flood tint or opacity mask and immediate `in` composite.
+- [x] Preserve disjoint source attribution through a shared SVG flood cutout or overlay with the original ink in the source-bounding `out` or `atop` input.
 - [ ] Add SVG filter primitives and retain PDF text and links for multi-source, non-axis-aligned or ambiguous spatial filter results.
 - [ ] Extend mixed-font SVG text fallback to spacing across ambiguous clusters, length owners separated by positioned or independently painted wrappers and glyph positioning.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.
