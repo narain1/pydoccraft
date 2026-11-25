@@ -2967,3 +2967,7 @@ The Linux x86-64 CPython 3.11 host wheel passed 803 installed tests, including 2
 ## 2026-11-25 EPUB timed TTML regions, nested SVG offsets and MathML table geometry
 
 The Linux x86-64 CPython 3.11 host wheel passed 809 installed tests, including 214 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-ttml-regions-nested-svg-offsets-and-mathml-table-geometry)
+
+## 2026-11-25 EPUB CSS calculations, nested SVG text lengths, native Word borders and caption styles
+
+The Linux x86-64 CPython 3.11 host wheel passed 814 installed tests, including 219 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-css-calculations-svg-text-lengths-mathml-borders-and-caption-styles)
