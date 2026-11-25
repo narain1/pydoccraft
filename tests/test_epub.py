@@ -5333,7 +5333,7 @@ first
             ('<feDropShadow flood-color="not-a-color"/>', doc_ex.MalformedDocumentError, "flood color"),
             ('<feDropShadow flood-color="url(#ds)"/>', doc_ex.UnsupportedFormatError, "active attributes"),
             ('<feDropShadow flood-opacity="1em"/>', doc_ex.MalformedDocumentError, "flood opacity"),
-            ('<feDropShadow/><feGaussianBlur/>', doc_ex.UnsupportedFormatError, "one Gaussian blur or drop shadow"),
+            ('<feDropShadow/><feGaussianBlur/>', doc_ex.UnsupportedFormatError, "one supported primitive"),
         )
         with doc_ex.open(epub_fixture()) as book:
             for primitive, error, message in cases:
@@ -5354,6 +5354,71 @@ first
             with self.subTest(reason=reason), doc_ex.open(data) as book:
                 with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, reason):
                     book.render_page(0, dpi=96)
+
+    def test_svg_color_matrix_preserves_alpha_text_and_fixed_pdf_links(self) -> None:
+        matrix = "0 0 0 0 0, 1 0 0 0 0, 0 0 0 0 0, 0 0 0 1 0"
+        xhtml = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Color</title>
+          <meta name="viewport" content="width=120,height=60"/></head><body style="margin:0">
+          <svg xmlns="http://www.w3.org/2000/svg" width="120" height="60" viewBox="0 0 120 60">
+            <defs>
+              <filter id="green" color-interpolation-filters="sRGB"><feColorMatrix values="{matrix}"/></filter>
+              <filter id="gray" color-interpolation-filters="sRGB"><feColorMatrix type="saturate" values="0"/></filter>
+              <filter id="hue" color-interpolation-filters="sRGB"><feColorMatrix type="hueRotate" values="120"/></filter>
+            </defs>
+            <g fill="red">
+              <rect x="4" y="4" width="24" height="20" filter="url(#green)" opacity=".5"/>
+              <rect x="36" y="4" width="24" height="20" filter="url(#gray)"/>
+              <rect x="68" y="4" width="24" height="20" filter="url(#hue)"/>
+              <a href="https://example.org/color"><text x="5" y="45" filter="url(#green)">COLOR</text></a>
+            </g>
+          </svg></body></html>"""
+        plain = xhtml.replace('filter="url(#green)"', "")
+        fixture = fixed_spread_fixture([("", "white", 120, 60)])
+        with (
+            doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": xhtml})) as book,
+            doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": plain})) as reference,
+        ):
+            def rgba(document: doc_ex.Document) -> tuple[int, bytes]:
+                return rgba_pixels(png_chunks(document.render_page(0, dpi=96)))
+
+            width, pixels = preview = rgba(book)
+            def pixel(x: int, y: int) -> bytes:
+                offset = 4 * (width * y + x)
+                return pixels[offset:offset + 3]
+
+            red, green, blue = pixel(12, 12)
+            self.assertTrue(125 <= red == blue <= 130 and green == 255)
+            gray = pixel(44, 12)
+            self.assertTrue(53 <= gray[0] == gray[1] == gray[2] <= 56)
+            red, green, blue = pixel(76, 12)
+            self.assertTrue(red < 10 and green > 100 and blue < 10)
+            with (
+                doc_ex.open(book.export_epub_fixed_pdf(dpi=96, pages=[0], searchable=True)) as pdf,
+                doc_ex.open(reference.export_epub_fixed_pdf(dpi=96, pages=[0], searchable=True)) as original,
+                doc_ex.open(book.export_epub_fixed_pdf(dpi=96, pages=[0])) as visual,
+            ):
+                self.assertEqual(rgba(pdf), preview)
+                self.assertEqual(rgba(visual), preview)
+                self.assertEqual(pdf[0].search_for("COLOR"), original[0].search_for("COLOR"))
+                link, = pdf[0].get_links()
+                self.assertEqual(link.uri, "https://example.org/color")
+                self.assertEqual(link.bbox, original[0].get_links()[0].bbox)
+
+        cases = (
+            ('type="luminanceToAlpha"', doc_ex.UnsupportedFormatError, "color matrix mode"),
+            ('type="saturate" values="2"', doc_ex.UnsupportedFormatError, "saturation"),
+            ('type="hueRotate" values="NaN"', doc_ex.MalformedDocumentError, "color matrix values"),
+            ('type="matrix" values="1,,2"', doc_ex.MalformedDocumentError, "color matrix values"),
+            (f'values="{matrix[:-3]}0 0"', doc_ex.UnsupportedFormatError, "preserve alpha"),
+            (f'values="2000{matrix[1:]}"', doc_ex.UnsafeArchiveError, "color matrix coefficient"),
+        )
+        with doc_ex.open(epub_fixture()) as book:
+            for attributes, error, reason in cases:
+                svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 20">
+                  <defs><filter id="color"><feColorMatrix {attributes}/></filter></defs>
+                  <rect width="10" height="10" filter="url(#color)"/></svg>"""
+                with self.subTest(attributes=attributes), self.assertRaisesRegex(error, reason):
+                    book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Color", svg), 0])
 
     def test_svg_gradient_templates_and_blur_reject_unsafe_inputs(self) -> None:
         def svg(body: str) -> str:

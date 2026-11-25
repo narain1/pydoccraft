@@ -830,8 +830,10 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
     for node in root.descendants().filter(Node::is_element) {
         let tag = node.tag_name().name();
         let packaged_element = base.is_some() && matches!(tag, "image" | "style" | "a");
+        let filter_primitive = super::svg::effects::is_filter_primitive(tag);
         if node.tag_name().namespace() != Some(SVG)
             || (!packaged_element
+                && !filter_primitive
                 && !matches!(
                     tag,
                     "svg"
@@ -858,8 +860,6 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                         | "pattern"
                         | "marker"
                         | "filter"
-                        | "feGaussianBlur"
-                        | "feDropShadow"
                 ))
         {
             return Err(unsupported("SVG contains unsupported or active elements"));
@@ -909,11 +909,13 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                 None if tag == "a" && key == "target" => true,
                 None if tag == "svg" && key == "baseProfile" => true,
                 None if tag == "filter" && matches!(key, "filterUnits" | "primitiveUnits") => true,
-                None if super::svg::effects::is_blur_primitive(tag)
-                    && matches!(key, "stdDeviation" | "in") =>
+                None if filter_primitive && key == "in" => true,
+                None if matches!(tag, "feDropShadow" | "feGaussianBlur")
+                    && key == "stdDeviation" =>
                 {
                     true
                 }
+                None if tag == "feColorMatrix" && matches!(key, "type" | "values") => true,
                 None if tag == "feDropShadow"
                     && matches!(key, "dx" | "dy" | "flood-color" | "flood-opacity") =>
                 {
@@ -1049,7 +1051,7 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
     if root.descendants().any(|node| {
         node.is_element()
             && (node.has_tag_name("filter")
-                || super::svg::effects::is_blur_primitive(node.tag_name().name())
+                || super::svg::effects::is_filter_primitive(node.tag_name().name())
                 || node.attribute("filter").is_some()
                 || (super::svg::effects::is_gradient(node.tag_name().name())
                     && (node.attribute("href").is_some()
