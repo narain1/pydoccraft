@@ -122,6 +122,7 @@ fn source(
         end: fragment_end_us,
         spatial,
         tracks,
+        chapter_id,
     } = fragment
         .map(|fragment| media_fragment(fragment, kind))
         .transpose()?
@@ -143,6 +144,11 @@ fn source(
     {
         return Err(unsupported(
             "named media fragments require local WebM or Ogg",
+        ));
+    }
+    if chapter_id.is_some() && !matches!(media, "audio/webm" | "video/webm") {
+        return Err(unsupported(
+            "media fragment IDs require a local WebM source",
         ));
     }
     let ogg_video = kind == "video" && matches!(media, "video/ogg" | "application/ogg");
@@ -183,6 +189,9 @@ fn source(
     if !tracks.is_empty() {
         source["fragment_tracks"] = json!(tracks);
     }
+    if let Some(chapter_id) = chapter_id {
+        source["fragment_id"] = json!(chapter_id);
+    }
     Ok(source)
 }
 
@@ -194,6 +203,7 @@ struct MediaFragment {
     end: Option<u64>,
     spatial: Option<SpatialFragment>,
     tracks: Vec<String>,
+    chapter_id: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -246,12 +256,31 @@ fn media_fragment(fragment: &str, kind: &str) -> Result<MediaFragment, EngineErr
     let mut timing = None;
     let mut spatial = None;
     let mut tracks = Vec::new();
+    let mut chapter_id = None;
     for pair in fragment.split('&') {
         let (name, value) = pair
             .split_once('=')
             .ok_or_else(|| unsupported("embedded media fragment requires name-value dimensions"))?;
         match percent_decode(name)?.as_str() {
-            "t" if timing.is_none() => timing = Some(temporal_fragment(&percent_decode(value)?)?),
+            "t" if timing.is_none() => {
+                if chapter_id.is_some() {
+                    return Err(unsupported(
+                        "embedded media fragments cannot combine t and id",
+                    ));
+                }
+                timing = Some(temporal_fragment(&percent_decode(value)?)?);
+            }
+            "id" if chapter_id.is_none() => {
+                if timing.is_some() {
+                    return Err(unsupported(
+                        "embedded media fragments cannot combine t and id",
+                    ));
+                }
+                if value.contains('=') {
+                    return Err(invalid("invalid embedded media fragment ID"));
+                }
+                chapter_id = Some(fragment_name(value, "invalid embedded media fragment ID")?);
+            }
             "xywh" if kind != "video" => {
                 return Err(unsupported(
                     "embedded media audio supports only a temporal t dimension",
@@ -261,10 +290,7 @@ fn media_fragment(fragment: &str, kind: &str) -> Result<MediaFragment, EngineErr
                 spatial = Some(SpatialFragment::parse(&percent_decode(value)?)?)
             }
             "track" => {
-                let name = percent_decode(value)?;
-                if name.is_empty() || name.len() > 1024 || name.chars().any(char::is_control) {
-                    return Err(invalid("invalid embedded media fragment track name"));
-                }
+                let name = fragment_name(value, "invalid embedded media fragment track name")?;
                 if !tracks.contains(&name) {
                     if tracks.len() == 2 {
                         return Err(unsupported(
@@ -287,7 +313,16 @@ fn media_fragment(fragment: &str, kind: &str) -> Result<MediaFragment, EngineErr
         end,
         spatial,
         tracks,
+        chapter_id,
     })
+}
+
+fn fragment_name(value: &str, message: &str) -> Result<String, EngineError> {
+    let name = percent_decode(value)?;
+    if name.is_empty() || name.len() > 1024 || name.chars().any(char::is_control) {
+        return Err(invalid(message));
+    }
+    Ok(name)
 }
 
 fn temporal_fragment(value: &str) -> Result<(u64, Option<u64>), EngineError> {

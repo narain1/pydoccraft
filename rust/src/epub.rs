@@ -61,7 +61,7 @@ pub(crate) mod text_tracks;
 pub(crate) mod video;
 #[cfg(feature = "python")]
 #[path = "epub_webm.rs"]
-mod webm;
+pub(crate) mod webm;
 
 pub(crate) use editor::{update_chapters, update_metadata};
 pub(crate) use structure::{update_structure, OverlayEdit, ResourceEdit, SpineEdit};

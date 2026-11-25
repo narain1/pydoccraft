@@ -61,16 +61,6 @@ def _epub_playback_interval(start_us: int, end_us: int | None) -> tuple[int, int
     return start, end
 
 
-def _epub_source_interval(
-    source: EpubMediaSource, start_us: int, end_us: int | None
-) -> tuple[int, int | None]:
-    start, end = _epub_playback_interval(start_us, end_us)
-    start = max(start, source.fragment_start_us)
-    if source.fragment_end_us is not None:
-        end = source.fragment_end_us if end is None else min(end, source.fragment_end_us)
-    return start, end
-
-
 class _EpubTextTimeline:
     def __init__(self, cues: list[EpubTextCue]) -> None:
         self._cues = cues
@@ -773,6 +763,22 @@ class Document:
         result = _native(lambda: _core._epub_text_track(self._source, track.path, track.media_type, start, end))
         return [EpubTextCue(*cue) for cue in result]
 
+    def _epub_source_interval(
+        self, source: EpubMediaSource, start_us: int, end_us: int | None
+    ) -> tuple[int, int | None]:
+        start, end = _epub_playback_interval(start_us, end_us)
+        authored_start, authored_end = source.fragment_start_us, source.fragment_end_us
+        if source.fragment_id is not None:
+            from . import _core, _native
+
+            authored_start, authored_end = _native(lambda: _core._epub_webm_chapter(
+                self._source, source.path, source.fragment_id,
+            ))
+        start = max(start, authored_start)
+        if authored_end is not None:
+            end = authored_end if end is None else min(end, authored_end)
+        return start, end
+
     def epub_embedded_audio(
         self,
         page: int,
@@ -805,11 +811,11 @@ class Document:
                 and source.media_type not in ("audio/webm", "video/webm")
             ):
                 continue
-            start, end = _epub_source_interval(source, start_us, end_us)
             self._ensure_open()
-            if end is not None and start >= end:
-                return
             try:
+                start, end = self._epub_source_interval(source, start_us, end_us)
+                if end is not None and start >= end:
+                    return
                 decoder = _native(lambda: _core._open_epub_audio(
                     self._source, source.path, source.media_type, opus_selection, embedded.kind == "video",
                     audio_selection, source.fragment_tracks,
@@ -820,7 +826,8 @@ class Document:
                 unsupported_source = error
             else:
                 yield from self._epub_pcm_chunks(
-                    decoder, start, end, frames, clamp_to_duration=source.fragment_end_us is not None
+                    decoder, start, end, frames,
+                    clamp_to_duration=source.fragment_end_us is not None or source.fragment_id is not None,
                 )
                 return
         if unsupported_source is not None:
@@ -856,11 +863,11 @@ class Document:
                 continue
             if source_index is None and selection is not None and source.media_type != "video/webm":
                 continue
-            start, end = _epub_source_interval(source, start_us, end_us)
             self._ensure_open()
-            if end is not None and start >= end:
-                return
             try:
+                start, end = self._epub_source_interval(source, start_us, end_us)
+                if end is not None and start >= end:
+                    return
                 decoder = _native(lambda: _core._open_epub_video(
                     self._source, source.path, source.media_type, start, end, selection, source.fragment_tracks,
                 ))

@@ -81,6 +81,7 @@
 - [x] Apply local normal-play-time fragments to embedded audio, video and synchronized captions.
 - [x] Crop local video spatial fragments in pixel and percent units, including when combined with timed audio and captions.
 - [x] Resolve repeated named track fragments for WebM and Ogg and keep the selected picture and soundtrack on one presentation clock.
+- [x] Resolve local WebM media fragment IDs through simple Matroska chapters and synchronize the selected picture, soundtrack, crop, and captions.
 - [x] Stream embedded Ogg Theora and synchronize Opus and captions across sequential Ogg segments.
 - [x] Stream mono and stereo Ogg Vorbis for embedded audio and SMIL narration. Preserve page granule timing across same-format chains and synchronize a Vorbis soundtrack with chained Theora and captions.
 - [x] Stream VP8 and SDR VP9 video, Opus soundtracks, and synchronized local captions from packaged WebM sources.
@@ -90,7 +91,7 @@
 - [x] Select a WebM video track explicitly while retaining clipped intervals and synchronized captions.
 - [x] Stream fixed-geometry SDR AV1 pictures from WebM with bounded keyframe seeking and synchronized audio and captions.
 - [x] Preserve surround Vorbis speaker assignments in Ogg and WebM audio, video soundtracks, and narration. Reject undefined speaker layouts.
-- [ ] Extend WebM to additional AV1 profiles, high dynamic range, and alpha. Support additional Ogg soundtracks and simultaneous video tracks, broaden MP4 coverage, and extend subtitle styling and support more media fragment track combinations and ID dimensions.
+- [ ] Extend WebM to additional AV1 profiles, high dynamic range, and alpha. Support additional Ogg soundtracks and simultaneous video tracks, broaden MP4 coverage, and extend subtitle styling and support more media fragment track combinations and ID fragments in other containers.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
 - [x] Synchronize XHTML navigation and the spine's compatibility NCX in the same EPUB 3 chapter edit.
 - [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.

@@ -3,13 +3,16 @@ use std::{collections::HashSet, io::Cursor};
 
 use oxideav_core::{CodecRegistry, Demuxer, Error, MediaType, Packet, TimeBase};
 use oxideav_mkv::{
-    demux::{open_typed, MkvDemuxer},
+    demux::{open_typed, Chapter, Edition, MkvDemuxer},
     ebml::{read_element_header, read_uint, read_vint, VINT_UNKNOWN_SIZE},
     ids,
     schema::{element_def, ElementType},
 };
 
-use super::{invalid, limited, unsupported, EngineError};
+use super::{
+    audio::MAX_ENCODED_BYTES, invalid, limited, media::integer, unsupported, validate_archive_path,
+    Book, EngineError,
+};
 
 const MAX_ELEMENTS: usize = 400_000;
 const MAX_PACKETS: usize = 250_000;
@@ -40,7 +43,14 @@ pub(super) struct Unit {
 
 impl Reader {
     pub(super) fn open(bytes: Vec<u8>) -> Result<Self, EngineError> {
-        let mut bounds = Bounds::default();
+        Self::open_bounded(bytes, false)
+    }
+
+    fn open_bounded(bytes: Vec<u8>, chapter_fields: bool) -> Result<Self, EngineError> {
+        let mut bounds = Bounds {
+            chapter_fields,
+            ..Bounds::default()
+        };
         bounds.walk(&bytes, None, false, 0)?;
         if !bounds.webm || !bounds.segment {
             return Err(unsupported("embedded WebM requires a WebM EBML segment"));
@@ -56,6 +66,9 @@ impl Reader {
             open_typed(Box::new(Cursor::new(bytes)), &CodecRegistry::new()).map_err(invalid)?;
         if demux.streams().len() != bounds.tracks.len() {
             return Err(invalid("WebM track index disagrees with its container"));
+        }
+        if chapter_fields && bounds.late_chapters && demux.chapters().is_empty() {
+            return Err(unsupported("late WebM chapters require a valid SeekHead"));
         }
         demux.set_apply_track_operations(false);
         Ok(Self {
@@ -177,6 +190,113 @@ impl Reader {
     }
 }
 
+pub(crate) fn chapter_interval(
+    epub: &[u8],
+    path: &str,
+    id: &str,
+) -> Result<(u64, Option<u64>), EngineError> {
+    validate_archive_path(path)?;
+    let bytes = Book::open(epub)?.read(path, MAX_ENCODED_BYTES)?;
+    std::panic::catch_unwind(|| {
+        let reader = Reader::open_bounded(bytes, true)?;
+        if reader
+            .demux
+            .crc_status()
+            .iter()
+            .any(|status| status.element_id == ids::CHAPTERS && !status.is_valid())
+        {
+            return Err(invalid("WebM chapter checksum mismatch"));
+        }
+        chapter_bounds(reader.demux.chapters(), id)
+    })
+    .map_err(|_| invalid("malformed WebM chapter index"))?
+}
+
+type ChapterLocation<'a> = (&'a [Chapter], usize);
+
+fn chapter_bounds(editions: &[Edition], id: &str) -> Result<(u64, Option<u64>), EngineError> {
+    let numeric = integer(id);
+    let mut selected = None;
+    for edition in editions {
+        if let Some(path) = chapter_path(&edition.chapters, id, numeric)? {
+            if selected.replace((edition, path)).is_some() {
+                return Err(invalid(format!("WebM chapter ID {id:?} is ambiguous")));
+            }
+        }
+    }
+    let (edition, path) =
+        selected.ok_or_else(|| invalid(format!("WebM chapter ID {id:?} is absent")))?;
+    if edition.ordered {
+        return Err(unsupported("WebM chapter IDs in an ordered edition"));
+    }
+    let mut start = 0;
+    let mut end: Option<u64> = None;
+    for (siblings, index) in path.into_iter().rev() {
+        let chapter = &siblings[index];
+        if chapter.segment_uuid.is_some() || chapter.segment_edition_uid.is_some() {
+            return Err(unsupported("WebM chapter IDs that link to another segment"));
+        }
+        if !chapter.chap_processes.is_empty() || !chapter.track_uids.is_empty() {
+            return Err(unsupported("WebM chapter commands or track restrictions"));
+        }
+        if !chapter.enabled {
+            return Err(unsupported("disabled WebM chapter"));
+        }
+        if chapter.uid.is_none()
+            || chapter.time_start_ns < start
+            || end.is_some_and(|end| chapter.time_start_ns > end)
+        {
+            return Err(invalid("invalid WebM chapter identity or nested interval"));
+        }
+        start = chapter.time_start_ns;
+        let declared = chapter.time_end_ns.or_else(|| {
+            siblings
+                .iter()
+                .map(|sibling| sibling.time_start_ns)
+                .filter(|&time| time > start)
+                .min()
+        });
+        if declared.is_some_and(|end| end < start) {
+            return Err(invalid("WebM chapter end precedes its start"));
+        }
+        if start > MAX_TIME_NS || declared.is_some_and(|end| end > MAX_TIME_NS) {
+            return Err(limited(
+                "WebM chapter timestamps exceed their timing budget",
+            ));
+        }
+        end = end.into_iter().chain(declared).min();
+    }
+    let start = start.div_ceil(1000);
+    let end = end.map(|end| end.div_ceil(1000));
+    if end == Some(start) {
+        return Err(unsupported("WebM chapter marker has no playable interval"));
+    }
+    Ok((start, end))
+}
+
+fn chapter_path<'a>(
+    chapters: &'a [Chapter],
+    id: &str,
+    numeric: Option<u64>,
+) -> Result<Option<Vec<ChapterLocation<'a>>>, EngineError> {
+    let mut matched = None;
+    for (index, chapter) in chapters.iter().enumerate() {
+        let mut path = chapter_path(&chapter.children, id, numeric)?;
+        let matches = chapter.string_uid.as_deref() == Some(id)
+            || numeric.is_some_and(|uid| chapter.uid == Some(uid));
+        if matches && path.replace(Vec::new()).is_some() {
+            return Err(invalid(format!("WebM chapter ID {id:?} is ambiguous")));
+        }
+        if let Some(mut path) = path {
+            path.push((chapters, index));
+            if matched.replace(path).is_some() {
+                return Err(invalid(format!("WebM chapter ID {id:?} is ambiguous")));
+            }
+        }
+    }
+    Ok(matched)
+}
+
 pub(super) fn timestamp(scale: TimeBase, ticks: i64) -> Result<i128, EngineError> {
     if scale.num() <= 0 || scale.den() <= 0 {
         return Err(invalid("invalid WebM time base"));
@@ -208,6 +328,9 @@ struct Bounds {
     packets: usize,
     tracks: Vec<u64>,
     blocks: Vec<Block>,
+    chapter_fields: bool,
+    seen_cluster: bool,
+    late_chapters: bool,
 }
 
 impl Bounds {
@@ -221,10 +344,25 @@ impl Bounds {
         if depth > 24 {
             return Err(limited("WebM element nesting exceeds 24 levels"));
         }
+        let chapter_atom = self.chapter_fields && parent == Some(ids::CHAPTER_ATOM);
+        let mut chapter_fields = 0;
         while !bytes.is_empty() {
             let before = bytes;
             let header = read_element_header(&mut bytes).map_err(invalid)?;
             let definition = element_def(header.id);
+            if chapter_atom {
+                let field = match header.id {
+                    ids::CHAPTER_UID => 1,
+                    ids::CHAPTER_TIME_START => 2,
+                    ids::CHAPTER_TIME_END => 4,
+                    ids::CHAPTER_STRING_UID => 8,
+                    _ => 0,
+                };
+                if chapter_fields & field != 0 {
+                    return Err(invalid("WebM chapter repeats an ID or timestamp field"));
+                }
+                chapter_fields |= field;
+            }
             if unknown
                 && parent == Some(ids::CLUSTER)
                 && definition.is_some_and(|def| def.parent_id == Some(ids::SEGMENT))
@@ -257,6 +395,13 @@ impl Bounds {
             }) {
                 return Err(invalid("WebM element is outside its declared parent"));
             }
+            if self.chapter_fields {
+                match header.id {
+                    ids::CLUSTER => self.seen_cluster = true,
+                    ids::CHAPTERS => self.late_chapters = self.seen_cluster,
+                    _ => {}
+                }
+            }
             if header.id == ids::SEGMENT && std::mem::replace(&mut self.segment, true) {
                 return Err(unsupported("multiple WebM segments"));
             }
@@ -278,6 +423,11 @@ impl Bounds {
                 self.leaf(header.id, body)?;
             }
             bytes = rest;
+        }
+        if chapter_atom && chapter_fields & 3 != 3 {
+            return Err(invalid(
+                "WebM chapter lacks a ChapterUID or start timestamp",
+            ));
         }
         Ok(bytes)
     }

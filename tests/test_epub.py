@@ -2692,6 +2692,117 @@ first
             with self.assertRaisesRegex(ValueError, "still referenced"):
                 book.edit_epub_structure(remove_resources=["OEBPS/sound.wav"])
 
+    def test_webm_media_fragment_ids_use_chapter_timing_for_video_audio_and_captions(self) -> None:
+        fixtures = Path(__file__).parent / "fixtures"
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapters</title></head>
+          <body><video src="chapter.webm#id=Caf%C3%A9%20%26%20%C3%A9tude&amp;track=Angle_Blue&amp;xywh=percent:25,25,50,50&amp;track=Voix%20%26%20cloche">
+          <track src="caption.vtt" kind="captions" srclang="en"/></video>
+          <video src="chapter.webm"><track src="caption.vtt" kind="captions" srclang="en"/></video>
+          <video src="chapter.webm#id=101"/><video src="chapter.webm#id=infer-child"/>
+          <video src="chapter.webm#id=last-child"/><video src="chapter.webm#id=tail"/>
+          <video src="https://example.invalid/clip.webm#id=lost"/>
+          <audio src="chapter-audio.webm#id=intro&amp;track=Spoken"/><audio src="chapter-audio.webm"/>
+          </body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Chapters", chapter, "OEBPS/chapters.xhtml")],
+                resources={
+                    "OEBPS/chapter.webm": doc_ex.EpubResource(
+                        "video/webm", (fixtures / "epub-video-webm-chapters.webm").read_bytes()),
+                    "OEBPS/chapter-audio.webm": doc_ex.EpubResource(
+                        "audio/webm", (fixtures / "epub-audio-webm-chapters.webm").read_bytes()),
+                    "OEBPS/caption.vtt": doc_ex.EpubResource(
+                        "text/vtt", b"WEBVTT\n\n00:00:00.175 --> 00:00:00.218\nMiddle\n"),
+                },
+            )
+
+        def timing(frame: doc_ex.EpubVideoFrame) -> tuple[int, int, tuple[doc_ex.EpubTextCue, ...]]:
+            return frame.start_us, frame.duration_us, frame.text_cues
+
+        def bounds(frames: list[doc_ex.EpubVideoFrame]) -> tuple[int, int]:
+            return frames[0].start_us, frames[-1].start_us + frames[-1].duration_us
+
+        with doc_ex.open(data) as book:
+            resources = book.epub_embedded_media(0)
+            self.assertEqual(resources[0].sources[0].fragment_id, "Café & étude")
+            self.assertIsNone(resources[1].sources[0].fragment_id)
+            self.assertIsNone(resources[6].sources[0].path)
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "local"):
+                next(book.epub_embedded_video(0, 6))
+            cropped = list(book.epub_embedded_video(0, 0, text_track=0))
+            full = list(book.epub_embedded_video(
+                0, 1, start_us=151_001, end_us=325_001, text_track=0, video_track=1))
+            self.assertEqual(bounds(cropped), (151_001, 325_001))
+            self.assertEqual([timing(f) for f in cropped], [timing(f) for f in full])
+            self.assertTrue(all((f.width, f.height) == (32, 20) and f.rgb[2] > 245 for f in cropped))
+            self.assertEqual([(f.start_us, f.duration_us) for f in cropped if f.text_cues],
+                             [(175_000, 43_000)])
+            seek = list(book.epub_embedded_video(0, 0, start_us=200_000, end_us=230_000, text_track=0))
+            self.assertEqual(bounds(seek), (200_000, 230_000))
+            self.assertEqual(seek[0].text_cues[0].text, "Middle")
+            self.assertEqual(list(book.epub_embedded_video(0, 0, start_us=325_001)), [])
+            self.assertEqual(list(book.epub_embedded_audio(0, 0, start_us=325_001)), [])
+            named = list(book.epub_embedded_audio(0, 0, start_us=160_000))
+            ordinal = list(book.epub_embedded_audio(
+                0, 1, start_us=160_000, end_us=325_001, audio_track=1))
+            self.assertEqual(named, ordinal)
+            self.assertEqual(sum(clip.frame_count for clip in named), 7_921)
+            audio_only = list(book.epub_embedded_audio(0, 7))
+            self.assertEqual(audio_only, list(book.epub_embedded_audio(0, 8, end_us=100_000, audio_track=0)))
+            self.assertEqual(sum(clip.frame_count for clip in audio_only), 4_800)
+
+            for index, expected in ((2, (0, 100_000)), (3, (330_000, 348_000)), (4, (348_000, 400_000))):
+                with self.subTest(chapter=index):
+                    frames = list(book.epub_embedded_video(0, index, video_track=1))
+                    self.assertEqual(bounds(frames), expected)
+            ending = list(book.epub_embedded_video(0, 5, video_track=1))
+            self.assertEqual([timing(f) for f in ending], [timing(f) for f in
+                book.epub_embedded_video(0, 1, start_us=475_000, video_track=1)])
+            ending_audio = list(book.epub_embedded_audio(0, 5, end_us=2_000_000, audio_track=1))
+            self.assertEqual(ending_audio, list(book.epub_embedded_audio(
+                0, 1, start_us=475_000, audio_track=1)))
+
+    def test_webm_media_fragment_ids_reject_conflicts_and_unsupported_chapters(self) -> None:
+        fixtures = Path(__file__).parent / "fixtures"
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapters</title></head>
+          <body><video src="chapter.webm#id=absent"/><video src="chapter.webm#id=duplicate"/>
+          <video src="chapter.webm#id=77"/><video src="chapter.webm#id=linked"/>
+          <video src="chapter.webm#id=marker"/><video src="chapter.webm#id=ordered"/>
+          <video src="chapter.webm#id=reversed"/></body></html>'''
+        path = "OEBPS/chapters.xhtml"
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Chapters", chapter, path)],
+                resources={
+                    "OEBPS/chapter.webm": doc_ex.EpubResource(
+                        "video/webm", (fixtures / "epub-video-webm-chapters.webm").read_bytes()),
+                    "OEBPS/movie.mp4": doc_ex.EpubResource(
+                        "video/mp4", (fixtures / "epub-video-h264.mp4").read_bytes()),
+                },
+            )
+        with doc_ex.open(data) as book:
+            for index, error, message in (
+                (0, doc_ex.MalformedDocumentError, "chapter ID .* absent"),
+                (1, doc_ex.MalformedDocumentError, "chapter ID .* ambiguous"),
+                (2, doc_ex.MalformedDocumentError, "chapter ID .* ambiguous"),
+                (3, doc_ex.UnsupportedFormatError, "link to another segment"),
+                (4, doc_ex.UnsupportedFormatError, "no playable interval"),
+                (5, doc_ex.UnsupportedFormatError, "ordered edition"),
+                (6, doc_ex.MalformedDocumentError, "end precedes its start"),
+            ):
+                with self.subTest(index=index), self.assertRaisesRegex(error, message):
+                    next(book.epub_embedded_video(0, index, source_index=0, video_track=1))
+            for uri, error, message in (
+                ("chapter.webm#id=absent&amp;t=0,1", doc_ex.UnsupportedFormatError, "cannot combine t and id"),
+                ("chapter.webm#t=0,1&amp;id=absent", doc_ex.UnsupportedFormatError, "cannot combine t and id"),
+                ("chapter.webm#id=marker&amp;id=absent", doc_ex.UnsupportedFormatError, "repeated"),
+                ("chapter.webm#id=", doc_ex.MalformedDocumentError, "fragment ID"),
+                ("chapter.webm#id=x%00", doc_ex.MalformedDocumentError, "fragment ID"),
+                ("movie.mp4#id=part", doc_ex.UnsupportedFormatError, "require a local WebM"),
+            ):
+                with self.subTest(uri=uri), self.assertRaisesRegex(error, message):
+                    book.edit_epub_chapters({0: chapter.replace("chapter.webm#id=absent", uri)})
+
     def test_named_webm_fragments_keep_picture_soundtrack_and_caption_aligned(self) -> None:
         fixtures = Path(__file__).parent / "fixtures"
         raw = (fixtures / "epub-video-named-tracks.webm").read_bytes()
@@ -2906,7 +3017,7 @@ first
             ("xywh=fraction:0,1,2,5", doc_ex.MalformedDocumentError, "fragment unit"),
             ("xywh=0,1,2,5&amp;xywh=1,2,3,4", doc_ex.UnsupportedFormatError, "repeated"),
             ("t=1&amp;t=2", doc_ex.UnsupportedFormatError, "repeated"),
-            ("xywh=0,1,2,5&amp;id=2", doc_ex.UnsupportedFormatError, "fragment dimension"),
+            ("xywh=0,1,2,5&amp;other=2", doc_ex.UnsupportedFormatError, "fragment dimension"),
             ("xywh=0%2C0%2C1%2C1%26t%3D2", doc_ex.MalformedDocumentError, "unsigned integers"),
         ):
             chapter = ('<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Crops</title></head>'
