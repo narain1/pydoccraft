@@ -1,10 +1,15 @@
 //! Parse the EPUB grid track profile and project it into the native layout tree.
+use std::collections::BTreeMap;
+
 use raffia::{
     ast::{ComponentValue, Declaration, Delimiter, DelimiterKind, DimensionKind, FunctionName},
     Parser, Spanned, Syntax,
 };
 use taffy::{
-    style::{GridTemplateComponent, LengthPercentage, TrackSizingFunction},
+    style::{
+        GridPlacement, GridTemplateArea, GridTemplateAreas, GridTemplateComponent,
+        LengthPercentage, TrackSizingFunction,
+    },
     style_helpers::{auto, fit_content, fr, max_content, min_content},
 };
 
@@ -15,6 +20,9 @@ use crate::{
 };
 
 const MAX_TRACKS: usize = 32;
+const MAX_LINE_NAMES: usize = 128;
+const MAX_LINE_NAME_BYTES: usize = 128;
+const MAX_PLACEMENT: i16 = 64;
 
 #[derive(Clone, Copy)]
 enum Length<'a> {
@@ -45,21 +53,50 @@ enum Issue {
     Limit,
 }
 
+pub(in crate::epub) struct Template<T> {
+    pub tracks: Vec<T>,
+    pub names: Vec<Vec<String>>,
+}
+
+impl<T> Default for Template<T> {
+    fn default() -> Self {
+        Self {
+            tracks: Vec::new(),
+            names: Vec::new(),
+        }
+    }
+}
+
+impl<T> Template<T> {
+    fn with_first_line() -> Self {
+        Self {
+            tracks: Vec::new(),
+            names: vec![Vec::new()],
+        }
+    }
+}
+
 pub(super) fn valid(value: &str, components: &[ComponentValue<'_>]) -> bool {
     !matches!(parse(value, components), Err(Issue::Invalid))
 }
 
-fn parse<'a>(value: &'a str, components: &[ComponentValue<'_>]) -> Result<Vec<Track<'a>>, Issue> {
-    let mut tracks = Vec::new();
+fn parse<'a>(
+    value: &'a str,
+    components: &[ComponentValue<'_>],
+) -> Result<Template<Track<'a>>, Issue> {
     if value.eq_ignore_ascii_case("none") {
-        return Ok(tracks);
+        return Ok(Template::default());
     }
+    let mut template = Template::with_first_line();
     let offset = components.first().ok_or(Issue::Invalid)?.span().start;
     let raw = |item: &ComponentValue<'_>| {
         let span = item.span();
         value.get(span.start.checked_sub(offset)?..span.end.checked_sub(offset)?)
     };
+    let mut names = 0;
+    let mut previous_line = false;
     for item in components {
+        check_adjacent_lines(item, &mut previous_line)?;
         if let Some((_, args)) =
             function(item).filter(|(name, _)| name.eq_ignore_ascii_case("repeat"))
         {
@@ -89,24 +126,101 @@ fn parse<'a>(value: &'a str, components: &[ComponentValue<'_>]) -> Result<Vec<Tr
             if count == 0 {
                 return Err(Issue::Invalid);
             }
-            if count > (MAX_TRACKS - tracks.len()) / list.len() {
+            let mut repeated = Template::with_first_line();
+            let mut repeated_names = 0;
+            let mut previous_line = false;
+            for item in list {
+                check_adjacent_lines(item, &mut previous_line)?;
+                append_slot(&mut repeated, item, &raw, &mut repeated_names)?;
+            }
+            let track_count = repeated.tracks.len();
+            if track_count == 0 {
+                return Err(Issue::Invalid);
+            }
+            if count > (MAX_TRACKS - template.tracks.len()) / track_count
+                || repeated_names.saturating_mul(count) > MAX_LINE_NAMES - names
+            {
                 return Err(Issue::Limit);
             }
-            let repeated = list
-                .iter()
-                .map(|item| track(item, &raw))
-                .collect::<Result<Vec<_>, _>>()?;
+            names += repeated_names * count;
             for _ in 0..count {
-                tracks.extend_from_slice(&repeated);
+                template.tracks.extend_from_slice(&repeated.tracks);
+                merge_names(template.names.last_mut().unwrap(), &repeated.names[0]);
+                template.names.extend_from_slice(&repeated.names[1..]);
             }
         } else {
-            if tracks.len() == MAX_TRACKS {
-                return Err(Issue::Limit);
-            }
-            tracks.push(track(item, &raw)?);
+            append_slot(&mut template, item, &raw, &mut names)?;
         }
     }
-    Ok(tracks)
+    if template.tracks.is_empty() {
+        return Err(Issue::Invalid);
+    }
+    if names == 0 {
+        template.names.clear();
+    }
+    Ok(template)
+}
+
+fn check_adjacent_lines(item: &ComponentValue<'_>, previous: &mut bool) -> Result<(), Issue> {
+    let line = matches!(item, ComponentValue::BracketBlock(_));
+    if std::mem::replace(previous, line) && line {
+        return Err(Issue::Invalid);
+    }
+    Ok(())
+}
+
+fn merge_names(line: &mut Vec<String>, more: &[String]) {
+    for name in more {
+        if !line.contains(name) {
+            line.push(name.clone());
+        }
+    }
+}
+
+fn append_slot<'a>(
+    template: &mut Template<Track<'a>>,
+    item: &ComponentValue<'_>,
+    raw: &impl Fn(&ComponentValue<'_>) -> Option<&'a str>,
+    names: &mut usize,
+) -> Result<(), Issue> {
+    if let ComponentValue::BracketBlock(block) = item {
+        let line = template.names.last_mut().unwrap();
+        for item in &block.value {
+            let name = line_name(item)?;
+            *names += 1;
+            if *names > MAX_LINE_NAMES {
+                return Err(Issue::Limit);
+            }
+            if !line.iter().any(|item| item == name) {
+                line.push(name.to_owned());
+            }
+        }
+    } else {
+        if template.tracks.len() == MAX_TRACKS {
+            return Err(Issue::Limit);
+        }
+        template.tracks.push(track(item, raw)?);
+        template.names.push(Vec::new());
+    }
+    Ok(())
+}
+
+fn line_name<'a>(item: &'a ComponentValue<'_>) -> Result<&'a str, Issue> {
+    let ComponentValue::InterpolableIdent(name) = item else {
+        return Err(Issue::Invalid);
+    };
+    let name = ident(name).ok_or(Issue::Invalid)?;
+    if super::css_wide(name)
+        || ["span", "auto", "default"]
+            .iter()
+            .any(|key| name.eq_ignore_ascii_case(key))
+    {
+        return Err(Issue::Invalid);
+    }
+    if name.len() > MAX_LINE_NAME_BYTES {
+        return Err(Issue::Limit);
+    }
+    Ok(name)
 }
 
 fn function<'a, 's>(item: &'a ComponentValue<'s>) -> Option<(&'a str, &'a [ComponentValue<'s>])> {
@@ -127,6 +241,268 @@ fn comma(item: &ComponentValue<'_>) -> bool {
             ..
         })
     )
+}
+
+pub(super) fn placement_parts(name: &str) -> Option<&'static [&'static str]> {
+    Some(match name {
+        "grid-column" => &["grid-column-start", "grid-column-end"],
+        "grid-row" => &["grid-row-start", "grid-row-end"],
+        "grid-area" => &[
+            "grid-row-start",
+            "grid-column-start",
+            "grid-row-end",
+            "grid-column-end",
+        ],
+        _ => return None,
+    })
+}
+
+pub(super) fn is_placement(name: &str) -> bool {
+    matches!(
+        name,
+        "grid-column-start" | "grid-column-end" | "grid-row-start" | "grid-row-end"
+    )
+}
+
+pub(super) fn valid_placement(items: &[ComponentValue<'_>]) -> bool {
+    !matches!(placement(items), Err(Issue::Invalid))
+}
+
+fn placement(items: &[ComponentValue<'_>]) -> Result<GridPlacement<String>, Issue> {
+    let mut span = false;
+    let mut number = None;
+    let mut name = None;
+    for item in items {
+        match item {
+            ComponentValue::InterpolableIdent(key)
+                if ident(key).is_some_and(|key| key.eq_ignore_ascii_case("auto")) =>
+            {
+                return if items.len() == 1 {
+                    Ok(GridPlacement::Auto)
+                } else {
+                    Err(Issue::Invalid)
+                };
+            }
+            ComponentValue::InterpolableIdent(key)
+                if ident(key).is_some_and(|key| key.eq_ignore_ascii_case("span")) && !span =>
+            {
+                span = true;
+            }
+            ComponentValue::Number(item) if number.is_none() => {
+                let digits = item.raw.trim_start_matches(['+', '-']);
+                if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+                    return Err(Issue::Invalid);
+                }
+                let index = item.raw.parse::<i16>().map_err(|_| Issue::Limit)?;
+                if index == 0 {
+                    return Err(Issue::Invalid);
+                }
+                if index.unsigned_abs() > MAX_PLACEMENT as u16 {
+                    return Err(Issue::Limit);
+                }
+                number = Some(index);
+            }
+            ComponentValue::InterpolableIdent(_) if name.is_none() => {
+                name = Some(line_name(item)?);
+            }
+            _ => return Err(Issue::Invalid),
+        }
+    }
+    Ok(match (span, number, name) {
+        (false, Some(index), None) => taffy::style_helpers::line(index),
+        (false, number, Some(name)) => {
+            GridPlacement::NamedLine(name.to_owned(), number.unwrap_or(0))
+        }
+        (true, Some(index), None) if index > 0 => GridPlacement::Span(index as u16),
+        (true, number, Some(name)) if number.unwrap_or(1) > 0 => {
+            GridPlacement::NamedSpan(name.to_owned(), number.unwrap_or(1) as u16)
+        }
+        _ => return Err(Issue::Invalid),
+    })
+}
+
+pub(super) fn expand_placement(name: &str, value: &str, keys: &[&str]) -> Vec<(String, String)> {
+    if super::css_wide(value) {
+        return keys
+            .iter()
+            .map(|key| ((*key).to_owned(), value.to_owned()))
+            .collect();
+    }
+    let declaration = format!("value:{value}");
+    let Ok(syntax) = Parser::new(&declaration, Syntax::Css).parse::<Declaration>() else {
+        return Vec::new();
+    };
+    let pieces: Option<Vec<_>> = syntax
+        .value
+        .split(|item| {
+            matches!(
+                item,
+                ComponentValue::Delimiter(Delimiter {
+                    kind: DelimiterKind::Solidus,
+                    ..
+                })
+            )
+        })
+        .map(|items| {
+            if !valid_placement(items) {
+                return None;
+            }
+            let component = &declaration[items.first()?.span().start..items.last()?.span().end];
+            let bare = matches!(items, [item] if !matches!(line_name(item), Err(Issue::Invalid)));
+            Some((component, bare))
+        })
+        .collect();
+    let Some(pieces) = pieces.filter(|pieces| !pieces.is_empty() && pieces.len() <= keys.len())
+    else {
+        return Vec::new();
+    };
+    let fallback = |(value, bare)| if bare { (value, true) } else { ("auto", false) };
+    let first = pieces[0];
+    let second = pieces.get(1).copied().unwrap_or_else(|| fallback(first));
+    let values = if name == "grid-area" {
+        [
+            first,
+            second,
+            pieces.get(2).copied().unwrap_or_else(|| fallback(first)),
+            pieces.get(3).copied().unwrap_or_else(|| fallback(second)),
+        ]
+    } else {
+        [first, second, ("auto", false), ("auto", false)]
+    };
+    keys.iter()
+        .zip(values)
+        .map(|(key, (value, _))| ((*key).to_owned(), value.to_owned()))
+        .collect()
+}
+
+pub(in crate::epub) fn resolve_placement(
+    source: &str,
+    inherited: impl FnOnce() -> GridPlacement<String>,
+) -> Result<GridPlacement<String>, EngineError> {
+    if source.eq_ignore_ascii_case("inherit") {
+        return Ok(inherited());
+    }
+    if source.eq_ignore_ascii_case("revert-layer") {
+        return Err(unsupported("EPUB grid cascade layers"));
+    }
+    if source.is_empty() || super::css_wide(source) {
+        return Ok(GridPlacement::Auto);
+    }
+    let declaration = format!("value:{source}");
+    let syntax = Parser::new(&declaration, Syntax::Css)
+        .parse::<Declaration>()
+        .map_err(|_| invalid("invalid EPUB grid placement"))?;
+    placement(&syntax.value).map_err(|issue| match issue {
+        Issue::Invalid => invalid("invalid EPUB grid placement"),
+        Issue::Unsupported => unsupported("unsupported EPUB grid placement"),
+        Issue::Limit => limited("EPUB grid placement exceeds its limit"),
+    })
+}
+
+pub(super) fn valid_areas(value: &str, items: &[ComponentValue<'_>]) -> bool {
+    value.eq_ignore_ascii_case("none") || !matches!(areas(items), Err(Issue::Invalid))
+}
+
+fn areas(items: &[ComponentValue<'_>]) -> Result<GridTemplateAreas<String>, Issue> {
+    if items.len() > MAX_TRACKS {
+        return Err(Issue::Limit);
+    }
+    let mut regions = BTreeMap::<&str, (GridTemplateArea<String>, u16)>::new();
+    let mut column_count = 0;
+    for (row, item) in items.iter().enumerate() {
+        let ComponentValue::InterpolableStr(source) = item else {
+            return Err(Issue::Invalid);
+        };
+        let mut rest = super::string_value(source).ok_or(Issue::Invalid)?;
+        let mut column = 0;
+        let row = row as u16 + 1;
+        while let Some(first) = rest.chars().next() {
+            if matches!(first, ' ' | '\t' | '\r' | '\n' | '\x0c') {
+                rest = &rest[1..];
+                continue;
+            }
+            let named = first != '.';
+            let ident_code =
+                |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_') || !c.is_ascii();
+            if named && !ident_code(first) {
+                return Err(Issue::Invalid);
+            }
+            let end = rest
+                .find(|c| if named { !ident_code(c) } else { c != '.' })
+                .unwrap_or(rest.len());
+            let (cell, tail) = rest.split_at(end);
+            rest = tail;
+            column += 1;
+            if column > MAX_TRACKS as u16 || named && cell.len() > MAX_LINE_NAME_BYTES {
+                return Err(Issue::Limit);
+            }
+            if named {
+                let (region, occupied) = regions.entry(cell).or_insert_with(|| {
+                    (
+                        GridTemplateArea {
+                            name: cell.to_owned(),
+                            row_start: row,
+                            row_end: row + 1,
+                            column_start: column,
+                            column_end: column + 1,
+                        },
+                        0,
+                    )
+                });
+                *occupied += 1;
+                region.row_end = row + 1;
+                region.column_start = region.column_start.min(column);
+                region.column_end = region.column_end.max(column + 1);
+            }
+        }
+        if column == 0 || column_count != 0 && column != column_count {
+            return Err(Issue::Invalid);
+        }
+        column_count = column;
+    }
+    if column_count == 0 {
+        return Err(Issue::Invalid);
+    }
+    let areas = regions
+        .into_values()
+        .map(|(region, occupied)| {
+            let expected =
+                (region.row_end - region.row_start) * (region.column_end - region.column_start);
+            if expected != occupied {
+                Err(Issue::Invalid)
+            } else {
+                Ok(region)
+            }
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(GridTemplateAreas {
+        areas,
+        row_count: items.len() as u16,
+        column_count,
+    })
+}
+
+pub(in crate::epub) fn resolve_areas(
+    source: &str,
+    inherited: impl FnOnce() -> Option<GridTemplateAreas<String>>,
+) -> Result<Option<GridTemplateAreas<String>>, EngineError> {
+    if source.eq_ignore_ascii_case("inherit") {
+        return Ok(inherited());
+    }
+    if source.eq_ignore_ascii_case("revert-layer") {
+        return Err(unsupported("EPUB grid cascade layers"));
+    }
+    if source.is_empty() || source.eq_ignore_ascii_case("none") || super::css_wide(source) {
+        return Ok(None);
+    }
+    let declaration = format!("value:{source}");
+    let syntax = Parser::new(&declaration, Syntax::Css)
+        .parse::<Declaration>()
+        .map_err(|_| invalid("invalid EPUB grid area template"))?;
+    areas(&syntax.value).map(Some).map_err(|issue| match issue {
+        Issue::Limit => limited("EPUB grid area template exceeds its limit"),
+        _ => invalid("invalid EPUB grid area template"),
+    })
 }
 
 fn track<'a>(
@@ -199,7 +575,6 @@ fn breadth<'a>(
                 _ => return Err(Issue::Invalid),
             }
         }
-        ComponentValue::BracketBlock(_) => return Err(Issue::Unsupported),
         ComponentValue::Function(_) => {
             let value = raw(item).ok_or(Issue::Invalid)?;
             if !calc::is_math(value) {
@@ -219,13 +594,13 @@ pub(in crate::epub) fn resolve(
     font: f32,
     viewport: [f32; 2],
     lengths: &mut calc::CalculationTable,
-) -> Result<Vec<GridTemplateComponent<String>>, EngineError> {
+) -> Result<Template<GridTemplateComponent<String>>, EngineError> {
     if source.is_empty()
         || ["none", "initial", "unset", "revert"]
             .iter()
             .any(|keyword| source.eq_ignore_ascii_case(keyword))
     {
-        return Ok(Vec::new());
+        return Ok(Template::default());
     }
     if source.eq_ignore_ascii_case("revert-layer") {
         return Err(unsupported("EPUB grid cascade layers"));
@@ -234,14 +609,14 @@ pub(in crate::epub) fn resolve(
     let syntax = Parser::new(&declaration, Syntax::Css)
         .parse::<Declaration>()
         .map_err(|_| invalid("invalid EPUB grid track expression"))?;
-    let tracks = parse(source, &syntax.value).map_err(|issue| match issue {
+    let Template { tracks, names } = parse(source, &syntax.value).map_err(|issue| match issue {
         Issue::Invalid => invalid("invalid EPUB grid track expression"),
         Issue::Unsupported => unsupported("unsupported EPUB grid track expression"),
         Issue::Limit => limited("EPUB grid track expression exceeds its limit"),
     })?;
-    tracks
+    let tracks = tracks
         .into_iter()
-        .map(|track| {
+        .map(|track| -> Result<_, EngineError> {
             let mut length = |length| -> Result<LengthPercentage, EngineError> {
                 Ok(match length {
                     Length::Points(raw) => {
@@ -280,5 +655,6 @@ pub(in crate::epub) fn resolve(
             }
             .into())
         })
-        .collect()
+        .collect::<Result<_, _>>()?;
+    Ok(Template { tracks, names })
 }

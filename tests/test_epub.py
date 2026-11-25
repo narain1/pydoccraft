@@ -2421,6 +2421,76 @@ class EpubTests(unittest.TestCase):
                         results.append((pixels, hit, external.bbox, xyz.groups()))
                 self.assertEqual(results[0], results[1])
 
+    def test_css_grid_named_lines_spans_and_placement_cascade(self) -> None:
+        source = fixed_spread_fixture([("", "white", 300, 150)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Named grid</title>
+          <meta name="viewport" content="width=300,height=150"/><style>
+          html,body,p{margin:0;font-size:11px}
+          #holder{position:absolute;left:12px;top:14px;width:240px}
+          #grid{display:grid;grid-template-columns:inherit;grid-template-rows:inherit;gap:4px}
+          #first{background:#b73337} #middle{background:#358348} #last{background:#3e62a0}
+          .note{margin-top:15px} CSS
+          </style></head><body><div id="holder"><div id="grid">
+          <p id="first">First</p><p id="middle"><a href="https://example.org/grid">Middle</a></p>
+          <p id="last">Last</p></div><p class="note"><a href="#last">Go to destination</a></p>
+          </div></body></html>"""
+        named = """
+          #holder {
+            grid-template-columns: [hero-start] 38px [hero-end dup]
+                repeat(2, [dup] 42px [mark dup]) [right] 60px [edge];
+            grid-template-rows: [upper] 28px [foot-start] 34px [foot-end];
+          }
+          #first {grid-column:hero;grid-row:upper / foot-start;grid-column-end:span -1}
+          #middle {--lane:2 dup / span mark;grid-column:var(--lane);grid-row-start:upper;
+            grid-row-end:1;grid-row-end: foot-start !important;grid-row:foot / foot}
+          #last {grid-area:foot / dup -1 / foot / edge}
+        """
+        numeric = """
+          #holder {grid-template-columns:38px 42px 42px 60px;grid-template-rows:28px 34px}
+          #first {grid-column:1 / 2;grid-row:1 / 2}
+          #middle {grid-column:3 / 4;grid-row:2 / 2}
+          #last {grid-area:2 / 4 / 3 / 5}
+        """
+        areas = r"""
+          #holder {
+            grid-template-columns:38px 42px 42px 60px;grid-template-rows:28px 34px;
+            grid-template-areas:"hero... . ." ".... ... MIDDLE Last";
+            grid-template-areas:"hero unknown" "hero hero";
+          }
+          #grid {grid-template-areas:inherit}
+          #first {grid-area:hero}
+          #middle {--area:M\49 DDLE;grid-area:var(--area)}
+          #last {grid-column:Last-start / Last-end;grid-row:Last}
+        """
+        results = []
+        for styles in (named, numeric, areas):
+            chapter = template.replace("CSS", styles)
+            with doc_ex.open(rewrite_epub(source, {"OEBPS/s0.xhtml": chapter})) as book:
+                pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                exported = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+            with doc_ex.open(exported) as pdf:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), pixels)
+                hits = [pdf[0].search_for(label) for label in ("First", "Middle", "Last")]
+                self.assertTrue(all(len(item) == 1 for item in hits), pdf[0].get_text())
+                external, internal = pdf[0].get_links()
+                self.assertEqual(external.uri, "https://example.org/grid")
+                self.assertEqual(internal.metadata["target_page"], 0)
+                self.assertGreater(hits[2][0][0], hits[1][0][0])
+                self.assertGreater(hits[2][0][1], hits[0][0][1])
+                results.append((pixels, hits, external.bbox, internal.bbox))
+        self.assertTrue(all(result == results[1] for result in results), "named and numeric grid geometry differs")
+
+        for styles in (
+            "#holder{grid-template-columns:repeat(32,[a b c d e] 4px)}",
+            "#first{grid-column:65 hero / edge}",
+            "#holder{grid-template-areas:" + " '.'" * 33 + "}",
+        ):
+            with self.subTest(styles=styles):
+                chapter = template.replace("CSS", styles)
+                with doc_ex.open(rewrite_epub(source, {"OEBPS/s0.xhtml": chapter})) as book:
+                    with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "EPUB grid.*exceeds"):
+                        book.render_page(0, dpi=96)
+
     def test_css_grid_intrinsic_and_fit_tracks_in_reflow(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic grid</title>
           <style>body,p{margin:0;font-size:10px}

@@ -3,9 +3,9 @@ use std::{collections::HashMap, sync::Arc};
 
 use roxmltree::{Node, NodeId};
 use taffy::{
-    geometry::{Point, Rect, Size},
+    geometry::{Line, Point, Rect, Size},
     prelude::*,
-    style::{BoxSizing, GridAutoFlow, Overflow},
+    style::{BoxSizing, GridAutoFlow, GridPlacement, Overflow},
 };
 use wordcraft_doc::props::{Align, CharProps, LineSpacing, Rgb, TextColor, Underline};
 
@@ -244,19 +244,37 @@ impl ChapterStyles {
                     Some(a.trim().parse::<f32>().ok()? / b.trim().parse::<f32>().ok()?)
                 })
                 .filter(|n| n.is_finite() && *n > 0.0);
-            let mut tracks = |key, inherited: fn(&Style) -> &Vec<GridTemplateComponent<String>>| {
+            let mut tracks = |key, axis| {
                 let source = value(&values, key);
                 if source.eq_ignore_ascii_case("inherit") {
                     return Ok(parent
-                        .map(|p| inherited(&p.box_style).clone())
+                        .map(|p| {
+                            let style = &p.box_style;
+                            let (tracks, names) = match axis {
+                                taffy::AbsoluteAxis::Horizontal => (
+                                    &style.grid_template_columns,
+                                    &style.grid_template_column_names,
+                                ),
+                                taffy::AbsoluteAxis::Vertical => {
+                                    (&style.grid_template_rows, &style.grid_template_row_names)
+                                }
+                            };
+                            css::grid::Template {
+                                tracks: tracks.clone(),
+                                names: names.clone(),
+                            }
+                        })
                         .unwrap_or_default());
                 }
                 css::grid::resolve(source, font, viewport, &mut styles.calculations)
             };
-            let columns = tracks("grid-template-columns", |style| {
-                &style.grid_template_columns
-            })?;
-            let rows = tracks("grid-template-rows", |style| &style.grid_template_rows)?;
+            let columns = tracks("grid-template-columns", taffy::AbsoluteAxis::Horizontal)?;
+            let rows = tracks("grid-template-rows", taffy::AbsoluteAxis::Vertical)?;
+            let placement = |key, edge: fn(&Style) -> &GridPlacement<String>| {
+                css::grid::resolve_placement(value(&values, key), || {
+                    parent.map_or(GridPlacement::Auto, |p| edge(&p.box_style).clone())
+                })
+            };
             let box_style = Style {
                 display: match display {
                     "flex" | "inline-flex" => Display::Flex,
@@ -368,8 +386,22 @@ impl ChapterStyles {
                     "space-evenly" => JustifyContent::SPACE_EVENLY,
                     _ => JustifyContent::START,
                 },
-                grid_template_columns: columns,
-                grid_template_rows: rows,
+                grid_template_columns: columns.tracks,
+                grid_template_column_names: columns.names,
+                grid_template_rows: rows.tracks,
+                grid_template_row_names: rows.names,
+                grid_template_areas: css::grid::resolve_areas(
+                    value(&values, "grid-template-areas"),
+                    || parent.and_then(|parent| parent.box_style.grid_template_areas.clone()),
+                )?,
+                grid_row: Line {
+                    start: placement("grid-row-start", |style| &style.grid_row.start)?,
+                    end: placement("grid-row-end", |style| &style.grid_row.end)?,
+                },
+                grid_column: Line {
+                    start: placement("grid-column-start", |style| &style.grid_column.start)?,
+                    end: placement("grid-column-end", |style| &style.grid_column.end)?,
+                },
                 grid_auto_flow: if value(&values, "grid-auto-flow") == "column" {
                     GridAutoFlow::Column
                 } else {

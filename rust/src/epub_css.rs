@@ -1242,6 +1242,8 @@ fn valid_literal(
         "grid-template-columns" | "grid-template-rows" => {
             css_wide(value) || grid::valid(value, components)
         }
+        "grid-template-areas" => css_wide(value) || grid::valid_areas(value, components),
+        _ if grid::is_placement(name) => css_wide(value) || grid::valid_placement(components),
         "font-family" => font_family_value(components).is_some(),
         "font-variation-settings" => axis_value(components).is_some(),
         _ if let Some(kind) = logical::intrinsic_size_kind(name, value) => {
@@ -1301,6 +1303,9 @@ fn border_names(sides: &'static [&'static str]) -> impl Iterator<Item = String> 
 }
 
 fn shorthand_parts(name: &str) -> Option<Vec<String>> {
+    if let Some(parts) = grid::placement_parts(name) {
+        return Some(parts.iter().copied().map(str::to_owned).collect());
+    }
     match name {
         "background" => Some(vec!["background-color".to_owned()]),
         _ => {
@@ -1316,6 +1321,9 @@ fn shorthand_parts(name: &str) -> Option<Vec<String>> {
 }
 
 fn expand(name: &str, value: &str) -> Vec<(String, String)> {
+    if let Some(parts) = grid::placement_parts(name) {
+        return grid::expand_placement(name, value, parts);
+    }
     if let Some(names) = logical::shorthand(name) {
         let pieces = value_components(value);
         if logical::pair(names[0]).is_some()
