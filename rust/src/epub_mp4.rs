@@ -1,7 +1,7 @@
 //! Bound local MP4 metadata and locate sample storage before demuxing.
 use std::{io::Cursor, ops::Range};
 
-use oxideav_mp4::boxes::read_box_header;
+use oxideav_mp4::{boxes::read_box_header, demux::EditListEntry};
 
 use super::{invalid, limited, unsupported, EngineError};
 
@@ -12,6 +12,38 @@ pub(crate) use chapters::chapter_interval;
 
 const MAX_METADATA_BYTES: usize = 4 * 1024 * 1024;
 pub(super) const MAX_ACCESS_UNITS: usize = 250_000;
+
+pub(super) struct LinearEdit {
+    pub movie_start: u64,
+    pub movie_end: u64,
+    pub media_start: i64,
+}
+
+/// One rate-1 media segment, optionally preceded by an empty movie interval.
+pub(super) fn linear_edit(
+    edits: &[EditListEntry],
+    unsupported_layout: &str,
+) -> Result<Option<LinearEdit>, EngineError> {
+    let rate_one =
+        |edit: &EditListEntry| edit.media_rate_integer == 1 && edit.media_rate_fraction == 0;
+    let (movie_start, edit) = match edits {
+        [] => return Ok(None),
+        [edit] => (0, edit),
+        [gap, edit] if gap.is_empty_edit() && rate_one(gap) => (gap.segment_duration, edit),
+        _ => return Err(unsupported(unsupported_layout)),
+    };
+    if edit.media_time < 0 || !rate_one(edit) {
+        return Err(unsupported(unsupported_layout));
+    }
+    let movie_end = movie_start
+        .checked_add(edit.segment_duration)
+        .ok_or_else(|| invalid("MP4 edit duration overflow"))?;
+    Ok(Some(LinearEdit {
+        movie_start,
+        movie_end,
+        media_start: edit.media_time,
+    }))
+}
 
 #[derive(Default)]
 pub(super) struct Mp4Bounds {

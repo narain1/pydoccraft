@@ -7499,6 +7499,143 @@ Trailing
             self.assertEqual(reopened.read_epub_resource("OEBPS/chapter.mp4"), data)
             self.assertEqual(list(reopened.epub_embedded_video(0, 0, text_track=0)), selected)
 
+    def test_mp4_leading_empty_edit_keeps_chapters_video_audio_and_captions_on_movie_clock(self) -> None:
+        fixture = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        marked = mp4_with_chapter_track(fixture, (
+            (500, b"Opening"), (375, b"Middle"), (2145, b"Tail"),
+        ))
+
+        def delay(movie: bytes, ticks: int, scale: int = 1, *, repeat: bool = False, rate: int = 1) -> bytes:
+            top = mp4_boxes(movie)
+            index, = (content for tag, content in top if tag == b"moov")
+            updated = []
+            for tag, payload in mp4_boxes(index):
+                if tag == b"mvhd":
+                    movie_header = bytearray(payload)
+                    assert struct.unpack_from(">III", movie_header, 12)[:2] == (1000, 1000)
+                    struct.pack_into(">II", movie_header, 12, 1000 * scale, 1000 * scale + ticks)
+                    payload = bytes(movie_header)
+                elif tag == b"trak":
+                    children = mp4_boxes(payload)
+                    header, = (content for kind, content in children if kind == b"tkhd")
+                    track_id, = struct.unpack_from(">I", header, 12)
+                    if track_id in (1, 2):
+                        edit, = (content for kind, data in children if kind == b"edts"
+                                 for edit_type, content in mp4_boxes(data) if edit_type == b"elst")
+                        assert struct.unpack_from(">II", edit) == (0, 1)
+                        length, origin, _, _ = struct.unpack_from(">Iihh", edit, 8)
+                        entries = [(ticks, -1, 1, 0), (length * scale, origin, rate, 0)]
+                        if repeat:
+                            entries.append((length * scale, origin, rate, 0))
+                        version = 1 if track_id == 1 else 0
+                        fmt = ">Qqhh" if version else ">Iihh"
+                        edit = struct.pack(">II", version << 24, len(entries)) + b"".join(
+                            struct.pack(fmt, *entry) for entry in entries
+                        )
+                        track_header = bytearray(header)
+                        struct.pack_into(">I", track_header, 20, sum(entry[0] for entry in entries))
+                        payload = b"".join(
+                            mp4_box(kind, mp4_box(b"elst", edit) if kind == b"edts"
+                                    else bytes(track_header) if kind == b"tkhd" else data)
+                            for kind, data in children
+                        )
+                updated.append(mp4_box(tag, payload))
+            # The original byte ranges still address the same AVC/AAC and chapter samples.
+            return b"".join(mp4_box(b"free" if tag == b"moov" else tag, data) for tag, data in top) + \
+                mp4_box(b"moov", b"".join(updated))
+
+        edited = delay(marked, 25)
+        path = "OEBPS/shifted.mp4"
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Delayed MP4</title></head>
+          <body><video src="shifted.mp4#id=Middle&amp;xywh=1,1,6,4"><track src="clip.vtt" kind="captions" srclang="en"/></video>
+          <video src="shifted.mp4#t=0.185,0.31&amp;xywh=1,1,6,4"><track src="clip.vtt" kind="captions" srclang="en"/></video>
+          <video src="shifted.mp4"><track src="clip.vtt" kind="captions" srclang="en"/></video>
+          <video src="baseline.mp4"/>
+          <audio src="shifted.m4a#id=Middle"/>
+          </body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            publication = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Delayed MP4", chapter, "OEBPS/clip.xhtml")],
+                resources={
+                    path: doc_ex.EpubResource("video/mp4", edited),
+                    "OEBPS/shifted.m4a": doc_ex.EpubResource("audio/mp4", edited),
+                    "OEBPS/baseline.mp4": doc_ex.EpubResource("video/mp4", fixture),
+                    "OEBPS/clip.vtt": doc_ex.EpubResource("text/vtt", b"""WEBVTT
+
+00:00.002 --> 00:00.030
+During delay
+
+00:00.190 --> 00:00.240
+Middle cue
+"""),
+                },
+            )
+
+        def pcm(book: doc_ex.Document, index: int, **clip: int) -> bytes:
+            buffers = []
+            for chunk in book.epub_embedded_audio(0, index, chunk_frames=463, **clip):
+                self.assertEqual((chunk.sample_rate, chunk.channels), (48_000, 1))
+                with wave.open(io.BytesIO(chunk.wave), "rb") as audio:
+                    buffers.append(audio.readframes(chunk.frame_count))
+            return b"".join(buffers)
+
+        with doc_ex.open(publication) as book:
+            self.assertEqual(book.epub_embedded_media(0)[0].sources[0].fragment_id, "Middle")
+            raw = list(book.epub_embedded_video(0, 3))
+            shifted = list(book.epub_embedded_video(0, 2))
+            self.assertEqual([frame.rgb for frame in shifted], [frame.rgb for frame in raw])
+            ticks = [25_000 + (i * 1_000_000 + 11) // 12 for i in range(13)]
+            self.assertEqual([(f.start_us, f.start_us + f.duration_us) for f in shifted],
+                             list(zip(ticks, ticks[1:])))
+            self.assertEqual(list(book.epub_embedded_video(0, 2, start_us=2_000, end_us=25_000, text_track=0)), [])
+            crossing = list(book.epub_embedded_video(0, 2, start_us=20_000, end_us=31_000, text_track=0))
+            self.assertEqual([(f.start_us, f.duration_us, bool(f.text_cues)) for f in crossing],
+                             [(25_000, 5_000, True), (30_000, 1_000, False)])
+            self.assertEqual([(cue.start_us, cue.end_us) for cue in book.epub_embedded_text(0, 2)],
+                             [(2_000, 30_000), (190_000, 240_000)])
+            selected = list(book.epub_embedded_video(0, 0, text_track=0))
+            self.assertEqual(selected, list(book.epub_embedded_video(0, 1, text_track=0)))
+            self.assertEqual([(f.start_us, f.start_us + f.duration_us, bool(f.text_cues)) for f in selected],
+                             [(185_000, 190_000, False), (190_000, 191_667, True), (191_667, 240_000, True),
+                              (240_000, 275_000, False), (275_000, 310_000, False)])
+            self.assertTrue(all((frame.width, frame.height) == (6, 4) for frame in selected))
+            self.assertIs(selected[0].rgb, selected[1].rgb)
+            self.assertEqual(list(book.epub_embedded_video(0, 0, start_us=186_001, end_us=195_002, text_track=0)),
+                             list(book.epub_embedded_video(0, 1, start_us=186_001, end_us=195_002, text_track=0)))
+            baseline = pcm(book, 3)
+            self.assertEqual(len(baseline), 48_000 * 2)
+            self.assertEqual(pcm(book, 2), bytes(1_200 * 2) + baseline)
+            self.assertEqual(pcm(book, 2, start_us=1_000, end_us=25_000), bytes(1_152 * 2))
+            self.assertEqual(pcm(book, 2, start_us=20_000, end_us=31_000), bytes(240 * 2) + baseline[:288 * 2])
+            middle = pcm(book, 0)
+            self.assertEqual(len(middle), 6_000 * 2)
+            # Give the reference seek the same AAC decoder preroll.
+            self.assertEqual(middle, pcm(book, 3, start_us=160_000, end_us=285_000))
+            self.assertEqual(middle, pcm(book, 1))
+            self.assertEqual(middle, pcm(book, 4))
+            revised = book.edit_epub_structure(replacements={0: chapter.replace("Delayed MP4", "Revised")})
+        with doc_ex.open(revised) as book:
+            self.assertEqual(book.read_epub_resource(path), edited)
+            self.assertEqual(list(book.epub_embedded_video(0, 0, text_track=0)), selected)
+
+        # A 1/3000-second leading edit ends between adjacent microseconds. The
+        # first video interval is pinned from the sum of the two exact clocks.
+        with doc_ex.open(rewrite_epub(publication, {path: delay(fixture, 1, 3)})) as book:
+            frames = list(book.epub_embedded_video(0, 2))
+            self.assertEqual((frames[0].start_us, frames[1].start_us), (334, 83_667))
+            self.assertEqual(frames[-1].start_us + frames[-1].duration_us, 1_000_334)
+            self.assertEqual(pcm(book, 2), bytes(16 * 2) + baseline)
+            self.assertEqual(pcm(book, 2, start_us=333, end_us=334), baseline[:2])
+
+        for options in ({"repeat": True}, {"rate": 0}):
+            with self.subTest(options=options), doc_ex.open(
+                rewrite_epub(publication, {path: delay(marked, 25, **options)}),
+            ) as book:
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "continuous presentation"):
+                    list(book.epub_embedded_video(0, 2))
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "one continuous segment"):
+                    pcm(book, 2)
+
     def test_mp4_chapter_id_rejects_malformed_or_ambiguous_local_tracks(self) -> None:
         movie = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
         chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>MP4 chapters</title></head>

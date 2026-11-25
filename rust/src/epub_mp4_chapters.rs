@@ -4,7 +4,7 @@ use std::{borrow::Cow, io::Cursor, ops::Range, sync::Arc};
 use oxideav_core::{CodecRegistry, Demuxer, StreamInfo};
 use oxideav_mp4::demux::{open_typed, EditListEntry, MovieHeader, Mp4Demuxer, SampleInfo};
 
-use super::Mp4Bounds;
+use super::{linear_edit, Mp4Bounds};
 use crate::epub::{
     audio::MAX_ENCODED_BYTES, invalid, limited, media::MAX_TIME, unsupported,
     validate_archive_path, Book, EngineError,
@@ -330,28 +330,17 @@ impl ChapterClock {
         {
             return Err(invalid("MP4 chapters require a finite movie clock"));
         }
-        let continuous =
-            |edit: &EditListEntry| edit.media_rate_integer == 1 && edit.media_rate_fraction == 0;
-        let (movie_start, media_origin, duration) = match edits {
-            [] => (0, 0, movie.duration),
-            [edit] if edit.media_time >= 0 && continuous(edit) => {
-                (0, edit.media_time, edit.segment_duration)
-            }
-            [gap, edit]
-                if gap.is_empty_edit()
-                    && continuous(gap)
-                    && edit.media_time >= 0
-                    && continuous(edit) =>
-            {
-                (gap.segment_duration, edit.media_time, edit.segment_duration)
-            }
-            _ => {
-                return Err(unsupported(
-                    "MP4 chapter track has a noncontinuous edit list",
-                ))
-            }
-        };
-        let movie_end = movie_start.saturating_add(duration).min(movie.duration);
+        let (movie_start, media_origin, movie_end) = linear_edit(
+            edits,
+            "MP4 chapter track has a noncontinuous edit list",
+        )?
+        .map_or((0, 0, movie.duration), |edit| {
+            (
+                edit.movie_start,
+                edit.media_start,
+                edit.movie_end.min(movie.duration),
+            )
+        });
         if movie_start >= movie_end {
             return Err(invalid("MP4 chapter track edit has no playable interval"));
         }

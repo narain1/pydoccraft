@@ -17,8 +17,8 @@ use oxideav_mp4::demux::{open_typed, EditListEntry, SampleInfo};
 use super::{
     audio::MAX_ENCODED_BYTES,
     invalid, limited,
-    media::SpatialFragment,
-    mp4::{Mp4Bounds, MAX_ACCESS_UNITS},
+    media::{SpatialFragment, MAX_TIME},
+    mp4::{linear_edit, Mp4Bounds, MAX_ACCESS_UNITS},
     unsupported, validate_archive_path, Book,
 };
 use crate::EngineError;
@@ -370,6 +370,31 @@ fn scale_us(value: i128, num: i64, den: i64) -> Result<u64, EngineError> {
     u64::try_from(value).map_err(|_| invalid("invalid MP4 video timestamp"))
 }
 
+fn shifted_us(
+    movie_time: u64,
+    movie_timescale: u32,
+    elapsed: u128,
+    base: TimeBase,
+) -> Result<u64, EngineError> {
+    let (num, den) = (i128::from(base.0.num), i128::from(base.0.den));
+    if movie_timescale == 0 || num <= 0 || den <= 0 {
+        return Err(invalid("invalid MP4 video timescale"));
+    }
+    let (num, den) = (num as u128, den as u128);
+    let movie_rate = u128::from(movie_timescale);
+    // Intersect the movie and media clocks before rounding a half-open boundary.
+    let time = elapsed
+        .checked_mul(num * movie_rate)
+        .and_then(|time| time.checked_add(u128::from(movie_time) * den))
+        .and_then(|time| time.checked_mul(1_000_000))
+        .ok_or_else(|| limited("MP4 video time exceeds limits"))?
+        .div_ceil(movie_rate * den);
+    if time > MAX_TIME {
+        return Err(limited("MP4 video time exceeds limits"));
+    }
+    Ok(time as u64)
+}
+
 fn playback_range(
     samples: &[SampleInfo],
     base: TimeBase,
@@ -388,35 +413,40 @@ fn playback_range(
             .checked_add(sample.duration)
             .ok_or_else(|| invalid("MP4 video duration overflow"))?
     };
-    let (origin, edit_duration) = match edits {
-        [] => (first, None),
-        [edit]
-            if edit.media_time >= first
-                && edit.media_rate_integer == 1
-                && edit.media_rate_fraction == 0 =>
-        {
-            let duration = scale_us(
-                i128::from(edit.segment_duration),
-                1,
-                i64::from(movie_timescale),
-            )?;
-            (edit.media_time, Some(duration))
-        }
-        _ => {
-            return Err(unsupported(
-                "MP4 video edit lists require a continuous presentation",
-            ))
-        }
-    };
+    let edit = linear_edit(
+        edits,
+        "MP4 video edit lists require a continuous presentation",
+    )?;
+    let (origin, movie_start) = edit
+        .as_ref()
+        .map_or((first, 0), |edit| (edit.media_start, edit.movie_start));
+    if origin < first {
+        return Err(unsupported(
+            "MP4 video edit begins before its media samples",
+        ));
+    }
     let since_origin = |pts: i64| {
-        scale_us(
-            (i128::from(pts) - i128::from(origin)).max(0),
-            base.0.num,
-            base.0.den,
-        )
+        let elapsed = (i128::from(pts) - i128::from(origin)).max(0);
+        if movie_start == 0 {
+            return scale_us(elapsed, base.0.num, base.0.den);
+        }
+        shifted_us(movie_start, movie_timescale, elapsed as u128, base)
     };
     let available = since_origin(stop)?;
-    let duration = available.min(edit_duration.unwrap_or(available));
+    let duration = if let Some(edit) = edit {
+        let end = if movie_start == 0 {
+            scale_us(i128::from(edit.movie_end), 1, i64::from(movie_timescale))?
+        } else {
+            shifted_us(edit.movie_end, movie_timescale, 0, base)?
+        };
+        let duration = available.min(end);
+        if duration <= since_origin(origin)? {
+            return Err(invalid("MP4 video edit has no playable interval"));
+        }
+        duration
+    } else {
+        available
+    };
     let clip = start_us..end_us.unwrap_or(duration).min(duration);
     if clip.is_empty() {
         return Err(EngineError::InvalidArgument(
@@ -435,6 +465,9 @@ fn playback_range(
                 "duplicate or unordered MP4 video presentation timestamp",
             ));
         }
+        if next <= origin {
+            continue;
+        }
         let interval = since_origin(pts)?..since_origin(next)?;
         if interval.start < clip.end && interval.end > clip.start {
             if interval.is_empty() {
@@ -443,6 +476,9 @@ fn playback_range(
             first_packet = first_packet.min(index);
             timeline.push(FrameTime { pts, interval });
         }
+    }
+    if timeline.is_empty() && clip.end <= since_origin(origin)? {
+        return Ok((timeline, clip, samples.len()));
     }
     let first_packet = samples
         .get(..=first_packet)
