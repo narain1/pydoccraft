@@ -1324,6 +1324,13 @@ fn expand(name: &str, value: &str) -> Vec<(String, String)> {
     }
     if let Some(names) = side_names(name) {
         let pieces = value_components(value);
+        if matches!(name, "margin" | "padding" | "inset" | "border-width")
+            && pieces
+                .iter()
+                .any(|piece| calc::is_calc(piece) && !calc::valid(piece, name != "border-width"))
+        {
+            return Vec::new();
+        }
         if name == "border-style"
             && !pieces
                 .iter()
@@ -1349,8 +1356,12 @@ fn expand(name: &str, value: &str) -> Vec<(String, String)> {
         let mut style = "none";
         let flow_relative = name.starts_with("border-inline") || name.starts_with("border-block");
         for word in value_components(value) {
-            if points(word, 12.0, [0.0; 2]).is_some()
-                || calc::is_calc(word) && calc::valid(word, false)
+            let calculated_width = calc::is_calc(word);
+            if calculated_width && !calc::valid(word, false) {
+                return Vec::new();
+            }
+            if calculated_width
+                || points(word, 12.0, [0.0; 2]).is_some()
                 || matches!(word, "thin" | "medium" | "thick")
             {
                 width = word;

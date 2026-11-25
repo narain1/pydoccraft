@@ -49,10 +49,15 @@ fn read(source: &str, font: f32, viewport: [f32; 2]) -> Result<Value, Issue> {
     if parsed.important.is_some() || parsed.span.end != declaration.len() {
         return Err(Issue::Invalid);
     }
-    evaluate(expr, font, viewport)
+    evaluate(expr, &declaration, font, viewport)
 }
 
-fn evaluate(expr: &ComponentValue<'_>, font: f32, viewport: [f32; 2]) -> Result<Value, Issue> {
+fn evaluate(
+    expr: &ComponentValue<'_>,
+    source: &str,
+    font: f32,
+    viewport: [f32; 2],
+) -> Result<Value, Issue> {
     use Kind::*;
     let value = match expr {
         ComponentValue::Number(number) => Value(Number, number.value),
@@ -73,11 +78,27 @@ fn evaluate(expr: &ComponentValue<'_>, font: f32, viewport: [f32; 2]) -> Result<
             let [expr] = function.args.as_slice() else {
                 return Err(Issue::Invalid);
             };
-            return evaluate(expr, font, viewport);
+            return evaluate(expr, source, font, viewport);
         }
         ComponentValue::Calc(expr) => {
-            let Value(left_kind, left) = evaluate(&expr.left, font, viewport)?;
-            let Value(right_kind, right) = evaluate(&expr.right, font, viewport)?;
+            if matches!(expr.op.kind, Op::Plus | Op::Minus) {
+                let bytes = source.as_bytes();
+                let before = expr
+                    .op
+                    .span
+                    .start
+                    .checked_sub(1)
+                    .and_then(|index| bytes.get(index));
+                let after = bytes.get(expr.op.span.end);
+                if ![before, after]
+                    .into_iter()
+                    .all(|byte| byte.is_some_and(u8::is_ascii_whitespace))
+                {
+                    return Err(Issue::Invalid);
+                }
+            }
+            let Value(left_kind, left) = evaluate(&expr.left, source, font, viewport)?;
+            let Value(right_kind, right) = evaluate(&expr.right, source, font, viewport)?;
             match (&expr.op.kind, left_kind, right_kind) {
                 (Op::Plus | Op::Minus, a, b) if a == b => {
                     let sign = if expr.op.kind == Op::Plus { 1.0 } else { -1.0 };

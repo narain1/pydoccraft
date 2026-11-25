@@ -1132,7 +1132,7 @@ class EpubTests(unittest.TestCase):
                padding-inline:calc(var(--gap) - 2px) calc(1.5em - 10px);
                padding-block-end:calc(2px - 4px); border-inline-start:calc(1px * 2) solid #3b2b7d}
           #inner{width:calc(100% - 25%); padding-inline-end:inherit; margin-inline-start:calc(3px - 7px)}
-          #note{left:5px;left:calc(2 + 4px)}
+          #note{left:5px;left:calc(2 + 4px);inset:calc(1px+ 2px)}
         """
         explicit = """
           #box{right:14px; top:14px; width:100px; height:48px;
