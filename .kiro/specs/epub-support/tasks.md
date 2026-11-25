@@ -1,5 +1,7 @@
 # EPUB implementation plan
 
+Follow-up work is tracked in GitHub for [CSS and fixed layout](https://github.com/narain1/pydoccraft/issues/147), [SVG geometry](https://github.com/narain1/pydoccraft/issues/148), [MathML](https://github.com/narain1/pydoccraft/issues/149), [captions and playback](https://github.com/narain1/pydoccraft/issues/150), [macOS and Windows wheel validation](https://github.com/narain1/pydoccraft/issues/151).
+
 - [x] Detect EPUB 2 and 3 and validate archive structure and sizes before reading resources.
 - [x] Replace the eager LexePub path with bounded in-repo container, OPF, navigation and XHTML extraction.
 - [x] Verify repeated metadata, path resolution, manifest and spine order, links, tables and media through the public API.
@@ -262,4 +264,4 @@
 - The locked Taffy grid API has no subgrid track type or parent track projection. EPUB's current adapter can delegate explicit, implicit and repeated track layout.
 - When an SVG spatial filter mixes overlapping sources into one RGBA raster, its final alpha cannot identify each contributor. Search and annotation geometry require a preservation proof or a representation that retains contributor identity.
 - WordCraft's editable equation matrix carries rows and column alignment. Its border boxes carry edge and strike flags. Interrupted dashed rules inside a larger equation cannot be represented by that model. Standalone Word tables retain authored borders.
-- EPUB video frames expose one RGB8 picture per presentation interval. Preserving HDR, alpha or simultaneous pictures requires a defined playback representation. Scroll-up captions and subtitle painting also require line layout and compositing, while the current timeline carries timed caption data.
+- EPUB video frames expose one RGB8 picture per presentation interval. Preserving HDR, alpha or simultaneous pictures requires a defined playback representation. The caption painter handles a single stationary WebVTT region cue. Scroll-up, simultaneous cues and TTML painting remain open.
