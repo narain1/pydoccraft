@@ -458,13 +458,7 @@ impl<'n> Reader<'_, 'n> {
         if pieces.iter().all(|piece| piece.region == region) {
             return self.emit(node, region, timing, pieces);
         }
-        if node
-            .ancestors()
-            .chain(node.descendants())
-            .any(|element| self.regions.excluded.contains(&element.id()))
-        {
-            return Err(unsupported("conditional TTML mixed-region content"));
-        }
+        // Excluded content has already advanced the timing walk without yielding pieces.
         let mut groups = Vec::new();
         let mut seen = HashSet::new();
         for group in pieces.chunk_by(|left, right| left.region == right.region) {

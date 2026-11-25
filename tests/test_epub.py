@@ -8145,6 +8145,103 @@ overlay
             self.assertEqual([presentation(cue) for cue in reopened.epub_embedded_text(0, 0)],
                              [presentation(cue) for cue in cues])
 
+    def test_ttml_mixed_regions_keep_omitted_span_timing_and_visible_region_order(self) -> None:
+        video = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        header = b'''<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling"
+          xmlns:ttp="http://www.w3.org/ns/ttml#parameter" xml:lang="en" ttp:tickRate="1000">
+          <head><layout>
+            <region xml:id="lower" tts:origin="10% 65%" tts:extent="80% 30%" tts:color="green"/>
+            <region xml:id="center" tts:origin="15% 30%" tts:extent="70% 25%"/>
+            <region xml:id="upper" tts:origin="10% 5%" tts:extent="80% 20%" tts:color="blue"/>
+            <region xml:id="aside" tts:origin="80% 10%" tts:extent="20% 20%"/>
+          </layout></head><body>'''
+        footer = b'<p xml:id="overlay" region="aside" begin="169t" end="184t">Overlay</p></body></tt>'
+        conditional = header + b'''<p xml:id="serial" begin="150t" dur="47t" timeContainer="seq">
+          <span region="lower" dur="12t">Before</span>
+          <span region="center" dur="19t" condition="parameter('forced')">
+            Optional <span tts:fontStyle="italic">line</span>
+          </span>
+          <span region="upper" dur="16t">
+            <set begin="3t" dur="7t" condition="!parameter('forced')" tts:color="lime"/>
+            After <span tts:fontWeight="bold">cue</span>
+          </span>
+        </p>''' + footer
+        ordinary_control = header + b'''<p xml:id="serial" begin="150t" end="197t">
+          <span region="lower" begin="0t" end="12t">Before</span>
+          <span region="upper" begin="31t" end="47t">
+            <set begin="3t" dur="7t" tts:color="lime"/>
+            After <span tts:fontWeight="bold">cue</span>
+          </span>
+        </p>''' + footer
+        forced_control = header + b'''<p xml:id="serial" begin="150t" end="197t">
+          <span region="lower" begin="0t" end="12t">Before</span>
+          <span region="center" begin="12t" end="31t">Optional <span tts:fontStyle="italic">line</span></span>
+          <span region="upper" begin="31t" end="47t">After <span tts:fontWeight="bold">cue</span></span>
+        </p>''' + footer
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Timed mixed regions</title></head>
+          <body><video src="clip.mp4#t=0.148,0.200&amp;xywh=1,1,6,4">
+          <track src="mixed.ttml" kind="captions" srclang="en"/>
+          <track src="ordinary.ttml" kind="subtitles" srclang="en"/>
+          <track src="forced.ttml" kind="subtitles" srclang="en"/>
+          </video></body></html>"""
+        path = "OEBPS/mixed.ttml"
+        with doc_ex.open(epub_fixture()) as original:
+            publication = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Timed mixed regions", chapter, "OEBPS/chapter.xhtml")],
+                resources={
+                    "OEBPS/clip.mp4": doc_ex.EpubResource("video/mp4", video),
+                    path: doc_ex.EpubResource("application/ttml+xml", conditional),
+                    "OEBPS/ordinary.ttml": doc_ex.EpubResource("application/ttml+xml", ordinary_control),
+                    "OEBPS/forced.ttml": doc_ex.EpubResource("application/ttml+xml", forced_control),
+                },
+            )
+
+        def presentation(cues: Iterable[doc_ex.EpubTextCue]) -> list[tuple[object, ...]]:
+            return [(cue, cue.runs, cue.ttml_region_layout) for cue in cues]
+
+        with doc_ex.open(publication) as book:
+            for forced, control_index, timeline in (
+                (False, 1, [(150, 162, "lower"), (169, 184, "aside"),
+                            (181, 184, "upper"), (184, 191, "upper"), (191, 197, "upper")]),
+                (True, 2, [(150, 162, "lower"), (162, 181, "center"),
+                           (169, 184, "aside"), (181, 197, "upper")]),
+            ):
+                with self.subTest(ttml_forced=forced):
+                    cues = book.epub_embedded_text(0, 0, ttml_forced=forced)
+                    self.assertEqual([(cue.start_us, cue.end_us, cue.region) for cue in cues],
+                                     [(start * 1000, end * 1000, region) for start, end, region in timeline])
+                    self.assertEqual(presentation(cues), presentation(book.epub_embedded_text(
+                        0, 0, track_index=control_index,
+                    )))
+                    expected = list(book.epub_embedded_video(0, 0, text_track=control_index))
+                    frames = list(book.epub_embedded_video(0, 0, text_track=0, ttml_forced=forced))
+                    self.assertEqual(frames, expected)
+                    self.assertEqual([presentation(frame.text_cues) for frame in frames],
+                                     [presentation(frame.text_cues) for frame in expected])
+                    self.assertTrue(all((frame.width, frame.height) == (6, 4) for frame in frames))
+
+                    seek = {"start_us": 170_123, "end_us": 183_456}
+                    sought = list(book.epub_embedded_video(0, 0, text_track=0, ttml_forced=forced, **seek))
+                    self.assertEqual(sought, list(book.epub_embedded_video(0, 0, text_track=control_index, **seek)))
+                    self.assertEqual([(frame.start_us, frame.duration_us) for frame in sought],
+                                     [(170_123, 10_877), (181_000, 2_456)])
+                    self.assertIs(sought[0].rgb, sought[1].rgb)
+                    self.assertEqual([[cue.region for cue in frame.text_cues] for frame in sought],
+                                     [["center", "aside"] if forced else ["aside"], ["upper", "aside"]])
+
+            empty_time = {"start_us": 163_250, "end_us": 164_500}
+            self.assertEqual(book.epub_embedded_text(0, 0, **empty_time), [])
+            plain_frame, = book.epub_embedded_video(0, 0, text_track=0, **empty_time)
+            self.assertEqual(plain_frame.text_cues, ())
+            captioned_frame, = book.epub_embedded_video(0, 0, text_track=0, ttml_forced=True, **empty_time)
+            self.assertEqual(captioned_frame.text_cues[0].text, "Optional line")
+            revised = book.edit_epub_structure(replacements={0: chapter.replace("Timed mixed regions", "Revised")})
+        with doc_ex.open(revised) as book:
+            self.assertEqual(book.read_epub_resource(path), conditional)
+            for forced, control_index in ((False, 1), (True, 2)):
+                self.assertEqual(presentation(book.epub_embedded_text(0, 0, ttml_forced=forced)),
+                                 presentation(book.epub_embedded_text(0, 0, track_index=control_index)))
+
     def test_ttml_mixed_regions_reject_ambiguous_text_and_region_order(self) -> None:
         head = b'''<tt xmlns="http://www.w3.org/ns/ttml"><head><layout>
           <region xml:id="low"/><region xml:id="high"/>
@@ -8169,13 +8266,21 @@ overlay
             (b'<p dur="1s" xml:space="preserve"> ' + low + high, "preserved whitespace"),
             (b'<p dur="1s">' + low + b' ' + low + high, "returns to an earlier region"),
             (b'<p dur="1s">' + low + high + low, "returns to an earlier region"),
-            (b'<p dur="1s">' + low + high + b'<span dur="1s" condition="false">Excluded</span>',
-             "conditional TTML mixed-region content"),
+            (b'<p dur="1s">' + low + high + b'<span condition="false">Excluded</span>',
+             "requires an explicit end or duration"),
         ):
             with self.subTest(paragraph=paragraph):
                 changed = rewrite_epub(data, {"OEBPS/mixed.ttml": head + paragraph + b'</p></body></tt>'})
                 with doc_ex.open(changed) as book, self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
                     book.epub_embedded_text(0, 0)
+
+        conditional_high = b"""<span region="high" dur="1s" condition="parameter('forced')">Higher</span>"""
+        interleaved = head + b'<p dur="1s">' + low + conditional_high + low + b'</p></body></tt>'
+        with doc_ex.open(rewrite_epub(data, {"OEBPS/mixed.ttml": interleaved})) as book:
+            [cue] = book.epub_embedded_text(0, 0)
+            self.assertEqual((cue.region, cue.text), ("low", "LowerLower"))
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "returns to an earlier region"):
+                book.epub_embedded_text(0, 0, ttml_forced=True)
 
     def test_ttml_forced_conditions_keep_excluded_intervals_on_the_source_clock(self) -> None:
         video = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
