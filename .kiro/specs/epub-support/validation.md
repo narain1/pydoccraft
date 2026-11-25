@@ -1626,3 +1626,13 @@ The installed baseline renders shared flat lighting with the same PNG as indepen
 Overlapping source supports, raised lighting, unrelated extra stages and over-compositing retain explicit attribution errors. A copied tile that reuses a generated light result name exercises lookup of the final effective named result.
 
 The Linux CPython 3.11 release wheel passed 66 SVG-related EPUB tests. Rust 1.95 formatting, locked release all-target Clippy with warnings denied, and the task roadmap check passed. [SVG filter compositing](https://www.w3.org/TR/filter-effects-1/#feCompositeElement)
+
+## 2026-11-25 Integrated EPUB subgrid edges, native MathML borrowing, shared lighting and narration escape
+
+Fixed-layout subgrids preserved interior lines through definite edge insets, gutter calculations and opposite logical directions. Independently authored controls verified editable MathML padding across distinct spaces, shared flat SVG lighting with preserved native PDF search and links, and leaving the innermost active narration structure through bounded playback. The intrinsic sizing budget still rejects a separate 4,100-box publication.
+
+The installed Linux x86-64 CPython 3.11.15 release wheel from `0fce9e6b92` passed 932 tests, including 337 EPUB tests, with zero failures, errors or skips. It measured 26,004,889 bytes with a 60,517,480-byte native extension. Its SHA-256 is `d2d1d27d66a38e90cf5ecc572fb5904dcae10e79428f10c15d529b81512f7b48`. This checkpoint used the host Linux wheel. The macOS and Windows release matrix remains open.
+
+Four released W3C EPUB books passed with 28 chapter previews and four reopened fixed-layout PDF pages. Two independently authored fixed-layout EPUBs with automatic grid repetition, gap shorthands, stepped CSS geometry, inline bidi isolation and labeled MathML widths passed EPUBCheck 5.4.0 with zero fatals, errors, warnings or informational messages. Rust 1.95 formatting and locked release all-target Clippy with warnings denied passed. Rust passed 479 unit and 7 integration tests with default features and 401 unit and 8 integration tests without Python. Node 22.22.1 passed 17 tests.
+
+Both lockfiles, the dependency inventory and the upstream revisions match the preceding checkpoint. The audit reviewed 349 core packages and binding licenses. All wheel attribution files matched their source copies. The Linux extension uses system C and GCC libraries. The public typing, documentation, support evidence and roadmap checks passed. The generated wheel, EPUB inputs, native crate objects and temporary test environment were pruned. Locked dependency artifacts were retained for the next validation.
