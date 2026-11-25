@@ -11,7 +11,7 @@ from numbers import Real
 from html import escape
 from itertools import chain
 from types import SimpleNamespace
-from typing import Any, Callable, Iterator, Literal, TYPE_CHECKING, overload
+from typing import Any, Callable, Generator, Iterator, Literal, TYPE_CHECKING, overload
 
 from .errors import DocumentClosedError, MalformedDocumentError, UnsafeArchiveError
 from .models import (
@@ -28,6 +28,8 @@ _MAX_EXPORT_NODES = 100_000
 _MAX_EXPORT_DEPTH = 32
 _MAX_EPUB_CHAPTER_BYTES = 8 * 1024 * 1024
 _MAX_EPUB_EDIT_BYTES = 128 * 1024 * 1024
+_EPUB_ESCAPABLE_ROLES = frozenset({"table", "list", "figure", "aside"})
+_EpubEscapeScopes = tuple[tuple[str, object], ...]
 _OverlayEdit = tuple[int, bool, str | None, str | None, int, int | None, str | None]
 _MEDIA_EXTENSIONS = {
     "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
@@ -940,11 +942,11 @@ class Document:
 
     def epub_media_cues(self, page: int) -> list[dict[str, Any]]:
         """Return SMIL cues for a spine page, in playback order."""
-        return [cue for cue, _ in self._epub_cues(page)]
+        return [cue for cue, _, _ in self._epub_cues(page)]
 
     def _epub_cues(
-        self, page: int, *, start_fragment: str | None = None,
-    ) -> Iterator[tuple[dict[str, Any], tuple[str, ...]]]:
+        self, page: int, *, start_fragment: str | None = None, track_escape: bool = False,
+    ) -> Iterator[tuple[dict[str, Any], tuple[str, ...], _EpubEscapeScopes]]:
         self._ensure_open()
         if self._filetype != "epub":
             from .errors import UnsupportedFormatError
@@ -955,13 +957,18 @@ class Document:
         overlay_id = chapter.get("media_overlay")
         started = start_fragment is None
         chapter_path = chapter["chapter_path"]
-        stack: list[tuple[dict[str, Any], tuple[str, ...], bool]] = []
+        stack: list[tuple[dict[str, Any], tuple[str, ...], bool, _EpubEscapeScopes]] = []
         if overlay_id is not None:
             overlay = self.metadata["media_overlays"][overlay_id]
-            stack.append((overlay["body"], (), False))
+            stack.append((overlay["body"], (), False, ()))
         while stack:
-            node, parent_roles, within_target = stack.pop()
-            roles = (*parent_roles, *(node.get("epub_type") or "").split())
+            node, parent_roles, within_target, scopes = stack.pop()
+            node_roles = (node.get("epub_type") or "").split()
+            roles = (*parent_roles, *node_roles)
+            if track_escape and (escapable_roles := _EPUB_ESCAPABLE_ROLES.intersection(node_roles)):
+                # The same role can occur on siblings or on nested structures.
+                owner = object()
+                scopes += tuple((role, owner) for role in escapable_roles)
             target = node.get("text")
             if not started and not within_target and target is not None:
                 within_target = target["path"] == chapter_path and target["fragment"] == start_fragment
@@ -973,9 +980,9 @@ class Document:
                         "text": dict(node["text"]),
                         "audio": None if node["audio"] is None else dict(node["audio"]),
                         "epub_type": node["epub_type"],
-                    }, roles
+                    }, roles, scopes
             else:
-                stack.extend((child, roles, within_target) for child in reversed(node["children"]))
+                stack.extend((child, roles, within_target, scopes) for child in reversed(node["children"]))
         if not started:
             raise IndexError("EPUB narration target is absent on this page")
 
@@ -988,7 +995,9 @@ class Document:
         chunk_frames: int | None,
         opus_tracks: Mapping[str, int] | None,
         audio_tracks: Mapping[str, int] | None,
-    ) -> Iterator[Iterator[EpubNarrationCue]]:
+        *,
+        track_escape: bool = False,
+    ) -> Generator[tuple[Iterator[EpubNarrationCue], _EpubEscapeScopes], object | None, None]:
         from . import _core, _native
 
         start_cue = operator.index(start_cue)
@@ -1009,11 +1018,17 @@ class Document:
         current_track = None
         decoder = None
         found_start = start_cue == 0
-        for index, (cue, roles) in enumerate(self._epub_cues(page, start_fragment=start_fragment)):
+        escaped_owner = None
+        cues = self._epub_cues(page, start_fragment=start_fragment, track_escape=track_escape)
+        for index, (cue, roles, scopes) in enumerate(cues):
             self._ensure_open()
             if index < start_cue:
                 continue
             found_start = True
+            if escaped_owner is not None:
+                if any(owner is escaped_owner for _, owner in scopes):
+                    continue
+                escaped_owner = None
             if skipped.intersection(roles):
                 continue
             target = cue["text"]
@@ -1021,7 +1036,7 @@ class Document:
             audio = cue["audio"]
             if audio is None:
                 spoken = _native(lambda: _core._epub_narration_text(self._source, target["path"], target["fragment"]))
-                yield iter((EpubNarrationCue(*args, text=spoken),))
+                escaped_owner = yield iter((EpubNarrationCue(*args, text=spoken),)), scopes
                 continue
             track = (audio["path"], audio["media_type"])
             if track != current_track:
@@ -1032,9 +1047,10 @@ class Document:
                     self._source, *track, opus_selection, audio_track=audio_selection,
                 ))
                 current_track = track
-            yield self._epub_audio_group(
+            group = self._epub_audio_group(
                 args, decoder, audio["clip_begin_us"], audio["clip_end_us"], chunk_frames,
             )
+            escaped_owner = yield group, scopes
         if not found_start:
             raise IndexError("EPUB narration cue index out of range")
 
@@ -1086,7 +1102,7 @@ class Document:
         audio_tracks: Mapping[str, int] | None = None,
     ) -> Iterator[EpubNarrationCue]:
         """Read cues, optionally starting at a cue index or decoded XHTML fragment ID."""
-        for group in self._epub_narration_groups(
+        for group, _ in self._epub_narration_groups(
             page, skip_roles, start_cue, start_fragment, chunk_frames, opus_tracks, audio_tracks,
         ):
             yield from group
@@ -1098,6 +1114,7 @@ class Document:
         play_audio: Callable[[EpubAudioClip], None],
         speak_text: Callable[[str], None],
         on_cue: Callable[[EpubNarrationCue | None], None] | None = None,
+        escape_role: Callable[[EpubNarrationCue], str | None] | None = None,
         skip_roles: Iterable[str] = (),
         start_cue: int = 0,
         start_fragment: str | None = None,
@@ -1105,10 +1122,19 @@ class Document:
         opus_tracks: Mapping[str, int] | None = None,
         audio_tracks: Mapping[str, int] | None = None,
     ) -> None:
-        """Play from a cue index or decoded XHTML fragment ID through blocking sinks."""
-        for group in self._epub_narration_groups(
+        """Play through blocking sinks, with optional escape after an audio chunk or text cue."""
+        groups = self._epub_narration_groups(
             page, skip_roles, start_cue, start_fragment, chunk_frames, opus_tracks, audio_tracks,
-        ):
+            track_escape=escape_role is not None,
+        )
+        escaped_owner = None
+        while True:
+            try:
+                # Send the selected owner back before the next cue opens its audio.
+                group, scopes = groups.send(escaped_owner)
+            except StopIteration:
+                return
+            escaped_owner = None
             first = next(group)
             if on_cue is not None:
                 on_cue(first)
@@ -1119,6 +1145,15 @@ class Document:
                         play_audio(cue.audio)
                     elif cue.text:
                         speak_text(cue.text)
+                    if escape_role is not None and scopes:
+                        role = escape_role(cue)
+                        if role is not None:
+                            if not isinstance(role, str):
+                                raise TypeError("EPUB narration escape role must be a string or None")
+                            escaped_owner = next((owner for name, owner in reversed(scopes) if name == role), None)
+                            if escaped_owner is None:
+                                raise ValueError("EPUB narration escape role is not active")
+                            break
             finally:
                 if on_cue is not None:
                     on_cue(None)

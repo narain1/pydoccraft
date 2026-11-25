@@ -58,6 +58,8 @@ with doc_ex.open(epub_bytes) as book:
 
 The callbacks run in sequence on the calling thread. The audio and speech callbacks return when playback ends. If supplied, `on_cue` receives the active target before playback and `None` when playback ends or the sink raises. The library decodes the audio in-process and delegates output to the supplied sinks. Pass EPUB structural roles to `skip_roles` to omit matching cues and descendants of matching sequences.
 
+Pass `escape_role` to let a reader leave an active `table`, `list`, `figure`, or `aside` during playback. The callback receives the current `EpubNarrationCue` after each delivered audio chunk or text cue in one of those structures. Return `None` to continue, or return an active role to resume immediately after its innermost matching SMIL structure on the selected page. Returning a role that is absent raises `ValueError`. Use `chunk_frames` to control how soon a request can take effect during recorded audio.
+
 ## Fast text extraction
 
 ```python

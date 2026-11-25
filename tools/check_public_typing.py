@@ -61,7 +61,10 @@ def verify_epub_tracks(source: bytes) -> None:
         assert_type(audio, Iterator[doc_ex.EpubAudioClip])
         narration = epub.epub_narration(0, start_fragment="section", audio_tracks={"OEBPS/voice.webm": 1})
         assert_type(narration, Iterator[doc_ex.EpubNarrationCue])
-        epub.play_epub_narration(0, start_fragment="section", play_audio=lambda _: None, speak_text=lambda _: None)
+        epub.play_epub_narration(
+            0, start_fragment="section", play_audio=lambda _: None, speak_text=lambda _: None,
+            escape_role=lambda cue: "aside" if "aside" in cue.roles else None,
+        )
         edited = epub.edit_epub_structure(
             [0], replacements={0: "<html><body>Revised</body></html>"},
             spine_properties={0: doc_ex.EpubSpineProperties(page_spread="center", spread="none")},

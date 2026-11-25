@@ -10637,6 +10637,123 @@ Resume
         with doc_ex.open(epub_fixture()) as document, self.assertRaisesRegex(IndexError, "target is absent"):
             list(document.epub_narration(0, start_fragment="chapter"))
 
+    def test_media_overlay_escapes_the_selected_active_structure_during_playback(self) -> None:
+        source, wav = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b"</manifest>", b'<item id="broken" href="Media/broken.flac" media-type="audio/flac"/></manifest>',
+            )
+        source = rewrite_epub(source, {
+            "OEBPS/content.opf": package,
+            "OEBPS/Media/broken.flac": b"fLaC",
+            "OEBPS/one.xhtml": """<html xmlns="http://www.w3.org/1999/xhtml"><body>
+                <p id="intro">Opening</p><aside id="outer"><ol id="all-lists">
+                  <li><ol id="first-list"><li id="heard">Hear these samples</li><li id="broken">Unused</li></ol></li>
+                  <li><ol id="second-list"><li id="next">Hear later samples</li></ol></li>
+                </ol><p id="notice">Inside aside</p></aside>
+                <aside id="sibling"><p id="sibling-leaf">Sibling aside</p></aside>
+                <p id="after">After both</p></body></html>""",
+            "OEBPS/two.xhtml": """<html xmlns="http://www.w3.org/1999/xhtml"><body>
+                <aside id="outer"><p id="heard">Second page</p><p id="notice">Unused after speech</p></aside>
+                <p id="after">Page two after</p></body></html>""",
+            "OEBPS/Sync/read.smil": """<smil xmlns="http://www.w3.org/ns/SMIL"
+                xmlns:epub="http://www.idpf.org/2007/ops" version="3.0"><body>
+                <par><text src="../one.xhtml#intro"/></par>
+                <seq epub:textref="../one.xhtml#outer" epub:type="aside">
+                  <seq epub:textref="../one.xhtml#all-lists" epub:type="list">
+                    <seq epub:textref="../one.xhtml#first-list" epub:type="list">
+                      <par id="first"><text src="../one.xhtml#heard"/>
+                        <audio src="../Media/voice.wav" clipBegin="250ms" clipEnd="625ms"/></par>
+                      <par><text src="../one.xhtml#broken"/>
+                        <audio src="../Media/broken.flac" clipEnd="1s"/></par>
+                    </seq>
+                    <seq epub:textref="../one.xhtml#second-list" epub:type="list">
+                      <par><text src="../one.xhtml#next"/>
+                        <audio src="../Media/voice.wav" clipBegin="750ms" clipEnd="800ms"/></par>
+                    </seq>
+                  </seq><par><text src="../one.xhtml#notice"/></par>
+                </seq>
+                <seq epub:textref="../one.xhtml#sibling" epub:type="aside">
+                  <par><text src="../one.xhtml#sibling-leaf"/></par>
+                </seq>
+                <par><text src="../one.xhtml#after"/></par>
+                <seq epub:textref="../two.xhtml#outer" epub:type="aside">
+                  <par><text src="../two.xhtml#heard"/></par>
+                  <par><text src="../two.xhtml#notice"/></par>
+                </seq><par><text src="../two.xhtml#after"/></par></body></smil>""",
+        })
+
+        with wave.open(io.BytesIO(wav), "rb") as control:
+            control.setpos(2000)
+            prefix = control.readframes(502)
+            control.setpos(6000)
+            following = control.readframes(400)
+
+        with doc_ex.open(source) as document:
+            with self.assertRaises(doc_ex.UnsupportedFormatError):
+                list(document.epub_narration(0, start_fragment="first-list"))
+
+            for role, remaining_audio, remainder in (
+                ("list", following, ["next", "notice"]),
+                ("aside", b"", []),
+            ):
+                with self.subTest(role=role):
+                    audio: list[doc_ex.EpubAudioClip] = []
+                    speech: list[str] = []
+                    changes: list[str | None] = []
+                    polls: list[str | None] = []
+
+                    def escape_after_two_chunks(cue: doc_ex.EpubNarrationCue) -> str | None:
+                        polls.append(cue.fragment)
+                        if cue.fragment == "heard":
+                            self.assertEqual(cue.roles, ("aside", "list", "list"))
+                            if len(audio) == 2:
+                                return role
+                        return None
+
+                    document.play_epub_narration(
+                        0, start_fragment="first-list", chunk_frames=251, escape_role=escape_after_two_chunks,
+                        play_audio=audio.append, speak_text=speech.append,
+                        on_cue=lambda cue: changes.append(cue.fragment if cue else None),
+                    )
+                    played = ["heard", *remainder, "sibling-leaf", "after"]
+                    self.assertEqual(changes, [event for target in played for event in (target, None)])
+                    self.assertEqual(speech, (["Inside aside"] if remainder else []) + ["Sibling aside", "After both"])
+                    self.assertEqual(polls, ["heard", "heard"] + (["next", "next", "notice"] if remainder else [])
+                                     + ["sibling-leaf"])
+                    self.assertEqual([clip.frame_count for clip in audio], [251, 251] + ([251, 149] if remainder else []))
+                    samples = bytearray()
+                    for clip in audio:
+                        with wave.open(io.BytesIO(clip.wave), "rb") as decoded:
+                            samples.extend(decoded.readframes(clip.frame_count))
+                    self.assertEqual(samples, b"".join(
+                        struct.pack("<h", (sample - 128) * 256) for sample in prefix + remaining_audio
+                    ))
+
+            speech = []
+            document.play_epub_narration(
+                -1, start_fragment="outer", escape_role=lambda cue: "aside",
+                play_audio=lambda _: self.fail("unexpected recorded cue"), speak_text=speech.append,
+            )
+            self.assertEqual(speech, ["Second page", "Page two after"])
+
+            speech = []
+            document.play_epub_narration(
+                0, start_cue=1, skip_roles={"aside"},
+                escape_role=lambda _: self.fail("polled inside a skipped structure"),
+                play_audio=lambda _: self.fail("unexpected recorded cue"), speak_text=speech.append,
+            )
+            self.assertEqual(speech, ["After both"])
+
+            changes = []
+            with self.assertRaisesRegex(ValueError, "escape role is not active"):
+                document.play_epub_narration(
+                    0, start_fragment="first-list", chunk_frames=251, escape_role=lambda _: "figure",
+                    play_audio=lambda _: None, speak_text=lambda _: None,
+                    on_cue=lambda cue: changes.append(cue.fragment if cue else None),
+                )
+            self.assertEqual(changes, ["heard", None])
+
     def test_media_overlay_streams_long_cue_with_one_active_target(self) -> None:
         source, _ = narrated_epub()
         with zipfile.ZipFile(io.BytesIO(source)) as archive:
