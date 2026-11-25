@@ -3031,3 +3031,7 @@ The Linux x86-64 CPython 3.11 host wheel passed 893 installed tests, including 2
 ## 2026-11-25 EPUB CSS percentage ratios, staged narration, MathML spacing and layered AV1
 
 The Linux x86-64 CPython 3.11 host wheel passed 898 installed tests, including 303 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-css-percentage-ratios-staged-narration-mathml-spacing-and-layered-av1)
+
+## 2026-11-25 EPUB CSS block bounds, nested SVG spacing, padded MathML labels and MP4 edits
+
+The Linux x86-64 CPython 3.11 host wheel passed 901 installed tests, including 306 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-css-block-bounds-nested-svg-spacing-padded-mathml-labels-and-mp4-edits)
