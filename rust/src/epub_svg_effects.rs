@@ -21,6 +21,9 @@ pub(super) use morphology::normalize as normalize_morphology;
 #[path = "epub_svg_noise.rs"]
 mod noise;
 
+#[path = "epub_svg_tiling.rs"]
+mod tiling;
+
 #[path = "epub_svg_transfer.rs"]
 mod transfer;
 pub(in crate::epub) use transfer::is_channel as is_transfer_channel;
@@ -53,6 +56,7 @@ pub(in crate::epub) fn is_filter_primitive(tag: &str) -> bool {
             | "feComponentTransfer"
             | "feMorphology"
             | "feConvolveMatrix"
+            | "feTile"
             | "feTurbulence"
             | "feDisplacementMap"
     )
@@ -522,7 +526,11 @@ fn validate_offset(offset: f32, message: &'static str) -> Result<(), EngineError
     Ok(())
 }
 
-pub(super) fn validate_raster(tree: &usvg::Tree, scale: Transform) -> Result<(), EngineError> {
+pub(super) fn validate_raster(
+    tree: &usvg::Tree,
+    transform: Transform,
+    raster: [u32; 2],
+) -> Result<(), EngineError> {
     for root in tree
         .patterns()
         .iter()
@@ -537,7 +545,8 @@ pub(super) fn validate_raster(tree: &usvg::Tree, scale: Transform) -> Result<(),
         }
     }
     let mut pixels = 0;
-    measure_group(tree.root(), scale, &mut pixels)
+    let viewport = RasterViewport { transform, raster };
+    measure_group(tree.root(), transform, &viewport, &mut pixels)
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -554,6 +563,7 @@ struct Support {
     retains_source: bool,
     within_source: bool,
     procedural: bool,
+    copied_source: bool,
 }
 
 impl Support {
@@ -562,14 +572,21 @@ impl Support {
             retains_source: self.retains_source || other.retains_source,
             within_source: self.within_source && other.within_source,
             procedural: self.procedural || other.procedural,
+            copied_source: self.copied_source || other.copied_source,
+        }
+    }
+
+    fn over(self, below: Self) -> Self {
+        Self {
+            copied_source: self.copied_source || (!self.retains_source && below.copied_source),
+            ..self.union(below)
         }
     }
 
     fn subset(within_source: bool) -> Self {
         Self {
-            retains_source: false,
             within_source,
-            procedural: false,
+            ..Self::default()
         }
     }
 }
@@ -588,10 +605,11 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
     let source = Support {
         retains_source: covers(filter.rect()),
         within_source: true,
-        procedural: false,
+        ..Support::default()
     };
     let mut output = Support::default();
-    for primitive in filter.primitives() {
+    let primitives = filter.primitives();
+    for (index, primitive) in primitives.iter().enumerate() {
         let get = |input: &Input| match input {
             Input::SourceGraphic | Input::SourceAlpha => source,
             Input::Reference(name) => results.get(name.as_str()).copied().unwrap_or_default(),
@@ -609,7 +627,7 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
                         // The native input is premultiplied and transparent pixels have
                         // zero color. A nonpositive bias cannot create coverage there.
                         within_source: input.within_source && values[19] <= 0.0,
-                        procedural: input.procedural,
+                        ..input
                     },
                     ColorMatrixKind::LuminanceToAlpha => Support {
                         retains_source: false,
@@ -624,8 +642,9 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
                 get(blur.input())
             }
             Kind::GaussianBlur(blur) => Support {
-                procedural: get(blur.input()).procedural,
-                ..Support::default()
+                retains_source: false,
+                within_source: false,
+                ..get(blur.input())
             },
             Kind::DropShadow(shadow) => Support {
                 within_source: false,
@@ -633,7 +652,28 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
             },
             Kind::Offset(offset) if offset.dx() == 0.0 && offset.dy() == 0.0 => get(offset.input()),
             Kind::DisplacementMap(map) if map.scale() == 0.0 => get(map.input1()),
-            Kind::DisplacementMap(_) | Kind::Turbulence(_) => Support {
+            Kind::DisplacementMap(map) => Support {
+                procedural: true,
+                copied_source: get(map.input1()).copied_source,
+                ..Support::default()
+            },
+            Kind::Tile(tile) if tiling::passes_input(tile, filter, &primitives[..index]) => {
+                Support {
+                    procedural: true,
+                    ..get(tile.input())
+                }
+            }
+            Kind::Tile(_) => Support {
+                procedural: true,
+                copied_source: true,
+                ..Support::default()
+            },
+            Kind::Offset(offset) => Support {
+                retains_source: false,
+                within_source: false,
+                ..get(offset.input())
+            },
+            Kind::Turbulence(_) => Support {
                 procedural: true,
                 ..Support::default()
             },
@@ -646,7 +686,7 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
                 Support {
                     retains_source: input.retains_source && alpha.retains_ink,
                     within_source: input.within_source && alpha.keeps_transparency,
-                    procedural: input.procedural,
+                    ..input
                 }
             }
             Kind::ConvolveMatrix(matrix) => {
@@ -656,6 +696,7 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
                     retains_source: input.retains_source && alpha.retains_ink,
                     within_source: input.within_source && alpha.keeps_transparency,
                     procedural: input.procedural || alpha.needs_neighbors,
+                    ..input
                 }
             }
             Kind::Morphology(morphology) => {
@@ -674,7 +715,8 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
             Kind::Composite(composite) => {
                 let (first, second) = (get(composite.input1()), get(composite.input2()));
                 let support = match composite.operator() {
-                    CompositeOperator::Over | CompositeOperator::Lighter => first.union(second),
+                    CompositeOperator::Over => first.over(second),
+                    CompositeOperator::Lighter => first.union(second),
                     CompositeOperator::In => {
                         Support::subset(first.within_source || second.within_source)
                     }
@@ -687,8 +729,14 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
                         Support::subset(k4 <= 0.0 && first.within_source && second.within_source)
                     }
                 };
+                let copied_source = match composite.operator() {
+                    CompositeOperator::Over => support.copied_source,
+                    CompositeOperator::In | CompositeOperator::Out => first.copied_source,
+                    _ => first.copied_source || second.copied_source,
+                };
                 Support {
                     procedural: first.procedural || second.procedural,
+                    copied_source,
                     ..support
                 }
             }
@@ -696,7 +744,7 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
                 .inputs()
                 .iter()
                 .fold(Support::subset(true), |output, input| {
-                    output.union(get(input))
+                    get(input).over(output)
                 }),
             _ => Support::default(),
         };
@@ -756,6 +804,9 @@ fn offset_chain(filter: &usvg::filter::Filter) -> Option<(Vec<[f32; 2]>, bool)> 
                 morphology.input()
             }
             Kind::DisplacementMap(map) if map.scale() == 0.0 => map.input1(),
+            Kind::Tile(tile) if tiling::passes_input(tile, filter, &primitives[..current]) => {
+                tile.input()
+            }
             Kind::GaussianBlur(blur)
                 if blur.std_dev_x().get() == 0.0 && blur.std_dev_y().get() == 0.0 =>
             {
@@ -790,7 +841,9 @@ fn filter_geometry(group: &usvg::Group, additive_input: bool) -> (FilterGeometry
         return (FilterGeometry::Unproven, true, false);
     };
     let output = filter_support(filter, bounds);
-    let filter = if output.retains_source {
+    let filter = if output.copied_source {
+        FilterGeometry::Unproven
+    } else if output.retains_source {
         FilterGeometry::Retained
     } else if output.within_source && !additive_input && at_most_one_leaf(group, &mut false) {
         // Measure the actual native effect when it can only remove or weaken
@@ -1001,9 +1054,15 @@ fn contains_filter(group: &usvg::Group) -> bool {
     !group.filters().is_empty() || groups(group).any(contains_filter)
 }
 
+struct RasterViewport {
+    transform: Transform,
+    raster: [u32; 2],
+}
+
 fn measure_group(
     group: &usvg::Group,
     parent: Transform,
+    viewport: &RasterViewport,
     pixels: &mut usize,
 ) -> Result<(), EngineError> {
     let mut transform = parent.pre_concat(group.transform());
@@ -1026,6 +1085,12 @@ fn measure_group(
         // Charge the isolated layer and the native filter's input/output canvas copies.
         charge_work(pixels, area, 3)?;
         for filter in group.filters() {
+            tiling::validate(
+                filter,
+                [sx, sy],
+                viewport.transform.pre_concat(group.abs_transform()),
+                viewport.raster,
+            )?;
             for primitive in filter.primitives() {
                 let region = primitive.rect();
                 if [
@@ -1073,6 +1138,9 @@ fn measure_group(
                         16
                     }
                     usvg::filter::Kind::ConvolveMatrix(matrix) => convolution::work(matrix),
+                    // Charge the cropped seed copy, pattern sampling, output
+                    // canvas, input copies and the final primitive crop.
+                    usvg::filter::Kind::Tile(_) => 12,
                     usvg::filter::Kind::Morphology(morphology) => morphology::work(
                         [
                             morphology.radius_x().get() * sx,
@@ -1090,7 +1158,7 @@ fn measure_group(
         }
     }
     for child in groups(group) {
-        measure_group(child, transform, pixels)?;
+        measure_group(child, transform, viewport, pixels)?;
     }
     Ok(())
 }

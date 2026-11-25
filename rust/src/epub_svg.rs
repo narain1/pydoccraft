@@ -197,7 +197,7 @@ pub(super) fn render(
         -(region.x as f32),
         -(region.y as f32),
     );
-    effects::validate_raster(&tree, transform)?;
+    effects::validate_raster(&tree, transform, raster)?;
     resvg::render(&tree, transform, &mut image.as_mut());
     Ok(wordcraft_render::Rendered {
         width: region.width,
@@ -1002,7 +1002,7 @@ pub(super) fn transparent_png(
         width as f32 / tree.size().width(),
         height as f32 / tree.size().height(),
     );
-    effects::validate_raster(tree, scale)?;
+    effects::validate_raster(tree, scale, [width, height])?;
     resvg::render(tree, scale, &mut image.as_mut());
     image.encode_png().map_err(invalid)
 }

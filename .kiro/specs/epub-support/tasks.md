@@ -60,6 +60,7 @@
 - [x] Render bounded native morphology and preserve PDF source attribution through provable erosion, dilation and erosion-to-offset chains.
 - [x] Render bounded native turbulence and displacement. Keep provable source geometry and reject ambiguous PDF attribution.
 - [x] Render bounded native convolution with signed kernels, edge modes and verified preservation or reduction of PDF source coverage.
+- [x] Repeat bounded native SVG tiles with preserved source phase and provable PDF attribution for original ink.
 - [x] Resolve mixed length and percentage calculations for supported box geometry against the native containing box and preserve indefinite percentage sizing.
 - [x] Resolve calculated grid rows and columns, intrinsic tracks, minmax, fit-content and bounded counted repetition.
 - [x] Resolve min(), max() and clamp() in supported box geometry and grid tracks, including nested arithmetic and containing-box percentages.

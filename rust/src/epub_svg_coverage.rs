@@ -305,7 +305,11 @@ impl<'tree> Coverage<'tree> {
             "EPUB SVG coverage exceeds its sample budget",
         )?;
         if !self.validated_effects {
-            effects::validate_raster(self.tree, tiny_skia::Transform::from_scale(sx, sy))?;
+            effects::validate_raster(
+                self.tree,
+                tiny_skia::Transform::from_scale(sx, sy),
+                self.raster,
+            )?;
             self.validated_effects = true;
         }
         self.measure_draws(paint.node, 0)?;

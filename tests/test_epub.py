@@ -11611,6 +11611,168 @@ Trailing
             with doc_ex.open(data) as book, self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "filter work exceeds"):
                 book.render_page(0, dpi=96)
 
+    def test_svg_tile_preserves_native_phase_and_proven_pdf_attribution(self) -> None:
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 98">
+          <defs>
+            <filter id="stripes" filterUnits="userSpaceOnUse" x="0" y="0" width="32" height="24"
+                    color-interpolation-filters="sRGB">
+              <feColorMatrix x="2" y="2" width="8" height="6" type="saturate" values="1" result="seed"/>
+              <feFlood flood-color="magenta" result="unused"/>
+              <feTile in="seed" x="0" y="4" width="27" height="18"/>
+            </filter>
+            <filter id="mask" filterUnits="userSpaceOnUse" x="100" y="4" width="50" height="35">
+              <feFlood x="104" y="8" width="12" height="12" flood-color="red" result="seed"/>
+              <feTile in="seed" x="116" y="4" width="24" height="34" result="tiled"/>
+              <feComposite in="SourceGraphic" in2="tiled" operator="in"/>
+            </filter>
+            <filter id="caption" filterUnits="userSpaceOnUse" x="0" y="44" width="150" height="52">
+              <feTile in="SourceGraphic" result="once"/>
+              <feOffset in="once" dx="6"/>
+            </filter>
+          </defs>
+          <g transform="translate(6,6) scale(2)" filter="url(#stripes)">
+            <rect x="2" y="2" width="4" height="6" fill="#1030a0"/>
+            <rect x="6" y="2" width="4" height="6" fill="#b06020"/>
+            <rect x="2" y="2" width="8" height="2" fill="#20a040"/>
+          </g>
+          <a href="https://example.org/mask">
+            <g id="marker" filter="url(#mask)"><rect x="106" y="12" width="35" height="18" fill="orange"/></g>
+          </a>
+          <a href="#marker"><rect x="85" y="10" width="8" height="8" fill="green"/></a>
+          <g filter="url(#caption)"><text x="13" y="78" font-size="26">
+            <a href="https://example.org/tile">Café</a>
+          </text></g>
+        </svg>"""
+        fixture = fixed_spread_fixture([("", "white", 160, 98)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Tile</title>
+          <meta name="viewport" content="width=160,height=98"/></head><body style="margin:0">{}</body></html>"""
+        with zipfile.ZipFile(io.BytesIO(fixture)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'href="s0.xhtml" media-type="application/xhtml+xml"',
+                b'href="s0.svg" media-type="image/svg+xml"',
+            )
+
+        def open_book(markup: str, inline: bool = False) -> doc_ex.Document:
+            members = ({"OEBPS/s0.xhtml": template.format(markup)} if inline else
+                       {"OEBPS/content.opf": package, "OEBPS/s0.svg": markup})
+            return doc_ex.open(rewrite_epub(fixture, members))
+
+        for inline in (False, True):
+            for dpi, scale in ((96, 1), (144, 1.5)):
+                with self.subTest(inline=inline, dpi=dpi), open_book(svg, inline) as book:
+                    def rgba(document: doc_ex.Document) -> tuple[int, bytes]:
+                        return rgba_pixels(png_chunks(document.render_page(0, dpi=dpi)))
+
+                    width, pixels = preview = rgba(book)
+                    path, markup = ("OEBPS/s0.xhtml", template.format(svg)) if inline else ("OEBPS/s0.svg", svg)
+                    self.assertEqual(book.read_epub_resource(path), markup.encode())
+
+                    def pixel(x: int, y: int) -> tuple[int, ...]:
+                        start = 4 * (int(y * scale) * width + int(x * scale))
+                        return tuple(pixels[start:start + 4])
+
+                    # The repeated two-dimensional pattern starts at the named
+                    # input's origin, and the output rectangle clips the repeats.
+                    for x in (0, 1, 2, 5, 6, 9, 10, 17, 18, 23, 26):
+                        for y in (4, 7, 8, 9, 10, 15, 21):
+                            tone = ((32, 160, 64) if (y - 2) % 6 < 2 else
+                                    (16, 48, 160) if (x - 2) % 8 < 4 else (176, 96, 32))
+                            self.assertEqual(pixel(6 + 2 * x, 6 + 2 * y), (*tone, 255), (x, y))
+                    for x, y in ((0, 3), (0, 22), (27, 10)):
+                        self.assertEqual(pixel(6 + 2 * x, 6 + 2 * y), (255, 255, 255, 255))
+                    self.assertEqual(pixel(117, 20), (255, 165, 0, 255))
+                    self.assertEqual(pixel(115, 20), (255, 255, 255, 255))
+                    self.assertEqual(pixel(140, 20), (255, 255, 255, 255))
+
+                    output = book.export_epub_fixed_pdf(dpi=dpi, searchable=True)
+                    named = svg.replace(
+                        '<feTile in="SourceGraphic" result="once"/>',
+                        '<feColorMatrix color-interpolation-filters="sRGB" type="saturate" values="1" result="full"/>'
+                        '<feTile in="full" result="once"/>',
+                    )
+                    with (open_book(named, inline) as book_with_named_seed,
+                          doc_ex.open(book_with_named_seed.export_epub_fixed_pdf(dpi=dpi, searchable=True)) as named_pdf,
+                          doc_ex.open(output) as direct_pdf):
+                        self.assertEqual(rgba(named_pdf), preview)
+                        self.assertEqual(named_pdf[0].search_for("Café"), direct_pdf[0].search_for("Café"))
+                        self.assertEqual(named_pdf[0].get_links(), direct_pdf[0].get_links())
+                    control = svg.replace('<feTile in="SourceGraphic" result="once"/>', '').replace(' in="once"', '')
+                    with (doc_ex.open(output) as pdf, open_book(control, inline) as source,
+                          doc_ex.open(source.export_epub_fixed_pdf(dpi=dpi, searchable=True)) as reference,
+                          pdf.edit() as edit):
+                        self.assertEqual(rgba(pdf), preview)
+                        self.assertEqual(pdf[0].get_text(), "Café")
+                        self.assertEqual(pdf[0].search_for("Café"), reference[0].search_for("Café"))
+                        self.assertEqual(pdf[0].get_links(), reference[0].get_links())
+                        mask, = [link for link in pdf[0].get_links() if link.uri == "https://example.org/mask"]
+                        for actual, expected in zip(mask.bbox, (87, 9, 105, 22.5)):
+                            self.assertAlmostEqual(actual, expected, delta=.01)
+                        destination, = re.findall(rb"/XYZ[ ]+(87[.]?[0-9]*)[ ]+([0-9.]+)[ ]+null",
+                                                  edit.to_bytes(object_streams=False))
+                        self.assertAlmostEqual(float(destination[1]), 64.5)
+
+        stage = '<feComposite in="SourceGraphic" in2="tiled" operator="in"/>'
+        shifted_mask = svg.replace(
+            stage, '<feOffset in="tiled" dx="4" result="shifted"/>'
+            '<feComposite in="SourceGraphic" in2="shifted" operator="in"/>',
+        )
+        with (open_book(shifted_mask) as book,
+              doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf):
+            mask, = [link for link in pdf[0].get_links() if link.uri == "https://example.org/mask"]
+            for actual, expected in zip(mask.bbox, (90, 9, 105.75, 22.5)):
+                self.assertAlmostEqual(actual, expected, delta=.01)
+
+        stack = '<feMerge><feMergeNode in="{}"/><feMergeNode in="{}"/></feMerge>'
+        original_over_tiles = svg.replace(stage, stack.format("tiled", "SourceGraphic"))
+        with (open_book(original_over_tiles) as book,
+              doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf):
+            mask, = [link for link in pdf[0].get_links() if link.uri == "https://example.org/mask"]
+            for actual, expected in zip(mask.bbox, (79.5, 9, 105.75, 22.5)):
+                self.assertAlmostEqual(actual, expected, delta=.01)
+
+        for result in ('<feTile in="seed"/>', stack.format("SourceGraphic", "tiled"),
+                       '<feComposite in="tiled" in2="SourceGraphic" operator="in"/>'):
+            with self.subTest(result=result), open_book(svg.replace(stage, result)) as book:
+                self.assertTrue(book.render_page(0, dpi=96).startswith(b"\x89PNG"))
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):
+                    book.export_epub_fixed_pdf(dpi=96, searchable=True)
+
+    def test_svg_tile_rejects_invalid_dependencies_and_unfaithful_raster_domains(self) -> None:
+        def svg(primitive: str, *, region: str = 'width="200" height="100"', transform: str = "") -> str:
+            return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100">
+              <defs><filter id="fx" filterUnits="userSpaceOnUse" x="0" y="0" {region}>{primitive}</filter></defs>
+              <rect x="2" y="2" width="24" height="18" {transform} filter="url(#fx)"/></svg>"""
+
+        with doc_ex.open(epub_fixture()) as original:
+            for value in ("forward", "BackgroundImage"):
+                primitive = f'<feTile in="{value}"/><feFlood result="forward"/>'
+                error = doc_ex.MalformedDocumentError if value == "forward" else doc_ex.UnsupportedFormatError
+                with self.subTest(value=value), self.assertRaisesRegex(error, "prior named result"):
+                    original.edit_epub_structure([doc_ex.EpubSvgChapterSource("Tile", svg(primitive)), 0])
+            stages = (
+                ('<feColorMatrix type="saturate" values="1" result="seed"/><feTile in="seed"/>',
+                 doc_ex.UnsupportedFormatError, "requires an sRGB input result"),
+                ('<feFlood x="-2" y="2" width="8" height="6" result="seed"/><feTile in="seed"/>',
+                 doc_ex.UnsupportedFormatError, "exceeds its filter region"),
+                ('<feFlood x="172" y="2" width="8" height="6" result="seed"/><feTile in="seed"/>',
+                 doc_ex.UnsupportedFormatError, "fit within the raster viewport"),
+                ('<feFlood x="2" y="2" width="7.5" height="6" result="seed"/><feTile in="seed"/>',
+                 doc_ex.UnsupportedFormatError, "periods must align to device pixels"),
+            )
+            cases = [(svg(markup), error, reason) for markup, error, reason in stages]
+            primitive = '<feFlood x="2" y="2" width="8" height="6" result="seed"/><feTile/>'
+            region = 'width="550" height="550"'
+            control = original.edit_epub_structure([doc_ex.EpubSvgChapterSource("Tile", svg(primitive, region=region)), 0])
+            cases.append((svg(primitive, region=region, transform='transform="scale(3)"'),
+                          doc_ex.UnsafeArchiveError, "filter work exceeds"))
+            books = [(original.edit_epub_structure([doc_ex.EpubSvgChapterSource("Tile", markup), 0]), error, reason)
+                     for markup, error, reason in cases]
+        with doc_ex.open(control) as book:
+            self.assertTrue(book.render_page(0, dpi=96).startswith(b"\x89PNG"))
+        for data, error, reason in books:
+            with self.subTest(reason=reason), doc_ex.open(data) as book, self.assertRaisesRegex(error, reason):
+                book.render_page(0, dpi=96)
+
     def test_svg_compositor_checks_second_inputs_children_and_scaled_budget(self) -> None:
         def svg(primitives: str, attrs: str = "", rect: str = "") -> str:
             return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 48">
