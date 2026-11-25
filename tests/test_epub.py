@@ -3290,6 +3290,15 @@ class EpubTests(unittest.TestCase):
                     control = direction + inherited + f"#one{{grid-column:{expected}}}"
                     self.assertEqual(render(actual), render(control))
 
+        for shared, authored, expected in (
+            ("#two{grid-row:2/3}", "span 5;grid-row:1/2", "1/3;grid-row:1/2"),
+            ("", "1/2;grid-row:auto/span 8", "1/2;grid-row:1/3"),
+        ):
+            with self.subTest(automatic_span=authored):
+                actual = inherited + shared + f"#one{{grid-column:{authored}}}"
+                control = inherited + shared + f"#one{{grid-column:{expected}}}"
+                self.assertEqual(render(actual), render(control))
+
         for invalid in (
             "#parent{grid-template-columns:[outer] 60px [left] 80px [middle] 1fr [end]}",
             "#sub{padding-left:240px}",

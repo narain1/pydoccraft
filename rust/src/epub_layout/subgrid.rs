@@ -44,6 +44,12 @@ pub(super) fn clamp_numeric_placement(placement: &mut Line<GridPlacement<String>
     }
     let lines = placement.into_origin_zero_ignoring_named(tracks as u16);
     if !lines.is_definite() {
+        // Auto placement cannot reserve a span larger than the inherited axis.
+        for edge in [&mut placement.start, &mut placement.end] {
+            if let GridPlacement::Span(span) = edge {
+                *span = (*span).min(tracks as u16);
+            }
+        }
         return;
     }
     let area = lines.resolve_definite_grid_lines();

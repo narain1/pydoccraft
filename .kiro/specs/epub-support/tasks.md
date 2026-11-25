@@ -99,6 +99,7 @@
 - [x] Preserve interior subgrid lines with definite margins, borders and padding, local percentage gutters, and reversed line numbering when parent and child directions differ.
 - [x] Resolve bounded counted and auto-fill subgrid line-name lists, truncation at the used span, and automatic parent spans from fixed aliases.
 - [x] Clamp definite numerical grid placements to inherited subgrid tracks, including signed indices and spans.
+- [x] Limit oversized automatic numeric spans to the inherited track count before native grid placement.
 - [ ] Extend the EPUB CSS profile with block and relative inline bounds in other content-dependent, flex and grid containing geometry, functional block bounds with an indefinite containing height, remaining contain-fit sizing contexts, other nonlinear ratio operands and typed math, and content-dependent subgrid sizing, edge insets that exhaust an outer track, scrollbar gutters, collapsed tracks, and automatic-placement and unresolved named-placement clamping.
 - [x] Match bounded sibling positions in either direction, including An+B, namespace-aware types, and filtered child selectors with the correct specificity.
 - [x] Render bounded native diffuse and specular distant lighting. Verify single-source PDF text and links when an original-alpha mask controls the lit result.
