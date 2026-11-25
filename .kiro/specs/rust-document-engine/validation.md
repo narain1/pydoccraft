@@ -2923,3 +2923,7 @@ The Linux x86-64 CPython 3.11.15 wheel passed 716 installed tests, including 121
 ## 2026-11-24 Integrated EPUB authoring, rendering and playback
 
 The Linux x86-64 CPython 3.11.15 wheel passed 727 installed tests, including 132 EPUB tests. It measured 24,700,585 bytes with a 57,448,584-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-integrated-epub-authoring-rendering-and-playback) covers editable MathML, revised archive anchors, fixed-layout links, fractional XHTML oblique, Vorbis playback and the remaining corpus gaps.
+
+## 2026-11-24 Integrated EPUB clipping, equation placement and track selection
+
+The Linux x86-64 CPython 3.11.15 wheel passed 736 installed tests, including 141 EPUB tests. It measured 24,725,709 bytes with a 57,624,184-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-integrated-epub-clipping-equation-placement-and-track-selection) covers rendered coverage, editable equations, WebM timing and selection, and reopened sample exports.
