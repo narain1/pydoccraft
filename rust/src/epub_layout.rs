@@ -631,6 +631,7 @@ impl<'book> Layout<'book> {
             style.overflow.x != Overflow::Visible || style.overflow.y != Overflow::Visible;
         self.add(
             style,
+            styled.inline_bounds,
             PaintBox {
                 id: NodeId::from(0usize),
                 dom: Some(node.id()),
@@ -788,6 +789,10 @@ impl<'book> Layout<'book> {
                     display: Display::Block,
                     ..Default::default()
                 },
+                super::style::InlineBounds {
+                    min: None,
+                    max: None,
+                },
                 PaintBox {
                     id: NodeId::from(0usize),
                     dom: None,
@@ -806,7 +811,12 @@ impl<'book> Layout<'book> {
         Ok(())
     }
 
-    fn add(&mut self, style: Style, mut paint_box: PaintBox) -> Result<usize, EngineError> {
+    fn add(
+        &mut self,
+        style: Style,
+        bounds: super::style::InlineBounds,
+        mut paint_box: PaintBox,
+    ) -> Result<usize, EngineError> {
         let index = self.boxes.len();
         if index >= MAX_BOXES {
             return Err(limited("EPUB layout exceeds 8000 boxes"));
@@ -816,7 +826,8 @@ impl<'book> Layout<'book> {
             .iter()
             .map(|index| self.boxes[*index].id)
             .collect();
-        paint_box.id = self.tree.add(style, children);
+        let relative_math = matches!(paint_box.content, Some(Contents::RelativeMath(_)));
+        paint_box.id = self.tree.add(style, bounds, children, relative_math);
         self.boxes.push(paint_box);
         Ok(index)
     }
@@ -839,7 +850,7 @@ impl<'book> Layout<'book> {
                 },
             },
             calculations,
-            |input, index, style| {
+            |input, index, style, intrinsic_bound| {
                 let size = if error.is_none() {
                     let content = self.boxes[index].content.as_mut();
                     if let Some(Contents::RelativeMath(relative)) = content {
@@ -892,7 +903,8 @@ impl<'book> Layout<'book> {
                             Size::ZERO
                         }
                     };
-                    if style.size.width.is_sizing_keyword()
+                    if intrinsic_bound
+                        || style.size.width.is_sizing_keyword()
                         || style.size.height.is_sizing_keyword()
                         || style.padding != taffy::geometry::Rect::zero()
                         || style.border != taffy::geometry::Rect::zero()

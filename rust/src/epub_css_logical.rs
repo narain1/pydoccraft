@@ -381,8 +381,13 @@ pub(super) fn intrinsic_size_kind(name: &str, value: &str) -> Option<ValueKind> 
     } else {
         return None;
     };
+    let intrinsic_width_bound = matches!(
+        name,
+        "min-width" | "max-width" | "min-inline-size" | "max-inline-size"
+    ) && (keyword(value, "min-content")
+        || keyword(value, "max-content"));
     Some(match kind {
-        ValueKind::Supported if !preferred => ValueKind::Unsupported,
+        ValueKind::Supported if !preferred && !intrinsic_width_bound => ValueKind::Unsupported,
         _ => kind,
     })
 }

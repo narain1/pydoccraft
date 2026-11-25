@@ -3,9 +3,9 @@ use std::{collections::HashMap, sync::Arc};
 
 use roxmltree::{Node, NodeId};
 use taffy::{
-    geometry::{Line, Point, Rect, Size},
+    geometry::{Line, MinMax, Point, Rect, Size},
     prelude::*,
-    style::{BoxSizing, GridAutoFlow, GridPlacement, Overflow},
+    style::{AvailableSpace, BoxSizing, GridAutoFlow, GridPlacement, Overflow},
 };
 use wordcraft_doc::props::{Align, CharProps, LineSpacing, Rgb, TextColor, Underline};
 
@@ -18,6 +18,7 @@ use crate::EngineError;
 
 pub(super) type Styles = HashMap<NodeId, Styled>;
 pub(super) type Paint = (Rgb, f32);
+pub(super) type InlineBounds = MinMax<Option<AvailableSpace>, Option<AvailableSpace>>;
 
 #[derive(Default)]
 pub(super) struct ChapterStyles {
@@ -28,6 +29,7 @@ pub(super) struct ChapterStyles {
 
 pub(super) struct Styled {
     pub box_style: Style,
+    pub inline_bounds: InlineBounds,
     pub text: Typography,
     pub inline: bool,
     pub bidi: super::bidi::Mode,
@@ -292,6 +294,15 @@ impl ChapterStyles {
                     parent.map_or(GridPlacement::Auto, |p| edge(&p.box_style).clone())
                 })
             };
+            let intrinsic_bound = |key| match value(&values, key).to_ascii_lowercase().as_str() {
+                "min-content" => Some(AvailableSpace::MinContent),
+                "max-content" => Some(AvailableSpace::MaxContent),
+                _ => None,
+            };
+            let inline_bounds = InlineBounds {
+                min: intrinsic_bound("min-width"),
+                max: intrinsic_bound("max-width"),
+            };
             let box_style = Style {
                 display: match display {
                     "flex" | "inline-flex" => Display::Flex,
@@ -439,6 +450,7 @@ impl ChapterStyles {
                 node.id(),
                 Styled {
                     box_style,
+                    inline_bounds,
                     text,
                     inline,
                     bidi,

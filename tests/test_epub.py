@@ -2569,10 +2569,60 @@ class EpubTests(unittest.TestCase):
                          preview("width:fit-content(55px)", "display:grid;grid-template-columns:200px"))
         self.assertEqual(preview("width:55px", "display:flex"),
                          preview("width:fit-content(55px)", "display:flex"))
-        for size in ("min-width:max-content", "max-inline-size:fit-content(10px)", "width:contain"):
+        self.assertEqual(maximum, preview("width:8px;min-width:max-content"))
+        self.assertEqual(minimum, preview("width:200px;max-inline-size:min-content"))
+        self.assertEqual(maximum, preview("width:200px;min-width:max-content;max-width:min-content"))
+        for size in ("min-height:min-content", "max-inline-size:fit-content(10px)", "width:contain"):
             with self.subTest(size=size):
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "CSS intrinsic box size"):
                     preview(size)
+
+    def test_css_intrinsic_inline_bounds_drive_parent_and_searchable_fixed_layout(self) -> None:
+        original = fixed_spread_fixture([("", "white", 280, 132)])
+        source = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic constraints</title>
+          <meta name="viewport" content="width=280,height=132"/><style>
+          html,body,p{margin:0;font-size:11px}
+          #line{position:absolute;inset-inline-start:20px;top:11px;display:flex;width:65px}
+          #limit{padding-inline:4px;border:2px solid #24608b;background:#6bad57;width:15px}
+          #inside{width:42px;height:20px} #peer{flex:none;width:18px;background:#aac5df}
+          #card{position:absolute;top:60px;left:20px;width:210px;font-size:15px}
+          #label{font-size:11px;background:#96b87a;padding-inline:7px}
+          CSS</style></head><body><div id="line"><div id="limit"><p id="inside">First</p></div>
+          <p id="peer"><a href="#label">X</a></p></div><div id="card">
+          <p id="label"><a href="https://example.org/intrinsic">Wide Wide Wide</a></p></div>
+          </body></html>"""
+
+        def publication(css: str) -> bytes:
+            return rewrite_epub(original, {"OEBPS/s0.xhtml": source.replace("CSS", css)})
+
+        for sizing, expected in (("content-box", 42), ("border-box", 54)):
+            projected = []
+            for css in (
+                f"#limit{{box-sizing:{sizing};min-inline-size:max-content}}"
+                "#card{max-width:max-content}#label{width:200px;max-inline-size:inherit}",
+                f"#limit{{box-sizing:{sizing};min-width:{expected}px}}"
+                "#card{max-width:max-content}#label{width:max-content}",
+            ):
+                with doc_ex.open(publication(css)) as book:
+                    pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                    frozen = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+                with doc_ex.open(frozen) as pdf:
+                    self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), pixels)
+                    peer, = pdf[0].search_for("X")
+                    first, = pdf[0].search_for("First")
+                    internal, external = pdf[0].get_links()
+                    self.assertEqual(internal.metadata["target_page"], 0)
+                    self.assertEqual(external.uri, "https://example.org/intrinsic")
+                    self.assertGreater(peer[0], first[2])
+                    projected.append((pixels, peer, internal.bbox, external.bbox))
+            with self.subTest(sizing=sizing):
+                self.assertTrue(projected[0] == projected[1], "intrinsic bounds changed geometry")
+
+        with doc_ex.open(publication(
+            "#limit{box-sizing:border-box;padding-left:10%;min-width:max-content}"
+        )) as book:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "relative border-box padding"):
+                book.render_page(0, dpi=96)
 
     def test_css_intrinsic_box_counts_padding_and_wraps_before_column_flex_height(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic box edges</title>

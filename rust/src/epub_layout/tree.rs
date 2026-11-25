@@ -4,16 +4,16 @@ use taffy::{
     compute_hidden_layout, compute_oof_layout, compute_root_layout,
     geometry::Size,
     style::{
-        AvailableSpace, BoxSizing, CalcHandle, Display, ExpandedDimension,
-        ExpandedLengthPercentage, Style,
+        AvailableSpace, BoxSizing, CalcHandle, Dimension, Display, ExpandedDimension,
+        ExpandedLengthPercentage, LengthPercentageAuto, Style,
     },
     BlockContext, Cache, CacheTree, DetailedGridInfo, DetailedLayoutInfo, Layout,
     LayoutBlockContainer, LayoutContainingBlock, LayoutFlexboxContainer, LayoutGridContainer,
-    LayoutInput, LayoutOutput, LayoutPartialTree, NodeId, RequestedAxis, RunMode,
+    LayoutInput, LayoutOutput, LayoutPartialTree, NodeId, RequestedAxis, RunMode, SizingMode,
     TraversePartialTree,
 };
 
-use crate::epub::{css::CalculationTable, limited};
+use crate::epub::{css::CalculationTable, limited, style::InlineBounds, unsupported};
 use crate::EngineError;
 
 #[path = "grid_budget.rs"]
@@ -26,6 +26,8 @@ pub(super) struct Tree {
 
 struct Node {
     style: Style,
+    inline_bounds: InlineBounds,
+    has_relative_math: bool,
     children: Vec<NodeId>,
     layout: Layout,
     cache: Cache,
@@ -34,10 +36,22 @@ struct Node {
 }
 
 impl Tree {
-    pub(super) fn add(&mut self, style: Style, children: Vec<NodeId>) -> NodeId {
+    pub(super) fn add(
+        &mut self,
+        style: Style,
+        inline_bounds: InlineBounds,
+        children: Vec<NodeId>,
+        relative_math: bool,
+    ) -> NodeId {
         let id = NodeId::from(self.nodes.len());
+        let has_relative_math = relative_math
+            || children
+                .iter()
+                .any(|id| self.nodes[usize::from(*id)].has_relative_math);
         self.nodes.push(Node {
             style,
+            inline_bounds,
+            has_relative_math,
             children,
             layout: Layout::with_order(0),
             cache: Cache::new(),
@@ -64,7 +78,7 @@ impl Tree {
         root: NodeId,
         space: Size<AvailableSpace>,
         calculations: &CalculationTable,
-        measure: impl FnMut(LayoutInput, usize, &Style) -> LayoutOutput,
+        measure: impl FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput,
     ) -> Result<(), EngineError> {
         let mut view = View {
             nodes: &mut self.nodes,
@@ -73,6 +87,7 @@ impl Tree {
             fit_probes: 0,
             grid_limit: false,
         };
+        view.resolve_inline_bounds()?;
         compute_root_layout(&mut view, root, space);
         if view.fit_probes > MAX_FIT_PROBES {
             return Err(limited(
@@ -106,7 +121,94 @@ struct View<'a, F> {
 
 const MAX_FIT_PROBES: usize = 4_096;
 
-impl<F: FnMut(LayoutInput, usize, &Style) -> LayoutOutput> View<'_, F> {
+impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
+    fn resolve_inline_bounds(&mut self) -> Result<(), EngineError> {
+        let input = LayoutInput {
+            run_mode: RunMode::ComputeSize,
+            sizing_mode: SizingMode::InherentSize,
+            axis: RequestedAxis::Horizontal,
+            ..LayoutInput::HIDDEN
+        };
+        let mut measured = false;
+        // Nodes are added after their children. Resolve each child's bounds
+        // before any parent queries its native style or intrinsic contribution.
+        for index in 0..self.nodes.len() {
+            let node = &mut self.nodes[index];
+            let bounds = node.inline_bounds;
+            let style = &mut node.style;
+            if bounds.min.is_none() && bounds.max.is_none() || style.display == Display::None {
+                continue;
+            }
+            if self.fit_probes > MAX_FIT_PROBES || self.grid_limit {
+                break;
+            }
+            if node.has_relative_math {
+                return Err(unsupported(
+                    "EPUB CSS intrinsic width bounds on percentage MathML",
+                ));
+            }
+            let edges = [
+                style.padding.left,
+                style.padding.right,
+                style.border.left,
+                style.border.right,
+            ];
+            let absolute_edges = edges
+                .into_iter()
+                .map(|edge| match edge.expand() {
+                    ExpandedLengthPercentage::Length(points) => Some(points),
+                    _ => None,
+                })
+                .sum::<Option<f32>>();
+            let subtract_padding = if style.box_sizing == BoxSizing::ContentBox {
+                // Intrinsic probes have no percentage basis, so only fixed
+                // edges are included in their native border-box result.
+                edges
+                    .into_iter()
+                    .filter_map(|edge| match edge.expand() {
+                        ExpandedLengthPercentage::Length(points) => Some(points),
+                        _ => None,
+                    })
+                    .sum()
+            } else {
+                if absolute_edges.is_none() {
+                    return Err(unsupported(
+                        "EPUB CSS intrinsic width bounds with relative border-box padding",
+                    ));
+                }
+                0.0
+            };
+            let width = std::mem::replace(&mut style.size.width, Dimension::auto());
+            let minimum =
+                std::mem::replace(&mut style.min_size.width, LengthPercentageAuto::auto());
+            let maximum =
+                std::mem::replace(&mut style.max_size.width, LengthPercentageAuto::auto());
+            let id = NodeId::from(index);
+            let mut probe = |space| {
+                let width = self.probe_width(id, input, space) - subtract_padding;
+                LengthPercentageAuto::length(width.max(0.0))
+            };
+            let measured_min = bounds.min.map(&mut probe);
+            let measured_max = if bounds.max == bounds.min {
+                measured_min
+            } else {
+                bounds.max.map(probe)
+            };
+            let node = &mut self.nodes[index];
+            node.cache.clear();
+            node.style.size.width = width;
+            node.style.min_size.width = measured_min.unwrap_or(minimum);
+            node.style.max_size.width = measured_max.unwrap_or(maximum);
+            measured = true;
+        }
+        if measured {
+            for node in &mut *self.nodes {
+                node.cache.clear();
+            }
+        }
+        Ok(())
+    }
+
     fn preferred_width(&mut self, id: NodeId, input: LayoutInput) -> Option<f32> {
         if input.known_dimensions.width.is_some()
             || input.run_mode != RunMode::ComputeSize
@@ -211,7 +313,12 @@ impl<F: FnMut(LayoutInput, usize, &Style) -> LayoutOutput> View<'_, F> {
                     }
                     compute_grid_layout(tree, id, input)
                 }
-                (_, true) => (tree.measure)(input, index, &node.style),
+                (_, true) => (tree.measure)(
+                    input,
+                    index,
+                    &node.style,
+                    node.inline_bounds.min.is_some() || node.inline_bounds.max.is_some(),
+                ),
             };
             if input.run_mode == RunMode::PerformLayout {
                 compute_oof_layout(tree, id, &mut output);
@@ -240,7 +347,7 @@ impl<F> TraversePartialTree for View<'_, F> {
     }
 }
 
-impl<F: FnMut(LayoutInput, usize, &Style) -> LayoutOutput> LayoutPartialTree for View<'_, F> {
+impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> LayoutPartialTree for View<'_, F> {
     type CoreContainerStyle<'a>
         = &'a Style
     where
@@ -264,7 +371,9 @@ impl<F: FnMut(LayoutInput, usize, &Style) -> LayoutOutput> LayoutPartialTree for
     }
 }
 
-impl<F: FnMut(LayoutInput, usize, &Style) -> LayoutOutput> LayoutContainingBlock for View<'_, F> {
+impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> LayoutContainingBlock
+    for View<'_, F>
+{
     type OofItemStyle<'a>
         = &'a Style
     where
@@ -303,7 +412,9 @@ impl<F> CacheTree for View<'_, F> {
     }
 }
 
-impl<F: FnMut(LayoutInput, usize, &Style) -> LayoutOutput> LayoutBlockContainer for View<'_, F> {
+impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> LayoutBlockContainer
+    for View<'_, F>
+{
     type BlockContainerStyle<'a>
         = &'a Style
     where
@@ -331,7 +442,9 @@ impl<F: FnMut(LayoutInput, usize, &Style) -> LayoutOutput> LayoutBlockContainer 
     }
 }
 
-impl<F: FnMut(LayoutInput, usize, &Style) -> LayoutOutput> LayoutFlexboxContainer for View<'_, F> {
+impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> LayoutFlexboxContainer
+    for View<'_, F>
+{
     type FlexboxContainerStyle<'a>
         = &'a Style
     where
@@ -350,7 +463,9 @@ impl<F: FnMut(LayoutInput, usize, &Style) -> LayoutOutput> LayoutFlexboxContaine
     }
 }
 
-impl<F: FnMut(LayoutInput, usize, &Style) -> LayoutOutput> LayoutGridContainer for View<'_, F> {
+impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> LayoutGridContainer
+    for View<'_, F>
+{
     type GridContainerStyle<'a>
         = &'a Style
     where
