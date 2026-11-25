@@ -12,6 +12,7 @@ pub(crate) const GUIDE_FONT: &str = "Liberation Serif";
 pub(crate) const GUIDE_COLOR: Rgb = Rgb(1, 2, 3);
 pub(crate) const SHIFT_GUIDE_COLOR: Rgb = Rgb(1, 2, 4);
 pub(crate) const GRID_GUIDE_COLOR: Rgb = Rgb(1, 2, 5);
+pub(crate) const GROUP_SPACE_COLOR: Rgb = Rgb(1, 2, 6);
 
 pub(super) fn visible_text(object: &InlineObject) -> Cow<'_, str> {
     if let InlineObject::Equation { linear, math, .. } = object {
@@ -117,7 +118,7 @@ fn is_grid_gap(node: &MNode) -> bool {
     matches!(e.as_slice(), [_, marker] if is_grid_marker(marker))
 }
 
-fn shifted_body(node: &MNode) -> Option<&Arg> {
+fn shifted_body(node: &MNode) -> Option<&[MNode]> {
     let MNode::Phant {
         show: true,
         zero_asc: true,
@@ -144,7 +145,14 @@ fn shifted_body(node: &MNode) -> Option<&Arg> {
     else {
         return None;
     };
-    (guide_flags(marker, SHIFT_GUIDE_COLOR) == Some(("H", true, true))).then_some(e)
+    if guide_flags(marker, SHIFT_GUIDE_COLOR) != Some(("H", true, true)) {
+        return None;
+    }
+    let spaces = e.iter().take_while(|node| {
+        matches!(node, MNode::Run(run) if run.color == Some(GROUP_SPACE_COLOR)
+            && run.lit && !run.nor && run.size.is_some() && run.text.bytes().all(|byte| byte == b' '))
+    }).count();
+    Some(&e[spaces..])
 }
 
 fn guide_flags(node: &MNode, color: Rgb) -> Option<(&str, bool, bool)> {

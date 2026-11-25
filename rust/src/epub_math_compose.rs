@@ -730,6 +730,22 @@ pub(super) fn grid_gap(width: f32) -> Result<Option<MNode>, EngineError> {
     }))
 }
 
+pub(super) fn group_leading_space(width: f32) -> Result<Arg, EngineError> {
+    if width < 0.2 {
+        return Ok(Arg::new());
+    }
+    // Native spaces contribute an advance without becoming an operator's
+    // neighbor. Keep the run recognizable inside our generated shift.
+    Ok(editable_gap_runs(width.max(0.4))?
+        .into_iter()
+        .map(|mut run| {
+            run.color = Some(math_spacing::GROUP_SPACE_COLOR);
+            run.lit = true;
+            MNode::Run(run)
+        })
+        .collect())
+}
+
 fn zeroed(length: Option<Length>, dimension: usize) -> Option<bool> {
     match length {
         None => Some(false),
@@ -747,9 +763,9 @@ fn zeroed(length: Option<Length>, dimension: usize) -> Option<bool> {
     }
 }
 
-fn editable_gap(width: f32) -> Result<Option<MNode>, EngineError> {
+fn editable_gap_runs(width: f32) -> Result<Vec<MRun>, EngineError> {
     if width == 0.0 {
-        return Ok(None);
+        return Ok(Vec::new());
     }
     // WordCraft advances a math space by 0.4 em and writes run sizes in half-points.
     // Use one run per distinct size so long gaps retain the same rounding precision.
@@ -762,20 +778,26 @@ fn editable_gap(width: f32) -> Result<Option<MNode>, EngineError> {
     let count = units.div_ceil(3276);
     let size = (units / count) as f32 / 2.0;
     let larger = units % count;
-    let run = |count: usize, size| {
-        MNode::Run(MRun {
-            size: Some(size),
-            ..MRun::plain(" ".repeat(count))
-        })
+    let run = |count: usize, size| MRun {
+        size: Some(size),
+        ..MRun::plain(" ".repeat(count))
     };
     let mut nodes = vec![run(count - larger, size)];
     if larger > 0 {
         nodes.push(run(larger, size + 0.5));
     }
+    Ok(nodes)
+}
+
+fn editable_gap(width: f32) -> Result<Option<MNode>, EngineError> {
+    let mut nodes: Arg = editable_gap_runs(width)?
+        .into_iter()
+        .map(MNode::Run)
+        .collect();
     if nodes.len() == 1 {
         return Ok(nodes.pop());
     }
-    Ok(Some(MNode::Boxed { e: nodes }))
+    Ok((!nodes.is_empty()).then_some(MNode::Boxed { e: nodes }))
 }
 
 pub(in crate::epub) fn position(item: &mut MItem, dx: f32, dy: f32, scale: f32) {

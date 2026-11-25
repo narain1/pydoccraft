@@ -948,8 +948,12 @@ impl Table {
             }
             let matrix_baseline = first_baseline - row as f32 * row_pitch;
             let offset = layout.baseline - top - ascent - matrix_baseline;
-            let mut cell_body = Arg::new();
-            cell_body.extend(compose::grid_gap((left - origins[column]).max(0.0))?);
+            let advance = (left - origins[column]).max(0.0);
+            let mut cell_body = if cell.anchor.is_some() {
+                compose::group_leading_space(advance)?
+            } else {
+                compose::grid_gap(advance)?.into_iter().collect()
+            };
             cell_body.extend(nodes);
             contents[row][column].push(MNode::Phant {
                 show: true,

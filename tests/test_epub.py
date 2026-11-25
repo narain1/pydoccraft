@@ -7092,6 +7092,19 @@ overlay
                     for source_coordinate, native_coordinate in zip(expected[label], rendered[label]):
                         self.assertAlmostEqual(native_coordinate, source_coordinate, delta=0.35)
 
+        signed = source.replace(
+            '<m:maligngroup/><m:mn mathcolor="#bf222d">',
+            '<m:maligngroup/><m:mo>−</m:mo><m:mn mathcolor="#bf222d">',
+        )
+        with doc_ex.open(epub_fixture(chapter_one=signed)) as book:
+            with doc_ex.open(book.convert("docx")) as reopened:
+                self.assertIn("−12:345", reopened[0].get_text())
+                for source_doc in (book, reopened):
+                    with doc_ex.open(source_doc.convert("pdf")) as pdf:
+                        rects = geometry(pdf, 0.25)
+                        minus, = pdf[0].search_for("−")
+                        self.assertAlmostEqual(minus[2], rects["12"][0], delta=0.25)
+
         fixed = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 500, 300)])
         with doc_ex.open(rewrite_epub(fixed, {"OEBPS/s0.xhtml": source})) as book:
             preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
