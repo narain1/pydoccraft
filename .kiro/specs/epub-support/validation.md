@@ -1267,3 +1267,13 @@ Both lockfiles, the package inventory and the upstream revisions match the prece
 ## SVG authored relative glyph positions
 
 The installed standalone and inline regression applies signed dx and dy to four logical mixed-face clusters with decomposed combining marks. Its separately authored unpositioned length control verifies exact predicted x/y pixel translations, searchable Unicode, link rectangles and a local destination. The widened spacingAndGlyphs output matches an independent SVG transform around the authored x plus its leading dx. The tests reject nonzero interior-cluster offsets, reordered positions, unsupported units and rotated outer geometry, and enforce the 4096-entry position-list bound. [SVG text positioning](https://www.w3.org/TR/SVG2/text.html#TSpanNotes)
+
+## 2026-11-25 Integrated EPUB sibling selectors, MathML signed carets, SVG positioning and mixed TTML
+
+The combined regressions compare filtered CSS sibling positions against equivalent fixed-layout pixels and PDF interaction geometry. They verify editable MathML carets across bounded negative padding, authored SVG glyph shifts through native spacing or scaling, and ordered TTML caption groups with distinct regions, clocks and styling.
+
+The installed Linux x86-64 CPython 3.11.15 release wheel from `0fd2291057` passed 865 tests, including 270 EPUB tests, with zero failures, errors or skips. It measured 25,889,395 bytes with a 60,272,808-byte native extension. Its SHA-256 is `f62be6967abb09ba1a3957518a9997f61ba2c5fe81d7ae8740b64b2009aa1ca7`. This checkpoint used the host Linux wheel. The macOS and Windows release matrix remains open.
+
+Four released W3C EPUB books passed with 28 chapter previews and four reopened fixed-layout PDF pages. Two independently authored fixed-layout EPUBs with grid shorthands, stepped CSS geometry, inline bidi isolation and labeled MathML widths passed EPUBCheck 5.4.0 with zero fatals, errors, warnings or informational messages. Rust 1.95 formatting and locked release all-target Clippy with warnings denied passed. Rust passed 479 unit and 7 integration tests with default features and 401 unit and 8 integration tests without Python. Node 22.22.1 passed 17 tests.
+
+Both lockfiles, the package inventory and the upstream revisions match the preceding checkpoint. The audit reviewed 349 core packages and binding licenses. All wheel attribution files matched their source copies. The Linux extension uses system C and GCC libraries. The public typing, documentation, support evidence and roadmap checks passed. Temporary Cargo output, wheels, test environments, downloaded books, generated site and the Node addon were pruned.
