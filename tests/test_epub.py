@@ -5956,6 +5956,10 @@ overlay
                 + b'</region>'
                 for name in ("r", *(f"r{i}" for i in range(64)))
             )), doc_ex.UnsafeArchiveError, "4096 region animation boundary budget"),
+            (track(b'<region xml:id="r" tts:padding="2%' + b" " * 150_000 + b'3%">'
+                   + b"".join(f'<set begin="{2 * phase}s" dur="1s" tts:origin="10% 0%"/>'.encode()
+                              for phase in range(32))
+                   + b'</region>'), doc_ex.UnsafeArchiveError, "region animation declaration budget"),
             (track(b"".join(f'<region xml:id="r{i}"/>'.encode() for i in range(257))),
              doc_ex.UnsafeArchiveError, "256 region definitions"),
             (track(b'<region xml:id="r">' + b'<style tts:extent="99% 50%"/>' * 33 + b'</region>'),

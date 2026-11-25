@@ -19,6 +19,7 @@ const MAX_REGIONS: usize = 256;
 const MAX_NESTED_STYLES: usize = 32;
 const MAX_REGION_SETS: usize = 32;
 const MAX_REGION_POINTS: usize = 4096;
+const MAX_ANIMATED_DECLARATION_BYTES: usize = 8 * 1024 * 1024;
 const ANIMATED_PROPERTIES: &[&str] =
     &["origin", "extent", "position", "padding", "backgroundColor"];
 const MAX_LABEL: usize = 1024;
@@ -238,6 +239,12 @@ impl<'n> Regions<'n> {
     }
 }
 
+#[derive(Default)]
+struct RegionWork {
+    boundaries: usize,
+    declaration_bytes: usize,
+}
+
 pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
     if !root.has_tag_name((TT, "tt")) {
         return Err(invalid("missing TTML tt root"));
@@ -305,7 +312,7 @@ pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
         };
         let mut ids = HashSet::new();
         let mut clock = None;
-        let mut region_work = 0;
+        let mut region_work = RegionWork::default();
         for (node, parent) in definitions {
             // An explicit region attribute wins over a child region.
             if parent.is_some_and(|parent| parent.has_attribute("region")) {
@@ -442,7 +449,7 @@ fn region_layouts(
     base: RegionPatch<'_>,
     sets: &[(Timing, RegionPatch<'_>)],
     viewport: Viewport,
-    work: &mut usize,
+    work: &mut RegionWork,
 ) -> Result<Arc<[RegionPoint]>, EngineError> {
     let mut times = Vec::with_capacity(sets.len() * 2);
     for (timing, _) in sets {
@@ -454,7 +461,7 @@ fn region_layouts(
     times.sort_unstable();
     times.dedup();
     charge(
-        work,
+        &mut work.boundaries,
         times.len(),
         MAX_REGION_POINTS,
         "TTML exceeds its 4096 region animation boundary budget",
@@ -472,7 +479,27 @@ fn region_layouts(
                 active = active.merge(patch);
             }
         }
-        let layout = base.merge(active).compute(region.id.clone(), viewport)?;
+        let style = base.merge(active);
+        // Referenced declarations can recur at every animation boundary.
+        let bytes = [
+            style.origin,
+            style.extent,
+            style.position,
+            style.padding,
+            style.color,
+            style.z_index,
+        ]
+        .into_iter()
+        .flatten()
+        .map(str::len)
+        .sum();
+        charge(
+            &mut work.declaration_bytes,
+            bytes,
+            MAX_ANIMATED_DECLARATION_BYTES,
+            "TTML exceeds its region animation declaration budget",
+        )?;
+        let layout = style.compute(region.id.clone(), viewport)?;
         let previous = layouts.last().map_or(region, |point| &point.layout);
         if previous != &layout {
             layouts.push(RegionPoint {
