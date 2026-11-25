@@ -292,6 +292,12 @@ The Linux x86-64 CPython 3.11.15 release wheel passed 670 installed tests, inclu
 
 Rust 1.95 formatting and warnings-denied all-target Clippy passed. The locked default suite passed 478 unit tests and 7 integration tests. The Python-free suite passed 401 unit tests and 8 integration tests. All 17 Node 22.22.1 preview tests passed. Public typing, documentation links, support evidence and roadmap checks passed. Cleanup removed about 6.1 GiB of Cargo output, the temporary wheels, Node addon, site build and public sample archive.
 
+## 2026-11-24 Staged chapter anchor references
+
+The regression fixture renames a percent-encoded Unicode target and updates its links across a chapter batch. The earlier wheel rejected this edit and accepted removal of IDs referenced by retained non-spine XHTML, SVG or compatibility NCX. The new wheel rejects removals still targeted by those resources or the OPF guide. SVG checks honor the precedence of `href` over `xlink:href`. The tests reopen the edited archive, confirm untouched member bytes and preserve links to previously unresolved fragments as authored. [EPUB 3.3 content documents](https://www.w3.org/TR/epub-33/#sec-contentdocs)
+
+The Linux x86-64 CPython 3.11.15 wheel passed all 123 EPUB tests. Rust 1.95 formatting and release Clippy with warnings denied passed, and the documentation check found 35 pages and 2,317 valid local references. The wheel measured 24,561,438 bytes with a 57,093,640-byte native extension. Its SHA-256 is `4a5a5b036ae69b3c85c3780488af2bd89c3e789c170f463eec7bdb3ea19c59c6`. The worktree's 1.6 GiB of Cargo output, temporary wheels and virtual environments were pruned.
+
 ## 2026-11-24 SVG spine chapter editing
 
 The installed-wheel regressions insert a fixed-layout SVG between two XHTML chapters with a stylesheet, PNG, and text-only media overlay in the same edit. They verify the escaped navigation path, the SVG media type and viewport, PNG colors, and narration text. A batch SVG and XHTML replacement changes the graphic and its viewport, preserves the OPF, navigation, media overlays and untouched member bytes, and renders the revised graphic from a reopened fixed-layout PDF. Missing navigation and narration targets, invalid viewBox values, mismatched roots and extensions, missing SVG dependencies, and active SVG elements are rejected.

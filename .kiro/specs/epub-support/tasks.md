@@ -12,6 +12,7 @@
 - [x] Open the unmodified math-heavy *Linear Algebra* sample within the semantic output budget and exercise its spine previews.
 - [ ] Validate the release wheel matrix on Linux, macOS, and Windows.
 - [x] Replace existing XHTML and SVG chapters transactionally and preserve targeted navigation and overlay anchors.
+- [x] Rename chapter anchors with their links in a single batch and preserve targets referenced by retained XHTML, SVG, navigation and media overlays outside the spine.
 - [x] Insert fixed-layout SVG spine chapters with packaged dependencies and optional media overlays in the same edit.
 - [x] Synchronize EPUB 3 `mathml` and `svg` resource properties after chapter insertion or replacement.
 - [x] Read SMIL timing trees and expose chapter cue order, time ranges, target IDs and bounded audio reads.

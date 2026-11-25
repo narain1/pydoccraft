@@ -8,8 +8,8 @@ use roxmltree::{Document, Node};
 use serde_json::Value;
 
 use super::{
-    external, extract, invalid, limited, name, parse_xml, required, resolve, unsupported, Book, DC,
-    METADATA_BYTES, MIME, OPF, XHTML, XML_BYTES,
+    charge, external, extract, invalid, limited, name, parse_xml, percent_decode, required,
+    resolve, svg, unsupported, Book, DC, METADATA_BYTES, MIME, NCX, OPF, XHTML, XML_BYTES,
 };
 use crate::{
     author_epub::{escape_attribute, escape_text, validate_text, BoundedOutput},
@@ -232,26 +232,12 @@ pub(crate) fn update_chapters(
             }
         }
     }
-    let mut links: HashMap<&str, HashSet<&str>> = HashMap::new();
-    for link in extracted.pages.iter().flat_map(|page| &page.links) {
-        if let (Some(path), Some(fragment)) = (
-            link.metadata.get("target_path").and_then(Value::as_str),
-            link.metadata.get("target_fragment").and_then(Value::as_str),
-        ) {
-            if replacements.contains_key(path) {
-                links.entry(path).or_default().insert(fragment);
-            }
-        }
-    }
-    for field in ["navigation", "media_overlays"] {
-        if let Some(value) = extracted.metadata.get(field) {
-            collect_fragments(value, &replacements, &mut links);
-        }
-    }
     let epub3 = extracted.metadata["epub_version"]
         .as_str()
         .is_some_and(|version| version.starts_with('3'));
     let mut declarations = HashMap::new();
+    let mut removed_anchors = HashMap::new();
+    let mut anchor_bytes = 0;
     for (&path, &replacement) in &replacements {
         let xml = parse_xml(replacement)?;
         let root = xml.root_element();
@@ -277,23 +263,35 @@ pub(crate) fn update_chapters(
                 declarations.insert(path, xhtml_properties(root));
             }
         }
-        // Preserve target IDs used by existing navigation, synchronization and links.
-        if let Some(required) = links.get(path) {
+        let original = book.read(path, XML_BYTES)?;
+        if original != replacement {
             let ids = anchors(&xml);
-            if required.iter().any(|id| !ids.contains(id)) {
-                let original = book.read(path, XML_BYTES)?;
-                let source = parse_xml(&original)?;
-                let old_ids = anchors(&source);
-                if required
-                    .iter()
-                    .any(|id| old_ids.contains(id) && !ids.contains(id))
-                {
-                    return Err(EngineError::InvalidArgument(
-                        "replacement chapter removes a referenced anchor".into(),
-                    ));
-                }
+            let source = parse_xml(&original)?;
+            let mut removed = HashSet::new();
+            for id in anchors(&source).difference(&ids) {
+                charge(
+                    &mut anchor_bytes,
+                    id.len() + 48,
+                    XML_BYTES,
+                    "removed EPUB anchors exceed their byte budget",
+                )?;
+                removed.insert((*id).to_owned());
+            }
+            if !removed.is_empty() {
+                removed_anchors.insert(path, removed);
             }
         }
+    }
+    if !removed_anchors.is_empty() {
+        if let Some(overlays) = extracted.metadata.get("media_overlays") {
+            check_overlay_anchors(overlays, &removed_anchors)?;
+        }
+        check_staged_links(
+            &mut book,
+            &extracted.metadata["manifest"],
+            &replacements,
+            &removed_anchors,
+        )?;
     }
     let package = sync_chapter_properties(&mut book, &declarations)?;
     if let Some((path, xml)) = &package {
@@ -427,30 +425,128 @@ fn anchors<'a>(xml: &'a Document<'_>) -> HashSet<&'a str> {
         .collect()
 }
 
-fn collect_fragments<'a>(
-    value: &'a Value,
-    replacements: &HashMap<&str, &[u8]>,
-    links: &mut HashMap<&'a str, HashSet<&'a str>>,
-) {
+type RemovedAnchors<'a> = HashMap<&'a str, HashSet<String>>;
+
+fn check_anchor(
+    removed: &RemovedAnchors<'_>,
+    path: &str,
+    fragment: &str,
+) -> Result<(), EngineError> {
+    if removed.get(path).is_some_and(|ids| ids.contains(fragment)) {
+        return Err(EngineError::InvalidArgument(
+            "replacement chapter removes a referenced anchor".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn check_overlay_anchors(value: &Value, removed: &RemovedAnchors<'_>) -> Result<(), EngineError> {
     match value {
         Value::Object(fields) => {
             if let (Some(path), Some(fragment)) = (
                 fields.get("path").and_then(Value::as_str),
                 fields.get("fragment").and_then(Value::as_str),
             ) {
-                if replacements.contains_key(path) {
-                    links.entry(path).or_default().insert(fragment);
-                }
+                check_anchor(removed, path, fragment)?;
             }
             for child in fields.values() {
-                collect_fragments(child, replacements, links);
+                check_overlay_anchors(child, removed)?;
             }
         }
         Value::Array(items) => {
             for child in items {
-                collect_fragments(child, replacements, links);
+                check_overlay_anchors(child, removed)?;
             }
         }
         _ => {}
     }
+    Ok(())
+}
+
+fn check_staged_links(
+    book: &mut Book<'_>,
+    manifest: &Value,
+    replacements: &HashMap<&str, &[u8]>,
+    removed: &RemovedAnchors<'_>,
+) -> Result<(), EngineError> {
+    let declared: HashSet<_> = manifest
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            matches!(
+                item["media_type"].as_str()?,
+                "application/xhtml+xml"
+                    | "text/html"
+                    | "image/svg+xml"
+                    | "application/x-dtbncx+xml"
+            )
+            .then(|| item["path"].as_str())
+            .flatten()
+        })
+        .collect();
+    // A retained file can still be followed by another chapter even when it
+    // is not in the spine. Replacements contribute their staged markup.
+    let paths: Vec<_> = book
+        .archive
+        .file_names()
+        .filter(|&path| {
+            declared.contains(path)
+                || path.rsplit_once('.').is_some_and(|(_, ext)| {
+                    ext.eq_ignore_ascii_case("xhtml") || ext.eq_ignore_ascii_case("html")
+                })
+        })
+        .map(str::to_owned)
+        .collect();
+    for path in paths {
+        let original;
+        let source = if let Some(&replacement) = replacements.get(path.as_str()) {
+            replacement
+        } else {
+            original = book.read(&path, XML_BYTES)?;
+            &original
+        };
+        check_markup_anchors(source, &path, removed)?;
+    }
+    let package = book.package_path()?;
+    check_markup_anchors(&book.read(&package, METADATA_BYTES)?, &package, removed)
+}
+
+fn check_markup_anchors(
+    source: &[u8],
+    base: &str,
+    removed: &RemovedAnchors<'_>,
+) -> Result<(), EngineError> {
+    let xml = parse_xml(source)?;
+    let root = xml.root_element();
+    let ncx = name(root, NCX, "ncx");
+    let package = name(root, OPF, "package");
+    for node in root.descendants().filter(Node::is_element) {
+        let href = if node.has_tag_name((svg::NS, "a")) {
+            svg::image_href(node)
+        } else if name(node, XHTML, "a") || name(node, XHTML, "area") {
+            node.attribute("href")
+        } else if ncx && name(node, NCX, "content") {
+            node.attribute("src")
+        } else if package && name(node, OPF, "reference") {
+            node.attribute("href")
+        } else {
+            None
+        };
+        let Some(href) = href.map(str::trim).filter(|href| !external(href)) else {
+            continue;
+        };
+        let Some((_, fragment)) = href.split_once('#') else {
+            continue;
+        };
+        // Unresolved URLs were already outside the editor's ID contract.
+        if let Ok(path) = resolve(base, href) {
+            if removed.contains_key(path.as_str()) {
+                if let Ok(fragment) = percent_decode(fragment) {
+                    check_anchor(removed, &path, &fragment)?;
+                }
+            }
+        }
+    }
+    Ok(())
 }

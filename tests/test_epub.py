@@ -3997,6 +3997,67 @@ first
             with self.assertRaises(doc_ex.UnsupportedFormatError):
                 signed.edit_epub_chapters({0: first})
 
+    def test_batch_chapter_anchor_validation_uses_staged_hyperlinks(self) -> None:
+        html = '<html xmlns="http://www.w3.org/1999/xhtml"><body>{}</body></html>'
+        chapter = html.format('<p xml:id="café">Target</p><p><a href="#caf%C3%A9">Same page</a></p>')
+        other = html.format('<p><a href="./one.xhtml?mode=1#caf%C3%A9">Previous page</a></p>')
+        source = rewrite_epub(epub_fixture(chapter_one=chapter), {"OEBPS/two.xhtml": other})
+        renamed = html.format('<p id="nouveau">Renamed target</p>')
+        retargeted = other.replace("caf%C3%A9", "nouveau")
+        with doc_ex.open(source) as book:
+            with self.assertRaisesRegex(ValueError, "referenced anchor"):
+                book.edit_epub_chapters({0: renamed})
+            with self.assertRaisesRegex(ValueError, "referenced anchor"):
+                book.edit_epub_chapters({0: renamed, 1: other.replace("Previous page", "Still stale")})
+            revised = book.edit_epub_chapters({0: renamed, -1: retargeted})
+            self.assertEqual(book[1].get_links()[0].metadata["target_fragment"], "café")
+            self.assertEqual(book.read_epub_resource("OEBPS/one.xhtml"), chapter.encode())
+        with doc_ex.open(revised) as edited:
+            self.assertEqual(edited[0].get_text(), "Renamed target")
+            link, = edited[1].get_links()
+            self.assertEqual(link.metadata["target_fragment"], "nouveau")
+
+    def test_batch_chapter_anchor_validation_covers_non_spine_references(self) -> None:
+        html = '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body>{}</body></html>'
+        chapter = html.format('<p id="spare">Spare destination</p>')
+        source = epub_fixture(chapter_one=chapter)
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        package = package.replace(b"</manifest><spine>", b'''
+          <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+          <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+          <item id="landmarks" href="Appendix/extra.xhtml" media-type="application/xhtml+xml"/>
+          <item id="figure" href="Art/jump.svg" media-type="image/svg+xml"/>
+          </manifest><spine toc="ncx">''')
+        nav = html.format('<nav epub:type="toc"><ol><li><a href="one.xhtml">One</a></li></ol></nav>')
+        ncx = '''<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"><navMap>
+          <navPoint id="old"><navLabel><text>Supplement</text></navLabel>
+          <content src="one.xhtml#unresolved"/></navPoint></navMap></ncx>'''
+        appendix = html.format('<map id="map" name="map"><area shape="default" href="../one.xhtml#unresolved"/></map>')
+        figure = '''<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+          <a href="https://example.org/" xlink:href="../one.xhtml#spare"><text y="12">Figure</text></a></svg>'''
+        members = {"OEBPS/content.opf": package, "OEBPS/nav.xhtml": nav, "OEBPS/toc.ncx": ncx,
+                   "OEBPS/Appendix/extra.xhtml": appendix, "OEBPS/Art/jump.svg": figure}
+        changed = html.format("<p>New chapter</p>")
+        for path, replacement in (
+            ("OEBPS/content.opf", package.replace(
+                b"</package>", b'<guide><reference type="text" title="Start" href="one.xhtml#spare"/></guide></package>',
+            )),
+            ("OEBPS/toc.ncx", ncx.replace("#unresolved", "#spare")),
+            ("OEBPS/Appendix/extra.xhtml", appendix.replace("#unresolved", "#spare")),
+            ("OEBPS/Art/jump.svg", figure.replace('href="https://example.org/" ', "")),
+        ):
+            with self.subTest(path=path), doc_ex.open(rewrite_epub(source, {**members, path: replacement})) as book:
+                with self.assertRaisesRegex(ValueError, "referenced anchor"):
+                    book.edit_epub_chapters({0: changed})
+                self.assertEqual(book[0].get_text(), "Spare destination")
+        with doc_ex.open(rewrite_epub(source, members)) as book:
+            revised = book.edit_epub_chapters({0: changed})
+        with doc_ex.open(revised) as edited:
+            self.assertEqual(edited[0].get_text(), "New chapter")
+            for path, contents in members.items():
+                self.assertEqual(edited.read_epub_resource(path), contents.encode() if isinstance(contents, str) else contents)
+
     def test_insert_and_replace_fixed_svg_chapter_with_staged_resources(self) -> None:
         chapter_path = "OEBPS/Art/Plate one.svg"
         css_path = "OEBPS/Styles/paint.css"
