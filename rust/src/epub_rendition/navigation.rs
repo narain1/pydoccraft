@@ -1,10 +1,10 @@
-//! Map the publication's table of contents to destinations in the selected PDF pages.
+//! Remap EPUB outlines and visible link areas to the selected PDF pages.
 use std::{collections::HashMap, sync::Arc};
 
 use pdfcraft_cos::{Document, ObjRef, Object, SaveOptions};
 use serde_json::Value;
 
-use super::{viewport, Anchors};
+use super::{viewport, Anchors, Capture, LinkAreas};
 use crate::{
     model::{DocumentPayload, PagePayload},
     EngineError,
@@ -12,7 +12,9 @@ use crate::{
 
 pub(super) struct Navigation<'a> {
     items: &'a [Value],
-    pages: HashMap<&'a str, DestinationPage<'a>>,
+    destinations: HashMap<&'a str, DestinationPage<'a>>,
+    pages: Vec<(&'a str, f64)>,
+    links: LinkAreas,
 }
 
 struct DestinationPage<'a> {
@@ -62,38 +64,61 @@ impl<'a> Navigation<'a> {
             .unwrap_or_default();
         let mut navigation = Self {
             items: toc,
-            pages: HashMap::new(),
+            destinations: HashMap::new(),
+            pages: Vec::with_capacity(selected.len()),
+            links: LinkAreas::default(),
         };
-        if toc.is_empty() {
-            return Ok(navigation);
-        }
         for (index, page) in selected.iter().enumerate() {
-            if let Some(path) = chapter_path(page) {
-                navigation.pages.entry(path).or_insert(DestinationPage {
+            let path = chapter_path(page)
+                .ok_or_else(|| super::super::invalid("missing EPUB chapter path"))?;
+            let height = viewport(page)?[1];
+            navigation
+                .destinations
+                .entry(path)
+                .or_insert(DestinationPage {
                     index,
-                    height: viewport(page)?[1],
+                    height,
                     anchors: HashMap::new(),
                 });
+            navigation.pages.push((path, height));
+        }
+        for (index, page) in selected.iter().enumerate() {
+            let path = navigation.pages[index].0;
+            if navigation.destinations[path].index != index {
+                continue;
+            }
+            for link in &page.links {
+                let target = link.metadata.get("target_path").and_then(Value::as_str);
+                let fragment = link.metadata.get("target_fragment").and_then(Value::as_str);
+                navigation.request_anchor(target, fragment);
             }
         }
         let mut pending = toc.iter().collect::<Vec<_>>();
         while let Some(item) = pending.pop() {
-            if let Some(page) = item["path"]
-                .as_str()
-                .and_then(|path| navigation.pages.get_mut(path))
-            {
-                if let Some(fragment) = item["fragment"].as_str().filter(|id| !id.is_empty()) {
-                    page.anchors.insert(fragment, None);
-                }
-            }
+            navigation.request_anchor(item["path"].as_str(), item["fragment"].as_str());
             pending.extend(items(&item["children"]));
         }
         Ok(navigation)
     }
 
-    pub(super) fn anchors(&mut self, index: usize, page: &PagePayload) -> Option<&mut Anchors<'a>> {
-        let target = self.pages.get_mut(chapter_path(page)?)?;
-        (target.index == index && !target.anchors.is_empty()).then_some(&mut target.anchors)
+    fn request_anchor(&mut self, path: Option<&str>, fragment: Option<&'a str>) {
+        if let Some(page) = path.and_then(|path| self.destinations.get_mut(path)) {
+            if let Some(fragment) = fragment.filter(|id| !id.is_empty()) {
+                page.anchors.insert(fragment, None);
+            }
+        }
+    }
+
+    pub(super) fn capture(&mut self, index: usize, page: &PagePayload) -> Capture<'_, 'a> {
+        self.links.page = index;
+        let anchors = chapter_path(page)
+            .and_then(|path| self.destinations.get_mut(path))
+            .filter(|target| target.index == index && !target.anchors.is_empty())
+            .map(|target| &mut target.anchors);
+        Capture {
+            anchors,
+            links: &mut self.links,
+        }
     }
 
     fn bookmarks(&self, nav: &'a [Value]) -> Vec<Bookmark<'a>> {
@@ -103,7 +128,7 @@ impl<'a> Navigation<'a> {
                 let children = self.bookmarks(items(&item["children"]));
                 let destination = item["path"]
                     .as_str()
-                    .and_then(|path| self.pages.get(path))
+                    .and_then(|path| self.destinations.get(path))
                     .map(|page| {
                         let [left, top] = item["fragment"]
                             .as_str()
@@ -127,24 +152,36 @@ impl<'a> Navigation<'a> {
 
     pub(super) fn attach(&self, pdf: Vec<u8>) -> Result<Vec<u8>, EngineError> {
         let bookmarks = self.bookmarks(self.items);
-        if bookmarks.is_empty() {
+        if bookmarks.is_empty() && self.links.entries.is_empty() {
             return Ok(pdf);
         }
-        let mut entries = Vec::new();
-        let mut destinations = Vec::new();
-        flatten(&bookmarks, 1, &mut entries, &mut destinations);
         let mut document = Document::open(Arc::new(pdf)).map_err(conversion)?;
         let pages = pdfcraft_annot::page_refs(&document).map_err(conversion)?;
+        if !bookmarks.is_empty() {
+            self.attach_bookmarks(&mut document, &pages, &bookmarks)?;
+        }
+        self.attach_links(&mut document, &pages)?;
+        pdfcraft_cos::write_full(&document, &SaveOptions::default()).map_err(conversion)
+    }
+
+    fn attach_bookmarks(
+        &self,
+        document: &mut Document,
+        pages: &[ObjRef],
+        bookmarks: &[Bookmark<'_>],
+    ) -> Result<(), EngineError> {
+        let mut entries = Vec::new();
+        let mut destinations = Vec::new();
+        flatten(bookmarks, 1, &mut entries, &mut destinations);
 
         // This public batch operation constructs and counts an entire subtree in one pass.
         // Promote its children to the PDF outline root so the EPUB hierarchy stays intact.
-        pdfcraft_organize::add_bookmark_tree(&mut document, "Contents", &entries)
-            .map_err(conversion)?;
+        pdfcraft_organize::add_bookmark_tree(document, "Contents", &entries).map_err(conversion)?;
         let catalog = document.root().ok_or_else(invalid_outline)?;
-        let root = reference(&document, catalog, b"Outlines")?;
-        let wrapper = reference(&document, root, b"First")?;
-        let first = reference(&document, wrapper, b"First")?;
-        let last = reference(&document, wrapper, b"Last")?;
+        let root = reference(document, catalog, b"Outlines")?;
+        let wrapper = reference(document, root, b"First")?;
+        let first = reference(document, wrapper, b"First")?;
+        let last = reference(document, wrapper, b"Last")?;
         let count = document
             .get(wrapper)
             .as_dict()
@@ -168,22 +205,13 @@ impl<'a> Navigation<'a> {
             if let Some(child) = dict.reference(b"First") {
                 pending.push((child, false));
             }
-            let page = *pages.get(destination.page).ok_or_else(invalid_outline)?;
+            let target = destination.object(pages)?;
             document
                 .update_dict(item, |dict| {
                     if top_level {
                         dict.set(b"Parent".to_vec(), Object::Ref(root));
                     }
-                    dict.set(
-                        b"Dest".to_vec(),
-                        Object::Array(vec![
-                            Object::Ref(page),
-                            Object::name("XYZ"),
-                            Object::Real(destination.left),
-                            Object::Real(destination.top),
-                            Object::Null,
-                        ]),
-                    );
+                    dict.set(b"Dest".to_vec(), target);
                 })
                 .map_err(conversion)?;
         }
@@ -191,8 +219,141 @@ impl<'a> Navigation<'a> {
             return Err(invalid_outline());
         }
         document.free(wrapper);
-        pdfcraft_cos::write_full(&document, &SaveOptions::default()).map_err(conversion)
+        Ok(())
     }
+
+    fn attach_links(&self, document: &mut Document, pages: &[ObjRef]) -> Result<(), EngineError> {
+        use pdfcraft_annot::links::{add_many, LinkStyle};
+
+        let mut entries = Vec::new();
+        let mut adjustments = Vec::new();
+        let mut page_index = None;
+        let mut annotation_index = 0;
+        for (index, rect, href) in &self.links.entries {
+            let (path, height) = self.pages[*index];
+            if page_index != Some(*index) {
+                page_index = Some(*index);
+                annotation_index = 0;
+            }
+            let (uri, destination) = if super::super::external(href) {
+                if !safe_uri(href) {
+                    continue;
+                }
+                (href.to_string(), None)
+            } else {
+                let Some(destination) = self.link_destination(path, *index, href)? else {
+                    continue;
+                };
+                // The pinned batch API creates URI actions. Replace the temporary action
+                // with the explicit local destination before saving.
+                (
+                    String::from("about:blank"),
+                    Some(destination.object(pages)?),
+                )
+            };
+            let area = [
+                f64::from(rect.x),
+                height - f64::from(rect.bottom()),
+                f64::from(rect.right()),
+                height - f64::from(rect.y),
+            ];
+            // PdfCraft's authoring UI requires a 2 pt box. The PDF rectangle can be
+            // smaller, for example for a linked inline icon or a partially clipped line.
+            let small = area[2] - area[0] < 2.0 || area[3] - area[1] < 2.0;
+            if small || destination.is_some() {
+                adjustments.push((*index, annotation_index, destination, small.then_some(area)));
+            }
+            let authoring_area = if small { [0.0, 0.0, 2.0, 2.0] } else { area };
+            entries.push((*index, vec![authoring_area], uri));
+            annotation_index += 1;
+        }
+        if entries.is_empty() {
+            return Ok(());
+        }
+        add_many(document, &entries, &LinkStyle::default()).map_err(conversion)?;
+        let mut last_page = None;
+        let mut page_object = None;
+        for (page, index, destination, area) in adjustments {
+            if last_page != Some(page) {
+                last_page = Some(page);
+                page_object = pages.get(page).map(|&page| document.get(page));
+            }
+            let annotation = page_object
+                .as_deref()
+                .and_then(Object::as_dict)
+                .and_then(|dict| dict.get(b"Annots"))
+                .and_then(Object::as_array)
+                .and_then(|items| items.get(index))
+                .and_then(Object::as_ref)
+                .ok_or_else(|| conversion("missing generated link annotation"))?;
+            document
+                .update_dict(annotation, |dict| {
+                    if let Some(destination) = destination {
+                        dict.remove(b"A");
+                        dict.set(b"Dest".to_vec(), destination);
+                    }
+                    if let Some(area) = area {
+                        dict.set(
+                            b"Rect".to_vec(),
+                            Object::Array(area.into_iter().map(Object::Real).collect()),
+                        );
+                    }
+                })
+                .map_err(conversion)?;
+        }
+        Ok(())
+    }
+
+    fn link_destination(
+        &self,
+        source: &str,
+        index: usize,
+        href: &str,
+    ) -> Result<Option<Destination>, EngineError> {
+        let path = super::super::resolve(source, href)?;
+        let Some(target) = self.destinations.get(path.as_str()) else {
+            return Ok(None);
+        };
+        let point = match href.split_once('#').map(|(_, fragment)| fragment) {
+            Some(fragment) if !fragment.is_empty() => {
+                let fragment = super::super::percent_decode(fragment)?;
+                let Some(Some(point)) = target.anchors.get(fragment.as_str()) else {
+                    return Ok(None);
+                };
+                *point
+            }
+            _ => [0.0, 0.0],
+        };
+        Ok(Some(Destination {
+            page: if path == source { index } else { target.index },
+            left: f64::from(point[0]),
+            top: target.height - f64::from(point[1]),
+        }))
+    }
+}
+
+impl Destination {
+    fn object(self, pages: &[ObjRef]) -> Result<Object, EngineError> {
+        let page = *pages.get(self.page).ok_or_else(invalid_outline)?;
+        Ok(Object::Array(vec![
+            Object::Ref(page),
+            Object::name("XYZ"),
+            Object::Real(self.left),
+            Object::Real(self.top),
+            Object::Null,
+        ]))
+    }
+}
+
+fn safe_uri(href: &str) -> bool {
+    let Some((scheme, target)) = href.split_once(':') else {
+        return false;
+    };
+    href.len() <= 8192
+        && !href.chars().any(char::is_control)
+        && (scheme.eq_ignore_ascii_case("mailto")
+            || (scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
+                && target.starts_with("//"))
 }
 
 fn flatten(

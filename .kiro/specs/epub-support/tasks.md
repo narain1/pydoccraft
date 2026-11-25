@@ -22,7 +22,8 @@
 - [x] Render fixed-layout spreads in both reading directions, honor spine placement and orientation-dependent spread rules, and clip across page boundaries.
 - [x] Export selected fixed-layout viewports as raster PDF pages at their original sizes.
 - [x] Preserve nested EPUB navigation in fixed-layout PDF outlines, with destinations remapped to the exported page order.
-- [ ] Preserve clickable links and fragment destinations using the visible fixed-layout geometry.
+- [x] Preserve clickable links and fragment destinations on fixed-layout XHTML content and standalone SVG objects.
+- [ ] Extend fixed-layout link geometry to SVG text spans and SVG embedded in XHTML, and resolve remaining inline fragment cases.
 - [ ] Preserve searchable text in fixed-layout PDF export.
 - [x] Scope packaged XHTML font faces using CSS Unicode ranges, overlap order and glyph fallback.
 - [x] Preserve ordered XHTML font-family stacks across inherited and inline styles, including packaged and generic fallbacks.

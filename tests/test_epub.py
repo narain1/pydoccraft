@@ -804,6 +804,140 @@ class EpubTests(unittest.TestCase):
                 self.assertRegex(readable_pdf, rb'/XYZ\s+12(?:\.0+)?\s+51(?:\.0+)?\s+null')
                 self.assertRegex(readable_pdf, rb'/XYZ\s+18(?:\.0+)?\s+63(?:\.0+)?\s+null')
 
+    def test_fixed_layout_pdf_links_follow_wrapped_text_images_and_destinations(self) -> None:
+        source = fixed_spread_fixture([("", "white", 200, 180)] * 3)
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
+        for family in ("sans-serif", "Sample"):
+            with self.subTest(family=family):
+                fonts = "@font-face {font-family: Sample; src: url(Inter.ttf)}" if family == "Sample" else ""
+                first = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>First</title>
+                <meta name="viewport" content="width=200,height=180"/><style>
+                {fonts} body {{margin:0; font: 18px {family}}}
+                #wrap {{position:absolute; left:16px; top:12px; width:90px; height:31px; overflow:hidden}}
+                #pic {{position:absolute; left:132px; top:8px}}
+                #block {{display:block; position:absolute; left:16px; top:90px; width:48px; height:24px}}
+                #jumps {{position:absolute; left:16px; top:125px}}
+                </style></head><body>
+                <div id="wrap"><a href="https://example.org/text">Alpha Bravo Charlie Delta Echo Foxtrot</a></div>
+                <div id="pic"><a href="mailto:author@example.org"><img src="image.png" alt="Mail"/></a></div>
+                <a id="block" href="s1.xhtml#caf%C3%A9">Next</a>
+                <div id="jumps"><a href="#wrap">Same</a> <a href="s2.xhtml">Omitted</a>
+                <a href="s1.xhtml#missing">Missing</a> <a href="javascript:void(0)">Inert</a></div>
+                </body></html>"""
+                second = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Second</title>
+                <meta name="viewport" content="width=200,height=180"/><style>
+                {fonts} body {{margin:0; font: 16px {family}}}
+                p {{position:absolute; left:24px; top:56px; margin:0}}
+                </style></head><body><p>Prefix <span id="café">Café</span> suffix</p></body></html>"""
+                data = rewrite_epub(source, {
+                    "OEBPS/s0.xhtml": first, "OEBPS/s1.xhtml": second, "OEBPS/Inter.ttf": font,
+                    "OEBPS/image.png": solid((212, 32, 32)),
+                })
+                with doc_ex.open(data) as book:
+                    pdf = book.export_epub_fixed_pdf(dpi=96, pages=[1, 0, 0])
+                    preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                with doc_ex.open(pdf) as result, result.edit() as editor:
+                    for index in (1, 2):
+                        links = result[index].get_links()
+                        wrapped = [link.bbox for link in links if link.uri == "https://example.org/text"]
+                        self.assertEqual(len(wrapped), 2, wrapped)
+                        self.assertLess(wrapped[0][1], wrapped[1][1])
+                        for left, top, right, bottom in wrapped:
+                            self.assertGreaterEqual(left, 12)
+                            self.assertGreaterEqual(top, 9)
+                            self.assertLessEqual(right, 79.5)
+                            self.assertLessEqual(bottom, 32.25)
+                        mail, = [link for link in links if link.uri == "mailto:author@example.org"]
+                        self.assertGreaterEqual(mail.bbox[0], 99)
+                        block, same = [link for link in links if link.metadata.get("target_kind") == "page"]
+                        self.assertEqual(block.metadata["target_page"], 0)
+                        self.assertEqual(tuple(block.bbox), (12, 67.5, 48, 85.5))
+                        self.assertEqual(same.metadata["target_page"], index)
+                        self.assertEqual(len(links), 5)
+                        self.assertEqual(rgba_pixels(png_chunks(result.render_page(index, dpi=96))), preview)
+                    pdf_objects = editor.to_bytes(object_streams=False)
+                    self.assertRegex(pdf_objects, rb"/XYZ\s+12(?:\.0+)?\s+126(?:\.0+)?\s+null")
+                    self.assertRegex(pdf_objects, rb"/XYZ\s+(?:[4-9]\d)(?:\.\d+)?\s+9[0-5](?:\.\d+)?\s+null")
+
+    def test_fixed_layout_pdf_preserves_link_order_around_inline_equations(self) -> None:
+        source = fixed_spread_fixture([("", "white", 360, 120)])
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
+        for family in ("serif", "Local"):
+            with self.subTest(family=family):
+                chapter = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Linked equation</title>
+                <meta name="viewport" content="width=360,height=120"/>
+                <style>@font-face {{font-family:Local;src:url(font.ttf)}}
+                body {{margin:0;font-family:{family};font-size:20px}}</style></head>
+                <body><p>Open <a href="https://example.org/formula">formula
+                <math xmlns="http://www.w3.org/1998/Math/MathML"><mfrac><mi>x</mi><mi>y</mi></mfrac></math>
+                details</a> and <a href="#target">jump</a>.</p><p>Label <span id="target">target</span></p>
+                </body></html>"""
+                control = chapter.replace(
+                    '<math xmlns="http://www.w3.org/1998/Math/MathML">',
+                    '</a><math xmlns="http://www.w3.org/1998/Math/MathML">',
+                ).replace("</math>", '</math><a href="https://example.org/formula">')
+
+                def areas(markup: str) -> list[tuple[float, float, float, float]]:
+                    data = rewrite_epub(source, {"OEBPS/s0.xhtml": markup, "OEBPS/font.ttf": font})
+                    with doc_ex.open(data) as book:
+                        pdf = book.export_epub_fixed_pdf(dpi=96)
+                    with doc_ex.open(pdf) as reopened:
+                        links = reopened[0].get_links()
+                    self.assertEqual(links[-1].metadata.get("target_page"), 0)
+                    self.assertTrue(all(link.uri == "https://example.org/formula" for link in links[:-1]))
+                    return [link.bbox for link in links[:-1] if link.bbox is not None]
+
+                left, right = areas(control)
+                center = (left[2] + right[0]) / 2
+                self.assertGreater(right[0] - left[2], 2)
+                self.assertTrue(any(area[0] < center < area[2] for area in areas(chapter)))
+
+    def test_fixed_layout_pdf_links_use_transformed_svg_content_geometry(self) -> None:
+        data = fixed_spread_fixture([("", "white", 160, 100)] * 2)
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        package = package.replace(b'href="s0.xhtml" media-type="application/xhtml+xml"',
+                                  b'href="s0.svg" media-type="image/svg+xml"')
+        chapter = """<svg xmlns="http://www.w3.org/2000/svg"
+                xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="10 20 160 100">
+                <g transform="translate(10 20)">
+                  <a href="#destination" xlink:href="s1.xhtml">
+                    <rect x="24" y="16" width="40" height="32" fill="#bb1256"/>
+                  </a>
+                  <clipPath id="edge"><rect x="144" y="12" width="40" height="40"/></clipPath>
+                  <a id="pydoccraft-pdf-link-0" xlink:href="https://example.org/plate" clip-path="url(#edge)">
+                    <rect x="140" y="10" width="40" height="24" fill="#124796"/>
+                  </a>
+                  <a href="s1.xhtml"><rect x="20" y="60" width="20" height="20"/></a>
+                  <a href="javascript:void(0)"><rect x="50" y="60" width="20" height="20"/></a>
+                  <a href="https://example.org/invisible" style="display:none">
+                    <rect x="20" y="10" width="20" height="20"/>
+                  </a>
+                  <rect id="destination" x="80" y="60" width="20" height="20" fill="#339933"/>
+                </g>
+                </svg>"""
+        data = rewrite_epub(data, {"OEBPS/content.opf": package, "OEBPS/s0.svg": chapter})
+        with doc_ex.open(data) as book:
+            pdf = book.export_epub_fixed_pdf(dpi=96, pages=[0])
+            preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+            with self.assertRaisesRegex(ValueError, "referenced anchor"):
+                book.edit_epub_chapters({0: chapter.replace('id="destination"', '')})
+            revised = book.edit_epub_chapters({0: chapter.replace('x="80" y="60"', 'x="92" y="60"')})
+        with doc_ex.open(revised) as book:
+            updated = book.export_epub_fixed_pdf(dpi=96, pages=[0])
+        with doc_ex.open(updated) as result, result.edit() as editor:
+            self.assertRegex(editor.to_bytes(object_streams=False),
+                             rb"/XYZ\s+69(?:\.0+)?\s+30(?:\.0+)?\s+null")
+        with doc_ex.open(pdf) as result, result.edit() as editor:
+            same_page, external = result[0].get_links()
+            self.assertEqual(same_page.metadata["target_page"], 0)
+            self.assertEqual(tuple(same_page.bbox), (18, 12, 48, 36))
+            self.assertEqual(external.uri, "https://example.org/plate")
+            self.assertEqual(tuple(external.bbox), (108, 9, 120, 25.5))
+            self.assertEqual(rgba_pixels(png_chunks(result.render_page(0, dpi=96))), preview)
+            self.assertRegex(editor.to_bytes(object_streams=False),
+                             rb"/XYZ\s+60(?:\.0+)?\s+30(?:\.0+)?\s+null")
+
     def test_fixed_layout_uses_viewport_and_local_stylesheet_cascade(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head>
         <meta name="viewport" content="width=320, height=240"/>

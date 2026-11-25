@@ -543,12 +543,18 @@ impl Fonts {
                 layout = build(overrides).0;
             }
         }
+        let navigation = if output.navigation.is_some() {
+            super::layout::InlineNavigation::new(block, &source.offsets)?
+        } else {
+            super::layout::InlineNavigation::default()
+        };
         Ok(Text {
             layout: RefCell::new(layout),
             align,
+            navigation,
             inline: inline
                 .into_iter()
-                .map(|(_, drawing)| drawing.items)
+                .map(|(offset, drawing)| (offset, drawing.items))
                 .collect(),
         })
     }
@@ -804,7 +810,8 @@ pub(super) fn read_face(face: &Face, book: &mut Book<'_>) -> Result<Vec<u8>, Eng
 pub(super) struct Text {
     layout: RefCell<Layout<Brush>>,
     align: Alignment,
-    inline: Vec<Vec<Draw>>,
+    inline: Vec<(usize, Vec<Draw>)>,
+    navigation: super::layout::InlineNavigation,
 }
 
 impl Text {
@@ -819,15 +826,20 @@ impl Text {
         area: Rect,
         remaining: &mut usize,
         output: &mut Vec<Draw>,
+        mut capture: Option<(&mut super::rendition::Capture<'_, '_>, Rect)>,
     ) -> Result<f32, EngineError> {
         self.size(area.w);
         let mut layout = self.layout.borrow_mut();
         layout.set_alignment(self.align, AlignmentOptions::default());
         for line in layout.lines() {
+            if let Some((capture, clip)) = capture.as_mut().filter(|_| !self.navigation.is_empty())
+            {
+                self.capture_line(&line, area, *clip, capture)?;
+            }
             for item in line.items() {
                 let run = match item {
                     PositionedLayoutItem::InlineBox(placed) => {
-                        let items = self
+                        let (_, items) = self
                             .inline
                             .get(placed.id as usize)
                             .ok_or_else(|| invalid("missing EPUB inline object"))?;
@@ -923,7 +935,74 @@ impl Text {
                 }
             }
         }
+        if let Some((capture, clip)) = capture.filter(|_| !self.navigation.is_empty()) {
+            if let Some(line) = layout.lines().last() {
+                let metrics = line.metrics();
+                let x = metrics.offset + metrics.inline_max_coord;
+                let top = metrics.block_min_coord;
+                self.navigation.capture_end(
+                    Rect::new(area.x + x, area.y + top, 0.0, metrics.line_height),
+                    clip,
+                    capture,
+                );
+            }
+        }
         Ok(layout.height())
+    }
+
+    fn capture_line(
+        &self,
+        line: &parley::layout::Line<'_, Brush>,
+        area: Rect,
+        clip: Rect,
+        capture: &mut super::rendition::Capture<'_, '_>,
+    ) -> Result<(), EngineError> {
+        let metrics = line.metrics();
+        let top = area.y + metrics.content_block_min_coord;
+        let height = metrics.content_block_max_coord - metrics.content_block_min_coord;
+        let mut origin = metrics.offset + metrics.inline_min_coord;
+        let mut geometry = Vec::new();
+        for run in line.runs() {
+            let mut left = origin;
+            for cluster in run.visual_clusters() {
+                let advance = cluster.advance();
+                let range = cluster.text_range();
+                let is_object = self
+                    .inline
+                    .binary_search_by_key(&range.start, |(at, _)| *at)
+                    .is_ok();
+                if advance > 0.0 && !is_object && cluster.style().brush[3] != 0 {
+                    geometry.push((range, Rect::new(area.x + left, top, advance, height)));
+                }
+                left += advance;
+            }
+            origin += run.advance();
+        }
+        for item in line.items() {
+            if let PositionedLayoutItem::InlineBox(placed) = item {
+                let (offset, _) = self
+                    .inline
+                    .get(placed.id as usize)
+                    .ok_or_else(|| invalid("missing EPUB inline object"))?;
+                let range = *offset..*offset + wordcraft_doc::para::OBJ.len_utf8();
+                geometry.push((
+                    range,
+                    Rect::new(
+                        area.x + placed.x,
+                        area.y + placed.y,
+                        placed.width,
+                        placed.height,
+                    ),
+                ));
+            }
+        }
+        // The shaper positions glyphs in visual order. Emit source order after placing inline
+        // boxes, so a linked formula (or a bidi run) remains alongside its surrounding text.
+        geometry.sort_by_key(|(range, _)| range.start);
+        for (range, rect) in geometry {
+            self.navigation.capture(range, rect, clip, capture)?;
+        }
+        Ok(())
     }
 }
 

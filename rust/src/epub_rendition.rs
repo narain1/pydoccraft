@@ -1,5 +1,5 @@
 //! Compose EPUB viewports on a common pixel grid and export fixed pages.
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use serde_json::Value;
 use wordcraft_geom::Rect;
@@ -9,6 +9,80 @@ use wordcraft_geom::Rect;
 mod navigation;
 
 pub(super) type Anchors<'a> = HashMap<&'a str, Option<[f32; 2]>>;
+
+pub(super) struct Capture<'a, 'key> {
+    pub anchors: Option<&'a mut Anchors<'key>>,
+    pub links: &'a mut LinkAreas,
+}
+
+#[derive(Default)]
+pub(super) struct LinkAreas {
+    page: usize,
+    entries: Vec<(usize, Rect, Arc<str>)>,
+    bytes: usize,
+}
+
+impl LinkAreas {
+    pub(super) fn add(
+        &mut self,
+        rect: Rect,
+        clip: Rect,
+        href: Arc<str>,
+    ) -> Result<(), EngineError> {
+        let rect = intersection(rect, clip);
+        if rect.w <= 0.0 || rect.h <= 0.0 {
+            return Ok(());
+        }
+        if let Some((page, existing, previous)) = self.entries.last_mut() {
+            if *page == self.page
+                && *previous == href
+                && (existing.y - rect.y).abs() <= 0.01
+                && (existing.h - rect.h).abs() <= 0.01
+                && existing.x <= rect.right() + 0.01
+                && rect.x <= existing.right() + 0.01
+            {
+                *existing = existing.union(&rect);
+                return Ok(());
+            }
+        }
+        super::charge(
+            &mut self.bytes,
+            href.len().saturating_add(64),
+            4 * 1024 * 1024,
+            "EPUB PDF link annotations exceed 4 MiB",
+        )?;
+        crate::limits::validate_member_count(self.entries.len() + 1)?;
+        self.entries.push((self.page, rect, href));
+        Ok(())
+    }
+}
+
+pub(super) fn intersection(a: Rect, b: Rect) -> Rect {
+    let x = a.x.max(b.x);
+    let y = a.y.max(b.y);
+    Rect::new(
+        x,
+        y,
+        a.right().min(b.right()) - x,
+        a.bottom().min(b.bottom()) - y,
+    )
+}
+
+pub(super) fn capture_anchor(
+    anchors: &mut Option<&mut Anchors<'_>>,
+    id: &str,
+    rect: Rect,
+    clip: Rect,
+) {
+    if let Some(position) = anchors
+        .as_deref_mut()
+        .and_then(|anchors| anchors.get_mut(id))
+    {
+        if position.is_none() {
+            *position = anchor_position(rect, clip);
+        }
+    }
+}
 
 pub(super) fn anchor_position(rect: Rect, clip: Rect) -> Option<[f32; 2]> {
     let left = rect.x.max(clip.x);
@@ -333,13 +407,13 @@ pub(super) fn export_pdf(
             64_000_000,
             "fixed-layout PDF exceeds 64 megapixels",
         )?;
-        let image = layout::render_with_anchors(
+        let image = layout::render_with_navigation(
             data,
             book,
             page,
             dpi,
             Region::Viewport(None),
-            navigation.anchors(index, page),
+            Some(navigation.capture(index, page)),
         )?
         .ok_or_else(|| invalid("fixed-layout preview has no raster"))?;
         rendering::validate_rgba(image.width, image.height, &image.pixels)?;

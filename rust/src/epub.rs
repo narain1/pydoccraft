@@ -369,6 +369,7 @@ fn extract_impl(
                     book: &mut book,
                     budget: &mut budget,
                     styles: None,
+                    collect_anchors: false,
                     equation_styles: equation_styles.as_ref().map(|styles| (styles, viewport)),
                 },
             )?

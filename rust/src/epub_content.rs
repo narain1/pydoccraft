@@ -58,6 +58,7 @@ pub(super) struct Context<'a, 'book> {
     pub book: &'a mut Book<'book>,
     pub budget: &'a mut Budget,
     pub styles: Option<&'a super::style::Styles>,
+    pub collect_anchors: bool,
     pub equation_styles: Option<(&'a super::style::ChapterStyles, [f32; 2])>,
 }
 
@@ -69,6 +70,7 @@ struct Inline {
     images: Vec<ImagePayload>,
     math: Vec<serde_json::Value>,
     styles: Vec<(usize, usize, super::output::RunStyle)>,
+    anchors: Vec<(usize, String)>,
 }
 
 impl Inline {
@@ -180,6 +182,11 @@ impl Inline {
             block
                 .metadata
                 .insert("mathml".into(), serde_json::Value::Array(inline.math));
+        }
+        if !inline.anchors.is_empty() {
+            block
+                .metadata
+                .insert("layout_anchors".into(), json!(inline.anchors));
         }
         if !inline.styles.is_empty() {
             block.metadata.insert(
@@ -432,6 +439,13 @@ fn inline(
     if !node.is_element() || styled(node, cx).is_some_and(|style| style.hidden) {
         return Ok(());
     }
+    if cx.collect_anchors && styled(node, cx).is_some_and(|style| !style.text.invisible) {
+        if let Some(id) = node.attribute("id").or_else(|| node.attribute((XML, "id"))) {
+            cx.budget.object()?;
+            cx.budget.bytes(id.len())?;
+            run.anchors.push((run.characters, id.to_owned()));
+        }
+    }
     let tag = node.tag_name();
     if tag.namespace() == Some(SVG) && tag.name() == "svg" {
         let mut image = inline_svg(node, cx)?;
@@ -591,13 +605,24 @@ fn link(
     end: usize,
     cx: &mut Context<'_, '_>,
 ) -> Result<LinkPayload, EngineError> {
-    cx.budget.object()?;
-    cx.budget
-        .bytes(href.len().saturating_add(label.len()).saturating_mul(3))?;
+    link_in_chapter(href, label, start, end, cx.path, cx.page, cx.budget)
+}
+
+fn link_in_chapter(
+    href: &str,
+    label: &str,
+    start: usize,
+    end: usize,
+    path: &str,
+    page: usize,
+    budget: &mut Budget,
+) -> Result<LinkPayload, EngineError> {
+    budget.object()?;
+    budget.bytes(href.len().saturating_add(label.len()).saturating_mul(3))?;
     let mut link = LinkPayload {
         uri: href.into(),
         text: label.into(),
-        page: Some(cx.page),
+        page: Some(page),
         ..Default::default()
     };
     link.metadata.insert("start".into(), json!(start));
@@ -608,8 +633,8 @@ fn link(
         json!(if is_external { "external" } else { "internal" }),
     );
     if !is_external {
-        let path = resolve(cx.path, href)?;
-        cx.budget.bytes(path.len().saturating_mul(3))?;
+        let path = resolve(path, href)?;
+        budget.bytes(path.len().saturating_mul(3))?;
         link.metadata.insert("target_path".into(), json!(path));
         if let Some((_, fragment)) = href.split_once('#') {
             link.metadata.insert(
@@ -705,10 +730,20 @@ pub(super) fn svg_page(
     path: &str,
     budget: &mut Budget,
 ) -> Result<PagePayload, EngineError> {
-    let image = svg_image(root, data, page, path, path, budget)?;
+    let mut image = svg_image(root, data, page, path, path, budget)?;
+    let links = root
+        .descendants()
+        .filter(|node| name(*node, SVG, "a"))
+        .filter_map(super::svg::image_href)
+        .map(|href| link_in_chapter(href, "", 0, 0, path, page, budget))
+        .collect::<Result<Vec<_>, _>>()?;
+    if !links.is_empty() {
+        image.metadata.insert("epub_svg_links".into(), json!(true));
+    }
     Ok(PagePayload {
         number: page,
         images: vec![image.clone()],
+        links,
         blocks: vec![BlockPayload {
             kind: "paragraph".into(),
             images: vec![image],
@@ -723,7 +758,14 @@ pub(super) fn inline_svg(
     cx: &mut Context<'_, '_>,
 ) -> Result<ImagePayload, EngineError> {
     let bytes = standalone(node, cx.source)?;
-    svg_image(node, &bytes, cx.page, "inline.svg", cx.path, cx.budget)
+    let mut image = svg_image(node, &bytes, cx.page, "inline.svg", cx.path, cx.budget)?;
+    if node
+        .descendants()
+        .any(|node| name(node, SVG, "a") && super::svg::image_href(node).is_some())
+    {
+        image.metadata.insert("epub_svg_links".into(), json!(true));
+    }
+    Ok(image)
 }
 
 fn svg_image(
@@ -769,7 +811,7 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
     }
     for node in root.descendants().filter(Node::is_element) {
         let tag = node.tag_name().name();
-        let packaged_element = base.is_some() && matches!(tag, "image" | "style");
+        let packaged_element = base.is_some() && matches!(tag, "image" | "style" | "a");
         if node.tag_name().namespace() != Some(SVG)
             || (!packaged_element
                 && !matches!(
@@ -816,6 +858,18 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                 super::svg::resource_path(base.unwrap_or_default(), value)?;
                 continue;
             }
+            if tag == "a"
+                && key == "href"
+                && matches!(attribute.namespace(), None | Some(super::svg::XLINK))
+            {
+                if !external(value) {
+                    resolve(base.unwrap_or_default(), value)?;
+                    if let Some((_, fragment)) = value.split_once('#') {
+                        super::percent_decode(fragment)?;
+                    }
+                }
+                continue;
+            }
             if tag == "use"
                 && key == "href"
                 && matches!(attribute.namespace(), None | Some(super::svg::XLINK))
@@ -833,6 +887,7 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
             }
             let static_attribute = match attribute.namespace() {
                 None if tag == "style" && matches!(key, "media" | "type") => true,
+                None if tag == "a" && key == "target" => true,
                 None if tag == "svg" && key == "baseProfile" => true,
                 None if tag == "filter" && matches!(key, "filterUnits" | "primitiveUnits") => true,
                 None if tag == "feGaussianBlur" && key == "stdDeviation" => true,

@@ -1,6 +1,6 @@
 //! Rasterize a validated EPUB SVG content document on its declared viewport.
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, HashSet},
     sync::Arc,
 };
 
@@ -141,45 +141,27 @@ pub(super) fn render(
     fixed: bool,
     dpi: f64,
     region: Region,
-    anchors: Option<&mut super::rendition::Anchors<'_>>,
+    mut navigation: Option<&mut super::rendition::Capture<'_, '_>>,
 ) -> Result<wordcraft_render::Rendered, EngineError> {
     let viewport = viewport(root);
     if fixed && viewport.is_none() {
         return Err(unsupported("fixed-layout SVG requires a numeric viewBox"));
     }
+    let links = navigation.is_some().then(|| SvgLinks::new(root));
     let tree = parse(
         root,
         root.document().input_text().as_bytes(),
         base,
         book,
         viewport,
+        links.as_ref(),
     )?;
     let [w, h] = viewport.unwrap_or([tree.size().width() * 0.75, tree.size().height() * 0.75]);
-    if let Some(anchors) = anchors {
-        let clip = wordcraft_geom::Rect::new(0.0, 0.0, w, h);
-        let scale = [w / tree.size().width(), h / tree.size().height()];
-        let mut stack = vec![tree.root().children().iter()];
-        while let Some(children) = stack.last_mut() {
-            if let Some(node) = children.next() {
-                if let Some(position) = anchors.get_mut(node.id()) {
-                    if position.is_none() {
-                        if let Some(rect) = node.abs_bounding_box() {
-                            let geometry = wordcraft_geom::Rect::new(
-                                rect.x() * scale[0],
-                                rect.y() * scale[1],
-                                rect.width() * scale[0],
-                                rect.height() * scale[1],
-                            );
-                            *position = super::rendition::anchor_position(geometry, clip);
-                        }
-                    }
-                }
-                if let usvg::Node::Group(group) = node {
-                    stack.push(group.children().iter());
-                }
-            } else {
-                stack.pop();
-            }
+    if let Some((capture, links)) = navigation.as_mut().zip(links.as_ref()) {
+        if capture.anchors.is_some() || !links.targets.is_empty() {
+            let clip = wordcraft_geom::Rect::new(0.0, 0.0, w, h);
+            let scale = [w / tree.size().width(), h / tree.size().height()];
+            capture_svg(&tree, links, scale, clip, capture)?;
         }
     }
     let scale = dpi / 72.0;
@@ -204,6 +186,93 @@ pub(super) fn render(
     })
 }
 
+struct SvgLinks<'a> {
+    generated_ids: HashMap<roxmltree::NodeId, String>,
+    targets: HashMap<String, &'a str>,
+}
+
+impl<'a> SvgLinks<'a> {
+    fn new(root: Node<'a, '_>) -> Self {
+        let mut result = Self {
+            generated_ids: HashMap::new(),
+            targets: HashMap::new(),
+        };
+        let used = root
+            .descendants()
+            .filter_map(|node| node.attribute("id"))
+            .collect::<HashSet<_>>();
+        let mut next = 0;
+        for node in root
+            .descendants()
+            .filter(|node| node.has_tag_name((NS, "a")))
+        {
+            let Some(href) = image_href(node) else {
+                continue;
+            };
+            let id = match node.attribute("id") {
+                Some("") => continue,
+                Some(id) => id.to_owned(),
+                None => loop {
+                    let id = format!("pydoccraft-pdf-link-{next}");
+                    next += 1;
+                    if !used.contains(id.as_str()) {
+                        result.generated_ids.insert(node.id(), id.clone());
+                        break id;
+                    }
+                },
+            };
+            result.targets.entry(id).or_insert(href);
+        }
+        result
+    }
+}
+
+fn capture_svg(
+    tree: &usvg::Tree,
+    links: &SvgLinks<'_>,
+    scale: [f32; 2],
+    clip: wordcraft_geom::Rect,
+    capture: &mut super::rendition::Capture<'_, '_>,
+) -> Result<(), EngineError> {
+    let geometry = |rect: usvg::Rect| {
+        wordcraft_geom::Rect::new(
+            rect.x() * scale[0],
+            rect.y() * scale[1],
+            rect.width() * scale[0],
+            rect.height() * scale[1],
+        )
+    };
+    let mut stack = vec![(tree.root().children().iter(), clip)];
+    while let Some((children, parent_clip)) = stack.last_mut() {
+        let Some(node) = children.next() else {
+            stack.pop();
+            continue;
+        };
+        let mut clip = *parent_clip;
+        if let usvg::Node::Group(group) = node {
+            if group.opacity().get() == 0.0 {
+                continue;
+            }
+            if group.clip_path().is_some() {
+                let Some(bounds) = group.abs_layer_bounding_box() else {
+                    continue;
+                };
+                clip = super::rendition::intersection(clip, geometry(bounds.to_rect()));
+            }
+            stack.push((group.children().iter(), clip));
+        }
+        if let Some(rect) = node.abs_bounding_box() {
+            super::rendition::capture_anchor(&mut capture.anchors, node.id(), geometry(rect), clip);
+        }
+        if let Some(href) = links.targets.get(node.id()) {
+            if let Some(rect) = node.abs_stroke_bounding_box() {
+                capture.links.add(geometry(rect), clip, (*href).into())?;
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn embedded(
     source: &[u8],
     base: &str,
@@ -211,7 +280,7 @@ pub(super) fn embedded(
 ) -> Result<usvg::Tree, EngineError> {
     let xml = super::parse_xml(source)?;
     let root = xml.root_element();
-    parse(root, source, base, book, viewport(root))
+    parse(root, source, base, book, viewport(root), None)
 }
 
 fn parse(
@@ -220,6 +289,7 @@ fn parse(
     base: &str,
     book: &mut Book<'_>,
     viewport: Option<[f32; 2]>,
+    links: Option<&SvgLinks<'_>>,
 ) -> Result<usvg::Tree, EngineError> {
     let has_uses = content::validate_svg(root, Some(base))?;
     let images = raster_images(root, base, book)?;
@@ -242,7 +312,7 @@ fn parse(
         options.default_size.height() * 0.75,
     ];
     let mut cascade = Cascade::load_svg(root, base, book, viewport)?;
-    let (styled, families) = apply_styles(root, source, &mut cascade)?;
+    let (styled, families) = apply_styles(root, source, &mut cascade, links)?;
     let fonts = if root
         .descendants()
         .any(|node| node.has_tag_name((NS, "text")))
@@ -290,6 +360,7 @@ fn apply_styles(
     root: Node<'_, '_>,
     source: &[u8],
     cascade: &mut Cascade,
+    links: Option<&SvgLinks<'_>>,
 ) -> Result<(Vec<u8>, svg_fonts::Families), EngineError> {
     let mut output = Vec::with_capacity(source.len());
     let mut cursor = 0;
@@ -352,9 +423,10 @@ fn apply_styles(
             style.push_str(&value);
             style.push(';');
         }
+        let id = links.and_then(|links| links.generated_ids.get(&node.id()));
         let range = if let Some(attribute) = node.attribute_node("style") {
             attribute.range()
-        } else if !style.is_empty() {
+        } else if id.is_some() || !style.is_empty() {
             let start = node.range().start + 1;
             let len = source[start..]
                 .iter()
@@ -364,7 +436,10 @@ fn apply_styles(
         } else {
             continue;
         };
-        let replacement = format!(r#" style="{}""#, escape_attribute(&style));
+        let mut replacement = format!(r#" style="{}""#, escape_attribute(&style));
+        if let Some(id) = id {
+            replacement.push_str(&format!(r#" id="{id}""#));
+        }
         charge(
             &mut added_bytes,
             replacement.len(),

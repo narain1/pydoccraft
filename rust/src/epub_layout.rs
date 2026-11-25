@@ -1,5 +1,9 @@
 //! Lay out styled XHTML in its viewport, then paint with the existing native renderer.
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
+
+#[path = "epub_layout/link_geometry.rs"]
+mod link_geometry;
+pub(super) use link_geometry::InlineNavigation;
 
 use roxmltree::Node;
 use taffy::{geometry::Size, prelude::*, style::Overflow, LayoutInput, LayoutOutput};
@@ -20,7 +24,7 @@ use super::{
     invalid, limited, name,
     output::{image_bytes, Output, RasterImage},
     parse_xml,
-    rendition::{fixed, Region},
+    rendition::{capture_anchor, fixed, intersection, Capture, Region},
     style::{ChapterStyles, Paint},
     unsupported, Book, XHTML, XML_BYTES,
 };
@@ -42,16 +46,16 @@ pub(super) fn render(
     dpi: f64,
     region: Region,
 ) -> Result<Option<wordcraft_render::Rendered>, EngineError> {
-    render_with_anchors(data, book, page, dpi, region, None)
+    render_with_navigation(data, book, page, dpi, region, None)
 }
 
-pub(super) fn render_with_anchors(
+pub(super) fn render_with_navigation(
     data: &[u8],
     book: &DocumentPayload,
     page: &PagePayload,
     dpi: f64,
     region: Region,
-    anchors: Option<&mut super::rendition::Anchors<'_>>,
+    mut navigation: Option<Capture<'_, '_>>,
 ) -> Result<Option<wordcraft_render::Rendered>, EngineError> {
     let fixed = fixed(page);
     rendering::validate_dpi(dpi)?;
@@ -65,7 +69,16 @@ pub(super) fn render_with_anchors(
     let doc = parse_xml(&source)?;
     let root = doc.root_element();
     if root.has_tag_name((super::svg::NS, "svg")) {
-        return super::svg::render(root, path, &mut archive, fixed, dpi, region, anchors).map(Some);
+        return super::svg::render(
+            root,
+            path,
+            &mut archive,
+            fixed,
+            dpi,
+            region,
+            navigation.as_mut(),
+        )
+        .map(Some);
     }
     let body = child(root, XHTML, "body").ok_or_else(|| invalid("XHTML chapter has no body"))?;
     let viewport = if fixed {
@@ -107,9 +120,16 @@ pub(super) fn render_with_anchors(
         book: &mut archive,
         budget: &mut budget,
         styles: Some(&styles.boxes),
+        collect_anchors: navigation
+            .as_ref()
+            .is_some_and(|capture| capture.anchors.is_some()),
         equation_styles: Some((&styles, viewport)),
     };
-    let mut layout = Layout::new(Output::new(data, book, false, dpi), viewport, fonts);
+    let mut output = Output::new(data, book, false, dpi);
+    if navigation.is_some() {
+        output.navigation = Some(HashMap::new());
+    }
+    let mut layout = Layout::new(output, viewport, fonts);
     let root_id = layout.build(root, &mut context)?;
     let id = layout.boxes[root_id].id;
     let mut root_style = layout.tree.style(id).map_err(failure)?.clone();
@@ -139,11 +159,18 @@ pub(super) fn render_with_anchors(
     let mut positions = PaintPositions {
         origins: HashMap::new(),
         anchors: HashMap::new(),
-        found: anchors,
+        navigation,
     };
-    if let Some(anchors) = positions.found.as_ref() {
+    if let Some(anchors) = positions
+        .navigation
+        .as_ref()
+        .and_then(|capture| capture.anchors.as_ref())
+    {
         for node in root.descendants().filter(Node::is_element) {
-            let Some(id) = node.attribute("id") else {
+            let Some(id) = node
+                .attribute("id")
+                .or_else(|| node.attribute((super::XML, "id")))
+            else {
                 continue;
             };
             if anchors.contains_key(id)
@@ -260,12 +287,13 @@ struct Layout<'book> {
 struct PaintPositions<'doc, 'out, 'key> {
     origins: HashMap<NodeId, [f32; 2]>,
     anchors: HashMap<roxmltree::NodeId, &'doc str>,
-    found: Option<&'out mut super::rendition::Anchors<'key>>,
+    navigation: Option<Capture<'out, 'key>>,
 }
 
 struct PaintBox {
     id: NodeId,
     dom: Option<roxmltree::NodeId>,
+    href: Option<Arc<str>>,
     children: Vec<usize>,
     content: Option<Contents>,
     background: Option<Paint>,
@@ -430,6 +458,11 @@ impl<'book> Layout<'book> {
             PaintBox {
                 id: NodeId::from(0usize),
                 dom: Some(node.id()),
+                href: if self.output.navigation.is_some() && name(node, XHTML, "a") {
+                    node.attribute("href").map(Arc::from)
+                } else {
+                    None
+                },
                 children,
                 content: local,
                 background: styled.background,
@@ -578,6 +611,7 @@ impl<'book> Layout<'book> {
                 PaintBox {
                     id: NodeId::from(0usize),
                     dom: None,
+                    href: None,
                     children: Vec::new(),
                     content: Some(content),
                     background: None,
@@ -692,13 +726,12 @@ impl<'book> Layout<'book> {
             return Err(limited("EPUB box geometry exceeds renderer limits"));
         }
         if !node.invisible {
-            if let Some(position) = node
-                .dom
-                .and_then(|dom| positions.anchors.get(&dom))
-                .and_then(|id| positions.found.as_mut()?.get_mut(*id))
-            {
-                if position.is_none() {
-                    *position = super::rendition::anchor_position(rectangle, clip);
+            if let Some(navigation) = positions.navigation.as_mut() {
+                if let Some(id) = node.dom.and_then(|dom| positions.anchors.get(&dom)) {
+                    capture_anchor(&mut navigation.anchors, id, rectangle, clip);
+                }
+                if let Some(href) = &node.href {
+                    navigation.links.add(rectangle, clip, href.clone())?;
                 }
             }
         }
@@ -710,6 +743,15 @@ impl<'book> Layout<'book> {
             (rectangle.w - border.left - border.right - padding.left - padding.right).max(0.0),
             (rectangle.h - border.top - border.bottom - padding.top - padding.bottom).max(0.0),
         );
+        let overflow = node.clip_overflow.then(|| {
+            Rect::new(
+                x + border.left,
+                y + border.top,
+                (rectangle.w - border.left - border.right).max(0.0),
+                (rectangle.h - border.top - border.bottom).max(0.0),
+            )
+        });
+        let child_clip = overflow.map_or(clip, |rect| intersection(clip, rect));
         let mut inner = Vec::new();
         if !node.invisible {
             if node.dom != Some(canvas_source) {
@@ -740,6 +782,20 @@ impl<'book> Layout<'book> {
                         &mut self.cache,
                         &mut self.measure_count,
                     )?;
+                    if let Some((capture, paragraphs)) = positions
+                        .navigation
+                        .as_mut()
+                        .zip(self.output.navigation.as_ref())
+                    {
+                        link_geometry::capture_native(
+                            &self.output.document,
+                            &page,
+                            paragraphs,
+                            content_box,
+                            child_clip,
+                            capture,
+                        )?;
+                    }
                     let draws = page_display(
                         &self.output.document,
                         &page,
@@ -755,7 +811,15 @@ impl<'book> Layout<'book> {
                 Some(Contents::FontText(blocks)) if content_box.w > 0.0 => {
                     let mut area = content_box;
                     for block in blocks {
-                        area.y += block.draw(area, &mut self.glyph_paths_remaining, &mut inner)?;
+                        area.y += block.draw(
+                            area,
+                            &mut self.glyph_paths_remaining,
+                            &mut inner,
+                            positions
+                                .navigation
+                                .as_mut()
+                                .map(|capture| (capture, child_clip)),
+                        )?;
                     }
                 }
                 Some(Contents::Image(image, alt)) if content_box.w > 0.0 && content_box.h > 0.0 => {
@@ -771,24 +835,6 @@ impl<'book> Layout<'book> {
                 _ => {}
             }
         }
-        let overflow = node.clip_overflow.then(|| {
-            Rect::new(
-                x + border.left,
-                y + border.top,
-                (rectangle.w - border.left - border.right).max(0.0),
-                (rectangle.h - border.top - border.bottom).max(0.0),
-            )
-        });
-        let child_clip = overflow.map_or(clip, |rect| {
-            let x = rect.x.max(clip.x);
-            let y = rect.y.max(clip.y);
-            Rect::new(
-                x,
-                y,
-                rect.right().min(clip.right()) - x,
-                rect.bottom().min(clip.bottom()) - y,
-            )
-        });
         let mut children = node.children.clone();
         children.sort_by_key(|&child| self.boxes[child].z_index);
         for child in children {

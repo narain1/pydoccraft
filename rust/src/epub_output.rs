@@ -95,6 +95,7 @@ pub(super) struct Output<'a> {
     archive: Option<super::Book<'a>>,
     pub document: Document,
     preserve_links: bool,
+    pub navigation: Option<std::collections::HashMap<u64, super::layout::InlineNavigation>>,
     pixels: u64,
     raster_dpi: f64,
     math_nodes_remaining: usize,
@@ -146,6 +147,7 @@ impl<'a> Output<'a> {
             archive: None,
             document,
             preserve_links,
+            navigation: None,
             pixels: 0,
             raster_dpi,
             math_nodes_remaining: 50_000,
@@ -336,6 +338,12 @@ impl<'a> Output<'a> {
             }
         }
         text.insert(&mut p, text_cursor, text.offsets.len() - 1, None)?;
+        if let Some(navigation) = self.navigation.as_mut() {
+            let projected = super::layout::InlineNavigation::new(block, &text.offsets)?;
+            if !projected.is_empty() {
+                navigation.insert(p.rev, projected);
+            }
+        }
         Ok(p)
     }
 
@@ -396,7 +404,10 @@ impl<'a> Output<'a> {
     }
 
     pub(super) fn load_image(&mut self, image: &ImagePayload) -> Result<RasterImage, EngineError> {
-        if self.preserve_links && image.metadata.contains_key("href") {
+        if self.preserve_links
+            && (image.metadata.contains_key("href")
+                || image.metadata.contains_key("epub_svg_links"))
+        {
             return Err(unsupported("linked images"));
         }
         let bytes = image_bytes(image)?;
