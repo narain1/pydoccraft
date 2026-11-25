@@ -1,5 +1,8 @@
 //! Validate Ogg transport and select a logical stream from each physical segment.
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Range,
+};
 
 use ogg::{
     reading::{BasePacketReader, OggPage, PageParser},
@@ -14,7 +17,7 @@ const MAX_PACKET_BYTES: usize = 65_536;
 const MAX_COMMENT_BYTES: usize = 1024 * 1024;
 const MAX_VIDEO_PACKET_BYTES: usize = 2 * 1024 * 1024;
 const MAX_SKELETON_BYTES: usize = 1024 * 1024;
-const MAX_NAMED_LINKS: usize = 256;
+const MAX_SELECTED_LINKS: usize = 256;
 const MAX_NAMED_STREAMS: usize = 256;
 const CONTINUED: u8 = 1;
 const BOS: u8 = 2;
@@ -52,12 +55,12 @@ impl Codec {
 type Serial = [u8; 4];
 
 #[derive(Default)]
-pub(super) struct NamedTracks {
+pub(super) struct SelectedTracks {
     audio: Vec<(Serial, Codec)>,
     video: Vec<Serial>,
 }
 
-impl NamedTracks {
+impl SelectedTracks {
     pub(super) fn audio_codec(&self) -> Option<Codec> {
         let &(_, codec) = self.audio.first()?;
         self.audio
@@ -147,6 +150,10 @@ impl<'a> Page<'a> {
             .expect("Ogg page serial field")
     }
 
+    fn identifies_other_audio(&self) -> bool {
+        self.body.starts_with(b"\x7fFLAC") || self.body.starts_with(b"Speex   ")
+    }
+
     fn flag(&self, flag: u8) -> bool {
         self.header[5] & flag != 0
     }
@@ -220,7 +227,7 @@ pub(super) fn groups<'a>(
     bytes: &'a [u8],
     codec: Codec,
     track: Option<usize>,
-    named: Option<&NamedTracks>,
+    named: Option<&SelectedTracks>,
 ) -> Result<Vec<Segment<'a>>, EngineError> {
     scan_groups(bytes, track, |index| {
         let serial = named.map(|tracks| tracks.track(index, codec)).transpose()?;
@@ -228,12 +235,12 @@ pub(super) fn groups<'a>(
     })
 }
 
-pub(super) fn named_audio_groups<'a>(
+pub(super) fn selected_audio_groups<'a>(
     bytes: &'a [u8],
-    named: &NamedTracks,
+    selection: &SelectedTracks,
 ) -> Result<Vec<Segment<'a>>, EngineError> {
     scan_groups(bytes, None, |index| {
-        let &(serial, codec) = named
+        let &(serial, codec) = selection
             .audio
             .get(index)
             .ok_or_else(|| unsupported("named Ogg fragment does not select an audio track"))?;
@@ -278,8 +285,7 @@ fn scan_groups<'a>(
             tracks += usize::from(matches);
             opus_tracks += usize::from(identified == Some(Codec::Opus));
             vorbis_tracks += usize::from(identified == Some(Codec::Vorbis));
-            has_other_audio |=
-                page.body.starts_with(b"\x7fFLAC") || page.body.starts_with(b"Speex   ");
+            has_other_audio |= page.identifies_other_audio();
             active.insert(
                 serial,
                 Stream {
@@ -362,10 +368,182 @@ fn scan_groups<'a>(
     Err(limited("Ogg exceeds its page count limit"))
 }
 
+struct DefaultLink {
+    audio: (Serial, Codec),
+    video: Option<Serial>,
+    skeleton: Option<Serial>,
+    repeated_skeleton: bool,
+    encoded: Range<usize>,
+}
+
+/// Look for a codec change between links with one genuine default soundtrack.
+/// Uniform and ambiguous selections keep the existing per-codec rules.
+pub(super) fn default_mixed_tracks(encoded: &[u8]) -> Result<Option<SelectedTracks>, EngineError> {
+    if encoded.is_empty() {
+        return Ok(None);
+    }
+    let mut remaining = encoded;
+    let mut active = HashSet::new();
+    let mut links = Vec::<DefaultLink>::new();
+    let mut audio = None;
+    let mut video = None;
+    let mut skeleton = None;
+    let mut repeated_skeleton = false;
+    let mut beginning = true;
+    let mut start = 0;
+    let mut mixed = false;
+    let mut too_many = false;
+    for _ in 0..MAX_PAGES {
+        let (page, rest) = Page::read(remaining)?;
+        remaining = rest;
+        let serial = page.serial();
+        if page.flag(BOS) {
+            if !beginning {
+                return Err(invalid("Ogg stream begins after its segment headers"));
+            }
+            if !active.insert(serial) {
+                return Err(invalid("Ogg segment repeats a stream serial"));
+            }
+            match Codec::from_identification(page.body) {
+                Some(Codec::Opus | Codec::Vorbis) if audio.is_some() => return Ok(None),
+                Some(codec @ (Codec::Opus | Codec::Vorbis)) => {
+                    audio = Some((serial, codec));
+                }
+                Some(Codec::Theora) => {
+                    video.get_or_insert(serial);
+                }
+                _ if page.identifies_other_audio() => return Ok(None),
+                _ if page.body.starts_with(b"fishead\0") => {
+                    repeated_skeleton |= skeleton.replace(serial).is_some();
+                }
+                _ => {}
+            }
+        } else {
+            beginning = false;
+        }
+        if !active.contains(&serial) {
+            return Err(invalid("Ogg page belongs to an inactive stream"));
+        }
+        if page.flag(EOS) {
+            active.remove(&serial);
+        }
+        let more_headers = beginning && remaining.get(5).is_some_and(|flags| flags & BOS != 0);
+        if active.is_empty() && !more_headers {
+            let Some(audio) = audio.take() else {
+                return Ok(None);
+            };
+            mixed |= links.first().is_some_and(|first| first.audio.1 != audio.1);
+            let end = encoded.len() - remaining.len();
+            if links.len() == MAX_SELECTED_LINKS {
+                too_many = true;
+            } else {
+                links.push(DefaultLink {
+                    audio,
+                    video,
+                    skeleton,
+                    repeated_skeleton,
+                    encoded: start..end,
+                });
+            }
+            video = None;
+            skeleton = None;
+            repeated_skeleton = false;
+            beginning = true;
+            start = end;
+        }
+        if remaining.is_empty() {
+            if !active.is_empty() {
+                return Err(invalid("truncated Ogg segment"));
+            }
+            return if mixed {
+                if too_many {
+                    return Err(limited("mixed Ogg exceeds its segment count limit"));
+                }
+                describe_defaults(encoded, links).map(Some)
+            } else {
+                Ok(None)
+            };
+        }
+    }
+    Err(limited("Ogg exceeds its page count limit"))
+}
+
+fn describe_defaults(
+    encoded: &[u8],
+    links: Vec<DefaultLink>,
+) -> Result<SelectedTracks, EngineError> {
+    let mut selection = SelectedTracks::default();
+    let mut title = None;
+    let mut metadata_bytes = 0;
+    for link in links {
+        if link.repeated_skeleton {
+            return Err(invalid("Ogg segment repeats its Skeleton stream"));
+        }
+        if let Some(skeleton) = link.skeleton {
+            let mut remaining = &encoded[link.encoded.clone()];
+            let mut pages = Vec::new();
+            while !remaining.is_empty() {
+                let (page, rest) = Page::read(remaining)?;
+                if page.serial() == skeleton {
+                    super::charge(
+                        &mut metadata_bytes,
+                        remaining.len() - rest.len(),
+                        MAX_SKELETON_BYTES,
+                        "mixed Ogg Skeleton headers exceed 1 MiB",
+                    )?;
+                    pages.push(page);
+                }
+                remaining = rest;
+            }
+            if let Some(name) = default_skeleton_name(pages, &link)? {
+                if title.get_or_insert_with(|| name.clone()) != &name {
+                    return Err(unsupported(
+                        "mixed Ogg soundtrack changes its Skeleton Name",
+                    ));
+                }
+            }
+        }
+        selection.audio.push(link.audio);
+    }
+    Ok(selection)
+}
+
+fn default_skeleton_name(
+    pages: Vec<Page<'_>>,
+    link: &DefaultLink,
+) -> Result<Option<String>, EngineError> {
+    let mut described = HashSet::new();
+    let mut title = None;
+    for packet in skeleton_packets(pages, "mixed Ogg")? {
+        let packet = packet?;
+        if skeleton_index_or_eos(&packet) {
+            continue;
+        }
+        let (serial, name) = skeleton_name(&packet.data)?;
+        if !described.insert(serial) {
+            return Err(invalid("Ogg Skeleton repeats a track header"));
+        }
+        if serial == link.audio.0 || Some(serial) == link.video {
+            if packet.data[36..44] != [0; 8] {
+                return Err(unsupported(
+                    "mixed Ogg requires a zero Skeleton track base granule",
+                ));
+            }
+            if serial == link.audio.0 {
+                title = name.map(str::to_owned);
+            }
+        }
+    }
+    Ok(title)
+}
+
 /// Resolve names through each segment's bounded Skeleton headers. The selected
 /// decoder subsequently validates transport and limits for all the streams.
-pub(super) fn named_tracks(mut bytes: &[u8], names: &[String]) -> Result<NamedTracks, EngineError> {
-    let mut selection = NamedTracks::default();
+pub(super) fn named_tracks(
+    mut bytes: &[u8],
+    names: &[String],
+) -> Result<SelectedTracks, EngineError> {
+    let mut selection = SelectedTracks::default();
     let mut active = HashSet::new();
     let mut codecs = HashMap::new();
     let mut skeleton = None;
@@ -416,7 +594,7 @@ pub(super) fn named_tracks(mut bytes: &[u8], names: &[String]) -> Result<NamedTr
         }
         let more_headers = beginning && bytes.get(5).is_some_and(|flags| flags & BOS != 0);
         if active.is_empty() && !more_headers {
-            if link >= MAX_NAMED_LINKS {
+            if link >= MAX_SELECTED_LINKS {
                 return Err(limited("named Ogg exceeds its segment count limit"));
             }
             let NamedSegment { audio, video } =
@@ -472,32 +650,12 @@ fn resolve_names(
             "named Ogg fragments require Skeleton track names",
         ));
     }
-    let mut packets = packets(pages);
-    let head = packets
-        .next()
-        .transpose()?
-        .ok_or_else(|| invalid("missing Ogg Skeleton header"))?;
-    if !head.first_in_stream()
-        || !head.data.starts_with(b"fishead\0")
-        || head.data.len() < 64
-        || !matches!(head.data[8..12], [3 | 4, 0, 0, 0])
-    {
-        return Err(unsupported(
-            "named Ogg requires Skeleton version 3.0 or 4.0",
-        ));
-    }
-    if head.data[12..20] != [0; 8] || head.data[28..36] != [0; 8] {
-        return Err(unsupported(
-            "named Ogg requires a zero Skeleton time origin",
-        ));
-    }
+    let packets = skeleton_packets(pages, "named Ogg")?;
     let mut matched = vec![None; names.len()];
     let mut described = HashSet::new();
     for packet in packets {
         let packet = packet?;
-        if (packet.data.is_empty() && packet.last_in_stream())
-            || packet.data.starts_with(b"index\0")
-        {
+        if skeleton_index_or_eos(&packet) {
             continue;
         }
         let (serial, name) = skeleton_name(&packet.data)?;
@@ -551,6 +709,36 @@ fn resolve_names(
         }
     }
     Ok(NamedSegment { audio, video })
+}
+
+fn skeleton_packets<'a>(
+    pages: Vec<Page<'a>>,
+    selection: &str,
+) -> Result<impl Iterator<Item = Result<Packet, EngineError>> + 'a, EngineError> {
+    let mut packets = packets(pages);
+    let head = packets
+        .next()
+        .transpose()?
+        .ok_or_else(|| invalid("missing Ogg Skeleton header"))?;
+    if !head.first_in_stream()
+        || !head.data.starts_with(b"fishead\0")
+        || head.data.len() < 64
+        || !matches!(head.data[8..12], [3 | 4, 0, 0, 0])
+    {
+        return Err(unsupported(&format!(
+            "{selection} requires Skeleton version 3.0 or 4.0"
+        )));
+    }
+    if head.data[12..20] != [0; 8] || head.data[28..36] != [0; 8] {
+        return Err(unsupported(&format!(
+            "{selection} requires a zero Skeleton time origin"
+        )));
+    }
+    Ok(packets)
+}
+
+fn skeleton_index_or_eos(packet: &Packet) -> bool {
+    (packet.data.is_empty() && packet.last_in_stream()) || packet.data.starts_with(b"index\0")
 }
 
 fn skeleton_name(bytes: &[u8]) -> Result<(Serial, Option<&str>), EngineError> {

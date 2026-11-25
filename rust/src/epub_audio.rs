@@ -168,10 +168,22 @@ impl AudioSource {
                     let named = (!names.is_empty())
                         .then(|| ogg::named_tracks(&bytes, names))
                         .transpose()?;
-                    if let Some(tracks) = named.as_ref().filter(|tracks| tracks.mixed_audio()) {
+                    let automatic = if named.is_none()
+                        && opus_track.is_none()
+                        && matches!(codec, Some(AudioCodec::Ogg))
+                    {
+                        ogg::default_mixed_tracks(&bytes)?
+                    } else {
+                        None
+                    };
+                    if let Some(tracks) = named
+                        .as_ref()
+                        .filter(|tracks| tracks.mixed_audio())
+                        .or(automatic.as_ref())
+                    {
                         let mut audio = ogg_mixed::Track::open(&bytes, tracks)?;
                         if synchronize_video {
-                            super::video::align_mixed_audio(&bytes, &mut audio, tracks)?;
+                            super::video::align_mixed_audio(&bytes, &mut audio, named.as_ref())?;
                         }
                         return Ok(Decoder::MixedOgg(Box::new(audio)));
                     }

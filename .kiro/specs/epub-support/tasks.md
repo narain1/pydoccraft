@@ -125,6 +125,7 @@
 - [x] Crop local video spatial fragments in pixel and percent units, including when combined with timed audio and captions.
 - [x] Resolve repeated named track fragments for WebM and Ogg and keep the selected picture and soundtrack on one presentation clock.
 - [x] Select a Skeleton-named soundtrack across Opus and Vorbis Ogg links with a common 48 kHz layout, preserving seek, crop and caption alignment.
+- [x] Select an unambiguous default soundtrack across mixed Opus and Vorbis Ogg links, with shared video, PCM, caption and SMIL timing.
 - [x] Resolve local WebM media fragment IDs through simple Matroska chapters and synchronize the selected picture, soundtrack, crop, and captions.
 - [x] Resolve local MP4 and M4A media fragment IDs by exact QuickTime chapter title, preserving movie edits, AAC, cropped picture and caption timing.
 - [x] Resolve local MP4 and M4A media fragment IDs from bounded Nero chapter tables, validate coexistence with QuickTime and preserve time-fragment playback.
@@ -138,7 +139,7 @@
 - [x] Stream fixed-geometry SDR AV1 pictures from WebM with bounded keyframe seeking and synchronized audio and captions.
 - [x] Preserve surround Vorbis speaker assignments in Ogg and WebM audio, video soundtracks, and narration. Reject undefined speaker layouts.
 - [ ] Extend WebM to additional AV1 profiles, high dynamic range and alpha.
-- [ ] Support additional Ogg soundtrack codecs, mixed soundtracks without named selection, simultaneous video tracks and more MP4 profiles.
+- [ ] Support additional Ogg soundtrack codecs, mixed soundtracks with differing PCM layouts, simultaneous video tracks and more MP4 profiles.
 - [x] Apply bounded WebVTT region selectors and carry typed region paint and cue styles into standalone captions and synchronized video.
 - [x] Apply TTML initial and inherited region styles to typed runs, including bounded paragraph and division inline regions, content overrides and time-based restores.
 - [ ] Support WebVTT region scrolling, conditional, directly animated and mixed-region TTML captions, additional TTML typography and subtitle painting.

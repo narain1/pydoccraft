@@ -1,10 +1,10 @@
-//! Keep a Skeleton-named soundtrack on one PCM clock across codec changes.
+//! Keep a selected Ogg soundtrack on one PCM clock across codec changes.
 use std::ops::Range;
 
 use hound::WavSpec;
 
 use super::{invalid, limited, opus, unsupported, vorbis, EngineError, MAX_CLIP_SAMPLES};
-use crate::epub::ogg::{self, Codec, NamedTracks, MAX_PACKETS};
+use crate::epub::ogg::{self, Codec, SelectedTracks, MAX_PACKETS};
 
 pub(in crate::epub) struct Track {
     links: Vec<Link>,
@@ -60,10 +60,13 @@ impl Decoder {
 }
 
 impl Track {
-    pub(in crate::epub) fn open(bytes: &[u8], named: &NamedTracks) -> Result<Self, EngineError> {
+    pub(in crate::epub) fn open(
+        bytes: &[u8],
+        selection: &SelectedTracks,
+    ) -> Result<Self, EngineError> {
         let mut opus_packets = MAX_PACKETS;
         let mut vorbis_codebooks = 0;
-        let segments = ogg::named_audio_groups(bytes, named)?;
+        let segments = ogg::selected_audio_groups(bytes, selection)?;
         let mut links = Vec::with_capacity(segments.len());
         let mut geometry = None;
         for segment in segments {
@@ -76,9 +79,7 @@ impl Track {
                     segment.pages,
                     &mut vorbis_codebooks,
                 )?)),
-                Codec::Theora => {
-                    return Err(invalid("named Ogg soundtrack selected a video stream"))
-                }
+                Codec::Theora => return Err(invalid("Ogg soundtrack selected a video stream")),
             };
             let link_format = decoder.geometry();
             if *geometry.get_or_insert(link_format) != link_format {

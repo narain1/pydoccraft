@@ -15,7 +15,7 @@ use super::{
 };
 use crate::epub::{
     charge,
-    ogg::{self, Codec, NamedTracks, Page},
+    ogg::{self, Codec, Page, SelectedTracks},
     webm,
 };
 
@@ -147,7 +147,7 @@ impl Track {
 
     pub(in crate::epub) fn open_ogg(
         bytes: &[u8],
-        named: Option<&NamedTracks>,
+        named: Option<&SelectedTracks>,
     ) -> Result<Self, EngineError> {
         let pages = ogg::groups(bytes, Codec::Vorbis, None, named)?;
         if pages.len() > MAX_LINKS {

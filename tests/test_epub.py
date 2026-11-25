@@ -101,6 +101,30 @@ def checked_ogg_page(page: bytes | bytearray) -> bytes:
     return bytes(page)
 
 
+def ogg_named_subset(pages: list[bytes], titles: tuple[bytes, ...], *, skeleton: bool = False) -> bytes:
+    serials = {
+        body[12:16]
+        for page in pages
+        if (body := ogg_page_body(page)).startswith(b"fisbone")
+        and any(b"Name: " + title + b"\r\n" in body for title in titles)
+    }
+    assert len(serials) == len(titles)
+    metadata, = (page[14:18] for page in pages if ogg_page_body(page).startswith(b"fishead"))
+    result = []
+    sequence = 0
+    for page in pages:
+        if page[14:18] in serials:
+            result.append(page)
+        elif skeleton and page[14:18] == metadata:
+            body = ogg_page_body(page)
+            if page[5] & 6 or body.startswith(b"fisbone") and body[12:16] in serials:
+                patched = bytearray(page)
+                struct.pack_into("<I", patched, 18, sequence)
+                result.append(checked_ogg_page(patched))
+                sequence += 1
+    return b"".join(result)
+
+
 def mp4_box(tag: bytes, payload: bytes) -> bytes:
     return struct.pack(">I4s", len(payload) + 8, tag) + payload
 
@@ -4386,6 +4410,157 @@ first
         patched = bytearray(page)
         struct.pack_into("<I", patched, offset, rate)
         return checked_ogg_page(patched)
+
+    def test_default_mixed_ogg_soundtrack_follows_the_selected_picture_and_captions(self) -> None:
+        source = (Path(__file__).parent / "fixtures/epub-video-named-tracks.ogv").read_bytes()
+        pages = ogg_pages(source)
+        head = [i for i, page in enumerate(pages) if page[5] & 2 and ogg_page_body(page).startswith(b"fishead")]
+        self.assertEqual(len(head), 2)
+        split = head[1]
+        first_pages, second_pages = pages[:split], pages[split:]
+        first = ogg_named_subset(first_pages, (b"Azur", b"Cloche"))
+        second = ogg_named_subset(second_pages, (b"Azur", b"Spoken"))
+        with_first_name = ogg_named_subset(first_pages, (b"Azur", b"Cloche"), skeleton=True)
+        with_second_name = ogg_named_subset(second_pages, (b"Azur", b"Spoken"), skeleton=True)
+        labeled_second = b"".join(
+            checked_ogg_page(page.replace(b"Name: Spoken\r\n", b"Name: Cloche\r\n"))
+            if b"Name: Spoken\r\n" in page else page for page in ogg_pages(with_second_name)
+        )
+        named = with_first_name + labeled_second
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Default soundtrack</title></head>
+          <body><video src="plain.ogv#xywh=percent:25,25,50,50"><track src="words.vtt" kind="captions"
+          srclang="en"/></video><video src="named.ogv#track=Azur&amp;track=Cloche&amp;xywh=percent:25,25,50,50">
+          <track src="words.vtt" kind="captions" srclang="en"/></video>
+          <video src="named.ogv"/><audio src="plain.ogv"/>
+          <audio src="first.ogv"/><audio src="second.ogv"/><video src="reverse.ogv"/>
+          </body></html>'''
+        path = "OEBPS/plain.ogv"
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Default soundtrack", chapter, "OEBPS/video.xhtml")],
+                resources={
+                    path: doc_ex.EpubResource("video/ogg", first + second),
+                    "OEBPS/named.ogv": doc_ex.EpubResource("video/ogg", named),
+                    "OEBPS/first.ogv": doc_ex.EpubResource("video/ogg", first),
+                    "OEBPS/second.ogv": doc_ex.EpubResource("video/ogg", second),
+                    "OEBPS/reverse.ogv": doc_ex.EpubResource("video/ogg", second + first),
+                    "OEBPS/words.vtt": doc_ex.EpubResource(
+                        "text/vtt", b"WEBVTT\n\n00:00.470 --> 00:00.520\nAcross codecs\n",
+                    ),
+                },
+            )
+
+        def pcm(book: doc_ex.Document, index: int, **bounds: int) -> bytes:
+            result = bytearray()
+            for clip in book.epub_embedded_audio(0, index, chunk_frames=977, **bounds):
+                self.assertEqual((clip.sample_rate, clip.channels), (48_000, 1))
+                with wave.open(io.BytesIO(clip.wave), "rb") as stream:
+                    result.extend(stream.readframes(clip.frame_count))
+            return bytes(result)
+
+        with doc_ex.open(data) as book:
+            self.assertEqual(book.epub_embedded_media(0)[0].sources[0].fragment_tracks, ())
+            early, late = pcm(book, 4), pcm(book, 5)
+            self.assertEqual((len(early), len(late)), (14_400 * 2, 43_200 * 2))
+            expected = early + bytes(9_600 * 2) + late
+            self.assertEqual(pcm(book, 0), expected)
+            self.assertEqual(pcm(book, 1), expected)
+            self.assertEqual(pcm(book, 2), expected)
+            self.assertEqual(pcm(book, 3), early + late)
+            self.assertEqual(pcm(book, 6), late + early)
+            self.assertEqual(pcm(book, 0, start_us=290_001, end_us=520_001), expected[13_921 * 2:24_961 * 2])
+            bounds = dict(start_us=450_000, end_us=620_000, text_track=0)
+            pictures = list(book.epub_embedded_video(0, 0, **bounds))
+            self.assertEqual(pictures, list(book.epub_embedded_video(0, 1, **bounds)))
+            self.assertEqual([(frame.start_us, frame.duration_us, bool(frame.text_cues)) for frame in pictures],
+                             [(450_000, 20_000, False), (470_000, 30_000, True),
+                              (500_000, 20_000, True), (520_000, 100_000, False)])
+            self.assertEqual([(f.width, f.height) for f in pictures], [(32, 20)] * 2 + [(28, 18)] * 2)
+            self.assertIs(pictures[2].rgb, pictures[3].rgb)
+            reverse = list(book.epub_embedded_video(0, 6, start_us=450_000, end_us=925_000))
+            self.assertEqual([(f.start_us, f.duration_us) for f in reverse],
+                             [(450_000, 50_000), (900_000, 25_000)])
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "requires an Opus stream"):
+                next(book.epub_embedded_audio(0, 0, opus_track=0))
+            edited = book.edit_epub_chapters({0: chapter.replace("Default soundtrack", "Revised")})
+        with doc_ex.open(edited) as reopened:
+            self.assertEqual(reopened.read_epub_resource(path), first + second)
+            self.assertEqual(pcm(reopened, 0), expected)
+
+        def alter_skeleton(encoded: bytes, header: bytes, at: int) -> bytes:
+            output = []
+            for page in ogg_pages(encoded):
+                body = ogg_page_body(page)
+                if body.startswith(header):
+                    patched = bytearray(page)
+                    patched[len(page) - len(body) + at] = 1
+                    page = checked_ogg_page(patched)
+                output.append(page)
+            return b"".join(output)
+
+        for encoded, message in (
+            (with_first_name + with_second_name, "changes its Skeleton Name"),
+            (alter_skeleton(with_first_name, b"fishead", 12) + labeled_second, "zero Skeleton time origin"),
+            (alter_skeleton(with_first_name, b"fisbone", 36) + labeled_second, "zero Skeleton track base granule"),
+        ):
+            with self.subTest(message=message), doc_ex.open(rewrite_epub(data, {path: encoded})) as book:
+                for playback in (book.epub_embedded_audio, book.epub_embedded_video):
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
+                        next(playback(0, 0, source_index=0))
+
+        competing = ogg_named_subset(first_pages, (b"Azur", b"Cloche", b"Spoken"))
+        vorbis_only = ogg_named_subset(second_pages, (b"Azur", b"Cloche"))
+        no_audio = ogg_named_subset(second_pages, (b"Azur",))
+        for encoded, audio_error in (
+            (competing + vorbis_only, "requires an Opus stream"),
+            (first + no_audio, "requires a Vorbis stream"),
+        ):
+            with self.subTest(audio_error=audio_error), doc_ex.open(rewrite_epub(data, {path: encoded})) as book:
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, audio_error):
+                    next(book.epub_embedded_audio(0, 0, source_index=0))
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "requires one consistent"):
+                    next(book.epub_embedded_video(0, 0, source_index=0))
+
+    def test_default_mixed_ogg_preserves_surround_pcm_and_smil_clip_bounds(self) -> None:
+        fixtures = Path(__file__).parent / "fixtures"
+        opus = (fixtures / "epub-narration-surround.opus").read_bytes()
+        vorbis = (fixtures / "epub-audio-vorbis-surround.ogg").read_bytes()
+        path = "OEBPS/mixed.ogg"
+        chapter = "OEBPS/audio.xhtml"
+        markup = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Surround soundtrack</title></head>
+          <body><p id="excerpt">Across codecs</p><audio src="mixed.ogg"/>
+          <audio src="opus.ogg"/><audio src="vorbis.ogg"/></body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Surround soundtrack", markup, chapter)],
+                resources={
+                    path: doc_ex.EpubResource("audio/ogg", opus + vorbis),
+                    "OEBPS/opus.ogg": doc_ex.EpubResource("audio/ogg", opus),
+                    "OEBPS/vorbis.ogg": doc_ex.EpubResource("audio/ogg", vorbis),
+                },
+                overlays={chapter: [doc_ex.EpubOverlayCue("excerpt", path, 370_000, 430_000)]},
+            )
+
+        def pcm(clip: doc_ex.EpubAudioClip | None) -> bytes:
+            assert clip is not None
+            self.assertEqual((clip.sample_rate, clip.channels), (48_000, 8))
+            self.assertEqual(struct.unpack_from("<HH", clip.wave, 20), (0xFFFE, 8))
+            self.assertEqual(struct.unpack_from("<I", clip.wave, 40), (0x63F,))
+            self.assertEqual(clip.wave[60:64], b"data")
+            self.assertEqual(len(clip.wave[68:]), clip.frame_count * 16)
+            return clip.wave[68:]
+
+        with doc_ex.open(data) as book:
+            expected = b"".join(pcm(clip) for i in (1, 2) for clip in book.epub_embedded_audio(0, i))
+            self.assertEqual(len(expected), (19_200 + 24_000) * 16)
+            self.assertEqual(b"".join(pcm(clip) for clip in book.epub_embedded_audio(
+                0, 0, chunk_frames=997)), expected)
+            self.assertEqual(b"".join(pcm(cue.audio) for cue in book.epub_narration(
+                0, chunk_frames=379)), expected[17_760 * 16:20_640 * 16])
+        mono = (fixtures / "epub-narration-mono.opus").read_bytes()
+        with doc_ex.open(rewrite_epub(data, {path: mono + vorbis})) as book:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "requires one 48 kHz channel layout"):
+                next(book.epub_embedded_audio(0, 0, source_index=0))
 
     def test_spatial_video_fragments_crop_picture_pixels_without_changing_the_clock(self) -> None:
         fixtures = Path(__file__).parent / "fixtures"

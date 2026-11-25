@@ -15,7 +15,7 @@ use super::{
 use crate::epub::{
     audio::{ogg_mixed, opus, vorbis},
     media::SpatialFragment,
-    ogg::{self, Codec, NamedTracks, Segment},
+    ogg::{self, Codec, Segment, SelectedTracks},
 };
 
 const MAX_PREROLL: usize = 512;
@@ -56,30 +56,31 @@ impl TheoraSource {
             .then(|| ogg::named_tracks(bytes, names))
             .transpose()?;
         let segments = ogg::groups(bytes, Codec::Theora, None, named.as_ref())?;
-        let soundtrack = match named.as_ref() {
-            Some(tracks) if segments.len() > 1 => tracks.audio_codec(),
-            Some(_) => None,
-            None => chained_soundtrack(&segments)?,
-        };
-        let audio: Option<(u32, Vec<_>)> =
-            if let Some(tracks) = named.as_ref().filter(|tracks| tracks.mixed_audio()) {
-                let track = ogg_mixed::Track::open(bytes, tracks)?;
+        let audio: Option<(u32, Vec<_>)> = match soundtrack(&segments, named.as_ref())? {
+            Some(Soundtrack::Uniform(Codec::Opus)) => Some((
+                OUTPUT_SAMPLE_RATE_HZ,
+                opus::Track::open(bytes, None, named.as_ref())?
+                    .link_lengths()
+                    .collect(),
+            )),
+            Some(Soundtrack::Uniform(Codec::Vorbis)) => {
+                let track = vorbis::Track::open_ogg(bytes, named.as_ref())?;
                 Some((track.spec().sample_rate, track.link_lengths().collect()))
-            } else {
-                match soundtrack {
-                    Some(Codec::Opus) => Some((
-                        OUTPUT_SAMPLE_RATE_HZ,
-                        opus::Track::open(bytes, None, named.as_ref())?
-                            .link_lengths()
-                            .collect(),
-                    )),
-                    Some(Codec::Vorbis) => {
-                        let track = vorbis::Track::open_ogg(bytes, named.as_ref())?;
-                        Some((track.spec().sample_rate, track.link_lengths().collect()))
-                    }
-                    _ => None,
-                }
-            };
+            }
+            Some(Soundtrack::Mixed) => {
+                let automatic;
+                let selection = if let Some(tracks) = &named {
+                    tracks
+                } else {
+                    automatic = ogg::default_mixed_tracks(bytes)?
+                        .ok_or_else(|| invalid("Ogg video and soundtrack segments disagree"))?;
+                    &automatic
+                };
+                let track = ogg_mixed::Track::open(bytes, selection)?;
+                Some((track.spec().sample_rate, track.link_lengths().collect()))
+            }
+            _ => None,
+        };
         let mut offset = 0;
         let mut clock = 0usize;
         let mut links = Vec::with_capacity(segments.len());
@@ -316,51 +317,57 @@ impl Link {
 pub(in crate::epub) fn align_audio(
     bytes: &[u8],
     track: &mut opus::Track,
-    named: Option<&NamedTracks>,
+    named: Option<&SelectedTracks>,
 ) -> Result<(), EngineError> {
     if track.link_lengths().len() < 2 || named.is_some_and(|tracks| !tracks.has_video()) {
         return Ok(());
     }
-    let video = alignment_frames(bytes, Some(Codec::Opus), OUTPUT_SAMPLE_RATE_HZ, named)?;
+    let video = alignment_frames(
+        bytes,
+        Soundtrack::Uniform(Codec::Opus),
+        OUTPUT_SAMPLE_RATE_HZ,
+        named,
+    )?;
     track.align_video_links(&video)
 }
 
 pub(in crate::epub) fn align_vorbis_audio(
     bytes: &[u8],
     track: &mut vorbis::Track,
-    named: Option<&NamedTracks>,
+    named: Option<&SelectedTracks>,
 ) -> Result<(), EngineError> {
     if track.link_lengths().len() < 2 || named.is_some_and(|tracks| !tracks.has_video()) {
         return Ok(());
     }
-    let video = alignment_frames(bytes, Some(Codec::Vorbis), track.spec().sample_rate, named)?;
+    let video = alignment_frames(
+        bytes,
+        Soundtrack::Uniform(Codec::Vorbis),
+        track.spec().sample_rate,
+        named,
+    )?;
     track.align_video_links(&video)
 }
 
 pub(in crate::epub) fn align_mixed_audio(
     bytes: &[u8],
     track: &mut ogg_mixed::Track,
-    named: &NamedTracks,
+    named: Option<&SelectedTracks>,
 ) -> Result<(), EngineError> {
-    if !named.has_video() {
+    if named.is_some_and(|tracks| !tracks.has_video()) {
         return Ok(());
     }
-    let video = alignment_frames(bytes, None, track.spec().sample_rate, Some(named))?;
+    let video = alignment_frames(bytes, Soundtrack::Mixed, track.spec().sample_rate, named)?;
     track.align_video_links(&video)
 }
 
 fn alignment_frames(
     bytes: &[u8],
-    codec: Option<Codec>,
+    expected: Soundtrack,
     rate: u32,
-    named: Option<&NamedTracks>,
+    named: Option<&SelectedTracks>,
 ) -> Result<Vec<usize>, EngineError> {
     let segments = ogg::groups(bytes, Codec::Theora, None, named)?;
-    let soundtrack = match named {
-        Some(tracks) => tracks.audio_codec(),
-        None => chained_soundtrack(&segments)?,
-    };
-    if soundtrack != codec {
+    if soundtrack(&segments, named)? != Some(expected) {
         return Err(invalid("Ogg video and soundtrack segments disagree"));
     }
     segments
@@ -369,21 +376,37 @@ fn alignment_frames(
         .collect()
 }
 
-fn chained_soundtrack(segments: &[Segment<'_>]) -> Result<Option<Codec>, EngineError> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Soundtrack {
+    Uniform(Codec),
+    Mixed,
+}
+
+fn soundtrack(
+    segments: &[Segment<'_>],
+    named: Option<&SelectedTracks>,
+) -> Result<Option<Soundtrack>, EngineError> {
     if segments.len() < 2 {
         return Ok(None);
     }
-    if segments
-        .iter()
-        .all(|s| s.opus_tracks == 1 && s.vorbis_tracks == 0 && !s.has_other_audio)
-    {
-        return Ok(Some(Codec::Opus));
+    if let Some(tracks) = named {
+        return Ok(if tracks.mixed_audio() {
+            Some(Soundtrack::Mixed)
+        } else {
+            tracks.audio_codec().map(Soundtrack::Uniform)
+        });
     }
     if segments
         .iter()
-        .all(|s| s.vorbis_tracks == 1 && s.opus_tracks == 0 && !s.has_other_audio)
+        .all(|s| s.opus_tracks + s.vorbis_tracks == 1 && !s.has_other_audio)
     {
-        return Ok(Some(Codec::Vorbis));
+        return Ok(Some(if segments.iter().all(|s| s.opus_tracks == 1) {
+            Soundtrack::Uniform(Codec::Opus)
+        } else if segments.iter().all(|s| s.vorbis_tracks == 1) {
+            Soundtrack::Uniform(Codec::Vorbis)
+        } else {
+            Soundtrack::Mixed
+        }));
     }
     if segments
         .iter()
