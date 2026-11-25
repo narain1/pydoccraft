@@ -4977,7 +4977,7 @@ first
             (inline(b'<set dur="1s" tts:color="red"/>', b"seq"),
              doc_ex.UnsupportedFormatError, "sequential time container"),
             (b'<head><layout><region xml:id="r"><set dur="1s" tts:color="red"/></region></layout></head>' + plain,
-             doc_ex.UnsupportedFormatError, "requires an inline subtitle content target"),
+             doc_ex.UnsupportedFormatError, "unsupported TTML set attribute or style property"),
             (b'<head><animation><set xml:id="change" dur="1s" tts:color="red"/></animation></head>' + plain,
              doc_ex.UnsupportedFormatError, "animation references or continuous animation"),
         ):
