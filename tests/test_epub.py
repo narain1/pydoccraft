@@ -19916,6 +19916,10 @@ Resume
         flood_overlay = flood + '<feComposite operator="atop" in="wash" in2="SourceGraphic"/>'
         erode = '<feMorphology operator="erode" in="SourceGraphic" radius=".9 1.1"/>'
         dilate = '<feMorphology operator="dilate" in="SourceAlpha" radius="2.6 3.1"/>'
+
+        def rotate(markup: str) -> str:
+            return markup.replace("matrix(.6 .8 0 1 38 12)", "matrix(.96 .28 -.28 .96 38 12)")
+
         cases = (
             ("sheared", shared, independent),
             ("scaled", axis(shared), axis(independent)),
@@ -19934,6 +19938,7 @@ Resume
             ("affine erosion", in_place(shared, erode), in_place(independent, erode)),
             ("scaled dilation", in_place(axis(shared), dilate), in_place(axis(independent), dilate)),
             ("affine dilation", in_place(shared, dilate), in_place(independent, dilate)),
+            ("rotated dilation", in_place(rotate(shared), dilate), in_place(rotate(independent), dilate)),
         )
         for mode, markup, control in cases:
             for inline in (False, True):
