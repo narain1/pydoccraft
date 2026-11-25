@@ -3,9 +3,12 @@ use std::ops::Range;
 
 use taffy::{
     geometry::Line,
-    style::{GridPlacement, GridTemplateComponent, LengthPercentage, TrackSizingFunction},
+    style::{
+        GridPlacement, GridTemplateArea, GridTemplateAreas, GridTemplateComponent,
+        LengthPercentage, TrackSizingFunction,
+    },
     style_helpers::line,
-    DetailedGridTracksInfo,
+    DetailedGridInfo, DetailedGridItemsInfo, DetailedGridTracksInfo,
 };
 
 use crate::{
@@ -30,6 +33,72 @@ pub(super) fn unresolved() -> EngineError {
 
 pub(super) fn implicit(tracks: &DetailedGridTracksInfo<String>) -> bool {
     tracks.negative_implicit_tracks != 0 || tracks.positive_implicit_tracks != 0
+}
+
+pub(super) fn inherit_areas(
+    source: &GridTemplateAreas<String>,
+    details: &DetailedGridInfo,
+    item: &DetailedGridItemsInfo,
+    columns: &Axis,
+    rows: &Axis,
+    reverse_columns: bool,
+) -> Result<Option<GridTemplateAreas<String>>, EngineError> {
+    let intersect = |area: Range<u16>, span: Range<u16>, leading: u16, reverse: bool| {
+        let leading = usize::from(leading);
+        let span = usize::from(span.start)..usize::from(span.end);
+        let first = (usize::from(area.start) + leading).max(span.start);
+        let last = (usize::from(area.end) + leading).min(span.end);
+        (first < last).then(|| {
+            // The measured item uses full grid lines, including implicit
+            // tracks. Return one-based lines within the bounded child span.
+            if reverse {
+                ((span.end - last + 1) as u16, (span.end - first + 1) as u16)
+            } else {
+                (
+                    (first - span.start + 1) as u16,
+                    (last - span.start + 1) as u16,
+                )
+            }
+        })
+    };
+    let line_names = |axis: &Axis| axis.names.iter().map(Vec::len).sum::<usize>();
+    let limit = (MAX_LINE_NAMES - line_names(columns).max(line_names(rows))) / 2;
+    let mut areas = Vec::new();
+    for area in &source.areas {
+        let Some((column_start, column_end)) = intersect(
+            area.column_start..area.column_end,
+            item.column_start..item.column_end,
+            details.columns.negative_implicit_tracks,
+            reverse_columns,
+        ) else {
+            continue;
+        };
+        let Some((row_start, row_end)) = intersect(
+            area.row_start..area.row_end,
+            item.row_start..item.row_end,
+            details.rows.negative_implicit_tracks,
+            false,
+        ) else {
+            continue;
+        };
+        if areas.len() == limit {
+            return Err(limited("EPUB CSS inherited grid line name limit"));
+        }
+        areas.push(GridTemplateArea {
+            name: area.name.clone(),
+            row_start,
+            row_end,
+            column_start,
+            column_end,
+        });
+    }
+    // Keep generated names in native area metadata so that they can be
+    // clipped again without moving any authored names on nested subgrids.
+    Ok((!areas.is_empty()).then_some(GridTemplateAreas {
+        areas,
+        row_count: rows.tracks.len() as u16,
+        column_count: columns.tracks.len() as u16,
+    }))
 }
 
 pub(super) fn clamp_numeric_placement(placement: &mut Line<GridPlacement<String>>, tracks: usize) {

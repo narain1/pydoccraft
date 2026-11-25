@@ -436,6 +436,19 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
                 },
             )?);
         }
+        let inherited_areas = match (&layout, &parent.style.grid_template_areas) {
+            ([Some(columns), Some(rows)], Some(source)) if style.grid_template_areas.is_none() => {
+                subgrid::inherit_areas(
+                    source,
+                    details,
+                    item,
+                    columns,
+                    rows,
+                    parent.style.direction.is_rtl() != style.direction.is_rtl(),
+                )?
+            }
+            _ => None,
+        };
 
         // CSS Grid stretches subgrids in their inherited axes regardless of
         // the authored preferred size, limits or alignment in those axes.
@@ -480,6 +493,9 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
         }
         if axes.width && axes.height {
             style.aspect_ratio = None;
+        }
+        if inherited_areas.is_some() {
+            style.grid_template_areas = inherited_areas;
         }
         for child in &node.children {
             let child = &mut descendants[usize::from(*child)].style;

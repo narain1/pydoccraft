@@ -3433,6 +3433,70 @@ class EpubTests(unittest.TestCase):
         with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "grid track expression exceeds"):
             render("#sub{grid-template-columns:subgrid repeat(65,[oversized])}")
 
+    def test_css_subgrid_projects_partially_overlapping_named_areas(self) -> None:
+        fixture = fixed_spread_fixture([("", "white", 260, 138)])
+        source = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Partial areas</title>
+          <meta name="viewport" content="width=260,height=138"/><style>
+          html,body,p{margin:0;font-size:11px}
+          #outer{position:absolute;left:10px;top:10px;width:217px;height:106px;display:grid;
+            grid-template-columns:25px 40px [panel-start] 60px 80px;
+            grid-template-rows:24px 28px 32px 22px;grid-auto-columns:12px;
+            grid-template-areas:"panel panel panel spare" "panel panel panel ." ". . . ." ". . . .";
+            direction:PARENT}
+          #lead{grid-column:-6/-5;grid-row:1;background:#475678}
+          #sub{display:grid;grid-column:2/5;grid-row:2/5;direction:SUB}
+          #nested{display:grid;grid-row:1/4;direction:NESTED}
+          #one{background:#a4c480}#two{grid-row:2;background:#938ac0}#edge{grid-row:3;background:#dbc399}
+          RULES</style></head><body><div id="outer"><div id="lead"></div><div id="sub">
+          FIRST<p id="two">Alias</p><p id="edge">Generated edges</p>
+          </div></div></body></html>"""
+        first = '<p id="one"><a href="https://example.org/partial">Panel link</a></p>'
+
+        def book(parent: str, sub: str, nested: bool, rules: str) -> doc_ex.Document:
+            markup = (source.replace("PARENT", parent).replace("SUB", sub)
+                      .replace("NESTED", "rtl" if sub == "ltr" else "ltr").replace("RULES", rules)
+                      .replace("FIRST", f'<div id="nested">{first}</div>' if nested else first))
+            return doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": markup}))
+
+        def render(document: doc_ex.Document) -> tuple[tuple[int, bytes], list[object], object]:
+            image = rgba_pixels(png_chunks(document.render_page(0, dpi=96)))
+            with doc_ex.open(document.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                self.assertTrue(image == rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))))
+                words = [pdf[0].search_for(label) for label in ("Panel", "Alias", "Generated")]
+                self.assertTrue(all(words))
+                link, = pdf[0].get_links()
+                self.assertEqual(link.uri, "https://example.org/partial")
+                return image, words, link.bbox
+
+        inherited = "grid-template-columns:subgrid;grid-template-rows:subgrid"
+        named = (f"#sub{{{inherited}}}#one{{grid-area:panel}}#two{{grid-column:panel-start 2/4}}"
+                 "#edge{grid-column:panel-start/panel-end}")
+        for parent, sub in (("ltr", "ltr"), ("rtl", "rtl"), ("ltr", "rtl"), ("rtl", "ltr")):
+            if parent == sub:
+                tracks, panel, authored = "40px 60px 80px", "1/3", "2/4"
+                nest_span, nest_tracks, nest_panel = "2/4", "80px 60px", "2/3"
+            else:
+                tracks, panel, authored = "80px 60px 40px", "2/4", "3/4"
+                nest_span, nest_tracks, nest_panel = "1/3", "60px 80px", "1/2"
+            control = (f"#sub{{grid-template-columns:{tracks};grid-template-rows:28px 32px 22px}}"
+                       f"#two{{grid-column:{authored}}}#edge{{grid-column:{panel}}}")
+            for nested in (False, True):
+                actual = named
+                reference = control + f"#one{{grid-column:{nest_panel if nested else panel};grid-row:1}}"
+                if nested:
+                    actual += f"#nested{{{inherited};grid-column:{nest_span}}}"
+                    reference += (f"#nested{{grid-column:{nest_span};grid-template-columns:{nest_tracks};"
+                                  "grid-template-rows:28px 32px 22px}")
+                with (self.subTest(parent=parent, sub=sub, nested=nested),
+                      book(parent, sub, nested, actual) as document,
+                      book(parent, sub, nested, reference) as expected):
+                    self.assertTrue(render(document) == render(expected))
+
+        outside = named.replace("grid-area:panel", "grid-area:spare")
+        with book("ltr", "ltr", False, outside) as document:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "implicit tracks on an inherited subgrid axis"):
+                document.render_page(0, dpi=96)
+
     def test_css_intrinsic_box_counts_padding_and_wraps_before_column_flex_height(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic box edges</title>
           <style>body,p{margin:0} section{width:200px;CONTAINER}
