@@ -24,12 +24,14 @@ use rules::{Occupancy, Rules};
 const MAX_ROWS: usize = 128;
 const MAX_DIMENSION: f32 = 20_000.0;
 const WIDTH_EPSILON: f32 = 0.0001;
+const TABLE_WIDTH_EPSILON: f32 = 0.01;
 
 pub(in crate::epub) struct Table {
     cells: Vec<Cell>,
     row_gaps: Vec<f32>,
     column_gaps: Vec<f32>,
-    column_widths: Vec<Option<f32>>,
+    column_widths: Vec<ColumnWidth>,
+    width: Option<f32>,
     equal_rows: bool,
     equal_columns: bool,
     rules: Rules,
@@ -52,6 +54,22 @@ struct Cell {
 enum CellContent {
     Equation(Math),
     Table(Table),
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum ColumnWidth {
+    Auto,
+    Fit,
+    Fixed(f32),
+}
+
+impl ColumnWidth {
+    fn fixed(self) -> Option<f32> {
+        match self {
+            Self::Fixed(width) => Some(width),
+            Self::Auto | Self::Fit => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -89,6 +107,9 @@ pub(super) fn has_authored_geometry(table: Node<'_, '_>) -> bool {
         ]
         .into_iter()
         .any(|key| table.has_attribute(key))
+        || table
+            .attribute("width")
+            .is_some_and(|width| width.trim() != "auto")
         || ["equalrows", "equalcolumns"].into_iter().any(|key| {
             table
                 .attribute(key)
@@ -267,11 +288,19 @@ pub(super) fn project<'xml>(
     let mut row_gaps = gaps(table, "rowspacing", rows.len(), em, "1ex")?;
     let mut column_gaps = gaps(table, "columnspacing", column_count, em, "0.8em")?;
     let rules = Rules::read(table, em, &mut row_gaps, &mut column_gaps)?;
+    let width = match table.attribute("width").map(str::trim) {
+        None | Some("auto") => None,
+        Some(value) => Some(
+            fixed_length(value, em)
+                .ok_or_else(|| unsupported("MathML table width requires a definite length"))?,
+        ),
+    };
     Ok(Table {
         cells,
         row_gaps,
         column_gaps,
-        column_widths: column_widths(table, column_count, em)?,
+        column_widths: column_widths(table, column_count, em, width)?,
+        width,
         equal_rows: boolean(table, "equalrows")?,
         equal_columns: boolean(table, "equalcolumns")?,
         rules,
@@ -342,25 +371,47 @@ fn column_widths(
     table: Node<'_, '_>,
     columns: usize,
     em: f32,
-) -> Result<Vec<Option<f32>>, EngineError> {
+    table_width: Option<f32>,
+) -> Result<Vec<ColumnWidth>, EngineError> {
     (0..columns)
-        .map(
-            |column| match indexed(table.attribute("columnwidth"), column) {
-                None | Some("auto") => Ok(None),
-                Some(value)
-                    if value.ends_with('%')
-                        || value.ends_with("vw")
-                        || value.ends_with("vh")
-                        || value == "fit" =>
-                {
-                    Err(unsupported("MathML fitted or percentage column widths"))
-                }
-                Some(value) => length(value, em)
-                    .map(Some)
-                    .ok_or_else(|| unsupported("MathML table column width")),
-            },
-        )
+        .map(|column| {
+            let value = indexed(table.attribute("columnwidth"), column).unwrap_or("auto");
+            if value == "auto" {
+                return Ok(ColumnWidth::Auto);
+            }
+            let definite = || {
+                table_width.ok_or_else(|| {
+                    unsupported(
+                        "MathML fitted or percentage column widths require a definite table width",
+                    )
+                })
+            };
+            if value == "fit" {
+                definite()?;
+                return Ok(ColumnWidth::Fit);
+            }
+            let width = if let Some(percent) = value.strip_suffix('%') {
+                let total = definite()?;
+                percent
+                    .parse::<f32>()
+                    .ok()
+                    .filter(|value| (0.0..=100.0).contains(value))
+                    .map(|value| total * (value / 100.0))
+            } else {
+                fixed_length(value, em)
+            };
+            width
+                .map(ColumnWidth::Fixed)
+                .ok_or_else(|| unsupported("MathML table column width"))
+        })
         .collect()
+}
+
+fn fixed_length(value: &str, em: f32) -> Option<f32> {
+    if value.ends_with('%') || value.ends_with("vw") || value.ends_with("vh") {
+        return None;
+    }
+    length(value, em)
 }
 
 fn length(value: &str, em: f32) -> Option<f32> {
@@ -477,29 +528,94 @@ impl Table {
             return Ok(());
         }
         let tracks = &self.column_widths[span.clone()];
-        let flexible = tracks.iter().filter(|width| width.is_none()).count();
-        if flexible == 0 {
-            return Err(unsupported("MathML cell exceeds fixed column widths"));
+        let automatic = |column: &ColumnWidth| *column == ColumnWidth::Auto;
+        if self.width.is_some() {
+            // Process spans by increasing right edge. Putting each deficit
+            // in the last automatic track minimizes their total width.
+            let last = tracks
+                .iter()
+                .rposition(automatic)
+                .ok_or_else(|| unsupported("MathML cell exceeds fixed column widths"))?;
+            widths[span.start + last] += excess;
+        } else {
+            let flexible = tracks.iter().filter(|column| automatic(column)).count();
+            if flexible == 0 {
+                return Err(unsupported("MathML cell exceeds fixed column widths"));
+            }
+            let share = excess / flexible as f32;
+            for (width, column) in widths[span.clone()].iter_mut().zip(tracks) {
+                if automatic(column) {
+                    *width += share;
+                }
+            }
         }
-        let share = excess / flexible as f32;
-        for (width, fixed) in widths[span.clone()].iter_mut().zip(tracks) {
-            if fixed.is_none() {
+        Ok(())
+    }
+
+    fn declared_track_width(&self) -> Result<Option<f32>, EngineError> {
+        let Some(width) = self.width else {
+            return Ok(None);
+        };
+        let remaining = width - self.column_gaps.iter().sum::<f32>() - 2.0 * self.rules.inset()[0];
+        if remaining < -TABLE_WIDTH_EPSILON {
+            return Err(unsupported(
+                "MathML table width is smaller than its gaps and frame",
+            ));
+        }
+        Ok(Some(remaining.max(0.0)))
+    }
+
+    fn fill_width(&self, widths: &mut [f32], total: f32) -> Result<(), EngineError> {
+        let remaining = total - widths.iter().sum::<f32>();
+        if remaining < -TABLE_WIDTH_EPSILON {
+            return Err(unsupported(
+                "MathML table contents exceed the authored width",
+            ));
+        }
+        let sharing = if self.column_widths.contains(&ColumnWidth::Fit) {
+            ColumnWidth::Fit
+        } else {
+            ColumnWidth::Auto
+        };
+        let tracks = self
+            .column_widths
+            .iter()
+            .filter(|&&column| column == sharing)
+            .count();
+        if tracks == 0 {
+            if remaining > TABLE_WIDTH_EPSILON {
+                return Err(unsupported(
+                    "fixed MathML columns cannot fill the authored table width",
+                ));
+            }
+            return Ok(());
+        }
+        let share = remaining.max(0.0) / tracks as f32;
+        for (width, &column) in widths.iter_mut().zip(&self.column_widths) {
+            if column == sharing {
                 *width += share;
             }
         }
         Ok(())
     }
 
-    fn equal_column_width(&self, minimum: f32) -> Result<f32, EngineError> {
-        let mut fixed_widths = self.column_widths.iter().flatten().copied();
-        let width = fixed_widths.next().unwrap_or(minimum);
+    fn equal_column_width(&self, minimum: f32, total: Option<f32>) -> Result<f32, EngineError> {
+        let mut fixed_widths = self
+            .column_widths
+            .iter()
+            .filter_map(|column| column.fixed());
+        let width = if let Some(total) = total {
+            total / self.column_widths.len() as f32
+        } else {
+            fixed_widths.next().unwrap_or(minimum)
+        };
         if fixed_widths.any(|fixed| (fixed - width).abs() > WIDTH_EPSILON) {
             return Err(unsupported(
                 "MathML equal columns request conflicting fixed widths",
             ));
         }
         if minimum > width + WIDTH_EPSILON {
-            return Err(unsupported("MathML cell exceeds fixed column widths"));
+            return Err(unsupported("MathML cell exceeds equal column widths"));
         }
         Ok(width)
     }
@@ -639,7 +755,7 @@ impl Table {
         let mut widths: Vec<_> = self
             .column_widths
             .iter()
-            .map(|width| width.unwrap_or_default())
+            .map(|column| column.fixed().unwrap_or_default())
             .collect();
         let mut ascent = vec![0.0f32; row_count];
         let mut descent = vec![0.0f32; row_count];
@@ -697,6 +813,7 @@ impl Table {
             indices.sort_by_key(|&index| key(&self.cells[index]));
             indices
         };
+        let declared = self.declared_track_width()?;
         if self.equal_columns {
             let common_width = self
                 .cells
@@ -706,14 +823,32 @@ impl Table {
                     equal_track_size(&self.column_gaps, &cell.columns, measure.size().0)
                 })
                 .fold(0.0, f32::max);
-            widths.fill(self.equal_column_width(common_width)?);
+            widths.fill(self.equal_column_width(common_width, declared)?);
         } else {
-            for index in ordered(|cell| cell.columns.len()) {
-                self.grow_columns(
-                    &mut widths,
-                    &self.cells[index].columns,
-                    measures[index].0.size().0,
-                )?;
+            let order = if declared.is_some() {
+                ordered(|cell| cell.columns.end)
+            } else {
+                ordered(|cell| cell.columns.len())
+            };
+            // Automatic columns are measured before fitted columns share
+            // the remaining width. Check spans using fit against that allocation.
+            let mut fitted = Vec::new();
+            for index in order {
+                let span = &self.cells[index].columns;
+                if self.column_widths[span.clone()].contains(&ColumnWidth::Fit) {
+                    fitted.push(index);
+                    continue;
+                }
+                self.grow_columns(&mut widths, span, measures[index].0.size().0)?;
+            }
+            if let Some(total) = declared {
+                self.fill_width(&mut widths, total)?;
+            }
+            for index in fitted {
+                let room = extent(&widths, &self.column_gaps, &self.cells[index].columns);
+                if measures[index].0.size().0 > room + TABLE_WIDTH_EPSILON {
+                    return Err(unsupported("MathML cell exceeds fitted column widths"));
+                }
             }
         }
         let mut common_height = heights.iter().copied().fold(0.0, f32::max);

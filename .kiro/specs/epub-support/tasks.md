@@ -63,6 +63,8 @@
 - [x] Preserve the measured placement and editable cell equations of supported spanning grids inside formulas and paragraphs in DOCX.
 - [x] Honor authored MathML table spacing and alignment, including row and cell overrides and signed row numbers for the table baseline.
 - [x] Honor equal MathML rows and columns and supported fixed column widths in previews, PDF and editable DOCX grids.
+- [x] Allocate MathML percentage, automatic and fitted columns against a definite authored table width in previews and native exports.
+- [ ] Resolve relative MathML table widths against the containing layout when its available width is known.
 - [x] Draw MathML solid and dashed table rules and frames, respect span interruptions and frame spacing, and preserve standalone rules as editable Word table borders.
 - [ ] Extend editable DOCX export to negative leading offsets and tighter matrix column spacing. Expand the remaining MathML visual properties.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.

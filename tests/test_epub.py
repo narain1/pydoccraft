@@ -5069,6 +5069,90 @@ first
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
                     book.convert("docx")
 
+    def test_mathml_definite_width_allocates_percentage_and_fitted_columns(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Fitted MathML columns</title><style>body {{margin:0}}</style></head>
+          <body><p><m:math mathsize="18pt">{}</m:math></p></body></html>"""
+        colors = ("bf222d", "ac661b", "198144", "1644df", "8343cd", "5920ac")
+        markers = [f'<m:mtext mathcolor="#{color}">H</m:mtext>' for color in colors]
+        table = """<m:mtable {attributes} columnalign="left" columnspacing="10pt">
+          <m:mtr>{ruler}</m:mtr>
+          <m:mtr><m:mtd><m:mtext>Red</m:mtext></m:mtd><m:mtd><m:mtext>Fixed</m:mtext></m:mtd>
+            <m:mtd><m:mtext>Automatic</m:mtext></m:mtd><m:mtd><m:mtext>Fitted</m:mtext></m:mtd>
+            <m:mtd><m:mtext>Other</m:mtext></m:mtd></m:mtr>
+          </m:mtable>"""
+
+        def fixture(attributes: str) -> bytes:
+            ruler = "".join(f"<m:mtd>{marker}</m:mtd>" for marker in markers[:-1])
+            body = table.format(attributes=attributes, ruler=ruler) + markers[-1]
+            return epub_fixture(chapter_one=template.format(body))
+
+        def advances(doc: doc_ex.Document) -> list[int]:
+            width, pixels = rgba_pixels(png_chunks(doc.render_page(0, dpi=96)))
+            starts = []
+            for color in colors:
+                ink = bytes.fromhex(color + "ff")
+                points = [i // 4 % width for i in range(0, len(pixels), 4) if pixels[i:i + 4] == ink]
+                self.assertTrue(points, color)
+                starts.append(min(points))
+            return [start - starts[0] for start in starts]
+
+        columns = 'columnwidth="20% 50pt auto fit fit"'
+        with doc_ex.open(fixture('width="360pt" ' + columns)) as book:
+            preview = advances(book)
+            self.assertAlmostEqual(preview[1], 82 * 96 / 72, delta=1)
+            self.assertAlmostEqual(preview[2] - preview[1], 60 * 96 / 72, delta=1)
+            self.assertAlmostEqual(preview[5] - preview[4], preview[4] - preview[3] - 10 * 96 / 72, delta=2)
+            self.assertAlmostEqual(preview[5], 360 * 96 / 72, delta=2)
+            for target in ("pdf", "docx"):
+                with self.subTest(target=target), doc_ex.open(book.convert(target)) as reopened:
+                    for measured, expected in zip(advances(reopened), preview):
+                        self.assertAlmostEqual(measured, expected, delta=2)
+                    text = reopened[0].get_text()
+                    for label in ("Red", "Fixed", "Automatic", "Fitted", "Other"):
+                        self.assertEqual(text.count(label), 1, text)
+        with doc_ex.open(fixture('width="400pt" ' + columns)) as book:
+            wider = advances(book)
+            self.assertAlmostEqual(wider[5] - preview[5], 40 * 96 / 72, delta=1)
+            self.assertAlmostEqual(wider[1] - preview[1], 8 * 96 / 72, delta=1)
+            self.assertAlmostEqual(wider[3] - wider[2], preview[3] - preview[2], delta=1)
+        with doc_ex.open(fixture('width="360pt"')) as book:
+            self.assertAlmostEqual(advances(book)[5], 360 * 96 / 72, delta=2)
+
+        merged = """<m:mtable width="260pt" columnwidth="60pt 30% fit fit" columnspacing="12pt">
+          <m:mtr><m:mtd columnspan="2"><m:mtext>Merged</m:mtext></m:mtd>
+            <m:mtd><m:mi>a</m:mi></m:mtd><m:mtd><m:mi>b</m:mi></m:mtd></m:mtr>
+          <m:mtr><m:mtd><m:mi>p</m:mi></m:mtd><m:mtd><m:mi>q</m:mi></m:mtd>
+            <m:mtd><m:mi>r</m:mi></m:mtd><m:mtd><m:mi>s</m:mi></m:mtd></m:mtr>
+          </m:mtable>"""
+        word = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        for markup, expected in (
+            (merged, [1320, 1800, 1100, 980]),
+            (merged.replace('width="260pt"', 'width="260pt" frame="solid" framespacing="8pt 6pt"'),
+             [1488, 1800, 925, 973]),
+            (merged.replace('columnwidth="60pt 30% fit fit"', 'columnwidth="fit" equalcolumns="true"'),
+             [1240, 1360, 1360, 1240]),
+        ):
+            with doc_ex.open(epub_fixture(chapter_one=template.format(markup))) as book:
+                converted = book.convert("docx")
+            with zipfile.ZipFile(io.BytesIO(converted)) as archive:
+                xml = ET.fromstring(archive.read("word/document.xml"))
+            grid = xml.findall(".//w:tblGrid/w:gridCol", {"w": word})
+            self.assertEqual([int(col.attrib[f"{{{word}}}w"]) for col in grid], expected)
+            with doc_ex.open(converted) as reopened:
+                self.assertEqual(reopened[0].get_text().count("Merged"), 1)
+
+        for attributes, diagnostic in (
+            (columns, "require a definite table width"),
+            ('width="50%"', "requires a definite length"),
+            ('width="4pt" ' + columns, "smaller than its gaps"),
+            ('width="240pt" columnwidth="20% 50pt 135pt fit fit"', "exceed the authored width"),
+            ('width="280pt" columnwidth="20% 50pt 130pt fit fit"', "exceeds fitted column widths"),
+        ):
+            with self.subTest(attributes=attributes), doc_ex.open(fixture(attributes)) as book:
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, diagnostic):
+                    book.render_page(0)
+
     def test_mathml_table_rules_and_frame_preserve_spans(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Ruled MathML</title><style>body {{margin:0}}</style></head>
