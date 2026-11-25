@@ -429,6 +429,11 @@ impl Cascade {
             let computed = computed_value(&mut self.variables, name, value)?;
             let computed =
                 computed.or_else(|| (name == "unicode-bidi").then(|| "unset".to_owned()));
+            if computed.as_deref().is_some_and(|value| {
+                logical::intrinsic_size_kind(name, value) == Some(logical::ValueKind::Unsupported)
+            }) {
+                return Err(unsupported("unsupported EPUB CSS intrinsic box size"));
+            }
             if pair.is_some()
                 && computed.as_deref().is_some_and(|value| {
                     logical::value_kind(name, value) == logical::ValueKind::Unsupported
@@ -1239,6 +1244,9 @@ fn valid_literal(
         }
         "font-family" => font_family_value(components).is_some(),
         "font-variation-settings" => axis_value(components).is_some(),
+        _ if let Some(kind) = logical::intrinsic_size_kind(name, value) => {
+            kind != logical::ValueKind::Invalid
+        }
         _ if logical::pair(name).is_some() => {
             css_wide(value) || logical::value_kind(name, value) != logical::ValueKind::Invalid
         }

@@ -2221,6 +2221,105 @@ class EpubTests(unittest.TestCase):
             _, pixels = rgba_pixels(clip)
             self.assertEqual(pixels[:4], bytes((221, 68, 68, 255)))
 
+    def test_css_intrinsic_boxes_and_stretch_in_reflow(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic box sizes</title>
+          <style>body,p{margin:0;font-size:12px} section{width:200px;margin-bottom:4px}
+            p{background:#488a3d;padding:1px}
+            .box{border:2px solid #264985;margin-inline:10px;padding:4px;height:22px}
+          </style></head><body><section style="CONTAINER"><p class="CLASS" style="SIZE">
+          Wider Wider Wider</p></section></body></html>"""
+
+        def preview(size: str, container: str = "", box: bool = False) -> tuple[int, bytes]:
+            xhtml = chapter.replace("CONTAINER", container).replace("CLASS", "box" if box else "")
+            with doc_ex.open(epub_fixture(chapter_one=xhtml.replace("SIZE", size))) as book:
+                return rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+
+        def extent(image: tuple[int, bytes], color: str) -> int:
+            width, pixels = image
+            ink = bytes.fromhex(color)
+            xs = [(index // 4) % width for index in range(0, len(pixels), 4)
+                  if pixels[index:index + 4] == ink]
+            self.assertTrue(xs)
+            return max(xs) - min(xs) + 1
+
+        green = "488a3dff"
+        minimum = preview("width:min-content")
+        maximum = preview("inline-size:MAX-CONTENT")
+        self.assertLess(extent(minimum, green), extent(maximum, green))
+        self.assertEqual(minimum, preview("inline-size:fit-content(0px)"))
+        self.assertEqual(maximum, preview("inline-size:fit-content(200px)"))
+        self.assertEqual(maximum, preview("width:fit-content"))
+        self.assertEqual(minimum, preview("width:fit-content", "width:20px"))
+        middle = preview("width:55px")
+        self.assertEqual(middle, preview("inline-size:fit-content(55px)"))
+        self.assertEqual(middle, preview("width:fit-content(27.5%)"))
+        self.assertEqual(middle, preview("width:fit-content(calc(25% + 5px))"))
+        self.assertEqual(middle, preview("width:fit-content", "width:57px"))
+        self.assertEqual(middle, preview("width:55px;width:fit-content(-5px)"))
+        self.assertEqual(middle, preview("width:55px;inline-size:fit-content(2fr)"))
+        self.assertEqual(preview("width:168px", box=True), preview("inline-size:stretch", box=True))
+        self.assertEqual(preview("height:78px", "height:80px"),
+                         preview("block-size:stretch", "height:80px"))
+        self.assertEqual(preview("width:55px", "display:grid;grid-template-columns:200px"),
+                         preview("width:fit-content(55px)", "display:grid;grid-template-columns:200px"))
+        self.assertEqual(preview("width:55px", "display:flex"),
+                         preview("width:fit-content(55px)", "display:flex"))
+        for size in ("min-width:max-content", "max-inline-size:fit-content(10px)", "width:contain"):
+            with self.subTest(size=size):
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "CSS intrinsic box size"):
+                    preview(size)
+
+    def test_css_intrinsic_box_inherits_limits_in_searchable_fixed_pdf(self) -> None:
+        source = fixed_spread_fixture([("", "white", 300, 160)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic fixed box</title>
+          <meta name="viewport" content="width=300,height=160"/><style>
+          html,body,p{margin:0;padding:0} section{position:absolute;left:12px;top:12px;
+          width:250px;height:112px} #limit{font-size:10px;PARENT}
+          #label{position:absolute;left:15px;top:5px;background:#98d8ad;font-size:12px;CHILD}
+          </style></head><body><section><div id="limit">
+          <p id="label"><a href="https://example.org/intrinsic">First bookmarked phrase</a></p>
+          </div></section></body></html>"""
+        results = []
+        for parent, child in (
+            ("inline-size:fit-content(calc(20% + 2em))", "width:inherit"),
+            ("width:70px", "width:70px"),
+        ):
+            chapter = template.replace("PARENT", parent).replace("CHILD", child)
+            with doc_ex.open(rewrite_epub(source, {"OEBPS/s0.xhtml": chapter})) as book:
+                pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                converted = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+            with doc_ex.open(converted) as pdf:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), pixels)
+                self.assertIn("bookmarked", pdf[0].get_text())
+                self.assertTrue(pdf[0].search_for("bookmarked"))
+                links = pdf[0].get_links()
+                self.assertTrue(links)
+                self.assertTrue(all(link.uri == "https://example.org/intrinsic" for link in links))
+                results.append((pixels, [(link.uri, link.bbox) for link in links]))
+        self.assertEqual(results[0], results[1])
+
+    def test_css_intrinsic_box_keeps_directional_words_searchable(self) -> None:
+        original = fixed_spread_fixture([("", "white", 200, 140)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Direction</title>
+          <meta name="viewport" content="width=200,height=140"/><style>
+          body{margin:0} section{position:absolute;left:16px;top:12px;width:100px;display:grid;
+          grid-template-columns:minmax(clamp(10px,85% + 3px,98px),1fr)}
+          h1{margin:0;font-size:13px;inline-size:LIMIT;FONT}
+          </style></head><body><section dir="auto">
+          <h1 id="title">&#x200f;Logical plate</h1><a href="#title">Back</a>
+          <p>Left <bdi>שלום!</bdi> Right</p></section></body></html>"""
+        for font in ("", "font-family:serif,sans-serif"):
+            for width in ("min-content", "max-content", "fit-content(clamp(70px,60% + 8px,85px))"):
+                with self.subTest(font=font, width=width):
+                    xhtml = template.replace("LIMIT", width).replace("FONT", font)
+                    with doc_ex.open(rewrite_epub(original, {"OEBPS/s0.xhtml": xhtml})) as book:
+                        pdf = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+                    with doc_ex.open(pdf) as document:
+                        self.assertTrue(document[0].search_for("Logical"), document[0].get_text())
+                        self.assertTrue(document[0].search_for("plate"), document[0].get_text())
+                        internal, = document[0].get_links()
+                        self.assertEqual(internal.metadata["target_page"], 0)
+
     def test_css_calculated_grid_tracks_match_explicit_sizes_in_fixed_pdf(self) -> None:
         source = fixed_spread_fixture([("", "white", 340, 160)])
         template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Calculated grid</title>

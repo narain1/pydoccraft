@@ -189,8 +189,15 @@ impl ChapterStyles {
                 if (key == "width" && auto_width) || (key == "height" && auto_height) {
                     return Dimension::auto();
                 }
-                calculations.get(key).copied().map_or_else(
-                    || dimension::<Dimension>(value(&values, key), font, viewport),
+                let value = value(&values, key);
+                let handle = calculations.get(key).copied();
+                if matches!(key, "width" | "height") {
+                    if let Some(dimension) = intrinsic_dimension(value, handle) {
+                        return dimension;
+                    }
+                }
+                handle.map_or_else(
+                    || dimension::<Dimension>(value, font, viewport),
                     Dimension::calc,
                 )
             };
@@ -644,6 +651,21 @@ where
         .map(T::from_percent)
         .or_else(|| css::points(value, font, viewport).map(T::from_length))
         .unwrap_or(T::AUTO)
+}
+
+fn intrinsic_dimension(value: &str, handle: Option<taffy::CalcHandle>) -> Option<Dimension> {
+    Some(match value.to_ascii_lowercase().as_str() {
+        "min-content" => Dimension::min_content(),
+        "max-content" => Dimension::max_content(),
+        "stretch" => Dimension::stretch(),
+        "fit-content" => handle.map_or_else(Dimension::fit_content, Dimension::fit_content_calc),
+        _ => {
+            let limit = css::logical::fit_content_argument(value)?;
+            percent(limit)
+                .map(Dimension::fit_content_percent)
+                .or_else(|| css::points(limit, 12.0, [0.0; 2]).map(Dimension::fit_content_px))?
+        }
+    })
 }
 
 fn align(value: &str) -> Option<AlignItems> {

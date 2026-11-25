@@ -206,19 +206,36 @@ pub(in crate::epub) fn resolve_calculated_geometry(
     mut handles: Calculations,
 ) -> Result<Calculations, EngineError> {
     for (name, value) in values {
-        if !calc::is_math(value) {
+        let limit = if matches!(name.as_str(), "width" | "height") {
+            fit_content_argument(value)
+        } else {
+            None
+        };
+        if limit.is_none() && !calc::is_math(value) {
             continue;
         }
         if let Some(pair) = physical_pair(name, flow).filter(|pair| pair.is_length()) {
-            *value = match calc::resolve(value, font, viewport, pair.allows_negative())? {
+            let source = limit.unwrap_or(value);
+            let resolved = if limit.is_some() && source.parse::<f32>().is_ok_and(|n| n == 0.0) {
+                calc::Resolved::Points(0.0)
+            } else {
+                calc::resolve(source, font, viewport, pair.allows_negative())?
+            };
+            let fit = limit.is_some();
+            let normalized = match resolved {
                 calc::Resolved::Points(points) => format!("{points}pt"),
                 calc::Resolved::Percent(percent) => format!("{percent}%"),
                 calc::Resolved::Deferred(length) => {
                     handles.insert(pair.physical(flow), calculations.register(length)?);
                     // A percentage-dependent value belongs to the typed handle
                     // table, including when inherited by a different box.
-                    "auto".to_owned()
+                    if fit { "fit-content" } else { "auto" }.to_owned()
                 }
+            };
+            *value = if fit && normalized != "fit-content" {
+                format!("fit-content({normalized})")
+            } else {
+                normalized
             };
         }
     }
@@ -317,8 +334,57 @@ pub(super) enum ValueKind {
     Unsupported,
 }
 
+pub(in crate::epub) fn fit_content_argument(value: &str) -> Option<&str> {
+    let (function, argument) = value.split_once('(')?;
+    keyword(function, "fit-content").then_some(argument.strip_suffix(')')?.trim())
+}
+
+pub(super) fn intrinsic_size_kind(name: &str, value: &str) -> Option<ValueKind> {
+    let preferred = matches!(name, "width" | "height" | "inline-size" | "block-size");
+    let size = preferred
+        || matches!(
+            name,
+            "min-width"
+                | "min-height"
+                | "max-width"
+                | "max-height"
+                | "min-inline-size"
+                | "min-block-size"
+                | "max-inline-size"
+                | "max-block-size"
+        );
+    if !size {
+        return None;
+    }
+    let kind = if ["min-content", "max-content", "fit-content", "stretch"]
+        .iter()
+        .any(|name| keyword(value, name))
+    {
+        ValueKind::Supported
+    } else if keyword(value, "contain") {
+        ValueKind::Unsupported
+    } else if let Some(argument) = fit_content_argument(value) {
+        let argument = argument.to_ascii_lowercase();
+        if calc::is_math(&argument) {
+            if calc::valid(&argument, true) {
+                ValueKind::Supported
+            } else {
+                ValueKind::Invalid
+            }
+        } else {
+            length_value_kind(&argument, false, false)
+        }
+    } else {
+        return None;
+    };
+    Some(match kind {
+        ValueKind::Supported if !preferred => ValueKind::Unsupported,
+        _ => kind,
+    })
+}
+
 pub(super) fn value_kind(name: &str, value: &str) -> ValueKind {
-    use ValueKind::{Invalid, Supported, Unsupported};
+    use ValueKind::{Invalid, Supported};
     let value = value.to_ascii_lowercase();
     let value = value.as_str();
     let classified = |valid| if valid { Supported } else { Invalid };
@@ -349,20 +415,21 @@ pub(super) fn value_kind(name: &str, value: &str) -> ValueKind {
     if calc::is_math(value) {
         return classified(calc::valid(value, !border));
     }
-    if size
-        && matches!(
-            value,
-            "min-content" | "max-content" | "fit-content" | "stretch"
-        )
-        || value.starts_with("fit-content(") && value.ends_with(')')
-    {
-        return Unsupported;
-    }
+    intrinsic_size_kind(name, value)
+        .unwrap_or_else(|| length_value_kind(value, border, margin || inset))
+}
+
+fn length_value_kind(value: &str, border: bool, negative: bool) -> ValueKind {
+    use ValueKind::{Invalid, Supported, Unsupported};
     if let Some(number) = value.strip_suffix('%') {
-        return classified(!border && allowed_length(number, margin || inset));
+        return if !border && allowed_length(number, negative) {
+            Supported
+        } else {
+            Invalid
+        };
     }
     if let Ok(number) = value.parse::<f32>() {
-        return classified(number == 0.0);
+        return if number == 0.0 { Supported } else { Invalid };
     }
     for unit in [
         "rem", "em", "px", "pt", "pc", "in", "cm", "mm", "vw", "vh", "ch", "ex", "cap", "ic", "lh",
@@ -372,7 +439,7 @@ pub(super) fn value_kind(name: &str, value: &str) -> ValueKind {
             .strip_suffix(unit)
             .filter(|number| number.parse::<f32>().is_ok())
         {
-            if !allowed_length(number, margin || inset) {
+            if !allowed_length(number, negative) {
                 return Invalid;
             }
             return if points(value, 12.0, [1.0; 2]).is_some() {

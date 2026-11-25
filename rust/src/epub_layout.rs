@@ -8,7 +8,9 @@ mod tree;
 pub(super) use link_geometry::InlineNavigation;
 
 use roxmltree::Node;
-use taffy::{geometry::Size, prelude::*, style::Overflow, LayoutInput, LayoutOutput};
+use taffy::{
+    geometry::Size, prelude::*, style::Overflow, LayoutInput, LayoutOutput, RequestedAxis,
+};
 use wordcraft_doc::{
     props::{Rgb, TextDirection},
     Blocks, Document,
@@ -16,6 +18,7 @@ use wordcraft_doc::{
 use wordcraft_geom::Rect;
 use wordcraft_layout::{
     display::{page_display, Draw},
+    para::ClKind,
     LayoutCache, LayoutOptions, Page, Placed, ViewMode,
 };
 
@@ -450,7 +453,7 @@ impl RelativeMath {
             self.layouts.len() - 1
         };
         let height = match &self.layouts[index].text {
-            Ok(text) => font_text_size(text, width, work)?.height,
+            Ok(text) => font_text_size(text, AvailableSpace::Definite(width), work)?.height,
             Err(_) => 0.0,
         };
         Ok(Size { width, height })
@@ -890,7 +893,7 @@ impl<'book> Layout<'book> {
                 };
                 LayoutOutput::from_outer_size(size)
             },
-        );
+        )?;
         if let Some(error) = error {
             return Err(error);
         }
@@ -1133,8 +1136,19 @@ fn measure(
         }
         Some(Contents::Text(blocks)) => {
             let width = available_text_width(input);
-            let page = layout_text(blocks, width, doc, cache, work)?;
-            text_size(&page)
+            let page = layout_text(
+                blocks,
+                width.into_option().unwrap_or(MAX_GEOMETRY),
+                doc,
+                cache,
+                work,
+            )?;
+            let mut size = text_size(&page, width);
+            if width == AvailableSpace::MinContent && input.axis != RequestedAxis::Horizontal {
+                let wrapped = layout_text(blocks, size.width, doc, cache, work)?;
+                size.height = text_size(&wrapped, AvailableSpace::Definite(size.width)).height;
+            }
+            size
         }
         None | Some(Contents::RelativeMath(_)) => Size::ZERO,
     };
@@ -1146,7 +1160,7 @@ fn measure(
 
 fn font_text_size(
     blocks: &[FontText],
-    width: f32,
+    space: AvailableSpace,
     work: &mut usize,
 ) -> Result<Size<f32>, EngineError> {
     super::charge(
@@ -1157,22 +1171,24 @@ fn font_text_size(
     )?;
     let mut total = Size::<f32>::ZERO;
     for block in blocks {
-        let [w, h] = block.size(width);
+        let [w, h] = match space {
+            AvailableSpace::Definite(width) => block.size(width),
+            space => {
+                let width = block.intrinsic_width(space == AvailableSpace::MinContent);
+                [width, block.size(width)[1]]
+            }
+        };
         total.width = total.width.max(w);
         total.height += h;
     }
     Ok(total)
 }
 
-fn available_text_width(input: LayoutInput) -> f32 {
+fn available_text_width(input: LayoutInput) -> AvailableSpace {
     input
         .known_dimensions
         .width
-        .unwrap_or(match input.available_space.width {
-            AvailableSpace::Definite(width) => width,
-            AvailableSpace::MinContent => 2.0,
-            AvailableSpace::MaxContent => MAX_GEOMETRY,
-        })
+        .map_or(input.available_space.width, AvailableSpace::Definite)
 }
 
 fn layout_text(
@@ -1218,7 +1234,7 @@ fn layout_text(
         .ok_or_else(|| invalid("empty EPUB text layout"))
 }
 
-fn text_size(page: &Page) -> Size<f32> {
+fn text_size(page: &Page, space: AvailableSpace) -> Size<f32> {
     let mut size = Size::ZERO;
     for entry in &page.items {
         match entry {
@@ -1234,9 +1250,41 @@ fn text_size(page: &Page) -> Size<f32> {
                 if let (Some(first), Some(last)) = (lines.first(), lines.last()) {
                     size.height = size.height.max(y + last.top - first.top + last.height);
                     for line in lines {
-                        if let (Some(left), Some(right)) = (line.xs.first(), line.xs.last()) {
-                            size.width = size.width.max((right - left).abs());
-                        }
+                        let width = if space == AvailableSpace::MinContent {
+                            let mut part = 0.0f32;
+                            let mut end = 0.0f32;
+                            let mut widest = 0.0f32;
+                            for cluster in &para.clusters[line.c0..line.c1] {
+                                part += cluster.adv;
+                                if cluster.kind != ClKind::Space {
+                                    end = part;
+                                }
+                                if cluster.break_after {
+                                    widest = widest.max(end);
+                                    part = 0.0;
+                                    end = 0.0;
+                                }
+                            }
+                            widest.max(end)
+                        } else if space == AvailableSpace::MaxContent && !line.vis.is_empty() {
+                            let left = line
+                                .vis
+                                .iter()
+                                .map(|cluster| cluster.x)
+                                .fold(f32::INFINITY, f32::min);
+                            let right = line
+                                .vis
+                                .iter()
+                                .map(|cluster| cluster.x + cluster.w)
+                                .fold(f32::NEG_INFINITY, f32::max);
+                            right - left
+                        } else {
+                            line.xs
+                                .first()
+                                .zip(line.xs.last())
+                                .map_or(0.0, |(left, right)| (right - left).abs())
+                        };
+                        size.width = size.width.max(width);
                     }
                 }
             }

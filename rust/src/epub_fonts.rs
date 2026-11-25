@@ -984,6 +984,15 @@ pub(super) struct Text {
 }
 
 impl Text {
+    pub(super) fn intrinsic_width(&self, minimum: bool) -> f32 {
+        let widths = self.layout.borrow().calculate_content_widths();
+        if minimum {
+            widths.min
+        } else {
+            widths.max
+        }
+    }
+
     pub(super) fn size(&self, width: f32) -> [f32; 2] {
         let mut layout = self.layout.borrow_mut();
         layout.break_all_lines(Some(width.max(2.0)));
