@@ -3222,6 +3222,110 @@ first
             with self.subTest(fragment=fragment), self.assertRaisesRegex(error, message):
                 doc_ex.open(epub_fixture(chapter_one=chapter))
 
+    def test_styled_webvtt_and_ttml_runs_reach_clipped_cues_and_video_frames(self) -> None:
+        video = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        vtt = '''WEBVTT
+
+voice
+00:00:00.075 --> 00:00:00.300
+<v Narrator &amp; Team><lang fr><c.yellow.magenta.bg_black.note>«<b>Un</b>»</c></lang> <00:00:00.140><i>mot</i><u>!</u></v>
+'''.encode()
+        ttml = b'''<tt xmlns="http://www.w3.org/ns/ttml"
+          xmlns:tts="http://www.w3.org/ns/ttml#styling" xml:lang="en">
+          <head><styling>
+            <style xml:id="foundation" tts:color="#11223380" tts:fontWeight="bold"
+                   tts:textDecoration="underline overline"/>
+            <style xml:id="variant" style="foundation" tts:fontStyle="oblique"/>
+            <style xml:id="override" tts:color="rgba(15,31,63,127)"/>
+          </styling></head>
+          <body style="variant"><div><p xml:id="same" begin="100ms" end="300ms" style="foundation override">
+            <span end="75ms" xml:lang="fr" tts:color="#ff0000" tts:textDecoration="noUnderline">Ping</span>
+            <span begin="75ms" xml:lang="ja" tts:fontStyle="normal" tts:fontWeight="normal"
+                  tts:textDecoration="lineThrough noOverline">Ping</span>
+          </p></div></body></tt>'''
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Styled subtitles</title></head>
+          <body><video src="clip.mp4#t=0.12,0.26">
+          <track src="voice.vtt" kind="captions" srclang="fr"/>
+          <track src="style.ttml" kind="subtitles" srclang="en"/>
+          </video></body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Styled subtitles", chapter, "OEBPS/style.xhtml")],
+                resources={
+                    "OEBPS/clip.mp4": doc_ex.EpubResource("video/mp4", video),
+                    "OEBPS/voice.vtt": doc_ex.EpubResource("text/vtt", vtt),
+                    "OEBPS/style.ttml": doc_ex.EpubResource("application/ttml+xml", ttml),
+                },
+            )
+        with doc_ex.open(data) as book:
+            vtt_cue, = book.epub_embedded_text(0, 0, track_index=0, start_us=160_000, end_us=220_000)
+            self.assertEqual((vtt_cue.start_us, vtt_cue.end_us, vtt_cue.text), (160_000, 220_000, "«Un» mot!"))
+            self.assertIn("<i>mot</i>", vtt_cue.markup or "")
+            fields = doc_ex.EpubTextStyle(
+                color=(255, 0, 255, 255), background_color=(0, 0, 0, 255),
+                classes=("yellow", "magenta", "bg_black", "note"), voice="Narrator & Team", language="fr")
+            self.assertEqual(vtt_cue.runs, (
+                doc_ex.EpubTextRun("«", fields),
+                doc_ex.EpubTextRun("Un", doc_ex.EpubTextStyle(
+                    bold=True, color=fields.color, background_color=fields.background_color,
+                    classes=fields.classes, voice=fields.voice, language=fields.language)),
+                doc_ex.EpubTextRun("»", fields),
+                doc_ex.EpubTextRun(" ", doc_ex.EpubTextStyle(voice=fields.voice)),
+                doc_ex.EpubTextRun("mot", doc_ex.EpubTextStyle(font_style="italic", voice=fields.voice), 140_000),
+                doc_ex.EpubTextRun("!", doc_ex.EpubTextStyle(underline=True, voice=fields.voice), 140_000),
+            ))
+            self.assertEqual(vtt_cue, doc_ex.EpubTextCue(
+                160_000, 220_000, "«Un» mot!", "voice", markup=vtt_cue.markup))
+            voiced = list(book.epub_embedded_video(0, 0, start_us=160_000, end_us=220_000, text_track=0))
+            self.assertTrue(voiced)
+            self.assertTrue(all(frame.text_cues[0].runs == vtt_cue.runs for frame in voiced))
+
+            first, second = book.epub_embedded_text(0, 0, track_index=1)
+            self.assertEqual([(c.start_us, c.end_us, c.text) for c in (first, second)],
+                             [(100_000, 175_000, "Ping"), (175_000, 300_000, "Ping")])
+            self.assertEqual(first.runs, (doc_ex.EpubTextRun("Ping", doc_ex.EpubTextStyle(
+                bold=True, font_style="oblique", overline=True, color=(255, 0, 0, 255), language="fr")),))
+            self.assertEqual(second.runs, (doc_ex.EpubTextRun("Ping", doc_ex.EpubTextStyle(
+                underline=True, line_through=True, color=(15, 31, 63, 127), language="ja")),))
+            frames = list(book.epub_embedded_video(0, 0, start_us=170_000, end_us=180_000, text_track=1))
+            self.assertEqual([(f.start_us, f.duration_us) for f in frames], [(170_000, 5_000), (175_000, 5_000)])
+            self.assertEqual([f.text_cues[0].runs for f in frames], [first.runs, second.runs])
+            self.assertIs(frames[0].rgb, frames[1].rgb)
+
+    def test_timed_subtitle_styles_bound_nesting_and_reject_broken_references(self) -> None:
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Styled subtitles</title></head>
+          <body><video><track src="voice.vtt" kind="captions" srclang="fr"/>
+          <track src="style.ttml" kind="subtitles" srclang="en"/>
+          </video></body></html>'''
+        vtt = b"WEBVTT\n\n00:00:00.000 --> 00:00:00.200\n"
+        ttml = b'<tt xmlns="http://www.w3.org/ns/ttml"><head><styling>'
+        text = b'</styling></head><body><div><p begin="0" dur="200ms" style="a">Text</p></div></body></tt>'
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Styled subtitles", chapter, "OEBPS/style.xhtml")],
+                resources={
+                    "OEBPS/voice.vtt": doc_ex.EpubResource("text/vtt", vtt + b"basic"),
+                    "OEBPS/style.ttml": doc_ex.EpubResource(
+                        "application/ttml+xml", ttml + b'<style xml:id="a"/>' + text),
+                },
+            )
+        for path, raw, index, error, message in (
+            ("voice.vtt", vtt + b"<b>" * 33 + b"text" + b"</b>" * 33, 0,
+             doc_ex.UnsafeArchiveError, "span nesting"),
+            ("voice.vtt", vtt + b"<c" + b".red" * 33 + b">text</c>", 0,
+             doc_ex.UnsafeArchiveError, "cue classes"),
+            ("voice.vtt", vtt + b"<b>x</b>y" * 5_001, 0,
+             doc_ex.UnsafeArchiveError, "styled run count"),
+            ("style.ttml", ttml + b'<style xml:id="a" style="b"/><style xml:id="b" style="a"/>' + text,
+             1, doc_ex.MalformedDocumentError, "cyclic TTML style"),
+            ("style.ttml", ttml + b'<style xml:id="a" style="b"/>' + text,
+             1, doc_ex.MalformedDocumentError, "missing TTML style"),
+        ):
+            with self.subTest(path=path, message=message):
+                changed = rewrite_epub(data, {f"OEBPS/{path}": raw})
+                with doc_ex.open(changed) as book, self.assertRaisesRegex(error, message):
+                    book.epub_embedded_text(0, 0, track_index=index)
+
     def test_embedded_ttml_nested_timing_preserves_regions_and_clip_intervals(self) -> None:
         ttml = b"""<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttp="http://www.w3.org/ns/ttml#parameter"
           xml:lang="en" ttp:timeBase="media" ttp:frameRate="30" ttp:frameRateMultiplier="1000 1001"

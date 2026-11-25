@@ -1,21 +1,29 @@
-//! Project the TTML media time base onto plain-text presentation cues.
-use std::collections::BTreeSet;
+//! Project TTML media-time cues and their supported text styles.
+use std::{
+    collections::{BTreeSet, HashMap, HashSet},
+    sync::Arc,
+};
 
 use roxmltree::Node;
 
-use super::{integer, Cue, Track, MAX_TIME, MICROS};
+use super::{
+    integer, Cue, FontStyle, StyledText, TextStyle, Track, MAX_STYLE_LABEL, MAX_TIME, MICROS,
+};
 use crate::{
     epub::{charge, invalid, limited, parse_xml, unsupported, XML},
     EngineError,
 };
 
 const TT: &str = "http://www.w3.org/ns/ttml";
+const STYLING: &str = "http://www.w3.org/ns/ttml#styling";
 const PARAM: &str = "http://www.w3.org/ns/ttml#parameter";
 // Nine decimal places plus the millisecond conversion fit into this scale.
 const DECIMALS: u128 = 1_000_000_000_000;
 const MAX_DEPTH: usize = 32;
 const MAX_PIECES: usize = 10_000;
 const MAX_TEXT_WORK: usize = 8 * 1024 * 1024;
+const MAX_STYLES: usize = 512;
+const MAX_STYLE_REFS: usize = 32;
 
 type Instant = u128;
 
@@ -43,12 +51,16 @@ pub(super) fn parse(bytes: &[u8], track: &mut Track) -> Result<(), EngineError> 
     if bodies.next().is_some() {
         return Err(invalid("multiple TTML bodies"));
     }
+    let styles = style_definitions(root)?;
+    let format = Format::default().on(root, &styles)?;
     let mut reader = Reader {
         clock,
         track,
         text_work: 0,
+        style_work: 0,
+        styles,
     };
-    reader.block(body, 0, None, Format::default().on(root)?, 0)?;
+    reader.block(body, 0, None, format, 0)?;
     Ok(())
 }
 
@@ -326,14 +338,208 @@ impl Children {
     }
 }
 
+// A declaration is separate from inherited style so explicit resets survive
+// merging style references and inline properties before application.
 #[derive(Clone, Copy, Default)]
+struct StylePatch {
+    bold: Option<bool>,
+    font_style: Option<FontStyle>,
+    decoration: Option<[Option<bool>; 3]>,
+    color: Option<[u8; 4]>,
+}
+
+impl StylePatch {
+    fn merge(self, later: Self) -> Self {
+        Self {
+            bold: later.bold.or(self.bold),
+            font_style: later.font_style.or(self.font_style),
+            decoration: later.decoration.or(self.decoration),
+            color: later.color.or(self.color),
+        }
+    }
+
+    fn inline(self, node: Node<'_, '_>) -> Result<Self, EngineError> {
+        let opt = |name| node.attribute((STYLING, name));
+        let later = Self {
+            bold: opt("fontWeight")
+                .map(|value| match value {
+                    "normal" => Ok(false),
+                    "bold" => Ok(true),
+                    _ => Err(invalid("invalid TTML fontWeight")),
+                })
+                .transpose()?,
+            font_style: opt("fontStyle")
+                .map(|value| match value {
+                    "normal" => Ok(FontStyle::Normal),
+                    "italic" => Ok(FontStyle::Italic),
+                    "oblique" => Ok(FontStyle::Oblique),
+                    _ => Err(invalid("invalid TTML fontStyle")),
+                })
+                .transpose()?,
+            decoration: opt("textDecoration").map(decoration).transpose()?,
+            color: opt("color").map(ttml_color).transpose()?,
+        };
+        Ok(self.merge(later))
+    }
+
+    fn apply(self, style: &mut TextStyle) {
+        style.bold = self.bold.unwrap_or(style.bold);
+        style.font_style = self.font_style.unwrap_or(style.font_style);
+        style.color = self.color.or(style.color);
+        if let Some([underline, line_through, overline]) = self.decoration {
+            style.underline = underline.unwrap_or(style.underline);
+            style.line_through = line_through.unwrap_or(style.line_through);
+            style.overline = overline.unwrap_or(style.overline);
+        }
+    }
+}
+
+fn decoration(value: &str) -> Result<[Option<bool>; 3], EngineError> {
+    if value == "none" {
+        return Ok([Some(false); 3]);
+    }
+    let mut flags = [None; 3];
+    let malformed = || invalid("invalid TTML textDecoration");
+    for word in value.split_ascii_whitespace() {
+        let (slot, enabled) = match word {
+            "underline" => (0, true),
+            "noUnderline" => (0, false),
+            "lineThrough" => (1, true),
+            "noLineThrough" => (1, false),
+            "overline" => (2, true),
+            "noOverline" => (2, false),
+            _ => return Err(malformed()),
+        };
+        if flags[slot].replace(enabled).is_some() {
+            return Err(malformed());
+        }
+    }
+    if flags == [None; 3] {
+        return Err(malformed());
+    }
+    Ok(flags)
+}
+
+fn ttml_color(value: &str) -> Result<[u8; 4], EngineError> {
+    let malformed = || invalid("invalid TTML color");
+    if let Some((function, values)) = value.split_once('(') {
+        let mut values = values.strip_suffix(')').ok_or_else(malformed)?.split(',');
+        let count = match function {
+            "rgb" => 3,
+            "rgba" => 4,
+            _ => return Err(malformed()),
+        };
+        let mut rgba = [255; 4];
+        for channel in &mut rgba[..count] {
+            *channel = values
+                .next()
+                .map(str::trim_ascii)
+                .and_then(integer)
+                .and_then(|value| u8::try_from(value).ok())
+                .ok_or_else(malformed)?;
+        }
+        if values.next().is_some() {
+            return Err(malformed());
+        }
+        return Ok(rgba);
+    }
+    if let Some(hex) = value.strip_prefix('#') {
+        if !matches!(hex.len(), 6 | 8) || !hex.bytes().all(|digit| digit.is_ascii_hexdigit()) {
+            return Err(malformed());
+        }
+    } else if !value.bytes().all(|letter| letter.is_ascii_alphabetic()) {
+        return Err(malformed());
+    }
+    let ([r, g, b], alpha) = crate::epub::css::color(value).ok_or_else(malformed)?;
+    Ok([r, g, b, (alpha * 255.0).round() as u8])
+}
+
+fn style_definitions<'n>(root: Node<'n, '_>) -> Result<HashMap<&'n str, StylePatch>, EngineError> {
+    let mut definitions = HashMap::new();
+    let styling = root
+        .children()
+        .filter(|node| node.has_tag_name((TT, "head")))
+        .flat_map(|head| {
+            head.children()
+                .filter(|node| node.has_tag_name((TT, "styling")))
+        });
+    for style in styling
+        .flat_map(|node| node.descendants())
+        .filter(|node| node.has_tag_name((TT, "style")))
+    {
+        let Some(name) = style.attribute((XML, "id")) else {
+            continue;
+        };
+        if definitions.len() == MAX_STYLES || name.len() > MAX_STYLE_LABEL {
+            return Err(limited("TTML style definitions exceed their budget"));
+        }
+        if definitions.insert(name, style).is_some() {
+            return Err(invalid("duplicate TTML style ID"));
+        }
+    }
+    let mut resolved = HashMap::new();
+    let mut active = HashSet::new();
+    for &name in definitions.keys() {
+        define_style(name, &definitions, &mut resolved, &mut active)?;
+    }
+    Ok(resolved)
+}
+
+fn define_style<'n>(
+    name: &'n str,
+    definitions: &HashMap<&'n str, Node<'n, '_>>,
+    resolved: &mut HashMap<&'n str, StylePatch>,
+    active: &mut HashSet<&'n str>,
+) -> Result<StylePatch, EngineError> {
+    if let Some(&style) = resolved.get(name) {
+        return Ok(style);
+    }
+    if active.len() == MAX_DEPTH {
+        return Err(limited("TTML style reference nesting exceeds 32"));
+    }
+    if !active.insert(name) {
+        return Err(invalid("cyclic TTML style reference"));
+    }
+    let node = *definitions
+        .get(name)
+        .ok_or_else(|| invalid("missing TTML style reference"))?;
+    let patch = referenced_styles(node, |parent| {
+        define_style(parent, definitions, resolved, active)
+    })?;
+    active.remove(name);
+    resolved.insert(name, patch);
+    Ok(patch)
+}
+
+fn referenced_styles<'n>(
+    node: Node<'n, '_>,
+    mut lookup: impl FnMut(&'n str) -> Result<StylePatch, EngineError>,
+) -> Result<StylePatch, EngineError> {
+    let mut patch = StylePatch::default();
+    if let Some(references) = node.attribute("style") {
+        for (index, name) in references.split_ascii_whitespace().enumerate() {
+            if index == MAX_STYLE_REFS {
+                return Err(limited("TTML style reference list exceeds 32 entries"));
+            }
+            patch = patch.merge(lookup(name)?);
+        }
+    }
+    patch.inline(node)
+}
+
+#[derive(Clone, Default)]
 struct Format<'a> {
     preserve: bool,
     region: Option<&'a str>,
+    style: Arc<TextStyle>,
 }
 
 impl<'a> Format<'a> {
-    fn on(mut self, node: Node<'a, '_>) -> Result<Self, EngineError> {
+    fn on(
+        mut self,
+        node: Node<'a, '_>,
+        styles: &HashMap<&str, StylePatch>,
+    ) -> Result<Self, EngineError> {
         match node.attribute((XML, "space")) {
             Some("preserve") => self.preserve = true,
             Some("default") => self.preserve = false,
@@ -341,6 +547,26 @@ impl<'a> Format<'a> {
             _ => return Err(invalid("invalid TTML xml:space value")),
         }
         self.region = node.attribute("region").or(self.region);
+        let patch = referenced_styles(node, |name| {
+            styles
+                .get(name)
+                .copied()
+                .ok_or_else(|| invalid("missing TTML style reference"))
+        })?;
+        if let Some(language) = node.attribute((XML, "lang")) {
+            if language.len() > MAX_STYLE_LABEL {
+                return Err(limited("TTML language exceeds its byte budget"));
+            }
+            Arc::make_mut(&mut self.style).language =
+                (!language.is_empty()).then(|| language.to_owned());
+        }
+        if patch.bold.is_some()
+            || patch.font_style.is_some()
+            || patch.decoration.is_some()
+            || patch.color.is_some()
+        {
+            patch.apply(Arc::make_mut(&mut self.style));
+        }
         Ok(self)
     }
 }
@@ -350,6 +576,7 @@ struct Piece<'a> {
     end: Option<Instant>,
     text: &'a str,
     preserve: bool,
+    style: Arc<TextStyle>,
 }
 
 struct Paragraph<'a> {
@@ -358,13 +585,15 @@ struct Paragraph<'a> {
     first_cue: usize,
 }
 
-struct Reader<'a> {
+struct Reader<'a, 'n> {
     clock: Clock,
     track: &'a mut Track,
     text_work: usize,
+    style_work: usize,
+    styles: HashMap<&'n str, StylePatch>,
 }
 
-impl Reader<'_> {
+impl Reader<'_, '_> {
     fn block<'n>(
         &mut self,
         node: Node<'n, '_>,
@@ -378,10 +607,10 @@ impl Reader<'_> {
         if timing.empty() {
             return Ok(timing.end);
         }
-        let format = inherited.on(node)?;
+        let format = inherited.on(node, &self.styles)?;
         if node.has_tag_name((TT, "p")) {
             let mut pieces = Vec::new();
-            let end = self.inline_children(node, timing, format, &mut pieces, depth)?;
+            let end = self.inline_children(node, timing, &format, &mut pieces, depth)?;
             self.emit(node, format.region, &pieces)?;
             return Ok(timing.finish(end));
         }
@@ -391,7 +620,7 @@ impl Reader<'_> {
             let end = match child.tag_name() {
                 name if name.namespace() != Some(TT) => continue,
                 name if matches!(name.name(), "div" | "p") => {
-                    self.block(child, base, timing.end, format, depth + 1)?
+                    self.block(child, base, timing.end, format.clone(), depth + 1)?
                 }
                 _ => return Err(unsupported("unsupported TTML block content")),
             };
@@ -404,7 +633,7 @@ impl Reader<'_> {
         &mut self,
         node: Node<'n, '_>,
         timing: Timing,
-        format: Format<'n>,
+        format: &Format<'n>,
         pieces: &mut Vec<Piece<'n>>,
         depth: usize,
     ) -> Result<Option<Instant>, EngineError> {
@@ -416,14 +645,21 @@ impl Reader<'_> {
                 if children.sequential {
                     continue;
                 }
-                push_piece(pieces, timing.begin, timing.end, text, format.preserve)?;
+                push_piece(
+                    pieces,
+                    timing.begin,
+                    timing.end,
+                    text,
+                    format.preserve,
+                    &format.style,
+                )?;
                 timing.end
             } else if child.has_tag_name((TT, "span")) || child.has_tag_name((TT, "br")) {
                 let span = Timing::new(child, base, timing.end, self.clock)?;
                 if span.empty() {
                     span.end
                 } else {
-                    let style = format.on(child)?;
+                    let style = format.clone().on(child, &self.styles)?;
                     if style.region != format.region {
                         return Err(unsupported("TTML region changes within a paragraph"));
                     }
@@ -432,10 +668,10 @@ impl Reader<'_> {
                     if children.sequential && text_only && !span.explicit_end {
                         Some(span.begin)
                     } else if line_break {
-                        push_piece(pieces, span.begin, span.end, "\n", true)?;
+                        push_piece(pieces, span.begin, span.end, "\n", true, &style.style)?;
                         span.end
                     } else {
-                        let end = self.inline_children(child, span, style, pieces, depth + 1)?;
+                        let end = self.inline_children(child, span, &style, pieces, depth + 1)?;
                         span.finish(end)
                     }
                 }
@@ -497,7 +733,7 @@ impl Reader<'_> {
         if active.is_empty() || end.is_some_and(|end| end == start) {
             return Ok(());
         }
-        let mut text = String::new();
+        let mut styled = StyledText::default();
         let mut pending = false;
         for &index in active {
             let piece = &pieces[index];
@@ -507,14 +743,23 @@ impl Reader<'_> {
                 MAX_TEXT_WORK,
                 "TTML timed text exceeds its presentation work budget",
             )?;
-            append_text(&mut text, &mut pending, piece);
+            charge(
+                &mut self.style_work,
+                piece.style.bytes(),
+                MAX_TEXT_WORK,
+                "TTML styling exceeds its presentation work budget",
+            )?;
+            let offset = styled.text.len();
+            append_text(&mut styled.text, &mut pending, piece);
+            styled.record(offset, &piece.style, None)?;
         }
+        let StyledText { text, runs, .. } = styled;
         if text.is_empty() {
             return Ok(());
         }
         if self.track.cues.len() > paragraph.first_cue {
             if let Some(previous) = self.track.cues.last_mut() {
-                if previous.end == Some(start) && previous.text == text {
+                if previous.end == Some(start) && previous.text == text && previous.runs == runs {
                     previous.end = end;
                     return Ok(());
                 }
@@ -528,6 +773,7 @@ impl Reader<'_> {
             settings: None,
             region: paragraph.region.map(str::to_owned),
             markup: None,
+            runs,
         })
     }
 }
@@ -545,6 +791,7 @@ fn push_piece<'n>(
     end: Option<Instant>,
     text: &'n str,
     preserve: bool,
+    style: &Arc<TextStyle>,
 ) -> Result<(), EngineError> {
     if pieces.len() == MAX_PIECES {
         return Err(limited("TTML paragraph exceeds 10000 timed text fragments"));
@@ -554,6 +801,7 @@ fn push_piece<'n>(
         end,
         text,
         preserve,
+        style: style.clone(),
     });
     Ok(())
 }

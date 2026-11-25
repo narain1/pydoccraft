@@ -524,6 +524,42 @@ fn _epub_webm_chapter(
     py.allow_threads(|| crate::epub::webm::chapter_interval(data, path, id))
 }
 
+type Rgba = (u8, u8, u8, u8);
+type TimedTextStyle = (
+    bool,
+    &'static str,
+    bool,
+    bool,
+    bool,
+    Option<Rgba>,
+    Option<Rgba>,
+    Vec<String>,
+    Option<String>,
+    Option<String>,
+);
+type TimedTextRun = (String, TimedTextStyle, Option<u64>);
+
+fn timed_text_run(run: crate::epub::text_tracks::TextRun) -> TimedTextRun {
+    let style = std::sync::Arc::unwrap_or_clone(run.style);
+    let rgba = |[r, g, b, a]: [u8; 4]| (r, g, b, a);
+    (
+        run.text,
+        (
+            style.bold,
+            style.font_style.as_str(),
+            style.underline,
+            style.line_through,
+            style.overline,
+            style.color.map(rgba),
+            style.background_color.map(rgba),
+            style.classes,
+            style.voice,
+            style.language,
+        ),
+        run.timestamp,
+    )
+}
+
 type TimedTextCue = (
     u64,
     Option<u64>,
@@ -532,6 +568,7 @@ type TimedTextCue = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Vec<TimedTextRun>,
 );
 
 #[pyfunction]
@@ -556,6 +593,7 @@ fn _epub_text_track(
                         cue.settings,
                         cue.region,
                         cue.markup,
+                        cue.runs.into_iter().map(timed_text_run).collect(),
                     )
                 })
                 .collect()

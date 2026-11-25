@@ -78,6 +78,31 @@ class EpubAudioClip:
 
 
 @dataclass(frozen=True, slots=True)
+class EpubTextStyle:
+    """Supported authored typography, colors, and annotations for a subtitle run."""
+
+    bold: bool = False
+    font_style: Literal["normal", "italic", "oblique"] = "normal"
+    underline: bool = False
+    line_through: bool = False
+    overline: bool = False
+    color: tuple[int, int, int, int] | None = None
+    background_color: tuple[int, int, int, int] | None = None
+    classes: tuple[str, ...] = ()
+    voice: str | None = None
+    language: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EpubTextRun:
+    """Normalized cue text and its style. The optional timestamp is on the source clock."""
+
+    text: str
+    style: EpubTextStyle = field(default_factory=EpubTextStyle)
+    timestamp_us: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class EpubTextCue:
     """Plain text and an interval on the embedded media presentation timeline."""
 
@@ -88,6 +113,7 @@ class EpubTextCue:
     settings: str | None = None
     region: str | None = None
     markup: str | None = None
+    runs: tuple[EpubTextRun, ...] = field(default=(), compare=False, repr=False)
 
 
 @dataclass(frozen=True, slots=True)

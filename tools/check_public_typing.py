@@ -26,6 +26,11 @@ def verify_epub_tracks(source: bytes) -> None:
         assert_type(cues, list[doc_ex.EpubTextCue])
         assert_type(cues[0].end_us, int | None)
         assert_type(cues[0].region, str | None)
+        assert_type(cues[0].runs, tuple[doc_ex.EpubTextRun, ...])
+        assert_type(cues[0].runs[0].style, doc_ex.EpubTextStyle)
+        assert_type(cues[0].runs[0].style.color, tuple[int, int, int, int] | None)
+        assert_type(cues[0].runs[0].style.font_style, Literal["normal", "italic", "oblique"])
+        assert_type(cues[0].runs[0].timestamp_us, int | None)
         assert_type(epub.epub_embedded_media(0)[0].sources[0].fragment_end_us, int | None)
         assert_type(epub.epub_embedded_media(0)[0].sources[0].playable_video, bool)
         assert_type(

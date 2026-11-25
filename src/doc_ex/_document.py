@@ -15,7 +15,7 @@ from typing import Any, Callable, Iterator, Literal, TYPE_CHECKING, overload
 
 from .errors import DocumentClosedError, MalformedDocumentError, UnsafeArchiveError
 from .models import (
-    Block, EpubAudioClip, EpubChapterSource, EpubEmbeddedMedia, EpubMediaSource, EpubMediaTrack, EpubNarrationCue, EpubOverlayCue, EpubOverlaySequence, EpubResource, EpubSpineProperties, EpubSvgChapterSource, EpubTextCue, EpubVideoFrame, Image, Link, Story, Table,
+    Block, EpubAudioClip, EpubChapterSource, EpubEmbeddedMedia, EpubMediaSource, EpubMediaTrack, EpubNarrationCue, EpubOverlayCue, EpubOverlaySequence, EpubResource, EpubSpineProperties, EpubSvgChapterSource, EpubTextCue, EpubTextRun, EpubTextStyle, EpubVideoFrame, Image, Link, Story, Table,
     _html_text,
 )
 
@@ -761,7 +761,15 @@ class Document:
 
         self._ensure_open()
         result = _native(lambda: _core._epub_text_track(self._source, track.path, track.media_type, start, end))
-        return [EpubTextCue(*cue) for cue in result]
+        cues = []
+        for *legacy_fields, native_runs in result:
+            runs = []
+            for text, native_style, timestamp in native_runs:
+                *properties, classes, voice, language = native_style
+                style = EpubTextStyle(*properties, tuple(classes), voice, language)
+                runs.append(EpubTextRun(text, style, timestamp))
+            cues.append(EpubTextCue(*legacy_fields, runs=tuple(runs)))
+        return cues
 
     def _epub_source_interval(
         self, source: EpubMediaSource, start_us: int, end_us: int | None
