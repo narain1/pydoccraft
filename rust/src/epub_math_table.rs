@@ -690,7 +690,11 @@ impl Table {
             ));
         }
         let [column_gap, row_pitch] = editor.matrix_spacing()?;
-        let (origins, advances) = self.matrix_columns(&layout.widths, column_gap)?;
+        let native_columns = self.matrix_columns(&layout.widths, column_gap);
+        let split_columns = native_columns.is_none();
+        let (origins, advances) = native_columns
+            .or_else(|| self.matrix_columns(&layout.widths, 0.0))
+            .ok_or_else(|| invalid("invalid MathML matrix column origins"))?;
         let rows = layout.heights.len();
         let columns = layout.widths.len();
         let mut contents = vec![vec![Arg::new(); columns]; rows];
@@ -733,18 +737,36 @@ impl Table {
                 }
             }
         }
+        let mut matrices = if split_columns {
+            // The pinned native matrix always adds an inter-column gap.
+            // Single-column matrices use the same row baselines and can
+            // sit side by side with the independently measured advances.
+            let mut tracks = vec![Vec::with_capacity(rows); columns];
+            for row in contents {
+                for (track, cell) in tracks.iter_mut().zip(row) {
+                    track.push(vec![cell]);
+                }
+            }
+            tracks
+                .into_iter()
+                .map(|rows| MNode::Matrix {
+                    rows,
+                    col_jc: vec![ColJc::Left],
+                })
+                .collect::<Arg>()
+        } else {
+            vec![MNode::Matrix {
+                rows: contents,
+                col_jc: vec![ColJc::Left; columns],
+            }]
+        };
+        matrices.push(compose::grid_marker());
         let mut nodes = vec![MNode::Phant {
             show: true,
             zero_wid: false,
             zero_asc: true,
             zero_desc: true,
-            e: vec![
-                MNode::Matrix {
-                    rows: contents,
-                    col_jc: vec![ColJc::Left; columns],
-                },
-                compose::grid_marker(),
-            ],
+            e: matrices,
         }];
         editor.add_extents(
             &mut nodes,
@@ -753,11 +775,7 @@ impl Table {
         Ok(MNode::Boxed { e: nodes })
     }
 
-    fn matrix_columns(
-        &self,
-        widths: &[f32],
-        native_gap: f32,
-    ) -> Result<(Vec<f32>, Vec<f32>), EngineError> {
+    fn matrix_columns(&self, widths: &[f32], native_gap: f32) -> Option<(Vec<f32>, Vec<f32>)> {
         let mut origins = Vec::with_capacity(widths.len());
         let mut advances = Vec::with_capacity(widths.len());
         let mut current = 0.0;
@@ -773,9 +791,7 @@ impl Table {
             };
             let reserve = desired_end - current - gap;
             if reserve < -0.0001 {
-                return Err(unsupported(
-                    "MathML matrix columns are closer than the native DOCX gap",
-                ));
+                return None;
             }
             // Round cumulative origins down so the cell's correction stays
             // nonnegative. The minimum native math space carries 0.4 points.
@@ -785,7 +801,7 @@ impl Table {
             advances.push(advance);
             current += advance + gap;
         }
-        Ok((origins, advances))
+        Some((origins, advances))
     }
 
     pub(in crate::epub) fn layout(

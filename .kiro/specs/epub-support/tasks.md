@@ -69,7 +69,8 @@
 - [x] Resolve percentage and unitless MathML table widths against definite containing text widths in previews, fixed PDF, and reflowable PDF and DOCX.
 - [ ] Resolve relative widths for MathML tables inside measured equation operands or intrinsically sized containers when their width becomes available.
 - [x] Draw MathML solid and dashed table rules and frames, respect span interruptions and frame spacing, and preserve standalone rules as editable Word table borders.
-- [ ] Extend editable DOCX export to negative leading offsets and tighter matrix column spacing. Expand the remaining MathML visual properties.
+- [x] Preserve tight column spacing in editable DOCX matrix projections and recover their logical rows during extraction.
+- [ ] Extend editable DOCX export to negative leading offsets and expand the remaining MathML visual properties.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.
 - [x] Decode and stream single-track mono and stereo Ogg Opus overlays with the correct presentation bounds and gain.

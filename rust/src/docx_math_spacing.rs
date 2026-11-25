@@ -2,7 +2,7 @@
 use std::{borrow::Cow, cell::Cell};
 
 use wordcraft_doc::{
-    math::{to_linear, Arg, MNode},
+    math::{to_linear, Arg, ColJc, MNode},
     math_linear::map_args,
     para::InlineObject,
     props::Rgb,
@@ -34,7 +34,7 @@ fn remove_guides(nodes: Arg, removed: &Cell<bool>) -> Arg {
             result.extend(remove_guides(body.to_vec(), removed));
         } else if let Some(matrix) = grid_body(&node) {
             removed.set(true);
-            result.push(map_args(matrix.clone(), &|arg| remove_guides(arg, removed)));
+            result.push(map_args(matrix, &|arg| remove_guides(arg, removed)));
         } else if is_grid_marker(&node)
             || is_grid_gap(&node)
             || guide_flags(&node, GUIDE_COLOR)
@@ -48,7 +48,7 @@ fn remove_guides(nodes: Arg, removed: &Cell<bool>) -> Arg {
     result
 }
 
-fn grid_body(node: &MNode) -> Option<&MNode> {
+fn grid_body(node: &MNode) -> Option<MNode> {
     let MNode::Boxed { e } = node else {
         return None;
     };
@@ -62,10 +62,40 @@ fn grid_body(node: &MNode) -> Option<&MNode> {
     else {
         return None;
     };
-    let [matrix @ MNode::Matrix { .. }, marker] = e.as_slice() else {
+    let (marker, matrices) = e.split_last()?;
+    if !is_grid_marker(marker) {
+        return None;
+    }
+    if let [matrix @ MNode::Matrix { .. }] = matrices {
+        return Some(matrix.clone());
+    }
+    let MNode::Matrix { rows, .. } = matrices.first()? else {
         return None;
     };
-    is_grid_marker(marker).then_some(matrix)
+    if matrices.len() > 32 || !(1..=128).contains(&rows.len()) {
+        return None;
+    }
+    // A tightly spaced MathML grid stores one single-column native matrix
+    // per column. Reassemble its logical rows before normalizing cell text.
+    let mut grid = vec![Vec::new(); rows.len()];
+    for matrix in matrices {
+        let MNode::Matrix { rows, col_jc } = matrix else {
+            return None;
+        };
+        if rows.len() != grid.len() || col_jc != &[ColJc::Left] {
+            return None;
+        }
+        for (output, row) in grid.iter_mut().zip(rows) {
+            let [cell] = row.as_slice() else {
+                return None;
+            };
+            output.push(cell.clone());
+        }
+    }
+    Some(MNode::Matrix {
+        rows: grid,
+        col_jc: vec![ColJc::Left; matrices.len()],
+    })
 }
 
 fn is_grid_marker(node: &MNode) -> bool {

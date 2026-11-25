@@ -5495,10 +5495,88 @@ voice
                 self.assertAlmostEqual(expect[axis] - preview[0][axis], got[axis] - actual[0][axis], delta=2)
 
         tiny = """<m:mtable columnspacing="0"><m:mtr><m:mtd columnspan="2"/></m:mtr>
-          <m:mtr><m:mtd/><m:mtd><m:mi>x</m:mi></m:mtd></m:mtr></m:mtable>"""
+          <m:mtr><m:mtd/><m:mtd><m:mtext>Tiny</m:mtext></m:mtd></m:mtr></m:mtable>"""
         with doc_ex.open(epub_fixture(chapter_one=template.format(tiny))) as book:
-            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "closer than the native DOCX gap"):
-                book.convert("docx")
+            with doc_ex.open(book.convert("docx")) as reopened:
+                text = reopened[0].get_text()
+                self.assertEqual(text.count("Tiny"), 1)
+                self.assertEqual(text.count("■("), 1)
+
+    def test_mathml_tight_inline_matrix_keeps_editable_cell_geometry(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Tight editable MathML matrix</title><style>body {{margin:0}}</style></head>
+          <body><p>Before <m:math mathsize="18pt"><m:mrow>
+            <m:mtable columnspacing="{}" rowspacing="3pt" columnwidth="6pt 65pt 48pt" columnalign="left">
+              <m:mtr><m:mtd rowspan="2" rowalign="center" mathsize="6pt" mathcolor="#bf222d">
+                  <m:mtext>Q</m:mtext></m:mtd>
+                <m:mtd mathcolor="#1644df"><m:mtext>Upper</m:mtext></m:mtd>
+                <m:mtd><m:mtext>Outer</m:mtext></m:mtd></m:mtr>
+              <m:mtr><m:mtd mathcolor="#198144"><m:mtext>Lower</m:mtext></m:mtd>
+                <m:mtd><m:mtext>Right</m:mtext></m:mtd></m:mtr>
+              <m:mtr><m:mtd columnspan="2" mathsize="12pt" mathcolor="#ac661b">
+                <m:mfrac><m:mtext>Numerator</m:mtext><m:mtext>Denominator</m:mtext></m:mfrac></m:mtd>
+                <m:mtd mathcolor="#006a71"><m:mtext>Peer</m:mtext></m:mtd></m:mtr>
+            </m:mtable><m:mtext mathcolor="#8343cd">Tail</m:mtext>
+          </m:mrow></m:math> after.</p></body></html>"""
+        colors = ("bf222d", "1644df", "198144", "ac661b", "8343cd", "006a71")
+
+        def positions(doc: doc_ex.Document) -> list[tuple[int, int]]:
+            width, pixels = rgba_pixels(png_chunks(doc.render_page(0, dpi=192)))
+            starts = []
+            for color in colors:
+                ink = bytes.fromhex(color + "ff")
+                points = [divmod(i // 4, width) for i in range(0, len(pixels), 4) if pixels[i:i + 4] == ink]
+                self.assertTrue(points, color)
+                starts.append((min(x for _, x in points), min(y for y, _ in points)))
+            x, y = starts[0]
+            return [(left - x, top - y) for left, top in starts]
+
+        rasters = []
+        for gap, split in (("0", True), ("1.25pt", True), ("9pt", False)):
+            with self.subTest(gap=gap), doc_ex.open(epub_fixture(chapter_one=template.format(gap))) as book:
+                preview = positions(book)
+                exported = book.convert("docx")
+                with doc_ex.open(exported) as reopened:
+                    rendered = positions(reopened)
+                    if split:
+                        rasters.append((preview, rendered))
+                    # The vector boxes compare placement across renderers
+                    # without relying on the smallest glyph's solid pixel.
+                    with doc_ex.open(book.convert("pdf")) as source_pdf, doc_ex.open(reopened.convert("pdf")) as docx_pdf:
+                        for label in ("Q", "Upper", "Lower", "Numerator", "Denominator", "Peer", "Tail"):
+                            expected, = source_pdf[0].search_for(label)
+                            actual, = docx_pdf[0].search_for(label)
+                            for expected_point, actual_point in zip(expected, actual):
+                                self.assertAlmostEqual(expected_point, actual_point, delta=0.2)
+                    text = reopened[0].get_text()
+                    labels = ("Before", "Q", "Upper", "Outer", "Lower", "Right", "Numerator", "Denominator",
+                              "Peer", "Tail", "after.")
+                    for label in labels:
+                        self.assertEqual(text.count(label), 1, text)
+                    self.assertEqual([text.index(label) for label in labels],
+                                     sorted(text.index(label) for label in labels))
+                    self.assertEqual(text.count("■("), 1, text)
+                    self.assertNotIn("⟡H", text)
+                with zipfile.ZipFile(io.BytesIO(exported)) as archive:
+                    xml = ET.fromstring(archive.read("word/document.xml"))
+                ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+                tracks = xml.findall(".//m:m", ns)
+                self.assertEqual(len(tracks), 3 if split else 1)
+                for matrix in tracks:
+                    self.assertEqual([len(row.findall("./m:e", ns)) for row in matrix.findall("./m:mr", ns)],
+                                     [1, 1, 1] if split else [3, 3, 3])
+                self.assertIsNotNone(tracks[0].find(".//m:f", ns))
+                if split:
+                    middle_text = [run.text for run in tracks[1].findall(".//m:t", ns)]
+                    self.assertIn("Upper", middle_text)
+                    self.assertIn("Lower", middle_text)
+                    self.assertIn("Peer", [run.text for run in tracks[2].findall(".//m:t", ns)])
+        for zero, spaced in zip(*rasters):
+            for index, gaps in ((1, 1), (2, 1), (4, 2), (5, 2)):
+                self.assertAlmostEqual(spaced[index][0] - zero[index][0], gaps * 1.25 * 192 / 72, delta=1)
+            self.assertEqual(spaced[3][0], zero[3][0])
+            for original, shifted in zip(zero, spaced):
+                self.assertAlmostEqual(shifted[1], original[1], delta=1)
 
     def test_mathml_matrix_honors_authored_spacing_and_alignment(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
