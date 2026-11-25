@@ -7419,6 +7419,8 @@ overlay
                     self.assertLess(min(rule_x), positions["North"][0])
                     self.assertGreater(max(rule_x), positions["East"][0])
                     self.assertLess(max(rule_x), positions["NoOne"][0])
+        inline = ruled.replace('<p style="text-align:center">', '<p style="text-align:center">Before ')
+        with doc_ex.open(epub_fixture(chapter_one=inline)) as book:
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "MathML table rules inside equations"):
                 book.convert("docx")
 
@@ -7496,6 +7498,114 @@ overlay
             for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "labeled contents exceed the authored"):
                     operation()
+
+    def test_mathml_ruled_labeled_rows_keep_native_borders_inside_the_data_grid(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Ruled labeled MathML</title><style>body {{margin:0}}</style></head><body>
+          <p style="text-align:center"><m:math mathsize="16pt"><m:mtable {attrs}
+            mathcolor="#a01b70" columnwidth="60pt 55pt 50pt" columnspacing="12pt" rowspacing="15pt"
+            rowlines="solid dashed" columnlines="solid dashed" frame="solid" framespacing="7pt 6pt"
+            minlabelspacing="15pt">
+            <m:mlabeledtr><m:mtd mathcolor="#e04b00" columnalign="left"><m:mtext>TagOne</m:mtext></m:mtd>
+              <m:mtd rowspan="3" mathcolor="#252525"><m:mtext>Across</m:mtext></m:mtd>
+              <m:mtd mathcolor="#bf222d"><m:mtext>Upper</m:mtext></m:mtd>
+              <m:mtd mathcolor="#252525"><m:mtext>Right</m:mtext></m:mtd></m:mlabeledtr>
+            <m:mtr><m:mtd columnspan="2" mathcolor="#198144"><m:mtext>Middle</m:mtext></m:mtd></m:mtr>
+            <m:mlabeledtr><m:mtd mathcolor="#8343cd" columnalign="right"><m:mtext>TagThree</m:mtext></m:mtd>
+              <m:mtd mathcolor="#1644df"><m:mtext>Lower</m:mtext></m:mtd>
+              <m:mtd mathcolor="#252525"><m:mtext>Final</m:mtext></m:mtd></m:mlabeledtr>
+            </m:mtable></m:math></p></body></html>"""
+        labels = ("TagOne", "TagThree", "Across", "Upper", "Right", "Middle", "Lower", "Final")
+        ns = {
+            "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+            "m": "http://schemas.openxmlformats.org/officeDocument/2006/math",
+        }
+        val = "{" + ns["w"] + "}val"
+
+        def measure(doc: doc_ex.Document, side: str) -> tuple[int, int]:
+            width, pixels = rgba_pixels(png_chunks(doc.render_page(0, dpi=192)))
+
+            def colored(color: str) -> set[tuple[int, int]]:
+                ink, points, index = bytes.fromhex(color + "ff"), set(), 0
+                while (index := pixels.find(ink, index)) >= 0:
+                    if index % 4 == 0:
+                        points.add(divmod(index // 4, width))
+                    index += 1
+                self.assertTrue(points, color)
+                return points
+
+            rules = colored("a01b70")
+            x0, x1 = min(x for _, x in rules), max(x for _, x in rules)
+            y0, y1 = min(y for y, _ in rules), max(y for y, _ in rules)
+            for x in (x0, x1):
+                coverage = len({y for y, rule_x in rules if abs(rule_x - x) <= 2})
+                self.assertGreaterEqual(coverage, (y1 - y0) * 0.95)
+            for y in (y0, y1):
+                coverage = len({x for rule_y, x in rules if abs(rule_y - y) <= 2})
+                self.assertGreaterEqual(coverage, (x1 - x0) * 0.95)
+            tag_x = [x for color in ("e04b00", "8343cd") for _, x in colored(color)]
+            if side == "left":
+                self.assertLess(max(tag_x), x0 - 14 * 192 / 72)
+            else:
+                self.assertGreater(min(tag_x), x1 + 14 * 192 / 72)
+            upper, middle = (min(y for y, _ in colored(ink)) for ink in ("bf222d", "198144"))
+            cut = [y for y in range(upper + 12, middle) if (y, x0 + 248) in rules]
+            self.assertTrue(cut)
+            self.assertFalse(any((y, x0 + 78) in rules for y in cut))
+            return x1 - x0, y1 - y0
+
+        for side, width in (("left", ""), ("right", 'width="408pt"')):
+            source = template.format(attrs=f'side="{side}" {width}')
+            with self.subTest(side=side), doc_ex.open(epub_fixture(chapter_one=source)) as book:
+                preview = measure(book, side)
+                with doc_ex.open(book.convert("pdf")) as pdf:
+                    rendered = measure(pdf, side)
+                    for actual, expected in zip(rendered, preview):
+                        self.assertAlmostEqual(actual, expected, delta=2)
+                    self.assertFalse(pdf[0].get_images())
+                converted = book.convert("docx")
+                with doc_ex.open(converted) as word:
+                    rendered = measure(word, side)
+                    self.assertAlmostEqual(rendered[0], preview[0], delta=4)
+                    for text in labels:
+                        self.assertEqual(word[0].get_text().count(text), 1, text)
+                    with doc_ex.open(word.convert("pdf")) as pdf:
+                        for tag, data in (("TagOne", "Upper"), ("TagThree", "Lower")):
+                            label_rect, = pdf[0].search_for(tag)
+                            data_rect, = pdf[0].search_for(data)
+                            self.assertAlmostEqual(label_rect[1], data_rect[1], delta=1)
+                with zipfile.ZipFile(io.BytesIO(converted)) as archive:
+                    xml = ET.fromstring(archive.read("word/document.xml"))
+                table = xml.find(".//w:body/w:tbl", ns)
+                self.assertIsNotNone(table)
+                columns = table.findall("./w:tblGrid/w:gridCol", ns)
+                self.assertEqual(len(columns), 5)
+                self.assertEqual(columns[0].attrib, columns[-1].attrib)
+                if width:
+                    width_attr = "{" + ns["w"] + "}w"
+                    self.assertEqual(table.find("./w:tblPr/w:tblW", ns).get(width_attr), "8160")
+                self.assertFalse(table.findall("./w:tblPr/w:tblBorders/*", ns))
+                rows = table.findall("./w:tr", ns)
+                self.assertEqual(len(rows), 3)
+                for row in rows:
+                    cells = row.findall("./w:tc", ns)
+                    for cell in (cells[0], cells[-1]):
+                        self.assertIsNone(cell.find("./w:tcPr/w:tcBorders", ns))
+                for row in (rows[0], rows[-1]):
+                    cell = row.findall("./w:tc", ns)[0 if side == "left" else -1]
+                    run = cell.find(".//m:oMath/m:r/m:t", ns)
+                    self.assertIsNotNone(run)
+                    self.assertIn(run.text, ("TagOne", "TagThree"))
+                self.assertEqual(len(table.findall(".//w:vMerge", ns)), 3)
+                self.assertTrue(any(edge.get(val) == "dashed" for edge in table.findall(".//w:tcBorders/*", ns)))
+                self.assertTrue(any(span.get(val) == "2" for span in table.findall(".//w:gridSpan", ns)))
+
+        equation = template.format(attrs='side="right"')
+        nested = equation.replace('<m:mtable side=', '<m:msqrt><m:mtable side=')
+        nested = nested.replace('</m:mtable></m:math>', '</m:mtable></m:msqrt></m:math>')
+        with doc_ex.open(epub_fixture(chapter_one=nested)) as book:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "MathML table rules inside equations"):
+                book.convert("docx")
 
     def test_mathml_table_rules_and_frame_preserve_spans(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">

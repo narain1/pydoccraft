@@ -196,6 +196,7 @@ pub(super) fn project_group<'xml>(
     if !has_spans(group) && !has_rule_requests(group) {
         return Ok(None);
     }
+    let outer_equation = group.has_tag_name((MATHML, "math"));
     let mut wrappers = Vec::new();
     loop {
         let mut children = group.children().filter(Node::is_element);
@@ -217,12 +218,12 @@ pub(super) fn project_group<'xml>(
     let table = wrappers
         .pop()
         .ok_or_else(|| invalid("missing MathML table"))?;
-    // Labels and aligned groups need the exact offsets of editable equation
-    // tracks. The standalone Word table path positions native cell paragraphs.
-    if table
+    let labeled = table
         .children()
-        .any(|row| row.has_tag_name((MATHML, "mlabeledtr")))
-        || alignment::table_has_groups(table)
+        .any(|row| row.has_tag_name((MATHML, "mlabeledtr")));
+    // Ruled standalone labels share native rows with the bordered grid.
+    // Other labeled grids and alignment groups use editable equation tracks.
+    if alignment::table_has_groups(table) || labeled && !(outer_equation && rules::requested(table))
     {
         return Ok(None);
     }
@@ -1384,9 +1385,18 @@ impl Table {
         align: Option<Align>,
     ) -> Result<NativeTable, EngineError> {
         let [frame_inline, frame_block] = self.rules.native_margin();
-        let widths = margins_for_tracks(&layout.widths, &self.column_gaps, frame_inline);
+        let mut widths = margins_for_tracks(&layout.widths, &self.column_gaps, frame_inline);
         let heights = margins_for_tracks(&layout.heights, &self.row_gaps, frame_block);
         let [nrows, ncols] = [heights.len(), widths.len()];
+        let data_start = usize::from(self.labels.is_some());
+        if self.labels.is_some() {
+            // Native edges paint on their center, so each outside track
+            // includes half the frame stroke without entering the label gap.
+            let half_frame = self.rules.inset()[0] - frame_inline;
+            let inset = (layout.label_inset + half_frame).max(0.1);
+            widths.insert(0, inset);
+            widths.push(inset);
+        }
         let width: f32 = widths.iter().sum();
         if width.max(layout.width) > available
             || heights.iter().sum::<f32>().max(layout.height) > available_height
@@ -1403,58 +1413,104 @@ impl Table {
         native.props.borders = Some(Borders::default());
         native.props.cell_margins = Some([0.0; 4]);
         native.props.align = align;
-        for (row, height) in native.rows.iter_mut().zip(heights) {
+        let vertical = self
+            .cells
+            .iter()
+            .zip(&layout.cells)
+            .map(|(cell, (_, top, _))| {
+                self.native_vertical_margins(cell, *top, &layout, frame_block)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut row_margins = vec![[f32::INFINITY, 0.0]; nrows];
+        if self.labels.is_some() {
+            for (cell, &[before, _]) in self.cells.iter().zip(&vertical) {
+                let row = &mut row_margins[cell.rows.start][0];
+                *row = row.min(before);
+            }
+            for (row, [before, after]) in row_margins.iter_mut().enumerate() {
+                if !before.is_finite() {
+                    *before = side_gap(&self.row_gaps, row.checked_sub(1));
+                }
+                *after = if row + 1 == nrows {
+                    let [_, band] = self.rules.native_vertical_bands(row, row + 1);
+                    (frame_block - band).max(0.0)
+                } else {
+                    side_gap(&self.row_gaps, Some(row))
+                };
+            }
+        }
+        for (index, (row, height)) in native.rows.iter_mut().zip(heights).enumerate() {
             row.props.height_rule = HeightRule::AtLeast;
-            row.props.height = Some(height);
+            row.props.height = Some(if self.labels.is_some() {
+                layout.heights[index]
+            } else {
+                height
+            });
             for (cell, width) in row.cells.iter_mut().zip(&native.grid) {
                 cell.props.width = Some(*width);
                 cell.props.hide_mark = true;
+                if self.labels.is_some() {
+                    let [before, after] = row_margins[index];
+                    cell.props.margins = Some([before, 0.0, after, 0.0]);
+                }
             }
         }
-        for (cell, (_, top, drawing)) in self.cells.into_iter().zip(layout.cells) {
+        for ((cell, (_, _, drawing)), [mut before, mut after]) in
+            self.cells.into_iter().zip(layout.cells).zip(vertical)
+        {
             let row = cell.rows.start;
-            let col = cell.columns.start;
             let last_row = cell.rows.end - 1;
-            let last_col = cell.columns.end - 1;
-            if row != last_row || col != last_col {
-                native.merge(row, last_row, col, last_col);
+            let label = self.labels.as_ref().filter(|_| cell.columns.is_empty());
+            let columns = if let Some(labels) = label {
+                let column = if labels.left { 0 } else { data_start + ncols };
+                column..column + 1
+            } else {
+                cell.columns.start + data_start..cell.columns.end + data_start
+            };
+            if row != last_row || columns.len() != 1 {
+                native.merge(row, last_row, columns.start, columns.end - 1);
             }
             let native_col = native
-                .cell_at_grid(row, col)
+                .cell_at_grid(row, columns.start)
                 .ok_or_else(|| invalid("missing MathML table cell"))?;
             let target = &mut native.rows[row].cells[native_col];
-            let cell_width: f32 = native.grid[cell.columns].iter().sum();
+            let cell_width: f32 = native.grid[columns].iter().sum();
             target.props.width = Some(cell_width);
             target.props.no_wrap = true;
-            let mut margins = [
-                (top - layout.row_positions[row]).max(0.0)
-                    + side_gap(&self.row_gaps, row.checked_sub(1)),
-                side_gap(&self.column_gaps, col.checked_sub(1)),
-                side_gap(&self.row_gaps, Some(last_row)),
-                side_gap(&self.column_gaps, Some(last_col)),
-            ];
-            if row == 0 {
-                margins[0] += frame_block;
-            }
-            if col == 0 {
-                margins[1] += frame_inline;
-            }
-            if last_row + 1 == nrows {
-                margins[2] += frame_block;
-            }
-            if last_col + 1 == ncols {
-                margins[3] += frame_inline;
-            }
-            let [top_band, bottom_band] = self.rules.native_vertical_bands(row, last_row + 1);
-            margins[0] -= top_band;
-            margins[2] -= bottom_band;
-            if margins[0] < -WIDTH_EPSILON || margins[2] < -WIDTH_EPSILON {
-                return Err(unsupported(
-                    "MathML table frame or row gap is smaller than native DOCX border clearance",
-                ));
-            }
-            margins[0] = margins[0].max(0.0);
-            margins[2] = margins[2].max(0.0);
+            let [left, right] = if let Some(labels) = label {
+                let gap = (cell_width - layout.label_width).max(0.0);
+                if labels.left {
+                    [0.0, gap]
+                } else {
+                    [gap, 0.0]
+                }
+            } else {
+                let start = cell.columns.start;
+                let end = cell.columns.end;
+                [
+                    if start == 0 {
+                        frame_inline
+                    } else {
+                        side_gap(&self.column_gaps, Some(start - 1))
+                    },
+                    if end == ncols {
+                        frame_inline
+                    } else {
+                        side_gap(&self.column_gaps, Some(end - 1))
+                    },
+                ]
+            };
+            // Word uses the row's largest top margin in every cell and
+            // adds border clearance individually. Retain each label's and
+            // data cell's remaining offset as native paragraph spacing.
+            let space_before = if self.labels.is_some() {
+                let additional = before - row_margins[row][0];
+                [before, after] = row_margins[row];
+                additional
+            } else {
+                0.0
+            };
+            let margins = [before, left, after, right];
             target.props.margins = Some(margins);
             let align = Some(match cell.horizontal {
                 ColJc::Left => Align::Left,
@@ -1467,6 +1523,11 @@ impl Table {
             };
             target.blocks = vec![match (cell.content, drawing) {
                 (CellContent::Table(nested), CellDrawing::Table(nested_layout)) => {
+                    if space_before > TABLE_WIDTH_EPSILON {
+                        return Err(unsupported(
+                            "MathML labeled table cannot vertically offset a nested Word table",
+                        ));
+                    }
                     // Widths reach DOCX in twentieths of a point.
                     let inner_width = cell_width - margins[1] - margins[3] + 0.05;
                     let nested = nested.export_layout(
@@ -1480,7 +1541,7 @@ impl Table {
                 }
                 (CellContent::Equation(math), CellDrawing::Equation(_)) => {
                     let mut paragraph = Paragraph::new();
-                    paragraph.props.space_before = Some(0.0);
+                    paragraph.props.space_before = Some(space_before);
                     paragraph.props.space_after = Some(0.0);
                     paragraph.props.align = align;
                     if !math.nodes.is_empty() {
@@ -1500,9 +1561,40 @@ impl Table {
         }
         if let Some(map) = layout.occupancy {
             self.rules
-                .set_native_edges(&mut native, &map, layout.rule_color);
+                .set_native_edges(&mut native, &map, layout.rule_color, data_start);
         }
         Ok(native)
+    }
+
+    fn native_vertical_margins(
+        &self,
+        cell: &Cell,
+        top: f32,
+        layout: &Layout,
+        frame_block: f32,
+    ) -> Result<[f32; 2], EngineError> {
+        let start = cell.rows.start;
+        let end = cell.rows.end;
+        let mut before = (top - layout.row_positions[start]).max(0.0)
+            + side_gap(&self.row_gaps, start.checked_sub(1));
+        let mut after = side_gap(&self.row_gaps, Some(end - 1));
+        if start == 0 {
+            before += frame_block;
+        }
+        if end == layout.heights.len() {
+            after += frame_block;
+        }
+        if !cell.columns.is_empty() {
+            let [top_band, bottom_band] = self.rules.native_vertical_bands(start, end);
+            before -= top_band;
+            after -= bottom_band;
+        }
+        if before < -WIDTH_EPSILON || after < -WIDTH_EPSILON {
+            return Err(unsupported(
+                "MathML table frame or row gap is smaller than native DOCX border clearance",
+            ));
+        }
+        Ok([before.max(0.0), after.max(0.0)])
     }
 }
 

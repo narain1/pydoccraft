@@ -173,14 +173,30 @@ impl Rules {
         Ok(paint.items)
     }
 
-    pub(super) fn set_native_edges(&self, table: &mut Table, map: &Occupancy, color: Rgb) {
-        table.props.borders =
-            Some(border(self.frame, color).map_or_else(Borders::default, Borders::box_));
-        let ncols = table.grid.len();
+    pub(super) fn set_native_edges(
+        &self,
+        table: &mut Table,
+        map: &Occupancy,
+        color: Rgb,
+        data_start: usize,
+    ) {
+        let frame = border(self.frame, color);
+        let cell_frame = if data_start == 0 {
+            table.props.borders = Some(frame.map_or_else(Borders::default, Borders::box_));
+            None
+        } else {
+            frame
+        };
+        let [nrows, ncols] = [table.rows.len(), map.columns];
         for (r, row) in table.rows.iter_mut().enumerate() {
-            let mut start = 0;
+            let mut col = 0usize;
             for cell in &mut row.cells {
-                let end = start + cell.span();
+                let start = col.checked_sub(data_start);
+                col += cell.span();
+                let Some(start) = start.filter(|&start| start < ncols) else {
+                    continue;
+                };
+                let end = col - data_start;
                 let edge = |vertical: bool, boundary: usize, track: usize| {
                     let styles = if vertical { &self.columns } else { &self.rows };
                     styles.get(boundary).and_then(|style| {
@@ -190,16 +206,27 @@ impl Rules {
                     })
                 };
                 let borders = Borders {
-                    top: r.checked_sub(1).and_then(|cut| edge(false, cut, start)),
-                    bottom: edge(false, r, start),
-                    left: start.checked_sub(1).and_then(|cut| edge(true, cut, r)),
-                    right: (end < ncols).then(|| edge(true, end - 1, r)).flatten(),
+                    top: r
+                        .checked_sub(1)
+                        .map_or(cell_frame, |cut| edge(false, cut, start)),
+                    bottom: if r + 1 == nrows {
+                        cell_frame
+                    } else {
+                        edge(false, r, start)
+                    },
+                    left: start
+                        .checked_sub(1)
+                        .map_or(cell_frame, |cut| edge(true, cut, r)),
+                    right: if end == ncols {
+                        cell_frame
+                    } else {
+                        edge(true, end - 1, r)
+                    },
                     ..Default::default()
                 };
                 if borders.any_visible() {
                     cell.props.borders = Some(borders);
                 }
-                start = end;
             }
         }
     }
