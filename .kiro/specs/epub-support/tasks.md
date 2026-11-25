@@ -80,7 +80,8 @@
 - [x] Resolve CSS powers, roots, logarithms and Euclidean norms in bounded geometry and grid calculations.
 - [x] Apply bounded automatic grid repetition with auto-fill and auto-fit, inherited calculated tracks, and template line names.
 - [x] Cascade the CSS gap shorthand and axis longhands, including typed calculations and inheritance.
-- [ ] Extend the EPUB CSS profile with intrinsic minimum and maximum constraints, contain-fit sizing, additional math and typed division, and subgrids.
+- [x] Resolve same-dimension length and angle ratios and finite layout-dependent scalar divisors.
+- [ ] Extend the EPUB CSS profile with intrinsic minimum and maximum constraints, contain-fit sizing, percentage dimension ratios and other typed math, and subgrids.
 - [x] Match bounded sibling positions in either direction, including An+B, namespace-aware types, and filtered child selectors with the correct specificity.
 - [ ] Add SVG filter primitives and retain PDF text and links for multi-source, non-axis-aligned or ambiguous spatial filter results.
 - [ ] Extend mixed-font SVG text fallback to spacing across ambiguous clusters, deeper nested length owners and glyph positioning.

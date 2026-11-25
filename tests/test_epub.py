@@ -1643,6 +1643,49 @@ class EpubTests(unittest.TestCase):
                     with self.assertRaisesRegex(error, message):
                         book.render_page(0, dpi=96)
 
+    def test_epub_css_typed_division_and_nonzero_deferred_scalars(self) -> None:
+        original = fixed_spread_fixture([("", "white", 250, 110)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Dimension ratios</title>
+          <meta name="viewport" content="width=250,height=110"/><style>
+          html,body,p{{margin:0;font-size:10px}} section{{position:absolute;left:15px;top:12px;
+          width:{width}px;height:55px;background:#334c55}} p{{position:absolute;background:#96ba75}}
+          {css}</style></head><body><section><p><a href="https://example.org/division">X</a></p>
+          </section></body></html>"""
+
+        def publication(width: int, css: str) -> bytes:
+            chapter = template.format(width=width, css=css)
+            return rewrite_epub(original, {"OEBPS/s0.xhtml": chapter})
+
+        sign = "sign(50% - 80px)"
+        computed = f"""p{{width:calc((1in / 18pt) * (12px / (2 + {sign})));
+          height:calc((.25turn / 45deg) * 10px);left:calc(22px + 12px / (-2 + {sign}));
+          width:calc(10px * (20px / 45deg));top:3px}}"""
+        for width, advance, left in ((120, 48, 18), (160, 24, 16), (200, 16, 10)):
+            with self.subTest(width=width):
+                expected = f"p{{width:{advance}px;height:20px;left:{left}px;top:3px}}"
+                views = []
+                for css in (computed, expected):
+                    with doc_ex.open(publication(width, css)) as book:
+                        pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                        frozen = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+                    with doc_ex.open(frozen) as pdf:
+                        self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), pixels)
+                        hit, = pdf[0].search_for("X")
+                        link, = pdf[0].get_links()
+                        self.assertEqual(link.uri, "https://example.org/division")
+                        views.append((pixels, hit, link.bbox))
+                self.assertTrue(views[0] == views[1], "typed division changed visible or PDF geometry")
+
+        for expression, error, message in (
+            (f"calc(1px / {sign})", doc_ex.UnsupportedFormatError, "unsupported EPUB CSS calc"),
+            ("calc((100% / 1px) * 5px)", doc_ex.UnsupportedFormatError, "unsupported EPUB CSS calc"),
+            ("calc((1in / .00001pt) * 1px)", doc_ex.UnsafeArchiveError, "CSS calc exceeds"),
+        ):
+            with self.subTest(expression=expression):
+                with doc_ex.open(publication(120, f"p{{width:{expression}}}")) as book:
+                    with self.assertRaisesRegex(error, message):
+                        book.render_page(0, dpi=96)
+
     def test_epub_css_calc_rejects_unsupported_operations_and_excess_geometry(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Calculated geometry</title>
           <style>div {background:green; CSS}</style></head><body><div>Panel</div></body></html>"""

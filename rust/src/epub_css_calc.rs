@@ -102,6 +102,7 @@ enum Expression {
     Abs(Box<Expression>),
     Sign(Box<Expression>),
     Product(Box<Expression>, Box<Expression>),
+    Reciprocal(Box<Expression>, Interval),
     Step(Step, Box<Expression>, Box<Expression>),
     Trig(Trig, Box<Expression>),
     Atan2(Box<Expression>, Box<Expression>),
@@ -125,6 +126,7 @@ impl Expression {
             Self::Abs(value) => value.at(basis).abs(),
             Self::Sign(value) => sign(value.at(basis)),
             Self::Product(left, right) => left.at(basis) * right.at(basis),
+            Self::Reciprocal(value, _) => value.at(basis).recip(),
             Self::Step(step, value, interval) => step.evaluate(value.at(basis), interval.at(basis)),
             Self::Trig(operation, value) => operation.evaluate(value.at(basis)),
             Self::Atan2(y, x) => trigonometry::atan2(y.at(basis), x.at(basis)),
@@ -163,6 +165,7 @@ impl Expression {
             Self::Abs(value) => value.scalar_bounds()?.absolute(),
             Self::Sign(_) => Interval::signed(1.0),
             Self::Product(one, other) => one.scalar_bounds()?.product(other.scalar_bounds()?),
+            Self::Reciprocal(_, bounds) => *bounds,
             Self::Step(operation, value, interval) => {
                 let bound = interval.scalar_bounds()?.absolute().high;
                 match operation {
@@ -287,6 +290,34 @@ impl Calculation {
         }
     }
 
+    fn reciprocal(self) -> Result<Self, Issue> {
+        if let Some(value) = self.fixed() {
+            return if value == 0.0 {
+                Err(Issue::Unsupported)
+            } else {
+                Ok(Self::constant(value.recip()))
+            };
+        }
+        let bounds = self.expression.scalar_bounds().ok_or(Issue::Unsupported)?;
+        if !bounds.low.is_finite()
+            || !bounds.high.is_finite()
+            || bounds.low <= 0.0 && bounds.high >= 0.0
+        {
+            return Err(Issue::Unsupported);
+        }
+        let bounds = Interval {
+            low: bounds.high.recip(),
+            high: bounds.low.recip(),
+        };
+        Ok(Self {
+            expression: Expression::Reciprocal(Box::new(self.expression), bounds),
+            point_bound: Some(bounds.absolute().high),
+            percent_bound: None,
+            relative_scalar: true,
+            nodes: self.nodes + 1,
+        })
+    }
+
     fn absolute(self) -> Self {
         Self {
             expression: Expression::Abs(Box::new(self.expression)),
@@ -377,6 +408,23 @@ impl Value {
 
     fn add(self, other: Self) -> Result<Self, Issue> {
         self.combine(other, Calculation::add)
+    }
+
+    fn divide(self, other: Self) -> Result<Self, Issue> {
+        let (kind, value) = self.split();
+        let (denominator_kind, denominator) = other.split();
+        if denominator_kind == Measure::Number {
+            return Ok(kind.supply(value.multiply(denominator.reciprocal()?)));
+        }
+        if kind != denominator_kind {
+            return Err(Issue::Invalid);
+        }
+        // These matching dimensions cancel to a scalar. A direct
+        // percentage needs a bound for its layout-dependent multiplier.
+        if value.percent_bound.is_some() || denominator.percent_bound.is_some() {
+            return Err(Issue::Unsupported);
+        }
+        Ok(Self::Number(value.multiply(denominator.reciprocal()?)))
     }
 
     fn compare(comparison: Comparison, mut values: Vec<Self>) -> Result<Self, Issue> {
@@ -584,13 +632,7 @@ fn evaluate(
                 | (Op::Multiply, value, Value::Number(factor)) => {
                     value.map(|value| value.multiply(factor))
                 }
-                (Op::Division, value, Value::Number(divisor)) => {
-                    let divisor = divisor
-                        .fixed()
-                        .filter(|&value| value != 0.0)
-                        .ok_or(Issue::Unsupported)?;
-                    value.scale(1.0 / divisor)
-                }
+                (Op::Division, value, divisor) => value.divide(divisor)?,
                 _ => return Err(Issue::Invalid),
             }
         }
