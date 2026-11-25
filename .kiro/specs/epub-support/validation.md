@@ -979,3 +979,13 @@ The installed cascade regression checks default and cue-ID backgrounds, declarat
 The installed bounds regression rejects an HTTP URL, a relative URL in an unmatched custom declaration, an import, an at-rule, and inputs that exceed the stylesheet byte, block, selector, declaration and matching-work limits.
 
 All 192 EPUB tests passed against the installed CPython 3.11 Linux x86-64 release wheel. Both final focused regressions passed. The wheel measured 25,591,497 bytes with a 59,606,184-byte native extension. Its SHA-256 is `776b8d9cf5baae8aa5b1dc329495f861908c2e78fc62d8f6138975ce02052787`. Rust 1.95 formatting, locked release all-target Clippy with warnings denied, and strict public typing passed. The lockfiles match the base commit. The packaged LICENSE, NOTICE, and LICENSE-THIRD-PARTY files match their source copies.
+
+## 2026-11-24 Integrated EPUB logical CSS, nested MathML, SVG text lengths and WebVTT styles
+
+The combined regressions verify direction-aware logical XHTML layouts and physical fallback when a literal declaration is malformed, nested relative MathML matrices inside definite cells, mixed-face anchored SVG text lengths with searchable text and links, and WebVTT author cue styles projected onto the original subtitle and video timeline.
+
+The installed Linux x86-64 CPython 3.11.15 release wheel from `fd4c0a7bc4` passed 791 tests, including 196 EPUB tests, with zero failures, errors or skips. It measured 25,620,026 bytes with a 59,679,128-byte native extension. Its SHA-256 is `2fb6f1803d7bf6f7df4e0fdba17eb3527e198b50a83266aa939dc80c4818f821`. This checkpoint used the host Linux wheel. The macOS and Windows release matrix remains open.
+
+Four released W3C EPUB books passed with 28 chapter previews and four reopened fixed-layout PDF pages. An independently authored fixed-layout EPUB using a right-to-left HTML direction hint and logical CSS passed EPUBCheck 5.4.0 with zero fatals, errors, warnings or informational messages. Rust 1.95 formatting and locked release all-target Clippy with warnings denied passed. Rust passed 479 unit and 7 integration tests with default features and 401 unit and 8 integration tests without Python. Node 22.22.1 passed 17 tests.
+
+The lockfiles and upstream revisions match the preceding checkpoint. The audit reviewed 349 core packages and binding licenses. All wheel attribution files matched their source copies. The Linux extension uses system C and GCC libraries. The public typing, documentation, support evidence and roadmap checks passed. Temporary Cargo output, wheels, test environments, downloaded books, generated site and the Node addon were pruned.
