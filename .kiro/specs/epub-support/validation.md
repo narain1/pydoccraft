@@ -989,3 +989,9 @@ The installed Linux x86-64 CPython 3.11.15 release wheel from `fd4c0a7bc4` passe
 Four released W3C EPUB books passed with 28 chapter previews and four reopened fixed-layout PDF pages. An independently authored fixed-layout EPUB using a right-to-left HTML direction hint and logical CSS passed EPUBCheck 5.4.0 with zero fatals, errors, warnings or informational messages. Rust 1.95 formatting and locked release all-target Clippy with warnings denied passed. Rust passed 479 unit and 7 integration tests with default features and 401 unit and 8 integration tests without Python. Node 22.22.1 passed 17 tests.
 
 The lockfiles and upstream revisions match the preceding checkpoint. The audit reviewed 349 core packages and binding licenses. All wheel attribution files matched their source copies. The Linux extension uses system C and GCC libraries. The public typing, documentation, support evidence and roadmap checks passed. Temporary Cargo output, wheels, test environments, downloaded books, generated site and the Node addon were pruned.
+
+## 2026-11-24 EPUB automatic horizontal direction
+
+Installed regressions verify automatic direction against explicit LTR and RTL control EPUBs. The first-strong scan ignores independently directed and style subtrees, treats Arabic-Indic digits as weak, uses left-to-right fallback for neutral text, and resolves an unqualified bdi. Fixed-layout PNG and reopened searchable PDF retain the same pixels and local link rectangles. Reflowable XHTML honors the direction with no author CSS, and an invalid winning direction substitution inherits the parent direction. EPUBCheck 5.4.0 accepted an independently authored fixed-layout direction fixture with zero errors or warnings.
+
+Both lockfiles add the existing unicode-bidi 0.3.18 package as a direct dependency for its Unicode class lookup. The resolved crate identities and licenses match the previous build. Regenerating both attribution copies produced identical bytes.

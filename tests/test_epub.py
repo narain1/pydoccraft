@@ -1117,7 +1117,7 @@ class EpubTests(unittest.TestCase):
         for color in ("c94b39ff", "215caaff", "fcd011ff", "9444b4ff"):
             self.assertIn(bytes.fromhex(color), pixels)
 
-    def test_logical_css_var_failure_resets_alias_and_unresolved_writing_modes_fail(self) -> None:
+    def test_logical_css_var_failure_resets_alias_and_vertical_writing_fails(self) -> None:
         markup = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Logical flow</title>
           <style>body{margin:0} #outer{width:64px;height:40px;background:#c94b39}
             #inside{width:20px;height:12px;background:#24b781} STYLES
@@ -1138,17 +1138,79 @@ class EpubTests(unittest.TestCase):
             candidate = markup.replace("STYLES", f"#outer{{padding-left:8px;{ignored}}}").replace("DIR", "")
             with doc_ex.open(epub_fixture(chapter_one=control)) as a, doc_ex.open(epub_fixture(chapter_one=candidate)) as b:
                 self.assertEqual(a.render_page(0, dpi=96), b.render_page(0, dpi=96))
-        for css, direction in (
-            ("#outer {writing-mode:vertical-rl; inline-size:30px}", ""),
-            ("#outer {padding-inline-start:9px}", 'dir="auto"'),
-        ):
-            data = epub_fixture(chapter_one=markup.replace("STYLES", css).replace("DIR", direction))
-            with doc_ex.open(data) as book, self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "horizontal writing direction"):
-                book.render_page(0, dpi=96)
+        data = epub_fixture(chapter_one=markup.replace(
+            "STYLES", "#outer {writing-mode:vertical-rl; inline-size:30px}",
+        ).replace("DIR", ""))
+        with doc_ex.open(data) as book, self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "horizontal writing mode"):
+            book.render_page(0, dpi=96)
         dashed = markup.replace("STYLES", "#outer{border-inline:2px dashed red}").replace("DIR", "")
         with doc_ex.open(epub_fixture(chapter_one=dashed)) as book:
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "logical CSS border style"):
                 book.render_page(0, dpi=96)
+
+    def test_auto_direction_uses_first_strong_xhtml_text_for_geometry_and_pdf_links(self) -> None:
+        source = fixed_spread_fixture([("", "white", 240, 190)])
+        markup = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Direction</title>
+          <meta name="viewport" content="width=240,height=190"/><style>
+            body{margin:0} article,bdi.own{position:absolute; display:block; inline-size:92px;
+                block-size:34px; inset-inline-start:16px;font-size:11px; margin:0}
+            #rtl{inset-block-start:8px;background:#c94b39}
+            #ltr{inset-block-start:46px;background:#24b781}
+            #neutral{inset-block-start:84px;background:#215caa}
+            #own{inset-block-start:122px;background:#f6d844}
+            #target{position:absolute;left:16px;top:156px;margin:0;font-size:12px}
+          </style></head><body>
+            <article id="rtl" DIR_A><span dir="ltr" hidden="hidden">English</span>
+              <bdi hidden="hidden">English</bdi><style>.latin{color:black}</style>
+              ١٢٣ — שלום <a href="#target">Back</a></article>
+            <article id="ltr" DIR_B><bdi hidden="hidden">שלום</bdi>123 — 東京</article>
+            <div dir="rtl"><article id="neutral" DIR_C>١٢٣ —</article></div>
+            <bdi id="own" class="own" DIR_D>مرحبا</bdi><p id="target">Target</p>
+          </body></html>"""
+        variants = (
+            ('dir="AuTo"', 'dir="auto"', 'dir="auto"', ""),
+            ('dir="rtl"', 'dir="ltr"', 'dir="ltr"', 'dir="rtl"'),
+        )
+        seen = []
+        for directions in variants:
+            chapter = markup
+            for name, attr in zip(("DIR_A", "DIR_B", "DIR_C", "DIR_D"), directions):
+                chapter = chapter.replace(name, attr)
+            with doc_ex.open(source) as original:
+                updated = original.edit_epub_structure(replacements={0: chapter})
+            with doc_ex.open(updated) as book:
+                paint = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                pdf = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+            with doc_ex.open(pdf) as output:
+                self.assertEqual(paint, rgba_pixels(png_chunks(output.render_page(0, dpi=96))))
+                (link,) = output[0].get_links()
+                self.assertEqual(link.metadata["target_page"], 0)
+                self.assertGreater(link.bbox[0], 90)
+                seen.append((paint, link.bbox))
+        self.assertEqual(seen[0], seen[1])
+        width, pixels = seen[0][0]
+        for x, y, expected in (
+            (218, 33, "c94b39ff"), (24, 70, "24b781ff"),
+            (24, 108, "215caaff"), (218, 146, "f6d844ff"),
+        ):
+            offset = (y * width + x) * 4
+            self.assertEqual(pixels[offset:offset + 4], bytes.fromhex(expected))
+
+    def test_reflowable_auto_direction_without_author_css(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Direction</title></head>
+          <body><p dir="DIR">123 — שלום Mixed</p></body></html>"""
+        previews = []
+        for direction in ("auto", "rtl", "ltr"):
+            with doc_ex.open(epub_fixture(chapter_one=template.replace("DIR", direction))) as book:
+                self.assertEqual(book[0].get_text(), "123 — שלום Mixed")
+                previews.append(rgba_pixels(png_chunks(book.render_page(0, dpi=96))))
+        self.assertEqual(previews[0], previews[1])
+        self.assertNotEqual(previews[0], previews[2])
+        inherited = template.replace("<body>", '<body dir="rtl">').replace("123 — שלום Mixed", "English שלום")
+        control = inherited.replace('dir="DIR"', 'dir="rtl"')
+        candidate = inherited.replace('dir="DIR"', 'dir="auto" style="direction:var(--missing)"')
+        with doc_ex.open(epub_fixture(chapter_one=control)) as a, doc_ex.open(epub_fixture(chapter_one=candidate)) as b:
+            self.assertEqual(a.render_page(0, dpi=96), b.render_page(0, dpi=96))
 
     def test_fixed_layout_embedded_xhtml_preserves_frame_pixels_text_and_links(self) -> None:
         source = fixed_spread_fixture([("", "white", 220, 154)])

@@ -1,12 +1,11 @@
 //! Horizontal flow-relative box properties, resolved before native layout.
 use roxmltree::Node;
 
-use super::{points, Properties};
+use super::{html_direction, points, Properties};
 
 #[derive(Clone, Copy, Default)]
 pub(in crate::epub) struct Flow {
     pub rtl: Option<bool>,
-    automatic: bool,
     vertical: bool,
 }
 
@@ -17,20 +16,20 @@ impl Flow {
         writing_mode: Option<&str>,
         mut inherited: Self,
     ) -> Self {
-        let hint = node.attribute("dir");
-        let direction = direction.filter(|value| !keyword(value, "revert"));
-        let explicit = direction.or(hint);
-        if let Some(direction) = explicit {
-            if keyword(direction, "rtl") {
-                inherited.rtl = Some(true);
-                inherited.automatic = false;
-            } else if keyword(direction, "ltr") || keyword(direction, "initial") {
+        match direction.filter(|value| !keyword(value, "revert")) {
+            Some(direction) if keyword(direction, "rtl") => inherited.rtl = Some(true),
+            Some(direction) if keyword(direction, "ltr") || keyword(direction, "initial") => {
                 inherited.rtl = Some(false);
-                inherited.automatic = false;
-            } else if keyword(direction, "auto") && explicit == hint {
-                inherited.rtl = None;
-                inherited.automatic = true;
             }
+            Some(direction) if keyword(direction, "inherit") || keyword(direction, "unset") => {
+                inherited.rtl = Some(inherited.rtl.unwrap_or(false));
+            }
+            None => {
+                if let Some(hint) = html_direction::hint(node) {
+                    inherited.rtl = Some(hint.rtl(node));
+                }
+            }
+            _ => {}
         }
         if let Some(mode) = writing_mode {
             if ["vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"]
@@ -45,8 +44,8 @@ impl Flow {
         inherited
     }
 
-    pub(super) fn unresolved(self, pair: &Pair) -> bool {
-        self.vertical || self.automatic && pair.1 != pair.2
+    pub(super) fn is_vertical(self) -> bool {
+        self.vertical
     }
 }
 

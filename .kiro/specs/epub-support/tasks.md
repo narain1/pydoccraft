@@ -20,7 +20,7 @@
 - [x] Read SMIL timing trees and expose chapter cue order, time ranges, target IDs and bounded audio reads.
 - [x] Project supported Presentation MathML into native equations for PNG, DOCX and PDF.
 - [x] Apply local author styles for the supported cascade and layout properties. Render fixed-layout XHTML and static SVG chapters with viewport bounds and clipping.
-- [x] Cascade horizontal logical sizes, spacing, offsets, overflow and solid borders against their physical aliases, including RTL inheritance and custom properties.
+- [x] Cascade horizontal logical sizes, spacing, offsets, overflow and solid borders against their physical aliases, including RTL inheritance and custom properties. Resolve HTML automatic direction for horizontal boxes and paragraph base direction.
 - [x] Render local CSS font faces, IDPF-obfuscated fonts, and static SVG embedded in XHTML. Preserve inline equations, images and table spans with packaged fonts. Rasterize static SVG in semantic export.
 - [x] Render SVG CSS, packaged SVG fonts, and referenced PNG and JPEG resources in spine previews, XHTML and semantic export.
 - [x] Render fixed-layout spreads in both reading directions, honor spine placement and orientation-dependent spread rules, and clip across page boundaries.

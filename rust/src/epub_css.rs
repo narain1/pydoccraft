@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use super::{charge, external, invalid, limited, name, resolve, unsupported, Book, XHTML};
 use crate::EngineError;
 
+#[path = "epub_html_direction.rs"]
+mod html_direction;
 #[path = "epub_css_logical.rs"]
 pub(super) mod logical;
 #[path = "epub_css_variables.rs"]
@@ -237,9 +239,9 @@ impl Cascade {
 
     pub(super) fn needed(&self, root: Node<'_, '_>) -> bool {
         self.bytes != 0
-            || root
-                .descendants()
-                .any(|node| node.attribute("style").is_some())
+            || root.descendants().any(|node| {
+                node.attribute("style").is_some() || html_direction::hint(node).is_some()
+            })
     }
 
     fn external_sheet(
@@ -384,7 +386,10 @@ impl Cascade {
         let (mut selected, _) = self.local_selection(node)?;
         let mut flow_value = |name| {
             selected.remove(name).map_or(Ok(None), |(_, value)| {
+                // These flow properties inherit when a winning substitution
+                // is invalid, even if this element has an HTML hint.
                 computed_value(&mut self.variables, name, &value)
+                    .map(|value| Some(value.unwrap_or_else(|| "unset".to_owned())))
             })
         };
         let direction = flow_value("direction")?;
@@ -398,9 +403,9 @@ impl Cascade {
         let mut winners = HashMap::new();
         for (name, (priority, value)) in &selected {
             let pair = logical::pair(name);
-            if pair.is_some_and(|pair| flow.unresolved(pair)) {
+            if pair.is_some() && flow.is_vertical() {
                 return Err(unsupported(
-                    "logical EPUB CSS requires a definite horizontal writing direction",
+                    "logical EPUB CSS requires a horizontal writing mode",
                 ));
             }
             let physical = pair.map_or(name.as_str(), |pair| pair.physical(flow));
@@ -426,9 +431,9 @@ impl Cascade {
                 if let Some(geometry) = geometry {
                     match computed.as_deref() {
                         Some(value) if value.eq_ignore_ascii_case("inherit") => {
-                            if let (Some(alias), Some(parent)) = (pair, parent) {
-                                if parent.flow.unresolved(alias) {
-                                    return Err(unsupported("inherited logical EPUB CSS requires a definite horizontal writing direction"));
+                            if let (Some(_), Some(parent)) = (pair, parent) {
+                                if parent.flow.is_vertical() {
+                                    return Err(unsupported("inherited logical EPUB CSS requires a horizontal writing mode"));
                                 }
                             }
                             Some(parent.map_or_else(

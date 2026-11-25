@@ -1816,6 +1816,7 @@ dependencies = [
  "skrifa 0.44.0",
  "taffy",
  "thiserror",
+ "unicode-bidi",
  "unicode-segmentation",
  "wordcraft-doc",
  "wordcraft-docx",
