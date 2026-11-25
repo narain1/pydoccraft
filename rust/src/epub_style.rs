@@ -40,6 +40,8 @@ pub(super) struct Typography {
     pub chars: CharProps,
     pub families: Arc<[css::Family]>,
     pub axes: Arc<[css::Axis]>,
+    pub font_weight: Option<f32>,
+    pub font_width: Option<f32>,
     pub optical_sizing_disabled: bool,
     pub align: Option<Align>,
     pub line_height: Option<LineSpacing>,
@@ -392,21 +394,40 @@ impl Typography {
             }
             None => {}
         }
-        self.chars.bold = match value(values, "font-weight") {
-            "bold" | "bolder" => Some(true),
-            "normal" | "lighter" => Some(false),
-            number if number.parse::<u32>().is_ok() => {
-                number.parse::<u32>().ok().map(|weight| weight >= 600)
-            }
-            _ if matches!(
+        let parent_weight = self.font_weight.unwrap_or(400.0);
+        let weight = match value(values, "font-weight").to_ascii_lowercase().as_str() {
+            "initial" => Some(400.0),
+            "bolder" => Some(match parent_weight {
+                w if w < 350.0 => 400.0,
+                w if w < 550.0 => 700.0,
+                w if w < 900.0 => 900.0,
+                w => w,
+            }),
+            "lighter" => Some(match parent_weight {
+                w if w < 100.0 => w,
+                w if w < 550.0 => 100.0,
+                w if w < 750.0 => 400.0,
+                _ => 700.0,
+            }),
+            "" if matches!(
                 tag,
                 "b" | "strong" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "th"
             ) =>
             {
-                Some(true)
+                Some(700.0)
             }
-            _ => self.chars.bold,
+            value => css::font_weight(value),
         };
+        if let Some(weight) = weight {
+            self.font_weight = Some(weight);
+            self.chars.bold = Some(weight >= 600.0);
+        }
+        let width = value(values, "font-stretch");
+        if width.eq_ignore_ascii_case("initial") {
+            self.font_width = Some(100.0);
+        } else if let Some(width) = css::font_width(width) {
+            self.font_width = Some(width);
+        }
         self.chars.italic = match value(values, "font-style") {
             "normal" => Some(false),
             "italic" | "oblique" => Some(true),

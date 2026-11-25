@@ -127,8 +127,24 @@ impl Resolver {
             let Some(alias) = aliases.get(&face.family.to_lowercase()) else {
                 continue;
             };
-            let (Some(weight), Some(style)) = (face.weight, face.style) else {
+            let [weight, upper] = face.weight.unwrap_or([400.0; 2]);
+            let Some(style) = face.style.filter(|_| weight == upper) else {
                 return Err(unsupported("EPUB SVG font-face weight and style ranges"));
+            };
+            if !face.axes.is_empty() {
+                return Err(unsupported("EPUB SVG font-face variation defaults"));
+            }
+            let stretch = match face.width {
+                None | Some([100.0, 100.0]) => Stretch::Normal,
+                Some([50.0, 50.0]) => Stretch::UltraCondensed,
+                Some([62.5, 62.5]) => Stretch::ExtraCondensed,
+                Some([75.0, 75.0]) => Stretch::Condensed,
+                Some([87.5, 87.5]) => Stretch::SemiCondensed,
+                Some([112.5, 112.5]) => Stretch::SemiExpanded,
+                Some([125.0, 125.0]) => Stretch::Expanded,
+                Some([150.0, 150.0]) => Stretch::ExtraExpanded,
+                Some([200.0, 200.0]) => Stretch::UltraExpanded,
+                _ => return Err(unsupported("EPUB SVG font-face width descriptor")),
             };
             let data = fonts::read_face(face, book)?;
             charge(
@@ -167,6 +183,7 @@ impl Resolver {
                     info.families = vec![(alias.clone(), Language::English_UnitedStates)];
                     info.style = style;
                     info.weight = Weight(weight as u16);
+                    info.stretch = stretch;
                     ids.push(database.push_face_info(info));
                 }
                 Ok(())

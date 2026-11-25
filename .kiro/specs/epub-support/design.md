@@ -48,7 +48,9 @@ SVG rendering registers the same bounded Unicode-restricted font copies used for
 
 If native fallback leaves a missing glyph after finding a candidate, the adapter can retry the source text as separate font runs. It chooses a face for each complete Unicode grapheme cluster and lets the same SVG engine place and shape the resulting runs. It validates the retained glyphs after the retry. When the source placement or inherited style cannot be preserved, the renderer returns an explicit unsupported error. [CSS Fonts matching algorithm](https://www.w3.org/TR/css-fonts-4/#font-matching-algorithm)
 
-Broader selectors, registered CSS custom properties, variable `@font-face` descriptor ranges and defaults, additional SVG features and semantic fixed-layout conversion remain open.
+For XHTML, the font collection registers packaged variants for the chapter's requested weight and width pairs when the author defines a weight range or a width descriptor. Width matching filters candidates in CSS order with fractional precision. Parley and Fontique match the remaining style and weight descriptors and resolve the winning face for each run, including Unicode fallback. A second shaping pass applies each selected face's clamped weight and width, followed by its explicit axis defaults, optical sizing and the element's own variation settings in that order. Alternate registrations share their font bytes. Each chapter is limited to 512 packaged face variants and each paragraph to 8 MiB of face-specific variation spans. Static SVG uses discrete font width descriptors when choosing among packaged faces. [CSS font matching](https://www.w3.org/TR/css-fonts-4/#font-matching-algorithm), [Variation precedence](https://www.w3.org/TR/css-fonts-4/#feature-variation-precedence)
+
+Broader selectors, registered CSS custom properties, XHTML oblique face ranges, SVG variable face ranges and defaults, additional SVG features and semantic fixed-layout conversion remain open.
 
 
 ## Presentation MathML

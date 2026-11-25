@@ -1,7 +1,7 @@
 //! Shape EPUB text with scoped archive fonts and bundled fallback faces.
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     ops::Range,
     sync::Arc,
 };
@@ -11,8 +11,8 @@ use parley::{
     fontique::{Blob, FontInfoOverride, GenericFamily},
     setting::{FontVariation, Tag},
     Alignment, AlignmentOptions, BaseDirection, FontContext, FontFamily, FontFamilyName, FontStyle,
-    FontVariations, FontWeight, InlineBox, InlineBoxKind, Layout, LayoutContext, LineHeight,
-    PositionedLayoutItem, StyleProperty,
+    FontVariations, FontWeight, FontWidth, InlineBox, InlineBoxKind, Layout, LayoutContext,
+    LineHeight, PositionedLayoutItem, StyleProperty,
 };
 use skrifa::{
     instance::{LocationRef, NormalizedCoord, Size},
@@ -42,19 +42,32 @@ use crate::{model::BlockPayload, EngineError};
 pub(super) mod ranges;
 
 pub(super) const MAX_FONT_BYTES: usize = 8 * 1024 * 1024;
+const MAX_REGISTERED_FACES: usize = 512;
+const MAX_VARIATION_SPAN_BYTES: usize = 8 * 1024 * 1024;
 type Brush = [u8; 4];
+type FontRequest = [u32; 2];
+type FontNames = HashMap<String, HashMap<Option<FontRequest>, String>>;
 
 pub(super) struct Face {
     pub family: String,
     pub base: String,
     pub urls: Vec<String>,
-    pub weight: Option<f32>,
+    pub weight: Option<[f32; 2]>,
+    pub width: Option<[f32; 2]>,
     pub style: Option<FontStyle>,
     pub unicode_ranges: Option<Vec<(u32, u32)>>,
+    pub axes: Arc<[super::css::Axis]>,
+}
+
+struct FaceVariations {
+    weight: Option<[f32; 2]>,
+    width: Option<[f32; 2]>,
+    axes: Arc<[super::css::Axis]>,
 }
 
 pub(super) struct Fonts {
-    names: HashMap<String, String>,
+    names: FontNames,
+    variations: HashMap<u64, FaceVariations>,
     fonts: FontContext,
     layout: LayoutContext<Brush>,
     shaping_bytes: usize,
@@ -64,6 +77,7 @@ impl Fonts {
     fn empty() -> Self {
         Self {
             names: HashMap::new(),
+            variations: HashMap::new(),
             fonts: FontContext::new(),
             layout: LayoutContext::new(),
             shaping_bytes: 0,
@@ -89,22 +103,36 @@ impl Fonts {
         styles: &Styles,
         book: &mut Book<'_>,
     ) -> Result<Option<Self>, EngineError> {
-        let mut used = HashSet::new();
+        let mut declared: HashMap<String, Vec<&Face>> = HashMap::new();
+        for face in faces {
+            declared
+                .entry(face.family.to_ascii_lowercase())
+                .or_default()
+                .push(face);
+        }
+        let mut used: HashMap<String, BTreeSet<FontRequest>> = HashMap::new();
         let mut needs_stack = false;
         for style in styles.values().filter(|style| !style.hidden) {
             let families = &style.text.families;
-            needs_stack |= families.len() > 1;
+            let weight = style.text.font_weight.unwrap_or(400.0);
+            let width = style.text.font_width.unwrap_or(100.0);
+            needs_stack |= families.len() > 1 || unusual_weight(weight) || width != 100.0;
+            let mut record = |name: &str| {
+                let key = name.to_ascii_lowercase();
+                if declared.contains_key(&key) {
+                    used.entry(key)
+                        .or_default()
+                        .insert([weight.to_bits(), width.to_bits()]);
+                }
+            };
             if families.is_empty() {
                 if let Some(name) = &style.text.chars.font {
-                    used.insert(name.to_ascii_lowercase());
+                    record(name);
                 }
             } else {
-                used.extend(
-                    families
-                        .iter()
-                        .filter(|family| !family.generic)
-                        .map(|family| family.name.to_ascii_lowercase()),
-                );
+                for family in families.iter().filter(|family| !family.generic) {
+                    record(&family.name);
+                }
             }
         }
         if faces.is_empty() {
@@ -114,16 +142,48 @@ impl Fonts {
         let mut budget = 0;
         let mut mapping_work = 0;
         let mut rewritten_bytes = 0;
+        let mut registered_faces = 0;
+        let mut families = 0;
+        let mut matched_widths = HashMap::new();
+        for (name, requests) in &used {
+            let group = &declared[name];
+            if group.iter().any(|face| {
+                face.width.is_some() || face.weight.is_some_and(|[low, high]| low != high)
+            }) {
+                let mut widths = HashMap::new();
+                for [_, width] in requests {
+                    widths
+                        .entry(*width)
+                        .or_insert_with(|| match_width(group, f32::from_bits(*width)));
+                }
+                matched_widths.insert(name.as_str(), widths);
+            }
+        }
         // Fontique tries matching faces in registration order. CSS composite faces
         // try the last declaration first when multiple faces cover a character.
         for face in faces.iter().rev() {
             let key = face.family.to_ascii_lowercase();
-            if !used.contains(&key) {
+            let Some(requests) = used.get(&key) else {
+                continue;
+            };
+            let choices: Vec<_> = if let Some(widths) = matched_widths.get(key.as_str()) {
+                let [low, high] = face.width.unwrap_or([100.0; 2]);
+                requests
+                    .iter()
+                    .copied()
+                    .filter(|[_, width]| f32::from_bits(*width).clamp(low, high) == widths[width])
+                    .map(Some)
+                    .collect()
+            } else {
+                vec![None]
+            };
+            if choices.is_empty() {
                 continue;
             }
-            let (Some(weight), Some(style)) = (face.weight, face.style) else {
-                return Err(unsupported("EPUB font-face weight and style ranges"));
-            };
+            let style = face
+                .style
+                .ok_or_else(|| unsupported("EPUB font-face style range"))?;
+            let interval = face.weight.unwrap_or([400.0; 2]);
             let data = read_face(face, book)?;
             charge(
                 &mut budget,
@@ -133,26 +193,58 @@ impl Fonts {
             )?;
             // Keep author families separate from bundled names so a glyph outside
             // an author face's range can reach the next family on the CSS list.
-            let family = result
-                .names
-                .get(&key)
-                .cloned()
-                .unwrap_or_else(|| format!("\0EPUB font family {}", result.names.len()));
-            let overrides = Some(FontInfoOverride {
-                family_name: Some(&family),
-                weight: Some(FontWeight::new(weight)),
-                style: Some(style),
-                ..Default::default()
-            });
-            let mut register = |data| {
-                let registrations = result
-                    .fonts
-                    .collection
-                    .register_fonts(Blob::new(Arc::new(data)), overrides);
-                if registrations.is_empty() {
-                    return Err(invalid("EPUB font-face has no usable font"));
+            let mut register = |data: Vec<u8>| {
+                let blob = Blob::new(Arc::new(data));
+                if face.weight.is_some() || face.width.is_some() || !face.axes.is_empty() {
+                    result.variations.insert(
+                        blob.id(),
+                        FaceVariations {
+                            weight: face.weight,
+                            width: face.width,
+                            axes: face.axes.clone(),
+                        },
+                    );
                 }
-                result.names.insert(key.clone(), family.clone());
+                let names = result.names.entry(key.clone()).or_default();
+                for &choice in &choices {
+                    charge(
+                        &mut registered_faces,
+                        1,
+                        MAX_REGISTERED_FACES,
+                        "EPUB font-face selection exceeds 512 registered variants",
+                    )?;
+                    let alias = names.entry(choice).or_insert_with(|| {
+                        families += 1;
+                        format!("\0EPUB font family {families}")
+                    });
+                    let [weight, width] =
+                        choice.map_or([interval[0], 100.0], |axes| axes.map(f32::from_bits));
+                    let nominal = weight.clamp(interval[0], interval[1]);
+                    let overrides = FontInfoOverride {
+                        family_name: Some(alias),
+                        weight: Some(FontWeight::new(nominal)),
+                        width: Some(FontWidth::from_percentage(width)),
+                        style: Some(style),
+                        axes: None,
+                    };
+                    let registrations = result
+                        .fonts
+                        .collection
+                        .register_fonts(blob.clone(), Some(overrides));
+                    if registrations.is_empty() {
+                        return Err(invalid("EPUB font-face has no usable font"));
+                    }
+                    charge(
+                        &mut registered_faces,
+                        registrations
+                            .iter()
+                            .map(|(_, fonts)| fonts.len())
+                            .sum::<usize>()
+                            .saturating_sub(1),
+                        MAX_REGISTERED_FACES,
+                        "EPUB font-face selection exceeds 512 registered variants",
+                    )?;
+                }
                 Ok(())
             };
             match face.unicode_ranges.as_deref() {
@@ -189,7 +281,9 @@ impl Fonts {
             return Ok(true);
         }
         Ok(StyledText::new(block)?.spans.iter().any(|(_, _, style)| {
-            if style.families.is_empty() {
+            if unusual_weight(run_weight(style)) || run_width(style) != 100.0 {
+                true
+            } else if style.families.is_empty() {
                 style
                     .chars
                     .font
@@ -284,121 +378,171 @@ impl Fonts {
             &mut spans,
         );
         let properties = CssParagraph::from_block(block)?;
-        let mut builder = self
-            .layout
-            .ranged_builder(&mut self.fonts, &text, 1.0, false);
-        builder.push_default(StyleProperty::FontSize(12.0));
-        builder.push_default(StyleProperty::FontFamily(FontFamily::Source(
-            "Source Sans 3".into(),
-        )));
-        builder.push_default(StyleProperty::Brush([0, 0, 0, 255]));
-        let mut align = Alignment::Start;
-        if let Some(properties) = properties {
-            if let Some(rtl) = properties.bidi {
-                builder.set_base_direction(if rtl {
-                    BaseDirection::Rtl
-                } else {
-                    BaseDirection::Ltr
-                });
-            }
-            if let Some(line) = properties.line_height {
-                builder.push_default(StyleProperty::LineHeight(match line {
-                    LineSpacing::Multiple(n) => LineHeight::FontSizeRelative(n),
-                    LineSpacing::Exactly(n) | LineSpacing::AtLeast(n) => LineHeight::Absolute(n),
-                }));
-            }
-            align = match properties.align.unwrap_or_default() {
-                Align::Left => Alignment::Start,
-                Align::Center => Alignment::Center,
-                Align::Right => Alignment::End,
-                Align::Justify | Align::Distribute => Alignment::Justify,
-            };
-        }
-        for (range, run) in spans {
-            let style = &run.chars;
-            let mut families: Vec<_> = run
-                .families
-                .iter()
-                .map(|family| {
-                    if family.generic {
-                        match family.name.as_str() {
-                            "serif" | "ui-serif" => FontFamilyName::named("Source Serif 4"),
-                            "sans-serif" | "system-ui" | "ui-sans-serif" => {
-                                FontFamilyName::named("Source Sans 3")
-                            }
-                            "monospace" | "ui-monospace" => FontFamilyName::named("JetBrains Mono"),
-                            name => GenericFamily::parse(name).map_or_else(
-                                || FontFamilyName::named(name),
-                                FontFamilyName::Generic,
-                            ),
-                        }
+        let mut build = |overrides: Vec<(Range<usize>, Vec<FontVariation>)>| {
+            let mut builder = self
+                .layout
+                .ranged_builder(&mut self.fonts, &text, 1.0, false);
+            builder.push_default(StyleProperty::FontSize(12.0));
+            builder.push_default(StyleProperty::FontFamily(FontFamily::Source(
+                "Source Sans 3".into(),
+            )));
+            builder.push_default(StyleProperty::Brush([0, 0, 0, 255]));
+            let mut align = Alignment::Start;
+            if let Some(properties) = &properties {
+                if let Some(rtl) = properties.bidi {
+                    builder.set_base_direction(if rtl {
+                        BaseDirection::Rtl
                     } else {
-                        named_family(&self.names, &family.name)
+                        BaseDirection::Ltr
+                    });
+                }
+                if let Some(line) = properties.line_height {
+                    builder.push_default(StyleProperty::LineHeight(match line {
+                        LineSpacing::Multiple(n) => LineHeight::FontSizeRelative(n),
+                        LineSpacing::Exactly(n) | LineSpacing::AtLeast(n) => {
+                            LineHeight::Absolute(n)
+                        }
+                    }));
+                }
+                align = match properties.align.unwrap_or_default() {
+                    Align::Left => Alignment::Start,
+                    Align::Center => Alignment::Center,
+                    Align::Right => Alignment::End,
+                    Align::Justify | Align::Distribute => Alignment::Justify,
+                };
+            }
+            for (range, run) in &spans {
+                let style = &run.chars;
+                let weight = run_weight(run);
+                let width = run_width(run);
+                let request = [weight.to_bits(), width.to_bits()];
+                let mut families: Vec<_> = run
+                    .families
+                    .iter()
+                    .map(|family| {
+                        if family.generic {
+                            match family.name.as_str() {
+                                "serif" | "ui-serif" => FontFamilyName::named("Source Serif 4"),
+                                "sans-serif" | "system-ui" | "ui-sans-serif" => {
+                                    FontFamilyName::named("Source Sans 3")
+                                }
+                                "monospace" | "ui-monospace" => {
+                                    FontFamilyName::named("JetBrains Mono")
+                                }
+                                name => GenericFamily::parse(name).map_or_else(
+                                    || FontFamilyName::named(name),
+                                    FontFamilyName::Generic,
+                                ),
+                            }
+                        } else {
+                            named_family(&self.names, &family.name, request)
+                        }
+                    })
+                    .collect();
+                if families.is_empty() {
+                    if let Some(name) = style.font.as_deref() {
+                        families.push(named_family(&self.names, name, request));
                     }
-                })
-                .collect();
-            if families.is_empty() {
-                if let Some(name) = style.font.as_deref() {
-                    families.push(named_family(&self.names, name));
+                }
+                if !families.is_empty() {
+                    families.push(FontFamilyName::named("Source Sans 3"));
+                    builder.push(
+                        StyleProperty::FontFamily(FontFamily::List(families.into())),
+                        range.clone(),
+                    );
+                }
+                let variations = variations(run, None);
+                if !variations.is_empty() {
+                    builder.push(
+                        StyleProperty::FontVariations(FontVariations::List(variations.into())),
+                        range.clone(),
+                    );
+                }
+                if let Some(size) = style.size {
+                    builder.push(StyleProperty::FontSize(size), range.clone());
+                }
+                if weight != 400.0 {
+                    builder.push(
+                        StyleProperty::FontWeight(FontWeight::new(weight)),
+                        range.clone(),
+                    );
+                }
+                if width != 100.0 {
+                    builder.push(
+                        StyleProperty::FontWidth(FontWidth::from_percentage(width)),
+                        range.clone(),
+                    );
+                }
+                if style.italic == Some(true) {
+                    builder.push(StyleProperty::FontStyle(FontStyle::Italic), range.clone());
+                }
+                if let Some(TextColor::Rgb(Rgb(r, g, b))) = style.color {
+                    builder.push(StyleProperty::Brush([r, g, b, 255]), range.clone());
+                }
+                if let Some(spacing) = style.spacing {
+                    builder.push(StyleProperty::LetterSpacing(spacing), range.clone());
+                }
+                if style.strike == Some(true) {
+                    builder.push(StyleProperty::Strikethrough(true), range.clone());
+                }
+                if style.underline.is_some_and(|line| line != Underline::None) {
+                    builder.push(StyleProperty::Underline(true), range.clone());
                 }
             }
-            if !families.is_empty() {
-                families.push(FontFamilyName::named("Source Sans 3"));
+            for (range, settings) in overrides {
                 builder.push(
-                    StyleProperty::FontFamily(FontFamily::List(families.into())),
-                    range.clone(),
+                    StyleProperty::FontVariations(FontVariations::List(settings.into())),
+                    range,
                 );
             }
-            let mut variations: Vec<_> = run
-                .axes
-                .iter()
-                .map(|&(axis, value)| FontVariation::new(Tag::from_bytes(axis), value))
-                .collect();
-            let opsz = Tag::from_bytes(*b"opsz");
-            if !run.optical_sizing_disabled && !variations.iter().any(|axis| axis.tag == opsz) {
-                // XHTML layout measures the computed font size in typographic points.
-                variations.push(FontVariation::new(opsz, style.size.unwrap_or(12.0)));
+            for (id, (index, fragment)) in inline.iter().enumerate() {
+                builder.push_inline_box(InlineBox {
+                    id: id as u64,
+                    kind: InlineBoxKind::InFlow,
+                    index: *index,
+                    width: fragment.width,
+                    height: fragment.height,
+                    baseline: fragment.baseline,
+                    vertical_align: Default::default(),
+                });
             }
-            if !variations.is_empty() {
-                builder.push(
-                    StyleProperty::FontVariations(FontVariations::List(variations.into())),
-                    range.clone(),
-                );
+            (builder.build(&text), align)
+        };
+        let (mut layout, align) = build(Vec::new());
+        if !self.variations.is_empty() {
+            // Defaults are properties of the face selected for these glyphs.
+            // Ask the native shaper to resolve fallback before applying them.
+            layout.break_all_lines(None);
+            let mut overrides = Vec::new();
+            let mut variation_bytes = 0;
+            for line in layout.lines() {
+                for run in line.runs() {
+                    let Some(face) = self.variations.get(&run.font().data.id()) else {
+                        continue;
+                    };
+                    let range = run.text_range();
+                    let first = spans.partition_point(|(span, _)| span.end <= range.start);
+                    for (span, author) in &spans[first..] {
+                        if span.start >= range.end {
+                            break;
+                        }
+                        let overlap = span.start.max(range.start)..span.end.min(range.end);
+                        if !overlap.is_empty() {
+                            charge(
+                                &mut variation_bytes,
+                                64 + (face.axes.len() + author.axes.len()).saturating_mul(8),
+                                MAX_VARIATION_SPAN_BYTES,
+                                "EPUB face variation spans exceed 8 MiB",
+                            )?;
+                            overrides.push((overlap, variations(author, Some(face))));
+                        }
+                    }
+                }
             }
-            if let Some(size) = style.size {
-                builder.push(StyleProperty::FontSize(size), range.clone());
-            }
-            if style.bold == Some(true) {
-                builder.push(StyleProperty::FontWeight(FontWeight::BOLD), range.clone());
-            }
-            if style.italic == Some(true) {
-                builder.push(StyleProperty::FontStyle(FontStyle::Italic), range.clone());
-            }
-            if let Some(TextColor::Rgb(Rgb(r, g, b))) = style.color {
-                builder.push(StyleProperty::Brush([r, g, b, 255]), range.clone());
-            }
-            if let Some(spacing) = style.spacing {
-                builder.push(StyleProperty::LetterSpacing(spacing), range.clone());
-            }
-            if style.strike == Some(true) {
-                builder.push(StyleProperty::Strikethrough(true), range.clone());
-            }
-            if style.underline.is_some_and(|line| line != Underline::None) {
-                builder.push(StyleProperty::Underline(true), range);
+            if !overrides.is_empty() {
+                layout = build(overrides).0;
             }
         }
-        for (id, (index, fragment)) in inline.iter().enumerate() {
-            builder.push_inline_box(InlineBox {
-                id: id as u64,
-                kind: InlineBoxKind::InFlow,
-                index: *index,
-                width: fragment.width,
-                height: fragment.height,
-                baseline: fragment.baseline,
-                vertical_align: Default::default(),
-            });
-        }
-        let layout = builder.build(&text);
         Ok(Text {
             layout: RefCell::new(layout),
             align,
@@ -417,9 +561,78 @@ struct Fragment {
     items: Vec<Draw>,
 }
 
-fn named_family<'a>(packaged: &'a HashMap<String, String>, name: &'a str) -> FontFamilyName<'a> {
+fn run_weight(run: &RunStyle) -> f32 {
+    run.font_weight.unwrap_or(if run.chars.bold == Some(true) {
+        700.0
+    } else {
+        400.0
+    })
+}
+
+fn unusual_weight(weight: f32) -> bool {
+    weight != 400.0 && weight != 700.0
+}
+
+fn run_width(run: &RunStyle) -> f32 {
+    run.font_width.unwrap_or(100.0)
+}
+
+fn match_width(faces: &[&Face], requested: f32) -> f32 {
+    let rank = |candidate: f32| {
+        let preferred = if requested <= 100.0 {
+            candidate <= requested
+        } else {
+            candidate >= requested
+        };
+        (!preferred, (candidate - requested).abs())
+    };
+    faces
+        .iter()
+        .map(|face| {
+            let [low, high] = face.width.unwrap_or([100.0; 2]);
+            requested.clamp(low, high)
+        })
+        .min_by(|&a, &b| {
+            let (side_a, distance_a) = rank(a);
+            let (side_b, distance_b) = rank(b);
+            side_a
+                .cmp(&side_b)
+                .then_with(|| distance_a.total_cmp(&distance_b))
+        })
+        .unwrap_or(100.0)
+}
+
+fn variations(run: &RunStyle, face: Option<&FaceVariations>) -> Vec<FontVariation> {
+    let mut axes = BTreeMap::new();
+    if let Some(face) = face {
+        if let Some([low, high]) = face.weight {
+            axes.insert(*b"wght", run_weight(run).clamp(low, high));
+        }
+        if let Some([low, high]) = face.width {
+            axes.insert(*b"wdth", run_width(run).clamp(low, high));
+        }
+        axes.extend(face.axes.iter().copied());
+    }
+    if !run.optical_sizing_disabled {
+        // XHTML layout measures the computed font size in typographic points.
+        axes.insert(*b"opsz", run.chars.size.unwrap_or(12.0));
+    }
+    axes.extend(run.axes.iter().copied());
+    axes.into_iter()
+        .map(|(axis, value)| FontVariation::new(Tag::from_bytes(axis), value))
+        .collect()
+}
+
+fn named_family<'a>(
+    packaged: &'a FontNames,
+    name: &'a str,
+    request: FontRequest,
+) -> FontFamilyName<'a> {
     let lower = name.to_ascii_lowercase();
-    FontFamilyName::named(if let Some(alias) = packaged.get(&lower) {
+    let alias = packaged
+        .get(&lower)
+        .and_then(|names| names.get(&Some(request)).or_else(|| names.get(&None)));
+    FontFamilyName::named(if let Some(alias) = alias {
         alias
     } else {
         match lower.as_str() {

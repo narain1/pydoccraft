@@ -1017,6 +1017,73 @@ class EpubTests(unittest.TestCase):
 
         self.assertEqual(bundled(""), bundled("font-variation-settings: 'wght' 900"))
 
+    def test_epub_xhtml_selects_variable_face_ranges_and_face_specific_defaults(self) -> None:
+        fixtures = Path(__file__).parent / "fixtures" / "fonts"
+        variable = (fixtures / "InterVariable.ttf").read_bytes()
+        wide = font_with_extra_advance((fixtures / "Inter-Regular.ttf").read_bytes())
+
+        def preview(
+            definitions: str, properties: str = "", text: str = "AB", *, fixed: bool = False,
+        ) -> bytes:
+            xhtml = f'''<html xmlns="http://www.w3.org/1999/xhtml"><head>
+              <title>Variable faces</title><meta name="viewport" content="width=360,height=90"/>
+              <style>{definitions}
+              body {{margin:0; font-size:48px; line-height:64px;
+                     font-family: Sample, Second, sans-serif; font-optical-sizing:none; {properties}}}
+              p {{margin:0}}</style></head><body><p>{text}</p></body></html>'''
+            if fixed:
+                source = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 360, 90)])
+                resources = {"OEBPS/s0.xhtml": xhtml}
+            else:
+                source = epub_fixture(chapter_one=xhtml)
+                resources = {}
+            resources.update({"OEBPS/variable.ttf": variable, "OEBPS/wide.ttf": wide})
+            with doc_ex.open(rewrite_epub(source, resources)) as book:
+                return book.render_page(0, dpi=96)
+
+        broad = "@font-face {font-family:Sample; src:url(variable.ttf); font-weight:300 800}"
+        defaults = broad[:-1] + '; font-variation-settings:"wght" 632.5, "opsz" 32}'
+        for fixed in (False, True):
+            with self.subTest(fixed=fixed):
+                sample = preview(defaults, fixed=fixed)
+                self.assertEqual(sample, preview(broad, 'font-variation-settings:"wght" 632.5, "opsz" 32', fixed=fixed))
+                self.assertNotEqual(sample, preview(broad, fixed=fixed))
+                self.assertEqual(sample, preview(defaults, 'font-variation-settings:normal', fixed=fixed))
+                self.assertEqual(preview(defaults, 'font-variation-settings:"wght" 300', fixed=fixed),
+                                 preview(broad, 'font-variation-settings:"wght" 300, "opsz" 32', fixed=fixed))
+                optical = defaults.replace('"opsz" 32', '"opsz" 14')
+                self.assertEqual(sample, preview(optical, 'font-optical-sizing:auto', fixed=fixed))
+                self.assertEqual(preview(broad, "font-weight:922.5", fixed=fixed),
+                                 preview(broad, 'font-variation-settings:"wght" 800', fixed=fixed))
+                self.assertEqual(preview(broad, "font-weight:553.5", fixed=fixed),
+                                 preview(broad, 'font-variation-settings:"wght" 553.5', fixed=fixed))
+
+        narrow = broad.replace("300 800", "100 350")
+        heavy = "@font-face {font-family:Sample; src:url(wide.ttf); font-weight:490 650}"
+        self.assertEqual(preview(narrow + heavy, "font-weight:450"), preview(heavy, "font-weight:450"))
+        self.assertEqual(preview(heavy + narrow, "font-weight:320"), preview(narrow, "font-weight:320"))
+        self.assertNotEqual(preview(narrow + heavy, "font-weight:450"), preview(narrow, "font-weight:450"))
+
+        condensed = broad[:-1] + "; font-stretch:70% 92.5%}"
+        expanded = heavy[:-1] + "; font-width:92.75% 127.5%}"
+        for fixed in (False, True):
+            with self.subTest(width=True, fixed=fixed):
+                request = "font-width:92.625%; font-weight:600"
+                self.assertEqual(preview(condensed + expanded, request, fixed=fixed),
+                                 preview(condensed, request, fixed=fixed))
+                request = "font-width:120%; font-stretch:92.75%; font-weight:600"
+                self.assertEqual(preview(expanded + condensed, request, fixed=fixed),
+                                 preview(expanded, request, fixed=fixed))
+                self.assertNotEqual(preview(expanded + condensed, request, fixed=fixed),
+                                    preview(condensed, request, fixed=fixed))
+
+        primary = broad[:-1] + '; unicode-range:U+0041; font-variation-settings:"wght" 300}'
+        second = broad.replace("Sample", "Second")[:-1] + '; unicode-range:U+0042; font-variation-settings:"wght" 800}'
+        neutral = primary.replace('; font-variation-settings:"wght" 300', '') + second.replace('; font-variation-settings:"wght" 800', '')
+        control = '<span style="font-variation-settings:\'wght\' 300">A</span><span style="font-variation-settings:\'wght\' 800">B</span>'
+        self.assertEqual(preview(primary + second), preview(neutral, text=control))
+        self.assertNotEqual(preview(primary + second), preview(neutral))
+
     def test_epub_svg_variable_axes_change_rendered_text(self) -> None:
         font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
 
@@ -1105,6 +1172,14 @@ class EpubTests(unittest.TestCase):
         _, generic = fixed("", '<text x="10" y="48" font-family="monospace, &quot;monospace&quot;">WW</text>')
         self.assertEqual(quoted, named)
         self.assertNotEqual(quoted, generic)
+
+        widths = """@font-face {font-family: Widths; src:url(inter.ttf); font-stretch:condensed}
+          @font-face {font-family: Widths; src:url(wide.ttf); font-width:expanded}"""
+        expanded = '<text x="10" y="48" font-family="Widths" font-stretch="expanded">WW</text>'
+        _, stretched = fixed(widths, expanded)
+        self.assertEqual(stretched, named)
+        _, condensed = fixed(widths, expanded.replace('stretch="expanded"', 'stretch="condensed"'))
+        self.assertNotEqual(condensed, stretched)
 
     def test_epub_svg_mixed_font_inline_export_matches_explicit_runs(self) -> None:
         font = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()

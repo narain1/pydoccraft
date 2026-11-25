@@ -541,6 +541,10 @@ pub(super) struct RunStyle {
     pub chars: CharProps,
     pub families: Vec<super::css::Family>,
     pub axes: Vec<super::css::Axis>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_weight: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_width: Option<f32>,
     pub optical_sizing_disabled: bool,
 }
 

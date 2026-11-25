@@ -139,6 +139,8 @@ impl Inline {
                     chars: props,
                     families: typography.families.to_vec(),
                     axes: typography.axes.to_vec(),
+                    font_weight: typography.font_weight,
+                    font_width: typography.font_width,
                     optical_sizing_disabled: typography.optical_sizing_disabled,
                 },
             ));
@@ -919,6 +921,7 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                         | "font-size"
                         | "font-weight"
                         | "font-style"
+                        | "font-stretch"
                         | "text-anchor"
                         | "textLength"
                         | "lengthAdjust"

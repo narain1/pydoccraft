@@ -488,6 +488,27 @@ fn font_face(
     let values: Properties = declarations(block, source)?
         .into_iter()
         .filter_map(|(key, value, _)| match value {
+            CssValue::Text(text)
+                if key == "font-weight"
+                    && !text.eq_ignore_ascii_case("auto")
+                    && weight_range(&text).is_none() =>
+            {
+                None
+            }
+            CssValue::Text(text)
+                if key == "font-stretch"
+                    && !text.eq_ignore_ascii_case("auto")
+                    && width_range(&text).is_none() =>
+            {
+                None
+            }
+            CssValue::Text(text)
+                if key == "font-variation-settings"
+                    && (text.eq_ignore_ascii_case("initial")
+                        || !matches!(parse_axes(&text), Some(AxisValue::Settings(_)))) =>
+            {
+                None
+            }
             CssValue::Text(text) => Some((key, text.to_string())),
             CssValue::Pending(..) => None,
         })
@@ -541,14 +562,6 @@ fn font_face(
             }
         }
     }
-    let weight = match values.get("font-weight").map(String::as_str) {
-        None | Some("normal") => Some(400.0),
-        Some("bold") => Some(700.0),
-        Some(value) => value
-            .parse::<f32>()
-            .ok()
-            .filter(|weight| (1.0..=1000.0).contains(weight)),
-    };
     let style = match values.get("font-style").map(String::as_str) {
         None | Some("normal") => Some(parley::FontStyle::Normal),
         Some("italic") => Some(parley::FontStyle::Italic),
@@ -559,10 +572,84 @@ fn font_face(
         family: family.clone(),
         base: base.into(),
         urls,
-        weight,
+        weight: values
+            .get("font-weight")
+            .and_then(|value| weight_range(value)),
+        width: values
+            .get("font-stretch")
+            .and_then(|value| width_range(value)),
         style,
         unicode_ranges,
+        axes: match values
+            .get("font-variation-settings")
+            .and_then(|value| parse_axes(value))
+        {
+            Some(AxisValue::Settings(axes)) => axes,
+            _ => Arc::default(),
+        },
     }))
+}
+
+pub(super) fn font_weight(value: &str) -> Option<f32> {
+    if value.eq_ignore_ascii_case("normal") {
+        return Some(400.0);
+    }
+    if value.eq_ignore_ascii_case("bold") {
+        return Some(700.0);
+    }
+    value
+        .parse()
+        .ok()
+        .filter(|number| (1.0..=1000.0).contains(number))
+}
+
+fn weight_range(value: &str) -> Option<[f32; 2]> {
+    let mut words = value.split_ascii_whitespace();
+    let first_word = words.next()?;
+    let first = font_weight(first_word)?;
+    let Some(last) = words.next() else {
+        return Some([first, first]);
+    };
+    first_word.parse::<f32>().ok()?;
+    last.parse::<f32>().ok()?;
+    let last = font_weight(last)?;
+    words
+        .next()
+        .is_none()
+        .then_some([first.min(last), first.max(last)])
+}
+
+pub(super) fn font_width(value: &str) -> Option<f32> {
+    let width: f32 = match value.to_ascii_lowercase().as_str() {
+        "ultra-condensed" => 50.0,
+        "extra-condensed" => 62.5,
+        "condensed" => 75.0,
+        "semi-condensed" => 87.5,
+        "normal" => 100.0,
+        "semi-expanded" => 112.5,
+        "expanded" => 125.0,
+        "extra-expanded" => 150.0,
+        "ultra-expanded" => 200.0,
+        value => value.strip_suffix('%')?.parse().ok()?,
+    };
+    (width >= 0.0 && width.is_finite()).then_some(width)
+}
+
+fn width_range(value: &str) -> Option<[f32; 2]> {
+    let mut words = value.split_ascii_whitespace();
+    let first_word = words.next()?;
+    let first = font_width(first_word)?;
+    let Some(last) = words.next() else {
+        return Some([first, first]);
+    };
+    if !(first_word.ends_with('%') && last.ends_with('%')) {
+        return None;
+    }
+    let last = font_width(last)?;
+    words
+        .next()
+        .is_none()
+        .then_some([first.min(last), first.max(last)])
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -746,6 +833,8 @@ fn declarations(
         let custom = key.starts_with("--");
         let name = if custom {
             key.to_owned()
+        } else if key.eq_ignore_ascii_case("font-width") {
+            "font-stretch".into()
         } else {
             key.to_ascii_lowercase()
         };

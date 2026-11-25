@@ -2887,3 +2887,7 @@ The Linux x86-64 CPython 3.11.15 wheel passed 704 installed tests, including 109
 ## 2026-11-24 Editable MathML horizontal padding
 
 The Linux x86-64 CPython 3.11.15 wheel passed 705 installed tests, including 110 EPUB tests. It measured 23,923,742 bytes with a 55,588,712-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-editable-mathml-horizontal-padding) covers reopened DOCX geometry, editable formulas inside a table cell, and the results of editing OMML operand text.
+
+## 2026-11-24 CSS font-face ranges and defaults
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 706 installed tests, including 111 EPUB tests. It measured 23,951,308 bytes with a 55,669,144-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-css-font-face-ranges-and-defaults) covers fractional weight and width matching, per-face defaults across fallback, and reopened fixed-layout PDF geometry.
