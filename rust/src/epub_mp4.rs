@@ -86,12 +86,10 @@ impl Mp4Bounds {
                     self.check(&bytes[start..end], base + start, depth + 1, header.fourcc)?;
                 }
                 b"chap" if &parent == b"tref" => {
-                    if std::mem::replace(&mut chapter_references, true)
-                        || length == 0
-                        || !length.is_multiple_of(4)
-                    {
+                    if chapter_references || length == 0 || !length.is_multiple_of(4) {
                         return Err(invalid("invalid or repeated MP4 chapter reference"));
                     }
+                    chapter_references = true;
                 }
                 b"stsz" | b"stz2" => {
                     let raw = bytes[start..end]
