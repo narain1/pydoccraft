@@ -11,8 +11,8 @@ use crate::{
     epub::{
         charge, invalid, limited, parse_xml,
         ttml_clock::{Clock, Instant, Timing},
-        ttml_regions::{self, Region, Regions, Selection},
-        ttml_styles::{self, StylePatch, STYLING, TT},
+        ttml_regions::{self, Definition, Region, Regions, Selection},
+        ttml_styles::{self, StylePatch, TT},
         unsupported, XML,
     },
     EngineError,
@@ -79,11 +79,14 @@ fn validate_animation(root: Node<'_, '_>) -> Result<(), EngineError> {
             && node.parent_element().is_none_or(|parent| {
                 let parent = parent.tag_name();
                 parent.namespace() != Some(TT)
-                    || !matches!(parent.name(), "body" | "div" | "p" | "span" | "br")
+                    || !matches!(
+                        parent.name(),
+                        "body" | "div" | "p" | "span" | "br" | "region"
+                    )
             })
         {
             return Err(unsupported(
-                "TTML set requires an inline subtitle content target",
+                "TTML set requires an inline subtitle content target or a region target",
             ));
         }
     }
@@ -142,33 +145,11 @@ struct StyleSet {
 
 impl StyleSet {
     fn new(node: Node<'_, '_>, timing: Timing, clock: Clock) -> Result<Self, EngineError> {
-        for attribute in node.attributes() {
-            let supported = match (attribute.namespace(), attribute.name()) {
-                (None, "begin" | "dur" | "end") | (Some(XML), _) => true,
-                (None, "fill") => attribute.value() == "remove",
-                (None, "repeatCount") => attribute.value() == "1",
-                (Some(STYLING), "color" | "fontWeight" | "fontStyle" | "textDecoration") => true,
-                _ => false,
-            };
-            if !supported {
-                return Err(unsupported(
-                    "unsupported TTML set attribute or style property",
-                ));
-            }
-        }
-        if node.children().any(|child| {
-            (child.is_element() && !child.has_tag_name((TT, "metadata")))
-                || (child.is_text()
-                    && child
-                        .text()
-                        .is_some_and(|text| !text.trim_ascii().is_empty()))
-        }) {
-            return Err(invalid("TTML set cannot contain subtitle content"));
-        }
+        ttml_styles::validate_set(
+            node,
+            &["color", "fontWeight", "fontStyle", "textDecoration"],
+        )?;
         let patch = StylePatch::default().inline(node)?;
-        if patch == StylePatch::default() {
-            return Err(invalid("TTML set has no style property"));
-        }
         Ok(Self {
             timing: Timing::new(node, timing.begin, timing.end, clock)?,
             patch,
@@ -218,8 +199,8 @@ struct Piece<'a> {
 struct Paragraph<'a> {
     id: Option<&'a str>,
     first_cue: usize,
-    region_layout: Option<Arc<Region>>,
-    region_timing: Option<Timing>,
+    region: Option<Definition>,
+    implicit_region: Option<Arc<Region>>,
 }
 
 struct Reader<'a, 'n> {
@@ -383,7 +364,7 @@ impl<'n> Reader<'_, 'n> {
         if node.has_tag_name((TT, "p")) {
             let mut pieces = Vec::new();
             let end = self.inline_children(node, timing, &format, &mut pieces, depth)?;
-            self.emit(node, format.region, &pieces)?;
+            self.emit(node, format.region, timing, &pieces)?;
             return Ok(timing.finish(end));
         }
         let mut children = Children::new(node, timing.begin)?;
@@ -467,37 +448,53 @@ impl<'n> Reader<'_, 'n> {
         &mut self,
         node: Node<'_, '_>,
         region: Option<Selection<'n>>,
+        timing: Timing,
         pieces: &[Piece<'_>],
     ) -> Result<(), EngineError> {
-        let definition = self.regions.get(region);
+        if pieces.is_empty() {
+            return Ok(());
+        }
         let paragraph = Paragraph {
             id: node.attribute((XML, "id")),
             first_cue: self.track.cues.len(),
-            region_layout: definition.map_or_else(
-                || self.regions.implicit.clone(),
-                |region| Some(region.region.clone()),
-            ),
-            region_timing: definition.and_then(|region| region.timing),
+            region: self.regions.get(region).cloned(),
+            implicit_region: self.regions.implicit.clone(),
         };
         let mut events = Vec::with_capacity(pieces.len() * 2);
         for (index, piece) in pieces.iter().enumerate() {
-            events.push((piece.begin, true, index));
+            events.push((piece.begin, Some((true, index))));
             if let Some(end) = piece.end {
-                events.push((end, false, index));
+                events.push((end, Some((false, index))));
             }
+        }
+        if let Some(region) = &paragraph.region {
+            let first = region
+                .layouts
+                .partition_point(|point| point.start <= timing.begin);
+            events.extend(
+                region.layouts[first..]
+                    .iter()
+                    .map(|point| point.start)
+                    .take_while(|&start| timing.end.is_none_or(|end| start < end))
+                    .map(|start| (start, None)),
+            );
         }
         events.sort_unstable();
         let mut active = BTreeSet::new();
         let mut previous = 0;
-        for (time, starts, index) in events {
+        for (time, piece) in events {
             if time > previous {
                 self.emit_interval(pieces, &active, previous, Some(time), &paragraph)?;
                 previous = time;
             }
-            if starts {
-                active.insert(index);
-            } else {
-                active.remove(&index);
+            match piece {
+                Some((true, index)) => {
+                    active.insert(index);
+                }
+                Some((false, index)) => {
+                    active.remove(&index);
+                }
+                None => {}
             }
         }
         self.emit_interval(pieces, &active, previous, None, &paragraph)
@@ -511,17 +508,22 @@ impl<'n> Reader<'_, 'n> {
         end: Option<Instant>,
         paragraph: &Paragraph<'_>,
     ) -> Result<(), EngineError> {
-        let (start, end) = paragraph.region_timing.map_or((start, end), |timing| {
+        let timing = paragraph.region.as_ref().and_then(|region| region.timing);
+        let (start, end) = timing.map_or((start, end), |timing| {
             (
                 start.max(timing.begin),
                 end.into_iter().chain(timing.end).min(),
             )
         });
-        let start = self.clock.micros(start);
+        let start_us = self.clock.micros(start);
         let end = end.map(|end| self.clock.micros(end));
-        if active.is_empty() || end.is_some_and(|end| end <= start) {
+        if active.is_empty() || end.is_some_and(|end| end <= start_us) {
             return Ok(());
         }
+        let region_layout = paragraph.region.as_ref().map_or_else(
+            || paragraph.implicit_region.clone(),
+            |region| Some(region.layout_at(start).clone()),
+        );
         let mut styled = StyledText::default();
         let mut pending = false;
         for &index in active {
@@ -548,27 +550,28 @@ impl<'n> Reader<'_, 'n> {
         }
         if self.track.cues.len() > paragraph.first_cue {
             if let Some(previous) = self.track.cues.last_mut() {
-                if previous.end == Some(start) && previous.text == text && previous.runs == runs {
+                if previous.end == Some(start_us)
+                    && previous.text == text
+                    && previous.runs == runs
+                    && previous.ttml_region_layout == region_layout
+                {
                     previous.end = end;
                     return Ok(());
                 }
             }
         }
         self.track.push(Cue {
-            start,
+            start: start_us,
             end,
             text,
             id: paragraph.id.map(str::to_owned),
             settings: None,
-            region: paragraph
-                .region_layout
-                .as_ref()
-                .and_then(|region| region.id.clone()),
+            region: region_layout.as_ref().and_then(|region| region.id.clone()),
             markup: None,
             runs,
             background_color: None,
             region_layout: None,
-            ttml_region_layout: paragraph.region_layout.clone(),
+            ttml_region_layout: region_layout,
         })
     }
 }

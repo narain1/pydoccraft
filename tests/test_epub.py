@@ -5648,6 +5648,111 @@ overlay
             self.assertEqual(reopened.read_epub_resource("OEBPS/regions.ttml"), ttml)
             self.assertEqual([cue.runs for cue in reopened.epub_embedded_text(0, 0)], [cue.runs for cue in cues])
 
+    def test_ttml_named_region_sets_follow_media_clock_in_captions_and_video(self) -> None:
+        video = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        ttml = b'''<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling"
+          xmlns:ttp="http://www.w3.org/ns/ttml#parameter" ttp:tickRate="1000" ttp:cellResolution="40 20">
+          <head><styling><style xml:id="geometry" tts:origin="10% 60%" tts:extent="60% 30%"/></styling>
+          <layout><region xml:id="motion" begin="170t" end="190t" style="geometry">
+            <set begin="3t" dur="8t" tts:origin="20% 55%"/>
+            <set begin="5t" dur="4t" tts:extent="50% 20%" tts:padding="10% 20%"
+              tts:backgroundColor="rgba(255,0,0,128)"/>
+            <set begin="10t" dur="2t" tts:position="right bottom"/>
+            <set begin="14t" dur="8t" tts:origin="10% 60%"/>
+          </region></layout></head>
+          <body region="motion"><p xml:id="caption" begin="165t" end="193t">Words
+            <set begin="12t" dur="1t" tts:fontStyle="italic"/>
+          </p></body></tt>'''
+        sequential = b'''<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling"
+          xmlns:ttp="http://www.w3.org/ns/ttml#parameter" ttp:tickRate="1000" ttp:cellResolution="40 20">
+          <head><layout><region xml:id="sequence" begin="170t" timeContainer="seq">
+            <set dur="3t" tts:origin="3c 12c"/>
+            <set begin="2t" end="4t" tts:extent="45% 25%"/>
+            <set tts:origin="99% 99%"/>
+            <set end="1t" repeatCount="1" tts:origin="99% 99%"/>
+            <set dur="2t" tts:origin="20% 10%"/>
+            <style tts:extent="60% 30%"/>
+          </region></layout></head><body region="sequence"><p begin="165t" end="185t">Shift</p>
+          <p begin="176t" end="177t">Companion</p></body></tt>'''
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Moving caption</title></head>
+          <body><video src="clip.mp4#t=0.169,0.192&amp;xywh=1,1,6,4">
+          <track src="animated.ttml" kind="captions" srclang="en"/>
+          <track src="sequential.ttml" kind="subtitles" srclang="en"/>
+          </video></body></html>'''
+        with doc_ex.open(epub_fixture()) as source:
+            data = source.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Moving caption", chapter, "OEBPS/captions.xhtml")],
+                resources={
+                    "OEBPS/clip.mp4": doc_ex.EpubResource("video/mp4", video),
+                    "OEBPS/animated.ttml": doc_ex.EpubResource("application/ttml+xml", ttml),
+                    "OEBPS/sequential.ttml": doc_ex.EpubResource("application/ttml+xml", sequential),
+                },
+            )
+        with doc_ex.open(data) as book:
+            base = doc_ex.EpubTtmlRegion("motion", (10, 60), (60, 30))
+            moved = doc_ex.EpubTtmlRegion("motion", (20, 55), (60, 30))
+            painted = doc_ex.EpubTtmlRegion(
+                "motion", (20, 55), (50, 20), (2, 10, 2, 10), background_color=(255, 0, 0, 128),
+            )
+            anchored = doc_ex.EpubTtmlRegion("motion", (40, 70), (60, 30))
+            expected = [
+                (170_000, 173_000, base, "normal"),
+                (173_000, 175_000, moved, "normal"),
+                (175_000, 177_000, painted, "normal"),
+                (177_000, 178_000, painted, "italic"),
+                (178_000, 179_000, painted, "normal"),
+                (179_000, 180_000, moved, "normal"),
+                (180_000, 182_000, anchored, "normal"),
+                (182_000, 190_000, base, "normal"),
+            ]
+            cues = book.epub_embedded_text(0, 0)
+            self.assertEqual([
+                (cue.start_us, cue.end_us, cue.ttml_region_layout, cue.runs[0].style.font_style)
+                for cue in cues
+            ], expected)
+            self.assertEqual({(cue.id, cue.text, cue.region) for cue in cues}, {("caption", "Words", "motion")})
+            for measured, expected_bound in zip(painted.content_bounds(200, 100), (60, 57, 60, 16)):
+                self.assertAlmostEqual(measured, expected_bound)
+            sought, = book.epub_embedded_text(0, 0, start_us=177_500, end_us=177_750)
+            self.assertEqual((sought.start_us, sought.end_us, sought.ttml_region_layout, sought.runs),
+                             (177_500, 177_750, painted, cues[3].runs))
+            self.assertEqual(book.epub_embedded_text(0, 0, start_us=190_000), [])
+            frames = list(book.epub_embedded_video(0, 0, start_us=166_000, end_us=195_000, text_track=0))
+            self.assertEqual([(frame.start_us, frame.duration_us) for frame in frames],
+                             [(169_000, 1_000), *((begin, end - begin) for begin, end, _, _ in expected),
+                              (190_000, 2_000)])
+            self.assertTrue(all((frame.width, frame.height) == (6, 4) and frame.rgb is frames[0].rgb
+                                for frame in frames))
+            self.assertEqual([frame.text_cues for frame in frames], [(), *((cue,) for cue in cues), ()])
+            self.assertEqual([frame.text_cues[0].ttml_region_layout for frame in frames[1:-1]],
+                             [region for _, _, region, _ in expected])
+            resumed, = book.epub_embedded_video(0, 0, start_us=177_500, end_us=177_750, text_track=0)
+            self.assertEqual((resumed.rgb, resumed.start_us, resumed.duration_us), (frames[0].rgb, 177_500, 250))
+            self.assertEqual(resumed.text_cues[0].ttml_region_layout, painted)
+            states = []
+            for cue in book.epub_embedded_text(0, 0, track_index=1):
+                region = cue.ttml_region_layout
+                assert region is not None
+                states.append((cue.start_us, cue.end_us, region.origin_percent, region.extent_percent))
+            self.assertEqual(states, [
+                (170_000, 173_000, (7.5, 60), (60, 30)),
+                (173_000, 175_000, (0, 0), (60, 30)),
+                (175_000, 177_000, (0, 0), (45, 25)),
+                (176_000, 177_000, (0, 0), (45, 25)),
+                (177_000, 179_000, (20, 10), (60, 30)),
+                (179_000, 185_000, (0, 0), (60, 30)),
+            ])
+            overlap, = book.epub_embedded_video(0, 0, start_us=176_500, end_us=176_750, text_track=1)
+            self.assertEqual([cue.text for cue in overlap.text_cues], ["Shift", "Companion"])
+            self.assertEqual([cue.ttml_region_layout for cue in overlap.text_cues],
+                             [doc_ex.EpubTtmlRegion("sequence", (0, 0), (45, 25))] * 2)
+            revised = book.edit_epub_structure(replacements={0: chapter.replace("Moving caption", "Revised")})
+        with doc_ex.open(revised) as reopened:
+            self.assertEqual(reopened.read_epub_resource("OEBPS/animated.ttml"), ttml)
+            self.assertEqual(reopened.read_epub_resource("OEBPS/sequential.ttml"), sequential)
+            self.assertEqual([cue.ttml_region_layout for cue in reopened.epub_embedded_text(0, 0)],
+                             [region for _, _, region, _ in expected])
+
     def test_ttml_region_edits_and_playback_validate_references_and_geometry(self) -> None:
         header = b'<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling">'
         body = b'<body region="r"><div><p begin="0s" end="1s">Text</p></div></body></tt>'
@@ -5687,8 +5792,31 @@ overlay
             (track(b'<region xml:id="r" tts:origin="10em 0%"/>'), doc_ex.UnsupportedFormatError, "region length unit"),
             (track(b'<region xml:id="r" condition="true"/>'), doc_ex.UnsupportedFormatError, "region condition"),
             (track(b'<region xml:id="r" begin="tomorrow"/>'), doc_ex.MalformedDocumentError, "TTML time expression"),
-            (track(b'<region xml:id="r"><set begin="0s" tts:origin="10% 0%"/></region>'),
-             doc_ex.UnsupportedFormatError, "TTML region content|inline subtitle content target"),
+            (track(b'<region xml:id="r" animate="motion"/>'),
+             doc_ex.UnsupportedFormatError, "TTML animation references"),
+            (track(b'<region xml:id="r"><set begin="0s" fill="freeze" tts:origin="10% 0%"/></region>'),
+             doc_ex.UnsupportedFormatError, "unsupported TTML set attribute"),
+            (track(b'<region xml:id="r"><set repeatCount="2" tts:origin="10% 0%"/></region>'),
+             doc_ex.UnsupportedFormatError, "unsupported TTML set attribute"),
+            (track(b'<region xml:id="r"><set tts:opacity="0.5"/></region>'),
+             doc_ex.UnsupportedFormatError, "unsupported TTML set attribute"),
+            (track(b'<region xml:id="r" end="1s"><set begin="2s" tts:extent="-1% 30%"/></region>'),
+             doc_ex.MalformedDocumentError, "negative TTML region extent"),
+            (track(b'<region xml:id="r"><set dur="1s" tts:origin="10% 0%"/>'
+                   b'<set begin="0.5s" dur="1s" tts:origin="20% 0%"/></region>'),
+             doc_ex.UnsupportedFormatError, "overlapping TTML region sets"),
+            (track(b'<region xml:id="r">' + b'<set dur="1s" tts:origin="10% 0%"/>' * 33 + b'</region>'),
+             doc_ex.UnsafeArchiveError, "32 set elements"),
+            (track(b'<region xml:id="r"/>',
+                   b'<body><p dur="1s"><region><set dur="1s" tts:origin="10% 0%"/></region>Text</p></body></tt>'),
+             doc_ex.UnsupportedFormatError, "animation of a content-inline region"),
+            (track(b"".join(
+                f'<region xml:id="{name}">'.encode()
+                + b"".join(f'<set begin="{2 * phase}s" dur="1s" tts:origin="10% 0%"/>'.encode()
+                           for phase in range(32))
+                + b'</region>'
+                for name in ("r", *(f"r{i}" for i in range(64)))
+            )), doc_ex.UnsafeArchiveError, "4096 region animation boundary budget"),
             (track(b"".join(f'<region xml:id="r{i}"/>'.encode() for i in range(257))),
              doc_ex.UnsafeArchiveError, "256 region definitions"),
             (track(b'<region xml:id="r">' + b'<style tts:extent="99% 50%"/>' * 33 + b'</region>'),

@@ -253,7 +253,6 @@ impl Timing {
         })
     }
 
-    #[cfg(feature = "python")]
     pub(super) fn empty(self) -> bool {
         self.end.is_some_and(|end| end <= self.begin)
     }

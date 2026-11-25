@@ -7,9 +7,9 @@ use std::{
 use roxmltree::{Node, NodeId};
 
 use super::{
-    invalid, limited,
+    charge, invalid, limited,
     media::integer,
-    ttml_clock::{Clock, Timing},
+    ttml_clock::{Clock, Instant, Timing},
     ttml_styles::{self, Patch, StylePatch, PARAM, STYLING, TT},
     unsupported, XML,
 };
@@ -17,9 +17,14 @@ use crate::EngineError;
 
 const MAX_REGIONS: usize = 256;
 const MAX_NESTED_STYLES: usize = 32;
+const MAX_REGION_SETS: usize = 32;
+const MAX_REGION_POINTS: usize = 4096;
+const ANIMATED_PROPERTIES: &[&str] =
+    &["origin", "extent", "position", "padding", "backgroundColor"];
 const MAX_LABEL: usize = 1024;
 const MAX_GEOMETRY: f64 = 1_000_000.0;
 
+#[derive(PartialEq)]
 #[cfg_attr(not(feature = "python"), allow(dead_code))]
 pub(crate) struct Region {
     pub id: Option<String>,
@@ -35,10 +40,29 @@ pub(crate) struct Region {
 }
 
 #[cfg_attr(not(feature = "python"), allow(dead_code))]
+pub(super) struct RegionPoint {
+    pub start: Instant,
+    layout: Arc<Region>,
+}
+
+#[derive(Clone)]
+#[cfg_attr(not(feature = "python"), allow(dead_code))]
 pub(super) struct Definition {
-    pub region: Arc<Region>,
+    region: Arc<Region>,
+    pub layouts: Arc<[RegionPoint]>,
     pub timing: Option<Timing>,
     pub style: StylePatch,
+}
+
+#[cfg(feature = "python")]
+impl Definition {
+    pub fn layout_at(&self, time: Instant) -> &Arc<Region> {
+        let index = self.layouts.partition_point(|point| point.start <= time);
+        match index.checked_sub(1) {
+            Some(index) => &self.layouts[index].layout,
+            None => &self.region,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -103,6 +127,14 @@ impl<'n> Patch<'n> for RegionPatch<'n> {
 }
 
 impl RegionPatch<'_> {
+    fn geometry_conflicts(self, other: Self) -> bool {
+        (self.origin.is_some() && other.origin.is_some())
+            || (self.extent.is_some() && other.extent.is_some())
+            || (self.position.is_some() && other.position.is_some())
+            || (self.padding.is_some() && other.padding.is_some())
+            || (self.color.is_some() && other.color.is_some())
+    }
+
     fn compute(self, id: Option<String>, viewport: Viewport) -> Result<Region, EngineError> {
         if self.unsupported {
             return Err(unsupported(
@@ -273,16 +305,21 @@ pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
         };
         let mut ids = HashSet::new();
         let mut clock = None;
+        let mut region_work = 0;
         for (node, parent) in definitions {
             // An explicit region attribute wins over a child region.
             if parent.is_some_and(|parent| parent.has_attribute("region")) {
                 continue;
             }
-            if node
-                .attribute("timeContainer")
-                .is_some_and(|value| value != "par")
-            {
-                return Err(unsupported("conditional or nonparallel TTML region layout"));
+            let sequential = match node.attribute("timeContainer") {
+                None | Some("par") => false,
+                Some("seq") if parent.is_none() => true,
+                _ => return Err(unsupported("unsupported TTML region time container")),
+            };
+            if node.has_attribute("animate") {
+                return Err(unsupported(
+                    "TTML animation references or continuous animation",
+                ));
             }
             let id = node.attribute((XML, "id"));
             if let Some(id) = id {
@@ -293,8 +330,19 @@ pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
             }
             let mut style = initial.merge(ttml_styles::references(node, lookup)?);
             let mut nested = 0;
+            let mut children = Vec::new();
             for child in node.children().filter(Node::is_element) {
                 if child.has_tag_name((TT, "metadata")) {
+                    continue;
+                }
+                if child.has_tag_name((TT, "set")) {
+                    if parent.is_some() {
+                        return Err(unsupported("TTML animation of a content-inline region"));
+                    }
+                    if children.len() == MAX_REGION_SETS {
+                        return Err(limited("TTML region exceeds 32 set elements"));
+                    }
+                    children.push(child);
                     continue;
                 }
                 if !child.has_tag_name((TT, "style")) {
@@ -309,6 +357,7 @@ pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
             let style = style.inline(node)?;
             let mut definition = Definition {
                 region: Arc::new(style.compute(id.map(str::to_owned), viewport)?),
+                layouts: Arc::default(),
                 timing: None,
                 style: style.text_style,
             };
@@ -317,15 +366,48 @@ pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
                 inline.insert(parent.id(), definition);
             } else {
                 let id = id.ok_or_else(|| invalid("missing TTML region ID"))?;
-                if ["begin", "end", "dur"]
-                    .iter()
-                    .any(|&name| node.has_attribute(name))
+                if sequential && children.is_empty() {
+                    return Err(unsupported("unsupported TTML region time container"));
+                }
+                if !children.is_empty()
+                    || ["begin", "end", "dur"]
+                        .iter()
+                        .any(|&name| node.has_attribute(name))
                 {
                     let clock = match clock {
                         Some(clock) => clock,
                         None => *clock.insert(Clock::new(root)?),
                     };
-                    definition.timing = Some(Timing::new(node, 0, None, clock)?);
+                    let timing = Timing::new(node, 0, None, clock)?;
+                    let mut cursor = timing.begin;
+                    let mut sets = Vec::with_capacity(children.len());
+                    for child in children {
+                        ttml_styles::validate_set(child, ANIMATED_PROPERTIES)?;
+                        let patch = RegionPatch::default().inline(child)?;
+                        // Validate values that could be capped out or hidden by position.
+                        patch.compute(None, viewport)?;
+                        let mut set = Timing::new(child, cursor, timing.end, clock)?;
+                        if sequential {
+                            // In a sequence, an explicit end can replace the implicit zero
+                            // duration only when no repetition count was specified.
+                            let has_duration = child.has_attribute("dur")
+                                || (child.has_attribute("end")
+                                    && !child.has_attribute("repeatCount"));
+                            if !has_duration {
+                                set.end = Some(set.end.map_or(set.begin, |end| end.min(set.begin)));
+                            }
+                            cursor = set.end.unwrap_or(set.begin);
+                        }
+                        sets.push((set, patch));
+                    }
+                    definition.layouts = region_layouts(
+                        &definition.region,
+                        style,
+                        &sets,
+                        viewport,
+                        &mut region_work,
+                    )?;
+                    definition.timing = Some(timing);
                 }
                 named.insert(id, definition);
             }
@@ -353,6 +435,53 @@ pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
         implicit,
         initial: initial.text_style,
     })
+}
+
+fn region_layouts(
+    region: &Region,
+    base: RegionPatch<'_>,
+    sets: &[(Timing, RegionPatch<'_>)],
+    viewport: Viewport,
+    work: &mut usize,
+) -> Result<Arc<[RegionPoint]>, EngineError> {
+    let mut times = Vec::with_capacity(sets.len() * 2);
+    for (timing, _) in sets {
+        if !timing.empty() {
+            times.push(timing.begin);
+            times.extend(timing.end);
+        }
+    }
+    times.sort_unstable();
+    times.dedup();
+    charge(
+        work,
+        times.len(),
+        MAX_REGION_POINTS,
+        "TTML exceeds its 4096 region animation boundary budget",
+    )?;
+    let mut layouts = Vec::<RegionPoint>::new();
+    for start in times {
+        let mut active = RegionPatch::default();
+        for &(timing, patch) in sets {
+            if timing.begin <= start && timing.end.is_none_or(|end| start < end) {
+                if active.geometry_conflicts(patch) {
+                    return Err(unsupported(
+                        "overlapping TTML region sets target the same property",
+                    ));
+                }
+                active = active.merge(patch);
+            }
+        }
+        let layout = base.merge(active).compute(region.id.clone(), viewport)?;
+        let previous = layouts.last().map_or(region, |point| &point.layout);
+        if previous != &layout {
+            layouts.push(RegionPoint {
+                start,
+                layout: Arc::new(layout),
+            });
+        }
+    }
+    Ok(layouts.into())
 }
 
 fn check_id(id: &str) -> Result<(), EngineError> {

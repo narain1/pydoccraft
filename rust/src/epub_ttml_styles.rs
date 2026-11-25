@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use roxmltree::Node;
 
-use super::{invalid, limited, media::integer, XML};
+use super::{invalid, limited, media::integer, unsupported, XML};
 use crate::EngineError;
 
 #[cfg(feature = "python")]
@@ -103,6 +103,40 @@ pub(super) fn local<'n, P: Patch<'n>>(
     lookup: impl FnMut(&'n str) -> Result<P, EngineError>,
 ) -> Result<P, EngineError> {
     references(node, lookup)?.inline(node)
+}
+
+pub(super) fn validate_set(node: Node<'_, '_>, properties: &[&str]) -> Result<(), EngineError> {
+    let mut has_property = false;
+    for attribute in node.attributes() {
+        let supported = match (attribute.namespace(), attribute.name()) {
+            (None, "begin" | "dur" | "end") | (Some(XML), _) => true,
+            (None, "fill") => attribute.value() == "remove",
+            (None, "repeatCount") => attribute.value() == "1",
+            (Some(STYLING), property) if properties.contains(&property) => {
+                has_property = true;
+                true
+            }
+            _ => false,
+        };
+        if !supported {
+            return Err(unsupported(
+                "unsupported TTML set attribute or style property",
+            ));
+        }
+    }
+    if node.children().any(|child| {
+        (child.is_element() && !child.has_tag_name((TT, "metadata")))
+            || (child.is_text()
+                && child
+                    .text()
+                    .is_some_and(|text| !text.trim_ascii().is_empty()))
+    }) {
+        return Err(invalid("TTML set cannot contain subtitle content"));
+    }
+    if !has_property {
+        return Err(invalid("TTML set has no style property"));
+    }
+    Ok(())
 }
 
 pub(super) fn color(value: &str) -> Result<[u8; 4], EngineError> {
