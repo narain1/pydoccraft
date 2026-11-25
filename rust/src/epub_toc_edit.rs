@@ -64,7 +64,7 @@ pub(super) fn ncx_replacement_xml(data: &[u8]) -> Result<Document<'_>, EngineErr
     Ok(xml)
 }
 
-pub(super) fn validate_replacement(
+pub(in crate::epub) fn validate_replacement(
     data: &[u8],
     metadata: &Map<String, Value>,
     xhtml: bool,

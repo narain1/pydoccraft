@@ -197,6 +197,7 @@ pub(crate) fn update_chapters(
         mut files,
         svg_paths,
         declarations,
+        replaces_navigation,
     } = prepare_chapter_replacements(
         &mut book,
         &extracted,
@@ -216,7 +217,16 @@ pub(crate) fn update_chapters(
         files.insert(path, xml.as_bytes());
     }
     let result = rewrite(&mut book, files, BTreeMap::new(), &HashSet::new())?;
-    extract(&result, None)?;
+    let updated = extract(&result, None)?;
+    if replaces_navigation {
+        super::structure::validate_navigation_replacement(
+            &result,
+            &updated.metadata,
+            true,
+            None,
+            &HashSet::new(),
+        )?;
+    }
     validate_svg_chapters(&result, svg_paths.into_iter())?;
     Ok(result)
 }
@@ -244,6 +254,7 @@ pub(super) struct ChapterReplacements<'doc, 'edit> {
     pub(super) files: HashMap<&'doc str, &'edit [u8]>,
     pub(super) svg_paths: HashSet<&'doc str>,
     pub(super) declarations: HashMap<&'doc str, Vec<&'static str>>,
+    pub(super) replaces_navigation: bool,
 }
 
 pub(super) fn prepare_chapter_replacements<'doc, 'edit>(
@@ -314,7 +325,23 @@ pub(super) fn prepare_chapter_replacements<'doc, 'edit>(
         }
         collect_removed_anchors(book, path, replacement, &xml, removed_anchors, anchor_bytes)?;
     }
+    let replaces_navigation = epub3
+        && extracted.metadata["manifest"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|item| {
+                item["path"]
+                    .as_str()
+                    .is_some_and(|path| replacements.contains_key(path))
+                    && item["properties"].as_str().is_some_and(|properties| {
+                        properties
+                            .split_ascii_whitespace()
+                            .any(|property| property == "nav")
+                    })
+            });
     Ok(ChapterReplacements {
+        replaces_navigation,
         files: replacements,
         svg_paths,
         declarations,

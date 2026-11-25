@@ -14194,9 +14194,29 @@ Final cue
         body = '<html xmlns="http://www.w3.org/1999/xhtml"><body><h1 id="{}">A chapter</h1></body></html>'
         source = rewrite_epub(source, {"OEBPS/content.opf": package, "OEBPS/two.xhtml": body.format("old")})
         with doc_ex.open(source) as book:
+            for changed, message in (
+                (toc("Missing anchor", "missing"), "missing fragment"),
+                (toc("Missing document", "old").replace("two.xhtml#old", "absent.xhtml"),
+                 "not a packaged resource"),
+                (toc("Wrong target type", "old").replace("two.xhtml#old", "image.png"),
+                 "local content documents"),
+            ):
+                with self.subTest(edit="chapters", message=message):
+                    with self.assertRaisesRegex(doc_ex.MalformedDocumentError, message):
+                        book.edit_epub_chapters({0: changed})
+                with self.subTest(edit="structure", message=message):
+                    with self.assertRaisesRegex(doc_ex.MalformedDocumentError, message):
+                        book.edit_epub_structure([1, 0], replacements={0: changed})
+            self.assertEqual(book.read_epub_resource("OEBPS/one.xhtml"), toc("Original heading", "old").encode())
+            replacement = book.edit_epub_chapters({0: toc("Revised heading", "new"), 1: body.format("new")})
             revised = book.edit_epub_structure([1, 0], replacements={
                 0: toc("Revised heading", "new"), 1: body.format("new"),
             })
+        with doc_ex.open(replacement) as book:
+            nav = book.metadata["navigation"][0]["items"]
+            self.assertEqual([item["label"] for item in nav], ["Contents", "Revised heading"])
+            self.assertEqual(nav[1]["fragment"], "new")
+            self.assertEqual(book[1].get_text(), "A chapter")
         with doc_ex.open(revised) as book:
             nav = book.metadata["navigation"][0]["items"]
             self.assertEqual([item["label"] for item in nav], ["Revised heading", "Contents"])

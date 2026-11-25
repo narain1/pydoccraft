@@ -30,6 +30,7 @@ mod removal;
 mod spine_edit;
 #[path = "epub_toc_edit.rs"]
 mod toc;
+pub(super) use toc::validate_replacement as validate_navigation_replacement;
 
 type ChapterEdit = (String, String, Option<String>, bool, bool, bool);
 pub(crate) type SpineEdit = (Option<i64>, Option<ChapterEdit>);
@@ -232,6 +233,7 @@ pub(crate) fn update_structure<'a>(
     let mut edits = Vec::new();
     let mut removed_anchors = editor::RemovedAnchors::new();
     let mut anchor_bytes = 0;
+    let mut replaces_navigation_chapter = false;
     if let Some(original) = original.as_ref().filter(|_| !chapters.is_empty()) {
         let replacement = editor::prepare_chapter_replacements(
             &mut book,
@@ -246,6 +248,7 @@ pub(crate) fn update_structure<'a>(
                     .unwrap_or_else(|| super::rendition::fixed(page))
             },
         )?;
+        replaces_navigation_chapter = replacement.replaces_navigation;
         editor::chapter_property_edits(
             package_source,
             &package_path,
@@ -902,11 +905,12 @@ pub(crate) fn update_structure<'a>(
             svg_chapters.push(path.to_owned());
         }
     }
-    if authored_nav.is_some() || authored_ncx.is_some() {
-        toc::validate_replacement(
+    let replaces_xhtml_navigation = authored_nav.is_some() || replaces_navigation_chapter;
+    if replaces_xhtml_navigation || authored_ncx.is_some() {
+        validate_navigation_replacement(
             &updated,
             &extracted.metadata,
-            authored_nav.is_some(),
+            replaces_xhtml_navigation,
             authored_ncx.map(|(path, _, _)| path.as_str()),
             &supplemental,
         )?;
