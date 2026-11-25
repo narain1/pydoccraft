@@ -32,6 +32,9 @@ pub struct EditableEpub {
     images: Vec<ImageResource>,
     content_bytes: usize,
     media_bytes: usize,
+    /// Generated `dc:date`/`dcterms:modified` value. It is refreshed only by a
+    /// successful edit so that writing an unchanged book is byte-identical.
+    modified: Option<String>,
     closed: bool,
 }
 
@@ -47,6 +50,7 @@ impl EditableEpub {
             images: Vec::new(),
             content_bytes: 0,
             media_bytes: 0,
+            modified: now_stamp(),
             closed: false,
         }
     }
@@ -97,6 +101,7 @@ impl EditableEpub {
         self.identifier = identifier;
         self.language = language;
         self.authors = authors;
+        self.touch();
         Ok(())
     }
 
@@ -106,6 +111,7 @@ impl EditableEpub {
             validate_text(value, 128, "publication date")?;
         }
         self.publication_date = date;
+        self.touch();
         Ok(())
     }
 
@@ -129,6 +135,7 @@ impl EditableEpub {
             body: String::new(),
         });
         self.content_bytes = next;
+        self.touch();
         Ok(self.chapters.len() - 1)
     }
 
@@ -270,6 +277,7 @@ impl EditableEpub {
         self.images.push(ImageResource { href, data });
         self.content_bytes = next_content;
         self.media_bytes = next_media;
+        self.touch();
         Ok(())
     }
 
@@ -330,8 +338,13 @@ impl EditableEpub {
                     .xhtml_body(chapter.body.as_str()),
             );
         }
-        if let Some(date) = &self.publication_date {
+        // rbook stamps the wall clock into any date the builder leaves unset,
+        // so pass the edit-time stamp explicitly to keep output deterministic.
+        if let Some(date) = self.publication_date.as_ref().or(self.modified.as_ref()) {
             builder = builder.published_date(date.as_str());
+        }
+        if let Some(modified) = &self.modified {
+            builder = builder.modified_date(modified.as_str());
         }
         let mut output = BoundedOutput::default();
         if let Err(error) = builder.build().write().write(&mut output) {
@@ -379,8 +392,17 @@ impl EditableEpub {
         let next = self.checked_append(chapter, fragment)?;
         self.chapters[chapter].body.push_str(fragment);
         self.content_bytes = next;
+        self.touch();
         Ok(())
     }
+
+    fn touch(&mut self) {
+        self.modified = now_stamp();
+    }
+}
+
+fn now_stamp() -> Option<String> {
+    rbook::ebook::metadata::datetime::DateTime::try_now().map(|now| now.to_string())
 }
 
 pub(crate) fn validate_text(value: &str, limit: usize, name: &str) -> Result<(), EngineError> {
@@ -540,6 +562,21 @@ mod tests {
         assert!(matches!(error, EngineError::ResourceLimit(_)));
         assert_eq!(book.chapters[chapter].body, before);
         assert!(book.images.is_empty());
+    }
+
+    #[test]
+    fn unchanged_book_writes_identical_bytes() {
+        let mut book = EditableEpub::new();
+        book.set_metadata("T".into(), "urn:t".into(), "en".into(), Vec::new())
+            .unwrap();
+        let chapter = book.add_chapter("One".into()).unwrap();
+        book.add_paragraph(chapter, "before".into()).unwrap();
+        book.modified = Some("2000-01-01T00:00:00Z".into());
+        let before = book.to_bytes().unwrap();
+        assert!(book.add_paragraph(chapter, "bad\u{1}".into()).is_err());
+        assert_eq!(book.to_bytes().unwrap(), before);
+        book.add_paragraph(chapter, "after".into()).unwrap();
+        assert_ne!(book.modified.as_deref(), Some("2000-01-01T00:00:00Z"));
     }
 
     #[test]
