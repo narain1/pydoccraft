@@ -13625,12 +13625,18 @@ Resume
         # the 150pt containing track. Its inner table uses exactly half.
         for width in ("75pt", "50%"):
             chapter = source.replace("INNER", width)
-            with self.subTest(width=width), doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+            with doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
                 preview = book.render_page(0, dpi=96)
                 with doc_ex.open(book.convert("pdf")) as pdf:
                     vector = boxes(pdf)
                     self.assertFalse(pdf[0].get_images())
-                    self.assertGreater(vector["Far"][0] - vector["Near"][0], 30)
+                    near, far, tail, aside = (vector[term][0] for term in ("Near", "Far", "Tail", "Aside"))
+                    # The math font controls the numerator's script scale.
+                    # The separate outer track and gap give its scale independently.
+                    scale = (aside - near) / (150 + 16)
+                    self.assertGreater(scale, 0)
+                    self.assertAlmostEqual(far - near, (75 / 2 + 4) * scale, delta=0.002, msg=width)
+                    self.assertAlmostEqual(tail - near, 75 * scale, delta=0.002, msg=width)
                     self.assertGreater(vector["Near"][1] - vector["Aside"][1], 2)
                 editable = book.convert("docx")
                 with zipfile.ZipFile(io.BytesIO(editable)) as archive:
