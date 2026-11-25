@@ -1493,10 +1493,123 @@ enum Test {
     Only,
     Empty,
     Link,
+    SiblingPosition(SiblingPosition),
     Choice {
         selectors: Vec<Selector>,
         negated: bool,
     },
+}
+
+struct SiblingPosition {
+    a: i64,
+    b: i64,
+    from_end: bool,
+    filter: SiblingFilter,
+}
+
+enum SiblingFilter {
+    Any,
+    Type,
+    Selectors(Vec<Selector>),
+}
+
+impl SiblingPosition {
+    fn compile(id: &str, nth: &Nth<'_>) -> Option<(Test, Specificity)> {
+        let (from_end, by_type) = match id {
+            "nth-child" => (false, false),
+            "nth-last-child" => (true, false),
+            "nth-of-type" => (false, true),
+            "nth-last-of-type" => (true, true),
+            _ => return None,
+        };
+        let (a, b) = match &nth.index {
+            NthIndex::Odd(_) => (2, 1),
+            NthIndex::Even(_) => (2, 0),
+            NthIndex::Integer(index) => (0, index.raw.parse().ok()?),
+            NthIndex::AnPlusB(index) => (i64::from(index.a), i64::from(index.b)),
+        };
+        let (filter, mut specificity) = match &nth.matcher {
+            None if by_type => (SiblingFilter::Type, [0; 3]),
+            None => (SiblingFilter::Any, [0; 3]),
+            Some(matcher) if !by_type => {
+                let selectors = matcher
+                    .selector
+                    .as_ref()?
+                    .selectors
+                    .iter()
+                    .map(Selector::compile)
+                    .collect::<Option<Vec<_>>>()?;
+                let specificity = selectors.iter().map(|sel| sel.specificity).max()?;
+                (SiblingFilter::Selectors(selectors), specificity)
+            }
+            Some(_) => return None,
+        };
+        specificity[1] = specificity[1].saturating_add(1);
+        Some((
+            Test::SiblingPosition(Self {
+                a,
+                b,
+                from_end,
+                filter,
+            }),
+            specificity,
+        ))
+    }
+
+    fn matches(
+        &self,
+        node: Node<'_, '_>,
+        work: &mut usize,
+        boundary: Option<NodeId>,
+    ) -> Result<bool, EngineError> {
+        let eligible = |sibling: Node<'_, '_>, work: &mut usize| match &self.filter {
+            SiblingFilter::Any => Ok(true),
+            SiblingFilter::Type => Ok(sibling.tag_name() == node.tag_name()),
+            SiblingFilter::Selectors(selectors) => {
+                for selector in selectors {
+                    if selector.matches(sibling, selector.steps.len(), work, boundary)? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+        };
+        if !eligible(node, work)? {
+            return Ok(false);
+        }
+        let mut index = 1_i128;
+        if boundary != Some(node.id()) {
+            let siblings = std::iter::successors(Some(node), |sibling| {
+                if self.from_end {
+                    sibling.next_sibling()
+                } else {
+                    sibling.prev_sibling()
+                }
+            })
+            .skip(1);
+            for current in siblings {
+                charge(
+                    work,
+                    1,
+                    SELECTOR_WORK,
+                    "EPUB CSS selector work limit exceeded",
+                )?;
+                if current.is_element() && eligible(current, work)? {
+                    index += 1;
+                    if self.a <= 0 && index > i128::from(self.b) {
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+        let difference = index - i128::from(self.b);
+        let a = i128::from(self.a);
+        Ok(if a == 0 {
+            difference == 0
+        } else {
+            difference % a == 0 && difference / a >= 0
+        })
+    }
 }
 
 impl Selector {
@@ -1586,6 +1699,9 @@ impl Selector {
     fn pseudo(pseudo: &PseudoClassSelector<'_>) -> Option<(Test, Specificity)> {
         let id = ident(&pseudo.name)?;
         if let Some(arg) = &pseudo.arg {
+            if let PseudoClassSelectorArgKind::Nth(nth) = &arg.kind {
+                return SiblingPosition::compile(&id.to_ascii_lowercase(), nth);
+            }
             let PseudoClassSelectorArgKind::SelectorList(list) = &arg.kind else {
                 return None;
             };
@@ -1744,6 +1860,7 @@ impl Test {
                 }
             }),
             Self::Root => boundary.is_none() && node.parent_element().is_none(),
+            Self::SiblingPosition(position) => position.matches(node, work, boundary)?,
             Self::First => shadow_root || node.prev_sibling_element().is_none(),
             Self::Last => shadow_root || node.next_sibling_element().is_none(),
             Self::Only => {

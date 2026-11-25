@@ -2699,6 +2699,54 @@ class EpubTests(unittest.TestCase):
                         images.append(rgba_pixels(png_chunks(doc.render_page(0, dpi=96))))
                 self.assertTrue(images[0] == images[1], "grid reset or implicit area height differs")
 
+    def test_css_sibling_positions_filter_and_match_native_pdf_controls(self) -> None:
+        original = fixed_spread_fixture([("", "white", 260, 180)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head>
+          <title>Sibling positions</title><meta name="viewport" content="width=260,height=180"/>
+          <style>html,body,p,div{margin:0;font-size:12px} section{width:210px;margin:6px}
+            section>*{height:22px;background:#ece5d8} CSS
+          </style></head><body><section>
+          <p id="a" class="target">Alpha</p>
+          <!-- non-element nodes never count -->
+          <div id="spacer">Spacer</div><p id="b" class="target">Bravo</p>
+          <p id="hidden" class="target" hidden="hidden">Hidden</p>
+          <p id="d" class="target"><a href="https://example.org/sibling">Delta</a></p>
+          <div id="footer"><a href="#b">Jump to target</a></div>
+          </section></body></html>"""
+        selected = """
+          section p:nth-child(2n+1){width:120px}
+          section p:nth-of-type(-n+2){padding-left:5px}
+          p:nth-child(2 of .target, #absent){background:#ddbe6c}
+          #b{background:#bb9988}
+          p:nth-last-child(2 of .target:not([hidden])){margin-left:14px}
+          p:nth-last-of-type(1){background:#94cbb0;margin-left:22px}
+          div:nth-of-type(even){width:95px}
+        """
+        reference = """
+          #a,#b,#d{width:120px}
+          #a,#b{padding-left:5px}
+          #b{background:#ddbe6c;margin-left:14px}
+          #d{background:#94cbb0;margin-left:22px}
+          #footer{width:95px}
+        """
+        results = []
+        for css in (selected, reference):
+            chapter = template.replace("CSS", css)
+            with doc_ex.open(rewrite_epub(original, {"OEBPS/s0.xhtml": chapter})) as book:
+                preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                converted = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+            with doc_ex.open(converted) as pdf:
+                captured = rgba_pixels(png_chunks(pdf.render_page(0, dpi=96)))
+                self.assertEqual(captured, preview)
+                self.assertNotIn("Hidden", pdf[0].get_text())
+                names = [pdf[0].search_for(label) for label in ("Alpha", "Bravo", "Delta")]
+                self.assertTrue(all(len(item) == 1 for item in names))
+                external, internal = pdf[0].get_links()
+                self.assertEqual(external.uri, "https://example.org/sibling")
+                self.assertEqual(internal.metadata["target_page"], 0)
+                results.append((preview, names, external.bbox, internal.bbox))
+        self.assertTrue(results[0] == results[1], "sibling selectors and direct controls differ")
+
     def test_css_grid_intrinsic_and_fit_tracks_in_reflow(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic grid</title>
           <style>body,p{margin:0;font-size:10px}
