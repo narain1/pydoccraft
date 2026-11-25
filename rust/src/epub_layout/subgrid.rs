@@ -9,7 +9,7 @@ use taffy::{
 
 use crate::{
     epub::{
-        css::grid::{MAX_LINE_NAMES, MAX_TRACKS},
+        css::grid::{NameRepeat, MAX_LINE_NAMES, MAX_TRACKS},
         limited, unsupported,
     },
     EngineError,
@@ -35,6 +35,7 @@ pub(super) struct Projection {
     pub(super) span: Range<usize>,
     pub(super) trim: Line<f32>,
     pub(super) local_gap: Option<f32>,
+    pub(super) name_repeat: Option<NameRepeat>,
     pub(super) parent_rtl: bool,
     pub(super) child_rtl: bool,
 }
@@ -48,6 +49,7 @@ pub(super) fn inherit_axis(
         span,
         trim,
         local_gap,
+        name_repeat,
         parent_rtl,
         child_rtl,
     } = projection;
@@ -56,11 +58,10 @@ pub(super) fn inherit_axis(
     if tracks.is_empty() || tracks.len() > MAX_TRACKS {
         return Err(limited("EPUB CSS inherited grid track limit"));
     }
-    if aliases.len() > tracks.len() + 1
-        || source
-            .collapsed_tracks
-            .iter()
-            .any(|run| run.start < span.end && run.end > span.start)
+    if source
+        .collapsed_tracks
+        .iter()
+        .any(|run| run.start < span.end && run.end > span.start)
     {
         return Err(unresolved());
     }
@@ -111,6 +112,23 @@ pub(super) fn inherit_axis(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
+    let positions = tracks.len() + 1;
+    let alias_index = |position: usize| {
+        let Some(repeat) = name_repeat else {
+            return position;
+        };
+        if position < repeat.start {
+            return position;
+        }
+        let fixed = aliases.len() - repeat.length;
+        let copies = positions.saturating_sub(fixed) / repeat.length;
+        let offset = position - repeat.start;
+        if offset < copies * repeat.length {
+            repeat.start + offset % repeat.length
+        } else {
+            position + repeat.length - copies * repeat.length
+        }
+    };
     let mut total = 0;
     let names = (0..=tracks.len())
         .map(|index| {
@@ -120,7 +138,7 @@ pub(super) fn inherit_axis(
                 span.start + index
             };
             let mut line = source.names_for_line(line_index).to_vec();
-            for alias in aliases.get(index).into_iter().flatten() {
+            for alias in aliases.get(alias_index(index)).into_iter().flatten() {
                 if !line.contains(alias) {
                     line.push(alias.clone());
                 }

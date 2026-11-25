@@ -16,7 +16,7 @@ use taffy::{
 };
 
 use crate::epub::{
-    css::CalculationTable,
+    css::{grid, CalculationTable},
     limited,
     style::{IntrinsicBound, IntrinsicBounds, SizeBounds},
     unsupported,
@@ -49,11 +49,27 @@ struct Node {
 impl Tree {
     pub(super) fn add(
         &mut self,
-        style: Style,
+        mut style: Style,
         bounds: IntrinsicBounds,
         children: Vec<NodeId>,
         relative_math: bool,
     ) -> NodeId {
+        if style.display == Display::Grid {
+            if bounds.subgrid.width {
+                style.grid_column = grid::subgrid_placement(
+                    style.grid_column,
+                    style.grid_template_column_names.len(),
+                    bounds.subgrid_name_repeat.width,
+                );
+            }
+            if bounds.subgrid.height {
+                style.grid_row = grid::subgrid_placement(
+                    style.grid_row,
+                    style.grid_template_row_names.len(),
+                    bounds.subgrid_name_repeat.height,
+                );
+            }
+        }
         let id = NodeId::from(self.nodes.len());
         let has_relative_math = relative_math
             || children
@@ -414,6 +430,7 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
                     span,
                     trim,
                     local_gap,
+                    name_repeat: node.bounds.subgrid_name_repeat.get_abs(axis),
                     parent_rtl,
                     child_rtl,
                 },

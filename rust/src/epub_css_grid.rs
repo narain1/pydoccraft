@@ -6,6 +6,7 @@ use raffia::{
     Parser, Spanned, Syntax,
 };
 use taffy::{
+    geometry::Line,
     style::{
         GridAutoFlow, GridPlacement, GridTemplateArea, GridTemplateAreas, GridTemplateComponent,
         GridTemplateRepetition, LengthPercentage, RepetitionCount, TrackSizingFunction,
@@ -73,10 +74,17 @@ enum Issue {
     Limit,
 }
 
+#[derive(Clone, Copy)]
+pub(in crate::epub) struct NameRepeat {
+    pub start: usize,
+    pub length: usize,
+}
+
 pub(in crate::epub) struct Template<T> {
     pub tracks: Vec<T>,
     pub names: Vec<Vec<String>>,
     pub subgrid: bool,
+    pub name_repeat: Option<NameRepeat>,
 }
 
 impl<T> Default for Template<T> {
@@ -85,6 +93,7 @@ impl<T> Default for Template<T> {
             tracks: Vec::new(),
             names: Vec::new(),
             subgrid: false,
+            name_repeat: None,
         }
     }
 }
@@ -95,6 +104,7 @@ impl<T> Template<T> {
             tracks: Vec::new(),
             names: vec![Vec::new()],
             subgrid: false,
+            name_repeat: None,
         }
     }
 }
@@ -170,31 +180,7 @@ fn parse<'a>(
     }
     if let [first, lines @ ..] = components {
         if keyword(first, "subgrid") {
-            if lines.len() > MAX_TRACKS + 1 {
-                return Err(Issue::Limit);
-            }
-            let mut template = Template {
-                subgrid: true,
-                ..Template::default()
-            };
-            let mut total = 0;
-            for line in lines {
-                let ComponentValue::BracketBlock(block) = line else {
-                    return Err(Issue::Unsupported);
-                };
-                total += block.value.len();
-                if total > MAX_LINE_NAMES {
-                    return Err(Issue::Limit);
-                }
-                template.names.push(
-                    block
-                        .value
-                        .iter()
-                        .map(|name| line_name(name).map(str::to_owned))
-                        .collect::<Result<_, _>>()?,
-                );
-            }
-            return Ok(template);
+            return parse_subgrid(lines);
         }
     }
     let mut template = Template::with_first_line();
@@ -218,17 +204,7 @@ fn parse<'a>(
                 return Err(Issue::Invalid);
             }
             let (count, automatic) = match count {
-                ComponentValue::Number(count) => {
-                    let digits = count.raw.strip_prefix('+').unwrap_or(count.raw);
-                    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-                        return Err(Issue::Invalid);
-                    }
-                    let count = digits.parse::<usize>().map_err(|_| Issue::Limit)?;
-                    if count == 0 {
-                        return Err(Issue::Invalid);
-                    }
-                    (count, None)
-                }
+                ComponentValue::Number(count) => (repeat_count(count.raw)?, None),
                 item if keyword(item, "auto-fit") => (1, Some(RepetitionCount::AutoFit)),
                 item if keyword(item, "auto-fill") => (1, Some(RepetitionCount::AutoFill)),
                 _ => return Err(Issue::Invalid),
@@ -297,6 +273,106 @@ fn parse<'a>(
         template.names.clear();
     }
     Ok(template)
+}
+
+fn parse_subgrid<'a>(items: &[ComponentValue<'_>]) -> Result<Template<TrackPart<'a>>, Issue> {
+    let mut template = Template {
+        subgrid: true,
+        ..Template::default()
+    };
+    let mut total = 0;
+    for item in items {
+        let (lists, count) = if let Some((_, args)) =
+            function(item).filter(|(name, _)| name.eq_ignore_ascii_case("repeat"))
+        {
+            let [count, delimiter, lists @ ..] = args else {
+                return Err(Issue::Invalid);
+            };
+            if !comma(delimiter) || lists.is_empty() {
+                return Err(Issue::Invalid);
+            }
+            let count = match count {
+                ComponentValue::Number(number) => Some(repeat_count(number.raw)?),
+                item if keyword(item, "auto-fill") && template.name_repeat.is_none() => None,
+                _ => return Err(Issue::Invalid),
+            };
+            (lists, count)
+        } else {
+            (std::slice::from_ref(item), Some(1))
+        };
+
+        let repeated = count.unwrap_or(1);
+        let slots = lists.len().checked_mul(repeated).ok_or(Issue::Limit)?;
+        if slots > MAX_TRACKS + 1 - template.names.len() {
+            return Err(Issue::Limit);
+        }
+        let mut group = Vec::with_capacity(lists.len());
+        for list in lists {
+            let ComponentValue::BracketBlock(block) = list else {
+                return Err(Issue::Invalid);
+            };
+            let expanded = block
+                .value
+                .len()
+                .checked_mul(repeated)
+                .ok_or(Issue::Limit)?;
+            if expanded > MAX_LINE_NAMES - total {
+                return Err(Issue::Limit);
+            }
+            total += expanded;
+            group.push(
+                block
+                    .value
+                    .iter()
+                    .map(|name| line_name(name).map(str::to_owned))
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+        }
+
+        if count.is_none() {
+            template.name_repeat = Some(NameRepeat {
+                start: template.names.len(),
+                length: group.len(),
+            });
+        }
+        for _ in 1..repeated {
+            template.names.extend(group.iter().cloned());
+        }
+        template.names.extend(group);
+    }
+    Ok(template)
+}
+
+fn repeat_count(source: &str) -> Result<usize, Issue> {
+    let digits = source.strip_prefix('+').unwrap_or(source);
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(Issue::Invalid);
+    }
+    let count = digits.parse::<usize>().map_err(|_| Issue::Limit)?;
+    if count == 0 {
+        return Err(Issue::Invalid);
+    }
+    Ok(count)
+}
+
+pub(in crate::epub) fn subgrid_placement(
+    mut line: Line<GridPlacement<String>>,
+    names: usize,
+    repeat: Option<NameRepeat>,
+) -> Line<GridPlacement<String>> {
+    let fixed = names - repeat.map_or(0, |repeat| repeat.length);
+    let span = GridPlacement::Span(fixed.saturating_sub(1).max(1) as u16);
+    match (&line.start, &line.end) {
+        (
+            GridPlacement::Auto | GridPlacement::Line(_) | GridPlacement::NamedLine(..),
+            GridPlacement::Auto,
+        ) => line.end = span,
+        (GridPlacement::Auto, GridPlacement::Line(_) | GridPlacement::NamedLine(..)) => {
+            line.start = span
+        }
+        _ => {}
+    }
+    line
 }
 
 fn check_adjacent_lines(item: &ComponentValue<'_>, previous: &mut bool) -> Result<(), Issue> {
@@ -768,6 +844,7 @@ pub(in crate::epub) fn resolve(
         tracks,
         names,
         subgrid,
+        name_repeat,
     } = parse(source, &syntax.value).map_err(|issue| match issue {
         Issue::Invalid => invalid("invalid EPUB grid track expression"),
         Issue::Unsupported => unsupported("unsupported EPUB grid track expression"),
@@ -831,5 +908,6 @@ pub(in crate::epub) fn resolve(
         tracks,
         names,
         subgrid,
+        name_repeat,
     })
 }

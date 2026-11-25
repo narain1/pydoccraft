@@ -3309,6 +3309,67 @@ class EpubTests(unittest.TestCase):
         )
         self.assertTrue(render(signed) == render(signed_control))
 
+    def test_css_subgrid_repeated_line_names_follow_the_selected_span(self) -> None:
+        fixture = fixed_spread_fixture([("", "white", 335, 128)])
+        source = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Repeated subgrid lines</title>
+          <meta name="viewport" content="width=335,height=128"/><style>
+          html,body,p{margin:0;font-size:11px}
+          #parent{position:absolute;left:10px;top:11px;width:300px;height:90px;display:grid;
+            grid-template-columns:40px 60px 70px 100px;grid-template-rows:90px;gap:10px}
+          #sub{display:grid;grid-row:1;grid-column:2/5;grid-template-rows:90px;background:#e1d5ba}
+          #one,#two{grid-row:1}#one{background:#8ead89}#two{background:#958bc9}
+          CSS</style></head><body><div id="parent"><div id="sub">
+          <p id="one"><a href="https://example.org/lines">First label</a></p>
+          <p id="two">Second label</p></div></div></body></html>"""
+
+        def render(rules: str) -> tuple[tuple[int, bytes], object, object]:
+            document = rewrite_epub(fixture, {"OEBPS/s0.xhtml": source.replace("CSS", rules)})
+            with doc_ex.open(document) as book:
+                image = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                result = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+            with doc_ex.open(result) as pdf:
+                self.assertTrue(image == rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))))
+                page = pdf[0]
+                words = [page.search_for(word) for word in ("First", "Second")]
+                self.assertTrue(all(words))
+                links = page.get_links()
+                self.assertEqual([link.uri for link in links], ["https://example.org/lines"])
+                return image, words, [link.bbox for link in links]
+
+        for names, exact, placements in (
+            ("[head] repeat(auto-fill,[bit]) [tail]",
+             "[head]60px [bit]70px [bit]100px [tail]",
+             "#one{grid-column:bit 1/bit 2}#two{grid-column:bit 2/tail}"),
+            ("repeat(2,[alpha] [beta]) [outside]",
+             "[alpha]60px [beta]70px [alpha]100px [beta]",
+             "#one{grid-column:alpha 1/beta 1}#two{grid-column:alpha 2/beta 2}"),
+            ("repeat(auto-fill,[token] [slot]) [tail]",
+             "[token]60px [slot]70px [tail]100px",
+             "#one{grid-column:token/slot}#two{grid-column:tail/-1}"),
+            ("[a] [b] repeat(auto-fill,[unused]) [c] [d]",
+             "[a]60px [b]70px [c]100px [d]",
+             "#one{grid-column:a/b}#two{grid-column:c/d}"),
+        ):
+            with self.subTest(names=names):
+                actual = f"#sub{{grid-template-columns:subgrid {names}}}" + placements
+                control = f"#sub{{grid-template-columns:{exact};column-gap:10px}}" + placements
+                self.assertTrue(render(actual) == render(control))
+
+        placements = "#one{grid-column:mark 1/mark 2}#two{grid-column:mark 3/mark 4}"
+        control = render(
+            "#sub{grid-template-columns:[mark]60px [mark]70px [mark]100px [mark];column-gap:10px}"
+            + placements
+        )
+        for position in ("2/auto", "auto/5"):
+            with self.subTest(position=position):
+                self.assertTrue(render(
+                    f"#sub{{grid-column:{position};grid-template-columns:subgrid repeat(4,[mark])}}"
+                    + placements
+                ) == control)
+
+        with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "grid track expression exceeds"):
+            render("#sub{grid-template-columns:subgrid repeat(65,[oversized])}")
+
     def test_css_intrinsic_box_counts_padding_and_wraps_before_column_flex_height(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic box edges</title>
           <style>body,p{margin:0} section{width:200px;CONTAINER}

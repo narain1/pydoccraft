@@ -27,6 +27,7 @@ pub(super) struct IntrinsicBounds {
     pub contain: Size<bool>,
     pub subgrid: Size<bool>,
     pub subgrid_local_gap: Size<bool>,
+    pub subgrid_name_repeat: Size<Option<css::grid::NameRepeat>>,
     pub content_box_ratio: bool,
 }
 
@@ -51,6 +52,10 @@ impl IntrinsicBounds {
         subgrid_local_gap: Size {
             width: false,
             height: false,
+        },
+        subgrid_name_repeat: Size {
+            width: None,
+            height: None,
         },
         content_box_ratio: false,
     };
@@ -322,6 +327,7 @@ impl ChapterStyles {
                                 tracks: tracks.clone(),
                                 names: names.clone(),
                                 subgrid: p.intrinsic_bounds.subgrid.get_abs(axis),
+                                name_repeat: p.intrinsic_bounds.subgrid_name_repeat.get_abs(axis),
                             }
                         })
                         .unwrap_or_default());
@@ -391,6 +397,10 @@ impl ChapterStyles {
                     height: values
                         .get("row-gap")
                         .is_some_and(|source| !source.eq_ignore_ascii_case("normal")),
+                },
+                subgrid_name_repeat: Size {
+                    width: columns.name_repeat,
+                    height: rows.name_repeat,
                 },
                 content_box_ratio: prefers_natural_ratio,
             };
