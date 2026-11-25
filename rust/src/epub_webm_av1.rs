@@ -2,7 +2,7 @@
 use oxideav_av1::{
     codec_config::Av1CodecConfig,
     decoder::SpecDecodeSession,
-    obu::{parse_obu, ObuType},
+    obu::{parse_obu, ObuDescriptor, ObuType},
     sequence_header::{parse_sequence_header, SequenceHeader},
 };
 use oxideav_core::{Packet, PixelFormat, VideoFrame, VideoPlane};
@@ -14,9 +14,60 @@ const MAX_PRIVATE_BYTES: usize = 64 * 1024;
 const MAX_BLOCK_OBUS: usize = 128;
 const MAX_FRAMES_PER_BLOCK: usize = 8;
 const MAX_OBUS: usize = 500_000;
+const BASE_LAYER: u16 = (1 << 8) | 1;
+
+#[derive(Clone, Copy, Default)]
+struct OperatingPoint {
+    index: u8,
+    idc: u16,
+}
+
+impl OperatingPoint {
+    fn select(sequence: &SequenceHeader) -> Result<Self, EngineError> {
+        let points = &sequence.operating_points;
+        if points.len() == 1 && points[0].operating_point_idc == 0 {
+            return Ok(Self::default());
+        }
+        let mut selected = None;
+        for (index, point) in points.iter().enumerate() {
+            let idc = point.operating_point_idc;
+            if points[..index]
+                .iter()
+                .any(|other| other.operating_point_idc == idc)
+            {
+                return Err(invalid("duplicate WebM AV1 operating-point mask"));
+            }
+            if idc == 0 {
+                return Err(invalid(
+                    "WebM AV1 mixes an unrestricted operating point with layer masks",
+                ));
+            }
+            if idc == BASE_LAYER {
+                selected = Some(Self {
+                    index: index as u8, // AV1 caps the list at 32 entries.
+                    idc,
+                });
+            }
+        }
+        selected.ok_or_else(|| unsupported("WebM AV1 has no supported base operating point"))
+    }
+
+    // AV1 §5.3.1 keeps sequence headers and delimiters in every operating point.
+    fn excludes(self, obu: ObuDescriptor<'_>) -> bool {
+        self.idc != 0
+            && obu.extension_flag
+            && !matches!(
+                obu.obu_type,
+                ObuType::SequenceHeader | ObuType::TemporalDelimiter
+            )
+            && ((self.idc >> obu.temporal_id) & 1 == 0
+                || (self.idc >> (obu.spatial_id + 8)) & 1 == 0)
+    }
+}
 
 pub(super) struct Track {
     sequence: Option<SequenceHeader>,
+    operating_point: OperatingPoint,
     bootstrap: Vec<u8>,
     coded: (u32, u32),
     obus: usize,
@@ -36,40 +87,65 @@ impl Track {
         }
         let mut track = Self {
             sequence: None,
+            operating_point: OperatingPoint::default(),
             bootstrap: Vec::new(),
             coded,
             obus: 0,
         };
         if !bytes.is_empty() {
-            let config = Av1CodecConfig::parse(bytes)
+            let mut config = Av1CodecConfig::parse(bytes)
                 .ok_or_else(|| invalid("invalid WebM AV1 codec configuration"))?;
-            track.scan(&config.config_obus, true)?;
+            track.scan(&mut config.config_obus, true)?;
         }
         Ok(track)
     }
 
-    pub(super) fn inspect(&mut self, bytes: &[u8]) -> Result<(bool, bool), EngineError> {
+    pub(super) fn inspect(
+        &mut self,
+        bytes: &mut Vec<u8>,
+    ) -> Result<Option<(bool, bool)>, EngineError> {
         self.scan(bytes, false)
     }
 
-    fn scan(&mut self, mut bytes: &[u8], configuration: bool) -> Result<(bool, bool), EngineError> {
+    fn scan(
+        &mut self,
+        bytes: &mut Vec<u8>,
+        configuration: bool,
+    ) -> Result<Option<(bool, bool)>, EngineError> {
         let mut frames = 0;
         let mut shown = 0;
         let mut key = false;
         let mut count = 0;
-        while !bytes.is_empty() {
+        let mut read = 0;
+        let mut write = 0;
+        let mut omitted_picture_data = false;
+        let mut selected_picture_data = false;
+        while read < bytes.len() {
             count += 1;
             self.obus += 1;
             if count > MAX_BLOCK_OBUS || self.obus > MAX_OBUS {
                 return Err(limited("WebM AV1 exceeds its OBU count budget"));
             }
-            let (obu, used) = parse_obu(bytes).map_err(invalid)?;
+            let (obu, used) = parse_obu(&bytes[read..]).map_err(invalid)?;
+            let stop = read + used;
+            if self.operating_point.excludes(obu) {
+                omitted_picture_data |= matches!(
+                    obu.obu_type,
+                    ObuType::Frame
+                        | ObuType::FrameHeader
+                        | ObuType::TileGroup
+                        | ObuType::RedundantFrameHeader
+                );
+                read = stop;
+                continue;
+            }
             if obu.spatial_id != 0 || obu.temporal_id != 0 {
-                return Err(unsupported("layered WebM AV1"));
+                return Err(unsupported("unsupported selected WebM AV1 layer"));
             }
             match obu.obu_type {
-                ObuType::SequenceHeader => self.sequence(&bytes[..used], obu.payload)?,
+                ObuType::SequenceHeader => self.sequence(&bytes[read..stop], obu.payload)?,
                 ObuType::Frame | ObuType::FrameHeader if !configuration => {
+                    selected_picture_data = true;
                     let sequence = self
                         .sequence
                         .as_ref()
@@ -90,12 +166,20 @@ impl Track {
                     }
                 }
                 ObuType::Metadata | ObuType::TemporalDelimiter | ObuType::Padding => {}
-                ObuType::TileGroup | ObuType::RedundantFrameHeader if !configuration => {}
+                ObuType::TileGroup | ObuType::RedundantFrameHeader if !configuration => {
+                    selected_picture_data = true;
+                }
                 _ => return Err(unsupported("WebM AV1 OBU type in this packet")),
             }
-            bytes = &bytes[used..];
+            // Decode the exact OBU sequence that was admitted and indexed.
+            if write != read {
+                bytes.copy_within(read..stop, write);
+            }
+            write += used;
+            read = stop;
         }
-        Ok((key, shown == 1))
+        bytes.truncate(write);
+        Ok((!omitted_picture_data || selected_picture_data).then_some((key, shown == 1)))
     }
 
     fn sequence(&mut self, encoded: &[u8], payload: &[u8]) -> Result<(), EngineError> {
@@ -112,9 +196,6 @@ impl Track {
             return Err(unsupported(
                 "WebM AV1 sequence dimensions disagree with its track",
             ));
-        }
-        if sequence.operating_points_cnt_minus_1 != 0 {
-            return Err(unsupported("layered WebM AV1"));
         }
         let signal = &sequence.color_config;
         if matches!(signal.transfer_characteristics, 16 | 18) {
@@ -142,6 +223,7 @@ impl Track {
                 return Err(unsupported("WebM AV1 changes its sequence header"));
             }
         } else {
+            self.operating_point = OperatingPoint::select(&sequence)?;
             self.sequence = Some(sequence);
             self.bootstrap = encoded.to_vec();
         }
@@ -197,9 +279,17 @@ impl Track {
         };
         let mut session = SpecDecodeSession::new();
         session.set_max_picture_size(MAX_PIXELS);
+        session
+            .set_operating_point(self.operating_point.index)
+            .map_err(decoder_error)?;
         let startup = session
             .decode_temporal_unit(&self.bootstrap)
             .map_err(decoder_error)?;
+        if session.operating_point_idc() != self.operating_point.idc {
+            return Err(invalid(
+                "WebM AV1 decoder disagrees with the operating point",
+            ));
+        }
         if !startup.is_empty() {
             return Err(invalid("unexpected WebM AV1 picture in sequence header"));
         }

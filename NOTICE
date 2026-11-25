@@ -122,6 +122,8 @@ The synthetic AV1 monochrome WebM fixtures in tests/fixtures/epub-video-av1-mono
 
 The synthetic AV1 RGB WebM fixtures in tests/fixtures/epub-video-av1-rgb-{8,10,12}.webm contain project-authored sample patterns under Apache-2.0. libaom through FFmpeg was used solely to encode the source-tree test fixtures.
 
+The synthetic AV1 base operating-point fixture in tests/fixtures/epub-video-av1-base-op.webm uses project-authored picture patterns and a generated tone under Apache-2.0. libaom and FFmpeg with libopus generated this source-tree fixture, and libdav1d verified the base picture samples.
+
 The locked crate-by-crate license inventory is distributed as LICENSE-THIRD-PARTY and maintained in source as THIRD_PARTY_LICENSES.md.
 
 The ArtCraft, PdfCraft, WordCraft, and DeckCraft names, wordmarks, and logos are trademarks of their respective owners. No trademark license is granted. No upstream logos or brand assets are included in pydoccraft.

@@ -92,8 +92,8 @@ impl WebmSource {
             .map_err(invalid)?;
         let (mut geometry, crop) = geometry(&reader, index, coded)?;
         let mut pictures = Vec::new();
-        let mut shown = Vec::new();
-        while let Some(unit) = reader.next()? {
+        let mut schedule = Vec::new();
+        while let Some(mut unit) = reader.next()? {
             if unit.packet.stream_index != index {
                 continue;
             }
@@ -101,13 +101,13 @@ impl WebmSource {
                 return Err(unsupported("laced or padded WebM video blocks"));
             }
             let time = unit.time()?;
-            let (keyframe, visible) = codec.inspect(&unit.packet.data, coded)?;
-            if pictures.is_empty() && !keyframe {
+            let selected = codec.inspect(&mut unit.packet.data, coded)?;
+            if selected.is_some_and(|(keyframe, _)| pictures.is_empty() && !keyframe) {
                 return Err(invalid("WebM video starts without a keyframe"));
             }
-            if visible {
+            if !matches!(selected, Some((_, false))) {
                 let time = u64::try_from(time).map_err(invalid)?;
-                if shown
+                if schedule
                     .last()
                     .is_some_and(|&(_, previous, _, _)| previous >= time)
                 {
@@ -123,42 +123,57 @@ impl WebmSource {
                     .map_err(invalid)?;
                 let tick =
                     u64::try_from(webm::timestamp(unit.packet.time_base, 1)?).map_err(invalid)?;
-                shown.push((pictures.len(), time, explicit, tick));
+                schedule.push((selected.map(|_| pictures.len()), time, explicit, tick));
             }
-            pictures.push(Picture {
-                packet: unit.packet,
-                keyframe,
-                display: None,
-            });
+            if let Some((keyframe, _)) = selected {
+                pictures.push(Picture {
+                    packet: unit.packet,
+                    keyframe,
+                    display: None,
+                });
+            }
         }
-        if shown.is_empty() {
+        if !schedule.iter().any(|point| point.0.is_some()) {
             return Err(invalid("WebM has no displayed pictures"));
         }
         let (kr, kb, full) = colour(&reader, index, codec.colour()?)?;
         (geometry.kr, geometry.kb, geometry.full_range) = (kr, kb, full);
-        let mut last_end = 0;
-        for (i, &(packet, begin, explicit, tick)) in shown.iter().enumerate() {
-            let following = shown.get(i + 1).map(|&(_, begin, _, _)| begin);
+        let mut shown: Vec<usize> = Vec::new();
+        for (i, &(packet, begin, explicit, tick)) in schedule.iter().enumerate() {
+            let following = schedule.get(i + 1).map(|&(_, begin, _, _)| begin);
             let end = picture_end(begin, following, explicit, nominal, tick, duration)?;
             let interval = begin / 1000..end / 1000;
             if interval.is_empty() {
                 return Err(invalid("WebM picture has no presentation duration"));
             }
-            last_end = interval.end;
-            pictures[packet].display = Some(interval);
+            if let Some(packet) = packet {
+                pictures[packet].display = Some(interval);
+                shown.push(packet);
+            } else if let Some(display) = shown
+                .last()
+                .and_then(|&packet| pictures[packet].display.as_mut())
+                .filter(|display| display.end == interval.start)
+            {
+                // Hold the selected picture over a contiguous omitted layer block.
+                display.end = interval.end;
+            }
         }
+        let last_end = shown
+            .last()
+            .and_then(|&packet| pictures[packet].display.as_ref())
+            .map_or(0, |display| display.end);
         let length = duration.map_or(last_end, |ns| last_end.max(ns / 1000));
         let clip = start..end.unwrap_or(length).min(length);
         if clip.is_empty() {
             return Err(invalid("WebM video clip lies outside its presentation"));
         }
-        let first = shown.partition_point(|&(packet, _, _, _)| {
+        let first = shown.partition_point(|&packet| {
             pictures[packet]
                 .display
                 .as_ref()
                 .is_some_and(|time| time.end <= start)
         });
-        let next = if let Some(&(packet, _, _, _)) = shown.get(first) {
+        let next = if let Some(&packet) = shown.get(first) {
             let key = pictures[..=packet]
                 .iter()
                 .rposition(|frame| frame.keyframe)
@@ -358,7 +373,11 @@ impl Playback {
 }
 
 impl Codec {
-    fn inspect(&mut self, bytes: &[u8], coded: (u32, u32)) -> Result<(bool, bool), EngineError> {
+    fn inspect(
+        &mut self,
+        bytes: &mut Vec<u8>,
+        coded: (u32, u32),
+    ) -> Result<Option<(bool, bool)>, EngineError> {
         match self {
             Self::Av1(state) => state.inspect(bytes),
             Self::Vp8 => {
@@ -370,7 +389,7 @@ impl Codec {
                         return Err(unsupported("WebM VP8 changes coded picture dimensions"));
                     }
                 }
-                Ok((header.keyframe.is_some(), header.tag.show_frame))
+                Ok(Some((header.keyframe.is_some(), header.tag.show_frame)))
             }
             Self::Vp9(colour) => {
                 let dimensions = [coded; 8];
@@ -407,7 +426,7 @@ impl Codec {
                         "multiple WebM VP9 pictures at one block timestamp",
                     ));
                 }
-                Ok((keyframe, shown == 1))
+                Ok(Some((keyframe, shown == 1)))
             }
         }
     }

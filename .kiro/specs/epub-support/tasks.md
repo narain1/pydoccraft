@@ -174,6 +174,7 @@
 - [x] Stream fixed-geometry SDR AV1 pictures from WebM with bounded keyframe seeking and synchronized audio and captions.
 - [x] Decode 8-, 10- and 12-bit monochrome SDR AV1 in WebM with full and studio range conversion, cropped seeks and synchronized captions.
 - [x] Decode 8-, 10- and 12-bit full-range BT.709/sRGB identity-matrix AV1 in WebM with exact RGB order, cropped seeks and synchronized captions.
+- [x] Stream the advertised fixed-geometry AV1 base operating point, preserving original timing, authored gaps and synchronized crops, seeks, audio and captions.
 - [x] Preserve surround Vorbis speaker assignments in Ogg and WebM audio, video soundtracks, and narration. Reject undefined speaker layouts.
 - [ ] Extend WebM to additional AV1 profiles, high dynamic range and alpha.
 - [ ] Support additional Ogg soundtrack codecs, mixed soundtracks with differing PCM layouts, simultaneous video tracks and more MP4 profiles.

@@ -8410,6 +8410,92 @@ Trailing
                 self.assertLess(red, 10)
                 self.assertGreater(min(green, blue), 245)
 
+    def test_embedded_webm_av1_base_operating_point_shares_media_clock(self) -> None:
+        resource = (Path(__file__).parent / "fixtures/epub-video-av1-base-op.webm").read_bytes()
+        path = "OEBPS/clip.webm"
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>AV1 base layer</title></head>
+          <body><video>
+          <source src="clip.webm" type="video/webm"/>
+          <source src="clip.webm#t=0.058,0.279&amp;xywh=4,5,6,4" type="video/webm"/>
+          <track kind="captions" srclang="en" src="captions.vtt"/>
+          </video></body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            publication = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("AV1 base layer", chapter, "OEBPS/clip.xhtml")],
+                resources={
+                    path: doc_ex.EpubResource("video/webm", resource),
+                    "OEBPS/captions.vtt": doc_ex.EpubResource(
+                        "text/vtt", b"WEBVTT\n\n00:00:00.090 --> 00:00:00.213\nBase picture\n",
+                    ),
+                },
+            )
+
+        # Independently decode operating point 1 with libdav1d. Cropping includes
+        # the WebM track's two-pixel top and left offsets.
+        def reference(frame: int) -> bytes:
+            row0 = (22 + frame * 42,) * 2 + (54 + frame * 42,) * 4
+            row1 = (34 + frame * 42,) * 2 + (66 + frame * 42,) * 4
+            return bytes(luma for row in (row0, row1, row1, row1) for luma in row for _ in range(3))
+
+        def pcm(book: doc_ex.Document, **clip: int) -> bytes:
+            chunks = bytearray()
+            for chunk in book.epub_embedded_audio(0, 0, source_index=0, chunk_frames=463, **clip):
+                self.assertEqual((chunk.sample_rate, chunk.channels), (48_000, 1))
+                with wave.open(io.BytesIO(chunk.wave), "rb") as samples:
+                    chunks.extend(samples.readframes(chunk.frame_count))
+            return bytes(chunks)
+
+        with doc_ex.open(publication) as book:
+            frames = list(book.epub_embedded_video(0, 0, source_index=0))
+            self.assertEqual([(f.start_us, f.duration_us) for f in frames],
+                             [(i * 80_000, 80_000) for i in range(4)])
+            self.assertTrue(all((f.width, f.height) == (14, 14) for f in frames))
+            clipped = list(book.epub_embedded_video(0, 0, source_index=1, text_track=0))
+            self.assertEqual([(f.start_us, f.duration_us) for f in clipped], [
+                (58_000, 22_000), (80_000, 10_000), (90_000, 70_000),
+                (160_000, 53_000), (213_000, 27_000), (240_000, 39_000),
+            ])
+            self.assertTrue(all((f.width, f.height) == (6, 4) for f in clipped))
+            self.assertEqual([f.rgb for f in clipped], [reference(i) for i in (0, 1, 1, 2, 2, 3)])
+            self.assertEqual([[cue.text for cue in f.text_cues] for f in clipped],
+                             [[], [], ["Base picture"], ["Base picture"], [], []])
+            self.assertIs(clipped[1].rgb, clipped[2].rgb)
+            seek = list(book.epub_embedded_video(
+                0, 0, source_index=1, start_us=205_123, end_us=217_002, text_track=0,
+            ))
+            self.assertEqual([(f.start_us, f.duration_us, bool(f.text_cues)) for f in seek],
+                             [(205_123, 7_877, True), (213_000, 4_002, False)])
+            self.assertEqual(seek[0].rgb, reference(2))
+            self.assertIs(seek[0].rgb, seek[1].rgb)
+            full = pcm(book)
+            self.assertEqual(len(full), 15_360 * 2)
+            self.assertTrue(any(full))
+            self.assertEqual(pcm(book, start_us=58_000, end_us=279_000), full[2_784 * 2:13_392 * 2])
+            self.assertEqual(book.read_epub_resource(path), resource)
+
+        # A shorter track default inserts real gaps between its 40 ms blocks.
+        nominal = bytes.fromhex("23e3838402625a00")
+        self.assertEqual(resource.count(nominal), 1)
+        gap = resource.replace(nominal, bytes.fromhex("23e3838401312d00"))
+        with doc_ex.open(rewrite_epub(publication, {path: gap})) as book:
+            frames = list(book.epub_embedded_video(0, 0, source_index=0))
+            self.assertEqual([(f.start_us, f.duration_us) for f in frames],
+                             [(i * 80_000, 20_000) for i in range(4)])
+
+        # All three headers (private configuration and both random access points)
+        # must advertise a fixed base operating point.
+        sequence = bytes.fromhex("0a0c001103008080cffcdaf90840")
+        self.assertEqual(resource.count(sequence), 3)
+        for candidate, error, message in (
+            ("0a0c001103008380cffcdaf90840", doc_ex.UnsupportedFormatError, "no supported base operating point"),
+            ("0a0c001103008180cffcdaf90840", doc_ex.MalformedDocumentError, "duplicate WebM AV1 operating-point"),
+        ):
+            with self.subTest(message=message):
+                changed = resource.replace(sequence, bytes.fromhex(candidate))
+                with doc_ex.open(rewrite_epub(publication, {path: changed})) as book:
+                    with self.assertRaisesRegex(error, message):
+                        next(book.epub_embedded_video(0, 0, source_index=0))
+
     def test_embedded_webm_av1_monochrome_preserves_samples_crop_and_timing(self) -> None:
         fixtures = Path(__file__).parent / "fixtures"
         profiles = (
