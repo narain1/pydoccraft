@@ -18374,6 +18374,126 @@ Resume
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):
                     source.export_epub_fixed_pdf(dpi=96, searchable=True)
 
+    def test_svg_flat_lighting_mask_attributes_separated_text_and_graphics(self) -> None:
+        fixture = fixed_spread_fixture([("", "white", 196, 120)])
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Shared lighting</title>
+          <meta name="viewport" content="width=196,height=120"/><style>body {margin:0}</style>
+          </head><body>SVGCONTENT</body></html>"""
+        with zipfile.ZipFile(io.BytesIO(fixture)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'href="s0.xhtml" media-type="application/xhtml+xml"',
+                b'href="s0.svg" media-type="image/svg+xml"',
+            )
+        text = ('<a href="https://example.org/word"><text id="word" x="18" y="55" '
+                'font-size="35" font-weight="900">B́</text></a>')
+        graphic = ('<a href="https://example.org/graphic"><g id="graphic" '
+                   'transform="translate(7 0) scale(.9 1)" clip-path="url(#cut)">'
+                   '<ellipse cx="145" cy="67" rx="27" ry="18" stroke="black" stroke-width="2"/></g></a>')
+        point = '<fePointLight x="92" y="48" z="36"/>'
+        spot = ('<feSpotLight x="32" y="42" z="44" pointsAtX="32" pointsAtY="42" '
+                'limitingConeAngle="39" specularExponent="1"/>')
+        diffuse = (f'<feDiffuseLighting surfaceScale="0" lighting-color="#aaa" in="SourceAlpha" result="lit">'
+                   f'{point}</feDiffuseLighting>')
+        specular = (f'<feSpecularLighting surfaceScale="0" lighting-color="#3333aa" specularExponent="4" '
+                    f'in="SourceAlpha" result="lit">{spot}</feSpecularLighting>')
+        mask = '<feComposite in="lit" in2="SourceAlpha" operator="in"/>'
+        marker = '<a href="#word"><rect x="4" y="4" width="6" height="6" fill="orange"/></a>'
+        second = '<a href="#graphic"><rect x="183" y="4" width="6" height="6" fill="green"/></a>'
+
+        def scene(chain: str, *, separate: bool = False, hidden: bool = False, shape: str = graphic) -> str:
+            defs = (
+                '<defs><clipPath id="cut"><path d="M115 45h54v17l-54 24z"/></clipPath>'
+                '<filter id="light" filterUnits="userSpaceOnUse" x="4" y="4" width="180" height="100">'
+                f'{chain}</filter></defs>'
+            )
+            wrapped = '<g transform="translate(4 6)" filter="url(#light)">{}</g>'
+            groups = wrapped.format(text) + wrapped.format(shape) if separate else wrapped.format(text + shape)
+            return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 196 120">'
+                    f'{defs}{groups}{marker}{"" if hidden else second}</svg>')
+
+        def publication(markup: str, inline: bool) -> doc_ex.Document:
+            if inline:
+                return doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": chapter.replace("SVGCONTENT", markup)}))
+            return doc_ex.open(rewrite_epub(fixture, {"OEBPS/content.opf": package, "OEBPS/s0.svg": markup}))
+
+        for inline in (False, True):
+            for dpi in (96, 144):
+                for lighting, hidden in ((diffuse, False), (specular, True)):
+                    with (
+                        self.subTest(inline=inline, dpi=dpi, hidden=hidden),
+                        publication(scene(lighting + mask, hidden=hidden), inline) as book,
+                        publication(scene(lighting + mask, separate=True, hidden=hidden), inline) as native,
+                    ):
+                        preview = rgba_pixels(png_chunks(book.render_page(0, dpi=dpi)))
+                        width, pixels = reference = rgba_pixels(png_chunks(native.render_page(0, dpi=dpi)))
+                        self.assertTrue(preview == reference, "shared light differs from separately filtered source pixels")
+                        ink = ([], [])
+                        for i in range(0, len(pixels), 4):
+                            if pixels[i] == pixels[i + 1] < 255:
+                                y, x = divmod(i // 4, width)
+                                ink[int(x >= width / 2)].append((x, y))
+                        self.assertTrue(ink[0])
+                        self.assertEqual(bool(ink[1]), not hidden)
+                        scale = 72 / dpi
+                        bounds = [(min(x for x, _ in part) * scale, min(y for _, y in part) * scale,
+                                   (max(x for x, _ in part) + 1) * scale, (max(y for _, y in part) + 1) * scale)
+                                  for part in ink if part]
+                        with (
+                            doc_ex.open(book.export_epub_fixed_pdf(dpi=dpi, searchable=True)) as pdf,
+                            doc_ex.open(native.export_epub_fixed_pdf(dpi=dpi, searchable=True)) as expected,
+                            pdf.edit() as edit,
+                        ):
+                            self.assertTrue(rgba_pixels(png_chunks(pdf.render_page(0, dpi=dpi))) == preview,
+                                            "reopened PDF changed the shared filtered raster")
+                            self.assertEqual(pdf[0].get_text(), expected[0].get_text())
+                            self.assertEqual(pdf[0].get_text(), "B́")
+                            found, = pdf[0].search_for("B́")
+                            self.assertTrue(expected[0].search_for("B́"))
+                            for edge in (0, 2):
+                                self.assertAlmostEqual(found[edge], bounds[0][edge], delta=.04)
+                            self.assertGreaterEqual(found[1], bounds[0][1])
+                            self.assertLessEqual(found[3], bounds[0][3])
+                            self.assertLess(found[1], found[3])
+                            external = {link.uri: link.bbox for link in pdf[0].get_links()
+                                        if link.uri and link.uri.startswith("https://")}
+                            separate = {link.uri: link.bbox for link in expected[0].get_links()
+                                        if link.uri and link.uri.startswith("https://")}
+                            urls = ("https://example.org/word",) if hidden else (
+                                "https://example.org/word", "https://example.org/graphic",
+                            )
+                            self.assertEqual(set(external), set(urls))
+                            self.assertEqual(set(separate), set(urls))
+                            for url, painted in zip(urls, bounds, strict=True):
+                                for actual, target in zip(external[url], painted, strict=True):
+                                    self.assertAlmostEqual(actual, target, delta=.04)
+                            destinations = sorted(tuple(map(float, target)) for target in re.findall(
+                                rb"/XYZ\s+([0-9.]+)\s+([0-9.]+)\s+null", edit.to_bytes(object_streams=False),
+                            ))
+                            self.assertEqual(len(destinations), len(bounds))
+                            for (x, y), target in zip(destinations, bounds, strict=True):
+                                self.assertAlmostEqual(x, target[0], delta=.04)
+                                self.assertAlmostEqual(y, 90 - target[1], delta=.04)
+
+        for markup in (
+            scene(diffuse + mask, shape=graphic.replace("translate(7 0)", "translate(-88 -24)")),
+            scene(diffuse.replace('surfaceScale="0"', 'surfaceScale="2"') + mask),
+            scene(diffuse + mask.replace('operator="in"', 'operator="over"')),
+            scene(diffuse + '<feColorMatrix type="saturate" values="1"/>' + mask),
+        ):
+            with publication(markup, False) as book:
+                self.assertTrue(book.render_page(0, dpi=96).startswith(b"\x89PNG"))
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):
+                    book.export_epub_fixed_pdf(dpi=96, searchable=True)
+
+        shadowed = (diffuse.replace(' result="lit"', '')
+                    + '<feFlood x="10" y="10" width="6" height="6" flood-color="red" result="seed"/>'
+                    + '<feTile in="seed" result="result1"/>'
+                    + mask.replace('in="lit"', 'in="result1"'))
+        with publication(scene(shadowed, hidden=True, shape=""), False) as book:
+            self.assertTrue(book.render_page(0, dpi=96).startswith(b"\x89PNG"))
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):
+                book.export_epub_fixed_pdf(dpi=96, searchable=True)
+
     def test_svg_stacked_offsets_keep_source_outside_standalone_layer_limits(self) -> None:
         svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50">
           <defs>

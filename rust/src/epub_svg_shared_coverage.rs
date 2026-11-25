@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use resvg::{tiny_skia, tiny_skia::Transform, usvg};
 use wordcraft_geom::Rect;
 
-use super::{affine_leaf, contains_filter, transfer, CaptureGeometry, FilterGeometry, RasterAxes};
+use super::{
+    affine_leaf, contains_filter, lighting, transfer, CaptureGeometry, FilterGeometry, RasterAxes,
+};
 
 const MAX_BRANCHES: usize = 8;
 const MAX_LAYERS: usize = 4;
@@ -46,6 +48,9 @@ pub(super) fn pointwise_layer(group: &usvg::Group, offsets: bool) -> bool {
     let [filter] = group.filters() else {
         return false;
     };
+    if lighting::flat_alpha_mask(filter.primitives()) {
+        return true;
+    }
     // A translated pixel can only carry the source it already belonged to.
     // Pointwise color and alpha changes also preserve ownership when a
     // transparent pixel remains transparent.

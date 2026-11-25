@@ -102,6 +102,7 @@
 - [x] Render bounded point lighting on flat surfaces under uniform device scaling and raised surfaces at unit scale. Preserve proven original-alpha PDF attribution.
 - [x] Render bounded spot lighting with a finite aim, focus and optional cone. Preserve proven PDF geometry and omit source text hidden by the specular cone.
 - [x] Resolve default and stylesheet-selected linearRGB for lighting. Preserve the sRGB override and proved original-alpha PDF attribution.
+- [x] Attribute flat diffuse or specular lighting through an immediate original-alpha mask in a shared layer with separated native source supports.
 - [ ] Add SVG filter primitives and retain PDF text and links for multi-source, non-axis-aligned or ambiguous spatial filter results.
 - [ ] Extend mixed-font SVG text fallback to spacing across ambiguous clusters, length owners separated by positioned or independently painted wrappers and glyph positioning.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.

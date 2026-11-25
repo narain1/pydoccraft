@@ -1618,3 +1618,11 @@ Both lockfiles, the dependency inventory and the upstream revisions match the pr
 The earlier Python facade rejects the escape callback on the same native binary. In the installed regression, playback leaves an inner list after two 251-frame WAVE chunks. It bypasses the rest of that cue and an unsupported soundtrack, then decodes exactly 400 frames from the sibling list. Both delivered sample regions match independently read source PCM. Selecting the outer aside exits both nested lists while retaining a second aside and subsequent text. An additional page shares the SMIL resource and fragment names, escapes after a text cue and resumes on that page. The regression checks role filtering and exactly one active-target clear for each delivered cue, including an invalid escape request. [EPUB reading system escapability](https://www.w3.org/TR/epub-rs-33/#sec-escapability)
 
 Twenty-six focused installed tests passed. Rust 1.95 formatting, locked release all-target Clippy with warnings denied, strict installed public typing and the roadmap check passed. The Linux x86-64 CPython 3.11 wheel was 26,006,205 bytes, with a 60,514,184-byte uncompressed extension. The pinned dependency graph is unchanged.
+
+## Shared flat SVG lighting with original-alpha masks
+
+The installed baseline renders shared flat lighting with the same PNG as independently filtered sources, then rejects searchable PDF export. The regression proves separated source ownership with a decomposed Unicode glyph and a transformed, clipped graphic. A point-lit field preserves both sources. A specular cone removes the off-cone graphic and its link. Standalone and inline SVG match the independent PNG and reopened PDF at 96 and 144 DPI, and the retained search bounds, links and local destinations follow the independent painted pixels.
+
+Overlapping source supports, raised lighting, unrelated extra stages and over-compositing retain explicit attribution errors. A copied tile that reuses a generated light result name exercises lookup of the final effective named result.
+
+The Linux CPython 3.11 release wheel passed 66 SVG-related EPUB tests. Rust 1.95 formatting, locked release all-target Clippy with warnings denied, and the task roadmap check passed. [SVG filter compositing](https://www.w3.org/TR/filter-effects-1/#feCompositeElement)

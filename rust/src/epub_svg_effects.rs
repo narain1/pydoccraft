@@ -796,14 +796,8 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
                     }
                 };
                 let unattributed_paint = match composite.operator() {
-                    // A direct lighting result clipped to original alpha
-                    // can be measured for a single original painted leaf.
                     CompositeOperator::In
-                        if matches!(composite.input2(), Input::SourceAlpha)
-                            && matches!(composite.input1(), Input::Reference(name) if primitives[..index].iter().any(|previous| {
-                                previous.result() == name
-                                    && matches!(previous.kind(), Kind::DiffuseLighting(_) | Kind::SpecularLighting(_))
-                            })) =>
+                        if lighting::masked_input(&primitives[..index], composite).is_some() =>
                     {
                         false
                     }

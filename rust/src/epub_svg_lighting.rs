@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use resvg::{
     tiny_skia::Transform,
     usvg::{
-        filter::{ColorInterpolation, Kind, LightSource, Primitive},
+        filter::{
+            ColorInterpolation, Composite, CompositeOperator, Input, Kind, LightSource, Primitive,
+        },
         NonZeroRect,
     },
 };
@@ -264,6 +266,41 @@ fn linear_channel(channel: u8) -> u8 {
         ((encoded + 0.055) / 1.055).powf(2.4)
     };
     (255.0 * linear).round() as u8
+}
+
+pub(super) fn masked_input<'a>(
+    previous: &'a [Primitive],
+    composite: &Composite,
+) -> Option<&'a Kind> {
+    if !matches!(composite.operator(), CompositeOperator::In)
+        || !matches!(composite.input2(), Input::SourceAlpha)
+    {
+        return None;
+    }
+    let Input::Reference(name) = composite.input1() else {
+        return None;
+    };
+    let input = previous
+        .iter()
+        .rfind(|primitive| primitive.result() == name)?
+        .kind();
+    matches!(input, Kind::DiffuseLighting(_) | Kind::SpecularLighting(_)).then_some(input)
+}
+
+pub(super) fn flat_alpha_mask(primitives: &[Primitive]) -> bool {
+    let [light, output] = primitives else {
+        return false;
+    };
+    let Kind::Composite(composite) = output.kind() else {
+        return false;
+    };
+    // The light field of a flat surface does not depend on any source
+    // samples. The final composite can only retain the original alpha.
+    match masked_input(std::slice::from_ref(light), composite) {
+        Some(Kind::DiffuseLighting(light)) => light.surface_scale() == 0.0,
+        Some(Kind::SpecularLighting(light)) => light.surface_scale() == 0.0,
+        _ => false,
+    }
 }
 
 pub(super) fn work(
