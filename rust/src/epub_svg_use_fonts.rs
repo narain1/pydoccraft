@@ -240,7 +240,7 @@ impl<'a, 'original, 'input> Instances<'a, 'original, 'input> {
                             style.insert(property.to_owned(), value);
                         }
                     }
-                    if node.has_tag_name((NS, "feDropShadow")) {
+                    if effects::has_flood_paint(node.tag_name().name()) {
                         for property in ["flood-color", "flood-opacity"] {
                             if let Some(value) = node.attribute(property) {
                                 if !style.contains_key(property) {

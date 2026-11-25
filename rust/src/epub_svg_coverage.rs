@@ -175,7 +175,8 @@ impl<'tree> Coverage<'tree> {
         clip: Rect,
         target: Target,
     ) -> Result<Option<Rect>, EngineError> {
-        if effects.is_empty() && !matches!(target, Target::PaintedObject) {
+        if effects.is_empty() && !paint.sample_geometry && !matches!(target, Target::PaintedObject)
+        {
             return Ok(Some(rect));
         }
         let rect = intersection(clip, rect);

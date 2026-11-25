@@ -899,3 +899,9 @@ The installed tests preserve the existing plain cue text, markup, equality and s
 The malformed-input regression verifies bounded WebVTT span depth, color classes and styled run counts, and rejects missing and cyclic TTML references. Independent installed-wheel probes reject WebVTT style expansion before text emission, excess TTML style definitions, and overlong reference lists.
 
 The isolated CPython 3.11.15 Linux x86-64 release wheel passed all 177 installed EPUB tests. It measured 25,505,216 bytes with a 59,403,992-byte native extension. Its SHA-256 is `25813bd58f941f16c11ba59dd856ddb5db0a595f96944398cd35786a22fdd873`. Rust formatting, warnings-denied locked release Clippy, and public typing passed. The lockfiles match the base commit, and the three packaged attribution files match their source copies.
+
+## 2026-11-24 SVG compositing and sampled PDF capture
+
+Installed regressions exercise a CSS-colored flood with a named composite input, signed offset and ordered merge. The native preview and reopened PDF agree on color, alpha and the retained source text and link boxes. An arithmetic composite preserves its measured hyperlink bounds. A luminance-to-alpha filter removes black glyphs and their annotation, keeps the surviving label in searchable PDF and suppresses an enclosing link whose only child becomes transparent. An unrelated translated graphic keeps rendering. Moving the linked text, combining multiple painted sources in an attribution-sensitive group or targeting a destination whose placement is uncertain returns an explicit export error. Invalid secondary and merge references, unsupported operators and subregions, excessive parameters and native merge work return stable errors.
+
+All 178 EPUB tests passed against the installed Linux x86-64 CPython 3.11 wheel. Rust 1.95 formatting and locked release all-target Clippy passed.

@@ -47,7 +47,8 @@
 - [x] Preserve signed fractional synthetic oblique in reflowable and fixed-layout XHTML previews and fixed-layout PDF.
 - [x] Render alpha-preserving SVG color matrices, including saturation and hue rotation, with the fixed-layout PDF text and annotations preserved.
 - [x] Render bounded SVG filter chains with prior named inputs, including alpha-changing color matrices in visual output. Reject PDF text or annotation capture when the source geometry cannot be preserved.
-- [ ] Extend source CSS and fixed-layout fidelity, including more SVG filter primitives, PDF text and annotations under alpha-changing filters, and complex SVG text fallback.
+- [x] Render bounded native flood, signed offset, composite and merge filter primitives with checked named dependencies. Sample in-place filtered coverage for PDF text and annotations from a single painted source.
+- [ ] Extend source CSS and fixed-layout fidelity, including more SVG filter primitives, PDF attribution when filters move or combine source ink, and complex SVG text fallback.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.
 - [x] Render tall reflowable chapters within the paint coordinate budget and apply raster limits to the requested DPI and clip.
 - [x] Project inherited MathML attributes, accents, movable limits, repeated script pairs, varied fences and separators, horizontal spaces, and zero-dimension padding.

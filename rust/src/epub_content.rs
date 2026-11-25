@@ -917,6 +917,7 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                         | "pattern"
                         | "marker"
                         | "filter"
+                        | "feMergeNode"
                 ))
         {
             return Err(unsupported("SVG contains unsupported or active elements"));
@@ -967,14 +968,20 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                 None if tag == "svg" && key == "baseProfile" => true,
                 None if tag == "filter" && matches!(key, "filterUnits" | "primitiveUnits") => true,
                 None if filter_primitive && matches!(key, "in" | "result") => true,
+                None if tag == "feMergeNode" && key == "in" => true,
+                None if tag == "feComposite"
+                    && matches!(key, "in2" | "operator" | "k1" | "k2" | "k3" | "k4") =>
+                {
+                    true
+                }
                 None if matches!(tag, "feDropShadow" | "feGaussianBlur")
                     && key == "stdDeviation" =>
                 {
                     true
                 }
                 None if tag == "feColorMatrix" && matches!(key, "type" | "values") => true,
-                None if tag == "feDropShadow"
-                    && matches!(key, "dx" | "dy" | "flood-color" | "flood-opacity") =>
+                None if super::svg::effects::has_flood_paint(tag)
+                    && matches!(key, "flood-color" | "flood-opacity") =>
                 {
                     true
                 }
@@ -1108,6 +1115,7 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
     if root.descendants().any(|node| {
         node.is_element()
             && (node.has_tag_name("filter")
+                || node.has_tag_name((SVG, "feMergeNode"))
                 || super::svg::effects::is_filter_primitive(node.tag_name().name())
                 || node.attribute("filter").is_some()
                 || (super::svg::effects::is_gradient(node.tag_name().name())

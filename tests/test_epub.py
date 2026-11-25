@@ -7106,8 +7106,9 @@ voice
             self.assertTrue(230 <= pixel(66, 12)[0] < 255)
             with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, pages=[0])) as pdf:
                 self.assertEqual(rgba(pdf), preview)
-            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):
-                book.export_epub_fixed_pdf(dpi=96, pages=[0], searchable=True)
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, pages=[0], searchable=True)) as pdf:
+                self.assertTrue(pdf[0].search_for("FILTERED"))
+                self.assertEqual(rgba(pdf), preview)
 
         linked = svg.replace(
             '<text x="4" y="50" id="label" fill="red" filter="url(#tint)">FILTERED</text>',
@@ -7115,8 +7116,10 @@ voice
         )
         with doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": template.format(linked)})) as book:
             self.assertEqual(rgba(book), preview)
-            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):
-                book.export_epub_fixed_pdf(dpi=96, pages=[0])
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, pages=[0])) as pdf:
+                link, = pdf[0].get_links()
+                self.assertEqual(link.uri, "https://example.org/")
+                self.assertEqual(rgba(pdf), preview)
 
         with doc_ex.open(epub_fixture(chapter_one=template.format(svg))) as book:
             for output in ("docx", "pdf"):
@@ -7197,6 +7200,147 @@ voice
             self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "SVG filter work"),
         ):
             book.render_page(0, dpi=96)
+
+    def test_svg_flood_offset_composite_and_merge_keep_source_coverage(self) -> None:
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" width="136" height="72" viewBox="0 0 136 72">
+          <style>.shade {color:#2040d0;flood-color:currentColor;flood-opacity:50%}</style>
+          <defs>
+            <filter id="halo" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"
+                    x="0" y="0" width="136" height="72">
+              <feFlood class="shade" result="tint"/>
+              <feComposite in="tint" operator="in" in2="SourceAlpha" result="ink"/>
+              <feOffset in="ink" dx="24" dy="-5" result="echo"/>
+              <feMerge><feMergeNode in="echo"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+            <filter id="arithmetic" color-interpolation-filters="sRGB">
+              <feComposite operator="arithmetic" in="SourceGraphic" in2="SourceAlpha" k2=".5"/>
+            </filter>
+          </defs>
+          <rect x="5" y="10" width="16" height="20" fill="#d04020" filter="url(#halo)"/>
+          <a href="https://example.org/gain">
+            <rect x="72" y="10" width="18" height="20" fill="blue" filter="url(#arithmetic)"/>
+          </a>
+          <text x="5" y="60" font-size="14" filter="url(#halo)">
+            <a href="https://example.org/label">Label</a>
+          </text>
+        </svg>"""
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Composition</title>
+            <meta name="viewport" content="width=136,height=72"/></head>
+            <body style="margin:0">{}</body></html>"""
+        fixture = fixed_spread_fixture([("", "white", 136, 72)])
+        data = rewrite_epub(fixture, {"OEBPS/s0.xhtml": template.format(svg)})
+        control = rewrite_epub(
+            fixture, {"OEBPS/s0.xhtml": template.format(svg.replace('filter="url(#halo)"', ""))},
+        )
+
+        def rgba(document: doc_ex.Document) -> tuple[int, bytes]:
+            return rgba_pixels(png_chunks(document.render_page(0, dpi=96)))
+
+        with doc_ex.open(data) as book, doc_ex.open(control) as plain:
+            width, data = preview = rgba(book)
+
+            def pixel(x: int, y: int) -> tuple[int, ...]:
+                at = 4 * (width * y + x)
+                return tuple(data[at:at + 3])
+
+            self.assertEqual(pixel(12, 20), (208, 64, 32))
+            red, green, blue = pixel(37, 7)
+            self.assertTrue(142 <= red <= 145 and 158 <= green <= 161 and 230 <= blue <= 233)
+            red, green, blue = pixel(80, 20)
+            self.assertTrue(126 <= red == green <= 130 and blue == 255)
+            self.assertEqual(pixel(54, 20), (255, 255, 255))
+            with (
+                doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf,
+                doc_ex.open(plain.export_epub_fixed_pdf(dpi=96, searchable=True)) as original,
+            ):
+                self.assertEqual(rgba(pdf), preview)
+                self.assertTrue(pdf[0].search_for("Label"))
+                self.assertEqual(pdf[0].search_for("Label"), original[0].search_for("Label"))
+                limits = {link.uri: link.bbox for link in pdf[0].get_links()}
+                for actual, expected in zip(limits["https://example.org/gain"], (54.0, 7.5, 67.5, 22.5)):
+                    self.assertAlmostEqual(actual, expected, delta=0.001)
+                label, = [link for link in original[0].get_links() if link.uri.endswith("/label")]
+                self.assertEqual(limits[label.uri], label.bbox)
+
+    def test_svg_pointwise_alpha_samples_surviving_text_and_localizes_uncertainty(self) -> None:
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" width="200" height="74" viewBox="0 0 200 74">
+          <defs>
+            <filter id="mask" color-interpolation-filters="sRGB">
+              <feColorMatrix type="luminanceToAlpha"/>
+            </filter>
+            <filter id="move"><feOffset dx="2"/></filter>
+          </defs>
+          <rect id="decoration" x="4" y="6" width="24" height="12" fill="blue" filter="url(#move)"/>
+          <a href="https://example.org/clear"><rect x="6" y="6" width="20" height="18"
+            fill="black" filter="url(#mask)"/></a>
+          <g id="luma" filter="url(#mask)"><text x="6" y="50" font-size="16">
+            <a href="https://example.org/removed" fill="black">Missing</a>
+            <a href="https://example.org/retained" fill="red" x="90">Visible</a>
+          </text></g>
+        </svg>"""
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Coverage</title>
+          <meta name="viewport" content="width=200,height=74"/></head><body style="margin:0">{}</body></html>"""
+        fixture = fixed_spread_fixture([("", "white", 200, 74)])
+
+        def book(markup: str) -> doc_ex.Document:
+            return doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": template.format(markup)}))
+
+        with book(svg) as main, doc_ex.open(main.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+            self.assertEqual(pdf[0].get_text(), "Visible")
+            link, = pdf[0].get_links()
+            self.assertEqual(link.uri, "https://example.org/retained")
+            self.assertGreaterEqual(link.bbox[0], 67.5)
+            self.assertEqual(
+                rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))),
+                rgba_pixels(png_chunks(main.render_page(0, dpi=96))),
+            )
+
+        multi = svg.replace('filter="url(#mask)"><text', 'filter="url(#mask)"><rect width="20" height="20"/><text')
+        moved = svg.replace('filter="url(#mask)"><text', 'filter="url(#move)"><text')
+        requested = svg.replace('</svg>', '<a href="#decoration"><rect x="120" y="10" width="12" height="8"/></a></svg>')
+        for markup in (multi, moved, requested):
+            with (
+                self.subTest(markup=markup),
+                book(markup) as publication,
+                self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"),
+            ):
+                publication.export_epub_fixed_pdf(dpi=96, searchable=True)
+
+    def test_svg_compositor_checks_second_inputs_children_and_scaled_budget(self) -> None:
+        def svg(primitives: str, attrs: str = "", rect: str = "") -> str:
+            return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 48">
+              <defs><filter id="fx" {attrs}>{primitives}</filter></defs>
+              <rect width="12" height="12" filter="url(#fx)" {rect}/></svg>"""
+
+        cases = [
+            ('<feComposite in2="later"/><feFlood result="later"/>',
+             doc_ex.MalformedDocumentError, "prior named result"),
+            ('<feMerge result="self"><feMergeNode in="self"/></feMerge>',
+             doc_ex.MalformedDocumentError, "prior named result"),
+            ('<feMerge><feFlood/></feMerge>', doc_ex.MalformedDocumentError, "feMergeNode children"),
+            ("<feMerge/>", doc_ex.MalformedDocumentError, "merge requires an input"),
+            ("<feMerge>" + '<feMergeNode in="SourceGraphic"/>' * 17 + "</feMerge>",
+             doc_ex.UnsafeArchiveError, "16 inputs"),
+            ('<feComposite operator="unknown"/>', doc_ex.UnsupportedFormatError, "compositing operator"),
+            ('<feComposite operator="arithmetic" k4="2000"/>', doc_ex.UnsafeArchiveError, "coefficient"),
+            ('<feComposite operator="arithmetic" k1="NaN"/>', doc_ex.MalformedDocumentError, "coefficient"),
+            ('<feOffset dx="100000"/>', doc_ex.UnsafeArchiveError, "filter offset"),
+            ('<feOffset width="5"/>', doc_ex.UnsupportedFormatError, "primitive subregions"),
+        ]
+        with doc_ex.open(epub_fixture()) as book:
+            for source, error, message in cases:
+                with self.subTest(source=source), self.assertRaisesRegex(error, message):
+                    book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Effect", svg(source)), 0])
+            work = svg("<feMerge>" + '<feMergeNode in="SourceGraphic"/>' * 16 + "</feMerge>",
+                       'filterUnits="userSpaceOnUse" width="850" height="850"')
+            shift = svg('<feOffset dx="1000"/>', rect='transform="scale(18)"')
+            outputs = [
+                book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Effect", source), 0])
+                for source in (work, shift)
+            ]
+        for data, reason in zip(outputs, ("filter work", "offset exceeds")):
+            with doc_ex.open(data) as book, self.assertRaisesRegex(doc_ex.UnsafeArchiveError, reason):
+                book.render_page(0, dpi=96)
 
     def test_svg_gradient_templates_and_blur_reject_unsafe_inputs(self) -> None:
         def svg(body: str) -> str:

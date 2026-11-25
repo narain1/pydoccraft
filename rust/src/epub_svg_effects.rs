@@ -12,19 +12,33 @@ use crate::{
 
 const MAX_TEMPLATE_DEPTH: usize = 32;
 const MAX_FILTER_PRIMITIVES: usize = 16;
+const MAX_MERGE_INPUTS: usize = 16;
 const MAX_RESULT_BYTES: usize = 128;
 const MAX_LAYER_PIXELS: usize = 8 * 1024 * 1024;
 const MAX_TOTAL_PIXELS: usize = 32 * 1024 * 1024;
 const MAX_DEVICE_SIGMA: f32 = 1024.0;
 const MAX_COLOR_COEFFICIENT: f32 = 1024.0;
-const MAX_SHADOW_OFFSET: f32 = wordcraft_render::MAX_SIDE as f32;
+const MAX_OFFSET: f32 = wordcraft_render::MAX_SIDE as f32;
 
 pub(in crate::epub) fn is_gradient(tag: &str) -> bool {
     matches!(tag, "linearGradient" | "radialGradient")
 }
 
 pub(in crate::epub) fn is_filter_primitive(tag: &str) -> bool {
-    matches!(tag, "feGaussianBlur" | "feDropShadow" | "feColorMatrix")
+    matches!(
+        tag,
+        "feGaussianBlur"
+            | "feDropShadow"
+            | "feColorMatrix"
+            | "feOffset"
+            | "feFlood"
+            | "feComposite"
+            | "feMerge"
+    )
+}
+
+pub(in crate::epub) fn has_flood_paint(tag: &str) -> bool {
+    matches!(tag, "feDropShadow" | "feFlood")
 }
 
 pub(super) struct Effects<'a, 'input> {
@@ -116,6 +130,14 @@ pub(in crate::epub) fn validate_markup(root: Node<'_, '_>) -> Result<(), EngineE
             tag if is_gradient(tag) => effects.validate_gradient(node)?,
             "filter" => validate_chain(node)?,
             tag if is_filter_primitive(tag) => validate_primitive(node)?,
+            "feMergeNode"
+                if !node
+                    .parent_element()
+                    .is_some_and(|parent| parent.has_tag_name("feMerge"))
+                    || node.children().any(|child| child.is_element()) =>
+            {
+                return Err(invalid("misplaced SVG filter merge input"));
+            }
             _ => {}
         }
         if let Some(value) = node.attribute("filter") {
@@ -147,19 +169,31 @@ fn validate_chain(node: Node<'_, '_>) -> Result<(), EngineError> {
         if !is_filter_primitive(child.tag_name().name()) {
             return Err(unsupported("unsupported SVG filter primitive"));
         }
-        match child.attribute("in") {
-            None | Some("SourceGraphic" | "SourceAlpha") => {}
-            Some("BackgroundImage" | "BackgroundAlpha" | "FillPaint" | "StrokePaint") => {
-                return Err(unsupported(
-                    "SVG filters require SourceGraphic or SourceAlpha or a prior named result",
-                ));
+        match child.tag_name().name() {
+            "feFlood" | "feMerge" if child.has_attribute("in") => {
+                return Err(invalid("unexpected SVG filter input"));
             }
-            Some(input) if results.contains(input) => {}
-            Some(_) => {
-                return Err(invalid(
-                    "SVG filter input must reference a prior named result",
-                ))
+            "feMerge" => {
+                let mut count = 0;
+                for input in child.children().filter(Node::is_element) {
+                    if !input.has_tag_name("feMergeNode") {
+                        return Err(invalid("SVG filter merge requires feMergeNode children"));
+                    }
+                    count += 1;
+                    if count > MAX_MERGE_INPUTS {
+                        return Err(limited("SVG filter merge exceeds 16 inputs"));
+                    }
+                    validate_input(input.attribute("in"), &results)?;
+                }
+                if count == 0 {
+                    return Err(invalid("SVG filter merge requires an input"));
+                }
             }
+            "feComposite" => {
+                validate_input(child.attribute("in"), &results)?;
+                validate_input(child.attribute("in2"), &results)?;
+            }
+            _ => validate_input(child.attribute("in"), &results)?,
         }
         if let Some(result) = child.attribute("result") {
             if !result_name(result) {
@@ -171,6 +205,19 @@ fn validate_chain(node: Node<'_, '_>) -> Result<(), EngineError> {
         }
     }
     Ok(())
+}
+
+fn validate_input(input: Option<&str>, results: &HashSet<&str>) -> Result<(), EngineError> {
+    match input {
+        None | Some("SourceGraphic" | "SourceAlpha") => Ok(()),
+        Some("BackgroundImage" | "BackgroundAlpha" | "FillPaint" | "StrokePaint") => Err(
+            unsupported("SVG filters require SourceGraphic or SourceAlpha or a prior named result"),
+        ),
+        Some(input) if results.contains(input) => Ok(()),
+        Some(_) => Err(invalid(
+            "SVG filter input must reference a prior named result",
+        )),
+    }
 }
 
 fn result_name(value: &str) -> bool {
@@ -226,13 +273,29 @@ fn validate_primitive(node: Node<'_, '_>) -> Result<(), EngineError> {
     if !node
         .parent_element()
         .is_some_and(|parent| parent.has_tag_name("filter"))
-        || node.children().any(|child| child.is_element())
+        || (!node.has_tag_name("feMerge") && node.children().any(|child| child.is_element()))
     {
         return Err(invalid("misplaced SVG filter primitive"));
     }
     validate_region(node)?;
-    if node.has_tag_name("feColorMatrix") {
-        return validate_color_matrix(node);
+    match node.tag_name().name() {
+        "feColorMatrix" => return validate_color_matrix(node),
+        "feComposite" => return validate_composite(node),
+        "feOffset" => {
+            // resvg translates the input raster and retains its subregion.
+            if ["x", "y", "width", "height"]
+                .iter()
+                .any(|key| node.has_attribute(*key))
+            {
+                return Err(unsupported("SVG feOffset primitive subregions"));
+            }
+            return validate_offsets(
+                node,
+                "invalid SVG filter offset",
+                "SVG filter offset exceeds 16000 pixels",
+            );
+        }
+        _ => {}
     }
     if let Some(value) = node.attribute("stdDeviation") {
         let numbers = if let Some((x, y)) = value.split_once(',') {
@@ -257,14 +320,52 @@ fn validate_primitive(node: Node<'_, '_>) -> Result<(), EngineError> {
         }
     }
     if node.has_tag_name("feDropShadow") {
-        for key in ["dx", "dy"] {
-            if let Some(value) = node.attribute(key) {
-                validate_offset(finite_number(value, "invalid SVG drop shadow offset")?)?;
-            }
-        }
+        validate_offsets(
+            node,
+            "invalid SVG drop shadow offset",
+            "SVG drop shadow offset exceeds 16000 pixels",
+        )?;
+    }
+    if has_flood_paint(node.tag_name().name()) {
         for property in ["flood-color", "flood-opacity"] {
             if let Some(value) = node.attribute(property) {
                 flood_paint(property, value)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_offsets(
+    node: Node<'_, '_>,
+    invalid_value: &'static str,
+    budget: &'static str,
+) -> Result<(), EngineError> {
+    for key in ["dx", "dy"] {
+        if let Some(value) = node.attribute(key) {
+            validate_offset(finite_number(value, invalid_value)?, budget)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_composite(node: Node<'_, '_>) -> Result<(), EngineError> {
+    let operator = node.attribute("operator").unwrap_or("over");
+    if !matches!(
+        operator,
+        "over" | "in" | "out" | "atop" | "xor" | "lighter" | "arithmetic"
+    ) {
+        return Err(unsupported("unsupported SVG filter compositing operator"));
+    }
+    for key in ["k1", "k2", "k3", "k4"] {
+        if let Some(value) = node.attribute(key) {
+            if operator != "arithmetic" {
+                return Err(invalid("SVG composite coefficients require arithmetic"));
+            }
+            if finite_number(value, "invalid SVG filter composite coefficient")?.abs()
+                > MAX_COLOR_COEFFICIENT
+            {
+                return Err(limited("SVG filter composite coefficient exceeds 1024"));
             }
         }
     }
@@ -346,9 +447,9 @@ pub(super) fn flood_paint(property: &str, value: &str) -> Result<String, EngineE
     }
 }
 
-fn validate_offset(offset: f32) -> Result<(), EngineError> {
-    if !offset.is_finite() || offset.abs() > MAX_SHADOW_OFFSET {
-        return Err(limited("SVG drop shadow offset exceeds 16000 pixels"));
+fn validate_offset(offset: f32, message: &'static str) -> Result<(), EngineError> {
+    if !offset.is_finite() || offset.abs() > MAX_OFFSET {
+        return Err(limited(message));
     }
     Ok(())
 }
@@ -371,60 +472,210 @@ pub(super) fn validate_raster(tree: &usvg::Tree, scale: Transform) -> Result<(),
     measure_group(tree.root(), scale, &mut pixels)
 }
 
-// A filtered layer can crop the source and then change its alpha at each result.
-// Follow the final result's actual input chain. Other branches do not reach the canvas.
-pub(super) fn unproven_geometry(tree: &usvg::Tree) -> bool {
-    fn proof_failed(group: &usvg::Group) -> bool {
-        group.filters().iter().any(|filter| {
-            let Some(bounds) = group.stroke_bounding_box() else {
-                return true;
-            };
-            let covers = |region: usvg::NonZeroRect| {
-                region.x() <= bounds.x()
-                    && region.y() <= bounds.y()
-                    && region.right() >= bounds.right()
-                    && region.bottom() >= bounds.bottom()
-            };
-            if !covers(filter.rect()) {
-                return true;
-            }
-            let mut safe = HashMap::new();
-            for primitive in filter.primitives() {
-                use usvg::filter::{ColorMatrixKind, Input, Kind};
-                let (input, preserves) = match primitive.kind() {
-                    Kind::ColorMatrix(matrix) => {
-                        let preserves = match matrix.kind() {
-                            ColorMatrixKind::Matrix(values) => values[15..] == [0., 0., 0., 1., 0.],
-                            ColorMatrixKind::LuminanceToAlpha => false,
-                            ColorMatrixKind::Saturate(_) | ColorMatrixKind::HueRotate(_) => true,
-                        };
-                        (matrix.input(), preserves)
-                    }
-                    Kind::GaussianBlur(blur) => (
-                        blur.input(),
-                        blur.std_dev_x().get() == 0.0 && blur.std_dev_y().get() == 0.0,
-                    ),
-                    // The native implementation paints the original input over the shadow.
-                    Kind::DropShadow(shadow) => (shadow.input(), true),
-                    _ => return true,
-                };
-                let input_safe = match input {
-                    Input::SourceGraphic | Input::SourceAlpha => true,
-                    Input::Reference(name) => safe.get(name.as_str()).copied().unwrap_or(false),
-                };
-                safe.insert(
-                    primitive.result(),
-                    preserves && input_safe && covers(primitive.rect()),
-                );
-            }
-            filter
-                .primitives()
-                .last()
-                .is_some_and(|last| safe.get(last.result()) != Some(&true))
-        }) || groups(group).any(proof_failed)
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) enum FilterGeometry {
+    #[default]
+    Retained,
+    Sample,
+    Unproven,
+}
+
+#[derive(Clone, Copy, Default)]
+struct Support {
+    retains_source: bool,
+    within_source: bool,
+}
+
+impl Support {
+    fn union(self, other: Self) -> Self {
+        Self {
+            retains_source: self.retains_source || other.retains_source,
+            within_source: self.within_source && other.within_source,
+        }
     }
 
-    proof_failed(tree.root())
+    fn subset(within_source: bool) -> Self {
+        Self {
+            retains_source: false,
+            within_source,
+        }
+    }
+}
+
+// Results are classified in the native filter's raster coordinates. A branch
+// can retain all source locations, stay within them, or satisfy neither proof.
+fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support {
+    use usvg::filter::{ColorMatrixKind, CompositeOperator, Input, Kind};
+    let covers = |region: usvg::NonZeroRect| {
+        region.x() <= bounds.x()
+            && region.y() <= bounds.y()
+            && region.right() >= bounds.right()
+            && region.bottom() >= bounds.bottom()
+    };
+    let mut results = HashMap::<&str, Support>::new();
+    let source = Support {
+        retains_source: covers(filter.rect()),
+        within_source: true,
+    };
+    let mut output = Support::default();
+    for primitive in filter.primitives() {
+        let get = |input: &Input| match input {
+            Input::SourceGraphic | Input::SourceAlpha => source,
+            Input::Reference(name) => results.get(name.as_str()).copied().unwrap_or_default(),
+        };
+        output = match primitive.kind() {
+            Kind::ColorMatrix(matrix) => {
+                let input = get(matrix.input());
+                match matrix.kind() {
+                    ColorMatrixKind::Matrix(values) => Support {
+                        // A gain of at least one cannot quantize nonzero alpha away.
+                        retains_source: input.retains_source
+                            && values[15..18] == [0.; 3]
+                            && values[18] >= 1.0
+                            && values[19] == 0.0,
+                        // The native input is premultiplied and transparent pixels have
+                        // zero color. A nonpositive bias cannot create coverage there.
+                        within_source: input.within_source && values[19] <= 0.0,
+                    },
+                    ColorMatrixKind::LuminanceToAlpha => Support::subset(input.within_source),
+                    ColorMatrixKind::Saturate(_) | ColorMatrixKind::HueRotate(_) => input,
+                }
+            }
+            Kind::GaussianBlur(blur)
+                if blur.std_dev_x().get() == 0.0 && blur.std_dev_y().get() == 0.0 =>
+            {
+                get(blur.input())
+            }
+            Kind::DropShadow(shadow) => Support {
+                retains_source: get(shadow.input()).retains_source,
+                within_source: false,
+            },
+            Kind::Offset(offset) if offset.dx() == 0.0 && offset.dy() == 0.0 => get(offset.input()),
+            Kind::Flood(flood) if flood.opacity().get() == 0.0 => Support::subset(true),
+            Kind::Composite(composite) => {
+                let (first, second) = (get(composite.input1()), get(composite.input2()));
+                match composite.operator() {
+                    CompositeOperator::Over | CompositeOperator::Lighter => first.union(second),
+                    CompositeOperator::In => {
+                        Support::subset(first.within_source || second.within_source)
+                    }
+                    CompositeOperator::Out => Support::subset(first.within_source),
+                    CompositeOperator::Atop => Support::subset(second.within_source),
+                    CompositeOperator::Xor => {
+                        Support::subset(first.within_source && second.within_source)
+                    }
+                    CompositeOperator::Arithmetic { k4, .. } => {
+                        Support::subset(k4 <= 0.0 && first.within_source && second.within_source)
+                    }
+                }
+            }
+            Kind::Merge(merge) => merge
+                .inputs()
+                .iter()
+                .fold(Support::subset(true), |output, input| {
+                    output.union(get(input))
+                }),
+            _ => Support::default(),
+        };
+        output.retains_source &= covers(primitive.rect());
+        results.insert(primitive.result(), output);
+    }
+    output
+}
+
+fn filter_geometry(group: &usvg::Group, additive_input: bool) -> (FilterGeometry, bool) {
+    let [filter] = group.filters() else {
+        return if group.filters().is_empty() {
+            (FilterGeometry::Retained, additive_input)
+        } else {
+            (FilterGeometry::Unproven, true)
+        };
+    };
+    let Some(bounds) = group.stroke_bounding_box() else {
+        return (FilterGeometry::Unproven, true);
+    };
+    let output = filter_support(filter, bounds);
+    let filter = if output.retains_source {
+        FilterGeometry::Retained
+    } else if output.within_source && !additive_input && at_most_one_leaf(group, &mut false) {
+        // Measure the actual native effect when it can only remove or weaken
+        // ink from a single source. Overlapping sources would be ambiguous.
+        FilterGeometry::Sample
+    } else {
+        FilterGeometry::Unproven
+    };
+    (filter, additive_input || !output.within_source)
+}
+
+fn at_most_one_leaf(group: &usvg::Group, seen: &mut bool) -> bool {
+    group.children().iter().all(|node| match node {
+        usvg::Node::Group(group) => at_most_one_leaf(group, seen),
+        _ => !std::mem::replace(seen, true),
+    })
+}
+
+#[derive(Clone, Copy, Default)]
+pub(super) struct GeometryStatus {
+    pub(super) filter: FilterGeometry,
+    pub(super) unproven_subtree: bool,
+    pub(super) sample_subtree: bool,
+}
+
+#[derive(Default)]
+pub(super) struct CaptureGeometry {
+    groups: HashMap<*const usvg::Group, GeometryStatus>,
+}
+
+impl CaptureGeometry {
+    pub(super) fn new(tree: &usvg::Tree) -> Self {
+        let mut capture = Self::default();
+        capture.analyze(tree.root());
+        capture
+    }
+
+    fn analyze(&mut self, group: &usvg::Group) -> (GeometryStatus, bool) {
+        let mut status = GeometryStatus::default();
+        if group.opacity().get() == 0.0 {
+            return (status, false);
+        }
+        let mut additive_input = false;
+        for child in groups(group) {
+            let (child, additive) = self.analyze(child);
+            status.unproven_subtree |= child.unproven_subtree;
+            status.sample_subtree |= child.sample_subtree;
+            additive_input |= additive;
+        }
+        let (filter, additive) = filter_geometry(group, additive_input);
+        status.filter = filter;
+        status.unproven_subtree |= filter == FilterGeometry::Unproven;
+        status.sample_subtree |= filter == FilterGeometry::Sample;
+        if status.unproven_subtree || status.sample_subtree {
+            self.groups.insert(std::ptr::from_ref(group), status);
+        }
+        (status, additive)
+    }
+
+    pub(super) fn status(&self, node: &usvg::Node) -> GeometryStatus {
+        match node {
+            usvg::Node::Group(group) => self
+                .groups
+                .get(&std::ptr::from_ref(group.as_ref()))
+                .copied()
+                .unwrap_or_default(),
+            usvg::Node::Text(text) => {
+                // Native text exposes its outer filter as a group. A filter
+                // inside flattened text is not separately measurable per glyph.
+                let mut status = self
+                    .groups
+                    .get(&std::ptr::from_ref(text.flattened()))
+                    .copied()
+                    .unwrap_or_default();
+                status.unproven_subtree |= status.filter == FilterGeometry::Sample;
+                status
+            }
+            _ => GeometryStatus::default(),
+        }
+    }
 }
 
 pub(super) fn geometry_error() -> EngineError {
@@ -490,11 +741,21 @@ fn measure_group(
                         3 + blur_work(blur.std_dev_x().get() * sx, blur.std_dev_y().get() * sy)?
                     }
                     usvg::filter::Kind::DropShadow(shadow) => {
-                        validate_offset(shadow.dx() * sx)?;
-                        validate_offset(shadow.dy() * sy)?;
+                        let message = "SVG drop shadow offset exceeds 16000 pixels";
+                        validate_offset(shadow.dx() * sx, message)?;
+                        validate_offset(shadow.dy() * sy, message)?;
                         8 + blur_work(shadow.std_dev_x().get() * sx, shadow.std_dev_y().get() * sy)?
                     }
                     usvg::filter::Kind::ColorMatrix(_) => 8,
+                    usvg::filter::Kind::Flood(_) => 5,
+                    usvg::filter::Kind::Offset(offset) => {
+                        let message = "SVG filter offset exceeds 16000 pixels after scaling";
+                        validate_offset(offset.dx() * sx, message)?;
+                        validate_offset(offset.dy() * sy, message)?;
+                        5
+                    }
+                    usvg::filter::Kind::Composite(_) => 12,
+                    usvg::filter::Kind::Merge(merge) => 4 + 5 * merge.inputs().len(),
                     _ => return Err(unsupported("unsupported SVG filter primitive")),
                 };
                 charge_work(pixels, area, passes)?;

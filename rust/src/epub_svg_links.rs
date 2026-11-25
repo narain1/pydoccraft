@@ -83,14 +83,8 @@ impl<'a> Links<'a> {
         has_uses: bool,
         aliases: &super::use_fonts::Aliases,
     ) -> Result<Geometry, EngineError> {
-        let unproven_geometry = effects::unproven_geometry(tree);
-        let mut geometry = Geometry {
-            unproven_geometry,
-            ..Geometry::default()
-        };
-        if unproven_geometry && !self.objects.is_empty() {
-            return Err(effects::geometry_error());
-        }
+        let capture = effects::CaptureGeometry::new(tree);
+        let mut geometry = Geometry::default();
         let clip = Rect::new(0.0, 0.0, tree.size().width(), tree.size().height());
         let marked = self.mark_text(source, tree, clip, aliases)?;
         let marked_tree = marked
@@ -99,7 +93,7 @@ impl<'a> Links<'a> {
             .transpose()?;
         let mut text_targets = HashMap::<_, VecDeque<_>>::new();
         if let Some(marked_tree) = &marked_tree {
-            visit_painted_svg(marked_tree, clip, |paint, _, _| {
+            visit_painted_svg(marked_tree, clip, None, |paint, _, _| {
                 if let usvg::Node::Text(text) = paint.node {
                     // Instance expansion can discard IDs. Identical keys retain paint order.
                     text_targets
@@ -120,10 +114,19 @@ impl<'a> Links<'a> {
             object_links::ByNode::new()
         };
         let mut instance_anchors = Geometry::default();
-        visit_painted_svg(tree, clip, |paint, clip, effects| {
+        visit_painted_svg(tree, clip, Some(&capture), |paint, clip, effects| {
             let node = paint.node;
             if let Some(claims) = instantiated.remove(&std::ptr::from_ref(node)) {
-                if let Some(rect) = node.abs_stroke_bounding_box() {
+                if paint.unproven_geometry {
+                    for claim in claims {
+                        if claim.href.is_some() {
+                            return Err(effects::geometry_error());
+                        }
+                        if let Some(id) = claim.id {
+                            geometry.block_anchor(&id)?;
+                        }
+                    }
+                } else if let Some(rect) = node.abs_stroke_bounding_box() {
                     if let Some(rect) = coverage.refine(
                         paint,
                         effects,
@@ -148,7 +151,9 @@ impl<'a> Links<'a> {
             }
             let id = authored_id(aliases, node.id());
             if !id.is_empty() && !synthetic_ids.contains(id) {
-                if let Some(rect) = node.abs_bounding_box() {
+                if paint.unproven_geometry {
+                    geometry.block_anchor(id)?;
+                } else if let Some(rect) = node.abs_bounding_box() {
                     if let Some(rect) =
                         coverage.refine(paint, effects, actual_rect(rect), clip, Target::Object)?
                     {
@@ -157,6 +162,9 @@ impl<'a> Links<'a> {
                 }
             }
             if let Some(href) = self.objects.get(id) {
+                if paint.unproven_geometry {
+                    return Err(effects::geometry_error());
+                }
                 if let Some(rect) = node.abs_stroke_bounding_box() {
                     if let Some(rect) =
                         coverage.refine(paint, effects, actual_rect(rect), clip, Target::Object)?
@@ -192,6 +200,17 @@ impl<'a> Links<'a> {
                                 return Ok(());
                             };
                             if glyph.is_empty() {
+                                return Ok(());
+                            }
+                            if paint.unproven_geometry {
+                                if owner.href.is_some() {
+                                    return Err(effects::geometry_error());
+                                }
+                                for id in &owner.anchors {
+                                    if !synthetic_ids.contains(id.as_str()) {
+                                        geometry.block_anchor(id)?;
+                                    }
+                                }
                                 return Ok(());
                             }
                             let Some(rect) =
@@ -238,7 +257,7 @@ impl<'a> Links<'a> {
         // Choose colors absent from the real tree so unmarked runs cannot be
         // mistaken for a target, even when they inherit arbitrary author paint.
         let mut occupied = HashSet::new();
-        visit_painted_svg(tree, clip, |paint, _, _| {
+        visit_painted_svg(tree, clip, None, |paint, _, _| {
             if let usvg::Node::Text(text) = paint.node {
                 occupied.extend(
                     text.layouted()
@@ -393,7 +412,7 @@ pub(in crate::epub) struct Geometry {
     anchors: HashMap<String, Rect>,
     links: rendition::LinkAreas,
     anchor_bytes: usize,
-    unproven_geometry: bool,
+    blocked_anchors: HashSet<String>,
 }
 
 impl Geometry {
@@ -420,6 +439,19 @@ impl Geometry {
         Ok(())
     }
 
+    fn block_anchor(&mut self, id: &str) -> Result<(), EngineError> {
+        if !self.blocked_anchors.contains(id) {
+            charge(
+                &mut self.anchor_bytes,
+                id.len() + 48,
+                XML_BYTES,
+                "EPUB SVG anchor geometry exceeds 8 MiB",
+            )?;
+            self.blocked_anchors.insert(id.into());
+        }
+        Ok(())
+    }
+
     fn link(&mut self, rect: Rect, clip: Rect, href: Arc<str>) -> Result<(), EngineError> {
         self.links.add(rect, clip, href)
     }
@@ -431,15 +463,14 @@ impl Geometry {
         capture: &mut rendition::Capture<'_, '_>,
     ) -> Result<(), EngineError> {
         let transformed = |rect| rendition::text::transformed(rect, map);
+        if capture
+            .anchors
+            .as_ref()
+            .is_some_and(|targets| targets.keys().any(|id| self.blocked_anchors.contains(*id)))
+        {
+            return Err(effects::geometry_error());
+        }
         for (id, rect) in &self.anchors {
-            if self.unproven_geometry
-                && capture
-                    .anchors
-                    .as_ref()
-                    .is_some_and(|targets| targets.contains_key(id.as_str()))
-            {
-                return Err(effects::geometry_error());
-            }
             rendition::capture_anchor(&mut capture.anchors, id, transformed(*rect), clip);
         }
         for (_, rect, href) in &self.links.entries {

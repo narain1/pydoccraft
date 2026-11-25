@@ -221,11 +221,11 @@ pub(super) fn collect_image_text(
         f64::from(size[1] / tree.size().height()),
     );
     let mut metrics = HashMap::new();
-    let unproven_geometry = effects::unproven_geometry(tree);
+    let geometry = effects::CaptureGeometry::new(tree);
     let mut coverage = coverage::Coverage::new(tree, density);
-    visit_painted_svg(tree, clip, |paint, clip, effects| {
+    visit_painted_svg(tree, clip, Some(&geometry), |paint, clip, effects| {
         if let usvg::Node::Text(source) = paint.node {
-            if unproven_geometry {
+            if paint.unproven_geometry {
                 return Err(effects::geometry_error());
             }
             let scaled_clip = super::rendition::text::transformed(clip, scale);
@@ -257,11 +257,14 @@ pub(super) fn collect_image_text(
 struct PaintedNode<'tree> {
     node: &'tree usvg::Node,
     parent: tiny_skia::Transform,
+    unproven_geometry: bool,
+    sample_geometry: bool,
 }
 
 fn visit_painted_svg<'tree>(
     tree: &'tree usvg::Tree,
     clip: wordcraft_geom::Rect,
+    geometry: Option<&effects::CaptureGeometry>,
     mut visit: impl FnMut(
         PaintedNode<'tree>,
         wordcraft_geom::Rect,
@@ -274,23 +277,33 @@ fn visit_painted_svg<'tree>(
         clip,
         tiny_skia::Transform::identity(),
         0,
+        false,
     )];
-    while let Some((children, parent_clip, parent, inherited)) = stack.last_mut() {
+    while let Some((children, parent_clip, parent, inherited, unproven_parent)) = stack.last_mut() {
         let Some(node) = children.next() else {
             stack.pop();
             continue;
         };
         effects.truncate(*inherited);
+        let status = geometry
+            .map(|capture| capture.status(node))
+            .unwrap_or_default();
+        let unproven = *unproven_parent || status.filter == effects::FilterGeometry::Unproven;
         let paint = PaintedNode {
             node,
             parent: *parent,
+            unproven_geometry: unproven || status.unproven_subtree,
+            sample_geometry: status.sample_subtree,
         };
         let mut clip = *parent_clip;
         if let usvg::Node::Group(group) = node {
             if group.opacity().get() == 0.0 {
                 continue;
             }
-            if group.clip_path().is_some() || group.mask().is_some() {
+            if group.clip_path().is_some()
+                || group.mask().is_some()
+                || status.filter == effects::FilterGeometry::Sample
+            {
                 let Some(bounds) = group.abs_layer_bounding_box() else {
                     continue;
                 };
@@ -310,6 +323,7 @@ fn visit_painted_svg<'tree>(
                 clip,
                 paint.parent.pre_concat(group.transform()),
                 effects.len(),
+                unproven,
             ));
         }
         visit(paint, clip, &effects)?;
@@ -624,7 +638,7 @@ fn apply_styles(
             style.push_str(&encoded);
             style.push(';');
         }
-        if node.has_tag_name((NS, "feDropShadow")) {
+        if effects::has_flood_paint(node.tag_name().name()) {
             for property in ["flood-color", "flood-opacity"] {
                 if !props.iter().any(|(key, _)| key == property) {
                     if let Some(value) = node.attribute(property) {
