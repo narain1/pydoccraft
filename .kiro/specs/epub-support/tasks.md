@@ -153,8 +153,8 @@
 - [ ] Extend MathML alignment through other operator spacing and nontransparent wrappers and operands, right-to-left groups and cross-table scopes.
 - [x] Preserve editable negative MathML padding offsets that fit within the preceding horizontal math space, including nested superscripts.
 - [x] Retain direct editable MathML carets before and after bounded negative padding that uses preceding space.
-- [x] Preserve the original end caret of a single exactly representable borrowed MathML space in editable DOCX, including within a native script operand.
-- [ ] Expand editable negative leading offsets beyond preceding space and cover other carets inside merged or inexact borrowed spacing and remaining MathML visual properties.
+- [x] Preserve original boundary carets within or at the end of an exactly representable borrowed MathML space run in editable DOCX, including merged equal spaces and native script operands.
+- [ ] Expand editable negative leading offsets beyond a single preceding space run and cover inexact borrowed spacing and remaining MathML visual properties.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.
 - [x] Clamp overlong SMIL clip ends at the physical presentation end in buffered and streamed narration, including unindexed MPEG and chained Ogg audio.

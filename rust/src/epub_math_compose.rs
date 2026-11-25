@@ -460,19 +460,13 @@ impl Editable {
                         let preceding = result.last().map_or(0, argument_units);
                         let start = native_end - preceding;
                         let end = native_end + 1;
-                        let inside = (start + 1..end).contains(offset);
-                        let keep_caret = inside && preceding == 1 && *offset == native_end;
+                        let keep_caret = (start + 1..end).contains(offset);
                         recompose_borrowed_padding(&mut result, node, borrow, keep_caret)?;
-                        if inside && !keep_caret {
-                            return Err(unsupported(
-                                "MathML alignment caret inside borrowed spacing in DOCX export",
-                            ));
-                        }
                         if keep_caret {
-                            // Address the end of the original space inside
-                            // the zero-extent phantom at the front of the box.
+                            // The zero-extent phantom preserves each character
+                            // boundary of the original space run.
                             **suffix = Some(vec![(result.len() - 1, 0), (0, 0)]);
-                            *offset = 1;
+                            *offset -= start;
                             caret = None;
                         } else if *offset >= end {
                             *offset -= preceding;

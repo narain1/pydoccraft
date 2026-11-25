@@ -14882,21 +14882,23 @@ Resume
             for direct, native in zip(expected, reopened[term]):
                 self.assertAlmostEqual(direct, native, delta=0.35)
         mark = '<m:malignmark edge="right"/>'
-        joined = grouped.format(row("-6pt", '<m:mspace width="9pt"/><m:mspace width="9pt"/>' + mark))
         rounded = grouped.format(row("-6pt", '<m:mspace width="18.1pt"/>' + mark))
+        rounded_merged = grouped.format(row(
+            "-6pt", '<m:mspace width="9.1pt"/>' + mark + '<m:mspace width="9.1pt"/>',
+        ))
         for body, message in (
             (row("-6pt", ""), "requires preceding math space"),
             (row("-6pt", '<m:mspace width="4pt"/>'), "requires preceding math space"),
             (row("-3.8pt", '<m:mspace width="4pt"/>'), "spacing resolution"),
-            (joined, "alignment caret inside borrowed spacing"),
             (rounded, "alignment caret in borrowed space requires exact DOCX spacing"),
+            (rounded_merged, "alignment caret in borrowed space requires exact DOCX spacing"),
         ):
             with self.subTest(message=message), doc_ex.open(epub_fixture(chapter_one=template.format(body))) as book:
                 self.assertIn("Tail", boxes(book, ("Tail",)))
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
                     book.convert("docx")
 
-    def test_mathml_caret_keeps_the_original_end_of_borrowed_space(self) -> None:
+    def test_mathml_carets_keep_original_borrowed_space_boundaries(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>MathML borrowed-space caret</title><meta name="viewport" content="width=500,height=320"/>
             <style>body {margin:0}</style></head><body><p><m:math mathsize="12pt">
@@ -14905,18 +14907,35 @@ Resume
               <m:mtr><m:mtd><m:maligngroup/><m:malignmark/><m:mtext>Guide</m:mtext></m:mtd></m:mtr>
             </m:mtable>
           </m:math></p></body></html>"""
-        mark = '<m:malignmark edge="right"/>'
         native_fraction = "<m:mfrac><m:mtext>Upper</m:mtext><m:mtext>Lower</m:mtext></m:mfrac>"
         prefix = "<m:mtext>Lead</m:mtext>"
         tail = "<m:mtext>Tail</m:mtext>"
-        borrowed = (prefix + '<m:mspace width="18pt"/>' + mark
-                    + '<m:mpadded width="72pt" lspace="-6pt" voffset="4pt">' + native_fraction
-                    + '</m:mpadded>' + tail)
-        # An independently authored row puts the fraction at the same offset,
-        # positions the mark 6pt farther right, and retains the 72pt advance.
-        independent = (prefix + '<m:mspace width="12pt"/>'
-                       + '<m:mpadded width="6pt" voffset="4pt">' + native_fraction + '</m:mpadded>'
-                       + mark + '<m:mspace width="72pt"/>' + tail)
+
+        def gap(width: int) -> str:
+            return f'<m:mspace width="{width}pt"/>' if width else ""
+
+        def padded(width: int, inset: int = 0) -> str:
+            return (f'<m:mpadded width="{width}pt" lspace="{inset}pt" voffset="4pt">'
+                    + native_fraction + "</m:mpadded>")
+
+        def inputs(widths: tuple[int, ...], borrowed: int, boundary: int, edge: str) -> tuple[str, str, int]:
+            mark = f'<m:malignmark edge="{edge}"/>'
+            first = "".join(gap(width) for width in widths[:boundary])
+            last = "".join(gap(width) for width in widths[boundary:])
+            source = prefix + first + mark + last + padded(72, -borrowed) + tail
+            advance = sum(widths)
+            wanted = sum(widths[:boundary])
+            origin = advance - borrowed
+            # Position the same editable fraction and mark independently
+            # using nonnegative spacing and an explicit following advance.
+            if wanted <= origin:
+                control = (prefix + gap(wanted) + mark + gap(origin - wanted)
+                           + padded(borrowed) + gap(72) + tail)
+            else:
+                control = (prefix + gap(origin) + padded(wanted - origin) + mark
+                           + gap(advance + 72 - wanted) + tail)
+            return control, source, wanted
+
         terms = ("Lead", "Upper", "Lower", "Tail", "Guide")
         ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
         fixture = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 500, 320)])
@@ -14932,54 +14951,62 @@ Resume
                 contents = f"<m:msup><m:mi>q</m:mi><m:mrow>{contents}</m:mrow></m:msup>"
             return template.replace("EXPRESSION", contents)
 
-        for nested in (False, True):
-            samples = []
-            for authored in (independent, borrowed):
-                source = expression(authored, nested)
-                with self.subTest(nested=nested, borrowed=authored == borrowed):
-                    with doc_ex.open(epub_fixture(chapter_one=source)) as book:
-                        preview = book.render_page(0, dpi=96)
-                        with doc_ex.open(book.convert("pdf")) as pdf:
-                            self.assertFalse(pdf[0].get_images())
-                            vector = boxes(pdf)
-                            if not nested:
-                                self.assertAlmostEqual(vector["Guide"][0] - vector["Lead"][2], 18, delta=0.05)
-                        editable = book.convert("docx")
-                    with zipfile.ZipFile(io.BytesIO(editable)) as archive:
-                        xml = ET.fromstring(archive.read("word/document.xml"))
-                    matrix = xml.find(".//m:oMath//m:m", ns)
-                    self.assertIsNotNone(matrix)
-                    fraction = ".//m:sSup/m:sup//m:f" if nested else ".//m:f"
-                    self.assertIsNotNone(matrix.find(fraction, ns))
-                    if authored == borrowed:
-                        donor, = [phantom for phantom in matrix.findall(".//m:phant", ns)
-                                  if any(t.text == " " for t in phantom.findall("m:e/m:r/m:t", ns))
-                                  and phantom.find("m:phantPr/m:zeroWid", ns) is not None
-                                  and phantom.find("m:phantPr/m:zeroAsc", ns) is not None
-                                  and phantom.find("m:phantPr/m:zeroDesc", ns) is not None]
-                        self.assertEqual(donor.find("m:phantPr/m:show", ns).attrib[f"{{{ns['m']}}}val"], "0")
-                    with doc_ex.open(editable) as word, doc_ex.open(word.convert("pdf")) as pdf:
-                        text = word[0].get_text()
+        cases = (
+            ((18,), 6, 1, "right"),
+            ((10, 10, 10), 15, 1, "left"),
+            ((10, 10, 10), 15, 2, "right"),
+            ((10, 10, 10), 15, 3, "right"),
+        )
+        for widths, inset, boundary, edge in cases:
+            independent, borrowed, wanted = inputs(widths, inset, boundary, edge)
+            for nested in (False, True):
+                with self.subTest(widths=widths, boundary=boundary, nested=nested):
+                    samples = []
+                    for authored in (independent, borrowed):
+                        source = expression(authored, nested)
+                        with doc_ex.open(epub_fixture(chapter_one=source)) as book:
+                            preview = book.render_page(0, dpi=96)
+                            with doc_ex.open(book.convert("pdf")) as pdf:
+                                self.assertFalse(pdf[0].get_images())
+                                vector = boxes(pdf)
+                                if not nested:
+                                    self.assertAlmostEqual(vector["Guide"][0] - vector["Lead"][2], wanted, delta=0.05)
+                            editable = book.convert("docx")
+                        with zipfile.ZipFile(io.BytesIO(editable)) as archive:
+                            xml = ET.fromstring(archive.read("word/document.xml"))
+                        matrix = xml.find(".//m:oMath//m:m", ns)
+                        self.assertIsNotNone(matrix)
+                        fraction = ".//m:sSup/m:sup//m:f" if nested else ".//m:f"
+                        self.assertIsNotNone(matrix.find(fraction, ns))
+                        if authored == borrowed:
+                            donor, = [phantom for phantom in matrix.findall(".//m:phant", ns)
+                                      if any(t.text == " " * len(widths) for t in phantom.findall("m:e/m:r/m:t", ns))
+                                      and phantom.find("m:phantPr/m:zeroWid", ns) is not None
+                                      and phantom.find("m:phantPr/m:zeroAsc", ns) is not None
+                                      and phantom.find("m:phantPr/m:zeroDesc", ns) is not None]
+                            self.assertEqual(donor.find("m:phantPr/m:show", ns).attrib[f"{{{ns['m']}}}val"], "0")
+                        with doc_ex.open(editable) as word, doc_ex.open(word.convert("pdf")) as pdf:
+                            text = word[0].get_text()
+                            for term in terms:
+                                self.assertEqual(text.count(term), 1, text)
+                            self.assertNotIn("⟡H", text)
+                            self.assertNotIn("⁢", text)
+                            native = boxes(pdf)
+                            for term in terms:
+                                for expected, actual in zip(vector[term], native[term]):
+                                    self.assertAlmostEqual(expected, actual, delta=0.35)
+                        with doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": source})) as book:
+                            fixed = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), fixed)
+                                fixed_vector = boxes(pdf)
+                        samples.append((preview, vector, native, fixed, fixed_vector))
+                    self.assertEqual(samples[0][0], samples[1][0])
+                    self.assertEqual(samples[0][3], samples[1][3])
+                    for index, delta in ((1, 0.05), (2, 0.35), (4, 0.05)):
                         for term in terms:
-                            self.assertEqual(text.count(term), 1, text)
-                        self.assertNotIn("⟡H", text)
-                        self.assertNotIn("⁢", text)
-                        native = boxes(pdf)
-                        for term in terms:
-                            for expected, actual in zip(vector[term], native[term]):
-                                self.assertAlmostEqual(expected, actual, delta=0.35)
-                    with doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": source})) as book:
-                        fixed = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
-                        with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
-                            self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), fixed)
-                            fixed_vector = boxes(pdf)
-                    samples.append((preview, vector, native, fixed, fixed_vector))
-            self.assertEqual(samples[0][0], samples[1][0])
-            self.assertEqual(samples[0][3], samples[1][3])
-            for index, delta in ((1, 0.05), (2, 0.35), (4, 0.05)):
-                for term in terms:
-                    for expected, actual in zip(samples[0][index][term], samples[1][index][term]):
-                        self.assertAlmostEqual(expected, actual, delta=delta)
+                            for expected, actual in zip(samples[0][index][term], samples[1][index][term]):
+                                self.assertAlmostEqual(expected, actual, delta=delta)
 
     def test_mathml_signed_vertical_and_overhanging_horizontal_shifts_stay_editable(self) -> None:
         red = '<m:mtext mathcolor="#cf222e">Red</m:mtext>'
