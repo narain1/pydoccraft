@@ -14,7 +14,7 @@
 - [x] Build and validate the manylinux x86-64 wheels for CPython 3.11, 3.12, and 3.13.
 - [ ] Run the installed release wheel matrix on macOS and Windows.
 - [x] Replace existing XHTML and SVG chapters transactionally and preserve targeted navigation and overlay anchors.
-- [x] Rename chapter anchors with their links in a single batch and preserve targets referenced by retained XHTML, SVG, navigation and media overlays outside the spine.
+- [x] Rename chapter anchors with their links in a single batch and preserve targets referenced by retained XHTML, SVG, navigation and media overlays outside the spine. Protect targets of local OPF metadata links and refinements, including percent-encoded paths and fragments.
 - [x] Insert fixed-layout SVG spine chapters with packaged dependencies and optional media overlays in the same edit.
 - [x] Synchronize EPUB 3 `mathml` and `svg` resource properties after chapter insertion or replacement.
 - [x] Read SMIL timing trees and expose chapter cue order, time ranges, target IDs and bounded audio reads.
@@ -225,7 +225,7 @@
 - [x] Stage supplemental XHTML resources outside the spine and insert hyperlinked auxiliary chapters with a non-linear spine entry.
 - [x] Read and render archive-local static XHTML through iframe and XHTML object references, including nested viewport clipping and fixed PDF text and links.
 - [x] Attach or detach EPUB 3 media overlays and author sequential text and audio cues with package duration metadata.
-- [x] Edit a subset of chapters that share a SMIL resource while retaining the other chapters' cues and recalculating duration metadata.
+- [x] Edit a subset of chapters that share a SMIL resource while retaining the other chapters' cues and recalculating duration metadata. Resolve escaped and package-relative duration refinements during updates and removal. Preserve retained refinements of duration expressions.
 - [x] Replace IDPF-obfuscated fonts from plain font bytes and update their declarations after resource removal.
 - [x] Author nested SMIL sequences with chapter targets, inherited roles and clip-based durations. Recompute durations for a staged associated SMIL replacement or changed audio that supplies an open SMIL clip.
 

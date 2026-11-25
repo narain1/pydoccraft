@@ -639,6 +639,8 @@ fn check_markup_anchors(
     for node in root.descendants().filter(Node::is_element) {
         let content_target = super::content::hyperlink_target(node)
             .or_else(|| super::content::embedded_document_target(node));
+        let package_node = package && node.tag_name().namespace() == Some(OPF);
+        let tag = node.tag_name().name();
         let href = if content_target.is_some() {
             content_target
         } else if ncx && name(node, NCX, "content")
@@ -649,22 +651,26 @@ fn check_markup_anchors(
             .is_some_and(|namespace| name(node, namespace, "seq") || name(node, namespace, "body"))
         {
             node.attribute((super::EPUB, "textref"))
-        } else if package && name(node, OPF, "reference") {
+        } else if package_node && matches!(tag, "reference" | "link") {
             node.attribute("href")
         } else {
             None
         };
-        let Some(href) = href.map(str::trim).filter(|href| !external(href)) else {
-            continue;
+        let refines = if package_node && matches!(tag, "meta" | "link") {
+            node.attribute("refines")
+        } else {
+            None
         };
-        let Some((_, fragment)) = href.split_once('#') else {
-            continue;
-        };
-        // Unresolved URLs were already outside the editor's ID contract.
-        if let Ok(path) = resolve(base, href) {
-            if removed.contains_key(path.as_str()) {
-                if let Ok(fragment) = percent_decode(fragment) {
-                    check_anchor(removed, &path, &fragment)?;
+        for href in [href, refines].into_iter().flatten().map(str::trim) {
+            let Some((_, fragment)) = href.split_once('#').filter(|_| !external(href)) else {
+                continue;
+            };
+            // Unresolved URLs were already outside the editor's ID contract.
+            if let Ok(path) = resolve(base, href) {
+                if removed.contains_key(path.as_str()) {
+                    if let Ok(fragment) = percent_decode(fragment) {
+                        check_anchor(removed, &path, &fragment)?;
+                    }
                 }
             }
         }

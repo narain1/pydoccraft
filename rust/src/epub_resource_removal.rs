@@ -9,8 +9,9 @@ use roxmltree::Node;
 use super::{apply_edits, argument, Plan};
 use crate::{
     epub::{
-        attribute, charge, css, element_ids, external, invalid, name, parse_xml, percent_decode,
-        required, resolve, svg, unsupported, Book, EPUB, METADATA_BYTES, OPF, XHTML, XML_BYTES,
+        attribute, charge, css, element_ids, external, invalid, name, package_refinement,
+        parse_xml, percent_decode, required, resolve, svg, unsupported, Book, EPUB, METADATA_BYTES,
+        OPF, XHTML, XML_BYTES,
     },
     EngineError,
 };
@@ -72,11 +73,10 @@ pub(super) fn apply(
     for node in metadata.children().filter(|&node| {
         name(node, OPF, "meta") && node.attribute("property") == Some("media:duration")
     }) {
-        if node
-            .attribute("refines")
-            .and_then(|id| id.strip_prefix('#'))
-            .is_some_and(|id| ids.contains(id))
-        {
+        let Some(refines) = node.attribute("refines") else {
+            continue;
+        };
+        if package_refinement(plan.package, refines)?.is_some_and(|id| ids.contains(id.as_str())) {
             ids.extend(element_ids(node));
             edits.push((node.range(), String::new()));
         }
@@ -94,20 +94,18 @@ pub(super) fn apply(
             let value = attr.value();
             let id = match attr.name() {
                 "idref" | "fallback" | "fallback-style" | "media-overlay" | "toc" | "handler" => {
-                    Some(value)
+                    Some(percent_decode(value)?)
                 }
-                "refines" => value.strip_prefix('#'),
+                "refines" => package_refinement(plan.package, value)?,
                 "content" if name(node, OPF, "meta") && node.attribute("name") == Some("cover") => {
-                    Some(value)
+                    Some(percent_decode(value)?)
                 }
                 _ => None,
             };
-            if let Some(id) = id {
-                if ids.contains(percent_decode(id)?.as_str()) {
-                    return Err(argument(
-                        "removed EPUB resource is still referenced by the package",
-                    ));
-                }
+            if id.is_some_and(|id| ids.contains(id.as_str())) {
+                return Err(argument(
+                    "removed EPUB resource is still referenced by the package",
+                ));
             }
         }
     }
@@ -158,18 +156,18 @@ fn read<'a>(
     }
 }
 
-pub(super) fn check_metadata_id(node: Node<'_, '_>) -> Result<(), EngineError> {
+pub(super) fn check_metadata_id(package: &str, node: Node<'_, '_>) -> Result<(), EngineError> {
     let mut ids = element_ids(node).peekable();
     if ids.peek().is_none() {
         return Ok(());
     }
     let ids: HashSet<_> = ids.collect();
-    for fragment in node
+    for refines in node
         .document()
         .descendants()
-        .filter_map(|node| node.attribute("refines")?.strip_prefix('#'))
+        .filter_map(|node| node.attribute("refines"))
     {
-        if ids.contains(percent_decode(fragment)?.as_str()) {
+        if package_refinement(package, refines)?.is_some_and(|id| ids.contains(id.as_str())) {
             return Err(argument("removed EPUB duration metadata is still refined"));
         }
     }

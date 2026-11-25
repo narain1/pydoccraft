@@ -14,8 +14,8 @@ use super::{
 use crate::{
     author_epub::escape_attribute,
     epub::{
-        attribute, charge, editor, invalid, limited, name, overlay, parse_xml, required, resolve,
-        unsupported, Book, EPUB, METADATA_BYTES, OPF, XML_BYTES,
+        attribute, charge, editor, invalid, limited, name, overlay, package_refinement, parse_xml,
+        required, resolve, unsupported, Book, EPUB, METADATA_BYTES, OPF, XML_BYTES,
     },
     limits::{validate_member_count, MAX_INPUT_SIZE},
     EngineError,
@@ -161,7 +161,7 @@ pub(super) fn edit(
         return Ok(source.to_owned());
     }
 
-    let declared = durations_in(metadata)?;
+    let declared = durations_in(plan.package, metadata)?;
     #[cfg(feature = "python")]
     let mut audio = AudioDurations::default();
     for (id, path, owners) in active {
@@ -248,7 +248,14 @@ pub(super) fn edit(
     }
     let at = inner_range(source, manifest)?.end;
     edits.push((at..at, std::mem::take(&mut plan.manifest_additions)));
-    duration_edits(source, metadata, &declared, &durations, &mut edits)?;
+    duration_edits(
+        plan.package,
+        source,
+        metadata,
+        &declared,
+        &durations,
+        &mut edits,
+    )?;
     apply_edits(source, edits, METADATA_BYTES)
 }
 
@@ -365,6 +372,7 @@ fn write_smil(
 }
 
 fn durations_in<'a, 'input>(
+    package: &str,
     metadata: Node<'a, 'input>,
 ) -> Result<HashMap<String, Node<'a, 'input>>, EngineError> {
     let mut declared = HashMap::new();
@@ -372,15 +380,9 @@ fn durations_in<'a, 'input>(
         name(node, OPF, "meta") && node.attribute("property") == Some("media:duration")
     }) {
         let key = match node.attribute("refines") {
-            Some(value) if value.starts_with('#') && value.len() > 1 => {
-                crate::epub::percent_decode(&value[1..])?
-            }
+            Some(value) => package_refinement(package, value)?
+                .ok_or_else(|| unsupported("media overlay duration with a nonlocal refinement"))?,
             None => String::new(),
-            _ => {
-                return Err(unsupported(
-                    "media overlay duration with a nonlocal refinement",
-                ))
-            }
         };
         if declared.insert(key, node).is_some() {
             return Err(invalid("duplicate media overlay duration"));
@@ -390,6 +392,7 @@ fn durations_in<'a, 'input>(
 }
 
 fn duration_edits(
+    package: &str,
     source: &str,
     metadata: Node<'_, '_>,
     declared: &HashMap<String, Node<'_, '_>>,
@@ -418,7 +421,7 @@ fn duration_edits(
     }
     if let Some(node) = declared.get("") {
         if durations.is_empty() {
-            super::removal::check_metadata_id(*node)?;
+            super::removal::check_metadata_id(package, *node)?;
             edits.push((node.range(), String::new()));
         } else {
             edits.push((inner_range(source, *node)?, time(total)));

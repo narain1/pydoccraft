@@ -995,6 +995,20 @@ fn resolve(base: &str, target: &str) -> Result<String, EngineError> {
     Ok(result)
 }
 
+fn package_refinement(package: &str, value: &str) -> Result<Option<String>, EngineError> {
+    let value = value.trim();
+    let Some((_, fragment)) = value
+        .split_once('#')
+        .filter(|(_, fragment)| !fragment.is_empty())
+    else {
+        return Ok(None);
+    };
+    if external(value) || resolve(package, value)? != package {
+        return Ok(None);
+    }
+    percent_decode(fragment).map(Some)
+}
+
 fn percent_decode(input: &str) -> Result<String, EngineError> {
     let mut bytes = Vec::with_capacity(input.len());
     let mut remaining = input.as_bytes().iter().copied();

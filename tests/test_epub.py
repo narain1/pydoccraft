@@ -810,6 +810,60 @@ class EpubTests(unittest.TestCase):
             self.assertTrue(set(removed).isdisjoint(archive.namelist()))
             self.assertNotIn(b"media:duration", archive.read("OEBPS/content.opf"))
 
+    def test_structure_resolves_escaped_media_duration_refinements(self) -> None:
+        source, audio = narrated_epub()
+        package_path = "OEBPS/content.opf"
+        smil_path = "OEBPS/Sync/read.smil"
+        voice_path = "OEBPS/Media/voice.wav"
+        chapters = ("OEBPS/one.xhtml", "OEBPS/two.xhtml")
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            original_package = archive.read(package_path)
+
+        def package(refines: str, extra: str = "") -> bytes:
+            return original_package.replace(b"</metadata>", (
+                f'<meta id="track-duration" property="media:duration" refines="{refines}">0:00:01.798</meta>'
+                f'<meta id="book-duration" property="media:duration">0:00:01.798</meta>{extra}</metadata>'
+            ).encode())
+
+        def remove_narration(book: doc_ex.Document) -> bytes:
+            return book.edit_epub_structure(
+                [1, 0], overlays=dict.fromkeys(chapters), remove_resources=[smil_path, voice_path],
+            )
+
+        def durations(book: doc_ex.Document) -> dict[str | None, str | None]:
+            xml = ET.fromstring(book.read_epub_resource(package_path))
+            return {node.get("refines"): node.text for node in xml.findall("{*}metadata/{*}meta")
+                    if node.get("property") == "media:duration"}
+
+        for refines in ("#%73ync", "./%63ontent.opf#s%79nc"):
+            with self.subTest(refines=refines):
+                authored = package(refines)
+                with doc_ex.open(rewrite_epub(source, {package_path: authored})) as original:
+                    kept = original.epub_media_cues(1)
+                    partial = original.edit_epub_structure(overlays={chapters[0]: None})
+                    revised = remove_narration(original)
+                    self.assertEqual(original.read_epub_resource(package_path), authored)
+                    self.assertEqual(original.read_epub_resource(voice_path), audio)
+                with doc_ex.open(partial) as edited:
+                    self.assertEqual(edited.epub_media_cues(0), [])
+                    self.assertEqual(edited.epub_media_cues(1), kept)
+                    self.assertEqual(durations(edited), {refines: "0:00:00.923000", None: "0:00:00.923000"})
+                with doc_ex.open(revised) as edited, zipfile.ZipFile(io.BytesIO(revised)) as archive:
+                    self.assertEqual([page.metadata["chapter_path"] for page in edited], list(reversed(chapters)))
+                    self.assertEqual(durations(edited), {})
+                    self.assertTrue({smil_path, voice_path}.isdisjoint(archive.namelist()))
+
+        for target, message in (("book", "duration metadata is still refined"),
+                                ("track", "still referenced by the package")):
+            extra = (f'<meta property="dcterms:description" refines="./%63ontent.opf#{target}-%64uration">'
+                     'Duration source</meta>')
+            authored = package("#sync", extra)
+            with self.subTest(target=target), doc_ex.open(rewrite_epub(source, {package_path: authored})) as original:
+                with self.assertRaisesRegex(ValueError, message):
+                    remove_narration(original)
+                self.assertEqual(original.read_epub_resource(package_path), authored)
+                self.assertTrue(original.epub_media_cues(0))
+
     def test_replace_chapter_in_shared_overlay_preserves_nested_roles_and_staged_timing(self) -> None:
         source, original_audio = narrated_epub()
         path = "OEBPS/Media/voice.wav"
@@ -15767,6 +15821,75 @@ Resume
             self.assertEqual(authored.find("{*}content").attrib["src"], "named.xhtml#start")
             page = xml.find(".//{*}pageTarget")
             self.assertEqual([point.attrib["playOrder"] for point in (*points, page)], ["1", "3", "2", "4", "5"])
+
+    def test_chapter_edits_protect_packaged_metadata_link_and_refinement_fragments(self) -> None:
+        source, nav_path, nav, html = self.nonspine_navigation_fixture()
+        package_path = "OEBPS/content.opf"
+        chapter_path = "OEBPS/one.xhtml"
+        old_image = "OEBPS/image.png"
+        new_image = "OEBPS/Art/plate # café.png"
+        old_markup = html.format(
+            '<h1 id="old">First</h1><p id="description-é">Linked description</p>'
+            '<p id="rights-é">Original rights notice</p><p id="origin-é">Source information</p>'
+            '<img src="image.png" alt="Plate"/>',
+        )
+        description = "./on%65.xhtml#%64escription-%C3%A9"
+        rights = "one.xhtml#rights-%C3%A9"
+        origin = "./one.xhtml#origin-%C3%A9"
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read(package_path)
+        package = package.replace(b"</metadata>", (
+            f'<link rel="dcterms:description" href="{description}" media-type="application/xhtml+xml"/>'
+            f'<meta property="dcterms:rights" refines="{rights}">Permission granted</meta>'
+            f'<link rel="dcterms:source" href="https://example.org/source#old" refines="{origin}"/>'
+            '<meta property="dcterms:description" refines="#one">First chapter</meta></metadata>'
+        ).encode())
+        source = rewrite_epub(source, {package_path: package, chapter_path: old_markup})
+        new_markup = old_markup.replace('id="old">First', 'id="fresh-é">Revised first').replace(
+            'src="image.png"', 'src="Art/plate%20%23%20caf%C3%A9.png"',
+        )
+        new_nav = nav.replace("one.xhtml#old", "one.xhtml#fresh-%C3%A9")
+        with doc_ex.open(source) as original:
+            def combined(markup: str) -> bytes:
+                return original.edit_epub_structure(
+                    [1, 0], replacements={0: markup},
+                    resources={
+                        nav_path: doc_ex.EpubResource("application/xhtml+xml", new_nav.encode()),
+                        new_image: doc_ex.EpubResource("image/png", PNG),
+                    },
+                    remove_resources=[old_image],
+                )
+
+            for anchor in ("description-é", "rights-é", "origin-é"):
+                with self.subTest(anchor=anchor, edit="chapters"):
+                    with self.assertRaisesRegex(ValueError, "referenced anchor"):
+                        original.edit_epub_chapters({0: old_markup.replace(f'id="{anchor}"', "")})
+                with self.subTest(anchor=anchor, edit="structure"):
+                    with self.assertRaisesRegex(ValueError, "referenced anchor"):
+                        combined(new_markup.replace(f'id="{anchor}"', ""))
+            revised = combined(new_markup)
+            self.assertEqual(original.read_epub_resource(package_path), package)
+            self.assertEqual(original.read_epub_resource(chapter_path), old_markup.encode())
+            self.assertEqual(original.read_epub_resource(nav_path), nav.encode())
+            self.assertEqual(original.read_epub_resource(old_image), PNG)
+        with doc_ex.open(revised) as edited, zipfile.ZipFile(io.BytesIO(revised)) as archive:
+            self.assertEqual([page.metadata["chapter_path"] for page in edited],
+                             ["OEBPS/two.xhtml", chapter_path])
+            self.assertIn("Revised first", edited[1].get_text())
+            self.assertEqual([image.alt for image in edited[1].get_images()], ["Plate"])
+            self.assertEqual(edited.read_epub_resource(new_image), PNG)
+            self.assertNotIn(old_image, archive.namelist())
+            toc = edited.metadata["navigation"][0]["items"]
+            self.assertEqual(toc[1]["children"][0]["fragment"], "fresh-é")
+            package_xml = ET.fromstring(archive.read(package_path))
+            meta = package_xml.find("{*}metadata")
+            self.assertEqual([node.get("refines") for node in meta.findall("{*}meta")
+                              if node.get("refines")], [rights, "#one"])
+            self.assertEqual([(node.get("href"), node.get("refines")) for node in meta.findall("{*}link")],
+                             [(description, None), ("https://example.org/source#old", origin)])
+            chapter_xml = ET.fromstring(archive.read(chapter_path))
+            self.assertEqual({node.get("id") for node in chapter_xml.iter() if node.get("id")},
+                             {"fresh-é", "description-é", "rights-é", "origin-é"})
 
     def test_structure_stages_supplemental_xhtml_links_navigation_and_assets(self) -> None:
         source, nav_path, nav, html = self.nonspine_navigation_fixture()
