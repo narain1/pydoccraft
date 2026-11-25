@@ -10884,8 +10884,90 @@ Trailing
                     self.assertAlmostEqual(fixed[label][0] - fixed["North"][0],
                                            reference[label][0] - reference["North"][0], delta=0.65)
 
-        unsafe = source.replace("<m:maligngroup/><m:mtext>RedMarker", "<m:maligngroup/><m:mo>+</m:mo><m:mtext>RedMarker")
+        unsafe = source.replace("<m:maligngroup/><m:mtext>RedMarker", "<m:maligngroup/><m:mo>=</m:mo><m:mtext>RedMarker")
         with doc_ex.open(epub_fixture(chapter_one=unsafe)) as book:
+            for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "alignment group boundary through operator spacing"):
+                    operation()
+
+    def test_mathml_alignment_groups_keep_native_binary_spacing(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>MathML binary group boundary</title><meta name="viewport" content="width=520,height=290"/>
+            <style>body {margin:0}</style></head><body><p><m:math mathsize="12pt">
+            <m:mtable groupalign="{right left}" columnwidth="215pt" columnalign="left">
+              <m:mtr><m:mtd>BODY</m:mtd></m:mtr>
+            </m:mtable>
+          </m:math></p></body></html>"""
+        left = "<m:mtext>Harbor</m:mtext>"
+        right = "<m:mtext>Orchard</m:mtext>"
+        operator = '<m:mo mathcolor="#bf222d">+</m:mo>'
+        radicand = "<m:msqrt><m:mn>91.387</m:mn></m:msqrt>"
+        group = "<m:maligngroup/>"
+        mark = "<m:malignmark/>"
+        terms = ("Harbor", "+", "Orchard", "91")
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+        fixture = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 520, 290)])
+
+        def geometry(pdf: doc_ex.Document) -> tuple[float, float, float]:
+            rects = {}
+            for term in terms:
+                rects[term], = pdf[0].search_for(term)
+            return (rects["+"][0] - rects["Harbor"][2],
+                    rects["Orchard"][0] - rects["+"][2],
+                    rects["91"][0] - rects["Orchard"][0])
+
+        unmarked = left + operator + right + radicand
+        with doc_ex.open(epub_fixture(chapter_one=template.replace("BODY", unmarked))) as book:
+            with doc_ex.open(book.convert("pdf")) as pdf:
+                reference = geometry(pdf)
+        self.assertGreater(min(reference[:2]), 1.0)
+
+        for body, anchor in (
+            (group + left + group + mark + operator + right + radicand, "+"),
+            (group + left + group + operator + right + radicand.replace("91.", "91" + mark + "."), ".387"),
+            (group + left + operator + group + mark + right + radicand, "Orchard"),
+        ):
+            chapter = template.replace("BODY", body)
+            with self.subTest(body=body), doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+                self.assertTrue(book.render_page(0, dpi=96).startswith(b"\x89PNG"))
+                with doc_ex.open(book.convert("pdf")) as pdf:
+                    self.assertFalse(pdf[0].get_images())
+                    for expected, actual in zip(reference, geometry(pdf)):
+                        self.assertAlmostEqual(expected, actual, delta=0.05)
+                editable = book.convert("docx")
+                with zipfile.ZipFile(io.BytesIO(editable)) as archive:
+                    xml = ET.fromstring(archive.read("word/document.xml"))
+                matrix = xml.find(".//m:oMath//m:m", ns)
+                self.assertIsNotNone(matrix)
+                self.assertIsNotNone(matrix.find(".//m:rad", ns))
+                source_tokens = ("Harbor", "+", "Orchard", "91.387")
+                tokens = [run.text for run in matrix.findall(".//m:t", ns) if run.text in source_tokens]
+                self.assertEqual(tuple(tokens), source_tokens)
+                with doc_ex.open(editable) as word, doc_ex.open(word.convert("pdf")) as pdf:
+                    text = word[0].get_text()
+                    for term in source_tokens:
+                        self.assertEqual(text.count(term), 1, text)
+                    self.assertNotIn("⟡H", text)
+                    for expected, actual in zip(reference, geometry(pdf)):
+                        self.assertAlmostEqual(expected, actual, delta=0.25)
+                with doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": chapter})) as book:
+                    preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                    with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                        self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+                        for expected, actual in zip(reference, geometry(pdf)):
+                            self.assertAlmostEqual(expected, actual, delta=0.65)
+
+            second = group + "<m:mtext>Westbound</m:mtext>" + group + mark + "<m:mtext>Independent</m:mtext>"
+            paired = chapter.replace("</m:mtable>", f"<m:mtr><m:mtd>{second}</m:mtd></m:mtr></m:mtable>")
+            with doc_ex.open(epub_fixture(chapter_one=paired)) as book, doc_ex.open(book.convert("docx")) as word:
+                for document, delta in ((book, 0.05), (word, 0.25)):
+                    with doc_ex.open(document.convert("pdf")) as pdf:
+                        marked, = pdf[0].search_for(anchor)
+                        reference_mark, = pdf[0].search_for("Independent")
+                        self.assertAlmostEqual(marked[0], reference_mark[0], delta=delta)
+
+        unproven = group + left + group + operator + '<m:mo>−</m:mo>' + right
+        with doc_ex.open(epub_fixture(chapter_one=template.replace("BODY", unproven))) as book:
             for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "alignment group boundary through operator spacing"):
                     operation()

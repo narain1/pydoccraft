@@ -1,13 +1,13 @@
 //! Measure MathML table alignment points without changing editable runs.
 use roxmltree::{Node, NodeId};
 use wordcraft_doc::{
-    math::{self, math_class, Arg, MClass, MNode, Math},
+    math::{self, math_class, Arg, MClass, MNode},
     math_edit::{self, MathPos},
 };
 use wordcraft_layout::math::MathLayout;
 
 use super::super::{append_token_text, xml_space, DEPTH};
-use super::{compose, indexed, invalid, limited, unsupported, MATHML};
+use super::{compose, indexed, invalid, limited, unsupported, AlignedEquation, MATHML};
 use crate::EngineError;
 
 #[derive(Clone)]
@@ -108,38 +108,78 @@ pub(super) fn merge_aligned_runs(
     Ok(result)
 }
 
-pub(super) fn check_boundaries<'a>(
-    groups: impl IntoIterator<Item = &'a Math>,
-) -> Result<(), EngineError> {
-    fn ordinary(node: Option<&MNode>, first: bool) -> bool {
-        let Some(node @ MNode::Run(run)) = node else {
-            return false;
-        };
-        if compose::is_box_marker(node) {
-            return false;
-        }
-        let mut chars = run.text.chars();
-        let ch = if first {
-            chars.next()
-        } else {
-            chars.next_back()
-        };
-        ch.is_some_and(|ch| {
-            !ch.is_whitespace()
-                && !matches!(ch, '\u{2061}'..='\u{2063}' | '\u{200b}')
-                && (run.nor || run.lit || math_class(ch) == MClass::Ord)
-        })
+fn edge_class(node: Option<&MNode>, first: bool) -> Option<MClass> {
+    let node @ MNode::Run(run) = node? else {
+        return None;
+    };
+    if compose::is_box_marker(node) {
+        return None;
     }
-    let mut groups = groups.into_iter().peekable();
-    while let Some(left) = groups.next() {
-        if let Some(right) = groups.peek() {
-            // An ordinary-to-ordinary boundary adds no native operator glue
-            // and supplies the same binary-operator context on either side.
-            if !ordinary(left.nodes.last(), false) || !ordinary(right.nodes.first(), true) {
-                return Err(unsupported(
-                    "MathML alignment group boundary through operator spacing",
-                ));
+    let mut chars = run.text.chars();
+    let ch = if first {
+        chars.next()?
+    } else {
+        chars.next_back()?
+    };
+    if ch.is_whitespace() || matches!(ch, '\u{2061}'..='\u{2063}' | '\u{200b}') {
+        return None;
+    }
+    Some(if run.nor || run.lit {
+        MClass::Ord
+    } else {
+        math_class(ch)
+    })
+}
+
+fn isolated_binary(node: Option<&MNode>) -> bool {
+    matches!(node, Some(MNode::Run(run)) if run.text.chars().count() == 1)
+        && edge_class(node, true) == Some(MClass::Bin)
+}
+
+pub(super) fn preserve_boundary_spacing(groups: &mut [AlignedEquation]) -> Result<(), EngineError> {
+    let mut guides = vec![[false; 2]; groups.len()];
+    for (index, pair) in groups.windows(2).enumerate() {
+        let left = &pair[0].math.nodes;
+        let right = &pair[1].math.nodes;
+        let trailing = left.last();
+        let leading = right.first();
+        let left_is_ordinary = edge_class(trailing, false) == Some(MClass::Ord);
+        let right_is_ordinary = edge_class(leading, true) == Some(MClass::Ord);
+        if left_is_ordinary && right_is_ordinary {
+            continue;
+        }
+        if left_is_ordinary
+            && isolated_binary(leading)
+            && edge_class(right.get(1), true) == Some(MClass::Ord)
+        {
+            guides[index + 1][0] = true;
+        } else if right_is_ordinary
+            && isolated_binary(trailing)
+            && edge_class(left.iter().rev().nth(1), false) == Some(MClass::Ord)
+        {
+            guides[index][1] = true;
+        } else {
+            return Err(unsupported(
+                "MathML alignment group boundary through operator spacing",
+            ));
+        }
+    }
+
+    for (group, [before, after]) in groups.iter_mut().zip(guides) {
+        // The invisible ordinary atom supplies the original binary neighbor.
+        // The native shaper then assigns the operator's gap to its own group.
+        if before {
+            group.math.nodes.insert(0, compose::grid_marker());
+            if let Some(caret) = group.anchor.caret_mut() {
+                if let Some((index, _)) = caret.path.first_mut() {
+                    *index += 1;
+                } else {
+                    caret.off += 1;
+                }
             }
+        }
+        if after {
+            group.math.nodes.push(compose::grid_marker());
         }
     }
     Ok(())

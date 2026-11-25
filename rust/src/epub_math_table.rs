@@ -536,7 +536,7 @@ fn project_cell<'xml>(
                         anchor: part.group.resolve(caret)?,
                     });
                 }
-                alignment::check_boundaries(aligned.iter().map(|group| &group.math))?;
+                alignment::preserve_boundary_spacing(&mut aligned)?;
                 return Ok((CellContent::Aligned(aligned), None));
             }
             Some(Groups::Single(group)) => Some(group),

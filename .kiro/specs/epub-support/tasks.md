@@ -129,7 +129,8 @@
 - [x] Align MathML decimal points inside native square and indexed roots and explicit marks inside native fraction and radical operands. Preserve editable operator trees and searchable text through geometry rewrites.
 - [x] Align implicit decimals in native script bases and explicit marks in ordinary base, subscript and superscript operands. Preserve operator spacing and editable scripts.
 - [x] Align native stacked limit operands and accent bases, including nested under/over paths. Preserve searchable text, operator spacing and editable Office Math objects.
-- [ ] Extend MathML alignment through operator spacing and other nontransparent wrappers and operands, right-to-left groups and cross-table scopes.
+- [x] Preserve binary operator spacing for a MathML alignment group boundary immediately beside an isolated operator between ordinary runs. Preserve editable operands and remap scalar and nested carets.
+- [ ] Extend MathML alignment through other operator spacing and nontransparent wrappers and operands, right-to-left groups and cross-table scopes.
 - [x] Preserve editable negative MathML padding offsets that fit within the preceding horizontal math space, including nested superscripts.
 - [x] Retain direct editable MathML carets before and after bounded negative padding that uses preceding space.
 - [ ] Expand editable negative leading offsets beyond preceding space or with carets inside the borrowed spacing, and cover remaining MathML visual properties.
