@@ -4148,6 +4148,37 @@ first
             for path, contents in members.items():
                 self.assertEqual(edited.read_epub_resource(path), contents.encode() if isinstance(contents, str) else contents)
 
+    def test_replacing_packaged_svg_checks_staged_fragment_references(self) -> None:
+        def svg(body: str) -> doc_ex.EpubResource:
+            return doc_ex.EpubResource("image/svg+xml", (
+                f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 30">{body}</svg>'
+            ).encode())
+
+        chart = "OEBPS/chart.svg"
+        old_chart = svg('<rect id="café" x="5" y="5" width="40" height="12"/>')
+        new_chart = svg('<rect id="key" x="5" y="5" width="40" height="12"/>')
+        guide = '<html xmlns="http://www.w3.org/1999/xhtml"><body><a href="chart.svg#{}">Chart</a></body></html>'
+        old_link = guide.format("caf%C3%A9")
+        new_link = guide.format("key")
+        with doc_ex.open(epub_fixture()) as book:
+            source = book.edit_epub_structure(resources={chart: old_chart})
+        with doc_ex.open(source) as book:
+            with self.assertRaisesRegex(ValueError, "referenced anchor"):
+                book.edit_epub_structure([doc_ex.EpubChapterSource("Guide", old_link, "OEBPS/guide.xhtml"), 0, 1],
+                                         resources={chart: new_chart})
+            updated = book.edit_epub_structure([doc_ex.EpubChapterSource("Guide", new_link, "OEBPS/guide.xhtml"), 0, 1],
+                                               resources={chart: new_chart})
+            with_link = book.edit_epub_chapters({0: old_link})
+            self.assertEqual(book.read_epub_resource(chart), old_chart.data)
+        with doc_ex.open(with_link) as book:
+            with self.assertRaisesRegex(ValueError, "referenced anchor"):
+                book.edit_epub_structure(resources={chart: new_chart})
+            self.assertEqual(book.read_epub_resource(chart), old_chart.data)
+        with doc_ex.open(updated) as book:
+            self.assertEqual(book.read_epub_resource(chart), new_chart.data)
+            link, = book[0].get_links()
+            self.assertEqual(link.metadata["target_fragment"], "key")
+
     def test_insert_and_replace_fixed_svg_chapter_with_staged_resources(self) -> None:
         chapter_path = "OEBPS/Art/Plate one.svg"
         css_path = "OEBPS/Styles/paint.css"

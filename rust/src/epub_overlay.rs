@@ -11,7 +11,7 @@ use super::{
 use crate::EngineError;
 
 pub(super) const SMIL: &str = "http://www.w3.org/ns/SMIL";
-const SMIL_HTTPS: &str = "https://www.w3.org/ns/SMIL";
+pub(super) const SMIL_HTTPS: &str = "https://www.w3.org/ns/SMIL";
 const MAX_OVERLAY_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Default)]

@@ -53,6 +53,8 @@ pub(crate) fn update_structure<'a>(
 ) -> Result<Vec<u8>, EngineError> {
     let mut total = 0;
     let mut inserted_svg = Vec::new();
+    let mut removed_anchors = editor::RemovedAnchors::new();
+    let mut anchor_bytes = 0;
     validate_member_count(removed.len())?;
     narration::charge_edits(overlays, &mut total)?;
     let mut removals = HashSet::new();
@@ -444,6 +446,17 @@ pub(crate) fn update_structure<'a>(
                 "EPUB resource replacement requires its existing manifest and media type",
             ));
         }
+        if media == "image/svg+xml" && book.archive.index_for_name(path).is_some() {
+            let xml = parse_xml(data)?;
+            editor::collect_removed_anchors(
+                &mut book,
+                path,
+                data,
+                &xml,
+                &mut removed_anchors,
+                &mut anchor_bytes,
+            )?;
+        }
         let replacement = if let Some(obfuscated) = book
             .obfuscated_fonts
             .as_ref()
@@ -536,6 +549,14 @@ pub(crate) fn update_structure<'a>(
     }
     if plan.files.is_empty() && removals.is_empty() {
         return Ok(data.to_vec());
+    }
+    if !removed_anchors.is_empty() {
+        let staged = plan
+            .files
+            .iter()
+            .map(|(path, data)| (path.as_str(), data.as_ref()))
+            .collect();
+        editor::check_staged_links(&mut book, &staged, &removed_anchors, &removals)?;
     }
     let (replacements, additions) = plan
         .files

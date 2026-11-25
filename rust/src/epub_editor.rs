@@ -263,35 +263,20 @@ pub(crate) fn update_chapters(
                 declarations.insert(path, xhtml_properties(root));
             }
         }
-        let original = book.read(path, XML_BYTES)?;
-        if original != replacement {
-            let ids = anchors(&xml);
-            let source = parse_xml(&original)?;
-            let mut removed = HashSet::new();
-            for id in anchors(&source).difference(&ids) {
-                charge(
-                    &mut anchor_bytes,
-                    id.len() + 48,
-                    XML_BYTES,
-                    "removed EPUB anchors exceed their byte budget",
-                )?;
-                removed.insert((*id).to_owned());
-            }
-            if !removed.is_empty() {
-                removed_anchors.insert(path, removed);
-            }
-        }
+        collect_removed_anchors(
+            &mut book,
+            path,
+            replacement,
+            &xml,
+            &mut removed_anchors,
+            &mut anchor_bytes,
+        )?;
     }
     if !removed_anchors.is_empty() {
         if let Some(overlays) = extracted.metadata.get("media_overlays") {
             check_overlay_anchors(overlays, &removed_anchors)?;
         }
-        check_staged_links(
-            &mut book,
-            &extracted.metadata["manifest"],
-            &replacements,
-            &removed_anchors,
-        )?;
+        check_staged_links(&mut book, &replacements, &removed_anchors, &HashSet::new())?;
     }
     let package = sync_chapter_properties(&mut book, &declarations)?;
     if let Some((path, xml)) = &package {
@@ -425,7 +410,37 @@ fn anchors<'a>(xml: &'a Document<'_>) -> HashSet<&'a str> {
         .collect()
 }
 
-type RemovedAnchors<'a> = HashMap<&'a str, HashSet<String>>;
+pub(super) type RemovedAnchors<'a> = HashMap<&'a str, HashSet<String>>;
+
+pub(super) fn collect_removed_anchors<'a>(
+    book: &mut Book<'_>,
+    path: &'a str,
+    replacement: &[u8],
+    xml: &Document<'_>,
+    removed_anchors: &mut RemovedAnchors<'a>,
+    anchor_bytes: &mut usize,
+) -> Result<(), EngineError> {
+    let original = book.read(path, XML_BYTES)?;
+    if original == replacement {
+        return Ok(());
+    }
+    let ids = anchors(xml);
+    let source = parse_xml(&original)?;
+    let mut removed = HashSet::new();
+    for id in anchors(&source).difference(&ids) {
+        charge(
+            anchor_bytes,
+            id.len() + 48,
+            XML_BYTES,
+            "removed EPUB anchors exceed their byte budget",
+        )?;
+        removed.insert((*id).to_owned());
+    }
+    if !removed.is_empty() {
+        removed_anchors.insert(path, removed);
+    }
+    Ok(())
+}
 
 fn check_anchor(
     removed: &RemovedAnchors<'_>,
@@ -463,38 +478,53 @@ fn check_overlay_anchors(value: &Value, removed: &RemovedAnchors<'_>) -> Result<
     Ok(())
 }
 
-fn check_staged_links(
+pub(super) fn check_staged_links(
     book: &mut Book<'_>,
-    manifest: &Value,
     replacements: &HashMap<&str, &[u8]>,
     removed: &RemovedAnchors<'_>,
+    omitted: &HashSet<&str>,
 ) -> Result<(), EngineError> {
-    let declared: HashSet<_> = manifest
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|item| {
-            matches!(
-                item["media_type"].as_str()?,
-                "application/xhtml+xml"
-                    | "text/html"
-                    | "image/svg+xml"
-                    | "application/x-dtbncx+xml"
+    let package_path = book.package_path()?;
+    let original;
+    let package: &[u8] = if let Some(replacement) = replacements.get(package_path.as_str()) {
+        replacement
+    } else {
+        original = book.read(&package_path, METADATA_BYTES)?;
+        &original
+    };
+    let xml = parse_xml(package)?;
+    let mut declared = HashSet::new();
+    for item in required(xml.root_element(), "manifest")?.children() {
+        if !name(item, OPF, "item")
+            || !matches!(
+                item.attribute("media-type"),
+                Some(
+                    "application/xhtml+xml"
+                        | "text/html"
+                        | "image/svg+xml"
+                        | "application/x-dtbncx+xml"
+                        | "application/smil+xml"
+                )
             )
-            .then(|| item["path"].as_str())
-            .flatten()
-        })
-        .collect();
+        {
+            continue;
+        }
+        if let Some(href) = item.attribute("href").filter(|href| !external(href)) {
+            declared.insert(resolve(&package_path, href)?);
+        }
+    }
     // A retained file can still be followed by another chapter even when it
     // is not in the spine. Replacements contribute their staged markup.
-    let paths: Vec<_> = book
+    let paths: HashSet<_> = book
         .archive
         .file_names()
+        .chain(replacements.keys().copied())
         .filter(|&path| {
-            declared.contains(path)
-                || path.rsplit_once('.').is_some_and(|(_, ext)| {
-                    ext.eq_ignore_ascii_case("xhtml") || ext.eq_ignore_ascii_case("html")
-                })
+            !omitted.contains(path)
+                && (declared.contains(path)
+                    || path.rsplit_once('.').is_some_and(|(_, ext)| {
+                        ext.eq_ignore_ascii_case("xhtml") || ext.eq_ignore_ascii_case("html")
+                    }))
         })
         .map(str::to_owned)
         .collect();
@@ -508,8 +538,7 @@ fn check_staged_links(
         };
         check_markup_anchors(source, &path, removed)?;
     }
-    let package = book.package_path()?;
-    check_markup_anchors(&book.read(&package, METADATA_BYTES)?, &package, removed)
+    check_markup_anchors(package, &package_path, removed)
 }
 
 fn check_markup_anchors(
@@ -521,13 +550,23 @@ fn check_markup_anchors(
     let root = xml.root_element();
     let ncx = name(root, NCX, "ncx");
     let package = name(root, OPF, "package");
+    let smil = root.tag_name().namespace().filter(|namespace| {
+        matches!(
+            *namespace,
+            super::overlay::SMIL | super::overlay::SMIL_HTTPS
+        ) && name(root, namespace, "smil")
+    });
     for node in root.descendants().filter(Node::is_element) {
         let href = if node.has_tag_name((svg::NS, "a")) {
             svg::image_href(node)
         } else if name(node, XHTML, "a") || name(node, XHTML, "area") {
             node.attribute("href")
-        } else if ncx && name(node, NCX, "content") {
+        } else if ncx && name(node, NCX, "content")
+            || smil.is_some_and(|namespace| name(node, namespace, "text"))
+        {
             node.attribute("src")
+        } else if smil.is_some_and(|namespace| name(node, namespace, "seq")) {
+            node.attribute((super::EPUB, "textref"))
         } else if package && name(node, OPF, "reference") {
             node.attribute("href")
         } else {
