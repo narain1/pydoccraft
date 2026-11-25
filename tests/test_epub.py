@@ -2709,6 +2709,48 @@ first
             with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "Vorbis codebook entries"):
                 next(book.epub_embedded_audio(0, 0))
 
+    def test_webm_vorbis_end_stamps_gaps_and_overlaps_preserve_pcm(self) -> None:
+        fixtures = Path(__file__).parent / "fixtures"
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Vorbis timing</title></head>
+          <body><video src="modern.webm"/><audio src="end-stamps.webm"/>
+          <audio src="gap-overlap.webm"/></body></html>'''
+        resources = {
+            "OEBPS/modern.webm": doc_ex.EpubResource(
+                "video/webm", (fixtures / "epub-video-vp8-vorbis.webm").read_bytes()),
+            "OEBPS/end-stamps.webm": doc_ex.EpubResource(
+                "audio/webm", (fixtures / "epub-audio-vorbis-end-stamps.webm").read_bytes()),
+            "OEBPS/gap-overlap.webm": doc_ex.EpubResource(
+                "audio/webm", (fixtures / "epub-audio-vorbis-gap-overlap.webm").read_bytes()),
+        }
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Vorbis timing", chapter, "OEBPS/timing.xhtml")],
+                resources=resources,
+            )
+
+        def pcm(book: doc_ex.Document, index: int, **clip: int) -> bytes:
+            output = bytearray()
+            for chunk in book.epub_embedded_audio(0, index, chunk_frames=293, **clip):
+                self.assertEqual((chunk.sample_rate, chunk.channels), (44_100, 2))
+                with wave.open(io.BytesIO(chunk.wave), "rb") as samples:
+                    output.extend(samples.readframes(chunk.frame_count))
+            return bytes(output)
+
+        with doc_ex.open(data) as book:
+            modern = pcm(book, 0)
+            self.assertEqual(modern[:132 * 4], bytes(132 * 4))
+            raw = modern[132 * 4:]
+            self.assertEqual(pcm(book, 1), raw)
+            with_breaks = pcm(book, 2)
+            expected = (
+                modern[:10_948 * 4] + bytes(3_517 * 4)
+                + raw[10_816 * 4:29_248 * 4] + raw[29_908 * 4:]
+            )
+            self.assertEqual(len(with_breaks), 53_741 * 4)
+            self.assertEqual(with_breaks, expected)
+            self.assertEqual(pcm(book, 2, start_us=200_000, end_us=950_000),
+                             with_breaks[8_820 * 4:41_895 * 4])
+
     def test_laced_webm_vorbis_audio_and_narration_share_trimmed_pcm(self) -> None:
         fixtures = Path(__file__).parent / "fixtures"
         video_path = "OEBPS/clip.webm"

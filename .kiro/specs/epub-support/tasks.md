@@ -69,7 +69,7 @@
 - [x] Stream mono and stereo Ogg Vorbis for embedded audio and SMIL narration. Preserve page granule timing across same-format chains and synchronize a Vorbis soundtrack with chained Theora and captions.
 - [x] Stream VP8 and SDR VP9 video, Opus soundtracks, and synchronized local captions from packaged WebM sources.
 - [x] Stream mono and stereo WebM Vorbis audio on the original presentation clock, including audio-only resources and soundtracks synchronized with video and captions.
-- [ ] Handle the Vorbis timestamp discontinuities in the public Shared Culture WebM sources.
+- [x] Play the legacy end-stamped Shared Culture WebM sources and carry real gaps and overlaps on the modern Vorbis presentation clock.
 - [ ] Extend WebM to AV1, surround Vorbis, high dynamic range, alpha, and concurrent tracks. Support additional Ogg soundtracks and simultaneous video tracks, broaden MP4 coverage, and extend subtitle styling and media fragment dimensions.
 - [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources.
 - [x] Synchronize XHTML navigation and the spine's compatibility NCX in the same EPUB 3 chapter edit.

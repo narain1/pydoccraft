@@ -33,10 +33,19 @@ pub(in crate::epub) struct Track {
 struct Link {
     format: Format,
     index: Index,
-    skip: usize,
-    leading: usize,
-    playable: usize,
-    audible: Range<usize>,
+    spans: Vec<Span>,
+    offset: usize,
+}
+
+struct Span {
+    timeline: Range<usize>,
+    raw_start: usize,
+}
+
+struct BlockTime {
+    nanos: i128,
+    first_sample: usize,
+    first_packet_end: usize,
 }
 
 struct Format {
@@ -71,6 +80,7 @@ impl Track {
     pub(super) fn open(mut reader: webm::Reader, index: u32) -> Result<Self, EngineError> {
         let stream = &reader.demux.streams()[index as usize];
         let (format, setup) = Format::parse(headers(&stream.params.extradata)?)?;
+        let tick = webm::timestamp(stream.time_base, 1)?;
         if stream.params.channels != Some(format.spec.channels)
             || stream.params.sample_rate != Some(format.spec.sample_rate)
         {
@@ -88,12 +98,9 @@ impl Track {
         codebook_cache_cost(&setup)?;
 
         let rate = format.spec.sample_rate;
-        let time_of = |frames: usize| frames as i128 * 1_000_000_000 / i128::from(rate);
         let mut packets = Index::default();
-        let mut origin = None;
-        let mut first_time = None;
+        let mut blocks = Vec::<BlockTime>::new();
         let mut end_padding = 0;
-        let mut block_start = 0;
         while let Some(unit) = reader.next()? {
             if unit.packet.stream_index != index {
                 continue;
@@ -103,24 +110,22 @@ impl Track {
                     "WebM Vorbis discard padding outside the final block",
                 ));
             }
-            if unit.index_in_block == 0 {
-                block_start = packets.frames;
-                let time = unit.time()? - i128::from(delay);
-                if packets.packets.is_empty() {
-                    first_time = Some(time);
-                } else {
-                    // The priming packet has no PCM. An unlaced first audible packet
-                    // has its own timestamp. Otherwise infer its position from the next block.
-                    let base = *origin.get_or_insert(time - time_of(packets.frames));
-                    let tick = webm::timestamp(unit.packet.time_base, 1)?;
-                    if (time - base - time_of(packets.frames)).abs() > tick + 1 {
-                        return Err(unsupported("discontinuous WebM Vorbis timestamps"));
-                    }
-                }
-            }
+            let first_sample = packets.frames;
             packets.push(&unit.packet.data, &setup, format.block_sizes)?;
+            if unit.index_in_block == 0 {
+                let nanos = unit.time()? - i128::from(delay);
+                if blocks.last().is_some_and(|block| nanos < block.nanos) {
+                    return Err(unsupported("backward WebM Vorbis timestamps"));
+                }
+                blocks.push(BlockTime {
+                    nanos,
+                    first_sample,
+                    first_packet_end: packets.frames,
+                });
+            }
             if unit.index_in_block + 1 == unit.block_count {
                 end_padding = sample_frames(i128::from(unit.discard_padding), rate)?;
+                let block_start = blocks.last().expect("indexed WebM block").first_sample;
                 if end_padding > packets.frames - block_start {
                     return Err(invalid(
                         "WebM Vorbis discard padding exceeds its final block",
@@ -128,14 +133,8 @@ impl Track {
                 }
             }
         }
-        // A single lace can contain the priming packet and all audible packets.
-        let origin = origin
-            .or(first_time)
-            .ok_or_else(|| invalid("WebM Vorbis has no packets"))?;
-        let leading = sample_frames(origin.max(0), rate)?;
-        let skip = sample_frames((-origin).max(0), rate)?;
-        let end = packets.frames - end_padding;
-        let link = Link::new(format, packets, leading, skip, end)?;
+        let spans = webm_spans(&blocks, tick, rate, packets.frames - end_padding)?;
+        let link = Link::new(format, packets, spans)?;
         let mut track = Self::new(vec![link])?;
         track.playback = Some(Playback::with_setup(0, &track.links[0].format, setup)?);
         Ok(track)
@@ -204,7 +203,7 @@ impl Track {
             let end = cursor
                 .checked_add(link.length())
                 .ok_or_else(|| limited("Vorbis presentation exceeds its frame budget"))?;
-            link.audible = cursor + link.leading..end;
+            link.offset = cursor;
             cursor = if let Some(video) = video.filter(|_| index < last) {
                 cursor
                     .checked_add(link.length().max(video[index]))
@@ -228,24 +227,38 @@ impl Track {
         }
 
         let mut samples = vec![0; (stop - start) * channels];
-        let first = self.links.partition_point(|link| link.audible.end <= start);
+        let first = self
+            .links
+            .partition_point(|link| link.offset + link.length() <= start);
         let mut work = 0;
         for (index, link) in self.links.iter().enumerate().skip(first) {
-            if link.audible.start >= stop {
+            if link.offset >= stop {
                 break;
             }
-            let from = link.audible.start.max(start);
-            let until = link.audible.end.min(stop);
-            let state = match &mut self.playback {
-                Some(state) if state.link == index => state,
-                slot => {
-                    slot.take();
-                    slot.insert(Playback::new(index, &link.format)?)
+            let local = start.saturating_sub(link.offset)..stop - link.offset;
+            let first = link
+                .spans
+                .partition_point(|span| span.timeline.end <= local.start);
+            for span in &link.spans[first..] {
+                if span.timeline.start >= local.end {
+                    break;
                 }
-            };
-            let raw = from - link.audible.start + link.skip..until - link.audible.start + link.skip;
-            let output = &mut samples[(from - start) * channels..(until - start) * channels];
-            state.read(&link.index, raw, channels, &mut work, output)?;
+                let from = span.timeline.start.max(local.start);
+                let until = span.timeline.end.min(local.end);
+                let state = match &mut self.playback {
+                    Some(state) if state.link == index => state,
+                    slot => {
+                        slot.take();
+                        slot.insert(Playback::new(index, &link.format)?)
+                    }
+                };
+                let raw_start = span.raw_start + (from - span.timeline.start);
+                let count = until - from;
+                let raw = raw_start..raw_start + count;
+                let offset = (link.offset + from - start) * channels;
+                let output = &mut samples[offset..offset + count * channels];
+                state.read(&link.index, raw, channels, &mut work, output)?;
+            }
         }
         Ok(samples)
     }
@@ -285,32 +298,24 @@ impl Format {
 }
 
 impl Link {
-    fn new(
-        format: Format,
-        index: Index,
-        leading: usize,
-        skip: usize,
-        end: usize,
-    ) -> Result<Self, EngineError> {
-        let playable = end
-            .checked_sub(skip)
-            .filter(|&frames| frames != 0)
-            .ok_or_else(|| invalid("Vorbis stream has no playable samples"))?;
-        leading
-            .checked_add(playable)
-            .ok_or_else(|| limited("Vorbis link exceeds its presentation frame budget"))?;
+    fn new(format: Format, index: Index, spans: Vec<Span>) -> Result<Self, EngineError> {
+        if spans.is_empty() {
+            return Err(invalid("Vorbis stream has no playable samples"));
+        }
         Ok(Self {
             format,
             index,
-            skip,
-            leading,
-            playable,
-            audible: 0..0,
+            spans,
+            offset: 0,
         })
     }
 
     fn length(&self) -> usize {
-        self.leading + self.playable
+        self.spans
+            .last()
+            .expect("nonempty Vorbis spans")
+            .timeline
+            .end
     }
 
     fn ogg(pages: Vec<Page<'_>>, work: &mut usize) -> Result<Self, EngineError> {
@@ -392,8 +397,16 @@ impl Link {
         };
         let leading = frames(origin.max(0))?;
         let skip = frames((-origin).max(0))?;
-        let end = frames(granule - origin)?;
-        Self::new(format, index, leading, skip, end)
+        let end = frames(granule)?;
+        let spans = if leading < end {
+            vec![Span {
+                timeline: leading..end,
+                raw_start: skip,
+            }]
+        } else {
+            Vec::new()
+        };
+        Self::new(format, index, spans)
     }
 }
 
@@ -526,6 +539,79 @@ impl Playback {
             .push_packet(&mut BitReaderLsb::new(bytes), &self.setup, &self.state)
             .map_err(|error| invalid(format!("malformed Vorbis audio: {error:?}")))
     }
+}
+
+fn webm_spans(
+    blocks: &[BlockTime],
+    tick: i128,
+    rate: u32,
+    frames: usize,
+) -> Result<Vec<Span>, EngineError> {
+    let (priming, audible) = blocks
+        .split_first()
+        .ok_or_else(|| invalid("WebM Vorbis has no packets"))?;
+    let time_of = |frame: usize| frame as i128 * 1_000_000_000 / i128::from(rate);
+    let start_offset = |block: &BlockTime| block.nanos - time_of(block.first_sample);
+    // The priming packet produces no PCM. For laced audio, infer its output
+    // origin from the first later Block when available.
+    let origin = audible.first().map_or(priming.nanos, start_offset);
+    let matches = |offset: i128, observed: i128| (observed - offset).abs() <= tick + 1;
+    let start_timed = audible
+        .iter()
+        .all(|block| matches(origin, start_offset(block)));
+    // Legacy muxers used the end of the Vorbis overlap output as the packet
+    // timestamp. Accept that convention only when it fits the complete track.
+    let end_timed = !start_timed
+        && blocks
+            .iter()
+            .all(|block| matches(priming.nanos, block.nanos - time_of(block.first_packet_end)));
+
+    let mut spans = Vec::new();
+    if start_timed || end_timed {
+        let offset = if end_timed { priming.nanos } else { origin };
+        append_span(&mut spans, 0..frames, offset, rate)?;
+    } else {
+        let mut first = 0;
+        let mut offset = origin;
+        for block in audible
+            .iter()
+            .take_while(|block| block.first_sample < frames)
+        {
+            let observed = start_offset(block);
+            if !matches(offset, observed) {
+                append_span(&mut spans, first..block.first_sample, offset, rate)?;
+                first = block.first_sample;
+                offset = observed;
+            }
+        }
+        append_span(&mut spans, first..frames, offset, rate)?;
+    }
+    Ok(spans)
+}
+
+fn append_span(
+    spans: &mut Vec<Span>,
+    raw: Range<usize>,
+    offset_ns: i128,
+    rate: u32,
+) -> Result<(), EngineError> {
+    let offset = sample_frames(offset_ns.abs(), rate)? as i128 * offset_ns.signum();
+    let start = raw.start as i128 + offset;
+    let end = raw.end as i128 + offset;
+    // Output begins at time zero. On overlap, keep the preceding samples and
+    // skip the obstructed beginning of the later span.
+    let first = start.max(spans.last().map_or(0, |span| span.timeline.end) as i128);
+    if first < end {
+        let frame = |position| {
+            usize::try_from(position)
+                .map_err(|_| limited("WebM Vorbis presentation exceeds its frame budget"))
+        };
+        spans.push(Span {
+            timeline: frame(first)?..frame(end)?,
+            raw_start: raw.start + frame(first - start)?,
+        });
+    }
+    Ok(())
 }
 
 fn sample_frames(nanos: i128, rate: u32) -> Result<usize, EngineError> {
