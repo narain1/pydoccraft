@@ -138,6 +138,7 @@
 - [x] Align native stacked limit operands and accent bases, including nested under/over paths. Preserve searchable text, operator spacing and editable Office Math objects.
 - [x] Preserve binary operator spacing for a MathML alignment group boundary immediately beside an isolated operator between ordinary runs. Preserve editable operands and remap scalar and nested carets.
 - [x] Preserve decimal and explicit alignment carets inside native MathML enclosures with supported edges, strikes and radical notation.
+- [x] Preserve MathML alignment inside editable fence operands, including varying separators and multi-character delimiters.
 - [ ] Extend MathML alignment through other operator spacing and nontransparent wrappers and operands, right-to-left groups and cross-table scopes.
 - [x] Preserve editable negative MathML padding offsets that fit within the preceding horizontal math space, including nested superscripts.
 - [x] Retain direct editable MathML carets before and after bounded negative padding that uses preceding space.

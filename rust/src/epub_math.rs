@@ -770,36 +770,55 @@ impl<'xml> Projection<'_, 'xml> {
         let separators = node.attribute("separators").unwrap_or(",");
         let mut separators = separators.chars().filter(|c| !c.is_ascii_whitespace());
         let mut elems = Vec::new();
-        let mut row = Vec::new();
         let mut sep = separators.next();
         // OMML delimiters have one repeating separator. A varying sequence
         // uses ordinary math runs between operands inside the outer fences.
         let use_runs =
             leading.is_some() || trailing.is_some() || separators.clone().next().is_some();
-        if let Some(leading) = leading {
-            self.charge(depth + 1)?;
-            row.push(styled_run(leading, style));
-        }
-        for (index, child) in node.children().filter(Node::is_element).enumerate() {
-            let elem = self.element(child, depth + 1, style)?;
-            if !use_runs {
-                elems.push(elem);
-                continue;
-            }
-            if let Some(separator) = sep.filter(|_| index != 0) {
-                self.charge(depth + 1)?;
-                row.push(styled_run(separator.to_string(), style));
-                sep = separators.next().or(sep);
-            }
-            row.extend(elem);
-        }
-        if let Some(trailing) = trailing {
-            self.charge(depth + 1)?;
-            row.push(styled_run(trailing, style));
-        }
+        let children = node.children().filter(Node::is_element);
         if use_runs {
+            let row = self.with_operand_caret(0, |projection| {
+                let mut row = Vec::new();
+                if let Some(leading) = leading {
+                    projection.charge(depth + 1)?;
+                    row.push(styled_run(leading, style));
+                }
+                for (index, child) in children.enumerate() {
+                    if let Some(separator) = sep.filter(|_| index != 0) {
+                        projection.charge(depth + 1)?;
+                        row.push(styled_run(separator.to_string(), style));
+                        sep = separators.next().or(sep);
+                    }
+                    let start = row.len();
+                    let seeking = projection
+                        .alignment_group
+                        .as_ref()
+                        .is_some_and(table::alignment::Scope::seeking_caret);
+                    projection.append_element(&mut row, child, depth + 1, style)?;
+                    if seeking
+                        && row.len() == start
+                        && projection
+                            .alignment_group
+                            .as_ref()
+                            .is_some_and(|scope| scope.caret.is_some())
+                    {
+                        return Err(unsupported("MathML alignment mark in an empty operand"));
+                    }
+                }
+                if let Some(trailing) = trailing {
+                    projection.charge(depth + 1)?;
+                    row.push(styled_run(trailing, style));
+                }
+                Ok(row)
+            })?;
             elems.push(row);
             sep = None;
+        } else {
+            for (index, child) in children.enumerate() {
+                elems.push(self.with_operand_caret(index, |projection| {
+                    projection.element(child, depth + 1, style)
+                })?);
+            }
         }
         Ok(MNode::Delim {
             beg,

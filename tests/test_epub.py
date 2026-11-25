@@ -12575,6 +12575,112 @@ Final cue
                     with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, error):
                         operation()
 
+    def test_mathml_alignment_retains_fenced_arguments_and_separators(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>MathML fenced alignment</title><meta name="viewport" content="width=520,height=310"/>
+            <style>body {margin:0}</style></head><body><p><m:math mathsize="12pt">
+            <m:mtable groupalign="{decimalpoint}" columnwidth="245pt" columnalign="left" rowspacing="12pt">
+              ROWS
+            </m:mtable>
+          </m:math></p></body></html>"""
+        group = '<m:maligngroup/>'
+        cells = (
+            group + '<m:mfenced ATTRS><m:mtext>Alpha</m:mtext><m:mn>12.345</m:mn><m:mtext>Beta</m:mtext></m:mfenced>',
+            group + '<m:mfenced ATTRS><m:mtext>Preamble</m:mtext>'
+                    '<m:msqrt><m:mn>63<m:malignmark/>:925</m:mn></m:msqrt><m:mtext>Coast</m:mtext></m:mfenced>',
+            group + '<m:mfenced ATTRS><m:mtext>Before</m:mtext><m:mtext>Outer</m:mtext>'
+                    '<m:mrow><m:mtext>West</m:mtext><m:malignmark edge="right"/><m:mo>+</m:mo><m:mtext>Arm</m:mtext></m:mrow></m:mfenced>',
+            group + '<m:mn>.418</m:mn>',
+        )
+        terms = ("Alpha", "12.345", "Beta", "Preamble", "63:925", "Coast",
+                 "Before", "Outer", "West", "+", "Arm", ".418")
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+        fixture = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 520, 310)])
+
+        def chapter(contents: tuple[str, ...], attrs: str) -> str:
+            rows = "".join(f"<m:mtr><m:mtd>{cell}</m:mtd></m:mtr>" for cell in contents)
+            return template.replace("ROWS", rows).replace("ATTRS", attrs)
+
+        def boxes(pdf: doc_ex.Document, names: tuple[str, ...]) -> dict[str, tuple[float, float, float, float]]:
+            positions = {}
+            for name in names:
+                positions[name], = pdf[0].search_for(name)
+            return positions
+
+        def gaps(positions: dict[str, tuple[float, float, float, float]]) -> tuple[float, float]:
+            return positions["+"][0] - positions["West"][2], positions["Arm"][0] - positions["+"][2]
+
+        for attrs, argument_count in (('open="[" close="]" separators=";"', 3),
+                                      ('open="&lt;&lt;" close="&gt;&gt;" separators=",;"', 1)):
+            with self.subTest(attrs=attrs):
+                unmarked = cells[2].replace(group, "").replace('<m:malignmark edge="right"/>', "")
+                control = chapter((unmarked,), attrs)
+                with doc_ex.open(epub_fixture(chapter_one=control)) as book:
+                    expected_preview = book.render_page(0, dpi=96)
+                    with doc_ex.open(book.convert("pdf")) as pdf:
+                        expected_gaps = gaps(boxes(pdf, ("West", "+", "Arm")))
+                self.assertGreater(min(expected_gaps), 1.0)
+                with doc_ex.open(epub_fixture(chapter_one=chapter((cells[2],), attrs))) as book:
+                    self.assertEqual(book.render_page(0, dpi=96), expected_preview)
+
+                def geometry(pdf: doc_ex.Document, delta: float) -> dict[str, tuple[float, float, float, float]]:
+                    positions = boxes(pdf, (*terms, "12", "63"))
+                    for name in ("12", "63", "West"):
+                        self.assertAlmostEqual(positions[name][2], positions[".418"][0], delta=delta)
+                    for expected, actual in zip(expected_gaps, gaps(positions)):
+                        self.assertAlmostEqual(expected, actual, delta=delta)
+                    return positions
+
+                source = chapter(cells, attrs)
+                with doc_ex.open(epub_fixture(chapter_one=source)) as book:
+                    with doc_ex.open(book.convert("pdf")) as pdf:
+                        self.assertFalse(pdf[0].get_images())
+                        reference = geometry(pdf, 0.05)
+                    editable = book.convert("docx")
+                with zipfile.ZipFile(io.BytesIO(editable)) as archive:
+                    xml = ET.fromstring(archive.read("word/document.xml"))
+                matrix = xml.find(".//m:oMath//m:m", ns)
+                self.assertIsNotNone(matrix)
+                fences = matrix.findall(".//m:d", ns)
+                self.assertEqual([len(fence.findall("m:e", ns)) for fence in fences], [argument_count] * 3)
+                if argument_count == 3:
+                    separator = fences[0].find("m:dPr/m:sepChr", ns)
+                    self.assertEqual(separator.attrib[f"{{{ns['m']}}}val"], ";")
+                else:
+                    runs = [run.text for run in fences[0].findall("m:e//m:t", ns)]
+                    self.assertEqual("".join(runs), "<<Alpha,12.345;Beta>>")
+                self.assertIsNotNone(fences[1].find("m:e//m:rad", ns))
+                exact_tokens = [t.text for t in matrix.findall(".//m:t", ns) if t.text in terms]
+                self.assertEqual(tuple(exact_tokens), terms)
+                with doc_ex.open(editable) as word, doc_ex.open(word.convert("pdf")) as pdf:
+                    self.assertNotIn("⟡H", word[0].get_text())
+                    native = geometry(pdf, 0.25)
+                    for term in terms:
+                        self.assertEqual(word[0].get_text().count(term), 1)
+                        for expected, actual in zip(reference[term], native[term]):
+                            self.assertAlmostEqual(expected, actual, delta=0.35)
+
+                with doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": source})) as book:
+                    preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                    with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                        self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+                        fixed = boxes(pdf, terms)
+                        for term in terms:
+                            self.assertAlmostEqual(fixed[term][0] - fixed[".418"][0],
+                                                   reference[term][0] - reference[".418"][0], delta=0.65)
+
+        for body, error in (
+            ('<m:mfenced><m:malignmark/><m:mn>7</m:mn></m:mfenced>', "alignment mark outside the cell baseline"),
+            ('<m:mfenced><m:mrow><m:malignmark/></m:mrow></m:mfenced>', "alignment mark in an empty operand"),
+            ('<m:mfenced separators=",;"><m:mtext>Before</m:mtext><m:mrow><m:malignmark/></m:mrow></m:mfenced>',
+             "alignment mark in an empty operand"),
+        ):
+            source = chapter((group + body,), "")
+            with doc_ex.open(epub_fixture(chapter_one=source)) as book:
+                for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, error):
+                        operation()
+
     def test_mathml_labeled_rows_keep_editable_labels_outside_data_columns(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Labeled MathML</title><meta name="viewport" content="width=440,height=320"/>
