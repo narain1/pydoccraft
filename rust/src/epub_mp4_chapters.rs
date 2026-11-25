@@ -27,7 +27,7 @@ pub(crate) fn chapter_interval(
 }
 
 fn resolve(bytes: Vec<u8>, id: &str) -> Result<Range<u64>, EngineError> {
-    let bounds = Mp4Bounds::inspect(&bytes)?;
+    let bounds = Mp4Bounds::inspect_chapters(&bytes)?;
     let bytes: Arc<[u8]> = bytes.into();
     let demux =
         open_typed(Box::new(Cursor::new(bytes.clone())), &CodecRegistry::new()).map_err(invalid)?;

@@ -5159,7 +5159,7 @@ Trailing
     def test_mp4_chapter_id_rejects_malformed_or_ambiguous_local_tracks(self) -> None:
         movie = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
         chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>MP4 chapters</title></head>
-          <body><video src="chapter.mp4#id=marker"/></body></html>'''
+          <body><video src="chapter.mp4#id=marker"/><video src="chapter.mp4#t=0.1,0.2"/></body></html>'''
         valid = ((439, b"marker"), (2581, b"Tail"))
         path = "OEBPS/chapter.mp4"
         cases = (
@@ -5192,6 +5192,8 @@ Trailing
                 self.assertEqual(book.epub_embedded_media(0)[0].sources[0].fragment_id, "marker")
                 with self.assertRaisesRegex(error, message):
                     next(book.epub_embedded_video(0, 0, source_index=0))
+                if message == "repeated MP4 chapter reference":
+                    self.assertEqual(next(book.epub_embedded_video(0, 1)).start_us, 100_000)
 
     def test_embedded_mp4_video_frames_follow_presentation_order_and_clip_bounds(self) -> None:
         path = "OEBPS/clip.mp4"

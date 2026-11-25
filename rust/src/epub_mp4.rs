@@ -30,8 +30,17 @@ impl Mp4Bounds {
     }
 
     pub(super) fn inspect(bytes: &[u8]) -> Result<Self, EngineError> {
+        Self::inspect_boxes(bytes, None)
+    }
+
+    fn inspect_chapters(bytes: &[u8]) -> Result<Self, EngineError> {
+        Self::inspect_boxes(bytes, Some([0; 4]))
+    }
+
+    // Track the parent box when preflighting chapter references.
+    fn inspect_boxes(bytes: &[u8], parent: Option<[u8; 4]>) -> Result<Self, EngineError> {
         let mut bounds = Self::default();
-        bounds.check(bytes, 0, 0, [0; 4])?;
+        bounds.check(bytes, 0, 0, parent)?;
         Ok(bounds)
     }
 
@@ -40,7 +49,7 @@ impl Mp4Bounds {
         bytes: &[u8],
         base: usize,
         depth: usize,
-        parent: [u8; 4],
+        parent: Option<[u8; 4]>,
     ) -> Result<(), EngineError> {
         if depth > 8 {
             return Err(limited("MP4 box nesting exceeds limits"));
@@ -75,21 +84,24 @@ impl Mp4Bounds {
                     return Err(limited("MP4 metadata exceeds 4 MiB"));
                 }
             }
+            if parent == Some(*b"tref")
+                && &header.fourcc == b"chap"
+                && (std::mem::replace(&mut chapter_references, true)
+                    || length == 0
+                    || !length.is_multiple_of(4))
+            {
+                return Err(invalid("invalid or repeated MP4 chapter reference"));
+            }
+            let child_parent = parent.map(|_| header.fourcc);
             match &header.fourcc {
                 b"moov" | b"trak" | b"mdia" | b"minf" | b"stbl" | b"edts" => {
-                    self.check(&bytes[start..end], base + start, depth + 1, header.fourcc)?;
+                    self.check(&bytes[start..end], base + start, depth + 1, child_parent)?;
                 }
-                b"tref" if &parent == b"trak" => {
+                b"tref" if parent == Some(*b"trak") => {
                     if std::mem::replace(&mut track_references, true) {
                         return Err(invalid("duplicate MP4 track reference box"));
                     }
-                    self.check(&bytes[start..end], base + start, depth + 1, header.fourcc)?;
-                }
-                b"chap" if &parent == b"tref" => {
-                    if chapter_references || length == 0 || !length.is_multiple_of(4) {
-                        return Err(invalid("invalid or repeated MP4 chapter reference"));
-                    }
-                    chapter_references = true;
+                    self.check(&bytes[start..end], base + start, depth + 1, child_parent)?;
                 }
                 b"stsz" | b"stz2" => {
                     let raw = bytes[start..end]
