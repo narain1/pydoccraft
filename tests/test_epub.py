@@ -4985,12 +4985,11 @@ first
                 with doc_ex.open(book.convert("docx")) as word:
                     for source in (book, word):
                         with doc_ex.open(source.convert("pdf")) as pdf:
-                            boxes = {
-                                block["text"]: block["bbox"]
-                                for block in pdf[0].get_text("dict")["blocks"]
-                                if block["text"] in {"√Blue", "Guard"}
-                            }
-                            self.assertEqual(boxes.keys(), {"√Blue", "Guard"})
+                            boxes = {}
+                            for label in ("Blue", "Guard"):
+                                matches = pdf[0].search_for(label)
+                                self.assertEqual(len(matches), 1, (label, matches))
+                                boxes[label] = matches[0]
                             result.append(boxes)
             return result
 

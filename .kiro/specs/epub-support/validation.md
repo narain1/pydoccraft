@@ -664,6 +664,8 @@ The earlier wheel refused nonzero vertical shifts and positive leading offsets b
 
 On manylinux x86-64, PDF text boxes exported from the EPUB retain exactly the same denominator and following paragraph geometry. PDF exported from the reopened DOCX shows vertical changes of 0.0415 and 0.0477 points with unchanged horizontal bounds. These subpixel changes can move the first solid raster pixel by one at 96 DPI. The regression checks the exact EPUB vector bounds, a 0.1-point DOCX vector bound, and a one-pixel raster bound on both.
 
+The local Linux wheel exposes the same Blue and Guard glyphs through PDF search even though its text blocks group the radical differently. Searching for each operand yields one vector rectangle and avoids depending on the extracted radical character. The local EPUB bounds are identical and the DOCX positions move 0.0742 and 0.0854 points vertically. The existing vector and raster bounds still apply.
+
 The isolated Linux x86-64 CPython 3.11.15 wheel passed all 133 EPUB tests. Rust 1.95 formatting and warnings-denied locked release Clippy passed. The documentation checker verified 35 pages and 2,317 references. The wheel measured 24,708,599 bytes with a 57,448,136-byte native extension and SHA-256 `189400fc5539c520134bd258b2ce4b34b7bb1c228a35509cc3c51317ed2f39bd`. Cleanup removed the Cargo output, temporary wheels, virtual environments and generated documentation site.
 
 ## 2026-11-24 Editable MathML spanning grids
