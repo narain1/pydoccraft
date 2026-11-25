@@ -10,7 +10,7 @@ use wordcraft_geom::Rect;
 
 use super::{
     coverage::{Coverage, Target},
-    image_href, native_tree, visit_painted_svg, NS,
+    effects, image_href, native_tree, visit_painted_svg, NS,
 };
 use crate::{
     author_epub::escape_attribute,
@@ -80,6 +80,14 @@ impl<'a> Links<'a> {
         has_uses: bool,
         aliases: &super::use_fonts::Aliases,
     ) -> Result<Geometry, EngineError> {
+        let unproven_geometry = effects::unproven_geometry(tree);
+        let mut geometry = Geometry {
+            unproven_geometry,
+            ..Geometry::default()
+        };
+        if unproven_geometry && !self.objects.is_empty() {
+            return Err(effects::geometry_error());
+        }
         let clip = Rect::new(0.0, 0.0, tree.size().width(), tree.size().height());
         let marked = self.mark_text(source, tree, clip, aliases)?;
         let marked_tree = marked
@@ -100,7 +108,6 @@ impl<'a> Links<'a> {
             })?;
         }
         let mut metrics = HashMap::new();
-        let mut geometry = Geometry::default();
         let synthetic_ids: HashSet<&str> =
             self.generated_ids.values().map(String::as_str).collect();
         let mut coverage = Coverage::new(tree, [1.0; 2]);
@@ -348,6 +355,7 @@ pub(in crate::epub) struct Geometry {
     anchors: HashMap<String, Rect>,
     links: rendition::LinkAreas,
     anchor_bytes: usize,
+    unproven_geometry: bool,
 }
 
 impl Geometry {
@@ -386,6 +394,14 @@ impl Geometry {
     ) -> Result<(), EngineError> {
         let transformed = |rect| rendition::text::transformed(rect, map);
         for (id, rect) in &self.anchors {
+            if self.unproven_geometry
+                && capture
+                    .anchors
+                    .as_ref()
+                    .is_some_and(|targets| targets.contains_key(id.as_str()))
+            {
+                return Err(effects::geometry_error());
+            }
             rendition::capture_anchor(&mut capture.anchors, id, transformed(*rect), clip);
         }
         for (_, rect, href) in &self.links.entries {

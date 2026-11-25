@@ -909,7 +909,7 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                 None if tag == "a" && key == "target" => true,
                 None if tag == "svg" && key == "baseProfile" => true,
                 None if tag == "filter" && matches!(key, "filterUnits" | "primitiveUnits") => true,
-                None if filter_primitive && key == "in" => true,
+                None if filter_primitive && matches!(key, "in" | "result") => true,
                 None if matches!(tag, "feDropShadow" | "feGaussianBlur")
                     && key == "stdDeviation" =>
                 {

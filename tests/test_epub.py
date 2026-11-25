@@ -5818,7 +5818,6 @@ first
             ('<feDropShadow flood-color="not-a-color"/>', doc_ex.MalformedDocumentError, "flood color"),
             ('<feDropShadow flood-color="url(#ds)"/>', doc_ex.UnsupportedFormatError, "active attributes"),
             ('<feDropShadow flood-opacity="1em"/>', doc_ex.MalformedDocumentError, "flood opacity"),
-            ('<feDropShadow/><feGaussianBlur/>', doc_ex.UnsupportedFormatError, "one supported primitive"),
         )
         with doc_ex.open(epub_fixture()) as book:
             for primitive, error, message in cases:
@@ -5890,11 +5889,10 @@ first
                 self.assertEqual(link.bbox, original[0].get_links()[0].bbox)
 
         cases = (
-            ('type="luminanceToAlpha"', doc_ex.UnsupportedFormatError, "color matrix mode"),
+            ('type="unknown"', doc_ex.UnsupportedFormatError, "color matrix mode"),
             ('type="saturate" values="2"', doc_ex.UnsupportedFormatError, "saturation"),
             ('type="hueRotate" values="NaN"', doc_ex.MalformedDocumentError, "color matrix values"),
             ('type="matrix" values="1,,2"', doc_ex.MalformedDocumentError, "color matrix values"),
-            (f'values="{matrix[:-3]}0 0"', doc_ex.UnsupportedFormatError, "preserve alpha"),
             (f'values="2000{matrix[1:]}"', doc_ex.UnsafeArchiveError, "color matrix coefficient"),
         )
         with doc_ex.open(epub_fixture()) as book:
@@ -5904,6 +5902,143 @@ first
                   <rect width="10" height="10" filter="url(#color)"/></svg>"""
                 with self.subTest(attributes=attributes), self.assertRaisesRegex(error, reason):
                     book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Color", svg), 0])
+
+    def test_svg_filter_chain_renders_named_results_and_alpha_to_visual_outputs(self) -> None:
+        tint = "0 0 0 0 0, 1 0 0 0 0, 0 0 0 0 0, 0 0 0 1 0"
+        half = "1 0 0 0 0, 0 1 0 0 0, 0 0 1 0 0, 0 0 0 .5 0"
+        svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="124" height="64" viewBox="0 0 124 64">
+          <defs>
+            <filter id="tint" filterUnits="userSpaceOnUse" x="0" y="0" width="124" height="64"
+                    color-interpolation-filters="sRGB">
+              <feColorMatrix in="SourceGraphic" values="{tint}" result="green"/>
+              <feDropShadow in="SourceAlpha" dx="25" dy="0" stdDeviation="0" result="unused"/>
+              <feColorMatrix in="green" values="{half}"/>
+            </filter>
+            <filter id="fade" filterUnits="userSpaceOnUse" x="0" y="0" width="124" height="64"
+                    color-interpolation-filters="sRGB">
+              <feColorMatrix type="luminanceToAlpha" result="luminance"/>
+              <feGaussianBlur stdDeviation="1"/>
+            </filter>
+          </defs>
+          <rect x="4" y="4" width="22" height="18" fill="red" filter="url(#tint)"/>
+          <rect x="68" y="4" width="26" height="18" fill="red" filter="url(#fade)"/>
+          <text x="4" y="50" id="label" fill="red" filter="url(#tint)">FILTERED</text>
+        </svg>"""
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Filters</title>
+            <meta name="viewport" content="width=124,height=64"/></head>
+            <body style="margin:0">{}</body></html>"""
+        fixture = fixed_spread_fixture([("", "white", 124, 64)])
+        source = rewrite_epub(fixture, {"OEBPS/s0.xhtml": template.format(svg)})
+
+        def rgba(document: doc_ex.Document) -> tuple[int, bytes]:
+            return rgba_pixels(png_chunks(document.render_page(0, dpi=96)))
+
+        with doc_ex.open(source) as book:
+            width, pixels = preview = rgba(book)
+
+            def pixel(x: int, y: int) -> tuple[int, ...]:
+                offset = 4 * (y * width + x)
+                return tuple(pixels[offset:offset + 3])
+
+            red, green, blue = pixel(14, 12)
+            self.assertTrue(126 <= red == blue <= 130 and green == 255)
+            self.assertEqual(pixel(36, 12), (255, 255, 255))
+            red, green, blue = pixel(81, 12)
+            self.assertTrue(200 <= red == green == blue <= 205)
+            self.assertTrue(230 <= pixel(66, 12)[0] < 255)
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, pages=[0])) as pdf:
+                self.assertEqual(rgba(pdf), preview)
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):
+                book.export_epub_fixed_pdf(dpi=96, pages=[0], searchable=True)
+
+        linked = svg.replace(
+            '<text x="4" y="50" id="label" fill="red" filter="url(#tint)">FILTERED</text>',
+            '<a href="https://example.org/"><text x="4" y="50" fill="red" filter="url(#tint)">FILTERED</text></a>',
+        )
+        with doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": template.format(linked)})) as book:
+            self.assertEqual(rgba(book), preview)
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):
+                book.export_epub_fixed_pdf(dpi=96, pages=[0])
+
+        with doc_ex.open(epub_fixture(chapter_one=template.format(svg))) as book:
+            for output in ("docx", "pdf"):
+                with doc_ex.open(book.convert(output)) as reopened:
+                    _, rgba_data = rgba(reopened)
+                    colors = set(zip(rgba_data[::4], rgba_data[1::4], rgba_data[2::4]))
+                    self.assertTrue(any(126 <= red == blue <= 130 and green == 255 for red, green, blue in colors))
+
+    def test_svg_filter_chain_keeps_source_text_and_annotations_on_safe_final_branch(self) -> None:
+        tint = "0 0 0 0 0, 1 0 0 0 0, 0 0 0 0 0, 0 0 0 1 0"
+        svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="112" height="62" viewBox="0 0 112 62">
+          <defs>
+            <filter id="fx" filterUnits="userSpaceOnUse" x="0" y="0" width="112" height="62"
+                    color-interpolation-filters="sRGB">
+              <feColorMatrix values="{tint}" result="tinted"/>
+              <feGaussianBlur result="unused" stdDeviation="2"/>
+              <feDropShadow in="tinted" stdDeviation="0" dx="14" dy="3" flood-color="magenta"/>
+            </filter>
+          </defs>
+          <a href="https://example.org/label"><text x="8" y="30" fill="red" font-size="16"
+              filter="url(#fx)">TINT</text></a>
+        </svg>"""
+        fixture = fixed_spread_fixture([("", "white", 112, 62)])
+        with zipfile.ZipFile(io.BytesIO(fixture)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'href="s0.xhtml" media-type="application/xhtml+xml"',
+                b'href="s0.svg" media-type="image/svg+xml"',
+            )
+        members = {"OEBPS/content.opf": package, "OEBPS/s0.svg": svg}
+
+        def filtered_pdf(data: bytes) -> bytes:
+            with doc_ex.open(data) as book:
+                preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                result = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+                with doc_ex.open(result) as pdf:
+                    self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+                return result
+
+        with (
+            doc_ex.open(filtered_pdf(rewrite_epub(fixture, members))) as filtered,
+            doc_ex.open(filtered_pdf(rewrite_epub(fixture, {**members, "OEBPS/s0.svg": svg.replace('filter="url(#fx)"', "")}))) as original,
+        ):
+            self.assertTrue(filtered[0].search_for("TINT"))
+            self.assertEqual(filtered[0].search_for("TINT"), original[0].search_for("TINT"))
+            link, = filtered[0].get_links()
+            self.assertEqual(link.uri, "https://example.org/label")
+            self.assertEqual(link.bbox, original[0].get_links()[0].bbox)
+
+    def test_svg_filter_chain_rejects_invalid_references_and_bounds_work(self) -> None:
+        def svg(primitives: str, *, side: int = 80) -> str:
+            return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 48">
+              <defs><filter id="fx" filterUnits="userSpaceOnUse" x="0" y="0" width="{side}" height="{side}">
+                {primitives}</filter></defs>
+              <rect width="12" height="12" filter="url(#fx)"/></svg>"""
+
+        cases = (
+            ('<feGaussianBlur in="missing"/>', doc_ex.MalformedDocumentError, "prior named result"),
+            ('<feGaussianBlur in="later"/><feColorMatrix result="later"/>',
+             doc_ex.MalformedDocumentError, "prior named result"),
+            ('<feDropShadow in="self" result="self"/>', doc_ex.MalformedDocumentError, "prior named result"),
+            ('<feGaussianBlur result="one"/><feColorMatrix result="one"/>',
+             doc_ex.MalformedDocumentError, "duplicate SVG filter result"),
+            ('<feGaussianBlur result="SourceAlpha"/>', doc_ex.MalformedDocumentError, "invalid SVG filter result"),
+            ('<feGaussianBlur result="two words"/>', doc_ex.MalformedDocumentError, "invalid SVG filter result"),
+            ('<feGaussianBlur result="a"/><feColorMatrix in="a" width="0"/>',
+             doc_ex.MalformedDocumentError, "invalid SVG filter region"),
+            ('<feColorMatrix/>' * 17, doc_ex.UnsafeArchiveError, "16 primitives"),
+        )
+        with doc_ex.open(epub_fixture()) as book:
+            for primitives, error, reason in cases:
+                with self.subTest(reason=reason), self.assertRaisesRegex(error, reason):
+                    book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Filter", svg(primitives)), 0])
+            large = book.edit_epub_structure([
+                doc_ex.EpubSvgChapterSource("Filter", svg('<feColorMatrix/>' * 4, side=1200)), 0,
+            ])
+        with (
+            doc_ex.open(large) as book,
+            self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "SVG filter work"),
+        ):
+            book.render_page(0, dpi=96)
 
     def test_svg_gradient_templates_and_blur_reject_unsafe_inputs(self) -> None:
         def svg(body: str) -> str:

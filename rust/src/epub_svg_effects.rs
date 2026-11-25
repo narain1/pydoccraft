@@ -11,6 +11,8 @@ use crate::{
 };
 
 const MAX_TEMPLATE_DEPTH: usize = 32;
+const MAX_FILTER_PRIMITIVES: usize = 16;
+const MAX_RESULT_BYTES: usize = 128;
 const MAX_LAYER_PIXELS: usize = 8 * 1024 * 1024;
 const MAX_TOTAL_PIXELS: usize = 32 * 1024 * 1024;
 const MAX_DEVICE_SIGMA: f32 = 1024.0;
@@ -112,21 +114,109 @@ pub(in crate::epub) fn validate_markup(root: Node<'_, '_>) -> Result<(), EngineE
     for node in root.descendants().filter(Node::is_element) {
         match node.tag_name().name() {
             tag if is_gradient(tag) => effects.validate_gradient(node)?,
-            "filter" => {
-                let mut children = node.children().filter(Node::is_element);
-                if !children
-                    .next()
-                    .is_some_and(|child| is_filter_primitive(child.tag_name().name()))
-                    || children.next().is_some()
-                {
-                    return Err(unsupported("SVG filter requires one supported primitive"));
-                }
-            }
+            "filter" => validate_chain(node)?,
             tag if is_filter_primitive(tag) => validate_primitive(node)?,
             _ => {}
         }
         if let Some(value) = node.attribute("filter") {
             effects.validate_filter(node, value)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_chain(node: Node<'_, '_>) -> Result<(), EngineError> {
+    for attribute in ["filterUnits", "primitiveUnits"] {
+        if node
+            .attribute(attribute)
+            .is_some_and(|value| !matches!(value, "userSpaceOnUse" | "objectBoundingBox"))
+        {
+            return Err(invalid("invalid SVG filter units"));
+        }
+    }
+    validate_region(node)?;
+    let mut results = HashSet::new();
+    let mut children = node.children().filter(Node::is_element).peekable();
+    if children.peek().is_none() {
+        return Err(invalid("SVG filter requires a primitive"));
+    }
+    for (index, child) in children.enumerate() {
+        if index >= MAX_FILTER_PRIMITIVES {
+            return Err(limited("SVG filter exceeds 16 primitives"));
+        }
+        if !is_filter_primitive(child.tag_name().name()) {
+            return Err(unsupported("unsupported SVG filter primitive"));
+        }
+        match child.attribute("in") {
+            None | Some("SourceGraphic" | "SourceAlpha") => {}
+            Some("BackgroundImage" | "BackgroundAlpha" | "FillPaint" | "StrokePaint") => {
+                return Err(unsupported(
+                    "SVG filters require SourceGraphic or SourceAlpha or a prior named result",
+                ));
+            }
+            Some(input) if results.contains(input) => {}
+            Some(_) => {
+                return Err(invalid(
+                    "SVG filter input must reference a prior named result",
+                ))
+            }
+        }
+        if let Some(result) = child.attribute("result") {
+            if !result_name(result) {
+                return Err(invalid("invalid SVG filter result name"));
+            }
+            if !results.insert(result) {
+                return Err(invalid("duplicate SVG filter result name"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn result_name(value: &str) -> bool {
+    let mut chars = value.chars();
+    value.len() <= MAX_RESULT_BYTES
+        && !matches!(
+            value,
+            "SourceGraphic"
+                | "SourceAlpha"
+                | "BackgroundImage"
+                | "BackgroundAlpha"
+                | "FillPaint"
+                | "StrokePaint"
+                | "inherit"
+                | "initial"
+                | "unset"
+                | "revert"
+                | "revert-layer"
+                | "default"
+        )
+        && chars
+            .next()
+            .is_some_and(|ch| ch == '_' || ch == '-' || ch.is_alphabetic())
+        && chars.all(|ch| ch == '_' || ch == '-' || ch.is_alphanumeric())
+}
+
+fn validate_region(node: Node<'_, '_>) -> Result<(), EngineError> {
+    for (attribute, positive) in [
+        ("x", false),
+        ("y", false),
+        ("width", true),
+        ("height", true),
+    ] {
+        if let Some(length) = node.attribute(attribute) {
+            let length = length.trim();
+            let value = ["%", "px", "em", "ex", "in", "cm", "mm", "pt", "pc"]
+                .into_iter()
+                .find_map(|suffix| length.strip_suffix(suffix))
+                .unwrap_or(length);
+            let value = finite_number(value, "invalid SVG filter region")?;
+            if positive && value <= 0.0 {
+                return Err(invalid("invalid SVG filter region"));
+            }
+            if value.abs() > 1_000_000.0 {
+                return Err(limited("SVG filter region length exceeds 1000000"));
+            }
         }
     }
     Ok(())
@@ -140,14 +230,7 @@ fn validate_primitive(node: Node<'_, '_>) -> Result<(), EngineError> {
     {
         return Err(invalid("misplaced SVG filter primitive"));
     }
-    if node
-        .attribute("in")
-        .is_some_and(|value| !matches!(value, "SourceGraphic" | "SourceAlpha"))
-    {
-        return Err(unsupported(
-            "SVG filters require SourceGraphic or SourceAlpha",
-        ));
-    }
+    validate_region(node)?;
     if node.has_tag_name("feColorMatrix") {
         return validate_color_matrix(node);
     }
@@ -193,6 +276,7 @@ fn validate_color_matrix(node: Node<'_, '_>) -> Result<(), EngineError> {
     let expected = match mode {
         "matrix" => 20,
         "saturate" | "hueRotate" => 1,
+        "luminanceToAlpha" => 0,
         _ => return Err(unsupported("unsupported SVG color matrix mode")),
     };
     let Some(raw) = node.attribute("values") else {
@@ -214,16 +298,12 @@ fn validate_color_matrix(node: Node<'_, '_>) -> Result<(), EngineError> {
     if count != expected {
         return Err(invalid(message));
     }
-    if mode == "matrix" {
-        if values[15..] != [0.0, 0.0, 0.0, 1.0, 0.0] {
-            return Err(unsupported("SVG color matrix must preserve alpha"));
-        }
-        if values
+    if mode == "matrix"
+        && values
             .iter()
             .any(|value| value.abs() > MAX_COLOR_COEFFICIENT)
-        {
-            return Err(limited("SVG color matrix coefficient exceeds 1024"));
-        }
+    {
+        return Err(limited("SVG color matrix coefficient exceeds 1024"));
     }
     if mode == "saturate" && !(0.0..=1.0).contains(&values[0]) {
         return Err(unsupported("SVG saturation must be between 0 and 1"));
@@ -288,10 +368,69 @@ pub(super) fn validate_raster(tree: &usvg::Tree, scale: Transform) -> Result<(),
         }
     }
     let mut pixels = 0;
-    for group in groups(tree.root()) {
-        measure_group(group, scale, &mut pixels)?;
+    measure_group(tree.root(), scale, &mut pixels)
+}
+
+// A filtered layer can crop the source and then change its alpha at each result.
+// Follow the final result's actual input chain. Other branches do not reach the canvas.
+pub(super) fn unproven_geometry(tree: &usvg::Tree) -> bool {
+    fn proof_failed(group: &usvg::Group) -> bool {
+        group.filters().iter().any(|filter| {
+            let Some(bounds) = group.stroke_bounding_box() else {
+                return true;
+            };
+            let covers = |region: usvg::NonZeroRect| {
+                region.x() <= bounds.x()
+                    && region.y() <= bounds.y()
+                    && region.right() >= bounds.right()
+                    && region.bottom() >= bounds.bottom()
+            };
+            if !covers(filter.rect()) {
+                return true;
+            }
+            let mut safe = HashMap::new();
+            for primitive in filter.primitives() {
+                use usvg::filter::{ColorMatrixKind, Input, Kind};
+                let (input, preserves) = match primitive.kind() {
+                    Kind::ColorMatrix(matrix) => {
+                        let preserves = match matrix.kind() {
+                            ColorMatrixKind::Matrix(values) => values[15..] == [0., 0., 0., 1., 0.],
+                            ColorMatrixKind::LuminanceToAlpha => false,
+                            ColorMatrixKind::Saturate(_) | ColorMatrixKind::HueRotate(_) => true,
+                        };
+                        (matrix.input(), preserves)
+                    }
+                    Kind::GaussianBlur(blur) => (
+                        blur.input(),
+                        blur.std_dev_x().get() == 0.0 && blur.std_dev_y().get() == 0.0,
+                    ),
+                    // The native implementation paints the original input over the shadow.
+                    Kind::DropShadow(shadow) => (shadow.input(), true),
+                    _ => return true,
+                };
+                let input_safe = match input {
+                    Input::SourceGraphic | Input::SourceAlpha => true,
+                    Input::Reference(name) => safe.get(name.as_str()).copied().unwrap_or(false),
+                };
+                safe.insert(
+                    primitive.result(),
+                    preserves && input_safe && covers(primitive.rect()),
+                );
+            }
+            filter
+                .primitives()
+                .last()
+                .is_some_and(|last| safe.get(last.result()) != Some(&true))
+        }) || groups(group).any(proof_failed)
     }
-    Ok(())
+
+    proof_failed(tree.root())
+}
+
+pub(super) fn geometry_error() -> EngineError {
+    unsupported(
+        "SVG filter can change the painted source geometry used for PDF text and annotations",
+    )
 }
 
 fn groups(root: &usvg::Group) -> impl Iterator<Item = &usvg::Group> {
@@ -327,35 +466,38 @@ fn measure_group(
         if !width.is_finite() || !height.is_finite() || area > MAX_LAYER_PIXELS as f32 {
             return Err(limited("SVG filter layer exceeds 8 Mi pixels"));
         }
+        let area = area as usize;
+        // Charge the isolated layer and the native filter's input/output canvas copies.
+        charge_work(pixels, area, 3)?;
         for filter in group.filters() {
             for primitive in filter.primitives() {
+                let region = primitive.rect();
+                if [
+                    region.x() * sx,
+                    region.y() * sy,
+                    region.right() * sx,
+                    region.bottom() * sy,
+                ]
+                .iter()
+                .any(|value| !value.is_finite() || value.abs() > i32::MAX as f32 / 8.0)
+                {
+                    return Err(limited("SVG filter subregion exceeds device coordinates"));
+                }
+                // The native filter keeps prior results alive. Charge even unused
+                // results for the full layer, input copies and per-primitive output.
                 let passes = match primitive.kind() {
                     usvg::filter::Kind::GaussianBlur(blur) => {
-                        validate_blur(blur.std_dev_x().get() * sx, blur.std_dev_y().get() * sy)?;
-                        1
+                        3 + blur_work(blur.std_dev_x().get() * sx, blur.std_dev_y().get() * sy)?
                     }
                     usvg::filter::Kind::DropShadow(shadow) => {
                         validate_offset(shadow.dx() * sx)?;
                         validate_offset(shadow.dy() * sy)?;
-                        validate_blur(
-                            shadow.std_dev_x().get() * sx,
-                            shadow.std_dev_y().get() * sy,
-                        )?;
-                        // Gaussian blur, flood, offset, and compositing each
-                        // process the entire layer.
-                        4
+                        8 + blur_work(shadow.std_dev_x().get() * sx, shadow.std_dev_y().get() * sy)?
                     }
-                    // Account for two color-space conversions, two alpha
-                    // conversions, and the matrix multiplication.
-                    usvg::filter::Kind::ColorMatrix(_) => 5,
+                    usvg::filter::Kind::ColorMatrix(_) => 8,
                     _ => return Err(unsupported("unsupported SVG filter primitive")),
                 };
-                charge(
-                    pixels,
-                    (area as usize).saturating_mul(passes),
-                    MAX_TOTAL_PIXELS,
-                    "SVG filter work exceeds 32 Mi pixels",
-                )?;
+                charge_work(pixels, area, passes)?;
             }
         }
     }
@@ -365,9 +507,19 @@ fn measure_group(
     Ok(())
 }
 
-fn validate_blur(x: f32, y: f32) -> Result<(), EngineError> {
-    if x > MAX_DEVICE_SIGMA || y > MAX_DEVICE_SIGMA {
+fn charge_work(pixels: &mut usize, area: usize, passes: usize) -> Result<(), EngineError> {
+    charge(
+        pixels,
+        area.saturating_mul(passes),
+        MAX_TOTAL_PIXELS,
+        "SVG filter work exceeds 32 Mi pixels",
+    )
+}
+
+fn blur_work(x: f32, y: f32) -> Result<usize, EngineError> {
+    if !x.is_finite() || !y.is_finite() || x > MAX_DEVICE_SIGMA || y > MAX_DEVICE_SIGMA {
         return Err(limited("SVG blur exceeds 1024 pixels after scaling"));
     }
-    Ok(())
+    // Both native kernels make multiple sweeps over the layer and convert colors.
+    Ok(if x > 0.0 || y > 0.0 { 18 } else { 0 })
 }

@@ -221,9 +221,13 @@ pub(super) fn collect_image_text(
         f64::from(size[1] / tree.size().height()),
     );
     let mut metrics = HashMap::new();
+    let unproven_geometry = effects::unproven_geometry(tree);
     let mut coverage = coverage::Coverage::new(tree, density);
     visit_painted_svg(tree, clip, |paint, clip, effects| {
         if let usvg::Node::Text(source) = paint.node {
+            if unproven_geometry {
+                return Err(effects::geometry_error());
+            }
             let scaled_clip = super::rendition::text::transformed(clip, scale);
             let scaled_clip = super::rendition::intersection(page, scaled_clip);
             visit_glyphs(
