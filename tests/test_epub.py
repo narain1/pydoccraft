@@ -2572,7 +2572,11 @@ class EpubTests(unittest.TestCase):
         self.assertEqual(maximum, preview("width:8px;min-width:max-content"))
         self.assertEqual(minimum, preview("width:200px;max-inline-size:min-content"))
         self.assertEqual(maximum, preview("width:200px;min-width:max-content;max-width:min-content"))
-        for size in ("min-height:min-content", "max-inline-size:fit-content(10px)", "width:contain"):
+        self.assertEqual(middle, preview("width:200px;max-inline-size:fit-content(55px)"))
+        self.assertEqual(middle, preview("width:8px;min-width:fit-content(calc(4em + 7px))"))
+        self.assertEqual(minimum, preview("width:0px;min-inline-size:fit-content(0px)"))
+        self.assertEqual(maximum, preview("width:200px;max-width:fit-content(200px)"))
+        for size in ("min-height:min-content", "max-inline-size:fit-content(10%)", "width:contain"):
             with self.subTest(size=size):
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "CSS intrinsic box size"):
                     preview(size)
@@ -2617,6 +2621,16 @@ class EpubTests(unittest.TestCase):
                     projected.append((pixels, peer, internal.bbox, external.bbox))
             with self.subTest(sizing=sizing):
                 self.assertTrue(projected[0] == projected[1], "intrinsic bounds changed geometry")
+
+        fixed_fit = []
+        for css in (
+            "#card{max-width:fit-content(calc(2em + 25px))}"
+            "#label{width:200px;max-inline-size:inherit}",
+            "#card{max-width:55px}#label{width:200px;max-inline-size:55px}",
+        ):
+            with doc_ex.open(publication(css)) as book:
+                fixed_fit.append(rgba_pixels(png_chunks(book.render_page(0, dpi=96))))
+        self.assertTrue(fixed_fit[0] == fixed_fit[1], "inherited fit limits changed computed font units")
 
         with doc_ex.open(publication(
             "#limit{box-sizing:border-box;padding-left:10%;min-width:max-content}"

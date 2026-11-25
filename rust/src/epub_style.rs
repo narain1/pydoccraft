@@ -5,20 +5,27 @@ use roxmltree::{Node, NodeId};
 use taffy::{
     geometry::{Line, MinMax, Point, Rect, Size},
     prelude::*,
-    style::{AvailableSpace, BoxSizing, GridAutoFlow, GridPlacement, Overflow},
+    style::{BoxSizing, ExpandedDimension, GridAutoFlow, GridPlacement, Overflow},
 };
 use wordcraft_doc::props::{Align, CharProps, LineSpacing, Rgb, TextColor, Underline};
 
 use super::{
     charge,
     css::{self, Cascade, Properties},
-    limited, math, XHTML,
+    limited, math, unsupported, XHTML,
 };
 use crate::EngineError;
 
 pub(super) type Styles = HashMap<NodeId, Styled>;
 pub(super) type Paint = (Rgb, f32);
-pub(super) type InlineBounds = MinMax<Option<AvailableSpace>, Option<AvailableSpace>>;
+pub(super) type InlineBounds = MinMax<Option<InlineBound>, Option<InlineBound>>;
+
+#[derive(Clone, Copy)]
+pub(super) enum InlineBound {
+    Minimum,
+    Maximum,
+    FitContent(f32),
+}
 
 #[derive(Default)]
 pub(super) struct ChapterStyles {
@@ -294,14 +301,29 @@ impl ChapterStyles {
                     parent.map_or(GridPlacement::Auto, |p| edge(&p.box_style).clone())
                 })
             };
-            let intrinsic_bound = |key| match value(&values, key).to_ascii_lowercase().as_str() {
-                "min-content" => Some(AvailableSpace::MinContent),
-                "max-content" => Some(AvailableSpace::MaxContent),
-                _ => None,
+            let intrinsic_bound = |key| {
+                let source = value(&values, key);
+                let dimension = intrinsic_dimension(source, calculations.get(key).copied());
+                Ok(match dimension.map(Dimension::expand) {
+                    Some(ExpandedDimension::MinContent) => Some(InlineBound::Minimum),
+                    Some(ExpandedDimension::MaxContent) => Some(InlineBound::Maximum),
+                    Some(ExpandedDimension::FitContentPx(limit)) => {
+                        Some(InlineBound::FitContent(limit))
+                    }
+                    Some(
+                        ExpandedDimension::FitContentPercent(_)
+                        | ExpandedDimension::FitContentCalc(_),
+                    ) => {
+                        return Err(unsupported(
+                            "EPUB CSS intrinsic box size requires a fixed fit-content bound",
+                        ));
+                    }
+                    _ => None,
+                })
             };
             let inline_bounds = InlineBounds {
-                min: intrinsic_bound("min-width"),
-                max: intrinsic_bound("max-width"),
+                min: intrinsic_bound("min-width")?,
+                max: intrinsic_bound("max-width")?,
             };
             let box_style = Style {
                 display: match display {

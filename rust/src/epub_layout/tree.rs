@@ -13,7 +13,12 @@ use taffy::{
     TraversePartialTree,
 };
 
-use crate::epub::{css::CalculationTable, limited, style::InlineBounds, unsupported};
+use crate::epub::{
+    css::CalculationTable,
+    limited,
+    style::{InlineBound, InlineBounds},
+    unsupported,
+};
 use crate::EngineError;
 
 #[path = "grid_budget.rs"]
@@ -184,16 +189,39 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
             let maximum =
                 std::mem::replace(&mut style.max_size.width, LengthPercentageAuto::auto());
             let id = NodeId::from(index);
-            let mut probe = |space| {
-                let width = self.probe_width(id, input, space) - subtract_padding;
-                LengthPercentageAuto::length(width.max(0.0))
-            };
-            let measured_min = bounds.min.map(&mut probe);
-            let measured_max = if bounds.max == bounds.min {
-                measured_min
+            let choices = [bounds.min, bounds.max];
+            let mut probe =
+                |space| (self.probe_width(id, input, space) - subtract_padding).max(0.0);
+            let minimum_width = if choices.iter().any(|bound| {
+                matches!(
+                    bound,
+                    Some(InlineBound::Minimum | InlineBound::FitContent(_))
+                )
+            }) {
+                probe(AvailableSpace::MinContent)
             } else {
-                bounds.max.map(probe)
+                0.0
             };
+            let maximum_width = if choices.iter().any(|bound| {
+                matches!(
+                    bound,
+                    Some(InlineBound::Maximum | InlineBound::FitContent(_))
+                )
+            }) {
+                probe(AvailableSpace::MaxContent).max(minimum_width)
+            } else {
+                minimum_width
+            };
+            let used_bound = |bound| {
+                let width = match bound {
+                    InlineBound::Minimum => minimum_width,
+                    InlineBound::Maximum => maximum_width,
+                    InlineBound::FitContent(limit) => limit.min(maximum_width).max(minimum_width),
+                };
+                LengthPercentageAuto::length(width)
+            };
+            let measured_min = bounds.min.map(used_bound);
+            let measured_max = bounds.max.map(used_bound);
             let node = &mut self.nodes[index];
             node.cache.clear();
             node.style.size.width = width;
