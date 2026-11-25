@@ -14000,7 +14000,7 @@ Trailing
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):
                     source.export_epub_fixed_pdf(dpi=96, searchable=True)
 
-    def test_svg_shared_offsets_keep_separated_sources_attributable(self) -> None:
+    def test_svg_shared_filters_keep_separated_sources_attributable(self) -> None:
         definitions = """
           <defs>
             <filter id="outer" filterUnits="userSpaceOnUse" x="-14" y="-12" width="209" height="78">
@@ -14068,12 +14068,25 @@ Trailing
         def single(markup: str) -> str:
             return axis(markup).replace(' filter="url(#inner)"', "")
 
+        def in_place(markup: str, stages: str) -> str:
+            return markup.replace(' filter="url(#inner)"', "").replace(
+                '<feOffset dx="7.75" dy="3.75" result="translated"/>', "",
+            ).replace(rgb, stages)
+
+        in_place_matrix = matrix.replace(' in="translated"', "")
+        in_place_transfer = rgb.replace('in="translated"', 'result="toned"') + transfer.replace(
+            'in="translated"', 'in="toned"',
+        )
         cases = (
             ("sheared", shared, independent),
             ("scaled", axis(shared), axis(independent)),
             ("scaled transfer", axis(shared).replace(rgb, transfer), axis(independent).replace(rgb, transfer)),
             ("sheared alpha matrix", shared.replace(rgb, matrix), independent.replace(rgb, matrix)),
             ("single scaled transfer", single(shared).replace(rgb, transfer), single(independent).replace(rgb, transfer)),
+            ("in-place sheared matrix", in_place(shared, in_place_matrix),
+             in_place(independent, in_place_matrix)),
+            ("in-place scaled transfer", in_place(axis(shared), in_place_transfer),
+             in_place(axis(independent), in_place_transfer)),
         )
         for mode, markup, control in cases:
             for inline in (False, True):
@@ -14117,7 +14130,12 @@ Trailing
         mixed = shared.replace('<feOffset dx="3.75"', '<feGaussianBlur stdDeviation="2"/><feOffset dx="3.75"')
         split = shared.replace('id="graphic" mask="url(#cut)"', 'id="graphic" filter="url(#inner)"')
         painted_clear = single(shared).replace(rgb, transfer).replace('tableValues="0 0 .6 .8"', 'tableValues=".1 0 .6 .8"')
-        for markup in (touching, overlap, mixed, split, painted_clear):
+        in_place_mixed = in_place(shared, '<feGaussianBlur stdDeviation="2" result="toned"/>' + transfer.replace(
+            'in="translated"', 'in="toned"',
+        ))
+        in_place_painted_clear = in_place(shared, in_place_transfer).replace('tableValues="0 0 .6 .8"', 'tableValues=".1 0 .6 .8"')
+        for markup in (touching, overlap, mixed, split, painted_clear,
+                       in_place(overlap, in_place_matrix), in_place_mixed, in_place_painted_clear):
             with self.subTest(markup=markup), book(markup, False) as source:
                 self.assertTrue(source.render_page(0, dpi=96).startswith(b"\x89PNG"))
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):

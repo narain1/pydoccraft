@@ -1,10 +1,10 @@
-//! Attribute a shared native offset replay when source pixel supports stay apart.
+//! Attribute shared native filter replay when source pixel supports stay apart.
 use std::collections::HashMap;
 
 use resvg::{tiny_skia, tiny_skia::Transform, usvg};
 use wordcraft_geom::Rect;
 
-use super::{affine_leaf, contains_filter, transfer, CaptureGeometry, RasterAxes};
+use super::{affine_leaf, contains_filter, transfer, CaptureGeometry, FilterGeometry, RasterAxes};
 
 const MAX_BRANCHES: usize = 8;
 const MAX_LAYERS: usize = 4;
@@ -23,7 +23,7 @@ pub(super) fn common_stack(mut group: &usvg::Group) -> Option<&usvg::Group> {
     loop {
         if !group.filters().is_empty() {
             filters += 1;
-            if filters > MAX_LAYERS || !pointwise_offsets(group) {
+            if filters > MAX_LAYERS || !pointwise_layer(group, true) {
                 return None;
             }
         }
@@ -40,7 +40,7 @@ pub(super) fn common_stack(mut group: &usvg::Group) -> Option<&usvg::Group> {
     }
 }
 
-fn pointwise_offsets(group: &usvg::Group) -> bool {
+pub(super) fn pointwise_layer(group: &usvg::Group, offsets: bool) -> bool {
     use usvg::filter::{ColorMatrixKind, Kind};
 
     let [filter] = group.filters() else {
@@ -53,7 +53,7 @@ fn pointwise_offsets(group: &usvg::Group) -> bool {
         .primitives()
         .iter()
         .all(|primitive| match primitive.kind() {
-            Kind::Offset(_) => true,
+            Kind::Offset(_) => offsets,
             Kind::ColorMatrix(matrix) => match matrix.kind() {
                 ColorMatrixKind::Saturate(_)
                 | ColorMatrixKind::HueRotate(_)
@@ -159,7 +159,11 @@ impl CaptureGeometry {
                 if !(0.125..=8.0).contains(&determinant.abs()) || x > 8.0 || y > 8.0 {
                     return None;
                 }
-                let [dx, dy] = self.shift(group, axes)?;
+                let [dx, dy] = match self.groups.get(&std::ptr::from_ref(group))?.filter {
+                    FilterGeometry::Sample => [0.0, 0.0],
+                    FilterGeometry::Moved => self.shift(group, axes)?,
+                    _ => return None,
+                };
                 shift[0] += dx * sx;
                 shift[1] += dy * sy;
                 // Map the native layer's bilinear and antialias support back

@@ -1014,6 +1014,14 @@ impl CaptureGeometry {
             {
                 filter = FilterGeometry::Unproven;
             }
+            let sample_shared = filter == FilterGeometry::Unproven
+                && shared_sources
+                && !additive
+                && !status.filters_subtree
+                && shared::pointwise_layer(group, false);
+            if sample_shared {
+                filter = FilterGeometry::Sample;
+            }
             let mut replay_shared = false;
             if filter == FilterGeometry::Unproven
                 && (!status.filters_subtree || can_stack)
@@ -1034,12 +1042,13 @@ impl CaptureGeometry {
                 }
             }
             status.affine_subtree |= filter == FilterGeometry::Moved && !axis_aligned;
-            status.shared_subtree |= replay_shared;
+            status.shared_subtree |= replay_shared || sample_shared;
             status.incompatible_stack |= filter != FilterGeometry::Moved
                 || needs_affine && !affine_source && !shared_sources;
             status.filters_subtree = true;
-            status.needs_context = (erosion || status.moved_children || replay_shared)
-                && filter == FilterGeometry::Moved
+            status.needs_context = sample_shared
+                || (erosion || status.moved_children || replay_shared)
+                    && filter == FilterGeometry::Moved
                 || (erosion || procedural) && filter == FilterGeometry::Sample;
         }
         status.filter = filter;
