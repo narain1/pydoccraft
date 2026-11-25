@@ -145,7 +145,7 @@ enum CssValue {
     Pending(Arc<variables::Template>, Arc<str>),
 }
 
-fn value_parser(source: &str) -> Parser<'_, '_> {
+pub(super) fn value_parser(source: &str) -> Parser<'_, '_> {
     raffia::ParserBuilder::new(source)
         .options(raffia::ParserOptions {
             try_parsing_value_in_custom_property: true,
@@ -1382,14 +1382,14 @@ fn sides<'a>(parts: &[&'a str]) -> Option<[&'a str; 4]> {
     }
 }
 
-fn ident<'a>(value: &'a InterpolableIdent<'_>) -> Option<&'a str> {
+pub(super) fn ident<'a>(value: &'a InterpolableIdent<'_>) -> Option<&'a str> {
     match value {
         InterpolableIdent::Literal(value) => Some(&value.name),
         _ => None,
     }
 }
 
-fn string_value<'a>(value: &'a InterpolableStr<'_>) -> Option<&'a str> {
+pub(super) fn string_value<'a>(value: &'a InterpolableStr<'_>) -> Option<&'a str> {
     match value {
         InterpolableStr::Literal(value) => Some(&value.value),
         _ => None,
@@ -1735,7 +1735,7 @@ pub(super) fn color(value: &str) -> Option<([u8; 3], f32)> {
 
 // Raffia parses nested CSS functions and blocks recursively. Bound nesting before
 // calling it, and replace comments with spaces while retaining byte spans.
-fn checked_css(source: &str) -> Result<String, EngineError> {
+pub(super) fn checked_css(source: &str) -> Result<String, EngineError> {
     let mut bytes = source.as_bytes().to_vec();
     let mut pos = 0;
     let mut delimiters = Vec::new();
@@ -1823,14 +1823,14 @@ pub(super) fn resource_references(
     css_references(&statements, check)
 }
 
-fn css_error(error: raffia::error::Error) -> EngineError {
+pub(super) fn css_error(error: raffia::error::Error) -> EngineError {
     invalid(format!(
         "CSS at byte {}: {:?}",
         error.span.start, error.kind
     ))
 }
 
-fn css_references(
+pub(super) fn css_references(
     statements: &[Statement<'_>],
     check: &mut impl FnMut(&str, bool) -> Result<(), EngineError>,
 ) -> Result<(), EngineError> {

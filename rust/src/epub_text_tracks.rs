@@ -6,6 +6,8 @@ use crate::EngineError;
 
 #[path = "epub_ttml.rs"]
 mod ttml;
+#[path = "epub_webvtt_css.rs"]
+mod webvtt_css;
 
 const MAX_TRACK_BYTES: usize = 2 * 1024 * 1024;
 pub(super) const MICROS: u64 = 1_000_000;
@@ -126,6 +128,7 @@ pub(crate) struct Cue {
     pub region: Option<String>,
     pub markup: Option<String>,
     pub runs: Vec<TextRun>,
+    pub background_color: Option<[u8; 4]>,
 }
 
 #[derive(Default)]
@@ -186,12 +189,17 @@ pub(crate) fn read(
     media: &str,
     start: u64,
     end: Option<u64>,
+    language: Option<&str>,
 ) -> Result<Vec<Cue>, EngineError> {
     validate_archive_path(path)?;
     let bytes = Book::open(epub)?.read(path, MAX_TRACK_BYTES)?;
     let mut track = Track::default();
     match media {
-        "text/vtt" => webvtt(&bytes, &mut track)?,
+        "text/vtt" => webvtt(
+            &bytes,
+            &mut track,
+            language.filter(|value| !value.is_empty()),
+        )?,
         "application/ttml+xml" => ttml::parse(&bytes, &mut track)?,
         _ => {
             return Err(unsupported(
@@ -208,7 +216,7 @@ pub(crate) fn read(
     Ok(track.cues)
 }
 
-fn webvtt(bytes: &[u8], track: &mut Track) -> Result<(), EngineError> {
+fn webvtt(bytes: &[u8], track: &mut Track, language: Option<&str>) -> Result<(), EngineError> {
     let source = std::str::from_utf8(bytes)
         .map_err(invalid)?
         .trim_start_matches('\u{feff}')
@@ -237,11 +245,32 @@ fn webvtt(bytes: &[u8], track: &mut Track) -> Result<(), EngineError> {
         }
     }
     let mut previous = 0;
+    let mut cascade = webvtt_css::Cascade::default();
     while let Some(first) = lines.by_ref().find(|line| !line.is_empty()) {
+        if first.trim_end_matches([' ', '\t']) == "STYLE" {
+            let style_lines = lines.by_ref().take_while(|line| !line.is_empty());
+            if track.cues.is_empty() {
+                let mut sheet = String::new();
+                for line in style_lines {
+                    if line.contains("-->") {
+                        return Err(invalid("WebVTT STYLE cannot contain a timing delimiter"));
+                    }
+                    if sheet.len() + line.len() + 1 > webvtt_css::MAX_STYLESHEET_BYTES {
+                        return Err(limited("WebVTT stylesheets exceed 64 KiB"));
+                    }
+                    sheet.push_str(line);
+                    sheet.push('\n');
+                }
+                cascade.sheet(&sheet)?;
+            } else {
+                style_lines.for_each(drop);
+            }
+            continue;
+        }
         let side_block = first
             .strip_prefix("NOTE")
             .is_some_and(|tail| tail.is_empty() || tail.starts_with([' ', '\t']))
-            || matches!(first, "STYLE" | "REGION");
+            || first == "REGION";
         if side_block {
             lines
                 .by_ref()
@@ -281,7 +310,8 @@ fn webvtt(bytes: &[u8], track: &mut Track) -> Result<(), EngineError> {
             }
             markup.push_str(line);
         }
-        let StyledText { text, runs, .. } = styled_webvtt(&markup, start, end)?;
+        let (StyledText { text, runs, .. }, background_color) =
+            styled_webvtt(&markup, start, end, id.as_deref(), language, &mut cascade)?;
         track.push(Cue {
             start,
             end: Some(end),
@@ -291,6 +321,7 @@ fn webvtt(bytes: &[u8], track: &mut Track) -> Result<(), EngineError> {
             settings: (!settings.is_empty()).then_some(settings),
             markup: Some(markup),
             runs,
+            background_color,
         })?;
     }
     Ok(())
@@ -324,10 +355,27 @@ fn vtt_timestamp(source: &str) -> Result<u64, EngineError> {
         .ok_or_else(|| invalid("invalid EPUB WebVTT timestamp"))
 }
 
-fn styled_webvtt(mut markup: &str, start: u64, end: u64) -> Result<StyledText, EngineError> {
+fn styled_webvtt(
+    mut markup: &str,
+    start: u64,
+    end: u64,
+    id: Option<&str>,
+    language: Option<&str>,
+    cascade: &mut webvtt_css::Cascade,
+) -> Result<(StyledText, Option<[u8; 4]>), EngineError> {
     let mut out = StyledText::default();
     let mut stack = Vec::<(&str, Arc<TextStyle>)>::new();
-    let fallback = Arc::new(TextStyle::default());
+    let inherited = TextStyle::default();
+    let mut fallback = inherited.clone();
+    let background_color = cascade
+        .paint(webvtt_css::Target {
+            id,
+            language,
+            language_attribute: language,
+            ..Default::default()
+        })?
+        .apply(&inherited, &mut fallback);
+    let fallback = Arc::new(fallback);
     let mut style_work = 0;
     let mut annotation = false;
     let mut timestamp = None;
@@ -354,7 +402,14 @@ fn styled_webvtt(mut markup: &str, start: u64, end: u64) -> Result<StyledText, E
                         timestamp = Some(time);
                     }
                 } else {
-                    webvtt_style(tag, &mut stack, &mut style_work)?;
+                    webvtt_style(
+                        tag,
+                        &mut stack,
+                        &mut style_work,
+                        &fallback,
+                        language,
+                        cascade,
+                    )?;
                 }
                 markup = tail;
                 continue;
@@ -379,13 +434,16 @@ fn styled_webvtt(mut markup: &str, start: u64, end: u64) -> Result<StyledText, E
             timestamp,
         )?;
     }
-    Ok(out)
+    Ok((out, background_color))
 }
 
 fn webvtt_style<'a>(
     tag: &'a str,
     stack: &mut Vec<(&'a str, Arc<TextStyle>)>,
     work: &mut usize,
+    fallback: &TextStyle,
+    track_language: Option<&str>,
+    cascade: &mut webvtt_css::Cascade,
 ) -> Result<(), EngineError> {
     if let Some(close) = tag.strip_prefix('/') {
         if close == "ruby" && stack.last().is_some_and(|(tag, _)| *tag == "rt") {
@@ -413,14 +471,14 @@ fn webvtt_style<'a>(
     if stack.len() == 32 {
         return Err(limited("WebVTT cue span nesting exceeds 32"));
     }
-    let inherited = stack.last().map(|(_, style)| style);
+    let inherited = stack.last().map_or(fallback, |(_, style)| style);
     charge(
         work,
-        tag.len() + inherited.map_or(0, |style| style.bytes()),
+        tag.len() + inherited.bytes(),
         MAX_STYLE_BYTES,
         "WebVTT cue styling exceeds its processing budget",
     )?;
-    let mut style = inherited.map_or_else(TextStyle::default, |style| (**style).clone());
+    let mut style = inherited.clone();
     let annotation = annotation.trim_ascii();
     match name {
         "b" => style.bold = true,
@@ -439,6 +497,8 @@ fn webvtt_style<'a>(
         }
         _ => {}
     }
+    let class_start = style.classes.len();
+    let mut local_background = None;
     for class in parts.filter(|class| !class.is_empty()) {
         if style.classes.len() == 32 || class.len() > MAX_STYLE_LABEL {
             return Err(limited("WebVTT cue classes exceed their budget"));
@@ -447,10 +507,24 @@ fn webvtt_style<'a>(
             style.color = Some(color);
         }
         if let Some(color) = class.strip_prefix("bg_").and_then(webvtt_color) {
-            style.background_color = Some(color);
+            local_background = Some(color);
         }
         style.classes.push(class.to_owned());
     }
+    let paint = cascade.paint(webvtt_css::Target {
+        tag: Some(name),
+        id: None,
+        classes: &style.classes[class_start..],
+        voice: (name == "v" && !annotation.is_empty())
+            .then_some(())
+            .and(style.voice.as_deref()),
+        language: style.language.as_deref().or(track_language),
+        language_attribute: (name == "lang" && !annotation.is_empty())
+            .then_some(())
+            .and(style.language.as_deref()),
+    })?;
+    let background = paint.apply(inherited, &mut style).or(local_background);
+    style.background_color = webvtt_css::background(background, inherited.background_color);
     stack.push((name, Arc::new(style)));
     Ok(())
 }

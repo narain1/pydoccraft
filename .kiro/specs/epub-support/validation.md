@@ -971,3 +971,11 @@ The lockfiles and upstream revisions match the preceding checkpoint. The audit r
 Installed-wheel regressions compare LTR and RTL logical styles against physical controls with identical preview pixels, reopened fixed-layout PDF pixels, searchable text, and clickable areas at 96 DPI. They verify importance, source order within a declaration block, font-relative inheritance when direction changes, and color functions in border shorthands. A missing custom property resets the winning alias. Unresolved vertical and automatic inline directions and unsupported logical border styles return explicit errors.
 
 A separately authored EPUB with a fixed XHTML chapter and an HTML direction hint passed EPUBCheck 5.4.0 with no errors or warnings. Its logical layout rendered in preview and in a searchable PDF with a local link.
+
+## 2026-11-24 WebVTT author cue styles
+
+The installed cascade regression checks default and cue-ID backgrounds, declaration importance and order across two stylesheets, specificity, local classes, decoded voice matching, language matching from both `srclang` and inline spans, and nested alpha colors. It preserves the legacy cue fields, the 140 ms source timestamp after seeking, and separate cue and inline backgrounds. At 170 ms the video iterator changes captions while reusing the same decoded RGB picture. A late STYLE block leaves subsequent cues styled by the earlier blocks. [WebVTT cue styling](https://www.w3.org/TR/webvtt1/#the-cue-pseudo-element)
+
+The installed bounds regression rejects an HTTP URL, a relative URL in an unmatched custom declaration, an import, an at-rule, and inputs that exceed the stylesheet byte, block, selector, declaration and matching-work limits.
+
+All 192 EPUB tests passed against the installed CPython 3.11 Linux x86-64 release wheel. Both final focused regressions passed. The wheel measured 25,591,497 bytes with a 59,606,184-byte native extension. Its SHA-256 is `776b8d9cf5baae8aa5b1dc329495f861908c2e78fc62d8f6138975ce02052787`. Rust 1.95 formatting, locked release all-target Clippy with warnings denied, and strict public typing passed. The lockfiles match the base commit. The packaged LICENSE, NOTICE, and LICENSE-THIRD-PARTY files match their source copies.

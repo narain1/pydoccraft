@@ -114,6 +114,7 @@ class EpubTextCue:
     region: str | None = None
     markup: str | None = None
     runs: tuple[EpubTextRun, ...] = field(default=(), compare=False, repr=False)
+    background_color: tuple[int, int, int, int] | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True, slots=True)

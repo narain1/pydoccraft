@@ -970,6 +970,7 @@ impl Reader<'_, '_> {
             region: paragraph.region.map(str::to_owned),
             markup: None,
             runs,
+            background_color: None,
         })
     }
 }

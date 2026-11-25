@@ -569,10 +569,11 @@ type TimedTextCue = (
     Option<String>,
     Option<String>,
     Vec<TimedTextRun>,
+    Option<Rgba>,
 );
 
 #[pyfunction]
-#[pyo3(signature = (data, path, media, start, end))]
+#[pyo3(signature = (data, path, media, start, end, language=None))]
 fn _epub_text_track(
     py: Python<'_>,
     data: &[u8],
@@ -580,8 +581,9 @@ fn _epub_text_track(
     media: &str,
     start: u64,
     end: Option<u64>,
+    language: Option<&str>,
 ) -> Result<Vec<TimedTextCue>, EngineError> {
-    py.allow_threads(|| crate::epub::text_tracks::read(data, path, media, start, end))
+    py.allow_threads(|| crate::epub::text_tracks::read(data, path, media, start, end, language))
         .map(|cues| {
             cues.into_iter()
                 .map(|cue| {
@@ -594,6 +596,8 @@ fn _epub_text_track(
                         cue.region,
                         cue.markup,
                         cue.runs.into_iter().map(timed_text_run).collect(),
+                        cue.background_color
+                            .map(|[r, g, b, a]: [u8; 4]| (r, g, b, a)),
                     )
                 })
                 .collect()

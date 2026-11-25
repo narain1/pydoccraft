@@ -26,6 +26,7 @@ def verify_epub_tracks(source: bytes) -> None:
         assert_type(cues, list[doc_ex.EpubTextCue])
         assert_type(cues[0].end_us, int | None)
         assert_type(cues[0].region, str | None)
+        assert_type(cues[0].background_color, tuple[int, int, int, int] | None)
         assert_type(cues[0].runs, tuple[doc_ex.EpubTextRun, ...])
         assert_type(cues[0].runs[0].style, doc_ex.EpubTextStyle)
         assert_type(cues[0].runs[0].style.color, tuple[int, int, int, int] | None)

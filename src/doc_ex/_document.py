@@ -760,15 +760,17 @@ class Document:
         from . import _core, _native
 
         self._ensure_open()
-        result = _native(lambda: _core._epub_text_track(self._source, track.path, track.media_type, start, end))
+        result = _native(lambda: _core._epub_text_track(
+            self._source, track.path, track.media_type, start, end, track.language
+        ))
         cues = []
-        for *legacy_fields, native_runs in result:
+        for *legacy_fields, native_runs, background_color in result:
             runs = []
             for text, native_style, timestamp in native_runs:
                 *properties, classes, voice, language = native_style
                 style = EpubTextStyle(*properties, tuple(classes), voice, language)
                 runs.append(EpubTextRun(text, style, timestamp))
-            cues.append(EpubTextCue(*legacy_fields, runs=tuple(runs)))
+            cues.append(EpubTextCue(*legacy_fields, runs=tuple(runs), background_color=background_color))
         return cues
 
     def _epub_source_interval(

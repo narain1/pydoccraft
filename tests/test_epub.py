@@ -3576,6 +3576,125 @@ voice
             self.assertEqual([f.text_cues[0].runs for f in frames], [first.runs, second.runs])
             self.assertIs(frames[0].rgb, frames[1].rgb)
 
+    def test_webvtt_author_styles_cascade_and_follow_video_timing(self) -> None:
+        video = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        markup = ('Lead<v Narrator &amp; Team>Voice<lang fr-CA><c.highlight.bg_blue>Green'
+                  '<b.highlight>Blue</b><i.accent>Normal</i></c></lang></v>'
+                  '<00:00:00.140><u>End</u>')
+        vtt = f'''WEBVTT
+
+STYLE
+::cue {{ color: white; background-color: rgba(0,0,0,.5); }}
+::cue(:root) {{ font-weight: 600; }}
+::cue(#special) {{ color: #112233; background: #223344; }}
+::cue([lang|=en i]) {{ text-decoration: overline; }}
+::cue(c.highlight) {{ color: orangered !important; background-color: rgba(255,0,0,.5); }}
+::cue(.highlight) {{ color: red !important; }}
+::cue(b.highlight) {{ color: blue !important; }}
+::cue(v[voice="Narrator & Team"]), ::cue(lang:lang(fr)) {{ font-style: oblique; }}
+
+STYLE
+::cue(c.highlight) {{ color: lime !important; }}
+::cue(u) {{ text-decoration: none; }}
+::cue(i.accent:lang(fr)) {{ font-style: normal; color: teal; }}
+::cue(.accent) {{ background-color: rgba(0,0,255,.5); text-decoration-line: underline line-through; }}
+::cue(:past) {{ color: purple; }}
+
+special
+00:00:00.075 --> 00:00:00.170 align:start
+{markup}
+
+STYLE
+::cue {{ color: black !important; }}
+
+00:00:00.170 --> 00:00:00.260
+Second
+'''.encode()
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>CSS subtitles</title></head>
+          <body><video src="clip.mp4#t=0.12,0.25">
+          <track src="styled.vtt" kind="captions" srclang="en-US"/>
+          </video></body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("CSS subtitles", chapter, "OEBPS/style.xhtml")],
+                resources={
+                    "OEBPS/clip.mp4": doc_ex.EpubResource("video/mp4", video),
+                    "OEBPS/styled.vtt": doc_ex.EpubResource("text/vtt", vtt),
+                },
+            )
+        with doc_ex.open(data) as book:
+            lead, second = book.epub_embedded_text(0, 0, start_us=167_000, end_us=200_000)
+            expected = doc_ex.EpubTextCue(167_000, 170_000, "LeadVoiceGreenBlueNormalEnd",
+                                          "special", "align:start", markup=markup)
+            self.assertEqual(lead, expected)
+            self.assertEqual(hash(lead), hash(expected))
+            self.assertEqual(lead.background_color, (34, 51, 68, 255))
+            self.assertEqual((second.start_us, second.end_us, second.text), (170_000, 200_000, "Second"))
+            self.assertEqual(second.background_color, (0, 0, 0, 128))
+            self.assertEqual(second.runs, (doc_ex.EpubTextRun(
+                "Second", doc_ex.EpubTextStyle(bold=True, overline=True, color=(255, 255, 255, 255))),))
+            lead_run, voice, green, blue, normal, end = lead.runs
+            self.assertEqual([run.text for run in lead.runs], ["Lead", "Voice", "Green", "Blue", "Normal", "End"])
+            self.assertTrue(all(run.style.bold and run.style.overline for run in lead.runs))
+            self.assertEqual(lead_run.style, doc_ex.EpubTextStyle(bold=True, overline=True, color=(17, 34, 51, 255)))
+            self.assertEqual((green.style.color, blue.style.color, normal.style.color),
+                             ((0, 255, 0, 255), (0, 0, 255, 255), (0, 128, 128, 255)))
+            self.assertEqual((voice.style.font_style, green.style.font_style,
+                              blue.style.font_style, normal.style.font_style),
+                             ("oblique", "oblique", "oblique", "normal"))
+            self.assertEqual(green.style.background_color, (255, 0, 0, 128))
+            self.assertEqual(normal.style.background_color, (85, 0, 170, 192))
+            self.assertTrue(normal.style.underline and normal.style.line_through)
+            self.assertEqual((normal.style.voice, normal.style.language), ("Narrator & Team", "fr-CA"))
+            self.assertEqual(end.timestamp_us, 140_000)
+            self.assertFalse(end.style.underline)
+            self.assertEqual(end.style, lead_run.style)
+            frames = list(book.epub_embedded_video(0, 0, start_us=167_000, end_us=180_000, text_track=0))
+            self.assertEqual([(f.start_us, f.duration_us) for f in frames], [(167_000, 3_000), (170_000, 10_000)])
+            self.assertIs(frames[0].rgb, frames[1].rgb)
+            for frame, cue in zip(frames, (lead, second), strict=True):
+                self.assertEqual(frame.text_cues[0].runs, cue.runs)
+                self.assertEqual(frame.text_cues[0].background_color, cue.background_color)
+
+    def test_webvtt_author_styles_bound_work_and_reject_resource_rules(self) -> None:
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>CSS subtitles</title></head>
+          <body><video><track src="style.vtt" kind="captions" srclang="en"/></video></body></html>'''
+        header = b"WEBVTT\n\n"
+        cue = b"00:00:00.000 --> 00:00:00.200\nText"
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("CSS subtitles", chapter, "OEBPS/style.xhtml")],
+                resources={"OEBPS/style.vtt": doc_ex.EpubResource("text/vtt", header + cue)},
+            )
+        large = b"".join(hashlib.sha256(str(i).encode()).hexdigest().encode() for i in range(1024))
+        regular = b"::cue(b){color:red}\n"
+        for sheet, payload, error, message in (
+            (b'STYLE\n::cue { background: url(https://example.invalid/test.png); }\n\n',
+             cue, doc_ex.UnsupportedFormatError, "cannot reference resources"),
+            (b'STYLE\n::cue(#never) { --asset: url(../picture.png); }\n\n',
+             cue, doc_ex.UnsupportedFormatError, "cannot reference resources"),
+            (b'STYLE\n@import "caption.css";\n\n',
+             cue, doc_ex.UnsupportedFormatError, "cannot reference resources"),
+            (b'STYLE\n@media (width > 0px) { ::cue {color:red} }\n\n',
+             cue, doc_ex.UnsupportedFormatError, "at-rules"),
+            (b'STYLE\n/*' + large + b'*/\n\n',
+             cue, doc_ex.UnsafeArchiveError, "stylesheets exceed 64 KiB"),
+            (b'STYLE\n\n' * 33,
+             cue, doc_ex.UnsafeArchiveError, "32 STYLE blocks"),
+            (b'STYLE\n' + regular * 257 + b'\n',
+             cue, doc_ex.UnsafeArchiveError, "selector count"),
+            (b'STYLE\n::cue(' + b'.a' * 17 + b'){color:red}\n\n',
+             cue, doc_ex.UnsafeArchiveError, "too many selector terms"),
+            (b'STYLE\n::cue{' + b'color:red;' * 65 + b'}\n\n',
+             cue, doc_ex.UnsafeArchiveError, "declarations exceed"),
+            (b'STYLE\n' + regular * 256 + b'\n',
+             cue + b'<b></b>' * 4_001, doc_ex.UnsafeArchiveError, "work exceeds|exceeds its work budget"),
+        ):
+            with self.subTest(message=message):
+                changed = rewrite_epub(data, {"OEBPS/style.vtt": header + sheet + payload})
+                with doc_ex.open(changed) as book, self.assertRaisesRegex(error, message):
+                    book.epub_embedded_text(0, 0)
+
     def test_timed_subtitle_styles_bound_nesting_and_reject_broken_references(self) -> None:
         chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Styled subtitles</title></head>
           <body><video><track src="voice.vtt" kind="captions" srclang="fr"/>
