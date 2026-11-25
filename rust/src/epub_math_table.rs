@@ -407,28 +407,21 @@ pub(super) fn project<'xml>(
     let mut measured_labels = Vec::new();
     let track_total = match &grid.labels {
         Some(labels) if measured_fit.is_some() => {
-            let measurements = compose::Measurements::default();
             let mut label_width = 0.0f32;
             for cell in placements.iter().filter(|cell| cell.columns.is_empty()) {
                 let prior_boxes = projection.extras.box_count();
                 let label = project_cell(projection, table, depth, cell, None)?;
                 let CellContent::Equation(math) = &label.content else {
                     return Err(unsupported(
-                        "MathML fitted track width requires independently measurable native labels",
+                        "MathML fitted track width requires an independently measurable label",
                     ));
                 };
-                if projection.extras.box_count() != prior_boxes {
-                    return Err(unsupported(
-                        "MathML fitted track width requires independently measurable native labels",
-                    ));
-                }
-                if !math.nodes.is_empty() {
-                    // Label cells carry no alignment groups. The final table
-                    // uses the same document styles to resolve their metrics.
-                    let resolved = projection.document.styles.resolve_char(None, &label.format);
-                    let layout = measurements.layout(math, "", &resolved, false, MAX_DIMENSION)?;
-                    label_width = label_width.max(layout.width);
-                }
+                label_width = label_width.max(projection.extras.label_width(
+                    math,
+                    prior_boxes,
+                    projection.document,
+                    &label.format,
+                )?);
                 measured_labels.push(label);
             }
             grid.declared_track_width(label_width + labels.gap)?

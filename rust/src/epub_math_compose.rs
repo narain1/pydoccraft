@@ -72,6 +72,7 @@ pub(super) enum Extra {
     Space([f32; 3]),
 }
 
+#[derive(Clone)]
 pub(in crate::epub) struct Padding {
     body: Arg,
     format: CharProps,
@@ -146,6 +147,53 @@ impl Extras {
         self.nodes.len()
     }
 
+    pub(super) fn label_width(
+        &self,
+        math: &Math,
+        prior_boxes: usize,
+        document: &Document,
+        format: &CharProps,
+    ) -> Result<f32, EngineError> {
+        let unresolved =
+            || unsupported("MathML fitted track width requires an independently measurable label");
+        let resolved = document.styles.resolve_char(None, format);
+        let measurements = Measurements::default();
+        let layout = |equation| measurements.layout(equation, "", &resolved, false, MAX_GEOMETRY);
+        match self.nodes.get(prior_boxes..).ok_or_else(unresolved)? {
+            [] if math.nodes.is_empty() => Ok(0.0),
+            [] => Ok(layout(math)?.width),
+            [Extra::Padded(padding)] if matches!(math.nodes.as_slice(), [marker] if box_index(marker) == Some(prior_boxes)) =>
+            {
+                let [width, _, _, left, shift] = padding.lengths;
+                if width.is_some() || left.is_some() || shift.is_some() {
+                    return Err(unresolved());
+                }
+                // The only composed box belongs to this label. Its native
+                // operands cannot reference the fitted track or another box.
+                let visual = padding.clone().layout(document, format, &measurements)?;
+                let editable = padding
+                    .clone()
+                    .editable(&Editable::default(), &EditableLayout::new(document, None))?;
+                let native_width = layout(&Math {
+                    nodes: vec![editable.node],
+                    ..Default::default()
+                })?
+                .width;
+                // The visual placeholder has a 0.4pt minimum positive
+                // advance. An exact shared width must survive both paths.
+                if (visual.width > 0.0 && visual.width < 0.4)
+                    || (visual.width - native_width).abs() > 0.0001
+                {
+                    return Err(unsupported(
+                        "MathML fitted track width differs for the editable label",
+                    ));
+                }
+                Ok(visual.width)
+            }
+            _ => Err(unresolved()),
+        }
+    }
+
     pub(super) fn remember(&mut self, color: Rgb) {
         self.occupied_colors.insert([color.0, color.1, color.2]);
     }
@@ -168,14 +216,7 @@ impl Extras {
         paragraph_style: Option<&str>,
     ) -> Result<Editable, EngineError> {
         let mut editable = Editable::default();
-        let layout = EditableLayout {
-            document,
-            carrier: document
-                .styles
-                .resolve_char(paragraph_style, &CharProps::default()),
-            guide_ratios: OnceCell::new(),
-            matrix_spacing: OnceCell::new(),
-        };
+        let layout = EditableLayout::new(document, paragraph_style);
         for extra in self.nodes {
             let replacement = match extra {
                 Extra::Table(grid) => {
@@ -762,7 +803,18 @@ impl Padding {
     }
 }
 
-impl EditableLayout<'_> {
+impl<'a> EditableLayout<'a> {
+    fn new(document: &'a Document, paragraph_style: Option<&str>) -> Self {
+        Self {
+            document,
+            carrier: document
+                .styles
+                .resolve_char(paragraph_style, &CharProps::default()),
+            guide_ratios: OnceCell::new(),
+            matrix_spacing: OnceCell::new(),
+        }
+    }
+
     pub(super) fn axis(&self) -> f32 {
         let (face, constants) = resolve_math("Cambria Math");
         let axis_ratio = constants.as_ref().map_or(0.25, |table| {
