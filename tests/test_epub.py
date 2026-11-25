@@ -6976,6 +6976,130 @@ overlay
                     with self.assertRaisesRegex(error, message):
                         book.epub_embedded_text(0, 0)
 
+    def test_ttml_conditional_sets_keep_owner_and_region_clocks(self) -> None:
+        video = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        header = b'''<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling"
+          xmlns:ttp="http://www.w3.org/ns/ttml#parameter" ttp:tickRate="1000" xml:lang="en">
+          <head><layout>'''
+        conditional = header + b'''<region xml:id="lower" timeContainer="seq" tts:origin="10% 60%">
+            <set dur="173t" condition="parameter('forced')" tts:backgroundColor="red"/>
+            <set begin="5t" dur="13t" condition="!parameter('forced')" tts:backgroundColor="blue"/>
+          </region></layout></head>
+          <body begin="150t"><div region="lower" timeContainer="seq">
+            <div><set dur="17t" condition="false" tts:color="red"/></div>
+            <p xml:id="same" dur="50t" tts:color="#112233">
+              <set begin="5t" dur="17t" condition="true" tts:fontWeight="bold"/>
+              <set begin="10t" dur="10t" condition="false" tts:fontWeight="normal"/>
+              <span>Source</span><span><set begin="12t" dur="5t" condition="!parameter('forced')" tts:color="lime"/> detail</span>
+            </p>
+            <p dur="10t">
+              <region xml:id="after" tts:extent="60% 20%"><set begin="3t" dur="3t" condition="true" tts:position="right bottom"/></region>After
+            </p>
+          </div></body></tt>'''
+        control = header + b'''<region xml:id="lower" tts:origin="10% 60%">
+            <set begin="178t" end="191t" tts:backgroundColor="blue"/>
+          </region></layout></head>
+          <body begin="150t"><div region="lower" timeContainer="seq">
+            <div dur="17t"/>
+            <p xml:id="same" dur="50t" tts:color="#112233">
+              <set begin="5t" dur="17t" tts:fontWeight="bold"/>
+              <span>Source</span><span><set begin="12t" dur="5t" tts:color="lime"/> detail</span>
+            </p>
+            <p dur="10t">
+              <region xml:id="after" tts:extent="60% 20%"><set begin="3t" dur="3t" tts:position="right bottom"/></region>After
+            </p>
+          </div></body></tt>'''
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Conditional animations</title></head>
+          <body><video src="clip.mp4#t=0.16,0.225&amp;xywh=1,1,6,4">
+          <track src="conditional.ttml" kind="captions" srclang="en"/>
+          <track src="control.ttml" kind="subtitles" srclang="en"/>
+          </video></body></html>'''
+        path = "OEBPS/conditional.ttml"
+        with doc_ex.open(epub_fixture()) as source:
+            data = source.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Conditional animations", chapter, "OEBPS/chapter.xhtml")],
+                resources={
+                    "OEBPS/clip.mp4": doc_ex.EpubResource("video/mp4", video),
+                    path: doc_ex.EpubResource("application/ttml+xml", conditional),
+                    "OEBPS/control.ttml": doc_ex.EpubResource("application/ttml+xml", control),
+                },
+            )
+        with doc_ex.open(data) as book:
+            cues = book.epub_embedded_text(0, 0)
+            reference = book.epub_embedded_text(0, 0, track_index=1)
+            self.assertEqual(cues, reference)
+            self.assertEqual([cue.runs for cue in cues], [cue.runs for cue in reference])
+            self.assertEqual([cue.ttml_region_layout for cue in cues], [cue.ttml_region_layout for cue in reference])
+            boundaries = [167_000, 172_000, 178_000, 179_000, 184_000, 189_000, 191_000, 217_000, 220_000, 223_000, 227_000]
+            self.assertEqual([(cue.start_us, cue.end_us) for cue in cues], list(zip(boundaries, boundaries[1:])))
+            self.assertEqual([cue.text for cue in cues], ["Source detail"] * 7 + ["After"] * 3)
+            self.assertEqual([cue.runs[0].style.bold for cue in cues], [False] + [True] * 4 + [False] * 5)
+            self.assertEqual(cues[3].runs[-1].style.color, (0, 255, 0, 255))
+            self.assertEqual(cues[4].runs[-1].style.color, (17, 34, 51, 255))
+            self.assertEqual([cue.ttml_region_layout.background_color for cue in cues],
+                             [None, None] + [(0, 0, 255, 255)] * 4 + [None] * 4)
+            self.assertEqual([cue.ttml_region_layout.origin_percent for cue in cues[7:]],
+                             [(0.0, 0.0), (40.0, 80.0), (0.0, 0.0)])
+            frames = list(book.epub_embedded_video(0, 0, text_track=0))
+            self.assertEqual(frames, list(book.epub_embedded_video(0, 0, text_track=1)))
+            self.assertTrue(all((frame.width, frame.height) == (6, 4) for frame in frames))
+            blank = [(frame.start_us, frame.duration_us) for frame in frames if not frame.text_cues]
+            self.assertEqual(blank, [(160_000, 6_666), (166_666, 334)])
+            seeked = list(book.epub_embedded_video(0, 0, start_us=187_123, end_us=192_001, text_track=0))
+            self.assertEqual([(frame.start_us, frame.duration_us) for frame in seeked],
+                             [(187_123, 1_877), (189_000, 2_000), (191_000, 1_001)])
+            self.assertTrue(all(frame.rgb is seeked[0].rgb for frame in seeked))
+            self.assertEqual([frame.text_cues[0].runs for frame in seeked], [cue.runs for cue in cues[4:7]])
+            self.assertEqual([frame.text_cues[0].ttml_region_layout for frame in seeked],
+                             [cue.ttml_region_layout for cue in cues[4:7]])
+            inline = list(book.epub_embedded_video(0, 0, start_us=220_000, end_us=224_000, text_track=0))
+            self.assertEqual([(frame.start_us, frame.duration_us) for frame in inline],
+                             [(220_000, 3_000), (223_000, 1_000)])
+            self.assertEqual([frame.text_cues[0].ttml_region_layout for frame in inline],
+                             [cue.ttml_region_layout for cue in cues[-2:]])
+            revised = book.edit_epub_structure(
+                replacements={0: chapter.replace("Conditional animations", "Revised")},
+                resources={path: doc_ex.EpubResource("application/ttml+xml", conditional)},
+            )
+        with doc_ex.open(revised) as reopened:
+            self.assertEqual(reopened.read_epub_resource(path), conditional)
+            self.assertEqual(reopened.epub_embedded_text(0, 0), cues)
+
+    def test_ttml_conditional_sets_validate_in_staging_and_playback(self) -> None:
+        root = b'<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling"><body>'
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Conditional animations</title></head>
+          <body><video><track src="conditional.ttml" kind="captions" srclang="en"/></video></body></html>'''
+        path = "OEBPS/conditional.ttml"
+        valid = root + b'<p dur="1s"><set dur="1s" condition="true" tts:color="red"/>Visible</p></body></tt>'
+        with doc_ex.open(epub_fixture()) as original:
+            publication = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Conditional animations", chapter, "OEBPS/chapter.xhtml")],
+                resources={path: doc_ex.EpubResource("application/ttml+xml", valid)},
+            )
+        for sets, error, message in (
+            (b'<set dur="1s" condition="true &amp;&amp;" tts:color="red"/>', doc_ex.MalformedDocumentError,
+             "invalid TTML condition expression"),
+            (b'<set dur="1s" condition="parameter(\'userLanguage\')" tts:color="red"/>',
+             doc_ex.UnsupportedFormatError, "no EPUB playback binding"),
+            (b'<set dur="1s" condition="media(\'screen\')" tts:color="red"/>',
+             doc_ex.UnsupportedFormatError, "unsupported TTML condition context function"),
+            (b'<set dur="later" condition="false" tts:color="red"/>', doc_ex.MalformedDocumentError,
+             "invalid TTML time expression"),
+            (b'<set dur="1s" condition="false" tts:color="unavailable"/>', doc_ex.MalformedDocumentError,
+             "invalid TTML color"),
+            (b'<set dur="1s" condition="true" tts:color="red"/><set dur="1s" tts:color="blue"/>',
+             doc_ex.UnsupportedFormatError, "overlapping TTML set"),
+            (b'<span dur="1s" timeContainer="seq"><set dur="1s" condition="false" tts:color="red"/></span>',
+             doc_ex.UnsupportedFormatError, "sequential time container"),
+        ):
+            with self.subTest(message=message, input=sets):
+                changed = root + b'<p dur="1s">' + sets + b'Visible</p></body></tt>'
+                with doc_ex.open(publication) as book, self.assertRaisesRegex(error, message):
+                    book.edit_epub_structure(resources={path: doc_ex.EpubResource("application/ttml+xml", changed)})
+                with doc_ex.open(rewrite_epub(publication, {path: changed})) as book:
+                    with self.assertRaisesRegex(error, message):
+                        book.epub_embedded_text(0, 0)
+
     def test_ttml_region_edits_and_playback_validate_references_and_geometry(self) -> None:
         header = b'<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling">'
         body = b'<body region="r"><div><p begin="0s" end="1s">Text</p></div></body></tt>'

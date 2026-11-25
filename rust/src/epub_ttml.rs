@@ -9,7 +9,7 @@ use roxmltree::Node;
 use super::{Cue, StyledText, TextStyle, Track, MAX_STYLE_LABEL};
 use crate::{
     epub::{
-        charge, invalid, limited, parse_xml,
+        charge, invalid, limited,
         ttml_clock::{Clock, Instant, Timing},
         ttml_regions::{self, Definition, Region, Regions, Selection},
         ttml_styles::{self, StylePatch, TT},
@@ -24,9 +24,7 @@ const MAX_TEXT_WORK: usize = 8 * 1024 * 1024;
 const MAX_SETS_PER_ELEMENT: usize = 32;
 const MAX_ANIMATION_WORK: usize = 8 * 1024 * 1024;
 
-pub(super) fn parse(bytes: &[u8], track: &mut Track) -> Result<(), EngineError> {
-    let xml = parse_xml(bytes)?;
-    let root = xml.root_element();
+pub(super) fn parse(root: Node<'_, '_>, track: &mut Track) -> Result<(), EngineError> {
     if !root.has_tag_name((TT, "tt")) {
         return Err(invalid("missing TTML tt root"));
     }
@@ -145,11 +143,7 @@ struct StyleSet {
 
 impl StyleSet {
     fn new(node: Node<'_, '_>, timing: Timing, clock: Clock) -> Result<Self, EngineError> {
-        ttml_styles::validate_set(
-            node,
-            &["color", "fontWeight", "fontStyle", "textDecoration"],
-        )?;
-        let patch = StylePatch::default().inline(node)?;
+        let patch = ttml_styles::content_set(node)?;
         Ok(Self {
             timing: Timing::new(node, timing.begin, timing.end, clock)?,
             patch,
@@ -257,11 +251,13 @@ impl<'n> Reader<'_, 'n> {
                 return Err(limited("TTML content exceeds 32 inline set elements"));
             }
             let set = StyleSet::new(child, timing, self.clock)?;
+            // A false condition suppresses the style, but its interval still contributes
+            // to the owner's intrinsic duration.
             format.animation_end = format
                 .animation_end
                 .zip(set.timing.end)
                 .map(|(a, b)| a.max(b));
-            if !set.timing.empty() {
+            if !set.timing.empty() && !self.regions.excluded.contains(&child.id()) {
                 sets.push(set);
             }
         }
@@ -359,7 +355,7 @@ impl<'n> Reader<'_, 'n> {
     ) -> Result<Option<Instant>, EngineError> {
         check_depth(depth)?;
         let timing = Timing::new(node, base, cap, self.clock)?;
-        if timing.empty() || self.regions.excluded_content.contains(&node.id()) {
+        if timing.empty() || self.regions.excluded.contains(&node.id()) {
             return Ok(timing.end);
         }
         let format = self.format(inherited, node, timing)?;
@@ -417,7 +413,7 @@ impl<'n> Reader<'_, 'n> {
                 timing.end
             } else if child.has_tag_name((TT, "span")) || child.has_tag_name((TT, "br")) {
                 let span = Timing::new(child, base, timing.end, self.clock)?;
-                if span.empty() || self.regions.excluded_content.contains(&child.id()) {
+                if span.empty() || self.regions.excluded.contains(&child.id()) {
                     span.end
                 } else {
                     let style = self.format(format.clone(), child, span)?;

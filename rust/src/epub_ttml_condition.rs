@@ -6,7 +6,7 @@ use roxmltree::{Node, NodeId};
 use super::{
     invalid, limited,
     ttml_clock::{Clock, Timing},
-    ttml_styles::TT,
+    ttml_styles::{self, TT},
     unsupported, EngineError,
 };
 
@@ -28,21 +28,21 @@ pub(super) fn read(root: Node<'_, '_>) -> Result<HashSet<NodeId>, EngineError> {
         {
             continue;
         }
-        match node.tag_name().name() {
-            "body" | "div" | "p" | "span" | "br" => {}
-            // The shared region and animation validators retain their existing diagnostics.
+        let is_set = match node.tag_name().name() {
+            "body" | "div" | "p" | "span" | "br" => false,
+            // The shared region validator retains its existing diagnostics.
             "layout" | "region" => continue,
             "set" => {
-                return Err(unsupported(
-                    "unsupported TTML set attribute or style property",
-                ))
+                validate_set(node)?;
+                true
             }
             _ => return Err(unsupported("unsupported TTML conditional target")),
-        }
-        if evaluate(condition)? {
+        };
+        let included = evaluate(condition)?;
+        if included && !is_set {
             continue;
         }
-        if !node.has_attribute("dur") && !node.has_attribute("end") {
+        if !is_set && !node.has_attribute("dur") && !node.has_attribute("end") {
             return Err(unsupported(
                 "excluded TTML content requires an explicit end or duration",
             ));
@@ -51,11 +51,32 @@ pub(super) fn read(root: Node<'_, '_>) -> Result<HashSet<NodeId>, EngineError> {
             Some(clock) => clock,
             None => *clock.insert(Clock::new(root)?),
         };
-        // Keep the authored timing intact when the matching branch is omitted.
+        // Validate timing regardless of whether the animation or content is shown.
         Timing::new(node, 0, None, clock)?;
-        excluded.insert(node.id());
+        if !included {
+            excluded.insert(node.id());
+        }
     }
     Ok(excluded)
+}
+
+fn validate_set(node: Node<'_, '_>) -> Result<(), EngineError> {
+    let parent = node
+        .parent_element()
+        .filter(|parent| parent.tag_name().namespace() == Some(TT))
+        .ok_or_else(|| unsupported("unsupported TTML conditional set target"))?;
+    match parent.tag_name().name() {
+        "region" => Ok(()),
+        "body" | "div" | "p" | "span" | "br" => {
+            if parent.attribute("timeContainer") == Some("seq") {
+                return Err(unsupported(
+                    "inline TTML set in a sequential time container",
+                ));
+            }
+            ttml_styles::content_set(node).map(|_| ())
+        }
+        _ => Err(unsupported("unsupported TTML conditional set target")),
+    }
 }
 
 fn evaluate(expression: &str) -> Result<bool, EngineError> {

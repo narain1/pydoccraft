@@ -115,7 +115,7 @@ impl<'n> Patch<'n> for RegionPatch<'n> {
             show_background: get("showBackground"),
             z_index: get("zIndex"),
             text_style: StylePatch::default().inline(node)?,
-            unsupported: node.has_attribute("condition")
+            unsupported: (node.has_attribute("condition") && !node.has_tag_name((TT, "set")))
                 || get("display").is_some_and(|value| value != "auto")
                 || get("visibility").is_some_and(|value| value != "visible")
                 || get("backgroundImage").is_some_and(|value| value != "none")
@@ -224,7 +224,7 @@ pub(super) struct Regions<'n> {
     inline: HashMap<NodeId, Definition>,
     pub implicit: Option<Arc<Region>>,
     pub initial: StylePatch,
-    pub excluded_content: HashSet<NodeId>,
+    pub excluded: HashSet<NodeId>,
 }
 
 #[cfg(feature = "python")]
@@ -262,7 +262,7 @@ pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
     if !root.has_tag_name((TT, "tt")) {
         return Err(invalid("missing TTML tt root"));
     }
-    let excluded_content = ttml_condition::read(root)?;
+    let excluded = ttml_condition::read(root)?;
     let viewport = Viewport::new(root)?;
     let mut initial = RegionPatch::default();
     let mut definitions = Vec::new();
@@ -423,7 +423,9 @@ pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
                         }
                         cursor = set.end.unwrap_or(set.begin);
                     }
-                    sets.push((set, patch));
+                    if !excluded.contains(&child.id()) {
+                        sets.push((set, patch));
+                    }
                 }
                 definition.layouts =
                     region_layouts(&definition.region, style, &sets, viewport, &mut region_work)?;
@@ -459,7 +461,7 @@ pub(super) fn read<'n>(root: Node<'n, '_>) -> Result<Regions<'n>, EngineError> {
         inline,
         implicit,
         initial: initial.text_style,
-        excluded_content,
+        excluded,
     })
 }
 

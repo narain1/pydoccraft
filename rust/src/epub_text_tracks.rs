@@ -1,10 +1,14 @@
 //! Read bounded, standalone text tracks from local EPUB resources.
 use std::{collections::BTreeSet, sync::Arc};
 
+use roxmltree::Node;
+
 use super::{
     charge, invalid, limited,
     media::integer,
+    parse_xml,
     ttml_clock::{MAX_TIME, MICROS},
+    ttml_styles::TT,
     unsupported, validate_archive_path, Book,
 };
 use crate::EngineError;
@@ -182,6 +186,21 @@ impl Track {
     }
 }
 
+pub(super) fn validate_ttml_edit(root: Node<'_, '_>, bytes: usize) -> Result<(), EngineError> {
+    if root
+        .descendants()
+        .any(|node| node.has_tag_name((TT, "set")) && node.has_attribute("condition"))
+    {
+        if bytes > MAX_TRACK_BYTES {
+            return Err(limited("EPUB text track exceeds its byte budget"));
+        }
+        // Validate interactions with neighboring sets and owner clocks using the
+        // same bounded projection that caption and video playback will use.
+        return ttml::parse(root, &mut Track::default());
+    }
+    super::ttml_regions::read(root).map(|_| ())
+}
+
 pub(crate) fn read(
     epub: &[u8],
     path: &str,
@@ -201,7 +220,7 @@ pub(crate) fn read(
             language.filter(|value| !value.is_empty()),
             video_context,
         )?,
-        "application/ttml+xml" => ttml::parse(&bytes, &mut track)?,
+        "application/ttml+xml" => ttml::parse(parse_xml(&bytes)?.root_element(), &mut track)?,
         _ => {
             return Err(unsupported(
                 "embedded EPUB text tracks require WebVTT or TTML",

@@ -105,11 +105,19 @@ pub(super) fn local<'n, P: Patch<'n>>(
     references(node, lookup)?.inline(node)
 }
 
+pub(super) fn content_set(node: Node<'_, '_>) -> Result<StylePatch, EngineError> {
+    validate_set(
+        node,
+        &["color", "fontWeight", "fontStyle", "textDecoration"],
+    )?;
+    StylePatch::default().inline(node)
+}
+
 pub(super) fn validate_set(node: Node<'_, '_>, properties: &[&str]) -> Result<(), EngineError> {
     let mut has_property = false;
     for attribute in node.attributes() {
         let supported = match (attribute.namespace(), attribute.name()) {
-            (None, "begin" | "dur" | "end") | (Some(XML), _) => true,
+            (None, "begin" | "dur" | "end" | "condition") | (Some(XML), _) => true,
             (None, "fill") => attribute.value() == "remove",
             (None, "repeatCount") => attribute.value() == "1",
             (Some(STYLING), property) if properties.contains(&property) => {

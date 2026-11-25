@@ -651,6 +651,9 @@ pub(crate) fn update_structure<'a>(
             }
             let xml = parse_xml(data)?;
             if media == "application/ttml+xml" {
+                #[cfg(feature = "python")]
+                super::text_tracks::validate_ttml_edit(xml.root_element(), data.len())?;
+                #[cfg(not(feature = "python"))]
                 super::ttml_regions::read(xml.root_element())?;
             }
         }
