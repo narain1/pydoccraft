@@ -464,6 +464,10 @@ type RgbFrame = (Vec<u8>, u32, u32, (u32, u32), u64, u64);
 
 #[pymethods]
 impl NativeEpubVideo {
+    fn clip_spatial(&mut self, percent: bool, coordinates: [u64; 4]) -> Result<(), EngineError> {
+        self.0.clip_spatial(percent, coordinates)
+    }
+
     fn next_frame(&mut self, py: Python<'_>) -> Result<Option<RgbFrame>, EngineError> {
         py.allow_threads(|| self.0.next()).map(|frame| {
             frame.map(|frame| {

@@ -51,7 +51,7 @@ pub(crate) struct WebmSource {
     next: usize,
     decoder: Playback,
     clip: Range<u64>,
-    geometry: Geometry,
+    pub(super) geometry: Geometry,
     coded: (u32, u32),
     crop: (usize, usize),
 }
@@ -494,6 +494,7 @@ fn geometry(
             full_range: false,
             kr: 0.299,
             kb: 0.114,
+            region: None,
         },
         crop,
     ))

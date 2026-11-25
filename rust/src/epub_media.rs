@@ -117,7 +117,14 @@ fn source(
     let (uri, fragment) = src
         .split_once('#')
         .map_or((src, None), |(uri, fragment)| (uri, Some(fragment)));
-    let (fragment_start_us, fragment_end_us) = fragment.map_or(Ok((0, None)), temporal_fragment)?;
+    let MediaFragment {
+        start: fragment_start_us,
+        end: fragment_end_us,
+        spatial,
+    } = fragment
+        .map(|fragment| media_fragment(fragment, kind))
+        .transpose()?
+        .unwrap_or_default();
     let (path, media) = local(uri, cx)?;
     if media
         .split_once('/')
@@ -149,28 +156,111 @@ fn source(
             && ["av01", "av1", "vp8", "vp9", "vp09"]
                 .into_iter()
                 .any(advertises));
-    Ok(json!({
+    let mut source = json!({
         "uri": src, "path": path, "media_type": media, "playable_audio": playable_audio,
         "fragment_start_us": fragment_start_us, "fragment_end_us": fragment_end_us,
         "playable_video": playable_video,
-    }))
+    });
+    if let Some(SpatialFragment {
+        percent,
+        coordinates: [x, y, width, height],
+    }) = spatial
+    {
+        let unit = if percent { "percent" } else { "pixel" };
+        source["fragment_xywh"] = json!([unit, x, y, width, height]);
+    }
+    Ok(source)
 }
 
 const MAX_TIME: u128 = (1u128 << 53) - 1;
 
-fn temporal_fragment(fragment: &str) -> Result<(u64, Option<u64>), EngineError> {
-    let Some((name, value)) = fragment.split_once('=') else {
-        return Err(unsupported(
-            "embedded media fragment requires a temporal t dimension",
-        ));
-    };
-    if percent_decode(name)? != "t" || value.contains('&') {
-        return Err(unsupported(
-            "embedded media fragments support only one temporal t dimension",
-        ));
+#[derive(Default)]
+struct MediaFragment {
+    start: u64,
+    end: Option<u64>,
+    spatial: Option<SpatialFragment>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct SpatialFragment {
+    pub(super) percent: bool,
+    pub(super) coordinates: [u64; 4],
+}
+
+impl SpatialFragment {
+    pub(super) fn new(percent: bool, coordinates: [u64; 4]) -> Result<Self, EngineError> {
+        let [x, y, width, height] = coordinates;
+        if width == 0 || height == 0 {
+            return Err(invalid(
+                "embedded media spatial fragment needs a positive size",
+            ));
+        }
+        if percent && (x.saturating_add(width) > 100 || y.saturating_add(height) > 100) {
+            return Err(invalid(
+                "embedded media percent fragment exceeds 100 percent",
+            ));
+        }
+        Ok(Self {
+            percent,
+            coordinates,
+        })
     }
-    let value = percent_decode(value)?;
-    let value = value.strip_prefix("npt:").unwrap_or(&value);
+
+    fn parse(value: &str) -> Result<Self, EngineError> {
+        let (percent, coordinates) = match value.split_once(':') {
+            Some(("pixel", coordinates)) => (false, coordinates),
+            Some(("percent", coordinates)) => (true, coordinates),
+            Some(_) => return Err(invalid("invalid embedded media spatial fragment unit")),
+            None => (false, value),
+        };
+        let malformed =
+            || invalid("embedded media spatial fragment requires four unsigned integers");
+        let mut parts = coordinates.split(',');
+        let mut values = [0; 4];
+        for value in &mut values {
+            *value = parts.next().and_then(integer).ok_or_else(malformed)?;
+        }
+        if parts.next().is_some() {
+            return Err(malformed());
+        }
+        Self::new(percent, values)
+    }
+}
+
+fn media_fragment(fragment: &str, kind: &str) -> Result<MediaFragment, EngineError> {
+    let mut timing = None;
+    let mut spatial = None;
+    for pair in fragment.split('&') {
+        let (name, value) = pair.split_once('=').ok_or_else(|| {
+            unsupported("embedded media fragment requires t or xywh name-value dimensions")
+        })?;
+        match percent_decode(name)?.as_str() {
+            "t" if timing.is_none() => timing = Some(temporal_fragment(&percent_decode(value)?)?),
+            "xywh" if kind != "video" => {
+                return Err(unsupported(
+                    "embedded media audio supports only a temporal t dimension",
+                ))
+            }
+            "xywh" if spatial.is_none() => {
+                spatial = Some(SpatialFragment::parse(&percent_decode(value)?)?)
+            }
+            _ => {
+                return Err(unsupported(
+                    "unsupported or repeated embedded media fragment dimension",
+                ))
+            }
+        }
+    }
+    let (start, end) = timing.unwrap_or((0, None));
+    Ok(MediaFragment {
+        start,
+        end,
+        spatial,
+    })
+}
+
+fn temporal_fragment(value: &str) -> Result<(u64, Option<u64>), EngineError> {
+    let value = value.strip_prefix("npt:").unwrap_or(value);
     let (start, end) = match value.split_once(',') {
         Some((start, end)) => {
             let start = if start.is_empty() { 0 } else { npt(start)? };

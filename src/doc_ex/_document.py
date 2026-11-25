@@ -728,11 +728,16 @@ class Document:
             from .errors import UnsupportedFormatError
 
             raise UnsupportedFormatError("embedded media requires EPUB input")
+        def media_source(source: dict[str, Any]) -> EpubMediaSource:
+            if "fragment_xywh" in source:
+                source = {**source, "fragment_xywh": tuple(source["fragment_xywh"])}
+            return EpubMediaSource(**source)
+
         chapter = self.load_page(operator.index(page))
         return [
             EpubEmbeddedMedia(
                 item["kind"], item["id"], item["label"],
-                tuple(EpubMediaSource(**source) for source in item["sources"]),
+                tuple(media_source(source) for source in item["sources"]),
                 tuple(EpubMediaTrack(**track) for track in item["tracks"]),
                 item["poster_path"],
             )
@@ -833,7 +838,7 @@ class Document:
         text_track: int | None = None,
         video_track: int | None = None,
     ) -> Iterator[EpubVideoFrame]:
-        """Read local AVC, Theora or WebM frames with optional synchronized text cues."""
+        """Read local video frames with authored clips and optional synchronized text cues."""
         from . import _core, _native
         from .errors import UnsupportedFormatError
 
@@ -857,6 +862,9 @@ class Document:
                 decoder = _native(lambda: _core._open_epub_video(
                     self._source, source.path, source.media_type, start, end, selection,
                 ))
+                if source.fragment_xywh is not None:
+                    unit, *rectangle = source.fragment_xywh
+                    _native(lambda: decoder.clip_spatial(unit == "percent", rectangle))
             except UnsupportedFormatError as error:
                 if source_index is not None:
                     raise

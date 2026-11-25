@@ -2504,6 +2504,102 @@ first
             with self.assertRaisesRegex(ValueError, "still referenced"):
                 book.edit_epub_structure(remove_resources=["OEBPS/sound.wav"])
 
+    def test_spatial_video_fragments_crop_picture_pixels_without_changing_the_clock(self) -> None:
+        fixtures = Path(__file__).parent / "fixtures"
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Crops</title></head>
+          <body><video src="camera.mp4"><track src="caption.vtt" kind="captions" srclang="en"/></video>
+          <video><source src="camera.mp4#%78ywh=pixel%3A15%2C5%2C20%2C17&amp;t=0.1,0.23" type="video/mp4"/>
+          <track src="caption.vtt" kind="captions" srclang="en"/></video>
+          <video src="clip.webm"/><video src="clip.webm#t=0,0.1&amp;xywh=percent:8,13,33,41"/>
+          <video src="clip.ogv"/><video src="clip.ogv#xywh=9,8,29,20"/>
+          <video src="camera.mp4#xywh=125,62,18446744073709551615,20"/>
+          <video src="camera.mp4#xywh=128,0,1,1"/>
+          <video src="camera.mp4#xywh=0,64,1,1"/></body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Crops", chapter, "OEBPS/crops.xhtml")],
+                resources={
+                    "OEBPS/camera.mp4": doc_ex.EpubResource(
+                        "video/mp4", (fixtures / "epub-video-h264.mp4").read_bytes()),
+                    "OEBPS/clip.webm": doc_ex.EpubResource(
+                        "video/webm", (fixtures / "epub-video-vp9.webm").read_bytes()),
+                    "OEBPS/clip.ogv": doc_ex.EpubResource(
+                        "video/ogg", (fixtures / "epub-video-theora-spatial.ogv").read_bytes()),
+                    "OEBPS/caption.vtt": doc_ex.EpubResource(
+                        "text/vtt", b"WEBVTT\n\n00:00:00.125 --> 00:00:00.176\nCue\n"),
+                },
+            )
+
+        def crop(frame: doc_ex.EpubVideoFrame, left: int, top: int, width: int, height: int) -> bytes:
+            return b"".join(
+                frame.rgb[3 * (row * frame.width + left):3 * (row * frame.width + left + width)]
+                for row in range(top, top + height)
+            )
+
+        def timing(frame: doc_ex.EpubVideoFrame) -> tuple[int, int, bool]:
+            return frame.start_us, frame.start_us + frame.duration_us, bool(frame.text_cues)
+
+        with doc_ex.open(data) as book:
+            sources = [media.sources[0] for media in book.epub_embedded_media(0)]
+            self.assertIsNone(sources[0].fragment_xywh)
+            self.assertEqual(sources[1].fragment_xywh, ("pixel", 15, 5, 20, 17))
+            self.assertEqual((sources[1].fragment_start_us, sources[1].fragment_end_us), (100_000, 230_000))
+            self.assertEqual(sources[3].fragment_xywh, ("percent", 8, 13, 33, 41))
+            self.assertEqual(sources[5].fragment_xywh, ("pixel", 9, 8, 29, 20))
+
+            full = list(book.epub_embedded_video(0, 0, start_us=110_000, end_us=230_000, text_track=0))
+            spatial = list(book.epub_embedded_video(0, 1, start_us=110_000, end_us=270_000, text_track=0))
+            self.assertEqual([timing(frame) for frame in spatial], [
+                (110_000, 125_000, False), (125_000, 166_666, True),
+                (166_666, 176_000, True), (176_000, 230_000, False),
+            ])
+            self.assertEqual([timing(frame) for frame in spatial], [timing(frame) for frame in full])
+            self.assertEqual([frame.rgb for frame in spatial], [crop(frame, 11, 5, 16, 17) for frame in full])
+            self.assertTrue(all((f.width, f.height, f.pixel_aspect_ratio) == (16, 17, (4, 3)) for f in spatial))
+            self.assertIs(spatial[0].rgb, spatial[1].rgb)
+            self.assertIs(spatial[2].rgb, spatial[3].rgb)
+            sound = list(book.epub_embedded_audio(0, 1, start_us=110_000, end_us=270_000))
+            self.assertEqual(sound, list(book.epub_embedded_audio(0, 0, start_us=110_000, end_us=230_000)))
+            self.assertEqual(sum(clip.frame_count for clip in sound), 5760)
+
+            for original, clipped, left, top, width, height in (
+                (2, 3, 5, 6, 22, 21),
+                (4, 5, 9, 5, 29, 14),
+                (0, 6, 93, 62, 3, 2),
+            ):
+                with self.subTest(video=clipped):
+                    full = next(book.epub_embedded_video(0, original))
+                    spatial = next(book.epub_embedded_video(0, clipped))
+                    self.assertEqual((spatial.width, spatial.height, spatial.pixel_aspect_ratio),
+                                     (width, height, full.pixel_aspect_ratio))
+                    self.assertEqual(spatial.rgb, crop(full, left, top, width, height))
+            # Theora's plane rows run bottom-up and its clean aperture is smaller than the coded frame.
+            self.assertEqual(next(book.epub_embedded_video(0, 4)).pixel_aspect_ratio, (2, 3))
+
+            for index in (7, 8):
+                with self.subTest(video=index), self.assertRaisesRegex(
+                    doc_ex.MalformedDocumentError, "spatial fragment starts outside"
+                ):
+                    next(book.epub_embedded_video(0, index))
+
+    def test_spatial_video_fragments_reject_invalid_and_unsupported_dimensions(self) -> None:
+        for fragment, error, message in (
+            ("xywh=0,1,0,5", doc_ex.MalformedDocumentError, "positive size"),
+            ("xywh=0,-1,2,5", doc_ex.MalformedDocumentError, "unsigned integers"),
+            ("xywh=0,0,18446744073709551616,5", doc_ex.MalformedDocumentError, "unsigned integers"),
+            ("xywh=percent:98,0,3,10", doc_ex.MalformedDocumentError, "100 percent"),
+            ("xywh=percent:0,100,3,1", doc_ex.MalformedDocumentError, "100 percent"),
+            ("xywh=fraction:0,1,2,5", doc_ex.MalformedDocumentError, "fragment unit"),
+            ("xywh=0,1,2,5&amp;xywh=1,2,3,4", doc_ex.UnsupportedFormatError, "repeated"),
+            ("t=1&amp;t=2", doc_ex.UnsupportedFormatError, "repeated"),
+            ("xywh=0,1,2,5&amp;track=2", doc_ex.UnsupportedFormatError, "fragment dimension"),
+            ("xywh=0%2C0%2C1%2C1%26t%3D2", doc_ex.MalformedDocumentError, "unsigned integers"),
+        ):
+            chapter = ('<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Crops</title></head>'
+                       f'<body><video src="clip.mp4#{fragment}"/></body></html>')
+            with self.subTest(fragment=fragment), self.assertRaisesRegex(error, message):
+                doc_ex.open(epub_fixture(chapter_one=chapter))
+
     def test_embedded_ttml_nested_timing_preserves_regions_and_clip_intervals(self) -> None:
         ttml = b"""<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttp="http://www.w3.org/ns/ttml#parameter"
           xml:lang="en" ttp:timeBase="media" ttp:frameRate="30" ttp:frameRateMultiplier="1000 1001"

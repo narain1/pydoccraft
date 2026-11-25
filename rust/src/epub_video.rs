@@ -17,6 +17,7 @@ use oxideav_mp4::demux::{open_typed, EditListEntry, SampleInfo};
 use super::{
     audio::MAX_ENCODED_BYTES,
     invalid, limited,
+    media::SpatialFragment,
     mp4::{Mp4Bounds, MAX_ACCESS_UNITS},
     unsupported, validate_archive_path, Book,
 };
@@ -77,6 +78,15 @@ struct Geometry {
     full_range: bool,
     kr: f32,
     kb: f32,
+    region: Option<Region>,
+}
+
+#[derive(Clone, Copy)]
+struct Region {
+    left: usize,
+    top: usize,
+    width: usize,
+    height: usize,
 }
 
 impl AvcSource {
@@ -134,6 +144,19 @@ impl VideoSource {
             .map_err(|_| invalid("malformed embedded WebM video"))?
             .map(|source| Self::Webm(Box::new(source))),
             _ => Err(unsupported("unsupported EPUB video media type")),
+        }
+    }
+
+    pub(crate) fn clip_spatial(
+        &mut self,
+        percent: bool,
+        coordinates: [u64; 4],
+    ) -> Result<(), EngineError> {
+        let fragment = SpatialFragment::new(percent, coordinates)?;
+        match self {
+            Self::Avc(source) => source.geometry.clip_spatial(fragment),
+            Self::Theora(source) => source.clip_spatial(fragment),
+            Self::Webm(source) => source.geometry.clip_spatial(fragment),
         }
     }
 
@@ -415,6 +438,32 @@ fn playback_range(
 }
 
 impl Geometry {
+    fn clip_spatial(&mut self, fragment: SpatialFragment) -> Result<(), EngineError> {
+        let [x, y, width, height] = fragment.coordinates;
+        let (numerator, denominator) = (u128::from(self.aspect.0), u128::from(self.aspect.1));
+        let scale = numerator.max(denominator);
+        let axis = |length, origin, extent, display_units| {
+            spatial_axis(
+                length,
+                origin,
+                extent,
+                display_units,
+                scale,
+                fragment.percent,
+            )
+        };
+        let outside = || invalid("embedded media spatial fragment starts outside the picture");
+        let (left, width) = axis(self.width, x, width, denominator).ok_or_else(outside)?;
+        let (top, height) = axis(self.height, y, height, numerator).ok_or_else(outside)?;
+        self.region = Some(Region {
+            left,
+            top,
+            width,
+            height,
+        });
+        Ok(())
+    }
+
     fn from_avc(
         extra: &[u8],
         params: &CodecParameters,
@@ -552,6 +601,7 @@ impl Geometry {
                 full_range,
                 kr,
                 kb,
+                region: None,
             },
             config.length_size,
             pixel_format,
@@ -605,7 +655,18 @@ impl Geometry {
         start_us: u64,
         duration_us: u64,
     ) -> Result<VideoImage, EngineError> {
-        let (width, height) = (self.width as usize, self.height as usize);
+        let Region {
+            left,
+            top,
+            width,
+            height,
+        } = self.region.unwrap_or(Region {
+            left: 0,
+            top: 0,
+            width: self.width as usize,
+            height: self.height as usize,
+        });
+        let x = picture.x + left;
         let mut rgb = Vec::with_capacity(width * height * 3);
         let unit = f32::from(1u16 << (depth - 8));
         let neutral = 128.0 * unit;
@@ -627,21 +688,21 @@ impl Geometry {
             }
         };
         let [y, u, v] = picture.planes;
-        let chroma_start = picture.x / SX;
-        let chroma_width = (picture.x % SX + width).div_ceil(SX);
-        for row in 0..height {
+        let chroma_start = x / SX;
+        let chroma_width = (x % SX + width).div_ceil(SX);
+        for row in top..top + height {
             let row = picture.y
                 + if picture.bottom_up {
-                    height - 1 - row
+                    self.height as usize - 1 - row
                 } else {
                     row
                 };
-            let y_line = y.line(row, picture.x * BYTES, width * BYTES)?;
+            let y_line = y.line(row, x * BYTES, width * BYTES)?;
             let u_line = u.line(row / SY, chroma_start * BYTES, chroma_width * BYTES)?;
             let v_line = v.line(row / SY, chroma_start * BYTES, chroma_width * BYTES)?;
             for i in 0..width {
                 let luma = (sample(y_line, i) - black) * y_scale;
-                let chroma = (picture.x % SX + i) / SX;
+                let chroma = (x % SX + i) / SX;
                 let r = red * (sample(v_line, chroma) - neutral);
                 let b = blue * (sample(u_line, chroma) - neutral);
                 rgb.extend([
@@ -653,13 +714,36 @@ impl Geometry {
         }
         Ok(VideoImage {
             rgb,
-            width: self.width,
-            height: self.height,
+            width: width as u32,
+            height: height as u32,
             aspect: self.aspect,
             start_us,
             duration_us,
         })
     }
+}
+
+fn spatial_axis(
+    length: u32,
+    origin: u64,
+    extent: u64,
+    display_units: u128,
+    scale: u128,
+    percent: bool,
+) -> Option<(usize, usize)> {
+    let length = u128::from(length);
+    let origin = u128::from(origin);
+    let extent = u128::from(extent);
+    // Return the raster pixels covered by the requested display rectangle.
+    let (start, end) = if percent {
+        let start = origin * length / 100;
+        (start, start + (extent * length).div_ceil(100))
+    } else {
+        let start = origin * display_units / scale;
+        (start, ((origin + extent) * display_units).div_ceil(scale))
+    };
+    let end = end.min(length);
+    (start < end).then(|| (start as usize, (end - start) as usize))
 }
 
 struct Yuv<'a> {

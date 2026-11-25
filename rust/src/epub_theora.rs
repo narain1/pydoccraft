@@ -14,6 +14,7 @@ use super::{
 };
 use crate::epub::{
     audio::{opus, vorbis},
+    media::SpatialFragment,
     ogg::{self, Codec, Segment},
 };
 
@@ -107,6 +108,16 @@ impl TheoraSource {
             next,
             clip,
         })
+    }
+
+    pub(super) fn clip_spatial(&mut self, fragment: SpatialFragment) -> Result<(), EngineError> {
+        for link in &mut self.links[self.link..] {
+            if link.frames[0].interval.start >= self.clip.end {
+                break;
+            }
+            link.geometry.clip_spatial(fragment)?;
+        }
+        Ok(())
     }
 
     pub(super) fn next_image(&mut self) -> Result<Option<VideoImage>, EngineError> {
@@ -369,6 +380,7 @@ fn geometry(ident: &TheoraIdentHeader) -> Result<Geometry, EngineError> {
         full_range: false,
         kr: 0.299,
         kb: 0.114,
+        region: None,
     })
 }
 
