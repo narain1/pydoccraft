@@ -227,6 +227,30 @@ impl WebmSource {
         start: u64,
         duration: u64,
     ) -> Result<VideoImage, EngineError> {
+        let gray_depth = match format {
+            Some(PixelFormat::Gray8) => Some(8),
+            Some(PixelFormat::Gray10Le) => Some(10),
+            Some(PixelFormat::Gray12Le) => Some(12),
+            _ => None,
+        };
+        if let Some(depth) = gray_depth {
+            let [luma] = frame.planes.as_slice() else {
+                return Err(invalid(
+                    "WebM decoder returned unexpected monochrome picture planes",
+                ));
+            };
+            let plane = Plane {
+                bytes: &luma.data,
+                stride: luma.stride,
+            };
+            return if depth == 8 {
+                self.geometry
+                    .gray_image::<1>(plane, self.crop, depth, start, duration)
+            } else {
+                self.geometry
+                    .gray_image::<2>(plane, self.crop, depth, start, duration)
+            };
+        }
         let [y, u, v] = frame.planes.as_slice() else {
             return Err(invalid("WebM decoder returned unexpected picture planes"));
         };
@@ -268,7 +292,9 @@ impl WebmSource {
             Some(PixelFormat::Yuv440P12Le) => self
                 .geometry
                 .image_depth::<1, 2, 2>(picture, 12, start, duration),
-            _ => Err(unsupported("WebM video requires planar YUV pictures")),
+            _ => Err(unsupported(
+                "WebM video requires planar YUV or monochrome pictures",
+            )),
         }
     }
 }

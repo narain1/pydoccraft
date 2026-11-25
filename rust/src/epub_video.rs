@@ -673,12 +673,7 @@ impl Geometry {
             top,
             width,
             height,
-        } = self.region.unwrap_or(Region {
-            left: 0,
-            top: 0,
-            width: self.width as usize,
-            height: self.height as usize,
-        });
+        } = self.visible_region();
         let x = picture.x + left;
         let mut rgb = Vec::with_capacity(width * height * 3);
         let unit = f32::from(1u16 << (depth - 8));
@@ -693,13 +688,7 @@ impl Geometry {
         let red = 2.0 * (1.0 - self.kr) * uv_scale;
         let blue = 2.0 * (1.0 - self.kb) * uv_scale;
         let byte = |v: f32| v.round().clamp(0.0, 255.0) as u8;
-        let sample = |line: &[u8], col: usize| {
-            if BYTES == 1 {
-                f32::from(line[col])
-            } else {
-                f32::from(u16::from_le_bytes([line[2 * col], line[2 * col + 1]]))
-            }
-        };
+        let sample = |line: &[u8], col: usize| f32::from(video_sample::<BYTES>(line, col));
         let [y, u, v] = picture.planes;
         let chroma_start = x / SX;
         let chroma_width = (x % SX + width).div_ceil(SX);
@@ -733,6 +722,67 @@ impl Geometry {
             start_us,
             duration_us,
         })
+    }
+
+    fn gray_image<const BYTES: usize>(
+        &self,
+        plane: Plane<'_>,
+        origin: (usize, usize),
+        depth: u8,
+        start_us: u64,
+        duration_us: u64,
+    ) -> Result<VideoImage, EngineError> {
+        let Region {
+            left,
+            top,
+            width,
+            height,
+        } = self.visible_region();
+        let (black, span) = if self.full_range {
+            (0, (1u16 << depth) - 1)
+        } else {
+            let shift = depth - 8;
+            (16 << shift, 219 << shift)
+        };
+        let x = origin.0 + left;
+        let y = origin.1 + top;
+        let mut rgb = Vec::with_capacity(width * height * 3);
+        for row in y..y + height {
+            let line = plane.line(row, x * BYTES, width * BYTES)?;
+            for col in 0..width {
+                let luma = video_sample::<BYTES>(line, col)
+                    .saturating_sub(black)
+                    .min(span);
+                let intensity =
+                    ((u32::from(luma) * 255 + u32::from(span) / 2) / u32::from(span)) as u8;
+                rgb.extend([intensity; 3]);
+            }
+        }
+        Ok(VideoImage {
+            rgb,
+            width: width as u32,
+            height: height as u32,
+            aspect: self.aspect,
+            start_us,
+            duration_us,
+        })
+    }
+
+    fn visible_region(&self) -> Region {
+        self.region.unwrap_or(Region {
+            left: 0,
+            top: 0,
+            width: self.width as usize,
+            height: self.height as usize,
+        })
+    }
+}
+
+fn video_sample<const BYTES: usize>(line: &[u8], col: usize) -> u16 {
+    if BYTES == 1 {
+        u16::from(line[col])
+    } else {
+        u16::from_le_bytes([line[2 * col], line[2 * col + 1]])
     }
 }
 

@@ -117,8 +117,8 @@ impl Track {
             return Err(unsupported("layered WebM AV1"));
         }
         let signal = &sequence.color_config;
-        if signal.mono_chrome || matches!(signal.transfer_characteristics, 16 | 18) {
-            return Err(unsupported("WebM AV1 requires SDR planar YUV"));
+        if matches!(signal.transfer_characteristics, 16 | 18) {
+            return Err(unsupported("WebM AV1 HDR transfer characteristic"));
         }
         matrix(signal.matrix_coefficients)?;
         if let Some(previous) = &self.sequence {
@@ -150,16 +150,24 @@ impl Track {
             .sequence
             .ok_or_else(|| invalid("missing WebM AV1 sequence header"))?;
         let signal = sequence.color_config;
-        let format = match (signal.bit_depth, signal.subsampling_x, signal.subsampling_y) {
-            (8, true, true) => PixelFormat::Yuv420P,
-            (8, true, false) => PixelFormat::Yuv422P,
-            (8, false, false) => PixelFormat::Yuv444P,
-            (10, true, true) => PixelFormat::Yuv420P10Le,
-            (10, true, false) => PixelFormat::Yuv422P10Le,
-            (10, false, false) => PixelFormat::Yuv444P10Le,
-            (12, true, true) => PixelFormat::Yuv420P12Le,
-            (12, true, false) => PixelFormat::Yuv422P12Le,
-            (12, false, false) => PixelFormat::Yuv444P12Le,
+        let format = match (
+            signal.mono_chrome,
+            signal.bit_depth,
+            signal.subsampling_x,
+            signal.subsampling_y,
+        ) {
+            (true, 8, true, true) => PixelFormat::Gray8,
+            (true, 10, true, true) => PixelFormat::Gray10Le,
+            (true, 12, true, true) => PixelFormat::Gray12Le,
+            (false, 8, true, true) => PixelFormat::Yuv420P,
+            (false, 8, true, false) => PixelFormat::Yuv422P,
+            (false, 8, false, false) => PixelFormat::Yuv444P,
+            (false, 10, true, true) => PixelFormat::Yuv420P10Le,
+            (false, 10, true, false) => PixelFormat::Yuv422P10Le,
+            (false, 10, false, false) => PixelFormat::Yuv444P10Le,
+            (false, 12, true, true) => PixelFormat::Yuv420P12Le,
+            (false, 12, true, false) => PixelFormat::Yuv422P12Le,
+            (false, 12, false, false) => PixelFormat::Yuv444P12Le,
             _ => return Err(unsupported("WebM AV1 chroma sampling or depth")),
         };
         let mut session = SpecDecodeSession::new();
@@ -196,10 +204,12 @@ impl Playback {
         let Some(frame) = frames.pop() else {
             return Ok(None);
         };
+        let planes = self.format.plane_count();
         if (frame.width, frame.height) != self.coded
             || frame.bit_depth != self.depth
-            || frame.planes.len() != 3
-            || frame.plane_dims.len() != 3
+            || frame.planes.len() != planes
+            || frame.plane_dims.len() != planes
+            || (planes == 1 && frame.plane_dims[0] != self.coded)
         {
             return Err(unsupported(
                 "WebM AV1 changes decoded picture geometry or depth",

@@ -420,3 +420,8 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+## Project-authored AV1 test fixtures
+
+The synthetic WebM files `tests/fixtures/epub-video-av1-mono-{8,10,12}.webm` contain only project-authored numeric sample patterns under Apache-2.0. libaom via FFmpeg was used to encode the fixtures. libdav1d independently verified the decoded samples during fixture preparation.

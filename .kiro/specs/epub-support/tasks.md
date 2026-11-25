@@ -158,6 +158,7 @@
 - [x] Select a WebM audio track explicitly for embedded audio, video soundtracks and SMIL playback.
 - [x] Select a WebM video track explicitly while retaining clipped intervals and synchronized captions.
 - [x] Stream fixed-geometry SDR AV1 pictures from WebM with bounded keyframe seeking and synchronized audio and captions.
+- [x] Decode 8-, 10- and 12-bit monochrome SDR AV1 in WebM with full and studio range conversion, cropped seeks and synchronized captions.
 - [x] Preserve surround Vorbis speaker assignments in Ogg and WebM audio, video soundtracks, and narration. Reject undefined speaker layouts.
 - [ ] Extend WebM to additional AV1 profiles, high dynamic range and alpha.
 - [ ] Support additional Ogg soundtrack codecs, mixed soundtracks with differing PCM layouts, simultaneous video tracks and more MP4 profiles.
