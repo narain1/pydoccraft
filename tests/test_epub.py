@@ -977,6 +977,47 @@ class EpubTests(unittest.TestCase):
                     self.assertEqual(edited[0].get_text(), "Fresh content")
                     self.assertEqual(edited.metadata["navigation"][0]["items"][0]["label"], "Added")
 
+    def test_spine_edit_uses_staged_titles_in_generated_navigation(self) -> None:
+        markup = (
+            '<html xmlns="http://www.w3.org/1999/xhtml"><head><title> Revised &amp; café </title></head>'
+            '<body><h1 id="old">Distinct chapter heading</h1></body></html>'
+        )
+        title = "Revised & café"
+        for version in ("2.0", "3.0"):
+            with self.subTest(version=version), doc_ex.open(epub_fixture(version=version)) as original:
+                revised = original.edit_epub_structure([1, 0], replacements={0: markup})
+                self.assertEqual(original[0].metadata["chapter_title"], "One")
+                self.assertFalse(original.metadata.get("navigation"))
+                with doc_ex.open(revised) as edited:
+                    self.assertEqual(edited[1].metadata["chapter_title"], title)
+                    toc = edited.metadata["navigation"][0]["items"]
+                    self.assertEqual([(item["label"], item["path"]) for item in toc],
+                                     [("Two", "OEBPS/two.xhtml"), (title, "OEBPS/one.xhtml")])
+
+        source, nav_path, authored, _ = self.nonspine_navigation_fixture()
+        with doc_ex.open(source) as original:
+            revised = original.edit_epub_structure([1, 0], replacements={0: markup})
+            self.assertEqual(original.read_epub_resource(nav_path), authored.encode())
+        with doc_ex.open(revised) as edited:
+            self.assertEqual(edited[1].metadata["chapter_title"], title)
+            toc = edited.metadata["navigation"][0]["items"]
+            self.assertEqual(toc[1]["children"][0]["label"], "Old introduction")
+
+        # Reordering can also empty a previously authored TOC when all of
+        # its targets leave the spine. Its new fallback uses the staged title.
+        only_removed = (
+            '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
+            '<head><title>Contents</title></head><body><nav epub:type="toc"><ol>'
+            '<li><a href="../two.xhtml#other">Only removed chapter</a></li>'
+            '</ol></nav></body></html>'
+        )
+        with doc_ex.open(rewrite_epub(source, {nav_path: only_removed})) as original:
+            revised = original.edit_epub_structure([0], replacements={0: markup})
+        with doc_ex.open(revised) as edited:
+            self.assertEqual(edited[0].metadata["chapter_title"], title)
+            item, = edited.metadata["navigation"][0]["items"]
+            self.assertEqual((item["label"], item["path"]), (title, "OEBPS/one.xhtml"))
+
     def test_spine_edit_synchronizes_epub3_navigation_and_compatibility_ncx(self) -> None:
         with doc_ex.new("epub") as book:
             book.set_metadata(title="Hybrid navigation", identifier="urn:test:hybrid-nav")

@@ -318,16 +318,12 @@ pub(super) fn chapter(
     let media = super::media::inventory(body, cx)?;
     let mut blocks = Vec::new();
     flow(body, &mut blocks, 0, cx)?;
-    let title = child(root, XHTML, "head")
-        .and_then(|head| child(head, XHTML, "title"))
-        .map(node_text)
-        .filter(|title| !title.trim().is_empty())
-        .or_else(|| {
-            blocks
-                .iter()
-                .find(|block| block.level.is_some())
-                .map(|block| block.text.clone())
-        });
+    let title = document_title(root).or_else(|| {
+        blocks
+            .iter()
+            .find(|block| block.level.is_some())
+            .map(|block| block.text.clone())
+    });
     let title = title.as_deref().map(str::trim).unwrap_or("Untitled");
     cx.budget.bytes(title.len().saturating_mul(3))?;
     let mut result = PagePayload {
@@ -367,6 +363,13 @@ fn assets(blocks: &[BlockPayload], links: &mut Vec<LinkPayload>, images: &mut Ve
             }
         }
     }
+}
+
+pub(super) fn document_title(root: Node<'_, '_>) -> Option<String> {
+    child(root, XHTML, "head")
+        .and_then(|head| child(head, XHTML, "title"))
+        .map(node_text)
+        .filter(|title| !title.trim().is_empty())
 }
 
 fn node_text(node: Node<'_, '_>) -> String {

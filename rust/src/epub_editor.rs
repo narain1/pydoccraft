@@ -198,12 +198,14 @@ pub(crate) fn update_chapters(
         svg_paths,
         declarations,
         replaces_navigation,
+        ..
     } = prepare_chapter_replacements(
         &mut book,
         &extracted,
         changes,
         &mut removed,
         &mut 0,
+        false,
         super::rendition::fixed,
     )?;
     if !removed.is_empty() {
@@ -255,6 +257,7 @@ pub(super) struct ChapterReplacements<'doc, 'edit> {
     pub(super) svg_paths: HashSet<&'doc str>,
     pub(super) declarations: HashMap<&'doc str, Vec<&'static str>>,
     pub(super) replaces_navigation: bool,
+    pub(super) titles: HashMap<&'doc str, String>,
 }
 
 pub(super) fn prepare_chapter_replacements<'doc, 'edit>(
@@ -263,6 +266,7 @@ pub(super) fn prepare_chapter_replacements<'doc, 'edit>(
     changes: &'edit [(i64, String)],
     removed_anchors: &mut RemovedAnchors<'doc>,
     anchor_bytes: &mut usize,
+    collect_titles: bool,
     fixed: impl Fn(&PagePayload) -> bool,
 ) -> Result<ChapterReplacements<'doc, 'edit>, EngineError> {
     let fixed_paths: HashSet<_> = extracted
@@ -298,6 +302,7 @@ pub(super) fn prepare_chapter_replacements<'doc, 'edit>(
         .as_str()
         .is_some_and(|version| version.starts_with('3'));
     let mut declarations = HashMap::new();
+    let mut titles = HashMap::new();
     for (&path, &replacement) in &replacements {
         let xml = parse_xml(replacement)?;
         let root = xml.root_element();
@@ -322,6 +327,11 @@ pub(super) fn prepare_chapter_replacements<'doc, 'edit>(
             if epub3 {
                 declarations.insert(path, xhtml_properties(root));
             }
+            if collect_titles {
+                if let Some(title) = super::content::document_title(root) {
+                    titles.insert(path, title);
+                }
+            }
         }
         collect_removed_anchors(book, path, replacement, &xml, removed_anchors, anchor_bytes)?;
     }
@@ -345,6 +355,7 @@ pub(super) fn prepare_chapter_replacements<'doc, 'edit>(
         files: replacements,
         svg_paths,
         declarations,
+        titles,
     })
 }
 

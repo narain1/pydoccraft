@@ -234,6 +234,7 @@ pub(crate) fn update_structure<'a>(
     let mut removed_anchors = editor::RemovedAnchors::new();
     let mut anchor_bytes = 0;
     let mut replaces_navigation_chapter = false;
+    let mut staged_titles = HashMap::new();
     if let Some(original) = original.as_ref().filter(|_| !chapters.is_empty()) {
         let replacement = editor::prepare_chapter_replacements(
             &mut book,
@@ -241,6 +242,7 @@ pub(crate) fn update_structure<'a>(
             chapters,
             &mut removed_anchors,
             &mut anchor_bytes,
+            order.is_some(),
             |page| {
                 staged_properties
                     .get(&page.number)
@@ -249,6 +251,7 @@ pub(crate) fn update_structure<'a>(
             },
         )?;
         replaces_navigation_chapter = replacement.replaces_navigation;
+        staged_titles = replacement.titles;
         editor::chapter_property_edits(
             package_source,
             &package_path,
@@ -336,10 +339,10 @@ pub(crate) fn update_structure<'a>(
                     let href = manifest
                         .get(attribute(references[index], "idref")?)
                         .map_or(path, String::as_str);
-                    let label = page
-                        .metadata
-                        .get("chapter_title")
-                        .and_then(Value::as_str)
+                    let label = staged_titles
+                        .get(path)
+                        .map(|title| title.trim())
+                        .or_else(|| page.metadata.get("chapter_title").and_then(Value::as_str))
                         .unwrap_or("Chapter");
                     selected.push(toc::Chapter {
                         path: path.into(),
