@@ -1,9 +1,12 @@
 //! Bound local MP4 metadata and locate sample storage before demuxing.
 use std::{io::Cursor, ops::Range};
 
-use oxideav_mp4::{boxes::read_box_header, demux::EditListEntry};
+use oxideav_mp4::{
+    boxes::read_box_header,
+    demux::{EditListEntry, MovieHeader},
+};
 
-use super::{invalid, limited, unsupported, EngineError};
+use super::{invalid, limited, media::MAX_TIME, unsupported, EngineError};
 
 #[path = "epub_mp4_chapters.rs"]
 mod chapters;
@@ -17,6 +20,24 @@ pub(super) struct LinearEdit {
     pub movie_start: u64,
     pub movie_end: u64,
     pub media_start: i64,
+}
+
+impl LinearEdit {
+    pub(super) fn implicit_tail_end(&self, movie: MovieHeader) -> Result<Option<u64>, EngineError> {
+        // ISO BMFF places a track's final empty edit outside its edit list.
+        // The supported rate-1 edit list already gives the track duration.
+        if matches!(movie.duration, 0 | 0xffff_ffff | u64::MAX) || movie.duration <= self.movie_end
+        {
+            return Ok(None);
+        }
+        if movie.timescale == 0 {
+            return Err(invalid("MP4 timescale is zero"));
+        }
+        if u128::from(movie.duration) * 1_000_000 > MAX_TIME * u128::from(movie.timescale) {
+            return Err(limited("MP4 presentation exceeds its clock budget"));
+        }
+        Ok(Some(movie.duration))
+    }
 }
 
 /// One rate-1 media segment, optionally preceded by an empty movie interval.

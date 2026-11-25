@@ -18,6 +18,7 @@ pub(super) struct Track {
     spec: WavSpec,
     media: Range<usize>,
     leading_frames: usize,
+    presentation_frames: usize,
     decoder: StreamDecoder,
     next_packet: usize,
     pcm: Vec<i16>,
@@ -111,11 +112,28 @@ impl Track {
             }
             packets.push(offset..end);
         }
-        let mut leading_frames = 0;
-        let media = match linear_edit(
+        let movie = demux.movie_header();
+        let rate = u64::from(movie.timescale);
+        let sample_rate = u64::from(spec.sample_rate);
+        // Use the same half-open sample boundary as the public clip clock.
+        let movie_frames = |tick: u64| {
+            if rate == 0 {
+                return Err(invalid("MP4 timescale is zero"));
+            }
+            usize::try_from((u128::from(tick) * u128::from(sample_rate)).div_ceil(u128::from(rate)))
+                .map_err(|_| limited("MP4 audio time exceeds limits"))
+        };
+        let edit = linear_edit(
             demux.edit_list(stream.index),
             "MP4 audio edit lists must have one continuous segment",
-        )? {
+        )?;
+        let tail = edit
+            .as_ref()
+            .map(|edit| edit.implicit_tail_end(movie))
+            .transpose()?
+            .flatten();
+        let mut leading_frames = 0;
+        let media = match edit {
             None => {
                 if let Some(timing) = demux.gapless_timing(stream.index) {
                     let start = usize::try_from(timing.priming).map_err(invalid)?;
@@ -131,21 +149,12 @@ impl Track {
             }
             Some(edit) => {
                 let start = media_frames(edit.media_start)?;
-                let rate = u64::from(demux.movie_timescale());
-                let sample_rate = u64::from(spec.sample_rate);
                 let rounding = scale(1, sample_rate, rate)?.max(1);
-                let duration = if edit.movie_start == 0 {
+                let duration = if edit.movie_start == 0 && tail.is_none() {
                     scale(edit.movie_end, sample_rate, rate)?
                 } else {
-                    // A presentation sample begins at the first PCM tick on or after
-                    // the corresponding movie-time boundary. Convert both endpoints
-                    // before subtracting to avoid rounding the delay and duration twice.
-                    let movie_frames = |tick: u64| {
-                        usize::try_from(
-                            (u128::from(tick) * u128::from(sample_rate)).div_ceil(u128::from(rate)),
-                        )
-                        .map_err(|_| limited("MP4 audio time exceeds limits"))
-                    };
+                    // Convert endpoints before subtracting to avoid rounding the
+                    // delay and duration twice.
                     leading_frames = movie_frames(edit.movie_start)?;
                     movie_frames(edit.movie_end)? - leading_frames
                 };
@@ -161,9 +170,14 @@ impl Track {
         if media.is_empty() || media.end > media_stop {
             return Err(invalid("MP4 audio presentation bounds are invalid"));
         }
-        leading_frames
+        let active_end = leading_frames
             .checked_add(media.len())
             .ok_or_else(|| limited("MP4 audio time exceeds limits"))?;
+        let presentation_frames = tail
+            .map(movie_frames)
+            .transpose()?
+            .unwrap_or(active_end)
+            .max(active_end);
         let mut track = Self {
             bytes,
             packets,
@@ -171,6 +185,7 @@ impl Track {
             spec,
             media,
             leading_frames,
+            presentation_frames,
             decoder: StreamDecoder::new(),
             next_packet: 0,
             pcm: Vec::new(),
@@ -192,24 +207,39 @@ impl Track {
     }
 
     pub(super) fn frames(&self) -> usize {
-        self.leading_frames + self.media.len()
+        self.presentation_frames
     }
 
     pub(super) fn samples(&mut self, start: usize, stop: usize) -> Result<Vec<i16>, EngineError> {
-        let rate = self.spec.sample_rate;
         let channels = usize::from(self.spec.channels);
         if stop - start > MAX_CLIP_SAMPLES / channels {
             return Err(limited("media-overlay audio clip exceeds 16 MiB of PCM"));
         }
         let mut samples = Vec::with_capacity((stop - start) * channels);
-        let silence = stop.min(self.leading_frames).saturating_sub(start);
-        samples.resize(silence * channels, 0);
-        if stop <= self.leading_frames {
-            return Ok(samples);
+        let active_start = start.max(self.leading_frames);
+        let active_stop = stop.min(self.leading_frames + self.media.len());
+        if active_start < active_stop {
+            samples.resize((active_start - start) * channels, 0);
+            let media_offset = |time: usize| time - self.leading_frames + self.media.start;
+            self.append_media(
+                media_offset(active_start),
+                media_offset(active_stop),
+                &mut samples,
+            )?;
         }
+        samples.resize((stop - start) * channels, 0);
+        Ok(samples)
+    }
+
+    fn append_media(
+        &mut self,
+        start: usize,
+        stop: usize,
+        samples: &mut Vec<i16>,
+    ) -> Result<(), EngineError> {
+        let rate = self.spec.sample_rate;
+        let channels = usize::from(self.spec.channels);
         let per_packet = self.config.ga_body.frame_length.samples() as usize;
-        let start = start.saturating_sub(self.leading_frames) + self.media.start;
-        let stop = stop - self.leading_frames + self.media.start;
         let first = start / per_packet;
         let last = (stop - 1) / per_packet;
         // AAC-LC needs preceding overlap samples, so warm up two access
@@ -249,7 +279,7 @@ impl Track {
             let right = (stop - base).min(per_packet) * channels;
             samples.extend_from_slice(&self.pcm[left..right]);
         }
-        Ok(samples)
+        Ok(())
     }
 }
 

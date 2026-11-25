@@ -12,7 +12,7 @@ use oxideav_h264::{
     pps::Pps,
     sps::Sps,
 };
-use oxideav_mp4::demux::{open_typed, EditListEntry, SampleInfo};
+use oxideav_mp4::demux::{open_typed, EditListEntry, MovieHeader, SampleInfo};
 
 use super::{
     audio::MAX_ENCODED_BYTES,
@@ -234,7 +234,7 @@ impl AvcSource {
             &samples,
             stream.time_base,
             demux.edit_list(stream.index),
-            demux.movie_timescale(),
+            demux.movie_header(),
             start_us,
             end_us,
         )?;
@@ -399,7 +399,7 @@ fn playback_range(
     samples: &[SampleInfo],
     base: TimeBase,
     edits: &[EditListEntry],
-    movie_timescale: u32,
+    movie: MovieHeader,
     start_us: u64,
     end_us: Option<u64>,
 ) -> Result<(Vec<FrameTime>, Range<u64>, usize), EngineError> {
@@ -425,28 +425,39 @@ fn playback_range(
             "MP4 video edit begins before its media samples",
         ));
     }
+    let tail = edit
+        .as_ref()
+        .map(|edit| edit.implicit_tail_end(movie))
+        .transpose()?
+        .flatten();
+    let ceil_boundaries = movie_start != 0 || tail.is_some();
     let since_origin = |pts: i64| {
         let elapsed = (i128::from(pts) - i128::from(origin)).max(0);
-        if movie_start == 0 {
-            return scale_us(elapsed, base.0.num, base.0.den);
+        if ceil_boundaries {
+            shifted_us(movie_start, movie.timescale, elapsed as u128, base)
+        } else {
+            scale_us(elapsed, base.0.num, base.0.den)
         }
-        shifted_us(movie_start, movie_timescale, elapsed as u128, base)
+    };
+    let movie_bound = |tick: u64| {
+        if ceil_boundaries {
+            shifted_us(tick, movie.timescale, 0, base)
+        } else {
+            scale_us(i128::from(tick), 1, i64::from(movie.timescale))
+        }
     };
     let available = since_origin(stop)?;
-    let duration = if let Some(edit) = edit {
-        let end = if movie_start == 0 {
-            scale_us(i128::from(edit.movie_end), 1, i64::from(movie_timescale))?
-        } else {
-            shifted_us(edit.movie_end, movie_timescale, 0, base)?
-        };
-        let duration = available.min(end);
-        if duration <= since_origin(origin)? {
+    let active_start = since_origin(origin)?;
+    let active_end = if let Some(edit) = edit {
+        let duration = available.min(movie_bound(edit.movie_end)?);
+        if duration <= active_start {
             return Err(invalid("MP4 video edit has no playable interval"));
         }
         duration
     } else {
         available
     };
+    let duration = tail.map(movie_bound).transpose()?.unwrap_or(active_end);
     let clip = start_us..end_us.unwrap_or(duration).min(duration);
     if clip.is_empty() {
         return Err(EngineError::InvalidArgument(
@@ -468,8 +479,8 @@ fn playback_range(
         if next <= origin {
             continue;
         }
-        let interval = since_origin(pts)?..since_origin(next)?;
-        if interval.start < clip.end && interval.end > clip.start {
+        let interval = since_origin(pts)?..since_origin(next)?.min(active_end);
+        if interval.start < clip.end.min(active_end) && interval.end > clip.start {
             if interval.is_empty() {
                 return Err(invalid("MP4 video frames are shorter than a microsecond"));
             }
@@ -477,7 +488,7 @@ fn playback_range(
             timeline.push(FrameTime { pts, interval });
         }
     }
-    if timeline.is_empty() && clip.end <= since_origin(origin)? {
+    if timeline.is_empty() && (clip.end <= active_start || clip.start >= active_end) {
         return Ok((timeline, clip, samples.len()));
     }
     let first_packet = samples

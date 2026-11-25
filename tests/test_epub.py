@@ -7790,6 +7790,136 @@ Middle cue
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "one continuous segment"):
                     pcm(book, 2)
 
+    def test_mp4_implicit_empty_tail_uses_movie_clock_for_pictures_audio_and_chapters(self) -> None:
+        fixture = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        marked = mp4_with_chapter_track(fixture, (
+            (2870, b"Opening"), (255, b"Closing"), (195, b"Gap"),
+        ))
+
+        def authored_tail(*, lead: int = 25, explicit_last: bool = False) -> bytes:
+            top = mp4_boxes(marked)
+            index, = (payload for tag, payload in top if tag == b"moov")
+            updated = []
+            for tag, payload in mp4_boxes(index):
+                if tag == b"mvhd":
+                    header = bytearray(payload)
+                    self.assertEqual(struct.unpack_from(">II", header, 12), (1000, 1000))
+                    struct.pack_into(">I", header, 16, 1125)
+                    payload = bytes(header)
+                elif tag == b"trak":
+                    children = mp4_boxes(payload)
+                    header, = (content for kind, content in children if kind == b"tkhd")
+                    track_id, = struct.unpack_from(">I", header, 12)
+                    edit, = (content for kind, data in children if kind == b"edts"
+                             for name, content in mp4_boxes(data) if name == b"elst")
+                    if track_id == 3:
+                        entries = [(25, -1, 1, 0), (1100, 20, 1, 0)]
+                    else:
+                        self.assertEqual(struct.unpack_from(">II", edit), (0, 1))
+                        _, origin, _, _ = struct.unpack_from(">Iihh", edit, 8)
+                        entries = [(lead, -1, 1, 0)] if lead else []
+                        entries.append((980 if track_id == 1 else 1000, origin, 1, 0))
+                        if explicit_last:
+                            entries.append((1125 - sum(entry[0] for entry in entries), -1, 1, 0))
+                    new_edit = struct.pack(">II", 0, len(entries)) + b"".join(
+                        struct.pack(">Iihh", *entry) for entry in entries
+                    )
+                    track_header = bytearray(header)
+                    struct.pack_into(">I", track_header, 20, sum(entry[0] for entry in entries))
+                    if track_id == 3:
+                        struct.pack_into(">I", track_header, 0, 3)
+                    payload = b"".join(
+                        mp4_box(kind, mp4_box(b"elst", new_edit) if kind == b"edts"
+                                else bytes(track_header) if kind == b"tkhd" else data)
+                        for kind, data in children
+                    )
+                updated.append(mp4_box(tag, payload))
+            # Preserve all sample offsets and use the edited text track as the longest track.
+            original = b"".join(mp4_box(b"free" if tag == b"moov" else tag, payload) for tag, payload in top)
+            return original + mp4_box(b"moov", b"".join(updated))
+
+        edited = authored_tail()
+        path = "OEBPS/tail.mp4"
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>MP4 tail</title></head>
+          <body>
+          <video src="tail.mp4#id=Closing&amp;xywh=1,1,6,4"><track src="tail.vtt" kind="captions" srclang="en"/></video>
+          <video src="tail.mp4#t=0.975,1.06&amp;xywh=1,1,6,4"><track src="tail.vtt" kind="captions" srclang="en"/></video>
+          <video src="baseline.mp4"/>
+          <video src="tail.mp4"/>
+          <video src="tail.mp4#id=Gap"><track src="tail.vtt" kind="captions" srclang="en"/></video>
+          <audio src="tail.m4a#id=Gap"/>
+          </body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            publication = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("MP4 tail", chapter, "OEBPS/clip.xhtml")],
+                resources={
+                    path: doc_ex.EpubResource("video/mp4", edited),
+                    "OEBPS/tail.m4a": doc_ex.EpubResource("audio/mp4", edited),
+                    "OEBPS/baseline.mp4": doc_ex.EpubResource("video/mp4", fixture),
+                    "OEBPS/tail.vtt": doc_ex.EpubResource("text/vtt", b"""WEBVTT
+
+00:00.995 --> 00:01.090
+Final cue
+"""),
+                },
+            )
+
+        def pcm(book: doc_ex.Document, index: int, **clip: int) -> bytes:
+            result = bytearray()
+            for chunk in book.epub_embedded_audio(0, index, chunk_frames=473, **clip):
+                self.assertEqual((chunk.sample_rate, chunk.channels), (48_000, 1))
+                with wave.open(io.BytesIO(chunk.wave), "rb") as audio:
+                    result.extend(audio.readframes(chunk.frame_count))
+            return bytes(result)
+
+        with doc_ex.open(publication) as book:
+            raw = list(book.epub_embedded_video(0, 2))
+            frames = list(book.epub_embedded_video(0, 3))
+            self.assertEqual([frame.rgb for frame in frames], [frame.rgb for frame in raw])
+            self.assertEqual((frames[0].start_us, frames[-1].start_us, frames[-1].duration_us),
+                             (25_000, 941_667, 63_333))
+            selected = list(book.epub_embedded_video(0, 0, text_track=0))
+            self.assertEqual(selected, list(book.epub_embedded_video(0, 1, text_track=0)))
+            self.assertEqual([(f.start_us, f.duration_us, bool(f.text_cues)) for f in selected],
+                             [(975_000, 20_000, False), (995_000, 10_000, True)])
+            self.assertTrue(all((frame.width, frame.height) == (6, 4) for frame in selected))
+            self.assertIs(selected[0].rgb, selected[1].rgb)
+            sought, = book.epub_embedded_video(0, 0, start_us=1_000_003, end_us=1_055_001, text_track=0)
+            self.assertEqual((sought.start_us, sought.duration_us, sought.rgb),
+                             (1_000_003, 4_997, selected[1].rgb))
+            self.assertEqual(list(book.epub_embedded_video(0, 3, start_us=1_005_000, end_us=1_125_000)), [])
+            self.assertEqual(list(book.epub_embedded_video(0, 4, text_track=0)), [])
+            cue, = book.epub_embedded_text(0, 4)
+            self.assertEqual((cue.start_us, cue.end_us, cue.text), (995_000, 1_090_000, "Final cue"))
+            clipped_cue, = book.epub_embedded_text(0, 4, start_us=1_060_000, end_us=1_125_000)
+            self.assertEqual((clipped_cue.start_us, clipped_cue.end_us), (1_060_000, 1_090_000))
+
+            baseline = pcm(book, 2)
+            self.assertEqual(len(baseline), 48_000 * 2)
+            self.assertEqual(pcm(book, 3), bytes(1_200 * 2) + baseline + bytes(4_800 * 2))
+            closing = pcm(book, 0)
+            self.assertEqual(closing, pcm(book, 1))
+            self.assertEqual(closing, pcm(book, 2, start_us=950_000) + bytes(1_680 * 2))
+            self.assertEqual(pcm(book, 4), pcm(book, 5))
+            self.assertEqual(pcm(book, 5), bytes(3_120 * 2))
+            self.assertEqual(pcm(book, 3, start_us=1_020_000, end_us=1_030_000),
+                             pcm(book, 2, start_us=995_000) + bytes(240 * 2))
+            revised = book.edit_epub_structure(replacements={0: chapter.replace("MP4 tail", "Revised")})
+        with doc_ex.open(revised) as book:
+            self.assertEqual(book.read_epub_resource(path), edited)
+            self.assertEqual(list(book.epub_embedded_video(0, 0, text_track=0)), selected)
+            self.assertEqual(pcm(book, 0), closing)
+
+        with doc_ex.open(rewrite_epub(publication, {path: authored_tail(lead=0)})) as book:
+            self.assertEqual(pcm(book, 3), baseline + bytes(6_000 * 2))
+            self.assertEqual(list(book.epub_embedded_video(0, 3, start_us=980_000)), [])
+
+        with doc_ex.open(rewrite_epub(publication, {path: authored_tail(explicit_last=True)})) as book:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "continuous presentation"):
+                list(book.epub_embedded_video(0, 3))
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "one continuous segment"):
+                pcm(book, 3)
+
     def test_mp4_chapter_id_rejects_malformed_or_ambiguous_local_tracks(self) -> None:
         movie = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
         chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>MP4 chapters</title></head>
