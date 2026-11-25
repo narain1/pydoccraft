@@ -397,17 +397,16 @@ pub(super) fn project<'xml>(
         em,
         enclosing_em,
     };
-    let definite_columns = grid.definite_columns()?;
+    // A labeled grid's free space depends on the measured label. Its
+    // authored fixed tracks remain available for nested relative widths.
+    let track_total = if grid.labels.is_some() {
+        None
+    } else {
+        grid.declared_track_width(0.0)?
+    };
+    let definite_columns = grid.definite_columns(track_total)?;
     for cell in placements {
-        let content_width = if cell.columns.is_empty() {
-            None
-        } else {
-            definite_columns[cell.columns.clone()]
-                .iter()
-                .copied()
-                .sum::<Option<f32>>()
-                .map(|width| width + internal_gaps(&grid.column_gaps, &cell.columns))
-        };
+        let content_width = grid.cell_width(&cell.columns, &definite_columns, track_total)?;
         let (content, anchor) =
             projection.with_cell_width(cell.node, content_width, |projection| {
                 let cell_depth = depth + 2;
@@ -906,14 +905,45 @@ impl Table {
         Ok(Some(remaining.max(0.0)))
     }
 
-    fn definite_columns(&self) -> Result<Vec<Option<f32>>, EngineError> {
-        // A labeled grid's free space depends on the measured label. Its
-        // authored fixed tracks remain available for nested relative widths.
-        let total = if self.labels.is_some() {
-            None
-        } else {
-            self.declared_track_width(0.0)?
+    fn cell_width(
+        &self,
+        span: &Range<usize>,
+        columns: &[Option<f32>],
+        track_total: Option<f32>,
+    ) -> Result<Option<f32>, EngineError> {
+        if span.is_empty() {
+            return Ok(None);
+        }
+        let inside = columns[span.clone()].iter().copied().sum::<Option<f32>>();
+        let track_width = match inside {
+            Some(width) => width,
+            None => {
+                let Some(total) = track_total else {
+                    return Ok(None);
+                };
+                // A definite whole-table width constrains the sum even if
+                // the tracks within this cell need intrinsic measurements.
+                let outside = columns[..span.start]
+                    .iter()
+                    .chain(&columns[span.end..])
+                    .copied()
+                    .sum::<Option<f32>>();
+                let Some(outside) = outside else {
+                    return Ok(None);
+                };
+                let width = total - outside;
+                if width < -TABLE_WIDTH_EPSILON {
+                    return Err(unsupported(
+                        "MathML table contents exceed the authored width",
+                    ));
+                }
+                width.max(0.0)
+            }
         };
+        Ok(Some(track_width + internal_gaps(&self.column_gaps, span)))
+    }
+
+    fn definite_columns(&self, total: Option<f32>) -> Result<Vec<Option<f32>>, EngineError> {
         let widths: Vec<_> = self
             .column_widths
             .iter()

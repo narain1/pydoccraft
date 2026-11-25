@@ -8411,6 +8411,97 @@ Trailing
                     with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "definite containing line width"):
                         operation()
 
+    def test_mathml_relative_width_uses_a_definite_aggregate_span(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>MathML aggregate span width</title><meta name="viewport" content="width=500,height=400"/>
+            <style>body {margin:0}</style></head><body><p><m:math mathsize="12pt">FORMULA</m:math></p></body></html>"""
+        outer = """<m:mtable width="250pt" columnwidth="TRACKS" columnspacing="6pt" columnalign="left">
+          <m:mtr><m:mtd><m:mtext>Left</m:mtext></m:mtd><m:mtd columnspan="2"><m:mstyle>
+            <m:mtable width="INNER" columnwidth="50% fit" columnspacing="4pt" columnalign="left">
+              <m:mtr><m:mtd><m:mtext>Near</m:mtext></m:mtd><m:mtd><m:mtext>Far</m:mtext></m:mtd></m:mtr>
+            </m:mtable><m:mtext>Tail</m:mtext></m:mstyle></m:mtd><m:mtd><m:mtext>Right</m:mtext></m:mtd></m:mtr>
+          <m:mtr><m:mtd><m:mi>a</m:mi></m:mtd><m:mtd><m:mtext>Short</m:mtext></m:mtd>
+            <m:mtd><m:mtext>Much Longer</m:mtext></m:mtd><m:mtd><m:mi>z</m:mi></m:mtd></m:mtr>
+          </m:mtable>"""
+        words = ("Near", "Far", "Tail", "Left", "Right", "Short", "Much Longer")
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math",
+              "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+
+        def positions(doc: doc_ex.Document, terms: tuple[str, ...]) -> list[tuple[float, float, float, float]]:
+            result = []
+            for term in terms:
+                match, = doc[0].search_for(term)
+                result.append(match)
+            return result
+
+        def fraction(grid: str) -> str:
+            return f"<m:mfrac><m:mrow>{grid}</m:mrow><m:mtext>Denominator</m:mtext></m:mfrac>"
+
+        cases = (
+            ("38pt auto auto 42pt", False, "", "79pt"),
+            ("38pt auto fit 42pt", True, "", "79pt"),
+            ("38pt auto auto 42pt", False, ' frame="solid" framespacing="3pt 12pt"', "75.25pt"),
+        )
+        for tracks, nest, frame, expected_width in cases:
+            with self.subTest(tracks=tracks, nest=nest, frame=frame):
+                grid = outer.replace("TRACKS", tracks).replace('<m:mtable width="250pt"', '<m:mtable' + frame + ' width="250pt"', 1)
+                terms = words + (("Denominator",) if nest else ())
+                relative = "0.5" if nest else "50%"
+                variant = fraction(grid) if nest else grid
+                # The span covers both free tracks and their internal 6pt gap.
+                # Its width excludes the outside tracks, outside gaps and
+                # both 3.75pt frame insets when the frame is present.
+                chapters = [template.replace("FORMULA", variant.replace("INNER", value))
+                            for value in (expected_width, relative)]
+                samples = []
+                for chapter in chapters:
+                    with doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+                        preview = book.render_page(0, dpi=96)
+                        with doc_ex.open(book.convert("pdf")) as pdf:
+                            pdf_positions = positions(pdf, terms)
+                            self.assertFalse(pdf[0].get_images())
+                        converted = book.convert("docx")
+                    with zipfile.ZipFile(io.BytesIO(converted)) as archive:
+                        xml = ET.fromstring(archive.read("word/document.xml"))
+                    if nest:
+                        editable = xml.find(".//m:oMath//m:f/m:num//m:m", ns)
+                    else:
+                        merged = xml.find(".//w:gridSpan", ns)
+                        self.assertEqual(merged.get(f"{{{ns['w']}}}val"), "2")
+                        editable = xml.find(".//w:tbl//m:oMath//m:m", ns)
+                    self.assertIsNotNone(editable)
+                    with doc_ex.open(converted) as word, doc_ex.open(word.convert("pdf")) as pdf:
+                        native_positions = positions(pdf, terms)
+                        self.assertNotIn("⟡H", word[0].get_text())
+                    samples.append((preview, pdf_positions, native_positions))
+                self.assertEqual(samples[0], samples[1])
+
+        grid = outer.replace("TRACKS", "38pt auto fit 42pt")
+        fixed = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 500, 400)])
+        fixed_results = []
+        for width in ("79pt", "50%"):
+            chapter = template.replace("FORMULA", fraction(grid.replace("INNER", width)))
+            chapter = chapter.replace("<body>", '<body><div style="position:absolute;left:5px;top:5px">')
+            chapter = chapter.replace("</body>", "</div></body>")
+            with doc_ex.open(rewrite_epub(fixed, {"OEBPS/s0.xhtml": chapter})) as book:
+                image = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                    self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), image)
+                    fixed_results.append((image, positions(pdf, words + ("Denominator",))))
+        self.assertEqual(fixed_results[0], fixed_results[1])
+
+        unresolved = outer.replace("TRACKS", "38pt auto auto auto").replace("INNER", "50%")
+        unbounded = outer.replace("TRACKS", "38pt auto auto 42pt").replace("INNER", "50%")
+        unbounded = unbounded.replace(' width="250pt"', "")
+        overwide = outer.replace("TRACKS", "38pt auto auto 42pt").replace("INNER", "125%")
+        for source, message in ((unresolved, "definite containing line width"),
+                                (unbounded, "definite containing line width"),
+                                (overwide, "outside the containing line")):
+            with self.subTest(message=message), doc_ex.open(epub_fixture(chapter_one=template.replace("FORMULA", source))) as book:
+                for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
+                        operation()
+
     def test_mathml_table_aligns_editable_numbers_at_decimal_points(self) -> None:
         source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Aligned MathML decimals</title><meta name="viewport" content="width=440,height=340"/>
