@@ -3092,3 +3092,7 @@ The Linux x86-64 CPython 3.11 host wheel passed 935 installed tests, including 3
 ## 2026-11-25 EPUB subgrid spans, navigation guards and directional flood composites
 
 The Linux x86-64 CPython 3.11 host wheel passed 936 installed tests, including 341 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-subgrid-spans-navigation-guards-and-directional-flood-composites)
+
+## 2026-11-25 EPUB static MathML actions, multi-span MP4, navigation labels and two-axis area clipping
+
+The Linux x86-64 CPython 3.11 host wheel passed 940 installed tests, including 345 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-static-mathml-actions-multi-span-mp4-navigation-labels-and-two-axis-area-clipping)
