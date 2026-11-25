@@ -8496,6 +8496,98 @@ overlay
             self.assertEqual(link.uri, "https://example.org/label")
             self.assertEqual(link.bbox, original[0].get_links()[0].bbox)
 
+    def test_svg_blend_and_component_transfer_keep_pixels_and_source_geometry(self) -> None:
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 74">
+          <defs>
+            <filter id="tint" filterUnits="userSpaceOnUse" x="0" y="0" width="180" height="74"
+                    color-interpolation-filters="sRGB">
+              <feComponentTransfer result="tint">
+                <feFuncR type="linear" slope=".5"/>
+                <feFuncG type="table" tableValues="1, 0"/>
+                <feFuncB type="gamma" amplitude="1" exponent="2"/>
+                <feFuncA/>
+              </feComponentTransfer>
+              <feFlood flood-color="magenta" result="unused"/>
+              <feBlend in="SourceGraphic" in2="tint" mode="multiply"/>
+            </filter>
+            <filter id="threshold" filterUnits="userSpaceOnUse" x="0" y="0" width="180" height="74"
+                    color-interpolation-filters="sRGB">
+              <feComponentTransfer result="ink"><feFuncA type="discrete" tableValues="0 1"/></feComponentTransfer>
+              SHIFT
+            </filter>
+          </defs>
+          <rect x="4" y="6" width="22" height="15" fill="#80c040" filter="url(#tint)"/>
+          <g filter="url(#threshold)"><text x="4" y="50" font-size="16">
+            <a href="https://example.org/removed" fill-opacity=".25">Hidden</a>
+            <a href="https://example.org/visible" fill-opacity=".8" x="68" id="label">Café</a>
+          </text></g>
+          <a href="#label"><rect x="150" y="11" width="12" height="8" fill="blue"/></a>
+          <a href="https://example.org/tinted"><text x="68" y="20" fill="#80c040" font-size="13"
+                filter="url(#tint)">Tinted</text></a>
+        </svg>"""
+        fixture = fixed_spread_fixture([("", "white", 180, 74)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Filters</title>
+            <meta name="viewport" content="width=180,height=74"/></head>
+            <body style="margin:0">{}</body></html>"""
+        with zipfile.ZipFile(io.BytesIO(fixture)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'href="s0.xhtml" media-type="application/xhtml+xml"',
+                b'href="s0.svg" media-type="image/svg+xml"',
+            )
+
+        def publish(markup: str, inline: bool) -> doc_ex.Document:
+            replacements = ({"OEBPS/s0.xhtml": template.format(markup)} if inline else
+                            {"OEBPS/content.opf": package, "OEBPS/s0.svg": markup})
+            return doc_ex.open(rewrite_epub(fixture, replacements))
+
+        def rgba(document: doc_ex.Document) -> tuple[int, bytes]:
+            return rgba_pixels(png_chunks(document.render_page(0, dpi=96)))
+
+        for inline in (False, True):
+            with self.subTest(inline=inline):
+                shifted = svg.replace("SHIFT", '<feOffset in="ink" dx="8"/>')
+                ordinary = svg.replace("SHIFT", "").replace(' filter="url(#tint)"', "")
+                with publish(shifted, inline) as book, publish(ordinary, inline) as plain:
+                    preview = rgba(book)
+                    width, pixels = preview
+                    at = 4 * (width * 12 + 12)
+                    for channel, expected in zip(pixels[at:at + 3], (32, 47, 4)):
+                        self.assertAlmostEqual(channel, expected, delta=2)
+                    self.assertNotEqual(preview, rgba(plain))
+                    output = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+                    reference = plain.export_epub_fixed_pdf(dpi=96, searchable=True)
+                with doc_ex.open(output) as pdf, doc_ex.open(reference) as base, pdf.edit() as editor:
+                    self.assertEqual(rgba(pdf), preview)
+                    self.assertNotIn("Hidden", pdf[0].get_text())
+                    visible, = pdf[0].search_for("Café")
+                    starting, = base[0].search_for("Café")
+                    for edge, shift in enumerate((6, 0, 6, 0)):
+                        self.assertAlmostEqual(visible[edge], starting[edge] + shift, delta=0.75)
+                    self.assertEqual(pdf[0].search_for("Tinted"), base[0].search_for("Tinted"))
+                    links = {link.uri: link.bbox for link in pdf[0].get_links() if link.uri}
+                    baseline_links = {link.uri: link.bbox for link in base[0].get_links() if link.uri}
+                    self.assertNotIn("https://example.org/removed", links)
+                    self.assertEqual(links["https://example.org/tinted"], baseline_links["https://example.org/tinted"])
+                    visible_link = links["https://example.org/visible"]
+                    for edge, shift in enumerate((6, 0, 6, 0)):
+                        self.assertAlmostEqual(visible_link[edge], baseline_links["https://example.org/visible"][edge] + shift,
+                                               delta=0.75)
+                    local, = [link for link in pdf[0].get_links() if link.metadata.get("target_page") is not None]
+                    self.assertEqual(local.metadata["target_page"], 0)
+                    destination, = re.findall(
+                        rb"/XYZ\s+([1-9][0-9.]*)\s+([0-9.]+)\s+null", editor.to_bytes(object_streams=False),
+                    )
+                    self.assertAlmostEqual(float(destination[0]), visible[0], delta=1)
+
+        additive = svg.replace("SHIFT", "").replace(
+            '<feFuncA type="discrete" tableValues="0 1"/>',
+            '<feFuncA type="linear" slope="-1" intercept=".5"/>',
+        )
+        with publish(additive, True) as book:
+            book.render_page(0, dpi=96)
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):
+                book.export_epub_fixed_pdf(dpi=96, searchable=True)
+
     def test_svg_filter_chain_rejects_invalid_references_and_bounds_work(self) -> None:
         def svg(primitives: str, *, side: int = 80) -> str:
             return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 48">
@@ -8515,19 +8607,43 @@ overlay
             ('<feGaussianBlur result="a"/><feColorMatrix in="a" width="0"/>',
              doc_ex.MalformedDocumentError, "invalid SVG filter region"),
             ('<feColorMatrix/>' * 17, doc_ex.UnsafeArchiveError, "16 primitives"),
+            ('<feBlend in2="later"/><feFlood result="later"/>',
+             doc_ex.MalformedDocumentError, "prior named result"),
+            ('<feBlend mode="plus-lighter"/>', doc_ex.UnsupportedFormatError, "blend mode"),
+            ('<feComponentTransfer><feFuncA type="identity"/><feFuncA type="linear"/></feComponentTransfer>',
+             doc_ex.UnsupportedFormatError, "repeated SVG component transfer channel"),
+            ('<feComponentTransfer><feFuncR type="unknown"/></feComponentTransfer>',
+             doc_ex.UnsupportedFormatError, "unsupported SVG component transfer function"),
+            ('<feComponentTransfer><feFuncB type="gamma" exponent="-1"/></feComponentTransfer>',
+             doc_ex.UnsupportedFormatError, "nonnegative exponent"),
+            ('<feComponentTransfer><feFuncG type="linear" slope="NaN"/></feComponentTransfer>',
+             doc_ex.MalformedDocumentError, "invalid SVG component transfer coefficient"),
+            ('<feComponentTransfer><feFuncG type="linear" slope="&#160;.5"/></feComponentTransfer>',
+             doc_ex.MalformedDocumentError, "invalid SVG component transfer parameter"),
+            ('<feComponentTransfer><feFuncR type="table" tableValues="0,,1"/></feComponentTransfer>',
+             doc_ex.MalformedDocumentError, "invalid SVG component transfer table"),
+            (f'<feComponentTransfer><feFuncA type="table" tableValues="{("0 " * 65).strip()}"/></feComponentTransfer>',
+             doc_ex.UnsafeArchiveError, "table exceeds 64 entries"),
         )
         with doc_ex.open(epub_fixture()) as book:
             for primitives, error, reason in cases:
                 with self.subTest(reason=reason), self.assertRaisesRegex(error, reason):
                     book.edit_epub_structure([doc_ex.EpubSvgChapterSource("Filter", svg(primitives)), 0])
+            heavy_gamma = ('<feComponentTransfer>' + ''.join(
+                f'<feFunc{channel} type="gamma" exponent=".5"/>' for channel in "RGBA"
+            ) + '</feComponentTransfer>')
+            expensive = book.edit_epub_structure([
+                doc_ex.EpubSvgChapterSource("Filter", svg(heavy_gamma, side=1200)), 0,
+            ])
             large = book.edit_epub_structure([
                 doc_ex.EpubSvgChapterSource("Filter", svg('<feColorMatrix/>' * 4, side=1200)), 0,
             ])
-        with (
-            doc_ex.open(large) as book,
-            self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "SVG filter work"),
-        ):
-            book.render_page(0, dpi=96)
+        for data in (large, expensive):
+            with (
+                doc_ex.open(data) as book,
+                self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "SVG filter work"),
+            ):
+                book.render_page(0, dpi=96)
 
     def test_svg_flood_offset_composite_and_merge_keep_source_coverage(self) -> None:
         svg = """<svg xmlns="http://www.w3.org/2000/svg" width="136" height="72" viewBox="0 0 136 72">

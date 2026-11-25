@@ -53,6 +53,7 @@
 - [x] Render bounded SVG filter chains with prior named inputs, including alpha-changing color matrices in visual output. Reject PDF text or annotation capture when the source geometry cannot be preserved.
 - [x] Render bounded native flood, signed offset, composite and merge filter primitives with checked named dependencies. Sample in-place filtered coverage for PDF text and annotations from a single painted source.
 - [x] Transport fixed-layout PDF text, annotations and destinations along provable single-layer SVG offset chains using native raster transforms and clipping.
+- [x] Render bounded native SVG blend and component transfer and retain searchable text, links and fragments through provable alpha and offset chains.
 - [ ] Extend source CSS and fixed-layout fidelity, including more SVG filter primitives, PDF attribution for stacked or ambiguous spatial filter results, and complex SVG text fallback including spacing across ambiguous clusters, nested length owners and glyph positioning.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.
 - [x] Render tall reflowable chapters within the paint coordinate budget and apply raster limits to the requested DPI and clip.

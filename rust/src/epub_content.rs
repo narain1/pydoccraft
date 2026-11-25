@@ -1004,9 +1004,11 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
         let tag = node.tag_name().name();
         let packaged_element = base.is_some() && matches!(tag, "image" | "style" | "a");
         let filter_primitive = super::svg::effects::is_filter_primitive(tag);
+        let transfer_channel = super::svg::effects::is_transfer_channel(tag);
         if node.tag_name().namespace() != Some(SVG)
             || (!packaged_element
                 && !filter_primitive
+                && !transfer_channel
                 && !matches!(
                     tag,
                     "svg"
@@ -1085,6 +1087,21 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                 None if tag == "filter" && matches!(key, "filterUnits" | "primitiveUnits") => true,
                 None if filter_primitive && matches!(key, "in" | "result") => true,
                 None if tag == "feMergeNode" && key == "in" => true,
+                None if tag == "feBlend" && matches!(key, "in2" | "mode") => true,
+                None if transfer_channel
+                    && matches!(
+                        key,
+                        "type"
+                            | "tableValues"
+                            | "slope"
+                            | "intercept"
+                            | "amplitude"
+                            | "exponent"
+                            | "offset"
+                    ) =>
+                {
+                    true
+                }
                 None if tag == "feComposite"
                     && matches!(key, "in2" | "operator" | "k1" | "k2" | "k3" | "k4") =>
                 {

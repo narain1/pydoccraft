@@ -10,6 +10,10 @@ use crate::{
     EngineError,
 };
 
+#[path = "epub_svg_transfer.rs"]
+mod transfer;
+pub(in crate::epub) use transfer::is_channel as is_transfer_channel;
+
 const MAX_TEMPLATE_DEPTH: usize = 32;
 const MAX_FILTER_PRIMITIVES: usize = 16;
 const MAX_MERGE_INPUTS: usize = 16;
@@ -34,6 +38,8 @@ pub(in crate::epub) fn is_filter_primitive(tag: &str) -> bool {
             | "feFlood"
             | "feComposite"
             | "feMerge"
+            | "feBlend"
+            | "feComponentTransfer"
     )
 }
 
@@ -130,6 +136,7 @@ pub(in crate::epub) fn validate_markup(root: Node<'_, '_>) -> Result<(), EngineE
             tag if is_gradient(tag) => effects.validate_gradient(node)?,
             "filter" => validate_chain(node)?,
             tag if is_filter_primitive(tag) => validate_primitive(node)?,
+            tag if is_transfer_channel(tag) => transfer::validate_channel(node)?,
             "feMergeNode"
                 if !node
                     .parent_element()
@@ -189,7 +196,7 @@ fn validate_chain(node: Node<'_, '_>) -> Result<(), EngineError> {
                     return Err(invalid("SVG filter merge requires an input"));
                 }
             }
-            "feComposite" => {
+            "feComposite" | "feBlend" => {
                 validate_input(child.attribute("in"), &results)?;
                 validate_input(child.attribute("in2"), &results)?;
             }
@@ -273,7 +280,8 @@ fn validate_primitive(node: Node<'_, '_>) -> Result<(), EngineError> {
     if !node
         .parent_element()
         .is_some_and(|parent| parent.has_tag_name("filter"))
-        || (!node.has_tag_name("feMerge") && node.children().any(|child| child.is_element()))
+        || (!matches!(node.tag_name().name(), "feMerge" | "feComponentTransfer")
+            && node.children().any(|child| child.is_element()))
     {
         return Err(invalid("misplaced SVG filter primitive"));
     }
@@ -281,6 +289,31 @@ fn validate_primitive(node: Node<'_, '_>) -> Result<(), EngineError> {
     match node.tag_name().name() {
         "feColorMatrix" => return validate_color_matrix(node),
         "feComposite" => return validate_composite(node),
+        "feComponentTransfer" => return transfer::validate_channels(node),
+        "feBlend" => {
+            if !matches!(
+                node.attribute("mode").unwrap_or("normal"),
+                "normal"
+                    | "multiply"
+                    | "screen"
+                    | "overlay"
+                    | "darken"
+                    | "lighten"
+                    | "color-dodge"
+                    | "color-burn"
+                    | "hard-light"
+                    | "soft-light"
+                    | "difference"
+                    | "exclusion"
+                    | "hue"
+                    | "saturation"
+                    | "color"
+                    | "luminosity"
+            ) {
+                return Err(unsupported("unsupported SVG filter blend mode"));
+            }
+            return Ok(());
+        }
         "feOffset" => {
             // resvg translates the input raster and retains its subregion.
             if ["x", "y", "width", "height"]
@@ -553,6 +586,16 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
             },
             Kind::Offset(offset) if offset.dx() == 0.0 && offset.dy() == 0.0 => get(offset.input()),
             Kind::Flood(flood) if flood.opacity().get() == 0.0 => Support::subset(true),
+            // Native blend modes use the same source-over alpha as normal.
+            Kind::Blend(blend) => get(blend.input1()).union(get(blend.input2())),
+            Kind::ComponentTransfer(transfer) => {
+                let input = get(transfer.input());
+                let alpha = transfer::alpha_coverage(transfer.func_a());
+                Support {
+                    retains_source: input.retains_source && alpha.retains_ink,
+                    within_source: input.within_source && alpha.keeps_transparency,
+                }
+            }
             Kind::Composite(composite) => {
                 let (first, second) = (get(composite.input1()), get(composite.input2()));
                 match composite.operator() {
@@ -610,6 +653,14 @@ fn offset_chain(filter: &usvg::filter::Filter) -> Option<(Vec<[f32; 2]>, bool)> 
                     _ => return None,
                 }
                 matrix.input()
+            }
+            Kind::ComponentTransfer(transfer) => {
+                let alpha = transfer::alpha_coverage(transfer.func_a());
+                if !alpha.keeps_transparency {
+                    return None;
+                }
+                preserves_alpha &= alpha.retains_ink;
+                transfer.input()
             }
             Kind::GaussianBlur(blur)
                 if blur.std_dev_x().get() == 0.0 && blur.std_dev_y().get() == 0.0 =>
@@ -865,7 +916,8 @@ fn measure_group(
                         validate_offset(offset.dy() * sy, message)?;
                         5
                     }
-                    usvg::filter::Kind::Composite(_) => 12,
+                    usvg::filter::Kind::Composite(_) | usvg::filter::Kind::Blend(_) => 12,
+                    usvg::filter::Kind::ComponentTransfer(transfer) => transfer::work(transfer),
                     usvg::filter::Kind::Merge(merge) => 4 + 5 * merge.inputs().len(),
                     _ => return Err(unsupported("unsupported SVG filter primitive")),
                 };
