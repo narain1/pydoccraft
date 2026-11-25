@@ -4870,13 +4870,42 @@ first
                     self.assertAlmostEqual(after[2][1], before[2][1], delta=1)
 
         fraction = '<m:mfrac>{}<m:msqrt>{}</m:msqrt></m:mfrac>'
-        before = sample(fraction.format(unshifted, blue))
-        nested = sample(fraction.format(f'<m:mpadded voffset="-25%height">{red}</m:mpadded>', blue))
+        unshifted_fraction = fraction.format(unshifted, blue)
+        shifted_fraction = fraction.format(f'<m:mpadded voffset="-25%height">{red}</m:mpadded>', blue)
+        before = sample(unshifted_fraction)
+        nested = sample(shifted_fraction)
         for original, shifted in zip(before[:2], nested[:2]):
             self.assertGreater(shifted[0][1], original[0][1])
-            self.assertEqual(shifted[1:], original[1:])
+            # Subpixel differences can change the first solid pixel by one.
+            for (old_x, old_y), (new_x, new_y) in zip(original[1:], shifted[1:]):
+                self.assertAlmostEqual(new_x, old_x, delta=1)
+                self.assertAlmostEqual(new_y, old_y, delta=1)
         self.assertIn(b"<m:f>", nested[2])
         self.assertIn(b"<m:rad>", nested[2])
+
+        def neighboring_boxes(body: str) -> list[dict[str, tuple[float, ...]]]:
+            result = []
+            with doc_ex.open(epub_fixture(chapter_one=template.format(body, green))) as book:
+                with doc_ex.open(book.convert("docx")) as word:
+                    for source in (book, word):
+                        with doc_ex.open(source.convert("pdf")) as pdf:
+                            boxes = {
+                                block["text"]: block["bbox"]
+                                for block in pdf[0].get_text("dict")["blocks"]
+                                if block["text"] in {"√Blue", "Guard"}
+                            }
+                            self.assertEqual(boxes.keys(), {"√Blue", "Guard"})
+                            result.append(boxes)
+            return result
+
+        original_epub, original_docx = neighboring_boxes(unshifted_fraction)
+        shifted_epub, shifted_docx = neighboring_boxes(shifted_fraction)
+        self.assertEqual(shifted_epub, original_epub)
+        # The half-point sizing of native DOCX placement guides can perturb
+        # the final baselines slightly even though the operands are unchanged.
+        for label, original_box in original_docx.items():
+            for original, shifted in zip(original_box, shifted_docx[label]):
+                self.assertAlmostEqual(shifted, original, delta=0.1)
 
         deep = '<m:mpadded voffset="3pt">' * 9 + red + '</m:mpadded>' * 9
         with doc_ex.open(epub_fixture(chapter_one=template.format(deep, green))) as book:
