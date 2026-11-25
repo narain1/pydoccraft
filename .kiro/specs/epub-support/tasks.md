@@ -139,6 +139,7 @@
 - [x] Preserve binary operator spacing for a MathML alignment group boundary immediately beside an isolated operator between ordinary runs. Preserve editable operands and remap scalar and nested carets.
 - [x] Preserve decimal and explicit alignment carets inside native MathML enclosures with supported edges, strikes and radical notation.
 - [x] Preserve MathML alignment inside editable fence operands, including varying separators and multi-character delimiters.
+- [x] Preserve MathML baseline decimal alignment within tensor bases and explicit marks within the base or individual pre- and postscript operands across repeated editable script pairs.
 - [ ] Extend MathML alignment through other operator spacing and nontransparent wrappers and operands, right-to-left groups and cross-table scopes.
 - [x] Preserve editable negative MathML padding offsets that fit within the preceding horizontal math space, including nested superscripts.
 - [x] Retain direct editable MathML carets before and after bounded negative padding that uses preceding space.

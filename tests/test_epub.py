@@ -12710,6 +12710,117 @@ Final cue
                     with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, error):
                         operation()
 
+    def test_mathml_alignment_retains_native_tensor_script_operands(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>MathML tensor alignment</title><meta name="viewport" content="width=520,height=400"/>
+            <style>body {margin:0}</style></head><body><p><m:math mathsize="12pt">
+            <m:mtable groupalign="{decimalpoint}" columnwidth="260pt" columnalign="left" rowspacing="12pt">
+              ROWS
+            </m:mtable>
+          </m:math></p></body></html>"""
+        group = '<m:maligngroup/>'
+        cells = (
+            group + """<m:mmultiscripts><m:mn>12.345</m:mn>
+              <m:mtext>LowOne</m:mtext><m:mtext>HighOne</m:mtext><m:mprescripts/>
+              <m:mtext>LeftLow</m:mtext><m:mtext>LeftHigh</m:mtext></m:mmultiscripts>""",
+            group + """<m:mmultiscripts><m:mtext>Core</m:mtext>
+              <m:mn>77<m:malignmark/>;819</m:mn><m:mtext>Rise</m:mtext>
+              <m:mtext>NearLow</m:mtext><m:mtext>NearHigh</m:mtext><m:mprescripts/>
+              <m:mtext>EdgeLow</m:mtext><m:mtext>EdgeHigh</m:mtext></m:mmultiscripts>""",
+            group + """<m:mmultiscripts><m:mtext>Stem</m:mtext>
+              <m:mtext>Down</m:mtext><m:mtext>Upward</m:mtext><m:mprescripts/>
+              <m:mn>63<m:malignmark/>:925</m:mn><m:mtext>LeadOne</m:mtext>
+              <m:mtext>FarLow</m:mtext><m:mtext>FarHigh</m:mtext></m:mmultiscripts>""",
+            group + """<m:mmultiscripts>
+              <m:mrow><m:mtext>West</m:mtext><m:malignmark edge="right"/><m:mo>+</m:mo><m:mtext>Arm</m:mtext></m:mrow>
+              <m:mtext>TrackLo</m:mtext><m:mtext>TrackHi</m:mtext><m:mprescripts/>
+              <m:mtext>LinkLo</m:mtext><m:mtext>LinkHi</m:mtext></m:mmultiscripts>""",
+            group + '<m:mn>.418</m:mn>',
+        )
+        terms = ("12.345", "LowOne", "HighOne", "LeftLow", "LeftHigh", "Core", "77;819",
+                 "Rise", "NearLow", "NearHigh", "EdgeLow", "EdgeHigh", "Stem", "Down", "Upward",
+                 "63:925", "LeadOne", "FarLow", "FarHigh", "West", "+", "Arm",
+                 "TrackLo", "TrackHi", "LinkLo", "LinkHi", ".418")
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+
+        def chapter(contents: tuple[str, ...]) -> str:
+            rows = "".join(f"<m:mtr><m:mtd>{cell}</m:mtd></m:mtr>" for cell in contents)
+            return template.replace("ROWS", rows)
+
+        def boxes(pdf: doc_ex.Document, names: tuple[str, ...]) -> dict[str, tuple[float, float, float, float]]:
+            positions = {}
+            for name in names:
+                positions[name], = pdf[0].search_for(name)
+            return positions
+
+        def gaps(positions: dict[str, tuple[float, float, float, float]]) -> tuple[float, float]:
+            return positions["+"][0] - positions["West"][2], positions["Arm"][0] - positions["+"][2]
+
+        unmarked = cells[3].replace(group, "").replace('<m:malignmark edge="right"/>', "")
+        with doc_ex.open(epub_fixture(chapter_one=chapter((unmarked,)))) as book:
+            control = book.render_page(0, dpi=96)
+            with doc_ex.open(book.convert("pdf")) as pdf:
+                expected_gaps = gaps(boxes(pdf, ("West", "+", "Arm")))
+        self.assertGreater(min(expected_gaps), 1.0)
+        with doc_ex.open(epub_fixture(chapter_one=chapter((cells[3],)))) as book:
+            self.assertEqual(book.render_page(0, dpi=96), control)
+
+        def geometry(pdf: doc_ex.Document, delta: float) -> dict[str, tuple[float, float, float, float]]:
+            positions = boxes(pdf, (*terms, "12", "77", "63"))
+            for name in ("12", "77", "63", "West"):
+                self.assertAlmostEqual(positions[name][2], positions[".418"][0], delta=delta)
+            for expected, actual in zip(expected_gaps, gaps(positions)):
+                self.assertAlmostEqual(expected, actual, delta=delta)
+            self.assertLess(positions["LeftHigh"][0], positions["12.345"][0])
+            self.assertAlmostEqual(positions["HighOne"][0], positions["12.345"][2], delta=delta)
+            self.assertLess(positions["FarHigh"][0], positions["LeadOne"][0])
+            return positions
+
+        source = chapter(cells)
+        with doc_ex.open(epub_fixture(chapter_one=source)) as book:
+            with doc_ex.open(book.convert("pdf")) as pdf:
+                self.assertFalse(pdf[0].get_images())
+                reference = geometry(pdf, 0.05)
+            editable = book.convert("docx")
+        with zipfile.ZipFile(io.BytesIO(editable)) as archive:
+            xml = ET.fromstring(archive.read("word/document.xml"))
+        matrix = xml.find(".//m:oMath//m:m", ns)
+        self.assertIsNotNone(matrix)
+        for path, token in (
+            (".//m:sPre/m:e/m:sSubSup/m:e/m:r/m:t", "12.345"),
+            (".//m:sPre/m:e/m:sSubSup/m:e/m:sSubSup/m:sub/m:r/m:t", "77;819"),
+            (".//m:sPre/m:e/m:sPre/m:sub/m:r/m:t", "63:925"),
+        ):
+            self.assertIn(token, [element.text for element in matrix.findall(path, ns)])
+        with doc_ex.open(editable) as word, doc_ex.open(word.convert("pdf")) as pdf:
+            text = word[0].get_text()
+            self.assertNotIn("⟡H", text)
+            native = geometry(pdf, 0.25)
+            for term in terms:
+                self.assertEqual(text.count(term), 1, text)
+                for expected, actual in zip(reference[term], native[term]):
+                    self.assertAlmostEqual(expected, actual, delta=0.35)
+
+        fixture = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 520, 400)])
+        with doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": source})) as book:
+            preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+                fixed = boxes(pdf, terms)
+                for term in terms:
+                    self.assertAlmostEqual(fixed[term][0] - fixed[".418"][0],
+                                           reference[term][0] - reference[".418"][0], delta=0.65)
+
+        for operand, error in (
+            ('<m:malignmark/>', "alignment mark outside the cell baseline"),
+            ('<m:mrow><m:malignmark/></m:mrow>', "alignment mark in an empty operand"),
+        ):
+            body = group + '<m:mmultiscripts><m:mi>x</m:mi>' + operand + '<m:mn>7</m:mn></m:mmultiscripts>'
+            with doc_ex.open(epub_fixture(chapter_one=chapter((body,)))) as book:
+                for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, error):
+                        operation()
+
     def test_mathml_labeled_rows_keep_editable_labels_outside_data_columns(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Labeled MathML</title><meta name="viewport" content="width=440,height=320"/>

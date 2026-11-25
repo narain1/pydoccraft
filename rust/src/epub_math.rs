@@ -1171,7 +1171,13 @@ impl<'xml> Projection<'_, 'xml> {
             return Err(limited("MathML multiscript pair limit exceeds eight"));
         }
         let levels = count / 2;
-        let mut base = self.element(base, depth + levels.max(1), style)?;
+        let seeking = self
+            .alignment_group
+            .as_ref()
+            .is_some_and(table::alignment::Scope::seeking_caret);
+        let mut base = self.with_operand_caret(0, |projection| {
+            projection.element(base, depth + levels.max(1), style)
+        })?;
         let mut pre = false;
         let mut scripts = Vec::new();
         for child in children {
@@ -1189,11 +1195,15 @@ impl<'xml> Projection<'_, 'xml> {
                     }
                     Vec::new()
                 } else {
-                    self.element(child, depth + levels.max(1), style)?
+                    let ordinal = scripts.len() + 1;
+                    self.with_operand_caret(ordinal, |projection| {
+                        projection.element(child, depth + levels.max(1), style)
+                    })?
                 };
                 scripts.push((pre, arg));
             }
         }
+        let pair_count = scripts.len() / 2;
         let mut groups = scripts.into_iter();
         while let Some((pre, sub)) = groups.next() {
             let (sup_pre, sup) = groups
@@ -1213,6 +1223,34 @@ impl<'xml> Projection<'_, 'xml> {
                 sub,
                 sup,
             }];
+        }
+        if seeking {
+            if let Some(caret) = self
+                .alignment_group
+                .as_mut()
+                .and_then(|scope| scope.caret.as_mut())
+            {
+                let (_, ordinal) = caret
+                    .path
+                    .first_mut()
+                    .ok_or_else(|| invalid("MathML alignment operand is missing"))?;
+                // Each later pair wraps this operand in the base of a new
+                // native script. Replace the provisional source ordinal
+                // with its actual slot below those outer base arguments.
+                let wrappers = if *ordinal == 0 {
+                    caret.path.remove(0);
+                    pair_count
+                } else {
+                    let index = *ordinal - 1;
+                    *ordinal = 1 + index % 2;
+                    pair_count
+                        .checked_sub(index / 2 + 1)
+                        .ok_or_else(|| invalid("MathML alignment operand is missing"))?
+                };
+                caret
+                    .path
+                    .splice(..0, std::iter::repeat_n((0, 0), wrappers));
+            }
         }
         Ok(base)
     }
