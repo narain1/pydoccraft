@@ -42,7 +42,7 @@ impl LinearEdit {
     }
 }
 
-/// Collapse adjacent source edits and allow one forward jump between rate-1 intervals.
+/// Collapse adjacent source edits and allow one boundary with a source jump or movie gap.
 pub(super) fn edit_spans(
     edits: &[EditListEntry],
     movie_timescale: u32,
@@ -74,11 +74,22 @@ pub(super) fn edit_spans(
         media_start: first.media_time,
     };
     let mut previous = first;
-    for next in rest {
+    let mut rest = rest.iter();
+    while let Some(mut next) = rest.next() {
         span.movie_end = span
             .movie_end
             .checked_add(previous.segment_duration)
             .ok_or_else(|| invalid("MP4 edit duration overflow"))?;
+        let gap = if next.is_empty_edit() {
+            if !rate_one(next) || next.segment_duration == 0 {
+                return Err(unsupported(unsupported_layout));
+            }
+            let gap = next.segment_duration;
+            next = rest.next().ok_or_else(|| unsupported(unsupported_layout))?;
+            gap
+        } else {
+            0
+        };
         if next.media_time < 0
             || !rate_one(next)
             || previous.segment_duration == 0
@@ -88,24 +99,27 @@ pub(super) fn edit_spans(
         }
         let elapsed_media = i128::from(next.media_time) - i128::from(span.media_start);
         let elapsed_movie = i128::from(span.movie_end - span.movie_start);
-        match (elapsed_media * i128::from(movie_timescale))
-            .cmp(&(elapsed_movie * i128::from(media_timescale)))
-        {
-            std::cmp::Ordering::Less => return Err(unsupported(unsupported_layout)),
-            std::cmp::Ordering::Equal => {}
-            std::cmp::Ordering::Greater => {
-                if !spans.is_empty() {
-                    return Err(unsupported(
-                        "MP4 edit lists support one forward source jump",
-                    ));
-                }
-                spans.push(span);
-                span = LinearEdit {
-                    movie_start: span.movie_end,
-                    movie_end: span.movie_end,
-                    media_start: next.media_time,
-                };
+        let media_distance = elapsed_media * i128::from(movie_timescale);
+        let movie_distance = elapsed_movie * i128::from(media_timescale);
+        if media_distance < movie_distance {
+            return Err(unsupported(unsupported_layout));
+        }
+        if media_distance > movie_distance || gap != 0 {
+            if !spans.is_empty() {
+                return Err(unsupported(
+                    "MP4 edit lists support one forward source jump or interior empty interval",
+                ));
             }
+            spans.push(span);
+            let start = span
+                .movie_end
+                .checked_add(gap)
+                .ok_or_else(|| invalid("MP4 edit duration overflow"))?;
+            span = LinearEdit {
+                movie_start: start,
+                movie_end: start,
+                media_start: next.media_time,
+            };
         }
         previous = next;
     }
