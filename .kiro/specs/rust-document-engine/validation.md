@@ -2927,3 +2927,7 @@ The Linux x86-64 CPython 3.11.15 wheel passed 727 installed tests, including 132
 ## 2026-11-24 Integrated EPUB clipping, equation placement and track selection
 
 The Linux x86-64 CPython 3.11.15 wheel passed 736 installed tests, including 141 EPUB tests. It measured 24,725,709 bytes with a 57,624,184-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-integrated-epub-clipping-equation-placement-and-track-selection) covers rendered coverage, editable equations, WebM timing and selection, and reopened sample exports.
+
+## 2026-11-24 EPUB Linux wheel and integrated regression validation
+
+The three Rust 1.95.0 manylinux x86-64 wheels for CPython 3.11, 3.12 and 3.13 each passed 749 installed tests, including 154 EPUB tests. The default and Python-free Rust suites, Node preview, public typing, binding and license audits, W3C EPUB samples and EPUBCheck all passed. The upstream engine and shared backend revisions are unchanged. The macOS and Windows matrix remains open. [Detailed EPUB wheel and test evidence](../epub-support/validation.md#2026-11-24-integrated-epub-typography-equations-media-and-navigation)
