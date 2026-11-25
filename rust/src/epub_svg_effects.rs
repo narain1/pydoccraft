@@ -10,6 +10,9 @@ use crate::{
     EngineError,
 };
 
+#[path = "epub_svg_convolution.rs"]
+mod convolution;
+
 #[path = "epub_svg_morphology.rs"]
 mod morphology;
 pub(super) use morphology::normalize as normalize_morphology;
@@ -48,6 +51,7 @@ pub(in crate::epub) fn is_filter_primitive(tag: &str) -> bool {
             | "feBlend"
             | "feComponentTransfer"
             | "feMorphology"
+            | "feConvolveMatrix"
             | "feTurbulence"
             | "feDisplacementMap"
     )
@@ -301,6 +305,7 @@ fn validate_primitive(node: Node<'_, '_>) -> Result<(), EngineError> {
         "feComposite" => return validate_composite(node),
         "feComponentTransfer" => return transfer::validate_channels(node),
         "feMorphology" => return morphology::validate(node),
+        "feConvolveMatrix" => return convolution::validate(node),
         "feTurbulence" => return noise::validate_turbulence(node),
         "feDisplacementMap" => return noise::validate_displacement(node),
         "feBlend" => {
@@ -643,6 +648,15 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
                     procedural: input.procedural,
                 }
             }
+            Kind::ConvolveMatrix(matrix) => {
+                let input = get(matrix.input());
+                let alpha = convolution::alpha_coverage(matrix);
+                Support {
+                    retains_source: input.retains_source && alpha.retains_ink,
+                    within_source: input.within_source && alpha.keeps_transparency,
+                    procedural: input.procedural || alpha.needs_neighbors,
+                }
+            }
             Kind::Morphology(morphology) => {
                 let input = get(morphology.input());
                 match morphology.operator() {
@@ -725,6 +739,14 @@ fn offset_chain(filter: &usvg::filter::Filter) -> Option<(Vec<[f32; 2]>, bool)> 
                 }
                 preserves_alpha &= alpha.retains_ink;
                 transfer.input()
+            }
+            Kind::ConvolveMatrix(matrix) => {
+                let alpha = convolution::alpha_coverage(matrix);
+                if !alpha.keeps_transparency || alpha.needs_neighbors {
+                    return None;
+                }
+                preserves_alpha &= alpha.retains_ink;
+                matrix.input()
             }
             Kind::Morphology(morphology)
                 if morphology.operator() == usvg::filter::MorphologyOperator::Erode =>
@@ -1049,6 +1071,7 @@ fn measure_group(
                         validate_offset(map.scale() * sy, message)?;
                         16
                     }
+                    usvg::filter::Kind::ConvolveMatrix(matrix) => convolution::work(matrix),
                     usvg::filter::Kind::Morphology(morphology) => morphology::work(
                         [
                             morphology.radius_x().get() * sx,

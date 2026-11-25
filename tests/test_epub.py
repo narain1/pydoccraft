@@ -10899,6 +10899,143 @@ Trailing
             with doc_ex.open(data) as book, self.assertRaisesRegex(doc_ex.UnsafeArchiveError, reason):
                 book.render_page(0, dpi=96)
 
+    def test_svg_convolution_pixels_and_proven_pdf_geometry(self) -> None:
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 98">
+          <defs>
+            <filter id="sharp" filterUnits="userSpaceOnUse" x="0" y="0" width="38" height="22"
+                    color-interpolation-filters="sRGB">
+              <feConvolveMatrix order="3, 1" kernelMatrix="-1, 2, 0"
+                                targetX="1" preserveAlpha="true"/>
+            </filter>
+            <filter id="edge" filterUnits="userSpaceOnUse" x="98" y="4" width="35" height="30"
+                    color-interpolation-filters="sRGB">
+              <feConvolveMatrix order="2 1" kernelMatrix="1 -1" divisor="1" targetX="1" edgeMode="none"/>
+            </filter>
+            <filter id="caption" filterUnits="userSpaceOnUse" x="0" y="40" width="158" height="56"
+                    color-interpolation-filters="sRGB">
+              <feOffset dx="8" dy="4" result="moved"/>
+              <feConvolveMatrix in="moved" order="1" kernelMatrix="-2"
+                                preserveAlpha="true" edgeMode="wrap" result="toned"/>
+              <feOffset in="toned" dx="4"/>
+            </filter>
+          </defs>
+          <g transform="translate(4,6) scale(2)"><g filter="url(#sharp)">
+            <rect x="2" y="2" width="14" height="12" fill="#406080"/>
+            <rect x="16" y="2" width="14" height="12" fill="#204060"/>
+          </g></g>
+          <a href="https://example.org/edge">
+            <g filter="url(#edge)" id="marker"><rect x="104" y="10" width="21" height="16" fill="red"/></g>
+          </a>
+          <a href="#marker"><rect x="140" y="8" width="10" height="8" fill="green"/></a>
+          <g filter="url(#caption)"><text x="15" y="74" font-size="25" fill="#406080">
+            <a href="https://example.org/convolution">Café</a>
+          </text></g>
+        </svg>"""
+        fixture = fixed_spread_fixture([("", "white", 160, 98)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Convolution</title>
+          <meta name="viewport" content="width=160,height=98"/></head><body style="margin:0">{}</body></html>"""
+        with zipfile.ZipFile(io.BytesIO(fixture)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'href="s0.xhtml" media-type="application/xhtml+xml"',
+                b'href="s0.svg" media-type="image/svg+xml"',
+            )
+
+        def open_book(markup: str, inline: bool) -> doc_ex.Document:
+            members = ({"OEBPS/s0.xhtml": template.format(markup)} if inline else
+                       {"OEBPS/content.opf": package, "OEBPS/s0.svg": markup})
+            return doc_ex.open(rewrite_epub(fixture, members))
+
+        control = svg.replace('filter="url(#caption)"', '')
+        for inline in (False, True):
+            for dpi, scale in ((96, 1), (144, 1.5)):
+                with self.subTest(inline=inline, dpi=dpi), open_book(svg, inline) as book:
+                    def rgba(document: doc_ex.Document) -> tuple[int, bytes]:
+                        return rgba_pixels(png_chunks(document.render_page(0, dpi=dpi)))
+
+                    width, pixels = preview = rgba(book)
+
+                    def pixel(x: int, y: int) -> tuple[int, ...]:
+                        start = 4 * (y * width + x)
+                        return tuple(pixels[start:start + 4])
+
+                    # SVG reverses the signed kernel. Sharpening uses a single
+                    # device pixel even after the source transform and DPI.
+                    boundary = int(36 * scale)
+                    self.assertEqual(pixel(boundary - 2, int(14 * scale)), (64, 96, 128, 255))
+                    self.assertEqual(pixel(boundary - 1, int(14 * scale)), (96, 128, 160, 255))
+                    self.assertEqual(pixel(boundary, int(14 * scale)), (32, 64, 96, 255))
+                    edge = int(104 * scale)
+                    self.assertEqual(pixel(edge, int(15 * scale)), (255, 0, 0, 255))
+                    self.assertIn(pixel(edge + 1, int(15 * scale)), ((255, 255, 255, 255), (0, 0, 0, 0)))
+
+                    output = book.export_epub_fixed_pdf(dpi=dpi, searchable=True)
+                    with (doc_ex.open(output) as pdf, open_book(control, inline) as source,
+                          doc_ex.open(source.export_epub_fixed_pdf(dpi=dpi, searchable=True)) as reference,
+                          pdf.edit() as edit):
+                        self.assertEqual(rgba(pdf), preview)
+                        self.assertEqual(pdf[0].get_text(), "Café")
+                        actual, = pdf[0].search_for("Café")
+                        baseline, = reference[0].search_for("Café")
+                        for index, shift in enumerate((9, 3, 9, 3)):
+                            self.assertAlmostEqual(actual[index], baseline[index] + shift, delta=.01)
+                        caption_uri = "https://example.org/convolution"
+                        caption, = [link.bbox for link in pdf[0].get_links() if link.uri == caption_uri]
+                        original, = [link.bbox for link in reference[0].get_links() if link.uri == caption_uri]
+                        for actual, expected, shift in zip(caption, original, (9, 3, 9, 3)):
+                            self.assertAlmostEqual(actual, expected + shift, delta=.01)
+                        link, = [link for link in pdf[0].get_links() if link.uri == "https://example.org/edge"]
+                        for actual, expected in zip(link.bbox, (78, 7.5, 78 + .75 / scale, 19.5)):
+                            self.assertAlmostEqual(actual, expected, delta=.01)
+                        local, = [link for link in pdf[0].get_links() if link.metadata.get("target_page") is not None]
+                        self.assertEqual(local.metadata["target_page"], 0)
+                        target, = re.findall(rb"/XYZ[ ]+(78[.]?[0-9]*)[ ]+([0-9.]+)[ ]+null",
+                                             edit.to_bytes(object_streams=False))
+                        self.assertAlmostEqual(float(target[1]), 66)
+
+        ambiguous = svg.replace('kernelMatrix="1 -1" divisor="1"', 'kernelMatrix="1 1" divisor="2"')
+        with open_book(ambiguous, False) as book:
+            self.assertNotEqual(book.render_page(0, dpi=96), b"")
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"):
+                book.export_epub_fixed_pdf(dpi=96, searchable=True)
+
+    def test_svg_convolution_validates_parameters_named_inputs_and_device_work(self) -> None:
+        def svg(primitive: str, *, transform: str = "") -> str:
+            return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100">
+              <defs><filter id="fx" filterUnits="userSpaceOnUse" width="180" height="180">
+                {primitive}</filter></defs>
+              <rect width="24" height="18" {transform} filter="url(#fx)"/></svg>"""
+
+        invalid_inputs = (
+            ('order="0" kernelMatrix="1"', doc_ex.MalformedDocumentError, "convolution order"),
+            ('order="10" kernelMatrix="1"', doc_ex.UnsafeArchiveError, "convolution order exceeds 9"),
+            ('order="2" kernelMatrix="1 0 0"', doc_ex.MalformedDocumentError, "convolution kernel"),
+            ('order="1" kernelMatrix="1,"', doc_ex.MalformedDocumentError, "convolution kernel"),
+            ('order="1" kernelMatrix="inf"', doc_ex.MalformedDocumentError, "convolution kernel"),
+            ('order="1" kernelMatrix="2000"', doc_ex.UnsafeArchiveError, "convolution coefficient"),
+            ('order="1" kernelMatrix="1" targetY="1"', doc_ex.MalformedDocumentError, "convolution target"),
+            ('order="1" kernelMatrix="1" bias="NaN"', doc_ex.MalformedDocumentError, "convolution bias"),
+            ('order="1" kernelMatrix="1" divisor="0"', doc_ex.UnsupportedFormatError, "convolution divisor"),
+            ('order="1" kernelMatrix="1" divisor="1e-9"', doc_ex.UnsupportedFormatError, "convolution divisor"),
+            ('order="1" kernelMatrix="1" preserveAlpha="True"', doc_ex.MalformedDocumentError, "preserveAlpha"),
+            ('order="1" kernelMatrix="1" edgeMode="bad"', doc_ex.UnsupportedFormatError, "convolution edge mode"),
+            ('order="1" kernelMatrix="1" kernelUnitLength="2 3"', doc_ex.UnsupportedFormatError, "kernelUnitLength"),
+            ('order="1" kernelMatrix="1" in="later"', doc_ex.MalformedDocumentError, "prior named result"),
+        )
+        with doc_ex.open(epub_fixture()) as original:
+            for attributes, error, reason in invalid_inputs:
+                with self.subTest(attributes=attributes), self.assertRaisesRegex(error, reason):
+                    markup = svg(f'<feConvolveMatrix {attributes}/><feFlood result="later"/>')
+                    original.edit_epub_structure([doc_ex.EpubSvgChapterSource("Kernel", markup), 0])
+            coefficients = " ".join(["1"] * 81)
+            primitive = f'<feConvolveMatrix order="9" kernelMatrix="{coefficients}"/>'
+            rendered = [original.edit_epub_structure([
+                doc_ex.EpubSvgChapterSource("Kernel", svg(primitive, transform=transform)), 0,
+            ]) for transform in ("", 'transform="scale(2)"')]
+        with doc_ex.open(rendered[0]) as book:
+            self.assertTrue(book.render_page(0, dpi=96).startswith(b"\x89PNG"))
+        with doc_ex.open(rendered[1]) as book, self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "filter work exceeds"):
+            book.render_page(0, dpi=96)
+
     def test_svg_compositor_checks_second_inputs_children_and_scaled_budget(self) -> None:
         def svg(primitives: str, attrs: str = "", rect: str = "") -> str:
             return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 48">
