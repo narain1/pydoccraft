@@ -3007,3 +3007,7 @@ The Linux x86-64 CPython 3.11 host wheel passed 865 installed tests, including 2
 ## 2026-11-25 EPUB trigonometry, interior MathML labels, affine SVG and F4V
 
 The Linux x86-64 CPython 3.11 host wheel passed 871 installed tests, including 276 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-trigonometry-interior-mathml-labels-affine-svg-and-f4v)
+
+## 2026-11-25 EPUB exponential CSS, MathML operand carets, separated SVG and AV1
+
+The Linux x86-64 CPython 3.11 host wheel passed 877 installed tests, including 282 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-exponential-css-mathml-operand-carets-separated-svg-and-av1)
