@@ -2931,3 +2931,7 @@ The Linux x86-64 CPython 3.11.15 wheel passed 736 installed tests, including 141
 ## 2026-11-24 EPUB Linux wheel and integrated regression validation
 
 The three Rust 1.95.0 manylinux x86-64 wheels for CPython 3.11, 3.12 and 3.13 each passed 749 installed tests, including 154 EPUB tests. The default and Python-free Rust suites, Node preview, public typing, binding and license audits, W3C EPUB samples and EPUBCheck all passed. The upstream engine and shared backend revisions are unchanged. The macOS and Windows matrix remains open. [Detailed EPUB wheel and test evidence](../epub-support/validation.md#2026-11-24-integrated-epub-typography-equations-media-and-navigation)
+
+## 2026-11-24 EPUB filter, media, MathML and navigation regression validation
+
+The Linux x86-64 CPython 3.11 host wheel passed 757 installed tests including 162 EPUB tests. The locked Rust suites, Node, public typing, four W3C EPUB books, two EPUBCheck documents, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-24-integrated-svg-filter-chains-mathml-sizing-spatial-fragments-and-ncx-editing)
