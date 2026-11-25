@@ -39,33 +39,44 @@ pub(super) fn inherit_areas(
     source: &GridTemplateAreas<String>,
     details: &DetailedGridInfo,
     item: &DetailedGridItemsInfo,
-    columns: &Axis,
-    rows: &Axis,
+    axes: &[Option<Axis>; 2],
     reverse_columns: bool,
 ) -> Result<Option<GridTemplateAreas<String>>, EngineError> {
-    let intersect = |area: Range<u16>, span: Range<u16>, leading: u16, reverse: bool| {
-        let leading = usize::from(leading);
-        let span = usize::from(span.start)..usize::from(span.end);
-        let first = (usize::from(area.start) + leading).max(span.start);
-        let last = (usize::from(area.end) + leading).min(span.end);
-        (first < last).then(|| {
-            // The measured item uses full grid lines, including implicit
-            // tracks. Return one-based lines within the bounded child span.
-            if reverse {
-                ((span.end - last + 1) as u16, (span.end - first + 1) as u16)
-            } else {
-                (
-                    (first - span.start + 1) as u16,
-                    (last - span.start + 1) as u16,
-                )
+    let [columns, rows] = axes;
+    let project =
+        |inherited: bool, area: Range<u16>, span: Range<u16>, leading: u16, reverse: bool| {
+            if !inherited || area.start == 0 {
+                // Taffy's native resolver uses zero for a missing area edge. An
+                // absent axis stays absent even when a descendant inherits it.
+                return Some((0, 0));
             }
-        })
-    };
-    let line_names = |axis: &Axis| axis.names.iter().map(Vec::len).sum::<usize>();
-    let limit = (MAX_LINE_NAMES - line_names(columns).max(line_names(rows))) / 2;
+            let leading = usize::from(leading);
+            let span = usize::from(span.start)..usize::from(span.end);
+            let first = (usize::from(area.start) + leading).max(span.start);
+            let last = (usize::from(area.end) + leading).min(span.end);
+            (first < last).then(|| {
+                // The measured item uses full grid lines, including implicit
+                // tracks. Return one-based lines within the bounded child span.
+                if reverse {
+                    ((span.end - last + 1) as u16, (span.end - first + 1) as u16)
+                } else {
+                    (
+                        (first - span.start + 1) as u16,
+                        (last - span.start + 1) as u16,
+                    )
+                }
+            })
+        };
+    let [mut column_names, mut row_names] = axes.each_ref().map(|axis| {
+        axis.iter()
+            .flat_map(|axis| &axis.names)
+            .map(Vec::len)
+            .sum::<usize>()
+    });
     let mut areas = Vec::new();
     for area in &source.areas {
-        let Some((column_start, column_end)) = intersect(
+        let Some((column_start, column_end)) = project(
+            columns.is_some(),
             area.column_start..area.column_end,
             item.column_start..item.column_end,
             details.columns.negative_implicit_tracks,
@@ -73,7 +84,8 @@ pub(super) fn inherit_areas(
         ) else {
             continue;
         };
-        let Some((row_start, row_end)) = intersect(
+        let Some((row_start, row_end)) = project(
+            rows.is_some(),
             area.row_start..area.row_end,
             item.row_start..item.row_end,
             details.rows.negative_implicit_tracks,
@@ -81,7 +93,12 @@ pub(super) fn inherit_areas(
         ) else {
             continue;
         };
-        if areas.len() == limit {
+        if column_start == 0 && row_start == 0 {
+            continue;
+        }
+        column_names += usize::from(column_start != 0) * 2;
+        row_names += usize::from(row_start != 0) * 2;
+        if column_names.max(row_names) > MAX_LINE_NAMES {
             return Err(limited("EPUB CSS inherited grid line name limit"));
         }
         areas.push(GridTemplateArea {
@@ -94,10 +111,11 @@ pub(super) fn inherit_areas(
     }
     // Keep generated names in native area metadata so that they can be
     // clipped again without moving any authored names on nested subgrids.
+    let count = |axis: &Option<Axis>| axis.as_ref().map_or(0, |axis| axis.tracks.len() as u16);
     Ok((!areas.is_empty()).then_some(GridTemplateAreas {
         areas,
-        row_count: rows.tracks.len() as u16,
-        column_count: columns.tracks.len() as u16,
+        row_count: count(rows),
+        column_count: count(columns),
     }))
 }
 

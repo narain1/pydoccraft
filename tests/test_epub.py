@@ -3497,6 +3497,68 @@ class EpubTests(unittest.TestCase):
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "implicit tracks on an inherited subgrid axis"):
                 document.render_page(0, dpi=96)
 
+    def test_css_subgrid_projects_area_names_only_on_inherited_axes(self) -> None:
+        fixture = fixed_spread_fixture([("", "white", 265, 265)])
+        source = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>One inherited axis</title>
+          <meta name="viewport" content="width=265,height=265"/><style>
+          html,body,p{margin:0;font-size:9px}
+          #outer{position:absolute;left:10px;top:10px;display:grid}
+          #sub,#nested{display:grid}
+          #ink{background:#77aa55}#tail{background:#446699}#probe{background:#996644}
+          RULES</style></head><body><div id="outer"><div id="sub">
+          FIRST<p id="tail">T</p><p id="probe">Q</p></div></div></body></html>"""
+        ink = '<p id="ink"><a href="https://example.org/axis">P</a></p>'
+
+        def book(rules: str, nested: bool) -> doc_ex.Document:
+            first = f'<div id="nested">{ink}</div>' if nested else ink
+            chapter = source.replace("RULES", rules).replace("FIRST", first)
+            return doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": chapter}))
+
+        def render(document: doc_ex.Document) -> tuple[tuple[int, bytes], list[object], object]:
+            image = rgba_pixels(png_chunks(document.render_page(0, dpi=96)))
+            with doc_ex.open(document.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                self.assertTrue(image == rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))))
+                words = [pdf[0].search_for(label) for label in ("P", "T", "Q")]
+                self.assertTrue(all(words))
+                link, = pdf[0].get_links()
+                self.assertEqual(link.uri, "https://example.org/axis")
+                return image, words, link.bbox
+
+        for axis, other, long, short, alignment, template in (
+            ("column", "row", "width", "height", "align-content",
+             '". . . ." "panel panel panel ." "panel panel panel ."'),
+            ("row", "column", "height", "width", "justify-content",
+             '". panel panel" ". panel panel" ". panel panel" ". . ."'),
+        ):
+            common = (
+                f"#outer{{{long}:235px;{short}:70px;grid-template-{axis}s:44px 51px 68px 72px;"
+                f"grid-template-{other}s:10px 23px 37px;grid-template-areas:{template}}}"
+                f"#sub{{grid-{axis}:2/5;grid-{other}:2/4;{short}:60px;"
+                f"grid-template-{other}s:11px;grid-auto-{other}s:13px;{alignment}:start}}"
+                f"#ink{{grid-{other}:1}}#tail{{grid-{axis}:3;grid-{other}:-1/span 1}}"
+                f"#probe{{grid-{axis}:3}}#nested{{grid-{axis}:2/4;grid-{other}:1/4}}"
+            )
+            named = (common + f"#sub{{grid-template-{axis}s:subgrid}}"
+                     f"#ink{{grid-{axis}:panel}}#probe{{grid-{other}:panel-start/span 1}}")
+            control = (common + f"#sub{{grid-template-{axis}s:51px 68px 72px}}"
+                       f"#probe{{grid-{other}:3/span 1}}")
+            mixed = "#nested{grid-template-columns:subgrid;grid-template-rows:subgrid}"
+            exact = (f"#nested{{grid-template-{axis}s:68px 72px;grid-template-{other}s:11px 13px 13px}}"
+                     f"#ink{{grid-{axis}:1/2}}")
+            for nested, actual, reference in (
+                (False, named, control + f"#ink{{grid-{axis}:1/3}}"),
+                (True, named + mixed, control + exact),
+            ):
+                with (self.subTest(axis=axis, nested=nested), book(actual, nested) as document,
+                      book(reference, nested) as expected):
+                    self.assertTrue(render(document) == render(expected))
+
+            # A nested grid can inherit both track axes, but the original
+            # parent area still has no edges on the axis that was interrupted.
+            with book(named + mixed + f"#ink{{grid-{other}:panel-start/span 1}}", True) as document:
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "implicit tracks on an inherited subgrid axis"):
+                    document.render_page(0, dpi=96)
+
     def test_css_intrinsic_box_counts_padding_and_wraps_before_column_flex_height(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic box edges</title>
           <style>body,p{margin:0} section{width:200px;CONTAINER}

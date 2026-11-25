@@ -436,17 +436,17 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
                 },
             )?);
         }
-        let inherited_areas = match (&layout, &parent.style.grid_template_areas) {
-            ([Some(columns), Some(rows)], Some(source)) if style.grid_template_areas.is_none() => {
-                subgrid::inherit_areas(
-                    source,
-                    details,
-                    item,
-                    columns,
-                    rows,
-                    parent.style.direction.is_rtl() != style.direction.is_rtl(),
-                )?
-            }
+        let inherited_areas = match (
+            &parent.style.grid_template_areas,
+            &style.grid_template_areas,
+        ) {
+            (Some(source), None) => subgrid::inherit_areas(
+                source,
+                details,
+                item,
+                &layout,
+                parent.style.direction.is_rtl() != style.direction.is_rtl(),
+            )?,
             _ => None,
         };
 
