@@ -342,7 +342,7 @@ pub(super) fn prepare_chapter_replacements<'doc, 'edit>(
                 declarations.insert(path, xhtml_properties(root));
             }
             if navigation == Some(path) {
-                super::structure::validate_xhtml_navigation_replacement(root)?;
+                super::structure::validate_xhtml_navigation_replacement(root, path)?;
             }
             if collect_titles {
                 if let Some(title) = super::content::document_title(root) {

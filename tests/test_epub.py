@@ -17214,6 +17214,66 @@ Resume
             self.assertEqual(reopened[1].get_text(), "Unrelated edit")
             self.assertEqual(reopened.metadata["navigation"][0]["items"], [item])
 
+    def test_staged_epub3_navigation_checks_page_lists_and_landmark_destinations(self) -> None:
+        def navigation(extra: str) -> str:
+            return (
+                '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
+                '<head><title>Contents</title></head><body><nav epub:type="toc">'
+                '<ol><li><a href="#café">Introduction</a></li></ol></nav>'
+                '<p id="café">Start</p><p id="second">End</p>' + extra + '</body></html>'
+            )
+
+        def landmarks(entries: str) -> str:
+            return '<nav epub:type="landmarks"><ol>' + entries + '</ol></nav>'
+
+        entry = '<li><a epub:type="bodymatter" href="#caf%C3%A9">Start</a></li>'
+        valid = landmarks(
+            entry
+            + '<li><a epub:type="loi" href="#café">Illustrations</a></li>'
+            + '<li><a epub:type="bodymatter" href="#second">End</a></li>'
+        )
+        page_list = '<nav epub:type="page-list"><ol><li><a href="#second">2</a></li></ol></nav>'
+        inside_path = "OEBPS/one.xhtml"
+        inside = epub_fixture(chapter_one=navigation(valid + page_list))
+        with zipfile.ZipFile(io.BytesIO(inside)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'<item id="one" ', b'<item id="one" properties="nav" ',
+            )
+        inside = rewrite_epub(inside, {"OEBPS/content.opf": package})
+        outside, outside_path, _, _ = self.nonspine_navigation_fixture()
+        outside = rewrite_epub(outside, {outside_path: navigation(valid + page_list)})
+
+        for source, member, index in ((inside, inside_path, 0), (outside, outside_path, None)):
+            relative_name = Path(member).name
+            with self.subTest(member=member), doc_ex.open(source) as book:
+                def stage(markup: str) -> bytes:
+                    if index is not None:
+                        return book.edit_epub_chapters({index: markup})
+                    return book.edit_epub_structure(resources={
+                        member: doc_ex.EpubResource("application/xhtml+xml", markup.encode()),
+                    })
+
+                for extra, message in (
+                    (page_list + page_list, "multiple page lists"),
+                    (valid + valid, "multiple landmarks lists"),
+                    (landmarks(entry.replace(' epub:type="bodymatter"', "")), "landmark requires a nonblank"),
+                    (landmarks(entry.replace('epub:type="bodymatter"', 'epub:type="  "')), "landmark requires a nonblank"),
+                    (landmarks(entry.replace("#caf%C3%A9", "https://example.org/")), "landmark requires a local"),
+                    (landmarks(entry + entry.replace("#caf%C3%A9", f"./{relative_name}#café")), "duplicate landmark"),
+                    (landmarks(entry.replace("bodymatter", "toc bodymatter")
+                               + entry.replace("bodymatter", "bodymatter toc")), "duplicate landmark"),
+                ):
+                    with self.subTest(message=message), self.assertRaisesRegex(doc_ex.MalformedDocumentError, message):
+                        stage(navigation(extra))
+                self.assertEqual(book.read_epub_resource(member), navigation(valid + page_list).encode())
+
+                revised = stage(navigation(page_list + valid))
+                with doc_ex.open(revised) as reopened:
+                    groups = {group["kind"]: group["items"] for group in reopened.metadata["navigation"]}
+                    self.assertEqual([(item["path"], item["fragment"]) for item in groups["landmarks"]],
+                                     [(member, "café"), (member, "café"), (member, "second")])
+                    self.assertEqual([item["label"] for item in groups["page-list"]], ["2"])
+
     def test_structure_rejects_invalid_nonspine_navigation_edits(self) -> None:
         source, nav_path, nav, _ = self.nonspine_navigation_fixture()
         with doc_ex.open(source) as book:

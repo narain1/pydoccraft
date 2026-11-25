@@ -20,29 +20,47 @@ pub(super) struct Chapter {
     pub inserted: bool,
 }
 
-pub(super) fn xhtml_replacement_xml(data: &[u8]) -> Result<Document<'_>, EngineError> {
+pub(super) fn xhtml_replacement_xml<'a>(
+    data: &'a [u8],
+    path: &str,
+) -> Result<Document<'a>, EngineError> {
     let xml = parse_xml(data)?;
-    validate_xhtml_replacement(xml.root_element())?;
+    validate_xhtml_replacement(xml.root_element(), path)?;
     Ok(xml)
 }
 
-pub(in crate::epub) fn validate_xhtml_replacement(root: Node<'_, '_>) -> Result<(), EngineError> {
+pub(in crate::epub) fn validate_xhtml_replacement(
+    root: Node<'_, '_>,
+    path: &str,
+) -> Result<(), EngineError> {
     if !name(root, XHTML, "html") || child(root, XHTML, "body").is_none() {
         return Err(invalid(
             "replacement EPUB navigation requires an XHTML document body",
         ));
     }
-    let mut has_toc = false;
+    let mut seen = HashSet::new();
     for nav in root.descendants().filter(|node| name(*node, XHTML, "nav")) {
         let Some(kind) = nav.attribute((EPUB, "type")) else {
             continue;
         };
-        if kind.split_ascii_whitespace().any(|kind| kind == "toc")
-            && std::mem::replace(&mut has_toc, true)
-        {
-            return Err(invalid(
+        let kinds = kind.split_ascii_whitespace();
+        for (standard, error) in [
+            (
+                "toc",
                 "replacement EPUB navigation requires one nonempty table of contents",
-            ));
+            ),
+            (
+                "page-list",
+                "replacement EPUB navigation has multiple page lists",
+            ),
+            (
+                "landmarks",
+                "replacement EPUB navigation has multiple landmarks lists",
+            ),
+        ] {
+            if kinds.clone().any(|kind| kind == standard) && !seen.insert(standard) {
+                return Err(invalid(error));
+            }
         }
         let mut children = nav.children().filter(Node::is_element);
         let mut list = children.next();
@@ -59,11 +77,51 @@ pub(in crate::epub) fn validate_xhtml_replacement(root: Node<'_, '_>) -> Result<
             .filter(|node| name(*node, XHTML, "ol") && children.next().is_none())
             .ok_or_else(|| invalid("replacement EPUB navigation requires one ordered list"))?;
         validate_xhtml_list(list)?;
+        if kinds.clone().any(|kind| kind == "landmarks") {
+            validate_landmarks(list, path)?;
+        }
     }
-    if !has_toc {
+    if !seen.contains("toc") {
         return Err(invalid(
             "replacement EPUB navigation requires one nonempty table of contents",
         ));
+    }
+    Ok(())
+}
+
+fn validate_landmarks(list: Node<'_, '_>, path: &str) -> Result<(), EngineError> {
+    use super::super::{charge, navigation_fragment, NAV_BYTES, NAV_ITEMS};
+
+    let mut seen = HashSet::new();
+    let mut bytes = 0;
+    let mut count = 0;
+    for anchor in list.descendants().filter(|node| name(*node, XHTML, "a")) {
+        let kinds = anchor
+            .attribute((EPUB, "type"))
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| invalid("replacement EPUB landmark requires a nonblank epub:type"))?
+            .split_ascii_whitespace();
+        let href = anchor
+            .attribute("href")
+            .filter(|href| !href.trim().is_empty() && !external(href))
+            .ok_or_else(|| invalid("replacement EPUB landmark requires a local destination"))?;
+        let destination = resolve(path, href)?;
+        let fragment = navigation_fragment(href)?.unwrap_or_default();
+        charge(&mut count, 1, NAV_ITEMS, "navigation item budget exceeded")?;
+        charge(
+            &mut bytes,
+            128 + destination.len() + fragment.len() + kinds.clone().count() * size_of::<&str>(),
+            NAV_BYTES,
+            "navigation byte budget exceeded",
+        )?;
+        let mut kinds: Vec<_> = kinds.collect();
+        kinds.sort_unstable();
+        kinds.dedup();
+        if !seen.insert((kinds, destination, fragment)) {
+            return Err(invalid(
+                "replacement EPUB navigation has a duplicate landmark destination",
+            ));
+        }
     }
     Ok(())
 }

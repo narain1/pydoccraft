@@ -1127,6 +1127,7 @@ fn ncx_items(
 }
 
 const NAV_BYTES: usize = 4 * METADATA_BYTES;
+const NAV_ITEMS: usize = 10_000;
 
 #[derive(Default)]
 struct NavBudget {
@@ -1224,6 +1225,12 @@ impl NavigationLabel {
     }
 }
 
+fn navigation_fragment(href: &str) -> Result<Option<String>, EngineError> {
+    href.split_once('#')
+        .map(|(_, fragment)| percent_decode(fragment))
+        .transpose()
+}
+
 fn nav_target(
     label: Node<'_, '_>,
     href: Option<&str>,
@@ -1247,7 +1254,7 @@ fn nav_target(
     charge(
         &mut budget.count,
         1,
-        10_000,
+        NAV_ITEMS,
         "navigation item budget exceeded",
     )?;
     charge(
@@ -1256,13 +1263,11 @@ fn nav_target(
         NAV_BYTES,
         "navigation byte budget exceeded",
     )?;
-    let fragment = if path.is_some() {
-        href.and_then(|href| href.split_once('#'))
-            .map(|(_, fragment)| percent_decode(fragment))
-            .transpose()?
-    } else {
-        None
-    };
+    let fragment = href
+        .filter(|_| path.is_some())
+        .map(navigation_fragment)
+        .transpose()?
+        .flatten();
     let label = if xhtml { label.as_str() } else { label.trim() };
     Ok(json!({"label": label, "href": href, "path": path, "fragment": fragment}))
 }

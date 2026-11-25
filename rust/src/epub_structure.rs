@@ -300,7 +300,7 @@ pub(crate) fn update_structure<'a>(
         if expected == "application/x-dtbncx+xml" {
             toc::ncx_replacement_xml(data)?;
         } else {
-            toc::xhtml_replacement_xml(data)?;
+            toc::xhtml_replacement_xml(data, path)?;
         }
         plan.files.insert(path.clone(), Cow::Borrowed(data));
     }
@@ -592,12 +592,11 @@ pub(crate) fn update_structure<'a>(
             .files
             .get(path)
             .ok_or_else(|| invalid("missing staged EPUB navigation"))?;
-        let parse = if epub3_nav {
-            toc::xhtml_replacement_xml
+        let xml = if epub3_nav {
+            toc::xhtml_replacement_xml(data, path)?
         } else {
-            toc::ncx_replacement_xml
+            toc::ncx_replacement_xml(data)?
         };
-        let xml = parse(data)?;
         if epub3_nav {
             let properties = editor::xhtml_properties(xml.root_element());
             editor::chapter_property_edits(
