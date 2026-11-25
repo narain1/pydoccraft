@@ -98,6 +98,7 @@
 - [x] Match bounded sibling positions in either direction, including An+B, namespace-aware types, and filtered child selectors with the correct specificity.
 - [x] Render bounded native diffuse and specular distant lighting. Verify single-source PDF text and links when an original-alpha mask controls the lit result.
 - [x] Render bounded point lighting on flat surfaces under uniform device scaling and raised surfaces at unit scale. Preserve proven original-alpha PDF attribution.
+- [x] Render bounded spot lighting with a finite aim, focus and optional cone. Preserve proven PDF geometry and omit source text hidden by the specular cone.
 - [ ] Add SVG filter primitives and retain PDF text and links for multi-source, non-axis-aligned or ambiguous spatial filter results.
 - [ ] Extend mixed-font SVG text fallback to spacing across ambiguous clusters, length owners separated by positioned or independently painted wrappers and glyph positioning.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.

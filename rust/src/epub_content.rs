@@ -1110,7 +1110,23 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                 None if filter_primitive && matches!(key, "in" | "result") => true,
                 None if tag == "feMergeNode" && key == "in" => true,
                 None if tag == "feDistantLight" && matches!(key, "azimuth" | "elevation") => true,
-                None if tag == "fePointLight" && matches!(key, "x" | "y" | "z") => true,
+                None if matches!(tag, "fePointLight" | "feSpotLight")
+                    && matches!(key, "x" | "y" | "z") =>
+                {
+                    true
+                }
+                None if tag == "feSpotLight"
+                    && matches!(
+                        key,
+                        "pointsAtX"
+                            | "pointsAtY"
+                            | "pointsAtZ"
+                            | "specularExponent"
+                            | "limitingConeAngle"
+                    ) =>
+                {
+                    true
+                }
                 None if super::svg::effects::is_lighting(tag)
                     && matches!(key, "surfaceScale" | "kernelUnitLength") =>
                 {

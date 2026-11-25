@@ -77,7 +77,7 @@ pub(in crate::epub) fn is_lighting(tag: &str) -> bool {
 }
 
 pub(in crate::epub) fn is_light_source(tag: &str) -> bool {
-    matches!(tag, "feDistantLight" | "fePointLight")
+    matches!(tag, "feDistantLight" | "fePointLight" | "feSpotLight")
 }
 
 pub(in crate::epub) fn paint_properties(tag: &str) -> &'static [&'static str] {

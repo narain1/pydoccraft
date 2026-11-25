@@ -1564,3 +1564,11 @@ The installed Linux x86-64 CPython 3.11.15 release wheel from `f16d2c191d` passe
 Four released W3C EPUB books passed with 28 chapter previews and four reopened fixed-layout PDF pages. Two independently authored fixed-layout EPUBs with automatic grid repetition, gap shorthands, stepped CSS geometry, inline bidi isolation and labeled MathML widths passed EPUBCheck 5.4.0 with zero fatals, errors, warnings or informational messages. Rust 1.95 formatting and locked release all-target Clippy with warnings denied passed. Rust passed 479 unit and 7 integration tests with default features and 401 unit and 8 integration tests without Python. Node 22.22.1 passed 17 tests.
 
 Both lockfiles, the dependency inventory and the upstream revisions match the preceding checkpoint. The audit reviewed 349 core packages and binding licenses. All wheel attribution files matched their source copies. The Linux extension uses system C and GCC libraries. The public typing, documentation, support evidence and roadmap checks passed. All owned Cargo output, generated wheels and EPUBs, installed test environments, downloaded samples and the Node addon were pruned.
+
+## SVG spot lighting and cone clipping
+
+The installed baseline rejected spot light markup. Standalone and inline fixed-layout EPUBs now match independently calculated samples for an oblique diffuse and specular spot light under translation and uniform scaling at 96 and 144 DPI. Both the bounded cone and omitted cone match the color calculation with native 8-bit beam rounding. Sampled channels stay within two levels of the continuous result. Reopened PDF pixels match the previews.
+
+A specular cone composited inside SourceAlpha retains the illuminated Unicode label, its search rectangle, link and authored tspan destination. An off-cone label in the same text leaf disappears from PDF text and annotations. The test retains the refusal of direct generated-light attribution and rejects an invalid cone, focus exponent, coincident aim, nonfinite positions and an excessive transformed aim.
+
+The Linux CPython 3.11 release wheel passed 64 SVG-related EPUB tests. Rust 1.95 formatting, locked release all-target Clippy with warnings denied, and the task roadmap check passed. [SVG spot lighting](https://www.w3.org/TR/SVG11/filters.html#feSpotLightElement)

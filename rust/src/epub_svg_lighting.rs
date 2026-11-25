@@ -15,6 +15,7 @@ use crate::{
 };
 
 const NUMBER: &str = "invalid SVG lighting number";
+const MIN_DEVICE_DISTANCE: f32 = 1.0 / 256.0;
 
 pub(super) fn validate(node: Node<'_, '_>) -> Result<(), EngineError> {
     let mut sources = node.children().filter(Node::is_element);
@@ -24,7 +25,7 @@ pub(super) fn validate(node: Node<'_, '_>) -> Result<(), EngineError> {
         || sources.next().is_some()
     {
         return Err(invalid(
-            "SVG lighting requires one distant light or point light",
+            "SVG lighting requires one distant light, point light or spot light",
         ));
     }
     if node.has_attribute("kernelUnitLength") {
@@ -67,10 +68,28 @@ pub(super) fn validate_source(node: Node<'_, '_>) -> Result<(), EngineError> {
     {
         return Err(invalid("misplaced SVG light source"));
     }
-    let (coordinates, max): (&[_], _) = if node.has_tag_name("fePointLight") {
-        (&["x", "y", "z"], MAX_OFFSET)
-    } else {
-        (&["azimuth", "elevation"], 360.0)
+    let (coordinates, max): (&[_], _) = match node.tag_name().name() {
+        "feSpotLight" => {
+            if let Some(value) = node.attribute("specularExponent") {
+                if !(0.0..=128.0).contains(&finite_number(value, NUMBER)?) {
+                    return Err(invalid("SVG spot exponent must be between 0 and 128"));
+                }
+            }
+            if let Some(value) = node.attribute("limitingConeAngle") {
+                let angle = finite_number(value, NUMBER)?;
+                if angle <= 0.0 || angle > 90.0 {
+                    return Err(invalid(
+                        "SVG spot cone angle must be positive and at most 90 degrees",
+                    ));
+                }
+            }
+            (
+                &["x", "y", "z", "pointsAtX", "pointsAtY", "pointsAtZ"],
+                MAX_OFFSET,
+            )
+        }
+        "fePointLight" => (&["x", "y", "z"], MAX_OFFSET),
+        _ => (&["azimuth", "elevation"], 360.0),
     };
     for &property in coordinates {
         if let Some(value) = node.attribute(property) {
@@ -136,39 +155,67 @@ pub(super) fn work(
         Kind::SpecularLighting(light) => (light.light_source(), light.surface_scale(), 32),
         _ => return Err(invalid("invalid SVG lighting primitive")),
     };
-    if let LightSource::PointLight(point) = source {
-        if device.sx != device.sy {
-            return Err(unsupported(
-                "SVG point lighting requires uniform device scale",
-            ));
-        }
-        // Native resvg scales the light's z coordinate with the device,
-        // while surface heights remain in the original units.
-        if surface != 0.0 && device.sx != 1.0 {
-            return Err(unsupported(
-                "SVG raised point lighting requires unit device scale",
-            ));
-        }
-        if (point.z - surface.max(0.0)) * device.sx < 1.0 / 256.0 {
-            return Err(unsupported(
-                "SVG point light height must be above the sampled surface",
-            ));
-        }
-        let position = [
-            point.x * device.sx + device.tx,
-            point.y * device.sy + device.ty,
-            point.z * device.sx,
-        ];
-        if position
-            .iter()
-            .any(|v| !v.is_finite() || v.abs() > MAX_OFFSET)
-        {
-            return Err(limited(
-                "SVG point lighting exceeds its device position budget",
-            ));
-        }
-        // A point light normalizes a new light vector at every sample.
-        return Ok(passes + 8);
+    let (position, target, kind, spatial_work) = match source {
+        LightSource::DistantLight(_) => return Ok(passes),
+        LightSource::PointLight(point) => ([point.x, point.y, point.z], None, "point", 8),
+        LightSource::SpotLight(spot) => (
+            [spot.x, spot.y, spot.z],
+            Some([spot.points_at_x, spot.points_at_y, spot.points_at_z]),
+            "spot",
+            24,
+        ),
+    };
+    if device.sx != device.sy {
+        return Err(unsupported(&format!(
+            "SVG {kind} lighting requires uniform device scale"
+        )));
     }
-    Ok(passes)
+    // Native resvg scales light depth with the device, while sampled surface
+    // heights remain in the original units.
+    if surface != 0.0 && device.sx != 1.0 {
+        return Err(unsupported(&format!(
+            "SVG raised {kind} lighting requires unit device scale"
+        )));
+    }
+    if (position[2] - surface.max(0.0)) * device.sx < MIN_DEVICE_DISTANCE {
+        return Err(unsupported(&format!(
+            "SVG {kind} light height must be above the sampled surface"
+        )));
+    }
+    let position = device_position(position, device, kind)?;
+    if let Some(target) = target {
+        let target = device_position(target, device, kind)?;
+        let length_squared = position
+            .into_iter()
+            .zip(target)
+            .map(|(light, aim)| (light - aim).powi(2))
+            .sum::<f32>();
+        if length_squared < MIN_DEVICE_DISTANCE.powi(2) {
+            return Err(invalid("SVG spot light requires a nonzero direction"));
+        }
+    }
+    // Positional lights normalize a vector per sample. A spot light also
+    // evaluates the cone and beam exponent before shading.
+    Ok(passes + spatial_work)
+}
+
+fn device_position(
+    [x, y, z]: [f32; 3],
+    device: Transform,
+    kind: &str,
+) -> Result<[f32; 3], EngineError> {
+    let position = [
+        x * device.sx + device.tx,
+        y * device.sy + device.ty,
+        z * device.sx,
+    ];
+    if position
+        .iter()
+        .any(|v| !v.is_finite() || v.abs() > MAX_OFFSET)
+    {
+        return Err(limited(&format!(
+            "SVG {kind} lighting exceeds its device position budget"
+        )));
+    }
+    Ok(position)
 }

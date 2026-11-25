@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import math
 import re
 import struct
 from pathlib import Path
@@ -16478,7 +16479,7 @@ Resume
                     else:
                         book.render_page(0, dpi=96)
 
-    def test_svg_point_lighting_matches_transformed_planar_shading_and_masked_pdf(self) -> None:
+    def test_svg_positional_lighting_matches_transformed_planar_shading_and_masked_pdf(self) -> None:
         fixture = fixed_spread_fixture([("", "white", 160, 112)])
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Point light</title>
           <meta name="viewport" content="width=160,height=112"/><style>body {margin:0}</style>
@@ -16506,13 +16507,19 @@ Resume
                 return rewrite_epub(fixture, {"OEBPS/s0.xhtml": chapter.replace("SVGCONTENT", svg)})
             return rewrite_epub(fixture, {"OEBPS/content.opf": package, "OEBPS/s0.svg": svg})
 
-        def light(kind: str, color: str, coefficient: str, surface: int = 0) -> str:
+        point_emitter = '<fePointLight x="48" y="30" z="24"/>'
+        spot_emitter = (
+            '<feSpotLight x="48" y="30" z="24" pointsAtX="74" pointsAtY="51" pointsAtZ="0" '
+            'specularExponent="4" limitingConeAngle="28"/>'
+        )
+
+        def light(kind: str, color: str, coefficient: str, surface: int = 0, emitter: str = point_emitter) -> str:
             mode = f'{kind.lower()}Constant="{coefficient}"'
             if kind == "Specular":
                 mode += ' specularExponent="6"'
             return (f'<fe{kind}Lighting in="SourceAlpha" result="lit" lighting-color="{color}" '
                     f'surfaceScale="{surface}" {mode}>'
-                    f'<fePointLight x="48" y="30" z="24"/></fe{kind}Lighting>')
+                    f'{emitter}</fe{kind}Lighting>')
 
         def color_at(plane: tuple[int, bytes], x: int, y: int) -> tuple[int, ...]:
             width, pixels = plane
@@ -16587,6 +16594,78 @@ Resume
                         self.assertEqual(tuple(map(float, target)),
                                          (min(x for x, _ in ink) * 72 / dpi, 84 - min(y for _, y in ink) * 72 / dpi))
 
+        aim = (32.5, 26.25, -30.0)
+
+        cone_cosine = math.cos(math.radians(28))
+
+        for inline in (False, True):
+            for dpi in (96, 144):
+                for kind, raw, color, constant in (
+                    ("Diffuse", (100, 180, 220), "#64b4dc", ".75"),
+                    ("Specular", (200, 100, 50), "#c86432", ".65"),
+                ):
+                    for cone in (True, False):
+                        with self.subTest(inline=inline, dpi=dpi, kind=kind, cone=cone):
+                            emitter = spot_emitter if cone else spot_emitter.replace(' limitingConeAngle="28"', "")
+                            source = markup(light(kind, color, constant, emitter=emitter))
+                            with doc_ex.open(publication(source, inline)) as book:
+                                preview = rgba_pixels(png_chunks(book.render_page(0, dpi=dpi)))
+                                for x, y in ((24, 26), (72, 46), (90, 70), (104, 72), (122, 90)):
+                                    ray = (x - 72, y - 45.5, -30.0)
+                                    projection = sum(a * b for a, b in zip(ray, aim, strict=True))
+                                    cosine = projection / (math.hypot(*ray) * math.hypot(*aim))
+                                    beam = cosine**4 if cosine > (cone_cosine if cone else 0) else 0
+                                    normal = 30 / math.hypot(*ray)
+                                    specular = kind == "Specular"
+                                    shading = float(constant) * (((1 + normal) / 2)**3 if specular else normal)
+                                    beam_channels = tuple(int(channel * beam + .5) for channel in raw)
+                                    pixel = color_at(preview, x * dpi // 96, y * dpi // 96)
+                                    self.assertEqual(pixel, display_channels(beam_channels, shading, specular=specular))
+                                    ideal = display_channels(raw, beam * shading, specular=specular)
+                                    self.assertTrue(all(abs(actual - expected) <= 2
+                                                        for actual, expected in zip(pixel, ideal, strict=True)))
+                                with doc_ex.open(book.export_epub_fixed_pdf(dpi=dpi)) as pdf:
+                                    self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=dpi))), preview)
+                                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "filter.*geometry"):
+                                    book.export_epub_fixed_pdf(dpi=dpi, searchable=True)
+
+                masked_emitter = (
+                    '<feSpotLight x="43" y="49" z="30" pointsAtX="43" pointsAtY="49" '
+                    'pointsAtZ="0" specularExponent="1" limitingConeAngle="35"/>'
+                )
+                bright = '<tspan x="28" id="ink"><a href="https://example.org/ink">Café</a></tspan>'
+                dark = '<tspan x="84" id="off"><a href="https://example.org/off">Off</a></tspan>'
+                printed = '<text y="55" font-size="15">LABELS</text>'
+                authored_text = printed.replace("LABELS", bright)
+                masked_text = printed.replace("LABELS", bright + dark)
+                effect = light("Specular", "blue", ".9", emitter=masked_emitter) + mask
+                with (
+                    doc_ex.open(publication(markup(effect, masked_text, after=marker), inline)) as book,
+                    doc_ex.open(publication(markup("", authored_text, after=marker), inline)) as manual,
+                ):
+                    preview = rgba_pixels(png_chunks(book.render_page(0, dpi=dpi)))
+                    with (
+                        doc_ex.open(book.export_epub_fixed_pdf(dpi=dpi, searchable=True)) as pdf,
+                        doc_ex.open(manual.export_epub_fixed_pdf(dpi=dpi, searchable=True)) as expected,
+                    ):
+                        self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=dpi))), preview)
+                        self.assertEqual(pdf[0].get_text(), "Café")
+                        self.assertEqual(pdf[0].search_for("Café"), expected[0].search_for("Café"))
+                        self.assertEqual(pdf[0].search_for("Off"), [])
+                        actual_links = {entry.uri: entry for entry in pdf[0].get_links()}
+                        expected_links = {entry.uri: entry for entry in expected[0].get_links()}
+                        self.assertEqual(set(actual_links), {"#page=1", "https://example.org/ink"})
+                        for uri in actual_links:
+                            for edge, expected_edge in zip(actual_links[uri].bbox, expected_links[uri].bbox, strict=True):
+                                self.assertAlmostEqual(edge, expected_edge, delta=72 / dpi)
+                        destinations = []
+                        for document in (pdf, expected):
+                            with document.edit() as edit:
+                                target, = re.findall(rb"/XYZ[ ]+([1-9][0-9.]*)[ ]+([0-9.]+)[ ]+null",
+                                                     edit.to_bytes(object_streams=False))
+                            destinations.append(tuple(map(float, target)))
+                        self.assertEqual(destinations[0], destinations[1])
+
         raised = markup(light("Diffuse", "white", ".75", surface=6),
                         '<rect x="36" y="24" width="36" height="24"/>', "translate(12 8)")
         with doc_ex.open(publication(raised, False)) as book:
@@ -16598,7 +16677,21 @@ Resume
                 book.render_page(0, dpi=144)
 
         point = markup(light("Diffuse", "blue", ".8"))
+        spot = markup(light("Diffuse", "blue", ".8", emitter=spot_emitter))
         for svg, reason, error in (
+            (spot.replace('pointsAtX="74" pointsAtY="51" pointsAtZ="0"',
+                          'pointsAtX="48" pointsAtY="30" pointsAtZ="24"'),
+             "spot light requires a nonzero direction", doc_ex.MalformedDocumentError),
+            (spot.replace('limitingConeAngle="28"', 'limitingConeAngle="0"'),
+             "cone angle must be positive and at most 90", doc_ex.MalformedDocumentError),
+            (spot.replace('limitingConeAngle="28"', 'limitingConeAngle="91"'),
+             "cone angle must be positive and at most 90", doc_ex.MalformedDocumentError),
+            (spot.replace('specularExponent="4"', 'specularExponent="-1"'),
+             "spot exponent must be between 0 and 128", doc_ex.MalformedDocumentError),
+            (spot.replace('pointsAtZ="0"', 'pointsAtZ="NaN"'), "invalid SVG lighting number",
+             doc_ex.MalformedDocumentError),
+            (spot.replace('pointsAtX="74"', 'pointsAtX="15000"'), "exceeds its device position budget",
+             doc_ex.UnsafeArchiveError),
             (point.replace("scale(1.25)", "scale(1.25 1)"), "requires uniform device scale",
              doc_ex.UnsupportedFormatError),
             (point.replace('z="24"', 'z="0"'), "light height must be above", doc_ex.UnsupportedFormatError),
