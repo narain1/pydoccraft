@@ -452,12 +452,12 @@ impl<'a> Output<'a> {
             }
             let interactive =
                 self.svg_images.is_some() && image.metadata.contains_key("epub_svg_inline");
-            let (tree, geometry) =
+            let (tree, navigation) =
                 super::svg::embedded_with_links(&bytes, base, archive, interactive)?;
             let width = tree.size().width();
             let height = tree.size().height();
             let media =
-                self.rasterize_svg(&tree, width * 0.75, height * 0.75, geometry.map(Arc::new))?;
+                self.rasterize_svg(&tree, width * 0.75, height * 0.75, navigation.as_ref())?;
             return Ok(RasterImage {
                 media,
                 width,
@@ -562,7 +562,7 @@ impl<'a> Output<'a> {
         tree: &resvg::usvg::Tree,
         width: f32,
         height: f32,
-        geometry: Option<Arc<super::svg::LinkGeometry>>,
+        navigation: Option<&super::svg::SvgNavigation>,
     ) -> Result<String, EngineError> {
         let scale = self.raster_dpi / 72.0;
         let pixels = [width, height].map(|size| (f64::from(size) * scale).ceil().max(1.0) as u32);
@@ -570,6 +570,14 @@ impl<'a> Output<'a> {
         let bytes = super::svg::transparent_png(tree, pixels[0], pixels[1])?;
         let media = self.add_preview_media(bytes, "png");
         if let Some(capture) = self.svg_images.as_mut() {
+            let density = [
+                pixels[0] as f32 / tree.size().width(),
+                pixels[1] as f32 / tree.size().height(),
+            ];
+            let geometry = navigation
+                .map(|navigation| navigation.collect(tree, density, pixels))
+                .transpose()?
+                .map(Arc::new);
             capture.record(&media, tree, [width, height], pixels, geometry)?;
         }
         Ok(media)

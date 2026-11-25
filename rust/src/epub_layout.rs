@@ -461,7 +461,7 @@ enum Picture {
     Frame(crate::model::ImagePayload, [f32; 2]),
     Svg {
         tree: Box<resvg::usvg::Tree>,
-        geometry: Option<Arc<super::svg::LinkGeometry>>,
+        navigation: Option<Box<super::svg::SvgNavigation>>,
     },
 }
 
@@ -478,8 +478,8 @@ impl Picture {
         match self {
             Self::Raster(image) => Ok(image.media.clone()),
             Self::Frame(source, _) => output.rasterize_frame(source, [rect.w, rect.h]),
-            Self::Svg { tree, geometry } => {
-                output.rasterize_svg(tree, rect.w, rect.h, geometry.clone())
+            Self::Svg { tree, navigation } => {
+                output.rasterize_svg(tree, rect.w, rect.h, navigation.as_deref())
             }
         }
     }
@@ -542,7 +542,7 @@ impl<'book> Layout<'book> {
                     let base = super::svg::image_base(&source)?;
                     let interactive = self.output.svg_images.is_some()
                         && source.metadata.contains_key("epub_svg_inline");
-                    let (tree, geometry) = super::svg::embedded_with_links(
+                    let (tree, navigation) = super::svg::embedded_with_links(
                         &image_bytes(&source)?,
                         base,
                         context.book,
@@ -550,7 +550,7 @@ impl<'book> Layout<'book> {
                     )?;
                     Picture::Svg {
                         tree: Box::new(tree),
-                        geometry: geometry.map(Arc::new),
+                        navigation: navigation.map(Box::new),
                     }
                 } else {
                     Picture::Raster(self.output.load_image(&source)?)

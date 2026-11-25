@@ -943,3 +943,9 @@ The installed regression verifies inherited foreground color, weight, font style
 The malformed-input regression rejects same-property overlaps, frozen fills, repeats, unsupported style properties, sets on sequential targets, region and out-of-line animation, and more than 32 sets on one element. Independent installed-wheel probes reject an 8,454-byte inherited-style workload at the style evaluation limit and a 5,049-byte track at the 10,000 projected fragments limit.
 
 The isolated CPython 3.11.15 Linux x86-64 release wheel passed all 186 installed EPUB tests. It measured 25,534,034 bytes with a 59,471,544-byte native extension. Its SHA-256 is `2d7b800f01e3ce093aba6f7711cf73322331b08c4d1e424590b9681e31e2f52c`. Rust formatting, warnings-denied locked release Clippy, and public typing passed. The lockfiles match the base commit, and the three packaged attribution files match their source copies.
+
+## 2026-11-24 SVG filter translation in fixed-layout PDF
+
+The installed regression covers standalone and inline SVG exported at 96 and 144 DPI. It checks both offset steps against explicit translation controls, including independent device rounding and a discarded blur branch. A clip removes a translated label that would otherwise be in the viewport. Search retains the original Unicode glyphs for Café, a clipped reused link moves from outside the viewport into view, and a rotated graphic supplies matching local link and bookmark destinations. The PDF reopens with exact preview pixels and the original EPUB resource bytes survive. Stacked filter layers still return an explicit geometry error.
+
+The installed offset regression, Rust 1.95 formatting and locked release all-target Clippy passed.

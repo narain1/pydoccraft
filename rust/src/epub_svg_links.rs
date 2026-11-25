@@ -75,170 +75,42 @@ impl<'a> Links<'a> {
         result
     }
 
-    pub(super) fn collect(
+    pub(super) fn prepare(
         &self,
         source: &[u8],
         tree: &usvg::Tree,
         options: &usvg::Options<'_>,
         has_uses: bool,
-        aliases: &super::use_fonts::Aliases,
-    ) -> Result<Geometry, EngineError> {
-        let capture = effects::CaptureGeometry::new(tree);
-        let mut geometry = Geometry::default();
+        aliases: super::use_fonts::Aliases,
+    ) -> Result<Navigation, EngineError> {
         let clip = Rect::new(0.0, 0.0, tree.size().width(), tree.size().height());
-        let marked = self.mark_text(source, tree, clip, aliases)?;
-        let marked_tree = marked
-            .as_ref()
-            .map(|marked| native_tree(marked.source.as_bytes(), options, has_uses))
-            .transpose()?;
-        let mut text_targets = HashMap::<_, VecDeque<_>>::new();
-        if let Some(marked_tree) = &marked_tree {
-            visit_painted_svg(marked_tree, clip, None, |paint, _, _| {
-                if let usvg::Node::Text(text) = paint.node {
-                    // Instance expansion can discard IDs. Identical keys retain paint order.
-                    text_targets
-                        .entry(text_key(text))
-                        .or_default()
-                        .push_back(text.as_ref());
-                }
-                Ok(())
-            })?;
-        }
-        let mut metrics = HashMap::new();
-        let synthetic_ids: HashSet<&str> =
-            self.generated_ids.values().map(String::as_str).collect();
-        let mut coverage = Coverage::new(tree, [1.0; 2]);
-        let mut instantiated = if has_uses {
-            object_links::recover(self, source, tree, options, aliases, &synthetic_ids)?
+        let (marked_tree, text_owners) =
+            if let Some(marked) = self.mark_text(source, tree, clip, &aliases)? {
+                (
+                    Some(native_tree(marked.source.as_bytes(), options, has_uses)?),
+                    marked.owners,
+                )
+            } else {
+                (None, HashMap::new())
+            };
+        let synthetic: HashSet<&str> = self.generated_ids.values().map(String::as_str).collect();
+        let instantiated = if has_uses {
+            object_links::recover(self, source, tree, options, &aliases, &synthetic)?
         } else {
             object_links::ByNode::new()
         };
-        let mut instance_anchors = Geometry::default();
-        visit_painted_svg(tree, clip, Some(&capture), |paint, clip, effects| {
-            let node = paint.node;
-            if let Some(claims) = instantiated.remove(&std::ptr::from_ref(node)) {
-                if paint.unproven_geometry {
-                    for claim in claims {
-                        if claim.href.is_some() {
-                            return Err(effects::geometry_error());
-                        }
-                        if let Some(id) = claim.id {
-                            geometry.block_anchor(&id)?;
-                        }
-                    }
-                } else if let Some(rect) = node.abs_stroke_bounding_box() {
-                    if let Some(rect) = coverage.refine(
-                        paint,
-                        effects,
-                        actual_rect(rect),
-                        clip,
-                        Target::PaintedObject,
-                    )? {
-                        for claim in claims {
-                            if let Some(id) = claim
-                                .id
-                                .as_deref()
-                                .filter(|id| !instance_anchors.anchors.contains_key(*id))
-                            {
-                                instance_anchors.anchor(id, rect, clip)?;
-                            }
-                            if let Some(href) = claim.href {
-                                geometry.link(rect, clip, href.into())?;
-                            }
-                        }
-                    }
-                }
-            }
-            let id = authored_id(aliases, node.id());
-            if !id.is_empty() && !synthetic_ids.contains(id) {
-                if paint.unproven_geometry {
-                    geometry.block_anchor(id)?;
-                } else if let Some(rect) = node.abs_bounding_box() {
-                    if let Some(rect) =
-                        coverage.refine(paint, effects, actual_rect(rect), clip, Target::Object)?
-                    {
-                        geometry.anchor(id, rect, clip)?;
-                    }
-                }
-            }
-            if let Some(href) = self.objects.get(id) {
-                if paint.unproven_geometry {
-                    return Err(effects::geometry_error());
-                }
-                if let Some(rect) = node.abs_stroke_bounding_box() {
-                    if let Some(rect) =
-                        coverage.refine(paint, effects, actual_rect(rect), clip, Target::Object)?
-                    {
-                        geometry.link(rect, clip, (*href).into())?;
-                    }
-                }
-            }
-            if let (usvg::Node::Text(text), Some(marked)) = (node, &marked) {
-                if let Some(probe) = text_targets
-                    .get_mut(&text_key(text))
-                    .and_then(VecDeque::pop_front)
-                {
-                    let assignment = probe
-                        .layouted()
-                        .iter()
-                        .map(|span| {
-                            color_index(span.fill.as_ref())
-                                .and_then(|index| marked.owners.get(&index))
-                        })
-                        .collect::<Vec<_>>();
-                    if assignment.iter().all(Option::is_none) {
-                        return Ok(());
-                    }
-                    validate_layout(text, probe)?;
-                    super::visit_glyphs(
-                        tree.fontdb(),
-                        text,
-                        &mut metrics,
-                        |index| assignment[index].is_some_and(|owner| !owner.is_empty()),
-                        |index, glyph, rect, ink| {
-                            let Some(owner) = assignment[index] else {
-                                return Ok(());
-                            };
-                            if glyph.is_empty() {
-                                return Ok(());
-                            }
-                            if paint.unproven_geometry {
-                                if owner.href.is_some() {
-                                    return Err(effects::geometry_error());
-                                }
-                                for id in &owner.anchors {
-                                    if !synthetic_ids.contains(id.as_str()) {
-                                        geometry.block_anchor(id)?;
-                                    }
-                                }
-                                return Ok(());
-                            }
-                            let Some(rect) =
-                                coverage.refine(paint, effects, rect, clip, Target::Glyph(ink))?
-                            else {
-                                return Ok(());
-                            };
-                            if let Some(href) = &owner.href {
-                                geometry.link(rect, clip, href.clone())?;
-                            }
-                            for id in &owner.anchors {
-                                if !synthetic_ids.contains(id.as_str()) {
-                                    geometry.anchor(id, rect, clip)?;
-                                }
-                            }
-                            Ok(())
-                        },
-                    )?;
-                }
-            }
-            Ok(())
-        })?;
-        for (id, rect) in instance_anchors.anchors {
-            if !geometry.anchors.contains_key(&id) {
-                geometry.anchor(&id, rect, clip)?;
-            }
-        }
-        Ok(geometry)
+        Ok(Navigation {
+            aliases,
+            objects: self
+                .objects
+                .iter()
+                .map(|(id, href)| (id.clone(), Arc::<str>::from(*href)))
+                .collect(),
+            marked_tree,
+            text_owners,
+            instantiated,
+            synthetic_ids: self.generated_ids.values().cloned().collect(),
+        })
     }
 
     fn mark_text(
@@ -338,11 +210,171 @@ impl<'a> Links<'a> {
     }
 }
 
+pub(in crate::epub) struct Navigation {
+    aliases: super::use_fonts::Aliases,
+    objects: HashMap<String, Arc<str>>,
+    marked_tree: Option<usvg::Tree>,
+    text_owners: HashMap<u32, Owner>,
+    // Native node addresses belong to the paired tree's heap-owned groups.
+    instantiated: object_links::ByNode,
+    synthetic_ids: HashSet<String>,
+}
+
+impl Navigation {
+    pub(in crate::epub) fn collect(
+        &self,
+        tree: &usvg::Tree,
+        density: [f32; 2],
+        raster: [u32; 2],
+    ) -> Result<Geometry, EngineError> {
+        let capture = effects::CaptureGeometry::new(tree, density);
+        let mut geometry = Geometry::default();
+        let clip = Rect::new(0.0, 0.0, tree.size().width(), tree.size().height());
+        let mut text_targets = HashMap::<_, VecDeque<_>>::new();
+        if let Some(marked_tree) = &self.marked_tree {
+            visit_painted_svg(marked_tree, clip, None, |paint, _, _| {
+                if let usvg::Node::Text(text) = paint.node {
+                    // Instance expansion can discard IDs. Identical keys retain paint order.
+                    text_targets
+                        .entry(text_key(text))
+                        .or_default()
+                        .push_back(text.as_ref());
+                }
+                Ok(())
+            })?;
+        }
+        let mut metrics = HashMap::new();
+        let mut coverage = Coverage::new(tree, density, raster);
+        let mut instance_anchors = Geometry::default();
+        visit_painted_svg(tree, clip, Some(&capture), |paint, clip, effects| {
+            let node = paint.node;
+            if let Some(claims) = self.instantiated.get(&std::ptr::from_ref(node).addr()) {
+                if paint.unproven_geometry {
+                    for claim in claims {
+                        if claim.href.is_some() {
+                            return Err(effects::geometry_error());
+                        }
+                        if let Some(id) = &claim.id {
+                            geometry.block_anchor(id)?;
+                        }
+                    }
+                } else if let Some(rect) = paint.object_bounds(true) {
+                    if let Some(rect) =
+                        coverage.refine(paint, effects, rect, clip, Target::PaintedObject)?
+                    {
+                        for claim in claims {
+                            if let Some(id) = claim
+                                .id
+                                .as_deref()
+                                .filter(|id| !instance_anchors.anchors.contains_key(*id))
+                            {
+                                instance_anchors.anchor(id, rect, clip)?;
+                            }
+                            if let Some(href) = &claim.href {
+                                geometry.link(rect, clip, href.clone())?;
+                            }
+                        }
+                    }
+                }
+            }
+            let id = authored_id(&self.aliases, node.id());
+            if !id.is_empty() && !self.synthetic_ids.contains(id) {
+                if paint.unproven_geometry {
+                    geometry.block_anchor(id)?;
+                } else if let Some(rect) = paint.object_bounds(false) {
+                    if let Some(rect) =
+                        coverage.refine(paint, effects, rect, clip, Target::Object)?
+                    {
+                        geometry.anchor(id, rect, clip)?;
+                    }
+                }
+            }
+            if let Some(href) = self.objects.get(id) {
+                if paint.unproven_geometry {
+                    return Err(effects::geometry_error());
+                }
+                if let Some(rect) = paint.object_bounds(true) {
+                    if let Some(rect) =
+                        coverage.refine(paint, effects, rect, clip, Target::Object)?
+                    {
+                        geometry.link(rect, clip, href.clone())?;
+                    }
+                }
+            }
+            if let usvg::Node::Text(text) = node {
+                if let Some(probe) = text_targets
+                    .get_mut(&text_key(text))
+                    .and_then(VecDeque::pop_front)
+                {
+                    let assignment = probe
+                        .layouted()
+                        .iter()
+                        .map(|span| {
+                            color_index(span.fill.as_ref())
+                                .and_then(|index| self.text_owners.get(&index))
+                        })
+                        .collect::<Vec<_>>();
+                    if assignment.iter().all(Option::is_none) {
+                        return Ok(());
+                    }
+                    validate_layout(text, probe)?;
+                    super::visit_glyphs(
+                        tree.fontdb(),
+                        text,
+                        &mut metrics,
+                        |index| assignment[index].is_some_and(|owner| !owner.is_empty()),
+                        |index, glyph, rect, ink| {
+                            let Some(owner) = assignment[index] else {
+                                return Ok(());
+                            };
+                            if glyph.is_empty() {
+                                return Ok(());
+                            }
+                            if paint.unproven_geometry {
+                                if owner.href.is_some() {
+                                    return Err(effects::geometry_error());
+                                }
+                                for id in &owner.anchors {
+                                    if !self.synthetic_ids.contains(id.as_str()) {
+                                        geometry.block_anchor(id)?;
+                                    }
+                                }
+                                return Ok(());
+                            }
+                            let Some(rect) =
+                                coverage.refine(paint, effects, rect, clip, Target::Glyph(ink))?
+                            else {
+                                return Ok(());
+                            };
+                            if let Some(href) = &owner.href {
+                                geometry.link(rect, clip, href.clone())?;
+                            }
+                            for id in &owner.anchors {
+                                if !self.synthetic_ids.contains(id.as_str()) {
+                                    geometry.anchor(id, rect, clip)?;
+                                }
+                            }
+                            Ok(())
+                        },
+                    )?;
+                }
+            }
+            Ok(())
+        })?;
+        for (id, rect) in instance_anchors.anchors {
+            if !geometry.anchors.contains_key(&id) {
+                geometry.anchor(&id, rect, clip)?;
+            }
+        }
+        Ok(geometry)
+    }
+}
+
 fn authored_id<'a>(aliases: &'a super::use_fonts::Aliases, id: &'a str) -> &'a str {
     aliases.get(id).map_or(id, String::as_str)
 }
 
-fn actual_rect(rect: usvg::Rect) -> Rect {
+pub(super) fn actual_rect(rect: usvg::Rect) -> Rect {
     Rect::new(rect.x(), rect.y(), rect.width(), rect.height())
 }
 

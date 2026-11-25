@@ -477,6 +477,7 @@ pub(super) enum FilterGeometry {
     #[default]
     Retained,
     Sample,
+    Moved,
     Unproven,
 }
 
@@ -583,6 +584,55 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
     output
 }
 
+// Follow only the input of the final result. Discarded branches do not
+// transport ink. A nonzero alpha bias, blend, merge or blur is not a
+// one-to-one translation of the source raster.
+fn offset_chain(filter: &usvg::filter::Filter) -> Option<(Vec<[f32; 2]>, bool)> {
+    use usvg::filter::{ColorMatrixKind, Input, Kind};
+    let primitives = filter.primitives();
+    let mut current = primitives.len().checked_sub(1)?;
+    let mut offsets = Vec::new();
+    let mut preserves_alpha = true;
+    loop {
+        let input = match primitives[current].kind() {
+            Kind::Offset(offset) => {
+                offsets.push([offset.dx(), offset.dy()]);
+                offset.input()
+            }
+            Kind::ColorMatrix(matrix) => {
+                match matrix.kind() {
+                    ColorMatrixKind::Matrix(values) if values[19] <= 0.0 => {
+                        preserves_alpha &=
+                            values[15..18] == [0.; 3] && values[18] >= 1.0 && values[19] == 0.0;
+                    }
+                    ColorMatrixKind::LuminanceToAlpha => preserves_alpha = false,
+                    ColorMatrixKind::Saturate(_) | ColorMatrixKind::HueRotate(_) => {}
+                    _ => return None,
+                }
+                matrix.input()
+            }
+            Kind::GaussianBlur(blur)
+                if blur.std_dev_x().get() == 0.0 && blur.std_dev_y().get() == 0.0 =>
+            {
+                blur.input()
+            }
+            _ => return None,
+        };
+        match input {
+            Input::SourceGraphic | Input::SourceAlpha => break,
+            Input::Reference(name) => {
+                current = primitives[..current]
+                    .iter()
+                    .rposition(|candidate| candidate.result() == name)?;
+            }
+        }
+    }
+    offsets
+        .iter()
+        .any(|&step| step != [0.0, 0.0])
+        .then_some((offsets, preserves_alpha))
+}
+
 fn filter_geometry(group: &usvg::Group, additive_input: bool) -> (FilterGeometry, bool) {
     let [filter] = group.filters() else {
         return if group.filters().is_empty() {
@@ -619,16 +669,23 @@ pub(super) struct GeometryStatus {
     pub(super) filter: FilterGeometry,
     pub(super) unproven_subtree: bool,
     pub(super) sample_subtree: bool,
+    pub(super) moved_subtree: bool,
+    filters_subtree: bool,
 }
 
 #[derive(Default)]
 pub(super) struct CaptureGeometry {
     groups: HashMap<*const usvg::Group, GeometryStatus>,
+    moves: HashMap<*const usvg::Group, Vec<[f32; 2]>>,
+    pub(super) density: [f32; 2],
 }
 
 impl CaptureGeometry {
-    pub(super) fn new(tree: &usvg::Tree) -> Self {
-        let mut capture = Self::default();
+    pub(super) fn new(tree: &usvg::Tree, density: [f32; 2]) -> Self {
+        let mut capture = Self {
+            density,
+            ..Self::default()
+        };
         capture.analyze(tree.root());
         capture
     }
@@ -643,16 +700,70 @@ impl CaptureGeometry {
             let (child, additive) = self.analyze(child);
             status.unproven_subtree |= child.unproven_subtree;
             status.sample_subtree |= child.sample_subtree;
+            status.moved_subtree |= child.moved_subtree;
+            status.filters_subtree |= child.filters_subtree;
             additive_input |= additive;
         }
-        let (filter, additive) = filter_geometry(group, additive_input);
+        let (mut filter, additive) = filter_geometry(group, additive_input);
+        let key = std::ptr::from_ref(group);
+        if !group.filters().is_empty() {
+            if status.moved_subtree {
+                // Each native filtering layer can use a different raster grid.
+                filter = FilterGeometry::Unproven;
+            } else if filter == FilterGeometry::Unproven && !status.filters_subtree {
+                if let [native] = group.filters() {
+                    if let Some((offsets, preserves_alpha)) = offset_chain(native) {
+                        if preserves_alpha || at_most_one_leaf(group, &mut false) {
+                            self.moves.insert(key, offsets);
+                            filter = FilterGeometry::Moved;
+                        }
+                    }
+                }
+            }
+            status.filters_subtree = true;
+        }
         status.filter = filter;
         status.unproven_subtree |= filter == FilterGeometry::Unproven;
-        status.sample_subtree |= filter == FilterGeometry::Sample;
+        status.sample_subtree |= matches!(filter, FilterGeometry::Sample | FilterGeometry::Moved);
+        status.moved_subtree |= filter == FilterGeometry::Moved;
         if status.unproven_subtree || status.sample_subtree {
-            self.groups.insert(std::ptr::from_ref(group), status);
+            self.groups.insert(key, status);
         }
         (status, additive)
+    }
+
+    pub(super) fn shift(&self, group: &usvg::Group, transform: Transform) -> Option<[f32; 2]> {
+        let steps = self.moves.get(&std::ptr::from_ref(group))?;
+        // Match resvg's isolated raster, including the scale after removing
+        // its rotation/shear and truncating each feOffset to a pixel step.
+        let sx = transform.sx.hypot(transform.ky);
+        let sy = transform.kx.hypot(transform.sy);
+        let rest = Transform::from_row(
+            transform.sx / sx,
+            transform.ky / sx,
+            transform.kx / sy,
+            transform.sy / sy,
+            0.0,
+            0.0,
+        );
+        let layer = rest.invert()?.pre_concat(transform);
+        let (sx, sy) = layer.get_scale();
+        let mut pixels = [0i32; 2];
+        for [x, y] in steps {
+            let values = [*x * sx, *y * sy];
+            for (sum, value) in pixels.iter_mut().zip(values) {
+                if !value.is_finite() || value.abs() > MAX_OFFSET {
+                    return None;
+                }
+                *sum += value as i32;
+            }
+        }
+        let [x, y] = pixels.map(|value| value as f32);
+        let shift = [
+            (rest.sx * x + rest.kx * y) / self.density[0],
+            (rest.ky * x + rest.sy * y) / self.density[1],
+        ];
+        shift.into_iter().all(f32::is_finite).then_some(shift)
     }
 
     pub(super) fn status(&self, node: &usvg::Node) -> GeometryStatus {
@@ -670,7 +781,7 @@ impl CaptureGeometry {
                     .get(&std::ptr::from_ref(text.flattened()))
                     .copied()
                     .unwrap_or_default();
-                status.unproven_subtree |= status.filter == FilterGeometry::Sample;
+                status.unproven_subtree |= status.sample_subtree;
                 status
             }
             _ => GeometryStatus::default(),

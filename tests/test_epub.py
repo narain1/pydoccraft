@@ -7622,6 +7622,7 @@ voice
               <feColorMatrix type="luminanceToAlpha"/>
             </filter>
             <filter id="move"><feOffset dx="2"/></filter>
+            <filter id="uncertain"><feOffset dx="2"/><feGaussianBlur stdDeviation="1"/></filter>
           </defs>
           <rect id="decoration" x="4" y="6" width="24" height="12" fill="blue" filter="url(#move)"/>
           <a href="https://example.org/clear"><rect x="6" y="6" width="20" height="18"
@@ -7649,8 +7650,10 @@ voice
             )
 
         multi = svg.replace('filter="url(#mask)"><text', 'filter="url(#mask)"><rect width="20" height="20"/><text')
-        moved = svg.replace('filter="url(#mask)"><text', 'filter="url(#move)"><text')
-        requested = svg.replace('</svg>', '<a href="#decoration"><rect x="120" y="10" width="12" height="8"/></a></svg>')
+        moved = svg.replace('filter="url(#mask)"><text', 'filter="url(#uncertain)"><text')
+        requested = svg.replace('filter="url(#move)"', 'filter="url(#uncertain)"').replace(
+            '</svg>', '<a href="#decoration"><rect x="120" y="10" width="12" height="8"/></a></svg>',
+        )
         for markup in (multi, moved, requested):
             with (
                 self.subTest(markup=markup),
@@ -7658,6 +7661,121 @@ voice
                 self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"),
             ):
                 publication.export_epub_fixed_pdf(dpi=96, searchable=True)
+
+    def test_svg_offset_chains_move_searchable_text_links_and_fragments(self) -> None:
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" width="184" height="120" viewBox="0 0 184 120">
+          <defs>
+            <clipPath id="text-window"><rect x="2" y="22" width="130" height="44"/></clipPath>
+            <clipPath id="marker-window"><rect x="147" y="0" width="35" height="85"/></clipPath>
+            <clipPath id="source-window"><rect x="-13" y="90" width="5" height="20"/></clipPath>
+            <g id="outside">
+              <a href="https://example.org/recovered" clip-path="url(#source-window)">
+                <rect x="-15" y="95" width="8" height="10" fill="green"/>
+              </a>
+            </g>
+            <filter id="move" filterUnits="userSpaceOnUse" x="-75" y="-50" width="260" height="170">
+              <feOffset in="SourceGraphic" dx="13.75" dy="-4.75" result="started"/>
+              <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="discarded"/>
+              <feColorMatrix in="started" type="saturate" values="1"/>
+              <feOffset dx="6.75" dy="7.75"/>
+            </filter>
+          </defs>
+          <g clip-path="url(#text-window)">
+            <g transform="translate(5 18) scale(2 1)">
+              <text filter="url(#move)" x="3" y="22" font-size="16">
+                <a href="https://example.org/word">Café</a>
+                <tspan x="65">Hidden</tspan>
+              </text>
+            </g>
+          </g>
+          <g clip-path="url(#marker-window)">
+            <a href="https://example.org/mark">
+              <g transform="translate(170 35) rotate(90)">
+                <g filter="url(#move)"><rect id="marker" x="4" y="5" width="16" height="12" fill="blue"/></g>
+              </g>
+            </a>
+          </g>
+          <g filter="url(#move)"><use href="#outside"/></g>
+          <a href="#marker"><rect x="144" y="92" width="14" height="10" fill="orange"/></a>
+        </svg>"""
+        fixture = fixed_spread_fixture([("", "white", 184, 120)])
+        with zipfile.ZipFile(io.BytesIO(fixture)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b"</manifest>",
+                b'<item id="toc" href="toc.xhtml" properties="nav" media-type="application/xhtml+xml"/></manifest>',
+            )
+        svg_package = package.replace(
+            b'href="s0.xhtml" media-type="application/xhtml+xml"',
+            b'href="s0.svg" media-type="image/svg+xml"',
+        )
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Shifted</title>
+          <meta name="viewport" content="width=184,height=120"/></head><body style="margin:0">{}</body></html>"""
+
+        navigation = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+          <head><title>Contents</title></head><body><nav epub:type="toc"><ol>
+            <li><a href="{}#marker">Shifted marker</a></li>
+          </ol></nav></body></html>"""
+
+        def publication(markup: str, inline: bool) -> bytes:
+            resource = "s0.xhtml" if inline else "s0.svg"
+            return rewrite_epub(fixture, {
+                "OEBPS/content.opf": package if inline else svg_package,
+                "OEBPS/toc.xhtml": navigation.format(resource),
+                "OEBPS/" + resource: template.format(markup) if inline else markup,
+            })
+
+        def offset(scale: float, first: float, second: float) -> float:
+            return (int(first * scale) + int(second * scale)) / scale
+
+        for inline in (False, True):
+            for dpi in (96, 144):
+                with self.subTest(inline=inline, dpi=dpi):
+                    scale = dpi / 96
+                    dx = offset(scale, 13.75, 6.75)
+                    dy = offset(scale, -4.75, 7.75)
+                    text_dx = offset(2 * scale, 13.75, 6.75)
+                    control = svg.replace(
+                        '<text filter="url(#move)"',
+                        f'<text transform="translate({text_dx} {dy})"',
+                    ).replace('filter="url(#move)"', f'transform="translate({dx} {dy})"')
+                    control = control.replace(' clip-path="url(#text-window)"', '')
+                    with doc_ex.open(publication(svg, inline)) as book, doc_ex.open(publication(control, inline)) as plain:
+                        output = book.export_epub_fixed_pdf(dpi=dpi, searchable=True)
+                        reference = plain.export_epub_fixed_pdf(dpi=dpi, searchable=True)
+                        preview = rgba_pixels(png_chunks(book.render_page(0, dpi=dpi)))
+                        self.assertEqual(book.read_epub_resource("OEBPS/s0.xhtml" if inline else "OEBPS/s0.svg"),
+                                         (template.format(svg) if inline else svg).encode())
+                    with doc_ex.open(output) as pdf, doc_ex.open(reference) as expected, pdf.edit() as editor:
+                        self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=dpi))), preview)
+                        self.assertEqual(pdf[0].get_text(), "Café")
+                        rect, = pdf[0].search_for("Café")
+                        target, = expected[0].search_for("Café")
+                        for actual, projected in zip(rect, target):
+                            self.assertAlmostEqual(actual, projected, delta=0.75)
+                        links = {link.uri: link.bbox for link in pdf[0].get_links() if (link.uri or "").startswith("https:")}
+                        expected_links = {link.uri: link.bbox for link in expected[0].get_links() if (link.uri or "").startswith("https:")}
+                        self.assertEqual(set(links), {
+                            "https://example.org/word", "https://example.org/mark", "https://example.org/recovered",
+                        })
+                        for uri, bbox in links.items():
+                            for actual, projected in zip(bbox, expected_links[uri]):
+                                self.assertAlmostEqual(actual, projected, delta=0.75)
+                        internal, = [link for link in pdf[0].get_links() if link.metadata.get("target_page") is not None]
+                        self.assertEqual(internal.metadata["target_page"], 0)
+                        self.assertEqual([(entry.title, entry.page) for entry in editor.bookmarks], [("Shifted marker", 0)])
+                        destinations = re.findall(rb"/XYZ\s+([0-9.]+)\s+([0-9.]+)\s+null", editor.to_bytes(object_streams=False))
+                        self.assertEqual(len(destinations), 2)
+                        for x, y in destinations:
+                            self.assertAlmostEqual(float(x), (153 - dy) * .75, delta=0.25)
+                            self.assertAlmostEqual(float(y), (81 - dx) * .75, delta=0.25)
+
+        stacked = svg.replace('<g transform="translate(5 18) scale(2 1)">',
+                              '<g transform="translate(5 18) scale(2 1)" filter="url(#move)">')
+        with (
+            doc_ex.open(publication(stacked, False)) as book,
+            self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "SVG filter can change the painted source"),
+        ):
+            book.export_epub_fixed_pdf(dpi=96, searchable=True)
 
     def test_svg_compositor_checks_second_inputs_children_and_scaled_budget(self) -> None:
         def svg(primitives: str, attrs: str = "", rect: str = "") -> str:

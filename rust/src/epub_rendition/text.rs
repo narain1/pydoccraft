@@ -124,6 +124,7 @@ impl SvgImages {
                     pixels[0] as f32 / tree.size().width(),
                     pixels[1] as f32 / tree.size().height(),
                 ],
+                pixels,
                 &mut capture,
             )?;
         }

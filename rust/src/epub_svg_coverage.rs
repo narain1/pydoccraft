@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use resvg::{tiny_skia, usvg};
 use wordcraft_geom::Rect;
 
-use super::{effects, limited, PaintedNode};
+use super::{effects, limited, shifted, PaintedNode};
 use crate::{
     epub::{charge, rendition::intersection},
     EngineError,
@@ -19,6 +19,7 @@ const MAX_DRAW_DEPTH: usize = 256;
 pub(super) struct Coverage<'tree> {
     tree: &'tree usvg::Tree,
     density: [f32; 2],
+    raster: [u32; 2],
     viewport: Rect,
     tiles: HashMap<*const usvg::Node, Option<Tile>>,
     saved: usize,
@@ -154,10 +155,11 @@ impl Tile {
 }
 
 impl<'tree> Coverage<'tree> {
-    pub(super) fn new(tree: &'tree usvg::Tree, density: [f32; 2]) -> Self {
+    pub(super) fn new(tree: &'tree usvg::Tree, density: [f32; 2], raster: [u32; 2]) -> Self {
         Self {
             tree,
             density,
+            raster,
             viewport: Rect::new(0.0, 0.0, tree.size().width(), tree.size().height()),
             tiles: HashMap::new(),
             saved: 0,
@@ -175,13 +177,14 @@ impl<'tree> Coverage<'tree> {
         clip: Rect,
         target: Target,
     ) -> Result<Option<Rect>, EngineError> {
+        let rect = shifted(rect, paint.geometry_shift);
         if effects.is_empty() && !paint.sample_geometry && !matches!(target, Target::PaintedObject)
         {
             return Ok(Some(rect));
         }
         let rect = intersection(clip, rect);
         let footprint = match target {
-            Target::Glyph(Some(ink)) => intersection(rect, ink),
+            Target::Glyph(Some(ink)) => intersection(rect, shifted(ink, paint.geometry_shift)),
             _ => rect,
         };
         let Some(bounds) = Bounds::from_rect(footprint, self.density) else {
@@ -254,14 +257,27 @@ impl<'tree> Coverage<'tree> {
         let candidate = intersection(
             self.viewport,
             Rect::new(
-                bbox.x() - padding[0],
-                bbox.y() - padding[1],
+                bbox.x() + paint.raster_shift[0] - padding[0],
+                bbox.y() + paint.raster_shift[1] - padding[1],
                 bbox.width() + 2.0 * padding[0],
                 bbox.height() + 2.0 * padding[1],
             ),
         );
-        let Some(bounds) = Bounds::from_rect(candidate, self.density) else {
-            return Ok(None);
+        let bounds = if paint.uses_moved_layer {
+            // Native filters can read source pixels outside the destination
+            // tile before moving them on-screen. Keep the same native clip
+            // domain as the full viewport when replaying a translated layer.
+            Bounds {
+                left: 0,
+                top: 0,
+                right: self.raster[0],
+                bottom: self.raster[1],
+            }
+        } else {
+            let Some(bounds) = Bounds::from_rect(candidate, self.density) else {
+                return Ok(None);
+            };
+            bounds
         };
         if bounds.pixels() > MAX_TILE_PIXELS || bounds.width() > 8192 || bounds.height() > 8192 {
             return Err(limited("EPUB SVG coverage exceeds its tile budget"));
@@ -285,18 +301,15 @@ impl<'tree> Coverage<'tree> {
         self.measure_draws(paint.node, 0)?;
         let mut pixmap = tiny_skia::Pixmap::new(bounds.width(), bounds.height())
             .ok_or_else(|| limited("cannot allocate EPUB SVG coverage"))?;
-        let transform = tiny_skia::Transform::from_row(
-            sx,
-            0.0,
-            0.0,
-            sy,
-            -(bounds.left as f32),
-            -(bounds.top as f32),
-        )
-        .pre_concat(paint.parent)
-        // The public single-node renderer first translates by its absolute bbox.
-        // Cancel that normalization to render on the original SVG pixel grid.
-        .pre_translate(bbox.x(), bbox.y());
+        let transform = paint
+            .device_parent
+            .post_translate(
+                sx * paint.raster_shift[0] - bounds.left as f32,
+                sy * paint.raster_shift[1] - bounds.top as f32,
+            )
+            // The public single-node renderer first translates by its absolute bbox.
+            // Cancel that normalization to render on the original SVG pixel grid.
+            .pre_translate(bbox.x(), bbox.y());
         resvg::render_node(paint.node, transform, &mut pixmap.as_mut());
         Ok(Some(Tile {
             bounds,

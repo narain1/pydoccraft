@@ -21,7 +21,7 @@ pub(super) mod effects;
 mod links;
 #[path = "epub_svg_fonts.rs"]
 mod svg_fonts;
-pub(super) use links::Geometry as LinkGeometry;
+pub(super) use links::{Geometry as LinkGeometry, Navigation as SvgNavigation};
 #[path = "epub_svg_use_fonts.rs"]
 mod use_fonts;
 #[path = "epub_svg_use.rs"]
@@ -155,7 +155,7 @@ pub(super) fn render(
         return Err(unsupported("fixed-layout SVG requires a numeric viewBox"));
     }
     let links = navigation.is_some().then(|| links::Links::new(root));
-    let (tree, geometry) = parse(
+    let (tree, svg_navigation) = parse(
         root,
         root.document().input_text().as_bytes(),
         base,
@@ -164,8 +164,15 @@ pub(super) fn render(
         links.as_ref(),
     )?;
     let [w, h] = viewport.unwrap_or([tree.size().width() * 0.75, tree.size().height() * 0.75]);
-    let scale = dpi / 72.0;
-    if let Some((capture, geometry)) = navigation.as_mut().zip(geometry.as_ref()) {
+    let scale = (dpi / 72.0) as f32;
+    let density = [
+        w * scale / tree.size().width(),
+        h * scale / tree.size().height(),
+    ];
+    let region = region.for_page([f64::from(w), f64::from(h)], dpi, fixed)?;
+    let raster = [region.width, region.height];
+    if let Some((capture, svg_navigation)) = navigation.as_mut().zip(svg_navigation) {
+        let geometry = svg_navigation.collect(&tree, density, raster)?;
         let clip = wordcraft_geom::Rect::new(0.0, 0.0, w, h);
         geometry.place(
             kurbo::Affine::scale_non_uniform(
@@ -176,26 +183,17 @@ pub(super) fn render(
             capture,
         )?;
         if let Some(text) = capture.text.as_deref_mut() {
-            collect_image_text(
-                &tree,
-                [w, h],
-                [
-                    (w / tree.size().width()) * scale as f32,
-                    (h / tree.size().height()) * scale as f32,
-                ],
-                text,
-            )?;
+            collect_image_text(&tree, [w, h], density, raster, text)?;
         }
     }
-    let region = region.for_page([f64::from(w), f64::from(h)], dpi, fixed)?;
     let mut image = tiny_skia::Pixmap::new(region.width, region.height)
         .ok_or_else(|| limited("cannot allocate EPUB SVG viewport"))?;
     image.fill(tiny_skia::Color::WHITE);
     let transform = tiny_skia::Transform::from_row(
-        w * scale as f32 / tree.size().width(),
+        density[0],
         0.0,
         0.0,
-        h * scale as f32 / tree.size().height(),
+        density[1],
         -(region.x as f32),
         -(region.y as f32),
     );
@@ -212,6 +210,7 @@ pub(super) fn collect_image_text(
     tree: &usvg::Tree,
     size: [f32; 2],
     density: [f32; 2],
+    raster: [u32; 2],
     output: &mut super::rendition::text::TextLayer,
 ) -> Result<(), EngineError> {
     let page = wordcraft_geom::Rect::new(0.0, 0.0, size[0], size[1]);
@@ -221,8 +220,8 @@ pub(super) fn collect_image_text(
         f64::from(size[1] / tree.size().height()),
     );
     let mut metrics = HashMap::new();
-    let geometry = effects::CaptureGeometry::new(tree);
-    let mut coverage = coverage::Coverage::new(tree, density);
+    let geometry = effects::CaptureGeometry::new(tree, density);
+    let mut coverage = coverage::Coverage::new(tree, density, raster);
     visit_painted_svg(tree, clip, Some(&geometry), |paint, clip, effects| {
         if let usvg::Node::Text(source) = paint.node {
             if paint.unproven_geometry {
@@ -256,9 +255,45 @@ pub(super) fn collect_image_text(
 #[derive(Clone, Copy)]
 struct PaintedNode<'tree> {
     node: &'tree usvg::Node,
-    parent: tiny_skia::Transform,
+    device_parent: tiny_skia::Transform,
     unproven_geometry: bool,
     sample_geometry: bool,
+    shifted_descendants: bool,
+    uses_moved_layer: bool,
+    // The original subtree renderer already performs its own filter.
+    raster_shift: [f32; 2],
+    geometry_shift: [f32; 2],
+}
+
+impl PaintedNode<'_> {
+    fn object_bounds(self, stroke: bool) -> Option<wordcraft_geom::Rect> {
+        if self.shifted_descendants {
+            return self
+                .node
+                .abs_layer_bounding_box()
+                .map(|bounds| bounds.to_rect())
+                .map(links::actual_rect);
+        }
+        let bounds = if stroke {
+            self.node.abs_stroke_bounding_box()
+        } else {
+            self.node.abs_bounding_box()
+        };
+        bounds.map(links::actual_rect)
+    }
+}
+
+pub(super) fn shifted(rect: wordcraft_geom::Rect, [x, y]: [f32; 2]) -> wordcraft_geom::Rect {
+    wordcraft_geom::Rect::new(rect.x + x, rect.y + y, rect.w, rect.h)
+}
+
+struct PaintFrame<'tree> {
+    children: std::slice::Iter<'tree, usvg::Node>,
+    clip: wordcraft_geom::Rect,
+    device: tiny_skia::Transform,
+    effects: usize,
+    unproven: bool,
+    shift: [f32; 2],
 }
 
 fn visit_painted_svg<'tree>(
@@ -271,61 +306,77 @@ fn visit_painted_svg<'tree>(
         &[PaintedNode<'tree>],
     ) -> Result<(), EngineError>,
 ) -> Result<(), EngineError> {
+    use effects::FilterGeometry;
+    let [sx, sy] = geometry.map_or([1.0; 2], |geometry| geometry.density);
     let mut effects = Vec::new();
-    let mut stack = vec![(
-        tree.root().children().iter(),
+    let mut stack = vec![PaintFrame {
+        children: tree.root().children().iter(),
         clip,
-        tiny_skia::Transform::identity(),
-        0,
-        false,
-    )];
-    while let Some((children, parent_clip, parent, inherited, unproven_parent)) = stack.last_mut() {
-        let Some(node) = children.next() else {
+        device: tiny_skia::Transform::from_scale(sx, sy),
+        effects: 0,
+        unproven: false,
+        shift: [0.0; 2],
+    }];
+    while let Some(frame) = stack.last_mut() {
+        let Some(node) = frame.children.next() else {
             stack.pop();
             continue;
         };
-        effects.truncate(*inherited);
+        effects.truncate(frame.effects);
         let status = geometry
             .map(|capture| capture.status(node))
             .unwrap_or_default();
-        let unproven = *unproven_parent || status.filter == effects::FilterGeometry::Unproven;
-        let paint = PaintedNode {
+        let mut unproven = frame.unproven || status.filter == FilterGeometry::Unproven;
+        let mut paint = PaintedNode {
             node,
-            parent: *parent,
-            unproven_geometry: unproven || status.unproven_subtree,
+            device_parent: frame.device,
+            unproven_geometry: false,
             sample_geometry: status.sample_subtree,
+            shifted_descendants: status.moved_subtree && status.filter != FilterGeometry::Moved,
+            uses_moved_layer: status.moved_subtree,
+            raster_shift: frame.shift,
+            geometry_shift: frame.shift,
         };
-        let mut clip = *parent_clip;
+        let mut clip = frame.clip;
         if let usvg::Node::Group(group) = node {
             if group.opacity().get() == 0.0 {
                 continue;
             }
+            let device = frame.device.pre_concat(group.transform());
+            if status.filter == FilterGeometry::Moved && !unproven {
+                if let Some([dx, dy]) = geometry.and_then(|geometry| geometry.shift(group, device))
+                {
+                    paint.geometry_shift = [frame.shift[0] + dx, frame.shift[1] + dy];
+                } else {
+                    unproven = true;
+                }
+            }
             if group.clip_path().is_some()
                 || group.mask().is_some()
-                || status.filter == effects::FilterGeometry::Sample
+                || matches!(
+                    status.filter,
+                    FilterGeometry::Sample | FilterGeometry::Moved
+                )
             {
                 let Some(bounds) = group.abs_layer_bounding_box() else {
                     continue;
                 };
                 clip = super::rendition::intersection(
                     clip,
-                    wordcraft_geom::Rect::new(
-                        bounds.x(),
-                        bounds.y(),
-                        bounds.width(),
-                        bounds.height(),
-                    ),
+                    shifted(links::actual_rect(bounds.to_rect()), paint.raster_shift),
                 );
                 effects.push(paint);
             }
-            stack.push((
-                group.children().iter(),
+            stack.push(PaintFrame {
+                children: group.children().iter(),
                 clip,
-                paint.parent.pre_concat(group.transform()),
-                effects.len(),
+                device,
+                effects: effects.len(),
                 unproven,
-            ));
+                shift: paint.geometry_shift,
+            });
         }
+        paint.unproven_geometry = unproven || status.unproven_subtree;
         visit(paint, clip, &effects)?;
     }
     Ok(())
@@ -447,7 +498,7 @@ pub(super) fn embedded_with_links(
     base: &str,
     book: &mut Book<'_>,
     capture_links: bool,
-) -> Result<(usvg::Tree, Option<LinkGeometry>), EngineError> {
+) -> Result<(usvg::Tree, Option<SvgNavigation>), EngineError> {
     let xml = super::parse_xml(source)?;
     let root = xml.root_element();
     let links = capture_links.then(|| links::Links::new(root));
@@ -461,7 +512,7 @@ fn parse(
     book: &mut Book<'_>,
     viewport: Option<[f32; 2]>,
     links: Option<&links::Links<'_>>,
-) -> Result<(usvg::Tree, Option<LinkGeometry>), EngineError> {
+) -> Result<(usvg::Tree, Option<SvgNavigation>), EngineError> {
     let has_uses = content::validate_svg(root, Some(base))?;
     let images = raster_images(root, base, book)?;
     let mut options = usvg::Options {
@@ -527,21 +578,21 @@ fn parse(
         None
     };
     options.fontdb = tree.fontdb().clone();
-    let geometry = links
+    let navigation = links
         .map(|links| {
-            links.collect(
+            links.prepare(
                 fallback.as_ref().map_or(&styled, |xml| xml.as_bytes()),
                 &tree,
                 &options,
                 has_uses,
-                &aliases,
+                aliases,
             )
         })
         .transpose()?;
     if let Some(fonts) = &fonts {
         fonts.check()?;
     }
-    Ok((tree, geometry))
+    Ok((tree, navigation))
 }
 
 fn native_tree(

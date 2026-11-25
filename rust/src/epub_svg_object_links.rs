@@ -18,29 +18,29 @@ use crate::{
 };
 
 type Span = (usize, usize);
-pub(super) type ByNode<'a> = HashMap<*const usvg::Node, Vec<Claim<'a>>>;
+pub(super) type ByNode = HashMap<usize, Vec<Claim>>;
 
 const MAX_NATIVE_VISITS: usize = 250_000;
 const MAX_NATIVE_DEPTH: usize = 256;
 
-pub(super) struct Claim<'a> {
+pub(super) struct Claim {
     pub(super) id: Option<Arc<str>>,
-    pub(super) href: Option<&'a str>,
+    pub(super) href: Option<Arc<str>>,
 }
 
-struct Tag<'a> {
+struct Tag {
     authored: Arc<str>,
-    claim: Claim<'a>,
+    claim: Claim,
 }
 
-pub(super) fn recover<'a>(
-    links: &'a Links<'_>,
+pub(super) fn recover(
+    links: &Links<'_>,
     source: &[u8],
     tree: &usvg::Tree,
     options: &usvg::Options<'_>,
-    aliases: &'a svg::use_fonts::Aliases,
+    aliases: &svg::use_fonts::Aliases,
     synthetic: &HashSet<&str>,
-) -> Result<ByNode<'a>, EngineError> {
+) -> Result<ByNode, EngineError> {
     let source = std::str::from_utf8(source).map_err(invalid)?;
     let xml = parse_xml(source.as_bytes())?;
     let scope = used_sources(xml.root_element());
@@ -64,7 +64,10 @@ pub(super) fn recover<'a>(
         {
             continue;
         }
-        let href = links.objects.get(authored).copied();
+        let href = links
+            .objects
+            .get(authored)
+            .map(|href| Arc::<str>::from(*href));
         let keep_id = !synthetic.contains(authored) && !authored.is_empty();
         let authored = Arc::<str>::from(authored);
         let claim = Claim {
@@ -137,7 +140,7 @@ pub(super) fn recover<'a>(
     // inherited explicitly through SVG opacity can reappear inside its group.
     groups.sort_unstable_by_key(|&((start, end), bits)| (start, Reverse(end), bits));
     let mut last = HashMap::<u32, Span>::new();
-    let mut by_span = HashMap::<Span, Vec<&Tag<'_>>>::new();
+    let mut by_span = HashMap::<Span, Vec<&Tag>>::new();
     for (span, bits) in groups {
         if last
             .get(&bits)
@@ -150,11 +153,13 @@ pub(super) fn recover<'a>(
     }
     // Equal paint-leaf ranges identify the same original artwork even when the
     // probe introduced a group on a path. Prefer the innermost real node.
-    let mut by_node = HashMap::<Span, *const usvg::Node>::new();
+    let mut by_node = HashMap::<Span, usize>::new();
     let mut represented = HashSet::<(Span, &str)>::new();
     for (node, span) in original.nodes {
         if by_span.contains_key(&span) {
-            by_node.entry(span).or_insert(std::ptr::from_ref(node));
+            by_node
+                .entry(span)
+                .or_insert(std::ptr::from_ref(node).addr());
             if !node.id().is_empty() {
                 represented.insert((span, authored_id(aliases, node.id())));
             }
@@ -171,7 +176,7 @@ pub(super) fn recover<'a>(
             if !represented.contains(&(span, tag.authored.as_ref())) {
                 output.entry(node).or_default().push(Claim {
                     id: tag.claim.id.clone(),
-                    href: tag.claim.href,
+                    href: tag.claim.href.clone(),
                 });
             }
         }
