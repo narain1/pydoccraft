@@ -7724,11 +7724,127 @@ overlay
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "MathML table rules inside equations"):
                 book.convert("docx")
 
-        for attrs, message in (
-            ('side="rightoverlap"', "overlapping MathML table row labels"),
-            ('minlabelspacing="-1pt"', "MathML table label spacing"),
+        invalid_gap = template.format(attrs='minlabelspacing="-1pt"')
+        with doc_ex.open(epub_fixture(chapter_one=invalid_gap)) as book:
+            for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "MathML table label spacing"):
+                    operation()
+
+    def test_mathml_overlap_label_sides_displace_rows_only_when_needed(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Overlapping labels</title>{viewport}<style>body {{margin:0}}</style></head>
+          <body><p style="text-align:center"><m:math mathsize="12pt"><m:mtable {attrs}
+              side="{side}" columnwidth="170pt 120pt" columnspacing="12pt"
+              columnalign="left right" rowspacing="11pt" minlabelspacing="{gap}pt">
+            <m:mlabeledtr rowalign="top">
+              <m:mtd columnalign="{edge}"><m:mtext>TopTag</m:mtext></m:mtd>
+              <m:mtd><m:mtext>DataOne</m:mtext></m:mtd>
+              <m:mtd><m:mtext>FarOne</m:mtext></m:mtd>
+            </m:mlabeledtr><m:mlabeledtr>
+              <m:mtd columnalign="{edge}"><m:mtext>LowerTag</m:mtext></m:mtd>
+              <m:mtd><m:mtext>DataTwo</m:mtext></m:mtd>
+              <m:mtd><m:mtext>FarTwo</m:mtext></m:mtd>
+            </m:mlabeledtr><m:mlabeledtr rowalign="top">
+              <m:mtd columnalign="{edge}"><m:mtext>UpperTag</m:mtext></m:mtd>
+              <m:mtd><m:mtext>DataThree</m:mtext></m:mtd>
+              <m:mtd><m:mtext>FarThree</m:mtext></m:mtd>
+            </m:mlabeledtr><m:mlabeledtr>
+              <m:mtd columnalign="{edge}"><m:mtext>BottomTag</m:mtext></m:mtd>
+              <m:mtd><m:mtext>DataFour</m:mtext></m:mtd>
+              <m:mtd><m:mtext>FarFour</m:mtext></m:mtd>
+            </m:mlabeledtr>
+          </m:mtable></m:math></p></body></html>"""
+        labels = ("TopTag", "LowerTag", "UpperTag", "BottomTag")
+        data = ("DataOne", "DataTwo", "DataThree", "DataFour")
+        search_terms = (*labels, *data, "FarOne")
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+
+        def source(side="right", attrs='width="320pt"', gap=15, viewport=""):
+            return template.format(attrs=attrs, side=side + "overlap", edge=side, gap=gap, viewport=viewport)
+
+        def boxes(doc: doc_ex.Document) -> dict[str, tuple[float, float, float, float]]:
+            result = {}
+            for term in search_terms:
+                result[term], = doc[0].search_for(term)
+            return result
+
+        def check_displaced(rects, side, inset=9):
+            ordered = ("TopTag", "DataOne", "DataTwo", "LowerTag",
+                       "UpperTag", "DataThree", "DataFour", "BottomTag")
+            tops = [rects[term][1] for term in ordered]
+            self.assertTrue(all(b - a > 5 for a, b in zip(tops, tops[1:])), tops)
+            if side == "left":
+                self.assertAlmostEqual(rects["DataOne"][0] - rects["TopTag"][0], inset, delta=0.3)
+            else:
+                self.assertAlmostEqual(rects["TopTag"][2] - rects["FarOne"][2], inset, delta=0.3)
+
+        for side in ("left", "right"):
+            with self.subTest(side=side), doc_ex.open(epub_fixture(chapter_one=source(side))) as book:
+                with doc_ex.open(book.convert("pdf")) as pdf:
+                    self.assertFalse(pdf[0].get_images())
+                    expected = boxes(pdf)
+                    check_displaced(expected, side)
+                exported = book.convert("docx")
+                with zipfile.ZipFile(io.BytesIO(exported)) as archive:
+                    xml = ET.fromstring(archive.read("word/document.xml"))
+                matrix = xml.find(".//m:oMath//m:m", ns)
+                self.assertIsNotNone(matrix)
+                self.assertEqual([len(row.findall("./m:e", ns)) for row in matrix.findall("./m:mr", ns)], [2] * 4)
+                tokens = [node.text for node in matrix.findall(".//m:t", ns)]
+                with doc_ex.open(exported) as word, doc_ex.open(word.convert("pdf")) as pdf:
+                    actual = boxes(pdf)
+                    check_displaced(actual, side)
+                    for term in search_terms:
+                        self.assertEqual(tokens.count(term), 1)
+                        self.assertEqual(word[0].get_text().count(term), 1)
+                        for value, target in zip(actual[term], expected[term]):
+                            self.assertAlmostEqual(value, target, delta=0.35)
+
+        roomy = source(attrs='width="455pt"')
+        normal = roomy.replace('side="rightoverlap"', 'side="right"')
+        with (
+            doc_ex.open(epub_fixture(chapter_one=roomy)) as book,
+            doc_ex.open(epub_fixture(chapter_one=normal)) as control,
         ):
-            with self.subTest(attrs=attrs), doc_ex.open(epub_fixture(chapter_one=template.format(attrs=attrs))) as book:
+            self.assertEqual(book.render_page(0, dpi=96), control.render_page(0, dpi=96))
+            with doc_ex.open(book.convert("docx")) as word, doc_ex.open(word.convert("pdf")) as pdf:
+                rects = boxes(pdf)
+                self.assertAlmostEqual(rects["TopTag"][1], rects["DataOne"][1], delta=0.25)
+
+        with doc_ex.open(epub_fixture(chapter_one=source(attrs="", gap=100))) as book:
+            with doc_ex.open(book.convert("docx")) as word:
+                for document in (book, word):
+                    with doc_ex.open(document.convert("pdf")) as pdf:
+                        check_displaced(boxes(pdf), "right", inset=0)
+
+        # The same auto-width table chooses different placement in two
+        # fixed viewports, using the actual text area instead of a page default.
+        for viewport, displaced in ((490, True), (670, False)):
+            entry = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", viewport, 340)])
+            meta = f'<meta name="viewport" content="width={viewport},height=340"/>'
+            chapter = source(attrs="", viewport=meta)
+            with doc_ex.open(rewrite_epub(entry, {"OEBPS/s0.xhtml": chapter})) as book:
+                preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                    self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+                    rects = boxes(pdf)
+                    if displaced:
+                        self.assertLess(rects["TopTag"][1], rects["DataOne"][1] - 5)
+                    else:
+                        self.assertAlmostEqual(rects["TopTag"][1], rects["DataOne"][1], delta=0.3)
+
+        spanning = source().replace(
+            "<m:mtd><m:mtext>DataOne", '<m:mtd rowspan="2"><m:mtext>DataOne',
+        ).replace("<m:mtd><m:mtext>DataTwo</m:mtext></m:mtd>", "")
+        unsized = source(attrs="").replace("<m:mtable", "<m:msqrt><m:mtable")
+        unsized = unsized.replace("</m:mtable>", "</m:mtable></m:msqrt>")
+        for chapter, message in (
+            (source(attrs='width="250pt"'), "MathML overlap labels or their data grid exceed the available width"),
+            (source(attrs='width="320pt" rowlines="solid"'), "MathML overlap labels with table rules or row spans"),
+            (spanning, "MathML overlap labels with table rules or row spans"),
+            (unsized, "MathML overlap labels require a definite available width"),
+        ):
+            with self.subTest(message=message), doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
                 for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
                     with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
                         operation()

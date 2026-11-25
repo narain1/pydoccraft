@@ -53,6 +53,7 @@ struct Cell {
     columns: Range<usize>,
     horizontal: ColJc,
     vertical: Vertical,
+    label_above: bool,
     anchor: Option<Anchor>,
     content: CellContent,
     format: CharProps,
@@ -64,6 +65,7 @@ struct CellPlacement<'xml, 'input> {
     columns: Range<usize>,
     horizontal: ColJc,
     vertical: Vertical,
+    label_above: bool,
     group: Option<alignment::Group>,
     style: Presentation<'xml>,
 }
@@ -76,6 +78,8 @@ enum CellContent {
 struct Labels {
     left: bool,
     gap: f32,
+    overlap: bool,
+    available: Option<f32>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -166,11 +170,17 @@ pub(in crate::epub) fn has_rule_requests(root: Node<'_, '_>) -> bool {
 pub(in crate::epub) fn has_relative_widths(root: Node<'_, '_>) -> bool {
     root.descendants().any(|node| {
         node.has_tag_name((MATHML, "mtable"))
-            && node
+            && (node
                 .attribute("width")
                 .map(str::trim)
                 .and_then(relative_width)
                 .is_some()
+                || node.attribute("side").map(str::trim).is_some_and(|side| {
+                    matches!(side, "leftoverlap" | "rightoverlap")
+                        && node
+                            .children()
+                            .any(|row| row.has_tag_name((MATHML, "mlabeledtr")))
+                }))
             && is_presentation(node)
             && node
                 .ancestors()
@@ -267,10 +277,14 @@ pub(super) fn project<'xml>(
             return Err(invalid("missing MathML table row label"));
         }
         if labeled && labels.is_none() {
-            labels = Some(Labels::read(table, em)?);
+            labels = Some(Labels::read(table, em, projection.containing_width(table))?);
         }
         projection.charge(depth + 1)?;
         let row_style = projection.style(row, style)?;
+        let row_alignment = row
+            .attribute("rowalign")
+            .or_else(|| indexed(table.attribute("rowalign"), row_index))
+            .unwrap_or("baseline");
         let mut column = 0;
         for (index, cell) in row.children().filter(Node::is_element).enumerate() {
             if !cell.has_tag_name((MATHML, "mtd")) {
@@ -292,13 +306,9 @@ pub(super) fn project<'xml>(
                     })
                     .unwrap_or("center"),
             )?;
-            let row_alignment = cell
-                .attribute("rowalign")
-                .or_else(|| row.attribute("rowalign"))
-                .or_else(|| indexed(table.attribute("rowalign"), row_index))
-                .unwrap_or("baseline");
-            let vertical = Vertical::parse(row_alignment.trim())
-                .ok_or_else(|| unsupported("MathML table row alignment"))?;
+            let vertical =
+                Vertical::parse(cell.attribute("rowalign").unwrap_or(row_alignment).trim())
+                    .ok_or_else(|| unsupported("MathML table row alignment"))?;
             projection.charge(depth + 2)?;
             let style = projection.style(cell, row_style)?;
             let rows_spanned = span(cell, "rowspan")?;
@@ -323,6 +333,7 @@ pub(super) fn project<'xml>(
                     columns: 0..0,
                     horizontal,
                     vertical,
+                    label_above: row_alignment.trim() == "top",
                     group,
                     style,
                 });
@@ -345,6 +356,7 @@ pub(super) fn project<'xml>(
                 columns: column..right,
                 horizontal,
                 vertical,
+                label_above: false,
                 group,
                 style,
             });
@@ -425,6 +437,7 @@ pub(super) fn project<'xml>(
             columns: cell.columns,
             horizontal: cell.horizontal,
             vertical: cell.vertical,
+            label_above: cell.label_above,
             anchor,
             content,
             format: CharProps {
@@ -494,13 +507,12 @@ fn horizontal_alignment(value: &str) -> Result<ColJc, EngineError> {
 }
 
 impl Labels {
-    fn read(table: Node<'_, '_>, em: f32) -> Result<Self, EngineError> {
-        let left = match table.attribute("side").unwrap_or("right").trim() {
-            "left" => true,
-            "right" => false,
-            "leftoverlap" | "rightoverlap" => {
-                return Err(unsupported("overlapping MathML table row labels"));
-            }
+    fn read(table: Node<'_, '_>, em: f32, available: Option<f32>) -> Result<Self, EngineError> {
+        let (left, overlap) = match table.attribute("side").unwrap_or("right").trim() {
+            "left" => (true, false),
+            "right" => (false, false),
+            "leftoverlap" => (true, true),
+            "rightoverlap" => (false, true),
             _ => return Err(invalid("invalid MathML table label side")),
         };
         let default = 0.8 * em;
@@ -520,7 +532,12 @@ impl Labels {
         }
         .filter(|gap| (0.0..=MAX_DIMENSION).contains(gap))
         .ok_or_else(|| unsupported("MathML table label spacing"))?;
-        Ok(Self { left, gap })
+        Ok(Self {
+            left,
+            gap,
+            overlap,
+            available,
+        })
     }
 }
 
@@ -655,9 +672,17 @@ pub(in crate::epub) struct Layout {
     row_positions: Vec<f32>,
     label_width: f32,
     label_inset: f32,
+    overlapping_labels: bool,
     rules: Vec<MItem>,
     occupancy: Option<Occupancy>,
     rule_color: Rgb,
+}
+
+struct ColumnsLayout {
+    widths: Vec<f32>,
+    inset: f32,
+    width: f32,
+    overlapping_labels: bool,
 }
 
 impl Layout {
@@ -891,6 +916,154 @@ impl Table {
         Ok(width)
     }
 
+    fn cell_order(&self, key: fn(&Cell) -> usize) -> Vec<usize> {
+        let mut indices: Vec<_> = (0..self.cells.len()).collect();
+        indices.sort_by_key(|&index| key(&self.cells[index]));
+        indices
+    }
+
+    fn size_columns(
+        &self,
+        measures: &[MeasuredCell],
+        anchors: &[[f32; 2]],
+        label_inset: f32,
+    ) -> Result<Vec<f32>, EngineError> {
+        let mut widths: Vec<_> = self
+            .column_widths
+            .iter()
+            .map(|column| column.fixed().unwrap_or_default())
+            .collect();
+        let declared = self.declared_track_width(label_inset)?;
+        // Automatic data columns stay intrinsic when there are labels.
+        // Fitted columns share the space left after reserving the labels.
+        let fill = declared
+            .filter(|_| self.labels.is_none() || self.column_widths.contains(&ColumnWidth::Fit));
+        if self.equal_columns {
+            let common_width = self
+                .cells
+                .iter()
+                .zip(measures)
+                .filter(|(cell, _)| !cell.columns.is_empty())
+                .map(|(cell, measure)| {
+                    let width = measure.width(cell.columns.start, anchors);
+                    equal_track_size(&self.column_gaps, &cell.columns, width)
+                })
+                .fold(0.0, f32::max);
+            widths.fill(self.equal_column_width(common_width, fill)?);
+            return Ok(widths);
+        }
+        let order = if declared.is_some() {
+            self.cell_order(|cell| cell.columns.end)
+        } else {
+            self.cell_order(|cell| cell.columns.len())
+        };
+        let mut fitted = Vec::new();
+        for index in order {
+            let span = &self.cells[index].columns;
+            if span.is_empty() {
+                continue;
+            }
+            if self.column_widths[span.clone()].contains(&ColumnWidth::Fit) {
+                fitted.push(index);
+                continue;
+            }
+            self.grow_columns(
+                &mut widths,
+                span,
+                measures[index].width(span.start, anchors),
+            )?;
+        }
+        if let Some(total) = fill {
+            self.fill_width(&mut widths, total)?;
+        }
+        for index in fitted {
+            let span = &self.cells[index].columns;
+            let room = extent(&widths, &self.column_gaps, span);
+            if measures[index].width(span.start, anchors) > room + TABLE_WIDTH_EPSILON {
+                return Err(unsupported("MathML cell exceeds fitted column widths"));
+            }
+        }
+        Ok(widths)
+    }
+
+    fn layout_columns(
+        &self,
+        measures: &[MeasuredCell],
+        anchors: &[[f32; 2]],
+        label_width: f32,
+    ) -> Result<ColumnsLayout, EngineError> {
+        let grid_width = |widths: &[f32]| {
+            let data = widths.iter().enumerate().fold(0.0, |left, (index, width)| {
+                left + width + self.column_gaps.get(index).copied().unwrap_or_default()
+            });
+            data + 2.0 * self.rules.inset()[0]
+        };
+        let minimum = self
+            .labels
+            .as_ref()
+            .map_or(0.0, |labels| label_width + labels.gap);
+        let ordinary = self
+            .size_columns(measures, anchors, minimum)
+            .and_then(|widths| {
+                let data = grid_width(&widths);
+                let inset = if let Some(width) = self.width.filter(|_| self.labels.is_some()) {
+                    let available = (width - data) / 2.0;
+                    if available < minimum - TABLE_WIDTH_EPSILON {
+                        return Err(unsupported(
+                            "MathML labeled contents exceed the authored table width",
+                        ));
+                    }
+                    available.max(minimum)
+                } else {
+                    minimum
+                };
+                Ok(ColumnsLayout {
+                    widths,
+                    inset,
+                    width: data + 2.0 * inset,
+                    overlapping_labels: false,
+                })
+            });
+        let Some(labels) = self.labels.as_ref().filter(|labels| labels.overlap) else {
+            return ordinary;
+        };
+        let limit = match (labels.available, self.width) {
+            (Some(available), Some(width)) => available.min(width),
+            (Some(width), None) | (None, Some(width)) => width,
+            (None, None) => {
+                return Err(unsupported(
+                    "MathML overlap labels require a definite available width",
+                ));
+            }
+        };
+        match ordinary {
+            Ok(grid) if grid.width <= limit + TABLE_WIDTH_EPSILON => return Ok(grid),
+            Err(error) if !matches!(error, EngineError::Unsupported(_)) => return Err(error),
+            _ => {}
+        }
+        let widths = self.size_columns(measures, anchors, 0.0)?;
+        let data = grid_width(&widths);
+        let width = self.width.unwrap_or_else(|| data.max(label_width));
+        if data.max(label_width) > width + TABLE_WIDTH_EPSILON
+            || width > limit + TABLE_WIDTH_EPSILON
+        {
+            return Err(unsupported(
+                "MathML overlap labels or their data grid exceed the available width",
+            ));
+        }
+        if self.rules.visible() || self.cells.iter().any(|cell| cell.rows.len() != 1) {
+            return Err(unsupported(
+                "MathML overlap labels with table rules or row spans",
+            ));
+        }
+        Ok(ColumnsLayout {
+            widths,
+            inset: ((width - data) / 2.0).max(0.0),
+            width: width.max(data),
+            overlapping_labels: true,
+        })
+    }
+
     pub(super) fn editable_matrix(
         self,
         layout: Layout,
@@ -904,7 +1077,11 @@ impl Table {
         let [column_gap, row_pitch] = editor.matrix_spacing()?;
         let mut widths = layout.widths;
         let mut gaps = self.column_gaps;
-        if self.labels.is_some() {
+        if layout.overlapping_labels {
+            let last = widths.len() - 1;
+            widths[0] += layout.label_inset;
+            widths[last] += layout.label_inset;
+        } else if self.labels.is_some() {
             widths.insert(0, layout.label_width);
             widths.push(layout.label_width);
             let gap = layout.label_inset - layout.label_width;
@@ -926,6 +1103,7 @@ impl Table {
         for (cell, (left, top, drawing)) in self.cells.into_iter().zip(layout.cells) {
             let row = cell.rows.start;
             let column = match &self.labels {
+                Some(_) if layout.overlapping_labels => cell.columns.start,
                 Some(labels) if cell.columns.is_empty() => {
                     if labels.left {
                         0
@@ -950,7 +1128,7 @@ impl Table {
             let matrix_baseline = first_baseline - row as f32 * row_pitch;
             let offset = layout.baseline - top - ascent - matrix_baseline;
             let advance = (left - origins[column]).max(0.0);
-            let mut cell_body = if cell.anchor.is_some() {
+            let mut cell_body = if cell.anchor.is_some() || layout.overlapping_labels {
                 compose::group_leading_space(advance)?
             } else {
                 compose::grid_gap(advance)?.into_iter().collect()
@@ -1055,17 +1233,12 @@ impl Table {
         let table_axis = self.em * axis_ratio;
         let enclosing_axis = self.enclosing_em * axis_ratio;
         let row_count = self.row_gaps.len() + 1;
-        let mut widths: Vec<_> = self
-            .column_widths
-            .iter()
-            .map(|column| column.fixed().unwrap_or_default())
-            .collect();
         let mut ascent = vec![0.0f32; row_count];
         let mut descent = vec![0.0f32; row_count];
         let mut row_baselines = vec![false; row_count];
         let mut heights = vec![0.0; row_count];
         let mut measures = Vec::with_capacity(self.cells.len());
-        let mut anchors = vec![[0.0f32; 2]; widths.len()];
+        let mut anchors = vec![[0.0f32; 2]; self.column_widths.len()];
         let mut marked_columns = [false; MAX_MATRIX_SIZE];
         if editable_carrier.is_some() {
             for cell in &self.cells {
@@ -1111,7 +1284,7 @@ impl Table {
                     MAX_DIMENSION,
                 )?),
             };
-            let (cell_width, cell_ascent, cell_descent) = measure.size();
+            let (cell_width, _, _) = measure.size();
             let anchor = if let Some(anchor) = cell.anchor {
                 let CellDrawing::Equation(equation) = &measure else {
                     return Err(invalid("MathML alignment group has no equation"));
@@ -1132,89 +1305,43 @@ impl Table {
                 Vertical::Axis => Some(resolved.draw_size() * axis_ratio - table_axis),
                 _ => None,
             };
-            if let Some(offset) = offset {
-                let row = cell.rows.start;
-                row_baselines[row] = true;
-                ascent[row] = ascent[row].max(cell_ascent - offset);
-                if cell.rows.len() == 1 {
-                    descent[row] = descent[row].max(cell_descent + offset);
-                }
-            }
             measures.push(MeasuredCell {
                 drawing: measure,
                 baseline_offset: offset,
                 anchor,
             });
         }
+        let ColumnsLayout {
+            widths,
+            inset: label_inset,
+            width,
+            overlapping_labels,
+        } = self.layout_columns(&measures, &anchors, label_width)?;
+        let mut label_bands = vec![[0.0f32; 2]; row_count];
+        for (cell, measure) in self.cells.iter().zip(&measures) {
+            let row = cell.rows.start;
+            let (_, cell_ascent, cell_descent) = measure.drawing.size();
+            if overlapping_labels && cell.columns.is_empty() {
+                label_bands[row][usize::from(!cell.label_above)] = cell_ascent + cell_descent;
+                continue;
+            }
+            if let Some(offset) = measure.baseline_offset {
+                row_baselines[row] = true;
+                ascent[row] = ascent[row].max(cell_ascent - offset);
+                if cell.rows.len() == 1 {
+                    descent[row] = descent[row].max(cell_descent + offset);
+                }
+            }
+        }
         for row in 0..row_count {
             heights[row] = ascent[row] + descent[row];
         }
-        // Resolve single cells first. Wider or taller spans impose a minimum
-        // over all of their tracks, including the gaps internal to the span.
-        let ordered = |key: fn(&Cell) -> usize| {
-            let mut indices: Vec<_> = (0..self.cells.len()).collect();
-            indices.sort_by_key(|&index| key(&self.cells[index]));
-            indices
-        };
-        let minimum_label_inset = self
-            .labels
-            .as_ref()
-            .map_or(0.0, |labels| label_width + labels.gap);
-        let declared = self.declared_track_width(minimum_label_inset)?;
-        // Size automatic data columns intrinsically. Fit columns can use
-        // remaining space once both outside tracks reserve the label gap.
-        let fill = declared
-            .filter(|_| self.labels.is_none() || self.column_widths.contains(&ColumnWidth::Fit));
-        if self.equal_columns {
-            let common_width = self
-                .cells
-                .iter()
-                .zip(&measures)
-                .filter(|(cell, _)| !cell.columns.is_empty())
-                .map(|(cell, measure)| {
-                    let width = measure.width(cell.columns.start, &anchors);
-                    equal_track_size(&self.column_gaps, &cell.columns, width)
-                })
-                .fold(0.0, f32::max);
-            widths.fill(self.equal_column_width(common_width, fill)?);
-        } else {
-            let order = if declared.is_some() {
-                ordered(|cell| cell.columns.end)
-            } else {
-                ordered(|cell| cell.columns.len())
-            };
-            // Automatic columns are measured before fitted columns share
-            // the remaining width. Check spans using fit against that allocation.
-            let mut fitted = Vec::new();
-            for index in order {
-                let span = &self.cells[index].columns;
-                if span.is_empty() {
-                    continue;
-                }
-                if self.column_widths[span.clone()].contains(&ColumnWidth::Fit) {
-                    fitted.push(index);
-                    continue;
-                }
-                self.grow_columns(
-                    &mut widths,
-                    span,
-                    measures[index].width(span.start, &anchors),
-                )?;
-            }
-            if let Some(total) = fill {
-                self.fill_width(&mut widths, total)?;
-            }
-            for index in fitted {
-                let span = &self.cells[index].columns;
-                let room = extent(&widths, &self.column_gaps, span);
-                if measures[index].width(span.start, &anchors) > room + TABLE_WIDTH_EPSILON {
-                    return Err(unsupported("MathML cell exceeds fitted column widths"));
-                }
-            }
-        }
         let mut common_height = heights.iter().copied().fold(0.0, f32::max);
-        for index in ordered(|cell| cell.rows.len()) {
+        for index in self.cell_order(|cell| cell.rows.len()) {
             let cell = &self.cells[index];
+            if overlapping_labels && cell.columns.is_empty() {
+                continue;
+            }
             let measure = &measures[index];
             let (_, cell_ascent, cell_descent) = measure.drawing.size();
             let top = measure
@@ -1232,22 +1359,24 @@ impl Table {
             heights.fill(common_height);
         }
         let x = starts(&widths, &self.column_gaps);
-        let y = starts(&heights, &self.row_gaps);
+        let mut y = starts(&heights, &self.row_gaps);
         let [left_inset, top_inset] = self.rules.inset();
-        let grid_width = x[widths.len()] + left_inset * 2.0;
-        let label_inset = match self.width {
-            Some(width) if self.labels.is_some() => {
-                let available = (width - grid_width) / 2.0;
-                if available < minimum_label_inset - TABLE_WIDTH_EPSILON {
-                    return Err(unsupported(
-                        "MathML labeled contents exceed the authored table width",
-                    ));
-                }
-                available.max(minimum_label_inset)
+        let mut label_positions = vec![0.0; row_count];
+        if overlapping_labels {
+            // Reserve an adjacent band for each displaced label. Two labels
+            // sharing a row boundary receive consecutive, separate bands.
+            let mut added = 0.0;
+            for (row, [before, after]) in label_bands.into_iter().enumerate() {
+                y[row] += added + before;
+                label_positions[row] = if before > 0.0 {
+                    y[row] - before
+                } else {
+                    y[row] + heights[row]
+                };
+                added += before + after;
             }
-            _ => minimum_label_inset,
-        };
-        let width = grid_width + 2.0 * label_inset;
+            y[row_count] += added;
+        }
         let height = y[heights.len()] + top_inset * 2.0;
         if ![width, height]
             .into_iter()
@@ -1289,21 +1418,31 @@ impl Table {
                         ColJc::Center => horizontal_room / 2.0,
                         ColJc::Right => horizontal_room,
                     };
-                let top = top_inset
-                    + y[cell.rows.start]
-                    + match cell.vertical {
-                        Vertical::Top => 0.0,
-                        Vertical::Bottom => vertical_room,
-                        Vertical::Center => vertical_room / 2.0,
-                        Vertical::Baseline | Vertical::Axis => {
-                            ascent[cell.rows.start] + measure.baseline_offset.unwrap_or_default()
-                                - cell_ascent
+                let row = cell.rows.start;
+                let top = if overlapping_labels && cell.columns.is_empty() {
+                    label_positions[row]
+                } else {
+                    top_inset
+                        + y[row]
+                        + match cell.vertical {
+                            Vertical::Top => 0.0,
+                            Vertical::Bottom => vertical_room,
+                            Vertical::Center => vertical_room / 2.0,
+                            Vertical::Baseline | Vertical::Axis => {
+                                ascent[row] + measure.baseline_offset.unwrap_or_default()
+                                    - cell_ascent
+                            }
                         }
-                    };
+                };
                 (left, top, measure.drawing)
             })
             .collect();
-        let (top, bottom, row_baseline) = self.alignment_row.map_or((0.0, height, None), |row| {
+        let data_bounds = if overlapping_labels {
+            (y[0], y[row_count - 1] + heights[row_count - 1], None)
+        } else {
+            (0.0, height, None)
+        };
+        let (top, bottom, row_baseline) = self.alignment_row.map_or(data_bounds, |row| {
             (
                 top_inset + y[row],
                 top_inset + y[row] + heights[row],
@@ -1357,6 +1496,7 @@ impl Table {
             row_positions: y.into_iter().map(|start| start + top_inset).collect(),
             label_width,
             label_inset,
+            overlapping_labels,
             rules,
             occupancy,
             rule_color,
@@ -1384,6 +1524,9 @@ impl Table {
         available_height: f32,
         align: Option<Align>,
     ) -> Result<NativeTable, EngineError> {
+        if layout.overlapping_labels {
+            return Err(unsupported("MathML overlap labels in a native Word table"));
+        }
         let [frame_inline, frame_block] = self.rules.native_margin();
         let mut widths = margins_for_tracks(&layout.widths, &self.column_gaps, frame_inline);
         let heights = margins_for_tracks(&layout.heights, &self.row_gaps, frame_block);

@@ -87,7 +87,8 @@
 - [x] Render native MathML row labels outside auto-width data grids on the authored side, including minimum label spacing, searchable PDF and editable unruled DOCX.
 - [x] Honor definite whole-table widths for MathML labeled grids and retain editable unruled DOCX positions.
 - [x] Keep editable Word borders, merged data spans and borderless label tracks for standalone ruled MathML labeled grids at auto and definite widths.
-- [ ] Support MathML row-label overlap modes and ruled labeled grids inside larger DOCX equations.
+- [x] Resolve conditional left and right MathML row-label overlap at definite widths in previews, searchable PDF and editable unruled Word matrices.
+- [ ] Extend overflow placement to ruled MathML grids and vertical spans, and support ruled labeled grids inside larger DOCX equations.
 - [x] Align a single MathML group per data cell to its edge, center or decimal point in previews, searchable PDF and editable DOCX.
 - [x] Preserve explicit MathML alignment marks on the group baseline and inside its tokens in searchable PDF and editable DOCX.
 - [ ] Extend MathML alignment to multiple groups per cell, marks inside operator arguments, automatic decimal alignment in compound numeric expressions, right-to-left groups and cross-table scopes.
