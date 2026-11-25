@@ -13756,6 +13756,9 @@ Resume
                               for rect in rects.values()]
                     self.assertLess(max(starts) - min(starts), 0.05)
 
+        overfull = source.replace('columnwidth="140pt 100pt"', 'columnwidth="60pt 100pt"').replace(
+            '>12.345</m:mn>', '>12.345</m:mn><m:mspace width="80pt"/>',
+        )
         for chapter, message in (
             (source.replace('<m:mtable groupalign=', '<m:mtable alignmentscope="false" groupalign='),
              "MathML alignment groups across table scopes"),
@@ -13764,8 +13767,7 @@ Resume
             (source.replace('<m:mn mathcolor="#bf222d">12.345</m:mn>',
                             '<m:mphantom><m:mn>12.345</m:mn></m:mphantom>'),
              "MathML decimal alignment inside a nontransparent operator"),
-            (source.replace('columnwidth="140pt 100pt"', 'columnwidth="60pt 100pt"'),
-             "MathML cell exceeds fixed column widths"),
+            (overfull, "MathML cell exceeds fixed column widths"),
         ):
             with self.subTest(message=message), doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
                 for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
