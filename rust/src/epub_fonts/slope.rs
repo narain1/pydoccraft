@@ -6,14 +6,14 @@ use parley::FontStyle;
 const PREFERENCE_ANGLE: f32 = 11.0;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub(super) enum Request {
+pub(in crate::epub) enum Request {
     Normal,
     Italic,
     Oblique(u32),
 }
 
 impl Request {
-    pub(super) fn new(italic: Option<bool>, oblique: Option<f32>) -> Self {
+    pub(in crate::epub) fn new(italic: Option<bool>, oblique: Option<f32>) -> Self {
         if let Some(angle) = oblique {
             Self::Oblique(angle.to_bits())
         } else if italic == Some(true) {
@@ -23,7 +23,7 @@ impl Request {
         }
     }
 
-    pub(super) fn style(self) -> FontStyle {
+    pub(in crate::epub) fn style(self) -> FontStyle {
         match self {
             Self::Normal => FontStyle::Normal,
             Self::Italic => FontStyle::Italic,
@@ -31,7 +31,7 @@ impl Request {
         }
     }
 
-    pub(super) fn angle(self, [low, high]: [f32; 2]) -> f32 {
+    pub(in crate::epub) fn angle(self, [low, high]: [f32; 2]) -> f32 {
         let requested = match self {
             Self::Normal => 0.0,
             Self::Italic => PREFERENCE_ANGLE,
@@ -40,7 +40,7 @@ impl Request {
         requested.clamp(low, high)
     }
 
-    pub(super) fn rank(self, style: FontStyle, oblique: Option<[f32; 2]>) -> Rank {
+    pub(in crate::epub) fn rank(self, style: FontStyle, oblique: Option<[f32; 2]>) -> Rank {
         let selected = oblique.map(|range| self.angle(range));
         let italic = style == FontStyle::Italic;
         match self {
@@ -79,10 +79,10 @@ impl Request {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct Rank(u8, f32);
+pub(in crate::epub) struct Rank(u8, f32);
 
 impl Rank {
-    pub(super) fn cmp(self, other: Self) -> Ordering {
+    pub(in crate::epub) fn cmp(self, other: Self) -> Ordering {
         self.0
             .cmp(&other.0)
             .then_with(|| self.1.total_cmp(&other.1))

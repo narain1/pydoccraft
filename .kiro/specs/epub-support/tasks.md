@@ -21,6 +21,7 @@
 - [x] Render SVG CSS, packaged SVG fonts, and referenced PNG and JPEG resources in spine previews, XHTML and semantic export.
 - [x] Render fixed-layout spreads in both reading directions, honor spine placement and orientation-dependent spread rules, and clip across page boundaries.
 - [x] Export selected fixed-layout viewports as raster PDF pages at their original sizes.
+- [ ] Investigate small preview and reopened PDF pixel differences at fractional raster scales.
 - [x] Preserve nested EPUB navigation in fixed-layout PDF outlines, with destinations remapped to the exported page order.
 - [x] Preserve clickable links and fragment destinations on fixed-layout XHTML content and standalone SVG objects.
 - [ ] Extend fixed-layout link geometry to SVG text spans and SVG embedded in XHTML, and resolve remaining inline fragment cases.
@@ -29,13 +30,14 @@
 - [x] Scope packaged XHTML font faces using CSS Unicode ranges, overlap order and glyph fallback.
 - [x] Preserve ordered XHTML font-family stacks across inherited and inline styles, including packaged and generic fallbacks.
 - [x] Shape variable-font glyphs with inherited CSS axis values and optical sizing in XHTML previews, and pass the properties to the static SVG renderer.
-- [x] Match XHTML font-face weight and width ranges, apply the selected face's variation defaults, and honor discrete SVG face width descriptors.
+- [x] Match XHTML font-face weight and width ranges and apply the selected face's variation defaults.
 - [x] Match XHTML oblique face ranges with signed, fractional angles and apply the selected slant to variable fonts.
 - [x] Resolve author-defined CSS custom properties in supported XHTML and SVG styles, including scoped inheritance, fallback cycles and deferred shorthands.
 - [x] Render bounded same-document SVG use references, including nested instances and symbols, in fixed-layout and inline content.
 - [x] Render SVG gradient templates and bounded Gaussian blur in fixed-layout previews, visual PDF and rasterized inline SVG exports.
 - [x] Apply Unicode ranges and ordered font fallback to static SVG text, including inherited lists and matching in reopened exports.
-- [ ] Extend source CSS and fixed-layout fidelity, including fractional synthetic oblique, SVG variable face ranges and defaults, additional SVG effects, and complex SVG text fallback.
+- [x] Match SVG font-face weight, width and signed oblique intervals and apply selected font variation defaults to the laid-out runs.
+- [ ] Extend source CSS and fixed-layout fidelity, including fractional synthetic oblique, additional SVG effects, and complex SVG text fallback and instance typography.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.
 - [x] Render tall reflowable chapters within the paint coordinate budget and apply raster limits to the requested DPI and clip.
 - [x] Project inherited MathML attributes, accents, movable limits, repeated script pairs, varied fences and separators, horizontal spaces, and zero-dimension padding.

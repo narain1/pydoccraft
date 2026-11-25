@@ -466,7 +466,8 @@ fn apply_styles(
 ) -> Result<(Vec<u8>, svg_fonts::Families), EngineError> {
     let mut output = Vec::with_capacity(source.len());
     let mut cursor = 0;
-    let mut families = svg_fonts::Families::default();
+    let mut families = svg_fonts::Families::new(&cascade.fonts);
+    let mut typography = HashMap::<roxmltree::NodeId, svg_fonts::CssFont>::new();
     let mut added_bytes = 0;
     let mut effects = None;
     // Process byte ranges in document order. Source XML remains available for extraction.
@@ -489,12 +490,46 @@ fn apply_styles(
             .map(|(_, value)| value.as_str())
             .or_else(|| node.attribute("font-family"));
         let mut style = String::new();
-        if let Some(family) = family {
-            if let Some(encoded) = families.encode(family)? {
-                style.push_str("font-family:");
-                style.push_str(&encoded);
-                style.push(';');
+        let mut encoded = family
+            .map(|value| families.encode(value))
+            .transpose()?
+            .flatten();
+        if families.tracks_variations() {
+            let mut text = node
+                .parent_element()
+                .and_then(|parent| typography.get(&parent.id()))
+                .cloned()
+                .unwrap_or_default();
+            if let Some(family) = &encoded {
+                text.apply("font-family", family);
             }
+            for key in [
+                "font-weight",
+                "font-stretch",
+                "font-style",
+                "font-variation-settings",
+                "font-optical-sizing",
+            ] {
+                let value = props
+                    .iter()
+                    .find(|(name, _)| name == key)
+                    .map(|(_, value)| value.as_str())
+                    .or_else(|| node.attribute(key));
+                if let Some(value) = value {
+                    text.apply(key, value);
+                }
+            }
+            if matches!(node.tag_name().name(), "text" | "tspan" | "a") {
+                if let Some(request) = families.variant(&text)? {
+                    encoded = Some(request);
+                }
+            }
+            typography.insert(node.id(), text);
+        }
+        if let Some(encoded) = encoded {
+            style.push_str("font-family:");
+            style.push_str(&encoded);
+            style.push(';');
         }
         props.retain(|(key, _)| key != "font-family");
         for (key, mut value) in props {

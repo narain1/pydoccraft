@@ -41,7 +41,7 @@ use crate::{model::BlockPayload, EngineError};
 #[path = "epub_font_ranges.rs"]
 pub(super) mod ranges;
 #[path = "epub_fonts/slope.rs"]
-mod slope;
+pub(super) mod slope;
 
 pub(super) const MAX_FONT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_REGISTERED_FACES: usize = 512;
@@ -703,15 +703,16 @@ fn contains_width(face: &Face, width: f32) -> bool {
     (low..=high).contains(&width)
 }
 
-fn match_width(faces: &[&Face], requested: f32) -> f32 {
-    let rank = |candidate: f32| {
-        let preferred = if requested <= 100.0 {
-            candidate <= requested
-        } else {
-            candidate >= requested
-        };
-        (!preferred, (candidate - requested).abs())
+pub(super) fn width_rank(requested: f32, candidate: f32) -> (bool, f32) {
+    let preferred = if requested <= 100.0 {
+        candidate <= requested
+    } else {
+        candidate >= requested
     };
+    (!preferred, (candidate - requested).abs())
+}
+
+fn match_width(faces: &[&Face], requested: f32) -> f32 {
     faces
         .iter()
         .map(|face| {
@@ -719,8 +720,8 @@ fn match_width(faces: &[&Face], requested: f32) -> f32 {
             requested.clamp(low, high)
         })
         .min_by(|&a, &b| {
-            let (side_a, distance_a) = rank(a);
-            let (side_b, distance_b) = rank(b);
+            let (side_a, distance_a) = width_rank(requested, a);
+            let (side_b, distance_b) = width_rank(requested, b);
             side_a
                 .cmp(&side_b)
                 .then_with(|| distance_a.total_cmp(&distance_b))

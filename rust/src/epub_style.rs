@@ -395,29 +395,15 @@ impl Typography {
             }
             None => {}
         }
-        let parent_weight = self.font_weight.unwrap_or(400.0);
-        let weight = match value(values, "font-weight").to_ascii_lowercase().as_str() {
-            "initial" => Some(400.0),
-            "bolder" => Some(match parent_weight {
-                w if w < 350.0 => 400.0,
-                w if w < 550.0 => 700.0,
-                w if w < 900.0 => 900.0,
-                w => w,
-            }),
-            "lighter" => Some(match parent_weight {
-                w if w < 100.0 => w,
-                w if w < 550.0 => 100.0,
-                w if w < 750.0 => 400.0,
-                _ => 700.0,
-            }),
-            "" if matches!(
+        let request = value(values, "font-weight");
+        let weight = if request.is_empty()
+            && matches!(
                 tag,
                 "b" | "strong" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "th"
-            ) =>
-            {
-                Some(700.0)
-            }
-            value => css::font_weight(value),
+            ) {
+            Some(700.0)
+        } else {
+            css::relative_font_weight(request, self.font_weight.unwrap_or(400.0))
         };
         if let Some(weight) = weight {
             self.font_weight = Some(weight);

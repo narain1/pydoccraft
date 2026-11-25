@@ -15,12 +15,15 @@ use super::super::{
     charge,
     css::{parse_font_family, FontFamilyValue},
     fonts::{self, ranges},
-    invalid, limited, unsupported, Book,
+    invalid, limited, Book,
 };
 use crate::EngineError;
 
 #[path = "epub_svg_font_runs.rs"]
 mod runs;
+#[path = "epub_svg_font_variations.rs"]
+mod variations;
+pub(super) use variations::CssFont;
 
 const FONT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_FACES: usize = 512;
@@ -34,9 +37,47 @@ const INTERNAL_FAMILY: &str = "\0EPUB resolved SVG face";
 pub(super) struct Families {
     // Authored names and their private SVG family identifiers.
     names: HashMap<String, String>,
+    variant_names: HashSet<String>,
+    requests: HashMap<CssFont, String>,
 }
 
 impl Families {
+    pub(super) fn new(faces: &[fonts::Face]) -> Self {
+        Self {
+            variant_names: faces
+                .iter()
+                .filter(|face| variations::has_descriptors(face))
+                .map(|face| face.family.to_lowercase())
+                .collect(),
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn tracks_variations(&self) -> bool {
+        !self.variant_names.is_empty()
+    }
+
+    pub(super) fn variant(&mut self, request: &CssFont) -> Result<Option<String>, EngineError> {
+        if !request
+            .family
+            .split(',')
+            .any(|name| name.starts_with("doccraft-svg-variable-"))
+        {
+            return Ok(None);
+        }
+        let next = self.requests.len();
+        if next == MAX_STACKS && !self.requests.contains_key(request) {
+            return Err(limited(
+                "EPUB SVG font selection exceeds 512 distinct stacks",
+            ));
+        }
+        let alias = self
+            .requests
+            .entry(request.clone())
+            .or_insert_with(|| format!("doccraft-svg-request-{next}"));
+        Ok(Some(alias.clone()))
+    }
+
     pub(super) fn encode(&mut self, value: &str) -> Result<Option<String>, EngineError> {
         let Some(value) = parse_font_family(value) else {
             return Ok(None);
@@ -61,10 +102,16 @@ impl Families {
                         });
                     } else {
                         let next = self.names.len();
+                        let name = family.name.to_lowercase();
+                        let prefix = if self.variant_names.contains(&name) {
+                            "doccraft-svg-variable-"
+                        } else {
+                            "doccraft-svg-font-"
+                        };
                         let alias = self
                             .names
-                            .entry(family.name.to_lowercase())
-                            .or_insert_with(|| format!("doccraft-svg-font-{next}"));
+                            .entry(name)
+                            .or_insert_with(|| format!("{prefix}{next}"));
                         encoded.push(alias.clone());
                     }
                 }
@@ -119,6 +166,11 @@ impl Resolver {
     ) -> Result<Self, EngineError> {
         let mut selection = Selection::default();
         let aliases = families.names;
+        selection.requests = families
+            .requests
+            .into_iter()
+            .map(|(request, name)| (name, request))
+            .collect();
         options.fontdb = system_fonts().db.clone();
         let mut decoded = 0;
         let mut total = 0;
@@ -127,25 +179,18 @@ impl Resolver {
             let Some(alias) = aliases.get(&face.family.to_lowercase()) else {
                 continue;
             };
-            let [weight, upper] = face.weight.unwrap_or([400.0; 2]);
-            if weight != upper || face.oblique.is_some_and(|[low, high]| low != high) {
-                return Err(unsupported("EPUB SVG font-face weight and style ranges"));
-            }
+            let [weight, _] = face.weight.unwrap_or([400.0; 2]);
             let style = face.style;
-            if !face.axes.is_empty() {
-                return Err(unsupported("EPUB SVG font-face variation defaults"));
-            }
-            let stretch = match face.width {
-                None | Some([100.0, 100.0]) => Stretch::Normal,
-                Some([50.0, 50.0]) => Stretch::UltraCondensed,
-                Some([62.5, 62.5]) => Stretch::ExtraCondensed,
-                Some([75.0, 75.0]) => Stretch::Condensed,
-                Some([87.5, 87.5]) => Stretch::SemiCondensed,
-                Some([112.5, 112.5]) => Stretch::SemiExpanded,
-                Some([125.0, 125.0]) => Stretch::Expanded,
-                Some([150.0, 150.0]) => Stretch::ExtraExpanded,
-                Some([200.0, 200.0]) => Stretch::UltraExpanded,
-                _ => return Err(unsupported("EPUB SVG font-face width descriptor")),
+            let stretch = match face.width.map(|bounds| bounds[0]) {
+                Some(width) if width <= 50.0 => Stretch::UltraCondensed,
+                Some(width) if width <= 62.5 => Stretch::ExtraCondensed,
+                Some(width) if width <= 75.0 => Stretch::Condensed,
+                Some(width) if width <= 87.5 => Stretch::SemiCondensed,
+                Some(width) if width >= 200.0 => Stretch::UltraExpanded,
+                Some(width) if width >= 150.0 => Stretch::ExtraExpanded,
+                Some(width) if width >= 125.0 => Stretch::Expanded,
+                Some(width) if width >= 112.5 => Stretch::SemiExpanded,
+                _ => Stretch::Normal,
             };
             let data = fonts::read_face(face, book)?;
             charge(
@@ -180,12 +225,21 @@ impl Resolver {
                 )?;
                 for id in loaded {
                     let mut info = face_info(database, id)?;
+                    let request = database
+                        .with_face_data(id, |data, index| {
+                            FontRef::from_index(data, index)
+                                .map(|font| variations::Face::new(face, font))
+                                .map_err(invalid)
+                        })
+                        .ok_or_else(|| invalid("missing EPUB SVG font data"))??;
                     database.remove_face(id);
                     info.families = vec![(alias.clone(), Language::English_UnitedStates)];
                     info.style = style;
                     info.weight = Weight(weight as u16);
                     info.stretch = stretch;
-                    ids.push(database.push_face_info(info));
+                    let id = database.push_face_info(info);
+                    selection.variants.insert(id, request);
+                    ids.push(id);
                 }
                 Ok(())
             };
@@ -230,6 +284,8 @@ impl Resolver {
 struct Selection {
     names: HashMap<String, String>,
     author: HashMap<String, Vec<ID>>,
+    requests: HashMap<String, CssFont>,
+    variants: HashMap<ID, variations::Face>,
     stacks: HashMap<Vec<ID>, ID>,
     candidates: HashMap<ID, Vec<ID>>,
     family_plans: HashMap<String, Option<ID>>,
@@ -262,14 +318,19 @@ impl Selection {
     }
 
     fn primary(&mut self, font: &Font, db: &mut Arc<Database>) -> Result<Option<ID>, EngineError> {
-        if let [FontFamily::Named(name)] = font.families() {
+        let request = if let [FontFamily::Named(name)] = font.families() {
             if let Some(&id) = self.direct_names.get(name) {
                 return Ok(Some(id));
             }
-        }
+            self.requests.get(name)
+        } else {
+            None
+        };
+        let planned = request.map(CssFont::families);
+        let families = planned.as_deref().unwrap_or_else(|| font.families());
         charge(
             &mut self.comparison_work,
-            (font.families().len() + 1).saturating_mul(db.len()),
+            (families.len() + 1).saturating_mul(db.len()),
             MAX_WORK,
             "EPUB SVG font matching exceeds its work budget",
         )?;
@@ -295,7 +356,25 @@ impl Selection {
             },
             ..Default::default()
         };
-        for family in font.families().iter().chain([&FontFamily::Serif]) {
+        for family in families.iter().chain([&FontFamily::Serif]) {
+            if let (Some(request), FontFamily::Named(name)) = (request, family) {
+                if let Some(faces) = self.author.get(name) {
+                    let ranked = faces
+                        .iter()
+                        .filter_map(|id| Some((*id, request.rank(self.variants.get(id)?))));
+                    let best = ranked
+                        .clone()
+                        .map(|(_, rank)| rank)
+                        .min_by(variations::rank_cmp);
+                    if let Some(best) = best {
+                        candidates.extend(ranked.filter_map(|(id, rank)| {
+                            (variations::rank_cmp(&rank, &best).is_eq() && seen.insert(id))
+                                .then_some(id)
+                        }));
+                    }
+                    continue;
+                }
+            }
             let family_name = match family {
                 FontFamily::Named(name) if self.author.contains_key(name) => Family::Name(name),
                 FontFamily::Named(name) => {

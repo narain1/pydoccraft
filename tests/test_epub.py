@@ -1479,6 +1479,82 @@ class EpubTests(unittest.TestCase):
         self.assertEqual(default, preview("normal", optical="NONE"))
         self.assertNotEqual(default, preview("normal", optical="initial"))
 
+    def test_epub_svg_variable_face_ranges_and_defaults_follow_selected_runs(self) -> None:
+        fonts = Path(__file__).parent / "fixtures" / "fonts"
+        variable = (fonts / "InterVariable.ttf").read_bytes()
+        regular = (fonts / "Inter-Regular.ttf").read_bytes()
+        wide = font_with_extra_advance(regular)
+        files = {
+            "OEBPS/Art/variable.ttf": doc_ex.EpubResource("font/ttf", variable),
+            "OEBPS/Art/regular.ttf": doc_ex.EpubResource("font/ttf", regular),
+            "OEBPS/Art/wide.ttf": doc_ex.EpubResource("font/ttf", wide),
+        }
+
+        def face(file: str, descriptors: str = "", family: str = "Author") -> str:
+            return f"@font-face{{font-family:{family};src:url({file});{descriptors}}}"
+
+        def preview(definitions: str, style: str = "", text: str = "AABBBAA", *,
+                    verify_pdf: bool = False, length: str = "") -> bytes:
+            style = style.replace('"', "&quot;")
+            svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 100">
+            <style>{definitions}</style><g style="font-family:Author;font-size:40px;font-optical-sizing:none;{style}">
+            <text x="10" y="62" {length}>{text}</text></g></svg>"""
+            chapter = doc_ex.EpubSvgChapterSource("Variable faces", svg, "OEBPS/Art/axes.svg")
+            with doc_ex.open(epub_fixture()) as book:
+                data = book.edit_epub_structure([chapter, 0], resources=files)
+            with doc_ex.open(data) as book:
+                image = book.render_page(0, dpi=96)
+                if verify_pdf:
+                    with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, pages=[0], searchable=True)) as pdf:
+                        self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))),
+                                         rgba_pixels(png_chunks(image)))
+                        self.assertEqual(pdf[0].get_text(), "AABBBAA")
+                return image
+
+        plain = face("variable.ttf")
+        ranged = face("variable.ttf", "font-weight:300 750")
+        inside = preview(ranged, "font-weight:612.5", verify_pdf=True)
+        self.assertEqual(inside, preview(plain, 'font-variation-settings:"wght" 612.5'))
+        self.assertNotEqual(inside, preview(plain, 'font-variation-settings:"wght" 612'))
+        self.assertEqual(preview(ranged, "font-weight:910"), preview(plain, 'font-variation-settings:"wght" 750'))
+        self.assertEqual(preview(ranged, "font-weight:200"), preview(plain, 'font-variation-settings:"wght" 300'))
+
+        defaults = face("variable.ttf", 'font-weight:300 750;font-variation-settings:"wght" 530,"opsz" 24')
+        self.assertEqual(preview(defaults, "font-weight:630"),
+                         preview(plain, 'font-variation-settings:"wght" 530,"opsz" 24'))
+        self.assertEqual(preview(defaults, 'font-weight:630;font-variation-settings:"wght" 720'),
+                         preview(plain, 'font-variation-settings:"wght" 720,"opsz" 24'))
+        self.assertEqual(preview(defaults, "font-optical-sizing:auto"),
+                         preview(plain, 'font-optical-sizing:auto;font-variation-settings:"wght" 530'))
+
+        first = face("variable.ttf", 'unicode-range:U+0041;font-variation-settings:"wght" 350')
+        second = face("variable.ttf", 'unicode-range:U+0042;font-variation-settings:"wght" 720')
+        runs = ('<tspan style="font-variation-settings:&quot;wght&quot; 350">AA</tspan>'
+                '<tspan style="font-variation-settings:&quot;wght&quot; 720">BBB</tspan>'
+                '<tspan style="font-variation-settings:&quot;wght&quot; 350">AA</tspan>')
+        self.assertEqual(preview(first + second), preview(plain, text=runs))
+        self.assertNotEqual(preview(first + second), preview(plain, 'font-variation-settings:"wght" 350'))
+
+        explicit = 'textLength="230" lengthAdjust="spacingAndGlyphs"'
+        self.assertEqual(preview(ranged, "font-weight:612.5", length=explicit),
+                         preview(plain, 'font-variation-settings:"wght" 612.5', length=explicit))
+        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "mixed variable fonts"):
+            preview(first + second, length=explicit)
+        local = '<tspan style="font-variation-settings:&quot;wght&quot; 720">AABBBAA</tspan>'
+        self.assertEqual(preview(defaults, text=local),
+                         preview(plain, 'font-variation-settings:"wght" 720,"opsz" 24'))
+
+        condensed = face("regular.ttf", "font-width:74.5% 90.25%;font-style:oblique 14deg 25deg;font-weight:300 500")
+        expanded = face("wide.ttf", "font-width:90.75% 120%;font-style:oblique 3deg 8deg;font-weight:500 750")
+        style = "font-width:90.5%;font-style:oblique 18deg;font-weight:630"
+        self.assertEqual(preview(condensed + expanded, style), preview(condensed, style))
+        style = "font-width:90.9%;font-style:oblique 18deg;font-weight:630"
+        self.assertEqual(preview(condensed + expanded, style), preview(expanded, style))
+        style = "font-style:oblique 12deg;font-weight:630"
+        self.assertEqual(preview(condensed.replace("font-width:74.5% 90.25%;", "") +
+                                 expanded.replace("font-width:90.75% 120%;", ""), style),
+                         preview(condensed.replace("font-width:74.5% 90.25%;", ""), style))
+
     def test_epub_svg_font_ranges_and_stacks_preserve_preferred_glyphs(self) -> None:
         inter = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
         wide = font_with_extra_advance(inter)

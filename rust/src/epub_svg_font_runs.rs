@@ -8,9 +8,9 @@ use resvg::usvg::{
 use roxmltree::Node;
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::{Resolver, Selection, MAX_FACES, MAX_WORK};
+use super::{CssFont, Resolver, Selection, MAX_FACES, MAX_WORK};
 use crate::{
-    author_epub::escape_text,
+    author_epub::{escape_attribute, escape_text},
     epub::{
         charge, invalid, limited, parse_xml,
         structure::{append, apply_edits},
@@ -31,7 +31,7 @@ impl Resolver {
             .lock()
             .map_err(|_| invalid("EPUB SVG font selection failed"))?;
         let missing = state.missing(tree);
-        if missing.is_empty() {
+        if missing.is_empty() && state.requests.is_empty() {
             return Ok(None);
         }
         let source = std::str::from_utf8(source).map_err(invalid)?;
@@ -42,9 +42,6 @@ impl Resolver {
             let Some(parent) = node.parent_element() else {
                 continue;
             };
-            if !can_split(parent) {
-                continue;
-            }
             let Some(family) = effective_family(parent) else {
                 continue;
             };
@@ -52,27 +49,90 @@ impl Resolver {
                 continue;
             };
             let Some(text) = node.text() else { continue };
-            if !text.chars().any(|ch| missing.contains(&(base, ch))) {
-                continue;
-            }
+            let repair = text.chars().any(|ch| missing.contains(&(base, ch)));
+            let request = state.requests.get(family).cloned();
             let Some(candidates) = state.candidates.get(&base).cloned() else {
                 continue;
             };
-            let Some(split) = state.split_text(text, base, &candidates, tree.fontdb())? else {
+            let variable = request.as_ref().is_some_and(|request| {
+                candidates
+                    .iter()
+                    .any(|id| request.settings(state.variants.get(id)) != request.author_settings())
+            });
+            if !repair && !variable {
                 continue;
+            }
+            if !parent
+                .ancestors()
+                .any(|node| node.has_tag_name((NS, "text")))
+            {
+                continue;
+            }
+            let Some(runs) = state.select_runs(text, base, &candidates, tree.fontdb())? else {
+                if variable {
+                    return Err(unsupported(
+                        "EPUB SVG variable-font run could not retain all glyphs",
+                    ));
+                }
+                continue;
+            };
+            if !repair
+                && request.as_ref().is_none_or(|request| {
+                    runs.iter().all(|(id, _)| {
+                        request.settings(state.variants.get(id)) == request.author_settings()
+                    })
+                })
+            {
+                continue;
+            }
+            let (range, replacement) = match (runs.as_slice(), parent.attribute_node("style")) {
+                ([(id, _)], Some(style))
+                    if variable
+                        && parent
+                            .children()
+                            .filter(|node| node.is_element() || node.is_text())
+                            .count()
+                            == 1 =>
+                {
+                    // Keep layout attributes such as textLength on their original element.
+                    let (family, axes) = state.resolved_style(*id, request.as_ref())?;
+                    let tail = style
+                        .value()
+                        .strip_prefix("font-family:")
+                        .and_then(|style| style.split_once(';'))
+                        .map_or(style.value(), |(_, style)| style);
+                    let merged = format!("font-family:{family};{tail}{axes}");
+                    (
+                        style.range(),
+                        format!(r#" style="{}""#, escape_attribute(&merged)),
+                    )
+                }
+                _ if can_split(parent) => {
+                    (node.range(), state.encode_runs(runs, request.as_ref())?)
+                }
+                _ if variable => {
+                    return Err(unsupported(
+                        "EPUB SVG mixed variable fonts with explicit text lengths",
+                    ))
+                }
+                _ => continue,
             };
             charge(
                 &mut bytes,
-                split.len(),
+                replacement.len(),
                 XML_BYTES,
                 "EPUB SVG fallback spans exceed 8 MiB",
             )?;
-            edits.push((node.range(), split));
+            edits.push((range, replacement));
         }
         if edits.is_empty() {
-            return Err(unsupported(
-                "EPUB SVG mixed-font text could not retain all glyphs",
-            ));
+            return if missing.is_empty() {
+                Ok(None)
+            } else {
+                Err(unsupported(
+                    "EPUB SVG mixed-font text could not retain all glyphs",
+                ))
+            };
         }
         Ok(Some(apply_edits(source, edits, XML_BYTES)?))
     }
@@ -106,13 +166,13 @@ impl Selection {
         missing
     }
 
-    fn split_text(
+    fn select_runs<'a>(
         &mut self,
-        text: &str,
+        text: &'a str,
         base: ID,
         candidates: &[ID],
         db: &Database,
-    ) -> Result<Option<String>, EngineError> {
+    ) -> Result<Option<Vec<(ID, &'a str)>>, EngineError> {
         let mut runs: Vec<(ID, &str)> = Vec::new();
         let mut last = candidates[0];
         let mut start = 0;
@@ -126,7 +186,12 @@ impl Selection {
                 MAX_WORK,
                 "EPUB SVG font fallback exceeds its work budget",
             )?;
-            let has_cluster = |id| cluster.chars().all(|ch| self.supports(db, id, ch.into()));
+            let has_cluster = |id| {
+                cluster.chars().all(|ch| {
+                    matches!(ch, '\u{200c}' | '\u{200d}' | '\u{fe00}'..='\u{fe0f}' | '\u{e0100}'..='\u{e01ef}')
+                        || ch.is_control() || self.supports(db, id, ch.into())
+                })
+            };
             let selected = candidates
                 .iter()
                 .copied()
@@ -147,25 +212,70 @@ impl Selection {
             }
         }
         runs.push((last, &text[start..]));
+        Ok(Some(runs))
+    }
+
+    fn encode_runs(
+        &mut self,
+        runs: Vec<(ID, &str)>,
+        request: Option<&CssFont>,
+    ) -> Result<String, EngineError> {
         let mut output = String::new();
         for (id, text) in runs {
-            let next = self.direct_fonts.len();
-            if !self.direct_fonts.contains_key(&id) && next >= MAX_FACES {
-                return Err(limited("EPUB SVG font fallback exceeds 512 face variants"));
-            }
-            let alias = self
-                .direct_fonts
-                .entry(id)
-                .or_insert_with(|| format!("doccraft-svg-resolved-{next}"));
-            self.direct_names.insert(alias.clone(), id);
+            let (family, axes) = self.resolved_style(id, request)?;
+            let style = if axes.is_empty() {
+                String::new()
+            } else {
+                format!(r#" style="{}""#, escape_attribute(&axes))
+            };
             let span = format!(
-                r#"<tspan xmlns="{}" font-family="{alias}">{}</tspan>"#,
+                r#"<tspan xmlns="{}" font-family="{family}"{style}>{}</tspan>"#,
                 NS,
-                escape_text(text)
+                escape_text(text),
             );
             append(&mut output, &span, XML_BYTES)?;
         }
-        Ok(Some(output))
+        Ok(output)
+    }
+
+    fn resolved_style(
+        &mut self,
+        id: ID,
+        request: Option<&CssFont>,
+    ) -> Result<(String, String), EngineError> {
+        let next = self.direct_fonts.len();
+        if !self.direct_fonts.contains_key(&id) && next >= MAX_FACES {
+            return Err(limited("EPUB SVG font fallback exceeds 512 face variants"));
+        }
+        let alias = self
+            .direct_fonts
+            .entry(id)
+            .or_insert_with(|| format!("doccraft-svg-resolved-{next}"))
+            .clone();
+        self.direct_names.insert(alias.clone(), id);
+        let mut style = String::new();
+        if let Some(request) = request {
+            use std::fmt::Write;
+            let settings = request.settings(self.variants.get(&id));
+            style.push_str("font-variation-settings:");
+            if settings.is_empty() {
+                style.push_str("normal");
+            }
+            for (index, (tag, setting)) in settings.iter().enumerate() {
+                let tag = std::str::from_utf8(tag).map_err(invalid)?;
+                if tag.contains('\\') || tag.contains('"') && tag.contains('\'') {
+                    return Err(unsupported("EPUB SVG variation axis cannot be encoded"));
+                }
+                if index != 0 {
+                    style.push(',');
+                }
+                let quote = if tag.contains('"') { '\'' } else { '"' };
+                write!(style, "{quote}{tag}{quote} {}", f32::from_bits(*setting))
+                    .map_err(invalid)?;
+            }
+            style.push(';');
+        }
+        Ok((alias, style))
     }
 }
 

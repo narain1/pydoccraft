@@ -665,6 +665,25 @@ pub(super) fn font_weight(value: &str) -> Option<f32> {
         .filter(|number| (1.0..=1000.0).contains(number))
 }
 
+pub(super) fn relative_font_weight(value: &str, parent: f32) -> Option<f32> {
+    match value.to_ascii_lowercase().as_str() {
+        "initial" => Some(400.0),
+        "bolder" => Some(match parent {
+            w if w < 350.0 => 400.0,
+            w if w < 550.0 => 700.0,
+            w if w < 900.0 => 900.0,
+            w => w,
+        }),
+        "lighter" => Some(match parent {
+            w if w < 100.0 => w,
+            w if w < 550.0 => 100.0,
+            w if w < 750.0 => 400.0,
+            _ => 700.0,
+        }),
+        value => font_weight(value),
+    }
+}
+
 fn weight_range(value: &str) -> Option<[f32; 2]> {
     let mut words = value.split_ascii_whitespace();
     let first_word = words.next()?;

@@ -2906,8 +2906,12 @@ The Linux x86-64 CPython 3.11.15 wheel passed 712 installed tests, including 117
 
 ## 2026-11-24 Searchable fixed-layout PDF
 
-The Linux x86-64 CPython 3.11.15 wheel passed 713 installed tests, including 118 EPUB tests. It measured 24,519,101 bytes with a 57,026,776-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-searchable-fixed-layout-pdf) covers native and Poppler text extraction, search geometry, fixed-layout raster equality, and local link and bookmark retention.
+The Linux x86-64 CPython 3.11.15 wheel passed 713 installed tests, including 118 EPUB tests. It measured 24,519,101 bytes with a 57,026,776-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-searchable-fixed-layout-pdf) covers native text extraction, an independent check with a system Poppler command, search geometry, fixed-layout raster equality, and local link and bookmark retention. The wheel links and uses the native PDF engine without Poppler.
 
 ## 2026-11-24 XHTML oblique font-face ranges
 
 The Linux x86-64 CPython 3.11.15 wheel passed 714 installed tests, including 119 EPUB tests. It measured 24,532,386 bytes with a 57,044,184-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-xhtml-oblique-font-face-ranges) covers directional matching, resolved variable slant, chapter edits, and reopened fixed-layout PDF geometry.
+
+## 2026-11-24 SVG variable font-face ranges
+
+The Linux x86-64 CPython 3.11.15 wheel passed 715 installed tests, including 120 EPUB tests. It measured 24,549,796 bytes with a 57,076,568-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-svg-variable-font-face-ranges) covers SVG font range matching, per-run default axes, chapter replacement and reopened fixed-layout PDF.
