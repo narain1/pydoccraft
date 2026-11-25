@@ -1,5 +1,8 @@
 //! Update existing EPUB 3 and EPUB 2 navigation hierarchies after a spine edit.
-use std::collections::{HashMap, HashSet};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, HashMap, HashSet},
+};
 
 use roxmltree::{Document, Node};
 use serde_json::{Map, Value};
@@ -257,12 +260,7 @@ pub(super) fn edit(
         let range = inner_range(source, container)?;
         edits.push((range.end..range.end, flat(path, epub3, chapters)?));
     }
-    let result = apply_edits(source, edits, XML_BYTES)?;
-    if epub3 {
-        Ok(result)
-    } else {
-        renumber(&result, path)
-    }
+    apply_edits(source, edits, XML_BYTES)
 }
 
 pub(super) fn create(
@@ -288,7 +286,9 @@ pub(super) fn create(
     if epub3 {
         Ok(output)
     } else {
-        renumber(&output, path)
+        renumber(&output, path, chapters, |_| {
+            Err(invalid("generated NCX has an unexpected fragment"))
+        })
     }
 }
 
@@ -567,7 +567,12 @@ fn replace_contents(
     ))
 }
 
-fn renumber(source: &str, path: &str) -> Result<String, EngineError> {
+pub(super) fn renumber<'a>(
+    source: &str,
+    path: &str,
+    chapters: &[Chapter],
+    read: impl FnMut(&str) -> Result<Cow<'a, [u8]>, EngineError>,
+) -> Result<String, EngineError> {
     let xml = parse_xml(source.as_bytes())?;
     let nodes: Vec<_> = xml
         .descendants()
@@ -590,22 +595,9 @@ fn renumber(source: &str, path: &str) -> Result<String, EngineError> {
         .unwrap_or(1);
     let mut edits = Vec::new();
     if uses_order {
-        let mut ranks = HashMap::new();
-        for node in nodes {
-            let target = child(node, NCX, "content")
-                .and_then(|node| node.attribute("src"))
-                .ok_or_else(|| invalid("NCX navigation item has no target"))?;
-            let fragment = target
-                .split_once('#')
-                .map(|(_, fragment)| super::super::percent_decode(fragment))
-                .transpose()?;
-            let target = if external(target) {
-                target.to_owned()
-            } else {
-                resolve(path, target)?
-            };
-            let next = ranks.len() + 1;
-            let order = ranks.entry((target, fragment)).or_insert(next).to_string();
+        let order = play_orders(&nodes, path, chapters, read)?;
+        for (node, order) in nodes.into_iter().zip(order) {
+            let order = order.to_string();
             if let Some(attribute) = node.attribute_node("playOrder") {
                 edits.push((value_range(source, attribute)?, order));
             } else {
@@ -625,6 +617,85 @@ fn renumber(source: &str, path: &str) -> Result<String, EngineError> {
         }
     }
     apply_edits(source, edits, XML_BYTES)
+}
+
+fn play_orders<'a>(
+    nodes: &[Node<'_, '_>],
+    path: &str,
+    chapters: &[Chapter],
+    mut read: impl FnMut(&str) -> Result<Cow<'a, [u8]>, EngineError>,
+) -> Result<Vec<usize>, EngineError> {
+    let mut ranks = HashMap::new();
+    for (position, chapter) in chapters.iter().enumerate() {
+        for name in [chapter.path.as_str(), chapter.href.as_str()] {
+            ranks.entry(name).or_insert(position);
+        }
+    }
+    let mut destinations = HashMap::new();
+    let mut entries = Vec::with_capacity(nodes.len());
+    for node in nodes {
+        let target = child(*node, NCX, "content")
+            .and_then(|node| node.attribute("src"))
+            .ok_or_else(|| invalid("NCX navigation item has no target"))?;
+        let key = if external(target) {
+            (target.to_owned(), None)
+        } else {
+            let fragment = target
+                .split_once('#')
+                .map(|(_, fragment)| super::super::percent_decode(fragment))
+                .transpose()?
+                .filter(|fragment| !fragment.is_empty());
+            (resolve(path, target)?, fragment)
+        };
+        let next = destinations.len();
+        entries.push(*destinations.entry(key).or_insert(next));
+    }
+    // A whole document precedes its fragments. Fall back to encounter order
+    // for legacy destinations without a readable section in the final spine.
+    let mut positions = vec![(usize::MAX, usize::MAX); destinations.len()];
+    let mut by_chapter = BTreeMap::<usize, HashMap<&str, Vec<usize>>>::new();
+    for ((target, fragment), &index) in &destinations {
+        let Some(&chapter) = ranks.get(target.as_str()) else {
+            continue;
+        };
+        if let Some(fragment) = fragment {
+            positions[index].0 = chapter;
+            by_chapter
+                .entry(chapter)
+                .or_default()
+                .entry(fragment)
+                .or_default()
+                .push(index);
+        } else {
+            positions[index] = (chapter, 0);
+        }
+    }
+    for (chapter, mut fragments) in by_chapter {
+        if fragments.len() < 2 {
+            continue;
+        }
+        let bytes = read(&chapters[chapter].path)?;
+        let xml = parse_xml(&bytes)?;
+        for node in xml.descendants().filter(Node::is_element) {
+            for id in super::super::element_ids(node) {
+                if let Some(indices) = fragments.remove(id) {
+                    for index in indices {
+                        positions[index].1 = node.range().start + 1;
+                    }
+                }
+            }
+            if fragments.is_empty() {
+                break;
+            }
+        }
+    }
+    let mut sorted: Vec<_> = (0..positions.len()).collect();
+    sorted.sort_unstable_by_key(|&index| (positions[index], index));
+    let mut order = vec![0; positions.len()];
+    for (position, index) in sorted.into_iter().enumerate() {
+        order[index] = position + 1;
+    }
+    Ok(entries.into_iter().map(|index| order[index]).collect())
 }
 
 // Use the complete attribute range so unusually long whitespace around '='

@@ -5467,6 +5467,37 @@ first
             self.assertEqual(xml.find(".//{*}navTarget").attrib["playOrder"], "1")
             self.assertEqual(book.read_epub_resource("OEBPS/image.png"), PNG)
 
+    def test_ncx_play_order_uses_final_fragment_positions_across_lists(self) -> None:
+        source, _, _, html = self.nonspine_navigation_fixture()
+        original = html.format(
+            '<h1 id="other">Second</h1><p id="late">Later marker</p><p id="early">Earlier marker</p>'
+        )
+        staged = html.format(
+            '<h1 id="other">Second</h1><p id="early">Earlier marker</p><p id="late">Later marker</p>'
+        )
+        source = rewrite_epub(source, {"OEBPS/two.xhtml": original})
+        path = "OEBPS/toc.ncx"
+        ncx_lists = b"""<pageList><pageTarget id="e" type="normal" value="1" playOrder="3">
+            <navLabel><text>Page one</text></navLabel><content src="two.xhtml#early"/>
+            </pageTarget></pageList><navList><navLabel><text>Index</text></navLabel>
+            <navTarget id="t" playOrder="3"><navLabel><text>Same place</text></navLabel>
+              <content src="./two.xhtml#%65arly"/></navTarget></navList>"""
+        with doc_ex.open(source) as book:
+            ncx = book.read_epub_resource(path).replace(b'two.xhtml"', b'two.xhtml#late"')
+            ncx = ncx.replace(b"</ncx>", ncx_lists + b"</ncx>")
+            result = book.edit_epub_structure(
+                [1, 0], replacements={1: staged},
+                resources={path: doc_ex.EpubResource("application/x-dtbncx+xml", ncx)},
+            )
+        with doc_ex.open(result) as book:
+            xml = ET.fromstring(book.read_epub_resource(path))
+            points = xml.findall(".//{*}navPoint")
+            self.assertEqual([p.find("{*}content").attrib["src"] for p in points],
+                             ["two.xhtml#late", "one.xhtml"])
+            self.assertEqual([p.attrib["playOrder"] for p in points], ["2", "3"])
+            self.assertEqual(xml.find(".//{*}pageTarget").attrib["playOrder"], "1")
+            self.assertEqual(xml.find(".//{*}navTarget").attrib["playOrder"], "1")
+
     def test_structure_validates_explicit_compatibility_ncx(self) -> None:
         source, nav_path, nav, html = self.nonspine_navigation_fixture()
         ncx_path = "OEBPS/toc.ncx"

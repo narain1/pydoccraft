@@ -811,3 +811,7 @@ The same installed wheel passed the four-book W3C corpus with 28 previews and fo
 Public typing, the documentation site, support evidence and roadmap checks passed. Both lockfiles and all upstream revisions match the preceding checkpoint. The audit reviewed 349 core packages and binding licenses. The source and wheel attribution files match, and the ELF extension links only the system C and GCC libraries. The worktrees removed about 7 GiB of Cargo output and also removed temporary wheels, environments, samples, bytecode, the generated site and the Node addon.
 
 A separate NCX probe reproduced a remaining play-order issue. After the spine moves a chapter to the front, an auxiliary page target at a unique ID in that chapter receives a later play-order number than a table-of-contents item in the following chapter. Renumbering across the final reading order and content positions remains tracked.
+
+## 2026-11-24 NCX play order across staged navigation lists
+
+The previous wheel numbered a page-list destination in the first chapter after a TOC entry in the second chapter. The new regression reorders the spine and swaps the relative positions of two IDs in the staged first chapter. The final NCX numbers the page-list destination before the later TOC destination and assigns the same number to the normalized URI in an auxiliary list. Six focused NCX regressions passed on the installed Linux wheel, including EPUB 2 and EPUB 3 compatibility navigation, generated navigation and exact resource-only replacement.

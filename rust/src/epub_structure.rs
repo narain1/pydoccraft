@@ -255,6 +255,7 @@ pub(crate) fn update_structure<'a>(
         }
         plan.files.insert(path.clone(), Cow::Borrowed(data));
     }
+    let mut reordered_ncx = None;
     if let Some((order, original)) = order.zip(original.as_ref()) {
         let references: Vec<_> = spine
             .children()
@@ -475,6 +476,7 @@ pub(crate) fn update_structure<'a>(
             if let Some(path) = compatibility_ncx.as_deref() {
                 reorder_navigation(&mut plan, &mut book, path, false, &selected, &old_paths)?;
             }
+            reordered_ncx = ncx_path.map(|path| (path, selected));
         }
     }
     for (authored, epub3_nav) in [(authored_nav, true), (authored_ncx, false)] {
@@ -609,6 +611,21 @@ pub(crate) fn update_structure<'a>(
             Cow::Borrowed(data.as_slice())
         };
         plan.files.insert(path.clone(), replacement);
+    }
+    if let Some((path, chapters)) = reordered_ncx {
+        let data = plan
+            .files
+            .get(path)
+            .ok_or_else(|| invalid("missing staged EPUB NCX"))?;
+        let source = std::str::from_utf8(data).map_err(invalid)?;
+        let revised = toc::renumber(source, path, &chapters, |target| {
+            match plan.files.get(target) {
+                Some(markup) => Ok(Cow::Borrowed(markup.as_ref())),
+                None => book.read(target, XML_BYTES).map(Cow::Owned),
+            }
+        })?;
+        plan.files
+            .insert(path.to_owned(), Cow::Owned(revised.into_bytes()));
     }
     if !plan.manifest_additions.is_empty() {
         let at = inner_range(package_source, manifest_node)?.end;
