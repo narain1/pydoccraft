@@ -1,5 +1,5 @@
 //! Retry mixed-font text when native glyph replacement cannot match shaping clusters.
-use std::collections::HashSet;
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 use resvg::usvg::{
     self,
@@ -8,7 +8,10 @@ use resvg::usvg::{
 use roxmltree::Node;
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::{CssFont, Resolver, Selection, MAX_FACES, MAX_WORK};
+use super::{
+    length::{prepare_length, TextLength},
+    CssFont, Resolver, Selection, MAX_FACES, MAX_WORK,
+};
 use crate::{
     author_epub::{escape_attribute, escape_text},
     epub::{
@@ -20,12 +23,17 @@ use crate::{
     EngineError,
 };
 
+pub(in crate::epub::svg) struct FallbackRuns {
+    pub(in crate::epub::svg) source: String,
+    pub(in crate::epub::svg) lengths: Vec<TextLength>,
+}
+
 impl Resolver {
     pub(in crate::epub::svg) fn split_fallback_runs(
         &self,
         source: &[u8],
         tree: &usvg::Tree,
-    ) -> Result<Option<String>, EngineError> {
+    ) -> Result<Option<FallbackRuns>, EngineError> {
         let mut state = self
             .0
             .lock()
@@ -38,6 +46,14 @@ impl Resolver {
         let xml = parse_xml(source.as_bytes())?;
         let mut edits = Vec::new();
         let mut bytes = 0;
+        let mut lengths = HashMap::new();
+        let mut ids = HashMap::new();
+        for id in xml.descendants().filter_map(|node| node.attribute("id")) {
+            ids.entry(id)
+                .and_modify(|duplicate| *duplicate = true)
+                .or_insert(false);
+        }
+        let mut next_id = 0;
         for node in xml.descendants().filter(Node::is_text) {
             let Some(parent) = node.parent_element() else {
                 continue;
@@ -107,15 +123,23 @@ impl Resolver {
                         format!(r#" style="{}""#, escape_attribute(&merged)),
                     )
                 }
-                _ if can_split(parent) => {
+                _ => {
+                    let Some(owner) = split_text(parent)? else {
+                        continue;
+                    };
+                    if owner.has_attribute("textLength") {
+                        if let Entry::Vacant(entry) = lengths.entry(owner.id()) {
+                            entry.insert(prepare_length(
+                                owner,
+                                &ids,
+                                &mut next_id,
+                                source,
+                                &mut edits,
+                            )?);
+                        }
+                    }
                     (node.range(), state.encode_runs(runs, request.as_ref())?)
                 }
-                _ if variable => {
-                    return Err(unsupported(
-                        "EPUB SVG mixed variable fonts with explicit text lengths",
-                    ))
-                }
-                _ => continue,
             };
             charge(
                 &mut bytes,
@@ -134,7 +158,10 @@ impl Resolver {
                 ))
             };
         }
-        Ok(Some(apply_edits(source, edits, XML_BYTES)?))
+        Ok(Some(FallbackRuns {
+            source: apply_edits(source, edits, XML_BYTES)?,
+            lengths: lengths.into_values().collect(),
+        }))
     }
 
     pub(in crate::epub::svg) fn check_rendered(
@@ -314,16 +341,20 @@ fn inspect_subroot(
     }
 }
 
-fn can_split(parent: Node<'_, '_>) -> bool {
+fn split_text<'a, 'input>(
+    parent: Node<'a, 'input>,
+) -> Result<Option<Node<'a, 'input>>, EngineError> {
     for ancestor in parent.ancestors().filter(Node::is_element) {
-        if ancestor.attribute("textLength").is_some() || ancestor.has_tag_name((NS, "textPath")) {
-            return false;
-        }
         if ancestor.has_tag_name((NS, "text")) {
-            return true;
+            return Ok(Some(ancestor));
+        }
+        if ancestor.has_attribute("textLength") || ancestor.has_tag_name((NS, "textPath")) {
+            return Err(unsupported(
+                "EPUB SVG mixed-font nested textLength or text path",
+            ));
         }
     }
-    false
+    Ok(None)
 }
 
 fn effective_family<'a>(parent: Node<'a, '_>) -> Option<&'a str> {

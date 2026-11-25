@@ -8,7 +8,8 @@ use std::{
 use resvg::usvg;
 use roxmltree::Node;
 
-use super::{authored_id, image_href, native_tree, validate_layout, Links};
+use super::{authored_id, native_tree, validate_layout, Links};
+use crate::epub::svg::use_refs::{scope_contains, used_sources};
 use crate::{
     author_epub::escape_attribute,
     epub::{
@@ -201,38 +202,6 @@ fn renderable(node: Node<'_, '_>) -> bool {
             | "image"
             | "text"
     )
-}
-
-fn used_sources(root: Node<'_, '_>) -> Vec<Span> {
-    let ids = root
-        .descendants()
-        .filter_map(|node| Some((node.attribute("id")?, node.range())))
-        .collect::<HashMap<_, _>>();
-    let mut ranges = root
-        .descendants()
-        .filter(|node| node.has_tag_name((svg::NS, "use")))
-        .filter_map(|node| {
-            let id = svg::fragment_id(image_href(node)?)?;
-            let source = ids.get(id)?;
-            Some((source.start, source.end))
-        })
-        .collect::<Vec<_>>();
-    ranges.sort_unstable();
-    let mut merged: Vec<Span> = Vec::new();
-    for range in ranges {
-        if let Some(last) = merged.last_mut().filter(|last| range.0 <= last.1) {
-            last.1 = last.1.max(range.1);
-        } else {
-            merged.push(range);
-        }
-    }
-    merged
-}
-
-fn scope_contains(scopes: &[Span], node: Node<'_, '_>) -> bool {
-    let range = node.range();
-    let index = scopes.partition_point(|span| span.0 <= range.start);
-    index > 0 && scopes[index - 1].1 >= range.end
 }
 
 struct Index<'a> {

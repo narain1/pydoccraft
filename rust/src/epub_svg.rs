@@ -565,12 +565,21 @@ fn parse(
     let mut tree = result?;
     let fallback = if let Some(fonts) = &fonts {
         if let Some(fallback) = fonts.split_fallback_runs(&styled, &tree)? {
+            let mut source = fallback.source;
             options.fontdb = tree.fontdb().clone();
-            let result = native_tree(fallback.as_bytes(), &options, has_uses);
+            let result = native_tree(source.as_bytes(), &options, has_uses);
             fonts.check()?;
             tree = result?;
             fonts.check_rendered(&tree)?;
-            Some(fallback)
+            if !fallback.lengths.is_empty() {
+                source = svg_fonts::fit_lengths(&source, &tree, &fallback.lengths)?;
+                options.fontdb = tree.fontdb().clone();
+                let result = native_tree(source.as_bytes(), &options, has_uses);
+                fonts.check()?;
+                tree = result?;
+                fonts.check_rendered(&tree)?;
+            }
+            Some(source)
         } else {
             None
         }

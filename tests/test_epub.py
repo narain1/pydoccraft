@@ -2273,8 +2273,8 @@ class EpubTests(unittest.TestCase):
         explicit = 'textLength="230" lengthAdjust="spacingAndGlyphs"'
         self.assertEqual(preview(ranged, "font-weight:612.5", length=explicit),
                          preview(plain, 'font-variation-settings:"wght" 612.5', length=explicit))
-        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "mixed variable fonts"):
-            preview(first + second, length=explicit)
+        fitted = preview(first + second, length=explicit, verify_pdf=True)
+        self.assertNotEqual(fitted, preview(first + second))
         local = '<tspan style="font-variation-settings:&quot;wght&quot; 720">AABBBAA</tspan>'
         self.assertEqual(preview(defaults, text=local),
                          preview(plain, 'font-variation-settings:"wght" 720,"opsz" 24'))
@@ -2289,6 +2289,98 @@ class EpubTests(unittest.TestCase):
         self.assertEqual(preview(condensed.replace("font-width:74.5% 90.25%;", "") +
                                  expanded.replace("font-width:90.75% 120%;", ""), style),
                          preview(condensed.replace("font-width:74.5% 90.25%;", ""), style))
+
+    def test_epub_svg_mixed_face_text_length_preserves_ink_search_and_link_geometry(self) -> None:
+        fonts = Path(__file__).parent / "fixtures" / "fonts"
+        resources = {
+            "OEBPS/Art/variable.ttf": doc_ex.EpubResource(
+                "font/ttf", (fonts / "InterVariable.ttf").read_bytes(),
+            ),
+        }
+
+        def preview(
+            length: str, *, inline: bool = False, positions: str = "144",
+        ) -> tuple[list[int], tuple[float, ...], tuple[float, ...]]:
+            svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 100">
+              <style>
+                @font-face {{font-family:Layout;src:url(Art/variable.ttf);unicode-range:U+00E9;
+                             font-variation-settings:"wght" 340}}
+                @font-face {{font-family:Layout;src:url(Art/variable.ttf);unicode-range:U+0042;
+                             font-variation-settings:"wght" 760}}
+                text {{font-family:Layout;font-size:32px;font-optical-sizing:none;
+                       transform:translate(7 0);text-anchor:middle;fill:#9a2222}}
+              </style>
+              <a href="#label"><rect x="8" y="8" width="12" height="12" fill="#027180"/></a>
+              <g transform="translate(9 3)">
+                <text x="{positions}" y="70" {length}><a href="https://example.org/length"><tspan id="label">éBBé</tspan></a></text>
+              </g>
+              </svg>"""
+            if inline:
+                chapter = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Text</title>
+                <meta name="viewport" content="width=320,height=100"/>
+                <style>body {{margin:0}} svg {{width:320px;height:100px}}</style>
+                </head><body>{svg}</body></html>"""
+                source = rewrite_epub(fixed_spread_fixture([("", "white", 320, 100)]),
+                                      {"OEBPS/s0.xhtml": chapter})
+                with doc_ex.open(source) as original:
+                    data = original.edit_epub_structure([0], resources=resources)
+                path, original_xml = "OEBPS/s0.xhtml", chapter
+            else:
+                raw_svg = svg.replace("url(Art/variable.ttf)", "url(variable.ttf)")
+                chapter = doc_ex.EpubSvgChapterSource("Run length", raw_svg, "OEBPS/Art/text.svg")
+                with doc_ex.open(epub_fixture()) as original:
+                    data = original.edit_epub_structure([chapter, 0], resources=resources)
+                path, original_xml = "OEBPS/Art/text.svg", raw_svg
+            with doc_ex.open(data) as book:
+                self.assertEqual(book.read_epub_resource(path), original_xml.encode())
+                width, pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                exported = book.export_epub_fixed_pdf(dpi=96, pages=[0], searchable=True)
+            with doc_ex.open(exported) as pdf, pdf.edit() as editor:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), (width, pixels))
+                self.assertEqual(pdf[0].get_text(), "éBBé")
+                links = pdf[0].get_links()
+                local, = [link for link in links if link.metadata.get("target_page") is not None]
+                self.assertEqual(local.metadata["target_page"], 0)
+                links = [link for link in links if link.metadata.get("target_page") is None]
+                self.assertEqual({link.uri for link in links}, {"https://example.org/length"})
+                bounds = (min(link.bbox[0] for link in links), min(link.bbox[1] for link in links),
+                          max(link.bbox[2] for link in links), max(link.bbox[3] for link in links))
+                search, = pdf[0].search_for("éBBé")
+                for edge in (0, 2):
+                    self.assertAlmostEqual(search[edge], bounds[edge], delta=1)
+                destination, = re.findall(
+                    rb"/XYZ\s+([1-9][0-9.]*)\s+([0-9.]+)\s+null", editor.to_bytes(object_streams=False),
+                )
+                self.assertAlmostEqual(float(destination[0]), bounds[0], delta=1)
+                self.assertAlmostEqual(float(destination[1]), 75 - bounds[1], delta=1)
+            ink = [index // 4 % width for index in range(0, len(pixels), 4)
+                   if pixels[index] < 200 and pixels[index + 1] < 80 and pixels[index + 3] > 200]
+            return ink, bounds, tuple(search)
+
+        for inline in (False, True):
+            with self.subTest(inline=inline):
+                narrow, small_link, small_search = preview(
+                    'textLength="90" lengthAdjust="spacingAndGlyphs"', inline=inline,
+                )
+                wide, large_link, large_search = preview(
+                    'textLength="180px" lengthAdjust="spacingAndGlyphs"', inline=inline,
+                )
+                self.assertAlmostEqual(max(wide) - min(wide), 2 * (max(narrow) - min(narrow)), delta=2)
+                self.assertAlmostEqual(max(wide) + min(wide), max(narrow) + min(narrow), delta=2)
+                self.assertAlmostEqual((max(wide) + min(wide)) / 2, 160, delta=2)
+                for small, large in ((small_link, large_link), (small_search, large_search)):
+                    self.assertAlmostEqual(large[2] - large[0], 2 * (small[2] - small[0]), delta=1)
+                    self.assertAlmostEqual(large[1], small[1], delta=0.75)
+                    self.assertAlmostEqual(large[3], small[3], delta=0.75)
+
+        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "spacingAndGlyphs"):
+            preview('textLength="180"')
+        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "spacingAndGlyphs"):
+            preview('textLength="180" lengthAdjust="spacingAndGlyphs" rotate="15"')
+        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "positioned native chunk"):
+            preview('textLength="180" lengthAdjust="spacingAndGlyphs"', positions="144 170")
+        with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "geometry budget"):
+            preview('textLength="1000000" lengthAdjust="spacingAndGlyphs"')
 
     def test_epub_svg_use_instances_keep_inherited_variable_font_requests(self) -> None:
         font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()

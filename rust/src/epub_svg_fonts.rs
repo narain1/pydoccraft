@@ -19,10 +19,13 @@ use super::super::{
 };
 use crate::EngineError;
 
+#[path = "epub_svg_font_length.rs"]
+mod length;
 #[path = "epub_svg_font_runs.rs"]
 mod runs;
 #[path = "epub_svg_font_variations.rs"]
 mod variations;
+pub(super) use length::fit_lengths;
 pub(super) use variations::CssFont;
 
 const FONT_BYTES: usize = 16 * 1024 * 1024;
