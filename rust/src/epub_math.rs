@@ -572,18 +572,10 @@ impl<'xml> Projection<'_, 'xml> {
                 caret = Some(token_mark_offset(node, child));
             }
         }
-        let mut run = native_token(node, style)?;
-        if let Some(caret) = caret {
-            if let Some(scope) = &mut self.alignment_group {
-                scope.caret = Some(MathPos::new(Vec::new(), caret));
-            }
-            if node.has_tag_name((MATHML, "mn")) {
-                // Keep punctuation inside an aligned number in the same
-                // searchable and editable run as its adjacent digits.
-                run.lit = true;
-            }
+        if let (Some(caret), Some(scope)) = (caret, &mut self.alignment_group) {
+            scope.caret = Some(MathPos::new(Vec::new(), caret));
         }
-        Ok(MNode::Run(run))
+        native_token(node, style).map(MNode::Run)
     }
 
     fn element(
@@ -940,8 +932,9 @@ fn native_token(node: Node<'_, '_>, style: Presentation<'_>) -> Result<MRun, Eng
         run.text = format!("{left}{}{right}", run.text);
     }
     run.nor = matches!(tag, "mtext" | "ms");
-    // Preserve literal symbols used by WordCraft for equation numbering and alignment.
-    run.lit = run.text.contains(['#', '&']);
+    // Number tokens carry their own punctuation. Preserve symbols that
+    // WordCraft uses for equation numbering and alignment as well.
+    run.lit = tag == "mn" || run.text.contains(['#', '&']);
     style.apply(&mut run);
     let (variant, alphabet) = match style.variant {
         None if tag == "mi" && run.text.chars().count() == 1 => (MSty::Italic, MScr::Roman),

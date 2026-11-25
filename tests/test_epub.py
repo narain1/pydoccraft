@@ -16,7 +16,7 @@ import zlib
 from collections.abc import Iterable
 
 import doc_ex
-from fixtures import PNG, docx_fixture
+from fixtures import PNG, docx_fixture, package
 from test_pdf_text_boxes import quadrant_png
 from test_pdf_underlays import JPEG, solid
 from test_rendering import png_chunks
@@ -14717,6 +14717,85 @@ Resume
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "alignment mark in an empty operand"):
                     operation()
 
+    def test_mathml_numeral_punctuation_keeps_its_literal_spacing_with_or_without_marks(self) -> None:
+        mathml = "http://www.w3.org/1998/Math/MathML"
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+        word_ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        template = f'''<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="{mathml}">
+          <head><title>Numeric literals</title><meta name="viewport" content="width=360,height=210"/>
+            <style>body {{margin:0;padding-top:16pt}}</style></head>
+          <body><p><m:math mathsize="18pt">
+            <m:mtable groupalign="{{decimalpoint}}" columnalign="left" columnwidth="150pt">
+              <m:mtr><m:mtd>CELL</m:mtd></m:mtr>
+            </m:mtable>
+          </m:math></p></body></html>'''
+
+        def literal_word(value: str) -> bytes:
+            return package({
+                "[Content_Types].xml": """<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+                  <Override PartName="/word/document.xml"
+                    ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+                  </Types>""",
+                "word/document.xml": f'''<w:document xmlns:w="{word_ns}" xmlns:m="{ns["m"]}">
+                  <w:body><w:p><m:oMath><m:r>
+                    <m:rPr><m:lit/><m:sty m:val="p"/></m:rPr>
+                    <w:rPr><w:rFonts w:ascii="Cambria Math" w:hAnsi="Cambria Math"/>
+                      <w:sz w:val="36"/></w:rPr>
+                    <m:t>{value}</m:t></m:r></m:oMath></w:p></w:body></w:document>''',
+            })
+
+        def search(page, value):
+            matches = page.search_for(value)
+            self.assertEqual(len(matches), 1, (value, page.get_text()))
+            return matches[0]
+
+        def geometry(page, value, prefix, suffix):
+            origin = search(page, value)[0]
+            return [x - origin for term in (value, prefix, suffix) for x in search(page, term)[::2]]
+
+        for prefix, separator, suffix in (("63", ":", "925"), ("1", ",", "205.9"), ("1.2e", "+", "30"),
+                                          ("0x", "", "FFEF")):
+            value = prefix + separator + suffix
+            with self.subTest(value=value):
+                with doc_ex.open(literal_word(value), filetype="docx") as control:
+                    with doc_ex.open(control.convert("pdf")) as pdf:
+                        expected = geometry(pdf[0], value, prefix, suffix)
+                plain = f"<m:mn>{value}</m:mn>"
+                marked = f"<m:maligngroup/><m:mn>{prefix}<m:malignmark/>{separator}{suffix}</m:mn>"
+                images = []
+                for cell in (plain, marked):
+                    source = template.replace("CELL", cell)
+                    with doc_ex.open(epub_fixture(chapter_one=source)) as book:
+                        images.append(book.render_page(0, dpi=96))
+                        with doc_ex.open(book.convert("pdf")) as pdf:
+                            actual = geometry(pdf[0], value, prefix, suffix)
+                        editable = book.convert("docx")
+                    with zipfile.ZipFile(io.BytesIO(editable)) as archive:
+                        xml = ET.fromstring(archive.read("word/document.xml"))
+                    runs = [run for run in xml.findall(".//m:oMath//m:r", ns)
+                            if run.findtext("m:t", namespaces=ns) == value]
+                    self.assertEqual(len(runs), 1)
+                    self.assertIsNotNone(runs[0].find("m:rPr/m:lit", ns))
+                    with doc_ex.open(editable) as word, doc_ex.open(word.convert("pdf")) as pdf:
+                        self.assertEqual(word[0].get_text().count(value), 1)
+                        reopened = geometry(pdf[0], value, prefix, suffix)
+                    for positions in (actual, reopened):
+                        for offset, control_offset in zip(positions, expected):
+                            self.assertAlmostEqual(offset, control_offset, delta=0.04)
+                plain_preview, marked_preview = images
+                self.assertEqual(plain_preview, marked_preview)
+
+                if separator:
+                    operation = f"<m:mn>{prefix}</m:mn><m:mo>{separator}</m:mo><m:mn>{suffix}</m:mn>"
+                    with doc_ex.open(epub_fixture(chapter_one=template.replace("CELL", operation))) as book:
+                        with doc_ex.open(book.convert("pdf")) as pdf:
+                            span = search(pdf[0], suffix)[2] - search(pdf[0], prefix)[0]
+                        self.assertGreater(span, expected[1] + 1)
+                        editable = book.convert("docx")
+                    with doc_ex.open(editable) as word, doc_ex.open(word.convert("pdf")) as pdf:
+                        span = search(pdf[0], suffix)[2] - search(pdf[0], prefix)[0]
+                        self.assertGreater(span, expected[1] + 1)
+
     def test_mathml_alignment_preserves_carets_through_vertical_padding(self) -> None:
         template = '''<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>MathML vertical padding alignment</title>
@@ -14736,10 +14815,10 @@ Resume
               <m:mtext>West</m:mtext>{mark}<m:mo>+</m:mo><m:mtext>Arm</m:mtext></m:mpadded>
               <m:mtext>BaseAmber</m:mtext>''',
             group + f'''<m:mpadded width="100%" voffset="-3pt"><m:mpadded height="+2pt" depth="4pt">
-              <m:mn>63{mark}.925</m:mn></m:mpadded></m:mpadded><m:mtext>BaseBlue</m:mtext>''',
+              <m:mn>63{mark}:925</m:mn></m:mpadded></m:mpadded><m:mtext>BaseBlue</m:mtext>''',
             group + "<m:mn>.418</m:mn>",
         )
-        terms = ("12.345", "BaseGreen", "West", "+", "Arm", "BaseAmber", "63.925", "BaseBlue", ".418")
+        terms = ("12.345", "BaseGreen", "West", "+", "Arm", "BaseAmber", "63:925", "BaseBlue", ".418")
         ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
 
         def chapter(contents: tuple[str, ...]) -> str:
@@ -14766,7 +14845,7 @@ Resume
                 self.assertEqual(book.render_page(0, dpi=96), expected)
         flat = tuple(cell.replace('voffset="7pt"', 'voffset="0"').replace('voffset="-3pt"', 'voffset="0"')
                      for cell in unmarked)
-        pairs = (("12.345", "BaseGreen", 0), ("West", "BaseAmber", 7), ("63.925", "BaseBlue", -3))
+        pairs = (("12.345", "BaseGreen", 0), ("West", "BaseAmber", 7), ("63:925", "BaseBlue", -3))
         with doc_ex.open(epub_fixture(chapter_one=chapter(flat))) as book, doc_ex.open(book.convert("pdf")) as pdf:
             positions = boxes(pdf, terms)
             vertical_controls = [y_distance(positions, ink, baseline) - shift for ink, baseline, shift in pairs]
@@ -14797,7 +14876,7 @@ Resume
                      if box.findtext("m:e/m:r/m:t", namespaces=ns) == "12.345")
         self.assertIsNotNone(green.find("m:phantPr/m:zeroAsc", ns))
         self.assertIsNotNone(green.find("m:phantPr/m:zeroDesc", ns))
-        shifted_terms = (("West", "+", "Arm"), ("63.925",))
+        shifted_terms = (("West", "+", "Arm"), ("63:925",))
         operands = [tuple(run.text for run in operand.findall(".//m:r/m:t", ns) if run.text in terms)
                     for operand in matrix.findall(".//m:eqArr/m:e/m:phant[1]/m:e", ns)]
         self.assertCountEqual([runs for runs in operands if runs in shifted_terms], shifted_terms)

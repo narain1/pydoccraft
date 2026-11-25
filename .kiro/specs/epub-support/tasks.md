@@ -152,6 +152,7 @@
 - [x] Align a single MathML group per data cell to its edge, center or decimal point in previews, searchable PDF and editable DOCX.
 - [x] Preserve explicit MathML alignment marks on the group baseline and inside its tokens in searchable PDF and editable DOCX.
 - [x] Align the first baseline number in supported compound expressions, including native operators and trailing units, in searchable PDF and editable DOCX.
+- [x] Preserve punctuation in literal MathML numerals with or without alignment marks. Keep explicit operators spaced and editable separately.
 - [x] Align up to eight MathML sibling groups per data cell with ordinary run boundaries. Apply ordinal alignment lists and preserve missing trailing groups, baseline geometry, searchable text and editable equation operands.
 - [x] Align groups that cross MathML row and style wrappers and the selected presentation branch of semantics. Keep inherited styles, operand order and native editability.
 - [x] Preserve direct decimal and explicit alignment carets after bounded composed geometry in searchable PDF and editable DOCX.
