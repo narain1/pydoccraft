@@ -1446,6 +1446,73 @@ class EpubTests(unittest.TestCase):
                         results.append(book.render_page(0, dpi=96))
                 self.assertEqual(results[0], results[1])
 
+    def test_epub_css_stepped_and_sign_geometry_in_fixed_pdf(self) -> None:
+        source = fixed_spread_fixture([("", "white", 320, 160)])
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Stepped geometry</title>
+          <meta name="viewport" content="width=320,height=160"/><style>
+          html,body,p{{margin:0}} #holder{{position:absolute;left:12px;top:16px;
+          width:{width}px;height:100px;font-size:10px;background:#233554}}
+          #panel{{position:absolute;background:#eece75}}
+          #label{{height:18px;background:#a2d7bb}} #note{{position:absolute;top:132px}}
+          {css}</style></head><body>
+          <div id="holder"><div id="panel"><p id="label"><a href="https://example.org/step">Go</a></p></div></div>
+          <p id="note"><a href="#label">Destination</a></p></body></html>"""
+        computed = """
+          #panel{left:calc(24px + mod(-13px,5px));top:calc(14px + rem(-13px,5px));
+            inline-size:ROUND(up,37% + 7px,8px);block-size:round(down,47px,-6px);
+            margin-inline-start:calc(2em + 0.8em * sign(50% - 100px));
+            padding-inline-start:abs(10% - 2em)}
+          #label{width:calc(55% + 10% * sign(20% - 15px));margin-inline-start:inherit;font-size:12px}
+          #note{left:calc(18px + 3px * round(-1.5) + round(pi - e) * 1px)}
+        """
+        for width, panel, margin, label in (
+            (160, 72, 12, "45%"),
+            (200, 88, 20, "65%"),
+            (240, 96, 28, "65%"),
+        ):
+            with self.subTest(width=width):
+                literal = f"""
+                  #panel{{left:26px;top:11px;width:{panel}px;height:42px;
+                    margin-left:{margin}px;padding-left:{abs(width / 10 - 20)}px}}
+                  #label{{width:{label};margin-left:12px;font-size:12px}}
+                  #note{{left:15px}}
+                """
+                results = []
+                for css in (computed, literal):
+                    edited = rewrite_epub(source, {"OEBPS/s0.xhtml": chapter.format(width=width, css=css)})
+                    with doc_ex.open(edited) as book:
+                        image = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                        exported = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+                    with doc_ex.open(exported) as pdf:
+                        self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), image)
+                        hits = pdf[0].search_for("Go")
+                        self.assertEqual(len(hits), 1)
+                        external, internal = pdf[0].get_links()
+                        self.assertEqual(external.uri, "https://example.org/step")
+                        self.assertEqual(internal.metadata["target_page"], 0)
+                        results.append((image, hits, external.bbox, internal.bbox))
+                self.assertTrue(results[0] == results[1], "stepped and literal CSS geometry differs")
+
+    def test_epub_css_stepped_functions_in_grid_and_zero_interval(self) -> None:
+        chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Stepped grid</title><style>
+          body,p{margin:0} #grid{position:relative;display:grid;width:220px;height:74px;
+            left:LEFT;gap:4px;grid-template-columns:COLUMNS;grid-template-rows:ROWS}
+          p:nth-child(odd){background:#117278} p:nth-child(even){background:#a65139}
+          </style></head><body><div id="grid"><p>First</p><p>Second</p><p>Third</p>
+          <p>Fourth</p></div></body></html>"""
+        results = []
+        for left, columns, rows in (
+            ("calc(6px + max(round(12px,0px),7px));width:220px;width:round(50px);width:mod(8px,2)",
+             "round(to-zero, 60% - 5px, 12px) mod(52px - 30%, -20px) 1fr",
+             "round(32.5px,5px) 1fr"),
+            ("0", "120px 0 1fr", "35px 1fr"),
+            ("calc((min(24999,1) + 100 - 101) * 1px)", "120px 0 1fr", "35px 1fr"),
+        ):
+            xhtml = chapter.replace("LEFT", left).replace("COLUMNS", columns).replace("ROWS", rows)
+            with doc_ex.open(epub_fixture(chapter_one=xhtml)) as book:
+                results.append(rgba_pixels(png_chunks(book.render_page(0, dpi=96))))
+        self.assertTrue(results[0] == results[1], "stepped and literal grid geometry differs")
+
     def test_epub_css_calc_rejects_unsupported_operations_and_excess_geometry(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Calculated geometry</title>
           <style>div {background:green; CSS}</style></head><body><div>Panel</div></body></html>"""

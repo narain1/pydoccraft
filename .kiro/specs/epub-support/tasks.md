@@ -67,7 +67,8 @@
 - [x] Resolve min(), max() and clamp() in supported box geometry and grid tracks, including nested arithmetic and containing-box percentages.
 - [x] Resolve intrinsic preferred sizes and stretch for XHTML layout boxes, including inherited and calculated fit-content limits.
 - [x] Resolve named grid lines, counted repeat boundaries, line and span placement, and rectangular grid template areas through the native layout engine.
-- [ ] Extend the EPUB CSS profile with intrinsic minimum and maximum constraints, contain-fit sizing, additional math functions, automatic grid repetition, grid template shorthands and subgrids.
+- [x] Resolve stepped and sign-related CSS math and finite numeric constants in supported geometry, including deferred scalar factors and inherited lengths.
+- [ ] Extend the EPUB CSS profile with intrinsic minimum and maximum constraints, contain-fit sizing, trigonometry and other math functions, automatic grid repetition, grid template shorthands and subgrids.
 - [ ] Add SVG filter primitives and retain PDF text and links for multi-source, non-axis-aligned or ambiguous spatial filter results.
 - [ ] Extend mixed-font SVG text fallback to spacing across ambiguous clusters, nested length owners and glyph positioning.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.
