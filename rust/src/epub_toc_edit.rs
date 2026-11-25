@@ -201,8 +201,9 @@ pub(super) fn edit<'a>(
             if is_toc && std::mem::replace(&mut primary, true) {
                 return Err(invalid("multiple EPUB tables of contents"));
             }
-            let items = context.items(list, Kind::Html)?;
-            let edited = context.render_list(items, Kind::Html, is_toc, chapters)?;
+            let mut covered = HashSet::new();
+            let items = context.items(list, Kind::Html, &mut covered)?;
+            let edited = context.render_list(items, Kind::Html, is_toc, chapters, &covered)?;
             if edited.is_empty() {
                 edits.push((nav.range(), String::new()));
             } else {
@@ -224,8 +225,9 @@ pub(super) fn edit<'a>(
                 return Err(invalid("multiple NCX tables of contents"));
             }
             let mut content = String::new();
-            let items = context.items(group, kind)?;
-            let edited = context.render_list(items, kind, is_toc, chapters)?;
+            let mut covered = HashSet::new();
+            let items = context.items(group, kind, &mut covered)?;
+            let edited = context.render_list(items, kind, is_toc, chapters, &covered)?;
             if edited.is_empty() {
                 edits.push((group.range(), String::new()));
             } else {
@@ -377,7 +379,12 @@ struct Item<'a> {
 }
 
 impl<'a> Context<'a> {
-    fn items(&self, container: Node<'a, 'a>, kind: Kind) -> Result<Vec<Item<'a>>, EngineError> {
+    fn items(
+        &self,
+        container: Node<'a, 'a>,
+        kind: Kind,
+        covered: &mut HashSet<usize>,
+    ) -> Result<Vec<Item<'a>>, EngineError> {
         let mut items = Vec::new();
         for node in container.children().filter(|node| kind.accepts(*node)) {
             let target = if kind == Kind::Html {
@@ -401,7 +408,7 @@ impl<'a> Context<'a> {
             let (before, after, mut children) = match kind {
                 Kind::Html => {
                     if let Some(list) = child(node, XHTML, "ol") {
-                        let nested = self.items(list, kind)?;
+                        let nested = self.items(list, kind, covered)?;
                         if nested.is_empty() {
                             if target.is_none() {
                                 continue;
@@ -424,7 +431,7 @@ impl<'a> Context<'a> {
                     }
                 }
                 Kind::NcxPoint => {
-                    let nested = self.items(node, kind)?;
+                    let nested = self.items(node, kind, covered)?;
                     if let Some(first) = node.children().find(|child| kind.accepts(*child)) {
                         let start = first.range().start;
                         let end = node
@@ -450,6 +457,7 @@ impl<'a> Context<'a> {
                 }
                 items.extend(children);
             } else {
+                covered.extend(own_rank);
                 let rank = own_rank
                     .into_iter()
                     .chain(children.iter().map(|child| child.rank))
@@ -476,6 +484,7 @@ impl<'a> Context<'a> {
         kind: Kind,
         primary: bool,
         chapters: &'a [Chapter],
+        covered: &HashSet<usize>,
     ) -> Result<String, EngineError> {
         if primary {
             let mut ids: HashSet<String> = parse_xml(self.source.as_bytes())?
@@ -487,7 +496,7 @@ impl<'a> Context<'a> {
             let fallback = items.is_empty();
             let mut number = 0;
             for (rank, chapter) in chapters.iter().enumerate() {
-                if chapter.inserted || fallback {
+                if fallback || chapter.inserted && !covered.contains(&rank) {
                     let id = loop {
                         number += 1;
                         let id = format!("doccraft-toc-{number}");

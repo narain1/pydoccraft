@@ -14914,6 +14914,72 @@ Final cue
             )
             self.assertEqual(points[-1].find("{*}content").attrib["src"], "one.xhtml#fresh-%C3%A9")
 
+    def test_structure_preserves_authored_navigation_for_inserted_chapters(self) -> None:
+        source, nav_path, nav, html = self.nonspine_navigation_fixture()
+        ncx_path = "OEBPS/toc.ncx"
+        named_path = "OEBPS/named.xhtml"
+        unlisted_path = "OEBPS/unlisted.xhtml"
+        authored_nav = nav.replace(
+            '<a href="../one.xhtml#old">Old introduction</a></li>',
+            '<a href="../one.xhtml#fresh-%C3%A9">Revised introduction</a></li>'
+            '<li id="new-topic"><a href="../named.xhtml#start">Authored topic</a></li>',
+        ).replace(
+            '<a href="../two.xhtml#other">Page 2</a></li>',
+            '<a href="../two.xhtml#other">Page 2</a></li>'
+            '<li><a href="../unlisted.xhtml#extra">Page 4</a></li>',
+        )
+        named = doc_ex.EpubChapterSource(
+            "Generated topic", html.format('<h1 id="start">Inserted topic</h1>'), path=named_path,
+        )
+        unlisted = doc_ex.EpubChapterSource(
+            "Unlisted chapter", html.format('<h1 id="extra">Another chapter</h1>'), path=unlisted_path,
+        )
+        with doc_ex.open(source) as original:
+            ncx = original.read_epub_resource(ncx_path)
+            authored_ncx = ncx.replace(
+                b'<content src="one.xhtml"/></navPoint>',
+                b'<content src="one.xhtml#fresh-%C3%A9"/>'
+                b'<navPoint id="authored-topic" playOrder="3"><navLabel><text>Authored NCX topic</text></navLabel>'
+                b'<content src="named.xhtml#start"/></navPoint></navPoint>',
+            ).replace(
+                b"</navMap>",
+                b'</navMap><pageList><pageTarget id="four" type="normal" value="4" playOrder="4">'
+                b'<navLabel><text>Page 4</text></navLabel><content src="unlisted.xhtml#extra"/>'
+                b'</pageTarget></pageList>',
+            )
+            revised = original.edit_epub_structure(
+                [1, named, 0, unlisted],
+                replacements={0: html.format('<h1 id="fresh-é">Renamed introduction</h1>')},
+                resources={
+                    nav_path: doc_ex.EpubResource("application/xhtml+xml", authored_nav.encode()),
+                    ncx_path: doc_ex.EpubResource("application/x-dtbncx+xml", authored_ncx),
+                },
+            )
+            self.assertEqual(original.read_epub_resource(nav_path), nav.encode())
+            self.assertEqual(original.read_epub_resource(ncx_path), ncx)
+        with doc_ex.open(revised) as book:
+            self.assertEqual([page.metadata["chapter_path"] for page in book],
+                             ["OEBPS/two.xhtml", named_path, "OEBPS/one.xhtml", unlisted_path])
+            self.assertEqual(book[2].get_text(), "Renamed introduction")
+            groups = {group["kind"]: group["items"] for group in book.metadata["navigation"]}
+            self.assertEqual([item["label"] for item in groups["toc"]],
+                             ["Second", "Part A", "Unlisted chapter"])
+            subsection = groups["toc"][1]["children"]
+            self.assertEqual([(item["label"], item["fragment"]) for item in subsection],
+                             [("Authored topic", "start"), ("Revised introduction", "fresh-é")])
+            self.assertEqual([item["label"] for item in groups["page-list"]], ["Page 2", "Page 4"])
+            self.assertIn(b'id="new-topic"', book.read_epub_resource(nav_path))
+            xml = ET.fromstring(book.read_epub_resource(ncx_path))
+            points = xml.findall(".//{*}navPoint")
+            self.assertEqual([point.findtext("{*}navLabel/{*}text") for point in points],
+                             ["NCX two", "NCX one", "Authored NCX topic", "Unlisted chapter"])
+            authored = points[1].find("{*}navPoint")
+            self.assertIs(authored, points[2])
+            self.assertEqual(authored.attrib["id"], "authored-topic")
+            self.assertEqual(authored.find("{*}content").attrib["src"], "named.xhtml#start")
+            page = xml.find(".//{*}pageTarget")
+            self.assertEqual([point.attrib["playOrder"] for point in (*points, page)], ["1", "3", "2", "4", "5"])
+
     def test_structure_stages_supplemental_xhtml_links_navigation_and_assets(self) -> None:
         source, nav_path, nav, html = self.nonspine_navigation_fixture()
         notes, glossary = "OEBPS/notes.xhtml", "OEBPS/glossary.xhtml"
