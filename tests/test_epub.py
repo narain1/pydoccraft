@@ -4100,6 +4100,38 @@ class EpubTests(unittest.TestCase):
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "overlapping textLength owners"):
                 render(source, False)
 
+        def peers(width: int, *, separate: bool = False) -> str:
+            markup = svg(None, 92).split('<text x="134"', 1)[0]
+            owners = []
+            for start, name, length in ((0, "inner", 78), (2, "second", 94)):
+                ink = "".join(f'<tspan fill="#{bytes(rgb).hex()}">{part}</tspan>'
+                              for rgb, part in zip(colors[start:start + 2], labels[start:start + 2]))
+                owners.append(f'<tspan id="{name}" textLength="{length}">'
+                              f'<a href="https://example.org/{name}">{ink}</a></tspan>')
+            if separate:
+                # The parent has two resolved children. All of its remaining
+                # spacing lies between them, so their separate starts follow
+                # from the parent's anchored edges and the final child length.
+                left = 134 - width / 2
+                right = left + width - 94
+                return markup + "".join(
+                    f'<text x="{x}" y="70" style="text-anchor:start">{owner}</text>'
+                    for x, owner in zip((left, right), owners)
+                ) + "</svg>"
+            return markup + f'<text x="134" y="70" textLength="{width}">{"".join(owners)}</text></svg>'
+
+        for inline in (False, True):
+            for width in (224, 250):
+                with self.subTest(inline=inline, peer_width=width):
+                    independent = render(peers(width, separate=True), inline)
+                    self.assertEqual(render(peers(width), inline), independent)
+
+        oversized = peers(224).replace(
+            "</text></svg>", '<tspan textLength="78">B́é</tspan>' * 7 + "</text></svg>",
+        )
+        with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "more than eight overlapping textLength"):
+            render(oversized, False)
+
     def test_epub_svg_use_instances_keep_inherited_variable_font_requests(self) -> None:
         font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
         resources = {

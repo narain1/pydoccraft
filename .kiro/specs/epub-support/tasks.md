@@ -52,7 +52,7 @@
 - [x] Fit textLength on a sole nested tspan and spacing on an independently positioned nested owner while preserving sibling ink and PDF geometry.
 - [x] Fit multiple independently positioned sibling spacing owners in one mixed-face SVG text element.
 - [x] Fit verified left-to-right multi-glyph clusters and keep their native ink in searchable SVG PDF text and links.
-- [x] Resolve one direct nested SVG spacing owner before its overlapping outer text length and verify final native glyphs.
+- [x] Resolve up to eight direct sibling SVG spacing owners before their overlapping outer text length and verify final native glyphs.
 - [x] Preserve verified per-character relative position lists through mixed-face SVG spacing and horizontal glyph scaling.
 - [x] Preserve signed fractional synthetic oblique in reflowable and fixed-layout XHTML previews and fixed-layout PDF.
 - [x] Render alpha-preserving SVG color matrices, including saturation and hue rotation, with the fixed-layout PDF text and annotations preserved.
@@ -83,7 +83,7 @@
 - [ ] Extend the EPUB CSS profile with intrinsic minimum and maximum constraints, contain-fit sizing, additional math and typed division, and subgrids.
 - [x] Match bounded sibling positions in either direction, including An+B, namespace-aware types, and filtered child selectors with the correct specificity.
 - [ ] Add SVG filter primitives and retain PDF text and links for multi-source, non-axis-aligned or ambiguous spatial filter results.
-- [ ] Extend mixed-font SVG text fallback to spacing across ambiguous clusters, nested length owners and glyph positioning.
+- [ ] Extend mixed-font SVG text fallback to spacing across ambiguous clusters, deeper nested length owners and glyph positioning.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.
 - [x] Render tall reflowable chapters within the paint coordinate budget and apply raster limits to the requested DPI and clip.
 - [x] Project inherited MathML attributes, accents, movable limits, repeated script pairs, varied fences and separators, horizontal spaces, and zero-dimension padding.

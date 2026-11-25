@@ -346,11 +346,15 @@ pub(in crate::epub::svg) fn fit_lengths(
             unsupported("EPUB SVG mixed-font textLength source has no native layout")
         })?;
         if let Some(nested) = &length.nested {
-            let probe = probe_ids
-                .get(&(id, 0))
-                .and_then(|id| probes.get(id.as_str()).copied())
-                .ok_or_else(nested::error)?;
-            let (check, fitted) = nested.fit(node, index, text, probe, source)?;
+            let child_probes = (0..nested.count())
+                .map(|index| {
+                    probe_ids
+                        .get(&(id, index))
+                        .and_then(|id| probes.get(id.as_str()).copied())
+                        .ok_or_else(nested::error)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let (check, fitted) = nested.fit(node, index, text, &child_probes, source)?;
             for edit in fitted {
                 charge(
                     &mut bytes,
@@ -521,7 +525,7 @@ fn probe_chunks<'a>(
         let mut replacement = String::new();
         let mut selected = Vec::new();
         if let Some(nested) = &length.nested {
-            selected.push((0, nested.owner(text)?));
+            selected.extend(nested.owners(text)?.into_iter().enumerate());
         } else if length.relative.is_some() {
             selected.push((0, text));
         } else {
