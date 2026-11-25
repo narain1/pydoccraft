@@ -274,10 +274,18 @@ impl AudioSource {
         u64::try_from(micros).map_err(|_| limited("media-overlay audio duration exceeds limits"))
     }
 
-    pub(crate) fn clip(&mut self, begin: u64, end: Option<u64>) -> Result<AudioClip, EngineError> {
+    pub(crate) fn clip(
+        &mut self,
+        begin: u64,
+        end: Option<u64>,
+        clamp_to_duration: bool,
+    ) -> Result<AudioClip, EngineError> {
         self.stream = None;
-        let window = self.window(begin, end, false)?;
-        let samples = self.read_frames(window.next, window.end, window.end.is_none())?;
+        let window = self.window(begin, end, clamp_to_duration)?;
+        let samples = self.read_frames(window.next, window.end, window.allow_eof)?;
+        if clamp_to_duration && samples.is_empty() {
+            return Err(empty_clip());
+        }
         encode_clip(window.spec, window.speaker_mask, samples)
     }
 
@@ -310,8 +318,12 @@ impl AudioSource {
             .ok_or_else(|| limited("media-overlay audio time exceeds limits"))?;
         let stop = window.end.map_or(limit, |end| end.min(limit));
         let samples = self.read_frames(window.next, Some(stop), window.allow_eof)?;
-        if samples.is_empty() && window.started && window.allow_eof {
-            return Ok(None);
+        if samples.is_empty() && window.allow_eof {
+            return if window.started {
+                Ok(None)
+            } else {
+                Err(empty_clip())
+            };
         }
         let result = encode_clip(window.spec, window.speaker_mask, samples)?;
         window.next += result.frames;
@@ -342,9 +354,7 @@ impl AudioSource {
             end = end.into_iter().chain(duration).min();
         }
         if end.is_some_and(|end| end <= next || duration.is_some_and(|duration| end > duration)) {
-            return Err(invalid(
-                "media-overlay audio clip lies outside its resource or contains no sample frames",
-            ));
+            return Err(empty_clip());
         }
         let speaker_mask = match &self.decoder {
             Decoder::Opus(track) => track.speaker_mask(),
@@ -461,6 +471,10 @@ fn encode_clip(
 fn read(data: &[u8], path: &str, limit: usize) -> Result<Vec<u8>, EngineError> {
     validate_archive_path(path)?;
     Book::open(data)?.read(path, limit)
+}
+
+fn empty_clip() -> EngineError {
+    invalid("media-overlay audio clip lies outside its resource or contains no sample frames")
 }
 
 fn frame_at(microseconds: u64, rate: u32) -> Result<usize, EngineError> {
@@ -676,7 +690,11 @@ impl Mp3 {
         let start = start + origin;
         let stop = stop.map(|frame| frame + origin);
         let channels = usize::from(format.channels);
-        if stop.is_some_and(|stop| stop.saturating_sub(start) > MAX_CLIP_SAMPLES / channels) {
+        // With no known duration, an authored stop can exceed EOF. Charge
+        // the decoded samples below instead of assuming the whole range exists.
+        if !allow_eof
+            && stop.is_some_and(|stop| stop.saturating_sub(start) > MAX_CLIP_SAMPLES / channels)
+        {
             return Err(limited("media-overlay audio clip exceeds 16 MiB of PCM"));
         }
         if start < self.sample_offset {

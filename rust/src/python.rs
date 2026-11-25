@@ -396,14 +396,16 @@ struct NativeEpubAudio(crate::epub::audio::AudioSource);
 
 #[pymethods]
 impl NativeEpubAudio {
-    #[pyo3(signature = (begin, end))]
+    #[pyo3(signature = (begin, end, clamp_to_duration=false))]
     fn clip(
         &mut self,
         py: Python<'_>,
         begin: u64,
         end: Option<u64>,
+        clamp_to_duration: bool,
     ) -> Result<PcmClip, EngineError> {
-        py.allow_threads(|| self.0.clip(begin, end)).map(pcm_clip)
+        py.allow_threads(|| self.0.clip(begin, end, clamp_to_duration))
+            .map(pcm_clip)
     }
 
     #[pyo3(signature = (begin, end, clamp_to_duration=false))]

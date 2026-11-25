@@ -1028,7 +1028,7 @@ class Document:
         end: int | None,
         chunk_frames: int | None,
     ) -> Iterator[EpubNarrationCue]:
-        for clip in self._epub_pcm_chunks(decoder, begin, end, chunk_frames):
+        for clip in self._epub_pcm_chunks(decoder, begin, end, chunk_frames, clamp_to_duration=True):
             yield EpubNarrationCue(*args, audio=clip)
 
     def _epub_pcm_chunks(
@@ -1044,7 +1044,7 @@ class Document:
 
         self._ensure_open()
         if chunk_frames is None:
-            wave, rate, channels, frames = _native(lambda: decoder.clip(begin, end))
+            wave, rate, channels, frames = _native(lambda: decoder.clip(begin, end, clamp_to_duration))
             yield EpubAudioClip(bytes(wave), rate, channels, frames)
             return
         _native(lambda: decoder.start_stream(begin, end, clamp_to_duration))

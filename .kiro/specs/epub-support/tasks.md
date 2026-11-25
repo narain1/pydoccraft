@@ -147,6 +147,7 @@
 - [ ] Expand editable negative leading offsets beyond preceding space and cover other carets inside merged or inexact borrowed spacing and remaining MathML visual properties.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.
+- [x] Clamp overlong SMIL clip ends at the physical presentation end in buffered and streamed narration, including unindexed MPEG and chained Ogg audio.
 - [x] Decode and stream single-track mono and stereo Ogg Opus overlays with the correct presentation bounds and gain.
 - [x] Stream sequentially chained mono and stereo Ogg Opus with a continuous sample timeline and bounded seeks.
 - [x] Decode family-1 Ogg Opus surround and preserve speaker assignments in standalone and chained WAVE playback.

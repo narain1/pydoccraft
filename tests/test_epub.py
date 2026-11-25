@@ -9747,7 +9747,10 @@ Final cue
                 self.assertAlmostEqual(crossings, 438, delta=2)
 
     def test_media_overlay_playback_errors_and_clears_active_cue(self) -> None:
-        source, _ = narrated_epub(first_clip_end="4s")
+        source, _ = narrated_epub(first_clip_end="5s")
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            smil = archive.read("OEBPS/Sync/read.smil")
+        source = rewrite_epub(source, {"OEBPS/Sync/read.smil": smil.replace(b'clipBegin="250ms"', b'clipBegin="4s"')})
         with doc_ex.open(source) as document, self.assertRaises(doc_ex.MalformedDocumentError):
             next(document.epub_narration(0))
         source, _ = narrated_epub()
@@ -9765,6 +9768,81 @@ Final cue
             with self.assertRaisesRegex(RuntimeError, "could not play audio"):
                 document.play_epub_narration(0, play_audio=fail, speak_text=lambda _: None, on_cue=cues.append)
         self.assertEqual([cue and cue.fragment for cue in cues], ["café", None])
+
+    def test_smil_narration_clamps_overlong_clip_end_to_physical_audio(self) -> None:
+        source, wav = narrated_epub()
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf")
+            smil = archive.read("OEBPS/Sync/read.smil")
+        fixtures = Path(__file__).parent / "fixtures"
+        mpeg = (fixtures / "epub-narration-tone.mp3").read_bytes()
+        gapless = (fixtures / "epub-narration-gapless.mp3").read_bytes()
+        stereo = (fixtures / "epub-narration-stereo.opus").read_bytes()
+        mono = (fixtures / "epub-narration-mono.opus").read_bytes()
+        self.assertNotIn(b"Xing", mpeg)
+        self.assertNotIn(b"Info", mpeg)
+        replay = (b'<text src="../one.xhtml#aside"/>'
+                  b'<audio src="../Media/voice.wav" clipBegin="0.1s" clipEnd="0.125s"/>')
+        smil = smil.replace(b'<text src="../one.xhtml#aside"/>', replay)
+
+        def pcm(audio: doc_ex.EpubAudioClip) -> bytes:
+            with wave.open(io.BytesIO(audio.wave), "rb") as samples:
+                self.assertEqual(samples.getnframes(), audio.frame_count)
+                return samples.readframes(audio.frame_count)
+
+        for label, media, audio, start, frames in (
+            ("WAVE", b"audio/wav", wav, b"0.25s", 14384),
+            ("unindexed MPEG", b"audio/mpeg", mpeg, b"0.25s", None),
+            ("gapless MPEG", b"audio/mpeg", gapless, b"0.25s", 6615),
+            ("chained Opus", b"audio/ogg", stereo + mono, b"1.14s", 17280),
+        ):
+            with self.subTest(label=label):
+                opened = smil.replace(b'clipBegin="250ms" clipEnd="00:00:01.125"', b'clipBegin="' + start + b'"')
+                overlong = opened.replace(b'clipBegin="' + start + b'"', b'clipBegin="' + start + b'" clipEnd="72h"')
+                resources = {
+                    "OEBPS/content.opf": package.replace(b"audio/wav", media),
+                    "OEBPS/Media/voice.wav": audio,
+                }
+                with doc_ex.open(rewrite_epub(source, {**resources, "OEBPS/Sync/read.smil": opened})) as book:
+                    first, back = (cue.audio for cue in book.epub_narration(0))
+                    assert first is not None and back is not None
+                    if frames is not None:
+                        self.assertEqual(first.frame_count, frames)
+                    expected = pcm(first) + pcm(back)
+                with doc_ex.open(rewrite_epub(source, {**resources, "OEBPS/Sync/read.smil": overlong})) as book:
+                    self.assertEqual(book.read_epub_resource("OEBPS/Sync/read.smil"), overlong)
+                    self.assertEqual(book.epub_media_cues(0)[0]["audio"]["clip_end_us"], 259_200_000_000)
+                    for chunk_frames in (None, 509, first.frame_count):
+                        played = bytearray()
+                        for cue in book.epub_narration(0, chunk_frames=chunk_frames):
+                            assert cue.audio is not None
+                            self.assertGreater(cue.audio.frame_count, 0)
+                            if chunk_frames is not None:
+                                self.assertLessEqual(cue.audio.frame_count, chunk_frames)
+                            played.extend(pcm(cue.audio))
+                        self.assertEqual(played, expected)
+                    active = []
+                    played = bytearray()
+                    book.play_epub_narration(
+                        0, chunk_frames=509, play_audio=lambda clip: played.extend(pcm(clip)),
+                        speak_text=lambda text: self.fail(f"unexpected narration {text}"),
+                        on_cue=lambda cue: active.append(cue and cue.fragment),
+                    )
+                    self.assertEqual(active, ["café", None, "aside", None])
+                    self.assertEqual(played, expected)
+                    [sought] = book.epub_narration(0, start_cue=1)
+                    assert sought.audio is not None
+                    self.assertEqual(pcm(sought.audio), pcm(back))
+
+        outside = smil.replace(b'clipBegin="250ms" clipEnd="00:00:01.125"', b'clipBegin="4s" clipEnd="72h"')
+        with doc_ex.open(rewrite_epub(source, {
+            "OEBPS/content.opf": package.replace(b"audio/wav", b"audio/mpeg"),
+            "OEBPS/Media/voice.wav": mpeg,
+            "OEBPS/Sync/read.smil": outside,
+        })) as book:
+            for chunk_frames in (None, 509):
+                with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "outside its resource"):
+                    next(book.epub_narration(0, chunk_frames=chunk_frames))
 
     def test_media_overlay_streaming_matches_buffered_pcm(self) -> None:
         source, wav = narrated_epub()
@@ -9886,7 +9964,9 @@ Final cue
                 with wave.open(io.BytesIO(cue.audio.wave), "rb") as pcm:
                     recorded.extend(pcm.readframes(cue.audio.frame_count))
             self.assertEqual(recorded, reference[5513 * 2:])
-        with doc_ex.open(rewrite_epub(source, {"OEBPS/Sync/read.smil": smil.replace(b"0.4s", b"0.401s")})) as document:
+        with doc_ex.open(rewrite_epub(source, {"OEBPS/Sync/read.smil": smil.replace(
+            b'clipBegin="0.125s" clipEnd="0.4s"', b'clipBegin="0.4s" clipEnd="0.401s"',
+        )})) as document:
             with self.assertRaises(doc_ex.MalformedDocumentError):
                 next(document.epub_narration(0, chunk_frames=509))
         damaged = bytearray(audio)
@@ -9929,7 +10009,7 @@ Final cue
             with wave.open(io.BytesIO(tail.wave), "rb") as pcm:
                 self.assertEqual(pcm.readframes(tail.frame_count), reference[54000 * 4:])
         with doc_ex.open(rewrite_epub(source, {"OEBPS/Sync/read.smil": smil.replace(
-            b"00:00:01.125", b"1.151s",
+            b'clipBegin="250ms" clipEnd="00:00:01.125"', b'clipBegin="1.15s" clipEnd="1.151s"',
         )})) as document:
             with self.assertRaises(doc_ex.MalformedDocumentError):
                 next(document.epub_narration(0, chunk_frames=773))
