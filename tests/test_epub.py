@@ -3072,6 +3072,66 @@ class EpubTests(unittest.TestCase):
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "definite inline size after flexing"):
                     render(dependent + "#panel{min-height:min-content}")
 
+    def test_css_intrinsic_bounds_and_contain_fit_use_native_grid_areas(self) -> None:
+        fixture = fixed_spread_fixture([("", "white", 305, 188)])
+        source = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Grid sizing bases</title>
+          <meta name="viewport" content="width=305,height=188"/><style>
+          html,body,p{margin:0;font-size:11px}
+          #grid{position:absolute;top:8px;left:10px;width:248px;height:158px;display:grid;
+            grid-template-columns:[left] 80px [right] minmax(0,1fr) [end];
+            grid-template-rows:[first] 60px [second] 90px [bottom];
+            gap:8px;align-items:start;background:#e5e1d6}
+          #spanning{grid-column:left/end;grid-row:first;height:2px;background:#89ba62;width:5px}
+          #panel{grid-column:right;grid-row:second;box-sizing:border-box;
+            margin-inline:10px;padding-inline:10px;border:2px solid #3c6683;background:#bdd3ed}
+          #edge{box-sizing:border-box;width:5px;background:#dfba56}
+          #fit{grid-column:left;grid-row:second;aspect-ratio:2/1;background:#85adad}
+          #hidden{display:none} CSS</style></head><body><div id="grid">
+          <p id="spanning"><a href="https://example.org/grid">First narrow line with extra words</a></p>
+          <p id="hidden">Not in the grid</p><section id="panel">
+          <p>Wrapped content defines the bounds of the card.</p>
+          <p id="edge">Inner</p></section><div id="fit"></div></div></body></html>"""
+
+        def render(rules: str) -> tuple[tuple[int, bytes], object, object]:
+            document = rewrite_epub(fixture, {"OEBPS/s0.xhtml": source.replace("CSS", rules)})
+            with doc_ex.open(document) as book:
+                png = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                output = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+            with doc_ex.open(output) as pdf:
+                self.assertTrue(png == rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))))
+                hits = pdf[0].search_for("First")
+                links = pdf[0].get_links()
+                self.assertEqual(len(hits), 1)
+                self.assertTrue(links)
+                self.assertTrue(all(link.uri == "https://example.org/grid" for link in links))
+                return png, hits, [link.bbox for link in links]
+
+        qualified = (
+            "#spanning{min-height:min-content;min-inline-size:fit-content(calc(25% + 4px))}"
+            "#panel{height:2px;min-block-size:fit-content(calc(20% + 2px))}"
+            "#edge{min-width:max-content;padding-left:25%}"
+            "#fit{inline-size:contain;block-size:contain}"
+        )
+        exact = (
+            "#spanning{width:66px;height:auto}#panel{width:140px;height:auto}"
+            "#edge{min-width:max-content;padding-left:29px}#fit{width:80px;height:40px}"
+        )
+        for axis in ("", "#grid{direction:rtl}"):
+            with self.subTest(direction=axis):
+                self.assertTrue(render(axis + qualified) == render(axis + exact))
+
+        for independent in (
+            "#grid{grid-template-columns:80px 1fr}",
+            "#grid{grid-template-rows:auto 90px}",
+            "#panel{margin-inline:auto}",
+            "#grid{grid-template-columns:[left] 80px [right] 160px [end]}"
+            "#fit{grid-column:4}",
+        ):
+            with self.subTest(independent=independent):
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError,
+                                            "containing|definite|contain-fit"):
+                    render(qualified + independent)
+
     def test_css_intrinsic_box_counts_padding_and_wraps_before_column_flex_height(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic box edges</title>
           <style>body,p{margin:0} section{width:200px;CONTAINER}

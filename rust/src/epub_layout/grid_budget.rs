@@ -2,7 +2,8 @@
 use taffy::{
     geometry::Size,
     style::{
-        BoxSizing, GridTemplateComponent, LengthPercentage, Overflow, Style, TrackSizingFunction,
+        BoxSizing, ExpandedMinTrackSizingFunction, GridTemplateComponent, LengthPercentage,
+        Overflow, Style, TrackSizingFunction,
     },
     util::{MaybeMath, MaybeResolve, ResolveOrZero},
     LayoutInput, RequestedAxis, RunMode, SizingMode,
@@ -12,6 +13,41 @@ use crate::epub::css::{
     grid::{MAX_LINE_NAMES, MAX_TRACKS},
     CalculationTable,
 };
+
+// These tracks have no content-derived minimum or growth limit. A flexible
+// upper limit is safe with a definite axis because its base stays definite.
+pub(super) fn independently_sized(style: &Style, capacity: Size<Option<f32>>) -> bool {
+    let axis = |template: &[GridTemplateComponent<String>],
+                implicit: &[TrackSizingFunction],
+                available: Option<f32>| {
+        let track = |track: &TrackSizingFunction| {
+            let minimum = match track.min.expand() {
+                ExpandedMinTrackSizingFunction::Length(_) => true,
+                ExpandedMinTrackSizingFunction::Percent(_)
+                | ExpandedMinTrackSizingFunction::Calc(_) => available.is_some(),
+                _ => false,
+            };
+            minimum
+                && (track.max.has_definite_value(available)
+                    || (available.is_some() && track.max.is_fr()))
+        };
+        (!template.is_empty() || !implicit.is_empty())
+            && implicit.iter().all(track)
+            && template.iter().all(|entry| match entry {
+                GridTemplateComponent::Single(size) => track(size),
+                GridTemplateComponent::Repeat(repeat) => repeat.tracks.iter().all(track),
+            })
+    };
+    axis(
+        &style.grid_template_columns,
+        &style.grid_auto_columns,
+        capacity.width,
+    ) && axis(
+        &style.grid_template_rows,
+        &style.grid_auto_rows,
+        capacity.height,
+    )
+}
 
 pub(super) fn permits(style: &Style, input: LayoutInput, calculations: &CalculationTable) -> bool {
     let has_repeat =

@@ -36,6 +36,7 @@ struct Node {
     bounds: IntrinsicBounds,
     parent: Option<NodeId>,
     has_relative_math: bool,
+    needs_intrinsic_geometry: bool,
     children: Vec<NodeId>,
     layout: Layout,
     cache: Cache,
@@ -56,6 +57,13 @@ impl Tree {
             || children
                 .iter()
                 .any(|id| self.nodes[usize::from(*id)].has_relative_math);
+        let needs_intrinsic_geometry = bounds.has_inline()
+            || bounds.has_block()
+            || bounds.contain.width
+            || bounds.contain.height
+            || children
+                .iter()
+                .any(|id| self.nodes[usize::from(*id)].needs_intrinsic_geometry);
         for child in &children {
             self.nodes[usize::from(*child)].parent = Some(id);
         }
@@ -64,6 +72,7 @@ impl Tree {
             bounds,
             parent: None,
             has_relative_math,
+            needs_intrinsic_geometry,
             children,
             layout: Layout::with_order(0),
             cache: Cache::new(),
@@ -97,6 +106,8 @@ impl Tree {
             viewport,
             geometry: Vec::new(),
             flex_widths: Vec::new(),
+            grid_areas: Vec::new(),
+            probing_grid: false,
             nodes: &mut self.nodes,
             calculations,
             measure,
@@ -112,9 +123,15 @@ impl Tree {
         }) {
             view.geometry
                 .resize(view.nodes.len(), BoxGeometry::default());
+            view.grid_areas.resize(view.nodes.len(), None);
             view.resolve_geometry()?;
             view.measure_flex_widths()?;
             view.resolve_bounds()?;
+        }
+        for node in &mut *view.nodes {
+            if !matches!(node.details, DetailedLayoutInfo::None) {
+                node.details = DetailedLayoutInfo::None;
+            }
         }
         compute_root_layout(&mut view, root, space);
         if view.fit_probes > MAX_FIT_PROBES {
@@ -139,6 +156,7 @@ impl Tree {
                 "EPUB CSS block bounds changed their measured flex width",
             ));
         }
+        view.verify_grid_areas()?;
         Ok(())
     }
 }
@@ -159,10 +177,18 @@ struct BoxGeometry {
     auto_block: bool,
 }
 
+#[derive(Clone, Copy)]
+struct GridArea {
+    size: Size<f32>,
+    block_probe_width: Option<f32>,
+}
+
 struct View<'a, F> {
     viewport: Size<Option<f32>>,
     geometry: Vec<BoxGeometry>,
     flex_widths: Vec<Option<f32>>,
+    grid_areas: Vec<Option<GridArea>>,
+    probing_grid: bool,
     nodes: &'a mut [Node],
     calculations: &'a CalculationTable,
     measure: F,
@@ -261,14 +287,39 @@ fn contain_axis(
     Some((minimum, available.min(maximum)))
 }
 
+fn unproven_grid() -> EngineError {
+    unsupported("EPUB CSS intrinsic bounds changed their independently sized grid area")
+}
+
+fn grid_area_size(details: &DetailedGridInfo, slot: usize) -> Option<Size<f32>> {
+    let item = details.items.get(slot)?;
+    if item.row_start == 0
+        || item.column_start == 0
+        || item.row_start >= item.row_end
+        || item.column_start >= item.column_end
+        || usize::from(item.row_end - 1) > details.rows.positions.len()
+        || usize::from(item.column_end - 1) > details.columns.positions.len()
+    {
+        return None;
+    }
+    let (_, size) = details.item_grid_area(slot)?;
+    (size.width.is_finite() && size.height.is_finite()).then_some(size)
+}
+
 impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
     fn resolve_geometry(&mut self) -> Result<(), EngineError> {
         // The tree stores children before parents. Resolve containing boxes
         // once in the other direction so chains of percentages take linear work.
         for index in (0..self.nodes.len()).rev() {
+            if self.grid_limit || self.fit_probes > MAX_FIT_PROBES {
+                break;
+            }
             self.resolve_contain(index)?;
             if !self.nodes[index].children.is_empty() {
                 self.geometry[index] = self.box_geometry(index);
+                if self.nodes[index].style.display == Display::Grid {
+                    self.measure_grid_areas(index)?;
+                }
             }
         }
         Ok(())
@@ -414,6 +465,9 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
         if node.parent.is_none() || node.style.position == Position::Fixed {
             return self.viewport;
         }
+        if let Some(area) = self.grid_area(index) {
+            return area.size.map(Some);
+        }
         let Some((geometry, _)) = self.containing_geometry(index) else {
             return Size::NONE;
         };
@@ -426,6 +480,9 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
 
     // The outer option records whether the containing block could be proven.
     fn contain_block_height(&self, index: usize) -> Option<Option<f32>> {
+        if let Some(area) = self.grid_area(index) {
+            return Some(Some(area.size.height));
+        }
         let (geometry, _) = self.containing_geometry(index)?;
         if self.nodes[index].style.position == Position::Absolute {
             geometry.padding.height.map(Some)
@@ -441,7 +498,7 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
         let style = &node.style;
         if !matches!(
             style.display,
-            Display::Block | Display::FlowRoot | Display::Flex
+            Display::Block | Display::FlowRoot | Display::Flex | Display::Grid
         ) || style.aspect_ratio.is_some()
             || style.scrollbar_width != 0.0
         {
@@ -504,7 +561,13 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
         if !style.size.width.is_auto() || style.item_is_replaced {
             return None;
         }
-        let parent = self.containing_geometry(index).map(|(_, parent)| parent);
+        let grid = self
+            .grid_area(index)
+            .and_then(|_| node.parent.map(|id| &self.nodes[usize::from(id)].style));
+        if grid.is_some() && (style.margin.left.is_auto() || style.margin.right.is_auto()) {
+            return None;
+        }
+        let parent = grid.or_else(|| self.containing_geometry(index).map(|(_, parent)| parent));
         if parent.is_none() && style.position != Position::Fixed {
             return None;
         }
@@ -531,6 +594,121 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
             width
         };
         Some((available - margins).max(0.0))
+    }
+
+    fn grid_area(&self, index: usize) -> Option<GridArea> {
+        self.grid_areas.get(index).copied().flatten()
+    }
+
+    fn grid_items(&self, index: usize) -> impl Iterator<Item = usize> + '_ {
+        self.nodes[index]
+            .children
+            .iter()
+            .map(|id| usize::from(*id))
+            .filter(|&child| {
+                let style = &self.nodes[child].style;
+                style.display != Display::None && !style.position.is_out_of_flow()
+            })
+    }
+
+    fn measure_grid_areas(&mut self, index: usize) -> Result<(), EngineError> {
+        let node = &self.nodes[index];
+        let geometry = self.geometry[index];
+        let (Some(width), Some(height)) = (geometry.outer.width, geometry.outer.height) else {
+            return Ok(());
+        };
+        if !self
+            .grid_items(index)
+            .any(|child| self.nodes[child].needs_intrinsic_geometry)
+            || !grid_budget::independently_sized(&node.style, geometry.content)
+            || self.fit_probes > MAX_FIT_PROBES
+            || self.grid_limit
+        {
+            return Ok(());
+        }
+        let input = LayoutInput {
+            run_mode: RunMode::PerformLayout,
+            sizing_mode: SizingMode::InherentSize,
+            axis: RequestedAxis::Both,
+            known_dimensions: geometry.outer,
+            known_dimensions_are_definite: Size {
+                width: true,
+                height: true,
+            },
+            parent_size: self.containing_size(index),
+            available_space: Size {
+                width: AvailableSpace::Definite(width),
+                height: AvailableSpace::Definite(height),
+            },
+            ..LayoutInput::HIDDEN
+        };
+        if !grid_budget::permits(&node.style, input, self.calculations) {
+            self.grid_limit = true;
+            return Ok(());
+        }
+
+        // Native placement supplies areas before any target intrinsic bounds
+        // are materialized. The track proof makes child contributions irrelevant.
+        self.fit_probes += 1;
+        self.probing_grid = true;
+        compute_grid_layout(self, NodeId::from(index), input);
+        self.probing_grid = false;
+        let node = &self.nodes[index];
+        let DetailedLayoutInfo::Grid(details) = &node.details else {
+            return Err(unproven_grid());
+        };
+        let implicit = |tracks: &taffy::DetailedGridTracksInfo<String>| {
+            tracks.negative_implicit_tracks != 0 || tracks.positive_implicit_tracks != 0
+        };
+        if (node.style.grid_auto_columns.is_empty() && implicit(&details.columns))
+            || (node.style.grid_auto_rows.is_empty() && implicit(&details.rows))
+        {
+            return Ok(());
+        }
+        let children = self.grid_items(index).collect::<Vec<_>>();
+        if children.len() != details.items.len() {
+            return Err(unproven_grid());
+        }
+        for (slot, child) in children.into_iter().enumerate() {
+            let size = grid_area_size(details, slot).ok_or_else(unproven_grid)?;
+            self.grid_areas[child] = Some(GridArea {
+                size,
+                block_probe_width: None,
+            });
+        }
+        Ok(())
+    }
+
+    fn verify_grid_areas(&self) -> Result<(), EngineError> {
+        for (index, node) in self.nodes.iter().enumerate() {
+            if node.style.display != Display::Grid
+                || !self
+                    .grid_items(index)
+                    .any(|child| self.grid_area(child).is_some())
+            {
+                continue;
+            }
+            let DetailedLayoutInfo::Grid(details) = &node.details else {
+                return Err(unproven_grid());
+            };
+            for (slot, child) in self.grid_items(index).enumerate() {
+                let Some(area) = self.grid_area(child) else {
+                    continue;
+                };
+                let actual = grid_area_size(details, slot).ok_or_else(unproven_grid)?;
+                let changed =
+                    |before: f32, after: f32| !after.is_finite() || (before - after).abs() > 0.001;
+                if changed(area.size.width, actual.width)
+                    || changed(area.size.height, actual.height)
+                    || area
+                        .block_probe_width
+                        .is_some_and(|width| changed(width, self.nodes[child].layout.size.width))
+                {
+                    return Err(unproven_grid());
+                }
+            }
+        }
+        Ok(())
     }
 
     fn measure_flex_widths(&mut self) -> Result<(), EngineError> {
@@ -863,6 +1041,9 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
                 )
             })
             .ok_or_else(unresolved)?;
+        if let Some(area) = self.grid_areas.get_mut(index).and_then(Option::as_mut) {
+            area.block_probe_width = Some(width);
+        }
         let height_adjust = if style.box_sizing == BoxSizing::ContentBox {
             block_edges
         } else {
@@ -988,6 +1169,11 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
         input: LayoutInput,
         block: Option<&mut BlockContext<'_>>,
     ) -> LayoutOutput {
+        if self.probing_grid {
+            return LayoutOutput::from_outer_size(
+                input.known_dimensions.map(|size| size.unwrap_or(0.0)),
+            );
+        }
         if input.run_mode == RunMode::PerformHiddenLayout {
             return compute_hidden_layout(self, id);
         }
