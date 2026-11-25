@@ -18,7 +18,7 @@ use super::{
     audio::MAX_ENCODED_BYTES,
     invalid, limited,
     media::{SpatialFragment, MAX_TIME},
-    mp4::{linear_edit, LinearEdit, Mp4Bounds, MAX_ACCESS_UNITS},
+    mp4::{edit_spans, LinearEdit, Mp4Bounds, MAX_ACCESS_UNITS},
     unsupported, validate_archive_path, Book,
 };
 use crate::EngineError;
@@ -48,6 +48,7 @@ pub(crate) struct AvcSource {
     next_packet: usize,
     next_frame: usize,
     decoder: H264CodecDecoder,
+    extra: Vec<u8>,
     flushed: bool,
     geometry: Geometry,
     pixel_format: PixelFormat,
@@ -60,6 +61,7 @@ pub(crate) struct AvcSource {
 struct FrameTime {
     pts: i64,
     interval: Range<u64>,
+    restart: Option<usize>,
 }
 
 pub(crate) struct VideoImage {
@@ -229,14 +231,14 @@ impl AvcSource {
             }
         }
         let movie = demux.movie_header();
-        let edit = linear_edit(
+        let edits = edit_spans(
             demux.edit_list(stream.index),
             movie.timescale,
             track.map_or(0, |track| track.media_timescale),
             "MP4 video edit lists require a continuous presentation",
         )?;
         let (timeline, clip, first_packet) =
-            playback_range(&samples, stream.time_base, edit, movie, start_us, end_us)?;
+            playback_range(&samples, stream.time_base, &edits, movie, start_us, end_us)?;
         let mut decoder = H264CodecDecoder::new(CodecId::new("h264"));
         decoder.consume_extradata(extra).map_err(invalid)?;
         Ok(Self {
@@ -246,6 +248,7 @@ impl AvcSource {
             next_packet: first_packet,
             next_frame: 0,
             decoder,
+            extra: extra.to_vec(),
             flushed: false,
             geometry,
             pixel_format,
@@ -260,6 +263,15 @@ impl AvcSource {
         if self.next_frame == self.timeline.len() {
             return Ok(None);
         }
+        let restart = self.timeline[self.next_frame].restart;
+        if let Some(packet) = restart.filter(|_| self.next_frame != 0) {
+            self.decoder = H264CodecDecoder::new(CodecId::new("h264"));
+            self.decoder
+                .consume_extradata(&self.extra)
+                .map_err(invalid)?;
+            self.next_packet = packet;
+            self.flushed = false;
+        }
         for _ in 0..MAX_PACKETS_PER_FRAME {
             match self.decoder.receive_frame() {
                 Ok(Frame::Video(frame)) => {
@@ -267,7 +279,7 @@ impl AvcSource {
                         .pts
                         .ok_or_else(|| invalid("AVC frame has no timestamp"))?;
                     let expected = &self.timeline[self.next_frame];
-                    if pts < expected.pts && self.next_frame == 0 {
+                    if pts < expected.pts && restart.is_some() {
                         continue;
                     }
                     if pts != expected.pts {
@@ -397,7 +409,7 @@ fn shifted_us(
 fn playback_range(
     samples: &[SampleInfo],
     base: TimeBase,
-    edit: Option<LinearEdit>,
+    edits: &[LinearEdit],
     movie: MovieHeader,
     start_us: u64,
     end_us: Option<u64>,
@@ -405,29 +417,28 @@ fn playback_range(
     let mut display: Vec<_> = (0..samples.len()).collect();
     display.sort_unstable_by_key(|&i| samples[i].composition_time);
     let first = samples[display[0]].composition_time;
-    let stop = {
-        let sample = &samples[*display.last().unwrap_or(&0)];
-        sample
-            .composition_time
-            .checked_add(sample.duration)
-            .ok_or_else(|| invalid("MP4 video duration overflow"))?
-    };
-    let (origin, movie_start) = edit
-        .as_ref()
-        .map_or((first, 0), |edit| (edit.media_start, edit.movie_start));
-    if origin < first {
-        return Err(unsupported(
-            "MP4 video edit begins before its media samples",
+    let last = &samples[*display.last().unwrap_or(&0)];
+    let stop = last
+        .composition_time
+        .checked_add(last.duration)
+        .ok_or_else(|| invalid("MP4 video duration overflow"))?;
+    if display
+        .windows(2)
+        .any(|pair| samples[pair[0]].composition_time >= samples[pair[1]].composition_time)
+    {
+        return Err(invalid(
+            "duplicate or unordered MP4 video presentation timestamp",
         ));
     }
-    let tail = edit
-        .as_ref()
+    let tail = edits
+        .last()
         .map(|edit| edit.implicit_tail_end(movie))
         .transpose()?
         .flatten();
-    let ceil_boundaries = movie_start != 0 || tail.is_some();
-    let since_origin = |pts: i64| {
-        let elapsed = (i128::from(pts) - i128::from(origin)).max(0);
+    let ceil_boundaries = edits.len() > 1
+        || edits.first().is_some_and(|edit| edit.movie_start != 0)
+        || tail.is_some();
+    let projection = |movie_start: u64, elapsed: i128| {
         if ceil_boundaries {
             shifted_us(movie_start, movie.timescale, elapsed as u128, base)
         } else {
@@ -441,55 +452,88 @@ fn playback_range(
             scale_us(i128::from(tick), 1, i64::from(movie.timescale))
         }
     };
-    let available = since_origin(stop)?;
-    let active_start = since_origin(origin)?;
-    let active_end = if let Some(edit) = edit {
-        let duration = available.min(movie_bound(edit.movie_end)?);
-        if duration <= active_start {
+    let mut active = Vec::new();
+    for index in 0..edits.len().max(1) {
+        let edit = edits.get(index);
+        let (origin, movie_start) =
+            edit.map_or((first, 0), |edit| (edit.media_start, edit.movie_start));
+        if origin < first {
+            return Err(unsupported(
+                "MP4 video edit begins before its media samples",
+            ));
+        }
+        let since_origin =
+            |pts: i64| projection(movie_start, (i128::from(pts) - i128::from(origin)).max(0));
+        let begin = since_origin(origin)?;
+        let available = since_origin(stop)?;
+        let end = if let Some(edit) = edit {
+            let declared = movie_bound(edit.movie_end)?;
+            if edits.len() > 1 && declared > available {
+                return Err(invalid("MP4 edit extends outside its video track"));
+            }
+            available.min(declared)
+        } else {
+            available
+        };
+        if end <= begin {
             return Err(invalid("MP4 video edit has no playable interval"));
         }
-        duration
-    } else {
-        available
-    };
-    let duration = tail.map(movie_bound).transpose()?.unwrap_or(active_end);
+        active.push((origin, movie_start, begin..end));
+    }
+    let duration = tail
+        .map(movie_bound)
+        .transpose()?
+        .unwrap_or_else(|| active.last().map_or(0, |span| span.2.end));
     let clip = start_us..end_us.unwrap_or(duration).min(duration);
     if clip.is_empty() {
         return Err(EngineError::InvalidArgument(
             "EPUB video clip lies outside its presentation".into(),
         ));
     }
-    let mut timeline = Vec::new();
-    let mut first_packet = samples.len();
-    for (ordinal, &index) in display.iter().enumerate() {
-        let pts = samples[index].composition_time;
-        let next = display
-            .get(ordinal + 1)
-            .map_or(stop, |&i| samples[i].composition_time);
-        if next <= pts {
-            return Err(invalid(
-                "duplicate or unordered MP4 video presentation timestamp",
-            ));
-        }
-        if next <= origin {
+    let mut timeline: Vec<FrameTime> = Vec::new();
+    for (origin, movie_start, active) in active {
+        let bounds = clip.start.max(active.start)..clip.end.min(active.end);
+        if bounds.is_empty() {
             continue;
         }
-        let interval = since_origin(pts)?..since_origin(next)?.min(active_end);
-        if interval.start < clip.end.min(active_end) && interval.end > clip.start {
-            if interval.is_empty() {
-                return Err(invalid("MP4 video frames are shorter than a microsecond"));
+        let since_origin =
+            |pts: i64| projection(movie_start, (i128::from(pts) - i128::from(origin)).max(0));
+        let first_frame = timeline.len();
+        let mut first_packet = samples.len();
+        for (ordinal, &index) in display.iter().enumerate() {
+            let pts = samples[index].composition_time;
+            let next = display
+                .get(ordinal + 1)
+                .map_or(stop, |&i| samples[i].composition_time);
+            if next <= origin {
+                continue;
             }
-            first_packet = first_packet.min(index);
-            timeline.push(FrameTime { pts, interval });
+            let interval = since_origin(pts)?..since_origin(next)?.min(active.end);
+            if interval.start >= bounds.end {
+                break;
+            }
+            if interval.end > bounds.start {
+                if interval.is_empty() {
+                    return Err(invalid("MP4 video frames are shorter than a microsecond"));
+                }
+                first_packet = first_packet.min(index);
+                timeline.push(FrameTime {
+                    pts,
+                    interval,
+                    restart: None,
+                });
+            }
         }
+        let first_packet = samples
+            .get(..=first_packet)
+            .and_then(|slice| slice.iter().rposition(|sample| sample.sync))
+            .ok_or_else(|| invalid("MP4 video clip has no preceding sync sample"))?;
+        timeline[first_frame].restart = Some(first_packet);
     }
-    if timeline.is_empty() && (clip.end <= active_start || clip.start >= active_end) {
-        return Ok((timeline, clip, samples.len()));
-    }
-    let first_packet = samples
-        .get(..=first_packet)
-        .and_then(|slice| slice.iter().rposition(|sample| sample.sync))
-        .ok_or_else(|| invalid("MP4 video clip has no preceding sync sample"))?;
+    let first_packet = timeline
+        .first()
+        .and_then(|time| time.restart)
+        .unwrap_or(samples.len());
     Ok((timeline, clip, first_packet))
 }
 

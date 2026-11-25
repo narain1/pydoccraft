@@ -17,6 +17,7 @@ const MAX_METADATA_BYTES: usize = 4 * 1024 * 1024;
 const MAX_EDIT_LIST_ENTRIES: u32 = 64;
 pub(super) const MAX_ACCESS_UNITS: usize = 250_000;
 
+#[derive(Clone, Copy)]
 pub(super) struct LinearEdit {
     pub movie_start: u64,
     pub movie_end: u64,
@@ -41,17 +42,17 @@ impl LinearEdit {
     }
 }
 
-/// One continuous rate-1 media interval, optionally preceded by an empty edit.
-pub(super) fn linear_edit(
+/// Collapse adjacent source edits and allow one forward jump between rate-1 intervals.
+pub(super) fn edit_spans(
     edits: &[EditListEntry],
     movie_timescale: u32,
     media_timescale: u32,
     unsupported_layout: &str,
-) -> Result<Option<LinearEdit>, EngineError> {
+) -> Result<Vec<LinearEdit>, EngineError> {
     let rate_one =
         |edit: &EditListEntry| edit.media_rate_integer == 1 && edit.media_rate_fraction == 0;
     let Some((head, rest)) = edits.split_first() else {
-        return Ok(None);
+        return Ok(Vec::new());
     };
     let (movie_start, playable) = if head.is_empty_edit() && rate_one(head) {
         (head.segment_duration, rest)
@@ -66,32 +67,54 @@ pub(super) fn linear_edit(
         return Err(invalid("invalid MP4 edit-list timescale"));
     }
 
-    let mut duration = first.segment_duration;
-    for edit in rest {
-        let elapsed_media = i128::from(edit.media_time) - i128::from(first.media_time);
-        // Compare exact boundaries in the two clocks before rounding to
-        // microseconds, samples or the demuxer's presentation ticks.
-        if edit.media_time < 0
-            || !rate_one(edit)
-            || duration == 0
-            || edit.segment_duration == 0
-            || elapsed_media * i128::from(movie_timescale)
-                != i128::from(duration) * i128::from(media_timescale)
+    let mut spans = Vec::new();
+    let mut span = LinearEdit {
+        movie_start,
+        movie_end: movie_start,
+        media_start: first.media_time,
+    };
+    let mut previous = first;
+    for next in rest {
+        span.movie_end = span
+            .movie_end
+            .checked_add(previous.segment_duration)
+            .ok_or_else(|| invalid("MP4 edit duration overflow"))?;
+        if next.media_time < 0
+            || !rate_one(next)
+            || previous.segment_duration == 0
+            || next.segment_duration == 0
         {
             return Err(unsupported(unsupported_layout));
         }
-        duration = duration
-            .checked_add(edit.segment_duration)
-            .ok_or_else(|| invalid("MP4 edit duration overflow"))?;
+        let elapsed_media = i128::from(next.media_time) - i128::from(span.media_start);
+        let elapsed_movie = i128::from(span.movie_end - span.movie_start);
+        match (elapsed_media * i128::from(movie_timescale))
+            .cmp(&(elapsed_movie * i128::from(media_timescale)))
+        {
+            std::cmp::Ordering::Less => return Err(unsupported(unsupported_layout)),
+            std::cmp::Ordering::Equal => {}
+            std::cmp::Ordering::Greater => {
+                if !spans.is_empty() {
+                    return Err(unsupported(
+                        "MP4 edit lists support one forward source jump",
+                    ));
+                }
+                spans.push(span);
+                span = LinearEdit {
+                    movie_start: span.movie_end,
+                    movie_end: span.movie_end,
+                    media_start: next.media_time,
+                };
+            }
+        }
+        previous = next;
     }
-    let movie_end = movie_start
-        .checked_add(duration)
+    span.movie_end = span
+        .movie_end
+        .checked_add(previous.segment_duration)
         .ok_or_else(|| invalid("MP4 edit duration overflow"))?;
-    Ok(Some(LinearEdit {
-        movie_start,
-        movie_end,
-        media_start: first.media_time,
-    }))
+    spans.push(span);
+    Ok(spans)
 }
 
 #[derive(Default)]

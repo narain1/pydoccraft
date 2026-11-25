@@ -4,7 +4,7 @@ use std::{borrow::Cow, io::Cursor, ops::Range, sync::Arc};
 use oxideav_core::{CodecRegistry, Demuxer, StreamInfo};
 use oxideav_mp4::demux::{open_typed, EditListEntry, MovieHeader, Mp4Demuxer, SampleInfo};
 
-use super::{linear_edit, Mp4Bounds};
+use super::{edit_spans, LinearEdit, Mp4Bounds};
 use crate::epub::{
     audio::MAX_ENCODED_BYTES, invalid, limited, media::MAX_TIME, unsupported,
     validate_archive_path, Book, EngineError,
@@ -313,8 +313,8 @@ fn title<'a>(
 struct ChapterClock {
     denominator: u128,
     units_per_media_tick: u128,
-    media_origin: i64,
-    movie_start: u128,
+    edits: Vec<LinearEdit>,
+    units_per_movie_tick: u128,
     movie_end: u128,
 }
 
@@ -330,37 +330,62 @@ impl ChapterClock {
         {
             return Err(invalid("MP4 chapters require a finite movie clock"));
         }
-        let (movie_start, media_origin, movie_end) = linear_edit(
+        let edits = edit_spans(
             edits,
             movie.timescale,
             media_timescale,
             "MP4 chapter track has a noncontinuous edit list",
-        )?
-        .map_or((0, 0, movie.duration), |edit| {
-            (
-                edit.movie_start,
-                edit.media_start,
-                edit.movie_end.min(movie.duration),
-            )
-        });
-        if movie_start >= movie_end {
+        )?;
+        let end = edits
+            .last()
+            .map_or(movie.duration, |edit| edit.movie_end.min(movie.duration));
+        if edits.first().is_some_and(|edit| edit.movie_start >= end) {
             return Err(invalid("MP4 chapter track edit has no playable interval"));
         }
+        let units_per_movie_tick = u128::from(media_timescale);
         Ok(Self {
-            denominator: u128::from(movie.timescale) * u128::from(media_timescale),
+            denominator: u128::from(movie.timescale) * units_per_movie_tick,
             units_per_media_tick: u128::from(movie.timescale),
-            media_origin,
-            movie_start: u128::from(movie_start) * u128::from(media_timescale),
-            movie_end: u128::from(movie_end) * u128::from(media_timescale),
+            edits,
+            units_per_movie_tick,
+            movie_end: u128::from(end) * units_per_movie_tick,
         })
     }
 
     fn interval(&self, source: Range<i64>) -> Result<Range<u64>, EngineError> {
-        let bound = |time: i64| {
-            let ticks = time.saturating_sub(self.media_origin).max(0) as u128;
-            (self.movie_start + ticks * self.units_per_media_tick).min(self.movie_end)
-        };
-        self.movie_interval(bound(source.start)..bound(source.end))
+        if self.edits.is_empty() {
+            let bound =
+                |time: i64| (time.max(0) as u128 * self.units_per_media_tick).min(self.movie_end);
+            return self.movie_interval(bound(source.start)..bound(source.end));
+        }
+        let mut interval: Option<Range<u128>> = None;
+        for edit in &self.edits {
+            let begin = u128::from(edit.movie_start) * self.units_per_movie_tick;
+            let end = (u128::from(edit.movie_end) * self.units_per_movie_tick).min(self.movie_end);
+            if begin >= end {
+                continue;
+            }
+            let bound = |time: i64| {
+                let elapsed = (i128::from(time) - i128::from(edit.media_start)).max(0) as u128;
+                (begin + elapsed * self.units_per_media_tick).min(end)
+            };
+            let part = bound(source.start)..bound(source.end);
+            if !part.is_empty() {
+                if let Some(joined) = &mut interval {
+                    if joined.end != part.start {
+                        return Err(unsupported(
+                            "MP4 chapter crosses a discontinuous presentation",
+                        ));
+                    }
+                    joined.end = part.end;
+                } else {
+                    interval = Some(part);
+                }
+            }
+        }
+        self.movie_interval(
+            interval.ok_or_else(|| unsupported("MP4 chapter has no playable interval"))?,
+        )
     }
 
     fn micros(&self, time: u128) -> Result<u64, EngineError> {
