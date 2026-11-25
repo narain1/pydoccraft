@@ -231,7 +231,7 @@
 - [x] Keep conditional TTML mixed-region paragraphs on the ordinary cue timeline when all scoped elements are active.
 - [ ] Support WebVTT region scrolling, additional TTML condition contexts and conditional layout, interleaved or ambiguous region ownership, and advanced TTML animation, additional TTML typography and subtitle painting.
 - [ ] Support more media fragment track combinations and ID fragments in additional containers.
-- [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources. Use staged explicit XHTML titles in generated fallback navigation labels.
+- [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources. Use staged explicit XHTML titles in generated fallback navigation labels. Protect referenced package IDs when an occurrence leaves the spine.
 - [x] Synchronize XHTML navigation and the spine's compatibility NCX in the same EPUB 3 chapter edit.
 - [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.
 - [x] Protect referenced fragment IDs across packaged SVG resource replacements and staged chapter insertions.

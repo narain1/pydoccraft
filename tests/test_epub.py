@@ -977,6 +977,59 @@ class EpubTests(unittest.TestCase):
                     self.assertEqual(edited[0].get_text(), "Fresh content")
                     self.assertEqual(edited.metadata["navigation"][0]["items"][0]["label"], "Added")
 
+    def test_spine_edit_protects_package_occurrence_fragment_targets(self) -> None:
+        source = epub_fixture()
+        package_path = "OEBPS/content.opf"
+        chapter_path = "OEBPS/two.xhtml"
+        first_path = "OEBPS/one.xhtml"
+        occurrence = "front-entry"
+        target = "./%63ontent.opf#front-%65ntry"
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read(package_path).replace(
+                b'<itemref idref="one"/>', b'<itemref id="front-entry" idref="one"/>',
+            )
+            first_data = archive.read(first_path)
+        opf_targets = (
+            '<meta property="dcterms:description" refines="#front-entry">Front occurrence</meta>',
+            f'<meta property="dcterms:type" refines="{target}">Text</meta>',
+            f'<link rel="dcterms:description" href="{target}" media-type="application/oebps-package+xml"/>',
+        )
+        for reference in opf_targets:
+            with self.subTest(reference=reference):
+                authored = package.replace(b"</metadata>", reference.encode() + b"</metadata>")
+                provided = rewrite_epub(source, {package_path: authored})
+                with doc_ex.open(provided) as original:
+                    with self.assertRaisesRegex(ValueError, "referenced anchor"):
+                        original.edit_epub_structure([1])
+                    reordered = original.edit_epub_structure([1, 0])
+                    self.assertEqual(original.read_epub_resource(package_path), authored)
+                    self.assertEqual(original.read_epub_resource(first_path), first_data)
+                with doc_ex.open(reordered) as reopened:
+                    self.assertEqual([page.metadata["chapter_path"] for page in reopened],
+                                     [chapter_path, first_path])
+                    opf = reopened.read_epub_resource(package_path)
+                    self.assertIn(reference.encode(), opf)
+                    itemrefs = ET.fromstring(opf).findall("{*}spine/{*}itemref")
+                    self.assertEqual([node.get("id") for node in itemrefs], [None, occurrence])
+
+        html = '<html xmlns="http://www.w3.org/1999/xhtml"><body>{}</body></html>'
+        old_chapter = html.format(f'<p><a href="{target}">Front occurrence</a></p>')
+        replacement = html.format("<p>Retained chapter</p>")
+        provided = rewrite_epub(source, {package_path: package, chapter_path: old_chapter})
+        with doc_ex.open(provided) as original:
+            with self.assertRaisesRegex(ValueError, "referenced anchor"):
+                original.edit_epub_structure([1])
+            revised = original.edit_epub_structure([1], replacements={1: replacement})
+            self.assertEqual(original.read_epub_resource(package_path), package)
+            self.assertEqual(original.read_epub_resource(chapter_path), old_chapter.encode())
+        with doc_ex.open(revised) as reopened:
+            self.assertEqual([page.metadata["chapter_path"] for page in reopened], [chapter_path])
+            self.assertEqual(reopened[0].get_text(), "Retained chapter")
+            self.assertEqual(reopened.read_epub_resource(first_path), first_data)
+            itemrefs = ET.fromstring(reopened.read_epub_resource(package_path)).findall("{*}spine/{*}itemref")
+            self.assertEqual([node.get("idref") for node in itemrefs], ["two"])
+            self.assertFalse(any(node.get("id") == occurrence for node in itemrefs))
+
     def test_spine_edit_uses_staged_titles_in_generated_navigation(self) -> None:
         markup = (
             '<html xmlns="http://www.w3.org/1999/xhtml"><head><title> Revised &amp; café </title></head>'

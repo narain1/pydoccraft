@@ -846,6 +846,14 @@ pub(crate) fn update_structure<'a>(
     let empty_encryption = remove_font_declarations(&mut plan, &mut book, &removals)?;
     removals.extend(empty_encryption.as_deref());
     if revised != package_source {
+        let revised_package = parse_xml(revised.as_bytes())?;
+        editor::collect_removed_xml_anchors(
+            &package_path,
+            &xml,
+            &revised_package,
+            &mut removed_anchors,
+            &mut anchor_bytes,
+        )?;
         plan.files.insert(
             package_path.clone(),
             Cow::Owned(revised.into_owned().into_bytes()),
