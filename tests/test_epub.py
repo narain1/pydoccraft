@@ -13831,9 +13831,14 @@ Resume
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "alignment group boundary through operator spacing"):
                     operation()
 
-    def test_mathml_alignment_groups_keep_native_binary_spacing(self) -> None:
+    def test_mathml_alignment_groups_keep_native_operator_spacing(self) -> None:
+        for symbol in ("+", "=", ","):
+            with self.subTest(symbol=symbol):
+                self._check_mathml_alignment_group_spacing(symbol)
+
+    def _check_mathml_alignment_group_spacing(self, symbol: str) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
-          <head><title>MathML binary group boundary</title><meta name="viewport" content="width=520,height=290"/>
+          <head><title>MathML operator group boundary</title><meta name="viewport" content="width=520,height=290"/>
             <style>body {margin:0}</style></head><body><p><m:math mathsize="12pt">
             <m:mtable groupalign="{right left}" columnwidth="215pt" columnalign="left">
               <m:mtr><m:mtd>BODY</m:mtd></m:mtr>
@@ -13841,11 +13846,11 @@ Resume
           </m:math></p></body></html>"""
         left = "<m:mtext>Harbor</m:mtext>"
         right = "<m:mtext>Orchard</m:mtext>"
-        operator = '<m:mo mathcolor="#bf222d">+</m:mo>'
+        operator = f'<m:mo mathcolor="#bf222d">{symbol}</m:mo>'
         radicand = "<m:msqrt><m:mn>91.387</m:mn></m:msqrt>"
         group = "<m:maligngroup/>"
         mark = "<m:malignmark/>"
-        terms = ("Harbor", "+", "Orchard", "91")
+        terms = ("Harbor", symbol, "Orchard", "91")
         ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
         fixture = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 520, 290)])
 
@@ -13853,18 +13858,21 @@ Resume
             rects = {}
             for term in terms:
                 rects[term], = pdf[0].search_for(term)
-            return (rects["+"][0] - rects["Harbor"][2],
-                    rects["Orchard"][0] - rects["+"][2],
+            return (rects[symbol][0] - rects["Harbor"][2],
+                    rects["Orchard"][0] - rects[symbol][2],
                     rects["91"][0] - rects["Orchard"][0])
 
         unmarked = left + operator + right + radicand
         with doc_ex.open(epub_fixture(chapter_one=template.replace("BODY", unmarked))) as book:
             with doc_ex.open(book.convert("pdf")) as pdf:
                 reference = geometry(pdf)
-        self.assertGreater(min(reference[:2]), 1.0)
+        if symbol == ",":
+            self.assertGreater(reference[1], 1.0)
+        else:
+            self.assertGreater(min(reference[:2]), 1.0)
 
         for body, anchor in (
-            (group + left + group + mark + operator + right + radicand, "+"),
+            (group + left + group + mark + operator + right + radicand, symbol),
             (group + left + group + operator + right + radicand.replace("91.", "91" + mark + "."), ".387"),
             (group + left + operator + group + mark + right + radicand, "Orchard"),
         ):
@@ -13881,7 +13889,7 @@ Resume
                 matrix = xml.find(".//m:oMath//m:m", ns)
                 self.assertIsNotNone(matrix)
                 self.assertIsNotNone(matrix.find(".//m:rad", ns))
-                source_tokens = ("Harbor", "+", "Orchard", "91.387")
+                source_tokens = ("Harbor", symbol, "Orchard", "91.387")
                 tokens = [run.text for run in matrix.findall(".//m:t", ns) if run.text in source_tokens]
                 self.assertEqual(tuple(tokens), source_tokens)
                 with doc_ex.open(editable) as word, doc_ex.open(word.convert("pdf")) as pdf:

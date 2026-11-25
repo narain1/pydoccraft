@@ -143,9 +143,12 @@ fn edge_class(node: Option<&MNode>, first: bool) -> Option<MClass> {
     })
 }
 
-fn isolated_binary(node: Option<&MNode>) -> bool {
+fn isolated_operator(node: Option<&MNode>) -> bool {
     matches!(node, Some(MNode::Run(run)) if run.text.chars().count() == 1)
-        && edge_class(node, true) == Some(MClass::Bin)
+        && matches!(
+            edge_class(node, true),
+            Some(MClass::Bin | MClass::Rel | MClass::Punct)
+        )
 }
 
 pub(super) fn preserve_boundary_spacing(groups: &mut [AlignedEquation]) -> Result<(), EngineError> {
@@ -161,12 +164,12 @@ pub(super) fn preserve_boundary_spacing(groups: &mut [AlignedEquation]) -> Resul
             continue;
         }
         if left_is_ordinary
-            && isolated_binary(leading)
+            && isolated_operator(leading)
             && edge_class(right.get(1), true) == Some(MClass::Ord)
         {
             guides[index + 1][0] = true;
         } else if right_is_ordinary
-            && isolated_binary(trailing)
+            && isolated_operator(trailing)
             && edge_class(left.iter().rev().nth(1), false) == Some(MClass::Ord)
         {
             guides[index][1] = true;
@@ -178,7 +181,7 @@ pub(super) fn preserve_boundary_spacing(groups: &mut [AlignedEquation]) -> Resul
     }
 
     for (group, [before, after]) in groups.iter_mut().zip(guides) {
-        // The invisible ordinary atom supplies the original binary neighbor.
+        // The invisible ordinary atom supplies the original neighbor.
         // The native shaper then assigns the operator's gap to its own group.
         if before {
             group.math.nodes.insert(0, compose::grid_marker());
