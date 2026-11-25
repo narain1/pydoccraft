@@ -3104,3 +3104,7 @@ The Linux x86-64 CPython 3.11 host wheel passed 943 installed tests, including 3
 ## 2026-11-25 EPUB merged subgrid areas, vertical MathML carets, captions and navigation landmarks
 
 The Linux x86-64 CPython 3.11 host wheel passed 947 installed tests, including 352 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-merged-subgrid-areas-vertical-mathml-carets-captions-and-navigation-landmarks)
+
+## 2026-11-25 EPUB literal MathML tokens, native operator spacing and terminal subgrid placement
+
+The Linux x86-64 CPython 3.11 host wheel passed 949 installed tests, including 354 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-literal-mathml-tokens-native-operator-spacing-and-terminal-subgrid-placement)
