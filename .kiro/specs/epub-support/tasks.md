@@ -189,3 +189,10 @@
 - [x] Edit a subset of chapters that share a SMIL resource while retaining the other chapters' cues and recalculating duration metadata.
 - [x] Replace IDPF-obfuscated fonts from plain font bytes and update their declarations after resource removal.
 - [x] Author nested SMIL sequences with chapter targets, inherited roles and clip-based durations.
+
+## Current implementation limits
+
+- The locked Taffy grid API has no subgrid track type or parent track projection. EPUB's current adapter can delegate explicit, implicit and repeated track layout.
+- When an SVG spatial filter mixes overlapping sources into one RGBA raster, its final alpha cannot identify each contributor. Search and annotation geometry require a preservation proof or a representation that retains contributor identity.
+- WordCraft's editable equation matrix carries rows and column alignment. Its border boxes carry edge and strike flags. Interrupted dashed rules inside a larger equation cannot be represented by that model. Standalone Word tables retain authored borders.
+- EPUB video frames expose one RGB8 picture per presentation interval. Preserving HDR, alpha or simultaneous pictures requires a defined playback representation. Scroll-up captions and subtitle painting also require line layout and compositing, while the current timeline carries timed caption data.
