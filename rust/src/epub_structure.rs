@@ -24,6 +24,8 @@ use crate::{
 mod narration;
 #[path = "epub_resource_removal.rs"]
 mod removal;
+#[path = "epub_spine_edit.rs"]
+mod spine_edit;
 #[path = "epub_toc_edit.rs"]
 mod toc;
 
@@ -42,16 +44,31 @@ type TimingEdit = (
 );
 pub(crate) type OverlayEdit = (String, Option<Vec<TimingEdit>>);
 type Files<'a> = BTreeMap<String, Cow<'a, [u8]>>;
+pub(crate) use spine_edit::SpinePropertyEdit;
+
+pub(crate) struct StructureEdits<'a> {
+    pub order: Option<&'a [SpineEdit]>,
+    pub resources: &'a [ResourceEdit],
+    pub modified: &'a str,
+    pub removed: &'a [String],
+    pub overlays: &'a [OverlayEdit],
+    pub chapters: &'a [(i64, String)],
+    pub spine_properties: &'a [SpinePropertyEdit],
+}
 
 pub(crate) fn update_structure<'a>(
     data: &[u8],
-    order: Option<&'a [SpineEdit]>,
-    resources: &'a [ResourceEdit],
-    modified: &str,
-    removed: &[String],
-    overlays: &[OverlayEdit],
-    chapters: &'a [(i64, String)],
+    changes: StructureEdits<'a>,
 ) -> Result<Vec<u8>, EngineError> {
+    let StructureEdits {
+        order,
+        resources,
+        modified,
+        removed,
+        overlays,
+        chapters,
+        spine_properties,
+    } = changes;
     let mut total = 0;
     let mut svg_chapters = Vec::new();
     editor::charge_chapter_replacements(chapters, &mut total)?;
@@ -101,6 +118,7 @@ pub(crate) fn update_structure<'a>(
         && removed.is_empty()
         && overlays.is_empty()
         && chapters.is_empty()
+        && spine_properties.is_empty()
     {
         return Ok(data.to_vec());
     }
@@ -153,9 +171,20 @@ pub(crate) fn update_structure<'a>(
             return Err(invalid("multiple EPUB tables of contents"));
         }
     }
-    let spine_paths: HashSet<_> = spine
+    let references: Vec<_> = spine
         .children()
         .filter(|node| name(*node, OPF, "itemref"))
+        .collect();
+    let package_fixed = super::package_fixed_layout(metadata);
+    let staged_properties = spine_edit::stage(
+        package_source,
+        &references,
+        spine_properties,
+        epub3,
+        package_fixed,
+    )?;
+    let spine_paths: HashSet<_> = references
+        .iter()
         .filter_map(|node| node.attribute("idref"))
         .filter_map(|id| manifest.get(id))
         .collect();
@@ -208,6 +237,12 @@ pub(crate) fn update_structure<'a>(
             chapters,
             &mut removed_anchors,
             &mut anchor_bytes,
+            |page| {
+                staged_properties
+                    .get(&page.number)
+                    .and_then(|change| change.fixed)
+                    .unwrap_or_else(|| super::rendition::fixed(page))
+            },
         )?;
         editor::chapter_property_edits(
             package_source,
@@ -258,40 +293,31 @@ pub(crate) fn update_structure<'a>(
         }
         plan.files.insert(path.clone(), Cow::Borrowed(data));
     }
+    let mut check_layout = Vec::new();
     let mut reordered_ncx = None;
     if let Some((order, original)) = order.zip(original.as_ref()) {
-        let references: Vec<_> = spine
-            .children()
-            .filter(|node| name(*node, OPF, "itemref"))
-            .collect();
         if references.len() != original.pages.len() {
             return Err(invalid("inconsistent EPUB spine"));
         }
         let mut selected = Vec::new();
         let mut used = HashSet::new();
-        let package_fixed = metadata.children().any(|m| {
-            name(m, OPF, "meta")
-                && m.attribute("property") == Some("rendition:layout")
-                && m.attribute("refines").is_none()
-                && m.text().is_some_and(|text| text.trim() == "pre-paginated")
-        });
         let mut read_order = String::new();
         let mut has_linear = false;
         for entry in order {
             match entry {
                 (Some(index), None) => {
-                    let count = references.len() as i64;
-                    let index = if *index < 0 { count + index } else { *index };
-                    let index = usize::try_from(index)
-                        .ok()
-                        .filter(|index| *index < references.len())
-                        .ok_or_else(|| {
-                            EngineError::PageIndex("EPUB chapter is out of range".into())
-                        })?;
+                    let index = spine_edit::index(*index, references.len())?;
                     if !used.insert(index) {
                         return Err(argument("EPUB spine index was selected more than once"));
                     }
-                    has_linear |= references[index].attribute("linear") != Some("no");
+                    let properties = staged_properties.get(&index);
+                    has_linear |= properties.map_or_else(
+                        || references[index].attribute("linear") != Some("no"),
+                        |properties| properties.linear,
+                    );
+                    if properties.is_some_and(|properties| properties.fixed.is_some()) {
+                        check_layout.push(selected.len());
+                    }
                     let page = &original.pages[index];
                     let path = page
                         .metadata
@@ -314,7 +340,9 @@ pub(crate) fn update_structure<'a>(
                     });
                     append(
                         &mut read_order,
-                        &package_source[references[index].range()],
+                        properties
+                            .and_then(|properties| properties.markup.as_deref())
+                            .unwrap_or(&package_source[references[index].range()]),
                         METADATA_BYTES,
                     )?;
                 }
@@ -403,6 +431,11 @@ pub(crate) fn update_structure<'a>(
                 _ => return Err(argument("invalid EPUB spine entry")),
             }
         }
+        if staged_properties.keys().any(|index| !used.contains(index)) {
+            return Err(argument(
+                "EPUB spine property edit targets an omitted chapter",
+            ));
+        }
         if selected.is_empty() {
             return Err(argument("EPUB must retain at least one chapter"));
         }
@@ -489,6 +522,29 @@ pub(crate) fn update_structure<'a>(
                 reorder_navigation(&mut plan, &mut book, path, false, &selected, &old_paths)?;
             }
             reordered_ncx = ncx_path.map(|path| (path, selected));
+        } else {
+            for (index, properties) in staged_properties {
+                if let Some(markup) = properties.markup {
+                    edits.push((references[index].range(), markup));
+                }
+            }
+        }
+    } else if !staged_properties.is_empty() {
+        if !references.iter().enumerate().any(|(index, reference)| {
+            staged_properties.get(&index).map_or_else(
+                || reference.attribute("linear") != Some("no"),
+                |properties| properties.linear,
+            )
+        }) {
+            return Err(argument("EPUB must retain at least one linear chapter"));
+        }
+        for (index, properties) in staged_properties {
+            if properties.fixed.is_some() {
+                check_layout.push(index);
+            }
+            if let Some(markup) = properties.markup {
+                edits.push((references[index].range(), markup));
+            }
         }
     }
     for (authored, epub3_nav) in [(authored_nav, true), (authored_ncx, false)] {
@@ -745,7 +801,7 @@ pub(crate) fn update_structure<'a>(
             Cow::Owned(revised.into_owned().into_bytes()),
         );
     }
-    if plan.files.is_empty() && removals.is_empty() {
+    if plan.files.is_empty() && removals.is_empty() && check_layout.is_empty() {
         return Ok(data.to_vec());
     }
     if !removed_anchors.is_empty() {
@@ -756,23 +812,55 @@ pub(crate) fn update_structure<'a>(
             .collect();
         editor::check_staged_links(&mut book, &staged, &removed_anchors, &removals)?;
     }
-    let (replacements, additions) = plan
-        .files
-        .iter()
-        .partition::<Vec<_>, _>(|(p, _)| book.archive.index_for_name(p).is_some());
-    let updated = editor::rewrite(
-        &mut book,
-        replacements
-            .into_iter()
-            .map(|(path, value)| (path.as_str(), value.as_ref()))
-            .collect(),
-        additions
-            .into_iter()
-            .map(|(path, value)| (path.as_str(), value.as_ref()))
-            .collect(),
-        &removals,
-    )?;
+    let updated = if plan.files.is_empty() && removals.is_empty() {
+        data.to_vec()
+    } else {
+        let (replacements, additions) = plan
+            .files
+            .iter()
+            .partition::<Vec<_>, _>(|(p, _)| book.archive.index_for_name(p).is_some());
+        editor::rewrite(
+            &mut book,
+            replacements
+                .into_iter()
+                .map(|(path, value)| (path.as_str(), value.as_ref()))
+                .collect(),
+            additions
+                .into_iter()
+                .map(|(path, value)| (path.as_str(), value.as_ref()))
+                .collect(),
+            &removals,
+        )?
+    };
     let extracted = super::extract_impl(&updated, None, false, &supplemental)?;
+    for index in check_layout {
+        let page = extracted
+            .pages
+            .get(index)
+            .ok_or_else(|| invalid("missing edited EPUB spine entry"))?;
+        let fixed = super::rendition::fixed(page);
+        if fixed && !page.metadata.get("viewport").is_some_and(Value::is_array) {
+            return Err(argument(
+                "a fixed-layout chapter requires a numeric viewport",
+            ));
+        }
+        if page
+            .metadata
+            .get("chapter_media_type")
+            .and_then(Value::as_str)
+            == Some("image/svg+xml")
+        {
+            if !fixed {
+                return Err(argument("an SVG spine chapter requires fixed layout"));
+            }
+            let path = page
+                .metadata
+                .get("chapter_path")
+                .and_then(Value::as_str)
+                .ok_or_else(|| invalid("missing SVG spine chapter path"))?;
+            svg_chapters.push(path.to_owned());
+        }
+    }
     if authored_nav.is_some() || authored_ncx.is_some() {
         toc::validate_replacement(
             &updated,
@@ -782,6 +870,8 @@ pub(crate) fn update_structure<'a>(
             &supplemental,
         )?;
     }
+    svg_chapters.sort_unstable();
+    svg_chapters.dedup();
     editor::validate_svg_chapters(&updated, svg_chapters.iter().map(String::as_str))?;
     Ok(updated)
 }

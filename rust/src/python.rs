@@ -581,7 +581,11 @@ fn _edit_epub_chapters(
 }
 
 #[pyfunction]
-#[pyo3(signature = (data, order, resources, modified, removed=Vec::new(), overlays=Vec::new(), chapters=Vec::new()))]
+#[pyo3(signature = (data, order, resources, modified, removed=Vec::new(), overlays=Vec::new(), chapters=Vec::new(), spine_properties=Vec::new()))]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "flat Python binding for EPUB structure edits"
+)]
 fn _edit_epub_structure(
     data: &[u8],
     order: Option<Vec<crate::epub::SpineEdit>>,
@@ -590,15 +594,19 @@ fn _edit_epub_structure(
     removed: Vec<String>,
     overlays: Vec<crate::epub::OverlayEdit>,
     chapters: Vec<(i64, String)>,
+    spine_properties: Vec<crate::epub::SpinePropertyEdit>,
 ) -> Result<Vec<u8>, EngineError> {
     crate::epub::update_structure(
         data,
-        order.as_deref(),
-        &resources,
-        modified,
-        &removed,
-        &overlays,
-        &chapters,
+        crate::epub::StructureEdits {
+            order: order.as_deref(),
+            resources: &resources,
+            modified,
+            removed: &removed,
+            overlays: &overlays,
+            chapters: &chapters,
+            spine_properties: &spine_properties,
+        },
     )
 }
 

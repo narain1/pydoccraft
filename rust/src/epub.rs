@@ -64,7 +64,9 @@ pub(crate) mod video;
 pub(crate) mod webm;
 
 pub(crate) use editor::{update_chapters, update_metadata};
-pub(crate) use structure::{update_structure, OverlayEdit, ResourceEdit, SpineEdit};
+pub(crate) use structure::{
+    update_structure, OverlayEdit, ResourceEdit, SpineEdit, SpinePropertyEdit, StructureEdits,
+};
 
 pub(crate) fn render(
     data: &[u8],
@@ -165,6 +167,17 @@ pub fn is_epub(data: &[u8]) -> Result<bool, EngineError> {
     Ok(std::str::from_utf8(&value).is_ok_and(|text| text.trim() == MIME))
 }
 
+fn package_fixed_layout(metadata: Node<'_, '_>) -> bool {
+    metadata.children().any(|node| {
+        name(node, OPF, "meta")
+            && node.attribute("property") == Some("rendition:layout")
+            && node.attribute("refines").is_none()
+            && node
+                .text()
+                .is_some_and(|text| text.trim() == "pre-paginated")
+    })
+}
+
 pub fn extract(data: &[u8], password: Option<&str>) -> Result<DocumentPayload, EngineError> {
     extract_impl(data, password, false, &HashSet::new())
 }
@@ -201,14 +214,7 @@ fn extract_impl(
     let spine = required(root, "spine")?;
     let package_info = required(root, "metadata")?;
     let mut metadata = package_metadata(package_info)?;
-    let default_fixed = package_info.children().any(|node| {
-        name(node, OPF, "meta")
-            && node.attribute("property") == Some("rendition:layout")
-            && node.attribute("refines").is_none()
-            && node
-                .text()
-                .is_some_and(|text| text.trim() == "pre-paginated")
-    });
+    let default_fixed = package_fixed_layout(package_info);
     if let Some(direction @ ("ltr" | "rtl" | "default")) =
         spine.attribute("page-progression-direction")
     {

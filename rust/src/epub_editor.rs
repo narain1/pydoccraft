@@ -13,7 +13,7 @@ use super::{
 };
 use crate::{
     author_epub::{escape_attribute, escape_text, validate_text, BoundedOutput},
-    model::DocumentPayload,
+    model::{DocumentPayload, PagePayload},
     EngineError,
 };
 
@@ -197,7 +197,14 @@ pub(crate) fn update_chapters(
         mut files,
         svg_paths,
         declarations,
-    } = prepare_chapter_replacements(&mut book, &extracted, changes, &mut removed, &mut 0)?;
+    } = prepare_chapter_replacements(
+        &mut book,
+        &extracted,
+        changes,
+        &mut removed,
+        &mut 0,
+        super::rendition::fixed,
+    )?;
     if !removed.is_empty() {
         if let Some(overlays) = extracted.metadata.get("media_overlays") {
             check_overlay_anchors(overlays, &removed)?;
@@ -245,11 +252,12 @@ pub(super) fn prepare_chapter_replacements<'doc, 'edit>(
     changes: &'edit [(i64, String)],
     removed_anchors: &mut RemovedAnchors<'doc>,
     anchor_bytes: &mut usize,
+    fixed: impl Fn(&PagePayload) -> bool,
 ) -> Result<ChapterReplacements<'doc, 'edit>, EngineError> {
     let fixed_paths: HashSet<_> = extracted
         .pages
         .iter()
-        .filter(|page| super::rendition::fixed(page))
+        .filter(|page| fixed(page))
         .filter_map(|page| page.metadata["chapter_path"].as_str())
         .collect();
     let mut svg_paths = HashSet::new();

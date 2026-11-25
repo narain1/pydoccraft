@@ -30,6 +30,16 @@ class EpubSvgChapterSource:
 
 
 @dataclass(frozen=True, slots=True)
+class EpubSpineProperties:
+    """Edit reading order participation and rendition of an existing spine entry."""
+
+    linear: bool | None = None
+    layout: Literal["reflowable", "pre-paginated", "inherit"] | None = None
+    page_spread: Literal["left", "right", "center", "inherit"] | None = None
+    spread: Literal["none", "landscape", "portrait", "both", "auto", "inherit"] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class EpubResource:
     """Media type and bytes for a local publication resource."""
 

@@ -15,7 +15,7 @@ from typing import Any, Callable, Iterator, Literal, TYPE_CHECKING, overload
 
 from .errors import DocumentClosedError, MalformedDocumentError, UnsafeArchiveError
 from .models import (
-    Block, EpubAudioClip, EpubChapterSource, EpubEmbeddedMedia, EpubMediaSource, EpubMediaTrack, EpubNarrationCue, EpubOverlayCue, EpubOverlaySequence, EpubResource, EpubSvgChapterSource, EpubTextCue, EpubVideoFrame, Image, Link, Story, Table,
+    Block, EpubAudioClip, EpubChapterSource, EpubEmbeddedMedia, EpubMediaSource, EpubMediaTrack, EpubNarrationCue, EpubOverlayCue, EpubOverlaySequence, EpubResource, EpubSpineProperties, EpubSvgChapterSource, EpubTextCue, EpubVideoFrame, Image, Link, Story, Table,
     _html_text,
 )
 
@@ -1121,6 +1121,7 @@ class Document:
         order: Iterable[int | EpubChapterSource | EpubSvgChapterSource] | None = None,
         *,
         replacements: Mapping[int, str] | None = None,
+        spine_properties: Mapping[int, EpubSpineProperties] | None = None,
         resources: Mapping[str, EpubResource] | None = None,
         remove_resources: Iterable[str] = (),
         overlays: Mapping[str, Iterable[EpubOverlayCue | EpubOverlaySequence] | None] | None = None,
@@ -1130,6 +1131,7 @@ class Document:
         To replace a packaged EPUB 3 navigation document outside the spine, pass
         its archive path and an XHTML resource in `resources`. A spine-linked
         NCX uses its archive path and an NCX resource in the same mapping.
+        Use `spine_properties` with original indices to edit retained entries.
         """
         self._ensure_open()
         if self._filetype != "epub":
@@ -1172,6 +1174,30 @@ class Document:
                     selected.append((index, None))
                 if total_bytes > _MAX_EPUB_EDIT_BYTES:
                     raise UnsafeArchiveError("EPUB edits exceed their byte budget")
+
+        property_edits: list[tuple[int, bool | None, str | None, str | None, str | None]] = []
+        if spine_properties is not None:
+            for index, properties in spine_properties.items():
+                self._ensure_open()
+                if len(property_edits) >= 10_000:
+                    raise UnsafeArchiveError("too many EPUB spine property edits")
+                index = operator.index(index)
+                if not -len(self._pages) <= index < len(self._pages):
+                    raise IndexError("page index out of range")
+                if not isinstance(properties, EpubSpineProperties):
+                    raise TypeError("spine property edits require EpubSpineProperties values")
+                linear = properties.linear
+                if linear is not None and type(linear) is not bool:
+                    raise TypeError("linear must be a bool or None")
+                layout = properties.layout
+                page_spread = properties.page_spread
+                spread = properties.spread
+                property_edits.append((
+                    index, linear,
+                    None if layout is None else _epub_edit_text(layout, 32, "spine layout"),
+                    None if page_spread is None else _epub_edit_text(page_spread, 32, "spine page spread"),
+                    None if spread is None else _epub_edit_text(spread, 32, "spine synthetic spread"),
+                ))
 
         changes: list[tuple[str, str, bytes]] = []
         if resources is not None:
@@ -1227,7 +1253,7 @@ class Document:
         self._ensure_open()
         modified = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
         return bytes(_native(lambda: _core._edit_epub_structure(
-            self._source, selected, changes, modified, removed, narration, chapters,
+            self._source, selected, changes, modified, removed, narration, chapters, property_edits,
         )))
 
     def edit(self) -> PdfDocument:

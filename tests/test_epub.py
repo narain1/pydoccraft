@@ -210,6 +210,135 @@ class EpubTests(unittest.TestCase):
             self.assertEqual([nav["kind"] for nav in published.metadata["navigation"]], ["toc"])
             self.assertTrue(published.read_epub_resource("OEBPS/Styles/new.css").endswith(b"/* revised */"))
 
+    def test_spine_properties_change_placement_without_rewriting_navigation(self) -> None:
+        source = fixed_spread_fixture([
+            ("page-spread-left rendition:page-spread-left rendition:orientation-landscape", "#c04020", 72, 96),
+            ("page-spread-right", "#1040a0", 80, 96),
+            ("", "#508030", 90, 96),
+        ])
+        package_path = "OEBPS/content.opf"
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read(package_path)
+        package = package.replace(
+            b'<itemref idref="s0"', b'<itemref id="kept-spine-id" idref="s0"', 1,
+        )
+        package = package.replace(
+            b"</manifest>",
+            b'<item id="nav" href="Nav.xhtml" media-type="application/xhtml+xml" properties="nav"/></manifest>',
+        )
+        navigation = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+          <head><title>Contents</title></head><body><nav epub:type="toc"><ol>
+            <li><a href="s0.xhtml">First</a></li><li><a href="s1.xhtml">Second</a></li>
+            <li><a href="s2.xhtml">Third</a></li></ol></nav></body></html>"""
+        source = rewrite_epub(source, {package_path: package, "OEBPS/Nav.xhtml": navigation})
+        with doc_ex.open(source) as book:
+            self.assertEqual(struct.unpack_from(">II", png_chunks(book.render_epub_spread(0, dpi=96))[b"IHDR"]),
+                             (152, 96))
+            nav = book.metadata["navigation"]
+            edited = book.edit_epub_structure([0, 1, 2], spine_properties={
+                0: doc_ex.EpubSpineProperties(page_spread="center", spread="both"),
+                -1: doc_ex.EpubSpineProperties(linear=False),
+            })
+            self.assertTrue(book[2].metadata["linear"])
+        with doc_ex.open(edited) as book:
+            self.assertEqual(book.metadata["navigation"], nav)
+            self.assertEqual(book[0].metadata["page_spread"], "center")
+            self.assertEqual(book[0].metadata["rendition_spread"], "both")
+            self.assertFalse(book[2].metadata["linear"])
+            self.assertEqual(struct.unpack_from(">II", png_chunks(book.render_epub_spread(0, dpi=96))[b"IHDR"]),
+                             (72, 96))
+            self.assertEqual(edited, book.edit_epub_structure(spine_properties={
+                0: doc_ex.EpubSpineProperties(page_spread="center", spread="both"),
+            }))
+            inherited = book.edit_epub_structure(spine_properties={
+                0: doc_ex.EpubSpineProperties(layout="inherit", page_spread="inherit", spread="inherit"),
+                -1: doc_ex.EpubSpineProperties(linear=True),
+            })
+        with zipfile.ZipFile(io.BytesIO(source)) as before, zipfile.ZipFile(io.BytesIO(edited)) as after:
+            for path in set(before.namelist()) - {package_path}:
+                self.assertEqual(before.read(path), after.read(path), path)
+            raw = after.read(package_path)
+            self.assertIn(b'id="kept-spine-id"', raw)
+            self.assertIn(b"rendition:orientation-landscape", raw)
+            self.assertNotIn(b"page-spread-left", raw)
+        with doc_ex.open(inherited) as book:
+            self.assertTrue(book[0].metadata["fixed_layout"])
+            self.assertNotIn("page_spread", book[0].metadata)
+            self.assertNotIn("rendition_spread", book[0].metadata)
+            self.assertTrue(book[2].metadata["linear"])
+
+    def test_spine_layout_and_reordering_validate_staged_content(self) -> None:
+        source = epub_fixture()
+        xhtml = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Changed</title>{}</head>
+          <body><p>Changed chapter</p></body></html>'''
+        with doc_ex.open(source) as book:
+            fixed = book.edit_epub_structure([1, 0], replacements={
+                0: xhtml.format('<meta name="viewport" content="width=120,height=80"/>'),
+            }, spine_properties={
+                -2: doc_ex.EpubSpineProperties(layout="pre-paginated", spread="none"),
+            })
+        with doc_ex.open(fixed) as book:
+            self.assertEqual(book[0].metadata["chapter_path"], "OEBPS/two.xhtml")
+            self.assertEqual(book[1].metadata["viewport"], [90, 60])
+            pdf = book.export_epub_fixed_pdf(pages=[1], dpi=96)
+            with doc_ex.open(pdf) as rendered:
+                self.assertEqual([rendered[0].metadata[key] for key in ("width", "height")], [90, 60])
+            reflowable = book.edit_epub_structure(replacements={-1: xhtml.format("")}, spine_properties={
+                -1: doc_ex.EpubSpineProperties(layout="inherit", spread="inherit"),
+            })
+        with doc_ex.open(reflowable) as book:
+            self.assertNotIn("fixed_layout", book[1].metadata)
+            self.assertNotIn("viewport", book[1].metadata)
+            self.assertEqual(book[1].get_text(), "Changed chapter")
+            with doc_ex.open(book.convert("docx")) as result:
+                self.assertIn("Changed chapter", result[-1].get_text())
+
+        repeated = fixed_spread_fixture([("", "red", 72, 96)])
+        with zipfile.ZipFile(io.BytesIO(repeated)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        repeated = rewrite_epub(repeated, {"OEBPS/content.opf": package.replace(
+            b"</spine>", b'<itemref idref="s0"/></spine>',
+        )})
+        reflow = doc_ex.EpubSpineProperties(layout="reflowable")
+        with doc_ex.open(repeated) as book:
+            with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "requires a numeric viewport"):
+                book.edit_epub_structure(replacements={0: xhtml.format("")}, spine_properties={0: reflow})
+            revised = book.edit_epub_structure(replacements={0: xhtml.format("")},
+                                               spine_properties={0: reflow, 1: reflow})
+        with doc_ex.open(revised) as book:
+            self.assertEqual([page.get_text() for page in book], ["Changed chapter"] * 2)
+            self.assertTrue(all("fixed_layout" not in page.metadata for page in book))
+
+    def test_spine_property_validation_is_atomic_and_epub2_keeps_linear_editing(self) -> None:
+        properties = doc_ex.EpubSpineProperties
+        source = epub_fixture()
+        with doc_ex.open(source) as book:
+            with self.assertRaisesRegex(ValueError, "numeric viewport"):
+                book.edit_epub_structure(spine_properties={0: properties(layout="pre-paginated")})
+            with self.assertRaisesRegex(ValueError, "omitted chapter"):
+                book.edit_epub_structure([1], spine_properties={0: properties(linear=False)})
+            with self.assertRaisesRegex(ValueError, "one linear chapter"):
+                book.edit_epub_structure(spine_properties={
+                    0: properties(linear=False), 1: properties(linear=False),
+                })
+            with self.assertRaisesRegex(ValueError, "duplicate EPUB spine property edit"):
+                book.edit_epub_structure(spine_properties={
+                    0: properties(page_spread="left"), -2: properties(page_spread="right"),
+                })
+            with self.assertRaises(IndexError):
+                book.edit_epub_structure(spine_properties={2: properties()})
+            with self.assertRaisesRegex(TypeError, "EpubSpineProperties"):
+                book.edit_epub_structure(spine_properties={0: "invalid"})
+            self.assertTrue(book[0].metadata["linear"])
+            self.assertEqual(book.edit_epub_structure(), source)
+        with doc_ex.open(epub_fixture(version="2.0")) as book:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "requires EPUB 3"):
+                book.edit_epub_structure(spine_properties={0: properties(page_spread="center")})
+            edited = book.edit_epub_structure(spine_properties={0: properties(linear=False)})
+        with doc_ex.open(edited) as book:
+            self.assertFalse(book[0].metadata["linear"])
+            self.assertTrue(book[1].metadata["linear"])
+
     def test_resource_removal_checks_the_combined_edited_archive(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head>
           <link rel="stylesheet" href="Styles/chapter.css"/></head><body><p>Retained chapter</p></body></html>"""

@@ -98,6 +98,7 @@
 - [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.
 - [x] Protect referenced fragment IDs across packaged SVG resource replacements and staged chapter insertions.
 - [x] Combine existing chapter replacements with spine, resource and narration edits in one validated transaction.
+- [x] Edit linear participation, layout, page placement and synthetic spread overrides on existing spine occurrences in the same transaction as content and order.
 - [x] Replace packaged EPUB 3 navigation XHTML outside the spine through the resource map in the same chapter edit.
 - [x] Stage explicit replacements of EPUB 2 and EPUB 3 compatibility NCX with chapter and XHTML navigation edits.
 - [x] Renumber NCX play order across the map and auxiliary lists using the final spine and fragment positions.
