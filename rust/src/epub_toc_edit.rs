@@ -108,6 +108,11 @@ fn validate_xhtml_list(list: Node<'_, '_>) -> Result<(), EngineError> {
                 "replacement EPUB navigation group requires a nested ordered list",
             ));
         }
+        if super::super::xhtml_navigation_label(label)?.is_empty() {
+            return Err(invalid(
+                "replacement EPUB navigation requires a nonblank label",
+            ));
+        }
         if let Some(nested) = nested {
             validate_xhtml_list(nested)?;
         }

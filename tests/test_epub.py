@@ -16712,6 +16712,84 @@ Resume
             self.assertEqual(book.read_epub_resource("OEBPS/toc.ncx"), ncx)
             self.assertEqual(book.metadata["navigation"][0]["items"][0]["children"][0]["label"], "Edited label")
 
+    def test_epub3_navigation_normalizes_labels_with_text_alternatives(self) -> None:
+        template = ('<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
+                    '<head><title>Contents</title></head><body><nav id="old-nav" epub:type="toc">'
+                    '<ol><li id="part-a">{}</li></ol></nav><p id="inside">Destination</p></body></html>')
+        initial = template.format('<a href="two.xhtml">Another chapter</a>')
+        inside = epub_fixture(chapter_one=initial)
+        with zipfile.ZipFile(io.BytesIO(inside)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'<item id="one" ', b'<item id="one" properties="nav" ',
+            )
+        inside = rewrite_epub(inside, {"OEBPS/content.opf": package})
+        outside, nav_path, original_nav, _ = self.nonspine_navigation_fixture()
+        group_image = '<img src="IMAGE" alt="   Catalogue &#x9; &amp; figures "/>'
+        entries = '''<span>GROUP_IMAGE</span><ol>
+          <li><a href="#inside"><img src="IMAGE" alt="   Illustrated &amp; café  "
+                 title="Redundant tooltip"/></a></li>
+          <li><a href="#inside"> <em>Frag</em>ment&#xA0;Four
+                 <img src="IMAGE" title=" blue &#x9;  plate "/> maps<br/>   last </a></li>
+          <li><a href="#inside" title="  Embedded   diagram ">
+                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1">
+                   <rect width="1" height="1"/>
+                 </svg></a></li>
+        </ol>'''
+        chapter_markup = template.format(entries.replace("GROUP_IMAGE", group_image).replace("IMAGE", "image.png"))
+        picture = f'<picture title="Redundant container tooltip">{group_image}</picture>'
+        resource_markup = template.format(entries.replace("GROUP_IMAGE", picture).replace("IMAGE", "../image.png"))
+
+        def resources(markup: str) -> dict[str, doc_ex.EpubResource]:
+            return {nav_path: doc_ex.EpubResource("application/xhtml+xml", markup.encode())}
+
+        def assert_labels(revised: bytes, path: str) -> None:
+            with doc_ex.open(revised) as book:
+                group, = book.metadata["navigation"][0]["items"]
+                self.assertEqual(group["label"], "Catalogue & figures")
+                self.assertIsNone(group["href"])
+                self.assertEqual([item["label"] for item in group["children"]],
+                                 ["Illustrated & café", "Fragment Four blue plate maps last", "Embedded diagram"])
+                self.assertEqual([(item["path"], item["fragment"]) for item in group["children"]],
+                                 [(path, "inside")] * 3)
+
+        assert_labels(rewrite_epub(outside, {nav_path: resource_markup}), nav_path)
+        with doc_ex.open(inside) as spine, doc_ex.open(outside) as separate:
+            assert_labels(spine.edit_epub_chapters({0: chapter_markup}), "OEBPS/one.xhtml")
+            assert_labels(spine.edit_epub_structure([1, 0], replacements={0: chapter_markup}), "OEBPS/one.xhtml")
+            staged = separate.edit_epub_structure(resources=resources(resource_markup))
+            assert_labels(staged, nav_path)
+            with doc_ex.open(staged) as reopened:
+                self.assertEqual(reopened.read_epub_resource(nav_path), resource_markup.encode())
+            assert_labels(separate.edit_epub_structure([1, 0], resources=resources(resource_markup)), nav_path)
+
+            for blank in (
+                '<a href="#inside"> &#x9; </a>',
+                '<a href="#inside" title="   "><img alt="  " title="  "/></a>',
+                '<span> &#x9; </span><ol><li><a href="#inside">Valid child</a></li></ol>',
+            ):
+                markup = template.format(blank)
+                with self.subTest(markup=blank):
+                    for operation in (
+                        lambda: spine.edit_epub_chapters({0: markup}),
+                        lambda: spine.edit_epub_structure([1, 0], replacements={0: markup}),
+                        lambda: separate.edit_epub_structure(resources=resources(markup)),
+                        lambda: separate.edit_epub_structure([1, 0], resources=resources(markup)),
+                    ):
+                        with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "requires a nonblank label"):
+                            operation()
+            self.assertEqual(spine.read_epub_resource("OEBPS/one.xhtml"), initial.encode())
+            self.assertEqual(separate.read_epub_resource(nav_path), original_nav.encode())
+
+        legacy = template.format('<a href="#inside"> &#x9; </a>')
+        with doc_ex.open(rewrite_epub(inside, {"OEBPS/one.xhtml": legacy})) as book:
+            item, = book.metadata["navigation"][0]["items"]
+            self.assertEqual(item["label"], "")
+            revised = book.edit_epub_chapters({
+                1: '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Unrelated edit</p></body></html>',
+            })
+        with doc_ex.open(revised) as book:
+            self.assertEqual(book.metadata["navigation"][0]["items"], [item])
+
     def test_staged_epub3_navigation_rejects_unlinked_structural_entries(self) -> None:
         template = ('<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
                     '<head><title>Contents</title></head><body><nav id="old-nav" epub:type="toc">'

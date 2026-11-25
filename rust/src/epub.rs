@@ -1126,10 +1126,102 @@ fn ncx_items(
     Ok(items)
 }
 
+const NAV_BYTES: usize = 4 * METADATA_BYTES;
+
 #[derive(Default)]
 struct NavBudget {
     count: usize,
     bytes: usize,
+}
+
+fn xhtml_navigation_label(label: Node<'_, '_>) -> Result<String, EngineError> {
+    let mut output = NavigationLabel::default();
+    output.visit(label)?;
+    if output.text.is_empty() && output.embedded {
+        if let Some(title) = label.attribute("title") {
+            output.append(title)?;
+        }
+    }
+    Ok(output.text)
+}
+
+#[derive(Default)]
+struct NavigationLabel {
+    text: String,
+    pending_space: bool,
+    embedded: bool,
+}
+
+impl NavigationLabel {
+    fn visit(&mut self, node: Node<'_, '_>) -> Result<(), EngineError> {
+        if node.is_text() {
+            return self.append(node.text().unwrap_or_default());
+        }
+        if !node.is_element() {
+            return Ok(());
+        }
+        let tag = node.tag_name();
+        if tag.namespace() == Some(XHTML) {
+            match tag.name() {
+                "script" | "style" | "template" => return Ok(()),
+                "br" => return self.append(" "),
+                _ => {}
+            }
+        }
+        let embedded = node.has_tag_name((svg::NS, "svg"))
+            || node.has_tag_name((math::MATHML, "math"))
+            || (tag.namespace() == Some(XHTML)
+                && matches!(
+                    tag.name(),
+                    "audio"
+                        | "canvas"
+                        | "embed"
+                        | "iframe"
+                        | "img"
+                        | "object"
+                        | "picture"
+                        | "video"
+                ));
+        self.embedded |= embedded;
+        let start = self.text.len();
+        let pending = self.pending_space;
+        for child in node.children() {
+            self.visit(child)?;
+        }
+        if embedded && self.text.len() == start {
+            self.pending_space = pending;
+            if let Some(alternative) = ["alt", "title"]
+                .into_iter()
+                .filter_map(|attribute| node.attribute(attribute))
+                .find(|value| {
+                    value
+                        .chars()
+                        .any(|character| !character.is_ascii_whitespace())
+                })
+            {
+                self.append(alternative)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn append(&mut self, value: &str) -> Result<(), EngineError> {
+        for character in value.chars() {
+            if character.is_ascii_whitespace() {
+                self.pending_space = !self.text.is_empty();
+                continue;
+            }
+            if self.text.len() + usize::from(self.pending_space) + character.len_utf8() > NAV_BYTES
+            {
+                return Err(limited("navigation byte budget exceeded"));
+            }
+            if std::mem::take(&mut self.pending_space) {
+                self.text.push(' ');
+            }
+            self.text.push(character);
+        }
+        Ok(())
+    }
 }
 
 fn nav_target(
@@ -1138,11 +1230,16 @@ fn nav_target(
     base: &str,
     budget: &mut NavBudget,
 ) -> Result<Value, EngineError> {
-    let label = label
-        .descendants()
-        .filter(Node::is_text)
-        .filter_map(|n| n.text())
-        .collect::<String>();
+    let xhtml = label.tag_name().namespace() == Some(XHTML);
+    let label = if xhtml {
+        xhtml_navigation_label(label)?
+    } else {
+        label
+            .descendants()
+            .filter(Node::is_text)
+            .filter_map(|n| n.text())
+            .collect::<String>()
+    };
     let path = href
         .filter(|href| !external(href))
         .map(|href| resolve(base, href))
@@ -1156,7 +1253,7 @@ fn nav_target(
     charge(
         &mut budget.bytes,
         256 + label.len() + href.map_or(0, str::len) + path.as_ref().map_or(0, String::len),
-        4 * METADATA_BYTES,
+        NAV_BYTES,
         "navigation byte budget exceeded",
     )?;
     let fragment = if path.is_some() {
@@ -1166,7 +1263,8 @@ fn nav_target(
     } else {
         None
     };
-    Ok(json!({"label": label.trim(), "href": href, "path": path, "fragment": fragment}))
+    let label = if xhtml { label.as_str() } else { label.trim() };
+    Ok(json!({"label": label, "href": href, "path": path, "fragment": fragment}))
 }
 
 pub(crate) fn validate_svg_resource(data: &[u8]) -> Result<(), EngineError> {
