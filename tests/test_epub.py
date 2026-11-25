@@ -6247,6 +6247,139 @@ overlay
             self.assertEqual(reopened.read_epub_resource("OEBPS/control.ttml"), control)
             self.assertEqual(reopened.epub_embedded_text(0, 0), cues)
 
+    def test_ttml_mixed_region_paragraph_keeps_separate_text_and_timelines(self) -> None:
+        video = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        header = b'''<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling"
+          xmlns:ttp="http://www.w3.org/ns/ttml#parameter" xml:lang="en" ttp:tickRate="1000">
+          <head><layout>
+            <region xml:id="lower" begin="174t" end="188t" tts:origin="10% 60%"
+                tts:extent="80% 30%" tts:color="#008000">
+              <set begin="4t" dur="3t" tts:backgroundColor="rgba(255,0,0,128)"/>
+            </region>
+            <region xml:id="upper" begin="169t" end="185t" tts:origin="10% 10%"
+                tts:extent="80% 30%" tts:color="blue">
+              <set begin="9t" dur="2t" tts:origin="15% 12%"/>
+            </region>
+          </layout></head>'''
+        lower = b'''<set begin="6t" dur="2t" tts:color="yellow"/>Lead
+          <span tts:fontStyle="italic">italic</span><br/><span xml:space="preserve">  two  spaces </span>'''
+        upper = b'Top <span xml:lang="fr" tts:fontWeight="bold">line</span>'
+        body = b'<body><div tts:textDecoration="underline">'
+        footer = b'</div></body></tt>'
+        mixed = (
+            header + body + b'<p xml:id="shared" begin="168t" end="191t">'
+            b'  <span><span region="lower" begin="4t" dur="17t">' + lower + b'</span></span>  '
+            b'  <span region="upper" begin="1t" dur="18t">' + upper + b'</span>  '
+            b'</p>' + footer
+        )
+        control = (
+            header + body + b'<p xml:id="lower-control" region="lower" begin="172t" end="189t">'
+            + lower + b'</p><p xml:id="upper-control" region="upper" begin="169t" end="187t">'
+            + upper + b'</p>' + footer
+        )
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Simultaneous captions</title></head>
+          <body><video src="clip.mp4#t=0.169,0.191&amp;xywh=1,1,6,4">
+          <track src="mixed.ttml" kind="captions" srclang="en"/>
+          <track src="control.ttml" kind="subtitles" srclang="en"/>
+          </video></body></html>'''
+        with doc_ex.open(epub_fixture()) as source:
+            data = source.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Simultaneous captions", chapter, "OEBPS/captions.xhtml")],
+                resources={
+                    "OEBPS/clip.mp4": doc_ex.EpubResource("video/mp4", video),
+                    "OEBPS/mixed.ttml": doc_ex.EpubResource("application/ttml+xml", mixed),
+                    "OEBPS/control.ttml": doc_ex.EpubResource("application/ttml+xml", control),
+                },
+            )
+
+        def presentation(cue: doc_ex.EpubTextCue) -> tuple:
+            return (cue.start_us, cue.end_us, cue.text, cue.region, cue.runs, cue.ttml_region_layout)
+
+        with doc_ex.open(data) as book:
+            cues = book.epub_embedded_text(0, 0)
+            expected = book.epub_embedded_text(0, 0, track_index=1)
+            self.assertEqual([presentation(cue) for cue in cues], [presentation(cue) for cue in expected])
+            self.assertEqual({cue.id for cue in cues}, {"shared"})
+            self.assertEqual([(cue.start_us, cue.end_us, cue.region) for cue in cues], [
+                (169_000, 178_000, "upper"), (174_000, 178_000, "lower"),
+                (178_000, 180_000, "lower"), (178_000, 180_000, "upper"),
+                (180_000, 181_000, "lower"), (180_000, 185_000, "upper"),
+                (181_000, 188_000, "lower"),
+            ])
+            self.assertEqual({cue.text for cue in cues if cue.region == "lower"},
+                             {"Lead italic\n  two  spaces "})
+            self.assertEqual({cue.text for cue in cues if cue.region == "upper"}, {"Top line"})
+            self.assertEqual([cue.runs[0].style.color for cue in cues[:3]],
+                             [(0, 0, 255, 255), (0, 128, 0, 255), (255, 255, 0, 255)])
+            self.assertEqual(cues[2].runs[1].style.font_style, "italic")
+            self.assertTrue(all(run.style.underline for cue in cues for run in cue.runs))
+            self.assertEqual(cues[3].runs[-1].style.language, "fr")
+            assert cues[2].ttml_region_layout is not None
+            assert cues[3].ttml_region_layout is not None
+            self.assertEqual(cues[2].ttml_region_layout.background_color, (255, 0, 0, 128))
+            self.assertEqual(cues[3].ttml_region_layout.origin_percent, (15, 12))
+
+            frames = list(book.epub_embedded_video(0, 0, text_track=0))
+            control_frames = list(book.epub_embedded_video(0, 0, text_track=1))
+            self.assertEqual([(frame.start_us, frame.duration_us) for frame in frames], [
+                (169_000, 5_000), (174_000, 4_000), (178_000, 2_000), (180_000, 1_000),
+                (181_000, 4_000), (185_000, 3_000), (188_000, 3_000),
+            ])
+            self.assertEqual([[cue.region for cue in frame.text_cues] for frame in frames],
+                             [["upper"], ["lower", "upper"], ["lower", "upper"],
+                              ["lower", "upper"], ["lower", "upper"], ["lower"], []])
+            self.assertTrue(all((frame.width, frame.height) == (6, 4) and frame.rgb is frames[0].rgb
+                                for frame in frames))
+            self.assertEqual([
+                (frame.start_us, frame.duration_us, {cue.region: presentation(cue) for cue in frame.text_cues})
+                for frame in frames
+            ], [
+                (frame.start_us, frame.duration_us, {cue.region: presentation(cue) for cue in frame.text_cues})
+                for frame in control_frames
+            ])
+            sought = book.epub_embedded_text(0, 0, start_us=178_500, end_us=179_250)
+            resumed, = book.epub_embedded_video(0, 0, start_us=178_500, end_us=179_250, text_track=0)
+            self.assertEqual((resumed.start_us, resumed.duration_us, resumed.rgb), (178_500, 750, frames[0].rgb))
+            self.assertEqual([presentation(cue) for cue in resumed.text_cues],
+                             [presentation(cue) for cue in sought])
+            self.assertEqual([cue.region for cue in sought], ["lower", "upper"])
+            revised = book.edit_epub_structure(replacements={0: chapter.replace("Simultaneous captions", "Revised")})
+        with doc_ex.open(revised) as reopened:
+            self.assertEqual(reopened.read_epub_resource("OEBPS/mixed.ttml"), mixed)
+            self.assertEqual([presentation(cue) for cue in reopened.epub_embedded_text(0, 0)],
+                             [presentation(cue) for cue in cues])
+
+    def test_ttml_mixed_regions_reject_ambiguous_text_and_region_order(self) -> None:
+        head = b'''<tt xmlns="http://www.w3.org/ns/ttml"><head><layout>
+          <region xml:id="low"/><region xml:id="high"/>
+        </layout></head><body>'''
+        low = b'<span region="low">Lower</span>'
+        high = b'<span region="high">Higher</span>'
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Regions</title></head>
+          <body><video><track src="mixed.ttml" kind="captions" srclang="en"/></video></body></html>'''
+        with doc_ex.open(epub_fixture()) as source:
+            data = source.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Regions", chapter, "OEBPS/captions.xhtml")],
+                resources={
+                    "OEBPS/mixed.ttml": doc_ex.EpubResource(
+                        "application/ttml+xml", head + b'<p dur="1s">' + low + high + b"</p></body></tt>",
+                    ),
+                },
+            )
+        for paragraph, message in (
+            (b'<p dur="1s" region="low">' + high, "unassigned content"),
+            (b'<p dur="1s"><span region="low">' + high + b'</span>', "unassigned content"),
+            (b'<p dur="1s">Unassigned' + low + high, "without a region"),
+            (b'<p dur="1s" xml:space="preserve"> ' + low + high, "preserved whitespace"),
+            (b'<p dur="1s">' + low + b' ' + low + high, "returns to an earlier region"),
+            (b'<p dur="1s">' + low + high + low, "returns to an earlier region"),
+            (b'<p dur="1s" condition="true">' + low + high, "conditional TTML mixed-region content"),
+        ):
+            with self.subTest(paragraph=paragraph):
+                changed = rewrite_epub(data, {"OEBPS/mixed.ttml": head + paragraph + b'</p></body></tt>'})
+                with doc_ex.open(changed) as book, self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
+                    book.epub_embedded_text(0, 0)
+
     def test_ttml_region_edits_and_playback_validate_references_and_geometry(self) -> None:
         header = b'<tt xmlns="http://www.w3.org/ns/ttml" xmlns:tts="http://www.w3.org/ns/ttml#styling">'
         body = b'<body region="r"><div><p begin="0s" end="1s">Text</p></div></body></tt>'

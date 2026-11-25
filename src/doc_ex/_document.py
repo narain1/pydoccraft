@@ -762,8 +762,7 @@ class Document:
         if track is None:
             return []
         cues = self._read_epub_text(track, start, end, video_context=embedded.kind == "video")
-        if track.media_type == "text/vtt":
-            cues.sort(key=operator.attrgetter("start_us"))
+        cues.sort(key=operator.attrgetter("start_us"))
         return cues
 
     def _read_epub_text(

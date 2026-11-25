@@ -1,6 +1,6 @@
 //! Project TTML media-time cues and their supported text styles.
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
 };
 
@@ -189,6 +189,7 @@ impl Format<'_> {
 }
 
 struct Piece<'a> {
+    region: Option<Selection<'a>>,
     begin: Instant,
     end: Option<Instant>,
     text: &'a str,
@@ -365,7 +366,7 @@ impl<'n> Reader<'_, 'n> {
         if node.has_tag_name((TT, "p")) {
             let mut pieces = Vec::new();
             let end = self.inline_children(node, timing, &format, &mut pieces, depth)?;
-            self.emit(node, format.region, timing, &pieces)?;
+            self.emit_paragraph(node, format.region, timing, &pieces)?;
             return Ok(timing.finish(end));
         }
         let mut children = Children::new(node, timing.begin)?;
@@ -420,10 +421,12 @@ impl<'n> Reader<'_, 'n> {
                     span.end
                 } else {
                     let style = self.format(format.clone(), child, span)?;
-                    if style.region != format.region {
-                        return Err(unsupported("TTML region changes within a paragraph"));
-                    }
                     let line_break = child.has_tag_name((TT, "br"));
+                    if style.region != format.region && (format.region.is_some() || line_break) {
+                        return Err(unsupported(
+                            "TTML mixed regions require region assignments on spans of unassigned content",
+                        ));
+                    }
                     let text_only = line_break || !child.children().any(|node| node.is_element());
                     if children.sequential && text_only && !span.explicit_end {
                         Some(span.begin)
@@ -443,6 +446,51 @@ impl<'n> Reader<'_, 'n> {
             children.include(end);
         }
         Ok(children.end)
+    }
+
+    fn emit_paragraph(
+        &mut self,
+        node: Node<'_, '_>,
+        region: Option<Selection<'n>>,
+        timing: Timing,
+        pieces: &[Piece<'n>],
+    ) -> Result<(), EngineError> {
+        if pieces.iter().all(|piece| piece.region == region) {
+            return self.emit(node, region, timing, pieces);
+        }
+        if node
+            .ancestors()
+            .chain(node.descendants())
+            .any(|element| element.has_attribute("condition"))
+        {
+            return Err(unsupported("conditional TTML mixed-region content"));
+        }
+        let mut groups = Vec::new();
+        let mut seen = HashSet::new();
+        for group in pieces.chunk_by(|left, right| left.region == right.region) {
+            let Some(region) = group[0].region else {
+                if group
+                    .iter()
+                    .any(|piece| piece.preserve || !piece.text.trim_ascii().is_empty())
+                {
+                    return Err(unsupported(
+                        "TTML mixed-region paragraph contains text or preserved whitespace without a region",
+                    ));
+                }
+                continue;
+            };
+            if !seen.insert(region) {
+                return Err(unsupported(
+                    "TTML mixed-region paragraph returns to an earlier region",
+                ));
+            }
+            groups.push((region, group));
+        }
+        self.track.mixed_ttml_regions |= groups.len() > 1;
+        for (region, group) in groups {
+            self.emit(node, Some(region), timing, group)?;
+        }
+        Ok(())
     }
 
     fn emit(
@@ -601,7 +649,7 @@ fn push_piece<'n>(
     end: Option<Instant>,
     text: &'n str,
     preserve: bool,
-    format: &Format<'_>,
+    format: &Format<'n>,
 ) -> Result<(), EngineError> {
     let first = format.style_at(begin);
     for (index, point) in format.styles[first..].iter().enumerate() {
@@ -617,6 +665,7 @@ fn push_piece<'n>(
             .get(first + index + 1)
             .map(|point| point.start);
         pieces.push(Piece {
+            region: format.region,
             begin,
             end: end.into_iter().chain(next).min(),
             text,

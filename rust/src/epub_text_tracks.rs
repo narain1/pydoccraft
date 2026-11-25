@@ -128,6 +128,7 @@ pub(crate) struct Cue {
 #[derive(Default)]
 struct Track {
     cues: Vec<Cue>,
+    mixed_ttml_regions: bool,
     bytes: usize,
     style_bytes: usize,
     runs: usize,
@@ -212,8 +213,8 @@ pub(crate) fn read(
         cue.end = cue.end.into_iter().chain(end).min();
         cue.end.is_none_or(|end| cue.start < end)
     });
-    // Keep WebVTT style intervals in authored cue order for the video sweep.
-    if media != "text/vtt" {
+    // Keep WebVTT cue intervals and TTML mixed-region groups in source order for video.
+    if media != "text/vtt" && !track.mixed_ttml_regions {
         track.cues.sort_by_key(|cue| cue.start);
     }
     Ok(track.cues)

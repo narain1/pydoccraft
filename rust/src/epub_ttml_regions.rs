@@ -201,7 +201,7 @@ impl RegionPatch<'_> {
 }
 
 #[cfg(feature = "python")]
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum Selection<'n> {
     Named(&'n str),
     Inline(NodeId, Instant),
