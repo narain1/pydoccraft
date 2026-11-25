@@ -7601,6 +7601,24 @@ overlay
                 self.assertTrue(any(span.get(val) == "2" for span in table.findall(".//w:gridSpan", ns)))
 
         equation = template.format(attrs='side="right"')
+        fraction = equation.replace('mathsize="16pt"', 'mathsize="12pt"').replace(
+            "<m:mtext>Upper</m:mtext>",
+            "<m:mfrac><m:mtext>Upper</m:mtext><m:mn>2</m:mn></m:mfrac>",
+        )
+        offsets = {}
+        for alignment in ("top", "bottom"):
+            chapter = fraction.replace('mathcolor="#e04b00" columnalign="left"',
+                                       f'mathcolor="#e04b00" columnalign="left" rowalign="{alignment}"')
+            with doc_ex.open(epub_fixture(chapter_one=chapter)) as book, doc_ex.open(book.convert("docx")) as word:
+                for origin, document in (("epub", book), ("word", word)):
+                    with doc_ex.open(document.convert("pdf")) as pdf:
+                        tag, = pdf[0].search_for("TagOne")
+                        numerator, = pdf[0].search_for("Upper")
+                        offsets[origin, alignment] = tag[1] - numerator[1]
+        moved = offsets["epub", "bottom"] - offsets["epub", "top"]
+        self.assertGreater(moved, 7.0)
+        self.assertAlmostEqual(offsets["word", "bottom"] - offsets["word", "top"], moved, delta=0.1)
+
         nested = equation.replace('<m:mtable side=', '<m:msqrt><m:mtable side=')
         nested = nested.replace('</m:mtable></m:math>', '</m:mtable></m:msqrt></m:math>')
         with doc_ex.open(epub_fixture(chapter_one=nested)) as book:
