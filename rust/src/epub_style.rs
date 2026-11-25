@@ -23,7 +23,7 @@ pub(super) type Paint = (Rgb, f32);
 pub(super) struct ChapterStyles {
     pub boxes: Styles,
     pub equations: HashMap<NodeId, math::Css>,
-    pub calculations: Vec<css::MixedLength>,
+    pub calculations: css::CalculationTable,
 }
 
 pub(super) struct Styled {
@@ -86,7 +86,7 @@ impl ChapterStyles {
             {
                 box_context.pop();
             }
-            let (mut values, flow) =
+            let (mut values, flow, inherited_calculations) =
                 cascade.properties(node, box_context.last().map(|(_, parent)| parent))?;
             if is_math {
                 if let Some(css) = math::Css::from_properties(&values) {
@@ -136,12 +136,12 @@ impl ChapterStyles {
             text.chars.rtl = flow.rtl;
             let font = text.chars.size.unwrap_or(12.0);
             let calculations = css::logical::resolve_calculated_geometry(
-                node,
                 &mut values,
                 flow,
                 font,
                 viewport,
                 &mut styles.calculations,
+                inherited_calculations,
             )?;
             let tag = node.tag_name().name();
             let position = match value(&values, "position") {
@@ -176,7 +176,19 @@ impl ChapterStyles {
                     LengthPercentageAuto::calc,
                 )
             };
+            let table_track = tag_has_mixed_size_as_auto(node);
+            let is_auto = |key| {
+                table_track
+                    && calculations
+                        .get(key)
+                        .is_some_and(|handle| styles.calculations.has_fixed_part(*handle))
+            };
+            let auto_width = is_auto("width");
+            let auto_height = is_auto("height");
             let dim = |key| {
+                if (key == "width" && auto_width) || (key == "height" && auto_height) {
+                    return Dimension::auto();
+                }
                 calculations.get(key).copied().map_or_else(
                     || dimension::<Dimension>(value(&values, key), font, viewport),
                     Dimension::calc,
@@ -219,10 +231,6 @@ impl ChapterStyles {
             } else {
                 0.0
             };
-            box_context.push((
-                range.end,
-                css::logical::Inherited::new(flow, &values, font, viewport, spacing),
-            ));
             let ratio = value(&values, "aspect-ratio")
                 .split_once('/')
                 .and_then(|(a, b)| {
@@ -362,6 +370,10 @@ impl ChapterStyles {
                 },
                 ..Default::default()
             };
+            box_context.push((
+                range.end,
+                css::logical::Inherited::new(flow, &values, font, viewport, spacing, calculations),
+            ));
             let background = css::color(value(&values, "background-color")).map(ink);
             let border = ["top", "right", "bottom", "left"].map(|side| {
                 css::color(value(&values, &format!("border-{side}-color")))
@@ -586,6 +598,16 @@ pub(super) fn block_tag(tag: &str) -> bool {
             | "h5"
             | "h6"
     )
+}
+
+// A mixed percentage and nonzero length computes normally, but HTML table
+// tracks use auto for it in the width and height properties.
+fn tag_has_mixed_size_as_auto(node: Node<'_, '_>) -> bool {
+    node.tag_name().namespace() == Some(XHTML)
+        && matches!(
+            node.tag_name().name(),
+            "col" | "colgroup" | "tr" | "thead" | "tbody" | "tfoot" | "td" | "th"
+        )
 }
 
 fn value<'a>(values: &'a Properties, key: &str) -> &'a str {

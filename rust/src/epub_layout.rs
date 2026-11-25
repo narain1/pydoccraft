@@ -21,7 +21,7 @@ use wordcraft_layout::{
 
 use super::{
     child, content,
-    css::{Cascade, MixedLength},
+    css::{CalculationTable, Cascade},
     fonts::{Fonts, Text as FontText},
     invalid, limited, name,
     output::{has_relative_math, image_bytes, Output, RasterImage},
@@ -822,7 +822,7 @@ impl<'book> Layout<'book> {
         &mut self,
         root: usize,
         fixed: bool,
-        calculations: &[MixedLength],
+        calculations: &CalculationTable,
     ) -> Result<[f32; 2], EngineError> {
         let mut error = None;
         self.tree.place(

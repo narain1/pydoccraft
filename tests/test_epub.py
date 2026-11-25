@@ -1290,12 +1290,73 @@ class EpubTests(unittest.TestCase):
           p{background:#d84e3d}</style></head>
         <body><section><div>Auto height</div><p>Next paragraph</p></section></body></html>"""
         previews = []
-        for expression in ("auto", "calc(100% - 100% + 90px)", "90px"):
+        for expression in ("auto", "calc(100% - 100% + 90px)",
+                           "max(80px,100% - 100% + 90px)", "90px"):
             chapter = xhtml.replace("EXPR", expression)
             with doc_ex.open(epub_fixture(chapter_one=chapter)) as publication:
                 previews.append(publication.render_page(0, dpi=96))
-        self.assertEqual(previews[0], previews[1])
-        self.assertNotEqual(previews[0], previews[2])
+        self.assertEqual(previews[:3], [previews[0]] * 3)
+        self.assertNotEqual(previews[0], previews[3])
+
+    def test_epub_css_comparisons_use_containing_sizes_and_inherit_computed_units(self) -> None:
+        source = fixed_spread_fixture([("", "white", 320, 170)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Comparison geometry</title>
+          <meta name="viewport" content="width=320,height=170"/><style>
+          html,body,p{{margin:0}} #holder{{position:absolute;left:12px;top:10px;width:{width}px;height:100px}}
+          #panel{{position:absolute;left:5px;top:6px;font-size:20px;background:#bbd0a0}}
+          #target{{font-size:12px;background:#a08c65}} #jump{{position:absolute;top:132px;left:12px}}
+          {styles}</style></head><body><div id="holder"><div id="panel" dir="rtl">
+            <p id="target" dir="ltr"><a href="https://example.org/compare">Measured target</a></p>
+          </div></div><p id="jump"><a href="#target">Jump to target</a></p></body></html>"""
+        calculated = """
+          #panel{--ceiling:140px;width:25px;inline-size:clamp(70px,60% + 8px,var(--ceiling));
+                 inline-size:min(3,90px);block-size:clamp(none,50% + 4px,none);
+                 padding-inline-start:max(1em + 5%,15px);padding-block-end:calc(min(2,3) * 1px)}
+          #target{padding-inline-start:inherit;min-block-size:clamp(19px,15px,12px)}
+        """
+        for width in (180, 240):
+            with self.subTest(width=width):
+                panel = min(width * 0.6 + 8, 140)
+                explicit = f"""#panel{{width:{panel}px;height:54px;padding-right:{20 + width / 20}px;
+                  padding-bottom:2px}} #target{{padding-left:{20 + panel / 20}px;min-height:19px}}"""
+                results = []
+                for styles in (calculated, explicit):
+                    chapter = template.format(width=width, styles=styles)
+                    edited = rewrite_epub(source, {"OEBPS/s0.xhtml": chapter})
+                    with doc_ex.open(edited) as book:
+                        pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                        pdf_bytes = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+                    with doc_ex.open(pdf_bytes) as pdf, pdf.edit() as editor:
+                        self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), pixels)
+                        hit, = pdf[0].search_for("Measured target")
+                        external, internal = pdf[0].get_links()
+                        self.assertEqual(external.uri, "https://example.org/compare")
+                        self.assertEqual(internal.metadata["target_page"], 0)
+                        xyz = re.search(rb"/XYZ\s+([0-9.]+)\s+([0-9.]+)\s+null",
+                                        editor.to_bytes(object_streams=False))
+                        assert xyz is not None
+                        results.append((pixels, hit, external.bbox, xyz.groups()))
+                self.assertEqual(results[0], results[1])
+
+    def test_epub_css_comparison_functions_inside_grid_tracks(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Compared grid</title><style>
+        body,p{{margin:0}} div{{display:grid;width:{width}px;height:70px;gap:4px;
+          grid-template-columns:{columns};grid-template-rows:MAXROW}}
+        p:nth-child(odd){{background:#117278}} p:nth-child(even){{background:#a65139}}
+        </style></head><body><div><p>First</p><p>Second</p><p>Third</p>
+         <p>Fourth</p><p>Fifth</p><p>Sixth</p></div></body></html>"""
+        for width in (160, 224):
+            with self.subTest(width=width):
+                reference = f"{min(width / 2 - 8, 80)}px {max(width / 4, 44)}px 1fr"
+                results = []
+                for columns, row in (
+                    ("min(50% - 8px,80px) max(25%,44px) 1fr", "clamp(18px,40% + 2px,40px) 1fr"),
+                    (reference, "30px 1fr"),
+                ):
+                    source = template.format(width=width, columns=columns).replace("MAXROW", row)
+                    with doc_ex.open(epub_fixture(chapter_one=source)) as book:
+                        results.append(book.render_page(0, dpi=96))
+                self.assertEqual(results[0], results[1])
 
     def test_epub_css_calc_rejects_unsupported_operations_and_excess_geometry(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Calculated geometry</title>
@@ -1309,6 +1370,12 @@ class EpubTests(unittest.TestCase):
             with self.subTest(css=css), doc_ex.open(epub_fixture(chapter_one=chapter.replace("CSS", css))) as book:
                 with self.assertRaisesRegex(error, message):
                     book.render_page(0, dpi=96)
+
+        comparison = "max(1px," + ",".join(["1%"] * 96) + ")"
+        repeated = chapter.replace("CSS", f"width:{comparison}").replace("<div>Panel</div>", "<div/>" * 2700)
+        with doc_ex.open(epub_fixture(chapter_one=repeated)) as book:
+            with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "chapter calculations exceed their node budget"):
+                book.render_page(0, dpi=96)
 
     def test_logical_css_var_failure_resets_alias_and_vertical_writing_fails(self) -> None:
         markup = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Logical flow</title>

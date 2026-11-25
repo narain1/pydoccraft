@@ -195,39 +195,29 @@ pub(super) fn physical_pair(name: &str, flow: Flow) -> Option<&'static Pair> {
     PAIRS.iter().find(|pair| pair.physical(flow) == name)
 }
 
+pub(in crate::epub) type Calculations = HashMap<&'static str, CalcHandle>;
+
 pub(in crate::epub) fn resolve_calculated_geometry(
-    node: Node<'_, '_>,
     values: &mut Properties,
     flow: Flow,
     font: f32,
     viewport: [f32; 2],
-    calculations: &mut Vec<calc::MixedLength>,
-) -> Result<HashMap<&'static str, CalcHandle>, EngineError> {
-    let table_track = node.tag_name().namespace() == Some(super::XHTML)
-        && matches!(
-            node.tag_name().name(),
-            "col" | "colgroup" | "tr" | "thead" | "tbody" | "tfoot" | "td" | "th"
-        );
-    let mut handles = HashMap::new();
+    calculations: &mut calc::CalculationTable,
+    mut handles: Calculations,
+) -> Result<Calculations, EngineError> {
     for (name, value) in values {
-        if !calc::is_calc(value) {
+        if !calc::is_math(value) {
             continue;
         }
         if let Some(pair) = physical_pair(name, flow).filter(|pair| pair.is_length()) {
             *value = match calc::resolve(value, font, viewport, pair.allows_negative())? {
                 calc::Resolved::Points(points) => format!("{points}pt"),
                 calc::Resolved::Percent(percent) => format!("{percent}%"),
-                calc::Resolved::Mixed(length) => {
-                    let computed = length.computed_css();
-                    // The used size of an HTML table track is auto in this case.
-                    // Keep the computed expression available for explicit inheritance.
-                    if !(table_track
-                        && matches!(name.as_str(), "width" | "height")
-                        && length.has_fixed_part())
-                    {
-                        handles.insert(pair.physical(flow), length.register(calculations));
-                    }
-                    computed
+                calc::Resolved::Deferred(length) => {
+                    handles.insert(pair.physical(flow), calculations.register(length)?);
+                    // A percentage-dependent value belongs to the typed handle
+                    // table, including when inherited by a different box.
+                    "auto".to_owned()
                 }
             };
         }
@@ -274,6 +264,7 @@ pub(super) fn border_sides(name: &str) -> Option<&'static [&'static str]> {
 pub(in crate::epub) struct Inherited {
     pub(super) flow: Flow,
     geometry: Properties,
+    calculations: Calculations,
     margin: f32,
 }
 
@@ -284,6 +275,7 @@ impl Inherited {
         font: f32,
         viewport: [f32; 2],
         margin: f32,
+        calculations: Calculations,
     ) -> Self {
         let geometry = PAIRS
             .iter()
@@ -298,8 +290,13 @@ impl Inherited {
         Self {
             flow,
             geometry,
+            calculations,
             margin,
         }
+    }
+
+    pub(super) fn calculation(&self, physical: &str) -> Option<CalcHandle> {
+        self.calculations.get(physical).copied()
     }
 
     pub(super) fn value(&self, physical: &str, initial: &str) -> String {
@@ -349,7 +346,7 @@ pub(super) fn value_kind(name: &str, value: &str) -> ValueKind {
     {
         return Supported;
     }
-    if calc::is_calc(value) {
+    if calc::is_math(value) {
         return classified(calc::valid(value, !border));
     }
     if size
@@ -357,9 +354,7 @@ pub(super) fn value_kind(name: &str, value: &str) -> ValueKind {
             value,
             "min-content" | "max-content" | "fit-content" | "stretch"
         )
-        || ["min(", "max(", "clamp(", "fit-content("]
-            .iter()
-            .any(|prefix| value.starts_with(prefix) && value.ends_with(')'))
+        || value.starts_with("fit-content(") && value.ends_with(')')
     {
         return Unsupported;
     }

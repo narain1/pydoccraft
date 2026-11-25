@@ -14,7 +14,7 @@ use crate::EngineError;
 mod calc;
 #[path = "epub_css_grid.rs"]
 pub(super) mod grid;
-pub(super) use calc::MixedLength;
+pub(super) use calc::CalculationTable;
 #[path = "epub_html_direction.rs"]
 mod html_direction;
 #[path = "epub_css_logical.rs"]
@@ -389,7 +389,7 @@ impl Cascade {
         &mut self,
         node: Node<'_, '_>,
         parent: Option<&logical::Inherited>,
-    ) -> Result<(Properties, logical::Flow), EngineError> {
+    ) -> Result<(Properties, logical::Flow, logical::Calculations), EngineError> {
         let (mut selected, _) = self.local_selection(node)?;
         let mut flow_value = |name| {
             selected.remove(name).map_or(Ok(None), |(_, value)| {
@@ -424,6 +424,7 @@ impl Cascade {
             }
         }
         let mut output = Properties::new();
+        let mut calculations = logical::Calculations::new();
         for (physical, (_, name, value, pair)) in winners {
             let computed = computed_value(&mut self.variables, name, value)?;
             let computed =
@@ -450,6 +451,9 @@ impl Cascade {
                                 |parent| {
                                     let key =
                                         pair.map_or(physical, |alias| alias.physical(parent.flow));
+                                    if let Some(handle) = parent.calculation(key) {
+                                        calculations.insert(geometry.physical(flow), handle);
+                                    }
                                     parent.value(key, geometry.3)
                                 },
                             ))
@@ -487,7 +491,7 @@ impl Cascade {
                 output.insert(physical.to_owned(), computed);
             }
         }
-        Ok((output, flow))
+        Ok((output, flow, calculations))
     }
 
     fn local_selection(
@@ -1238,7 +1242,7 @@ fn valid_literal(
         _ if logical::pair(name).is_some() => {
             css_wide(value) || logical::value_kind(name, value) != logical::ValueKind::Invalid
         }
-        _ if calc::is_calc(value) => logical::physical_pair(name, logical::Flow::default())
+        _ if calc::is_math(value) => logical::physical_pair(name, logical::Flow::default())
             .is_none_or(|pair| !pair.is_length() || calc::valid(value, pair.accepts_percentage())),
         "font-optical-sizing" => {
             optical_sizing(value).is_some()
@@ -1333,7 +1337,7 @@ fn expand(name: &str, value: &str) -> Vec<(String, String)> {
         if matches!(name, "margin" | "padding" | "inset" | "border-width")
             && pieces
                 .iter()
-                .any(|piece| calc::is_calc(piece) && !calc::valid(piece, name != "border-width"))
+                .any(|piece| calc::is_math(piece) && !calc::valid(piece, name != "border-width"))
         {
             return Vec::new();
         }
@@ -1362,7 +1366,7 @@ fn expand(name: &str, value: &str) -> Vec<(String, String)> {
         let mut style = "none";
         let flow_relative = name.starts_with("border-inline") || name.starts_with("border-block");
         for word in value_components(value) {
-            let calculated_width = calc::is_calc(word);
+            let calculated_width = calc::is_math(word);
             if calculated_width && !calc::valid(word, false) {
                 return Vec::new();
             }

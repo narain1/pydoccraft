@@ -9,7 +9,7 @@ use taffy::{
     LayoutInput, LayoutOutput, LayoutPartialTree, NodeId, RunMode, TraversePartialTree,
 };
 
-use crate::epub::css::MixedLength;
+use crate::epub::css::CalculationTable;
 
 #[derive(Default)]
 pub(super) struct Tree {
@@ -55,7 +55,7 @@ impl Tree {
         &mut self,
         root: NodeId,
         space: Size<AvailableSpace>,
-        calculations: &[MixedLength],
+        calculations: &CalculationTable,
         measure: impl FnMut(LayoutInput, usize, &Style) -> LayoutOutput,
     ) {
         let mut view = View {
@@ -68,17 +68,16 @@ impl Tree {
 }
 
 pub(super) fn calculated_length(
-    calculations: &[MixedLength],
+    calculations: &CalculationTable,
     handle: CalcHandle,
     basis: f32,
 ) -> f32 {
-    let index = ((handle.to_bits() >> 3) - 1) as usize;
-    calculations[index].at(basis)
+    calculations.at(handle, basis)
 }
 
 struct View<'a, F> {
     nodes: &'a mut [Node],
-    calculations: &'a [MixedLength],
+    calculations: &'a CalculationTable,
     measure: F,
 }
 

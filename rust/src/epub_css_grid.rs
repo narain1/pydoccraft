@@ -202,13 +202,8 @@ fn breadth<'a>(
         ComponentValue::BracketBlock(_) => return Err(Issue::Unsupported),
         ComponentValue::Function(_) => {
             let value = raw(item).ok_or(Issue::Invalid)?;
-            if !calc::is_calc(value) {
-                let (name, _) = function(item).ok_or(Issue::Invalid)?;
-                return if matches!(name.to_ascii_lowercase().as_str(), "min" | "max" | "clamp") {
-                    Err(Issue::Unsupported)
-                } else {
-                    Err(Issue::Invalid)
-                };
+            if !calc::is_math(value) {
+                return Err(Issue::Invalid);
             }
             if !calc::valid(value, true) {
                 return Err(Issue::Invalid);
@@ -223,7 +218,7 @@ pub(in crate::epub) fn resolve(
     source: &str,
     font: f32,
     viewport: [f32; 2],
-    lengths: &mut Vec<calc::MixedLength>,
+    lengths: &mut calc::CalculationTable,
 ) -> Result<Vec<GridTemplateComponent<String>>, EngineError> {
     if source.is_empty()
         || ["none", "initial", "unset", "revert"]
@@ -260,8 +255,8 @@ pub(in crate::epub) fn resolve(
                         calc::Resolved::Percent(percent) => {
                             LengthPercentage::percent(percent / 100.0)
                         }
-                        calc::Resolved::Mixed(length) => {
-                            LengthPercentage::calc(length.register(lengths))
+                        calc::Resolved::Deferred(length) => {
+                            LengthPercentage::calc(lengths.register(length)?)
                         }
                     },
                 })
