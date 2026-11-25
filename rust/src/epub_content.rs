@@ -1052,6 +1052,7 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                         | "marker"
                         | "filter"
                         | "feMergeNode"
+                        | "feDistantLight"
                 ))
         {
             return Err(unsupported("SVG contains unsupported or active elements"));
@@ -1107,6 +1108,18 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                 None if tag == "filter" && matches!(key, "filterUnits" | "primitiveUnits") => true,
                 None if filter_primitive && matches!(key, "in" | "result") => true,
                 None if tag == "feMergeNode" && key == "in" => true,
+                None if tag == "feDistantLight" && matches!(key, "azimuth" | "elevation") => true,
+                None if super::svg::effects::is_lighting(tag)
+                    && matches!(key, "surfaceScale" | "kernelUnitLength") =>
+                {
+                    true
+                }
+                None if tag == "feDiffuseLighting" && key == "diffuseConstant" => true,
+                None if tag == "feSpecularLighting"
+                    && matches!(key, "specularConstant" | "specularExponent") =>
+                {
+                    true
+                }
                 None if tag == "feBlend" && matches!(key, "in2" | "mode") => true,
                 None if tag == "feMorphology" && matches!(key, "operator" | "radius") => true,
                 None if tag == "feConvolveMatrix"
@@ -1166,11 +1179,7 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                     true
                 }
                 None if tag == "feColorMatrix" && matches!(key, "type" | "values") => true,
-                None if super::svg::effects::has_flood_paint(tag)
-                    && matches!(key, "flood-color" | "flood-opacity") =>
-                {
-                    true
-                }
+                None if super::svg::effects::paint_properties(tag).contains(&key) => true,
                 Some(XML) => matches!(key, "lang" | "space"),
                 None => matches!(
                     key,
@@ -1302,6 +1311,7 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
         node.is_element()
             && (node.has_tag_name("filter")
                 || node.has_tag_name((SVG, "feMergeNode"))
+                || node.has_tag_name((SVG, "feDistantLight"))
                 || super::svg::effects::is_filter_primitive(node.tag_name().name())
                 || node.attribute("filter").is_some()
                 || (super::svg::effects::is_gradient(node.tag_name().name())

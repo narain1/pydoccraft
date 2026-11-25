@@ -14,6 +14,9 @@ use crate::{
 mod convolution;
 pub(super) use convolution::normalize as normalize_convolution;
 
+#[path = "epub_svg_lighting.rs"]
+mod lighting;
+
 #[path = "epub_svg_morphology.rs"]
 mod morphology;
 pub(super) use morphology::normalize as normalize_morphology;
@@ -64,11 +67,21 @@ pub(in crate::epub) fn is_filter_primitive(tag: &str) -> bool {
             | "feImage"
             | "feTurbulence"
             | "feDisplacementMap"
+            | "feDiffuseLighting"
+            | "feSpecularLighting"
     )
 }
 
-pub(in crate::epub) fn has_flood_paint(tag: &str) -> bool {
-    matches!(tag, "feDropShadow" | "feFlood")
+pub(in crate::epub) fn is_lighting(tag: &str) -> bool {
+    matches!(tag, "feDiffuseLighting" | "feSpecularLighting")
+}
+
+pub(in crate::epub) fn paint_properties(tag: &str) -> &'static [&'static str] {
+    match tag {
+        "feDropShadow" | "feFlood" => &["flood-color", "flood-opacity"],
+        "feDiffuseLighting" | "feSpecularLighting" => &["lighting-color"],
+        _ => &[],
+    }
 }
 
 pub(super) struct Effects<'a, 'input> {
@@ -161,6 +174,7 @@ pub(in crate::epub) fn validate_markup(root: Node<'_, '_>) -> Result<(), EngineE
             "filter" => validate_chain(node)?,
             tag if is_filter_primitive(tag) => validate_primitive(node)?,
             tag if is_transfer_channel(tag) => transfer::validate_channel(node)?,
+            "feDistantLight" => lighting::validate_source(node)?,
             "feMergeNode"
                 if !node
                     .parent_element()
@@ -305,12 +319,20 @@ fn validate_primitive(node: Node<'_, '_>) -> Result<(), EngineError> {
         .parent_element()
         .is_some_and(|parent| parent.has_tag_name("filter"))
         || (!matches!(node.tag_name().name(), "feMerge" | "feComponentTransfer")
+            && !is_lighting(node.tag_name().name())
             && node.children().any(|child| child.is_element()))
     {
         return Err(invalid("misplaced SVG filter primitive"));
     }
     validate_region(node)?;
-    match node.tag_name().name() {
+    let tag = node.tag_name().name();
+    for &property in paint_properties(tag) {
+        if let Some(value) = node.attribute(property) {
+            filter_paint(property, value)?;
+        }
+    }
+    match tag {
+        tag if is_lighting(tag) => return lighting::validate(node),
         "feColorMatrix" => return validate_color_matrix(node),
         "feImage" => return validate_image_aspect(node),
         "feComposite" => return validate_composite(node),
@@ -387,13 +409,6 @@ fn validate_primitive(node: Node<'_, '_>) -> Result<(), EngineError> {
             "invalid SVG drop shadow offset",
             "SVG drop shadow offset exceeds 16000 pixels",
         )?;
-    }
-    if has_flood_paint(node.tag_name().name()) {
-        for property in ["flood-color", "flood-opacity"] {
-            if let Some(value) = node.attribute(property) {
-                flood_paint(property, value)?;
-            }
-        }
     }
     Ok(())
 }
@@ -530,7 +545,10 @@ fn finite_number(value: &str, reason: &'static str) -> Result<f32, EngineError> 
         .ok_or_else(|| invalid(reason))
 }
 
-pub(super) fn flood_paint(property: &str, value: &str) -> Result<String, EngineError> {
+pub(super) fn filter_paint(property: &str, value: &str) -> Result<String, EngineError> {
+    if property == "lighting-color" {
+        return lighting::color(value);
+    }
     let value = value.trim();
     if matches!(
         value,
@@ -711,6 +729,11 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
                 within_source: false,
                 ..get(offset.input())
             },
+            Kind::DiffuseLighting(_) | Kind::SpecularLighting(_) => Support {
+                procedural: true,
+                unattributed_paint: true,
+                ..Support::default()
+            },
             Kind::Turbulence(_) => Support {
                 procedural: true,
                 ..Support::default()
@@ -768,6 +791,17 @@ fn filter_support(filter: &usvg::filter::Filter, bounds: usvg::Rect) -> Support 
                     }
                 };
                 let unattributed_paint = match composite.operator() {
+                    // A direct lighting result clipped to original alpha
+                    // can be measured for a single original painted leaf.
+                    CompositeOperator::In
+                        if matches!(composite.input2(), Input::SourceAlpha)
+                            && matches!(composite.input1(), Input::Reference(name) if primitives[..index].iter().any(|previous| {
+                                previous.result() == name
+                                    && matches!(previous.kind(), Kind::DiffuseLighting(_) | Kind::SpecularLighting(_))
+                            })) =>
+                    {
+                        false
+                    }
                     CompositeOperator::Over => support.unattributed_paint,
                     CompositeOperator::In | CompositeOperator::Out => first.unattributed_paint,
                     _ => first.unattributed_paint || second.unattributed_paint,
@@ -1233,13 +1267,9 @@ fn measure_group(
         let area = area as usize;
         // Charge the isolated layer and the native filter's input/output canvas copies.
         charge_work(pixels, area, 3)?;
+        let device = viewport.transform.pre_concat(group.abs_transform());
         for filter in group.filters() {
-            tiling::validate(
-                filter,
-                [sx, sy],
-                viewport.transform.pre_concat(group.abs_transform()),
-                viewport.raster,
-            )?;
+            tiling::validate(filter, [sx, sy], device, viewport.raster)?;
             for primitive in filter.primitives() {
                 let region = primitive.rect();
                 if [
@@ -1266,6 +1296,10 @@ fn measure_group(
                         8 + blur_work(shadow.std_dev_x().get() * sx, shadow.std_dev_y().get() * sy)?
                     }
                     usvg::filter::Kind::ColorMatrix(_) => 8,
+                    usvg::filter::Kind::DiffuseLighting(_)
+                    | usvg::filter::Kind::SpecularLighting(_) => {
+                        lighting::work(primitive, filter.rect(), device, viewport.raster)?
+                    }
                     usvg::filter::Kind::Flood(_) => 5,
                     usvg::filter::Kind::Offset(offset) => {
                         let message = "SVG filter offset exceeds 16000 pixels after scaling";
@@ -1304,7 +1338,6 @@ fn measure_group(
                             height.ceil().max(1.0) as usize,
                         ],
                     )?,
-                    _ => return Err(unsupported("unsupported SVG filter primitive")),
                 };
                 charge_work(pixels, area, passes)?;
             }

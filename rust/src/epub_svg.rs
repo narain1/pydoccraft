@@ -869,13 +869,11 @@ fn apply_styles(
             style.push_str(&encoded);
             style.push(';');
         }
-        let presentation_fallbacks: &[&str] = if effects::has_flood_paint(node.tag_name().name()) {
-            &["flood-color", "flood-opacity"]
-        } else if node.has_tag_name((NS, "feImage")) {
+        let presentation_fallbacks: &[&str] = if node.has_tag_name((NS, "feImage")) {
             // The native parser accepts modern image-rendering values in CSS.
             &["image-rendering"]
         } else {
-            &[]
+            effects::paint_properties(node.tag_name().name())
         };
         for &property in presentation_fallbacks {
             if !props.iter().any(|(key, _)| key == property) {
@@ -945,8 +943,8 @@ fn canonical_style_value<'a, 'input>(
             .get_or_insert_with(|| effects::Effects::new(root))
             .validate_filter(node, &value)?
             .map_or_else(|| "none".into(), |id| format!("url(#{id})"));
-    } else if matches!(key, "flood-color" | "flood-opacity") {
-        value = effects::flood_paint(key, &value)?;
+    } else if matches!(key, "flood-color" | "flood-opacity" | "lighting-color") {
+        value = effects::filter_paint(key, &value)?;
     } else {
         validate_paint(&value)?;
     }
@@ -991,6 +989,7 @@ fn svg_property(key: &str) -> bool {
             | "color-interpolation-filters"
             | "flood-color"
             | "flood-opacity"
+            | "lighting-color"
             | "stop-color"
             | "stop-opacity"
             | "marker-start"

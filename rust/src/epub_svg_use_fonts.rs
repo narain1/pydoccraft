@@ -240,15 +240,13 @@ impl<'a, 'original, 'input> Instances<'a, 'original, 'input> {
                             style.insert(property.to_owned(), value);
                         }
                     }
-                    if effects::has_flood_paint(node.tag_name().name()) {
-                        for property in ["flood-color", "flood-opacity"] {
-                            if let Some(value) = node.attribute(property) {
-                                if !style.contains_key(property) {
-                                    style.insert(
-                                        property.to_owned(),
-                                        effects::flood_paint(property, value)?,
-                                    );
-                                }
+                    for &property in effects::paint_properties(node.tag_name().name()) {
+                        if let Some(value) = node.attribute(property) {
+                            if !style.contains_key(property) {
+                                style.insert(
+                                    property.to_owned(),
+                                    effects::filter_paint(property, value)?,
+                                );
                             }
                         }
                     }

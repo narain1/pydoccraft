@@ -95,6 +95,7 @@
 - [x] Resolve functional minima and maxima on ordinary blocks when the fit-content limit and the natural block probe both have independently resolvable geometry.
 - [ ] Extend the EPUB CSS profile with block and relative inline bounds in content-dependent or flex and grid containing geometry, functional block bounds with an indefinite containing height, remaining contain-fit sizing contexts, other nonlinear ratio operands and typed math, and subgrids.
 - [x] Match bounded sibling positions in either direction, including An+B, namespace-aware types, and filtered child selectors with the correct specificity.
+- [x] Render bounded native diffuse and specular distant lighting. Verify single-source PDF text and links when an original-alpha mask controls the lit result.
 - [ ] Add SVG filter primitives and retain PDF text and links for multi-source, non-axis-aligned or ambiguous spatial filter results.
 - [ ] Extend mixed-font SVG text fallback to spacing across ambiguous clusters, length owners separated by positioned or independently painted wrappers and glyph positioning.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.
