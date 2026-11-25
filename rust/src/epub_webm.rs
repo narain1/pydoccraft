@@ -66,21 +66,32 @@ impl Reader {
         })
     }
 
-    pub(super) fn track(&self, kind: MediaType) -> Result<u32, EngineError> {
+    pub(super) fn track(
+        &self,
+        kind: MediaType,
+        selection: Option<usize>,
+    ) -> Result<u32, EngineError> {
         let mut streams = self
             .demux
             .streams()
             .iter()
             .filter(|stream| stream.params.media_type == kind);
-        let stream = streams.next().ok_or_else(|| {
-            unsupported(match kind {
-                MediaType::Video => "WebM has no video track",
-                _ => "WebM has no audio track",
-            })
-        })?;
-        if streams.next().is_some() {
-            return Err(unsupported("multiple WebM tracks of the same media type"));
-        }
+        let stream = if let Some(ordinal) = selection {
+            streams.nth(ordinal).ok_or_else(|| {
+                EngineError::InvalidArgument(format!("WebM audio track {ordinal} is absent"))
+            })?
+        } else {
+            let stream = streams.next().ok_or_else(|| {
+                unsupported(match kind {
+                    MediaType::Video => "WebM has no video track",
+                    _ => "WebM has no audio track",
+                })
+            })?;
+            if streams.next().is_some() {
+                return Err(unsupported("multiple WebM tracks of the same media type"));
+            }
+            stream
+        };
         if self
             .demux
             .track_timing(stream.index)

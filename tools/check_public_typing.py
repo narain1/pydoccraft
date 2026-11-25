@@ -31,6 +31,10 @@ def verify_epub_tracks(source: bytes) -> None:
         frames = epub.epub_embedded_video(0, 0, text_track=1)
         assert_type(frames, Iterator[doc_ex.EpubVideoFrame])
         assert_type(next(frames).text_cues, tuple[doc_ex.EpubTextCue, ...])
+        audio = epub.epub_embedded_audio(0, 0, audio_track=1)
+        assert_type(audio, Iterator[doc_ex.EpubAudioClip])
+        narration = epub.epub_narration(0, audio_tracks={"OEBPS/voice.webm": 1})
+        assert_type(narration, Iterator[doc_ex.EpubNarrationCue])
 
 
 def verify(document_bytes: bytes, png: bytes, mode: str) -> None:

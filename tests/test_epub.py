@@ -2613,6 +2613,84 @@ first
             with self.assertRaises(doc_ex.MalformedDocumentError):
                 next(book.epub_embedded_video(0, 0))
 
+    def test_webm_selects_audio_tracks_for_video_and_narration(self) -> None:
+        fixtures = Path(__file__).parent / "fixtures"
+        movie = (fixtures / "epub-video-webm-selected-audio.webm").read_bytes()
+        voice = "OEBPS/voice.webm"
+        chapter_path = "OEBPS/tracks.xhtml"
+        markup = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Tracks</title></head>
+          <body><p id="voice">Select a narrator</p><video>
+          <source src="fallback.ogv" type="video/ogg; codecs=&quot;theora, vorbis&quot;"/>
+          <source src="tracks.webm" type="video/webm; codecs=&quot;vp8, opus, vorbis&quot;"/>
+          </video><audio src="voice.webm"/></body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            book_data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Tracks", markup, chapter_path)],
+                resources={
+                    "OEBPS/fallback.ogv": doc_ex.EpubResource("video/ogg", (
+                        fixtures / "epub-theora-vorbis-short-audio.ogv").read_bytes()),
+                    "OEBPS/tracks.webm": doc_ex.EpubResource("video/webm", movie),
+                    voice: doc_ex.EpubResource("audio/webm", (
+                        fixtures / "epub-audio-webm-selected-audio.webm").read_bytes()),
+                },
+                overlays={chapter_path: [doc_ex.EpubOverlayCue("voice", voice, 200_000, 400_000)]},
+            )
+
+        def pcm(chunks: list[doc_ex.EpubAudioClip], rate: int, channels: int) -> bytes:
+            output = bytearray()
+            for chunk in chunks:
+                self.assertEqual((chunk.sample_rate, chunk.channels), (rate, channels))
+                with wave.open(io.BytesIO(chunk.wave), "rb") as samples:
+                    output.extend(samples.readframes(chunk.frame_count))
+            return bytes(output)
+
+        with doc_ex.open(book_data) as book:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "multiple WebM tracks"):
+                next(book.epub_embedded_audio(0, 0, source_index=1))
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "multiple WebM tracks"):
+                next(book.epub_narration(0))
+            with self.assertRaisesRegex(ValueError, "track 2 is absent"):
+                next(book.epub_embedded_audio(0, 0, audio_track=2))
+            with self.assertRaisesRegex(ValueError, "requires a WebM resource"):
+                next(book.epub_embedded_audio(0, 0, source_index=0, audio_track=0))
+            with self.assertRaisesRegex(ValueError, "mutually exclusive"):
+                next(book.epub_embedded_audio(0, 0, audio_track=0, opus_track=0))
+            with self.assertRaisesRegex(ValueError, "mutually exclusive"):
+                next(book.epub_narration(0, audio_tracks={voice: 1}, opus_tracks={voice: 0}))
+
+            for track, rate, channels, frequencies in ((0, 48_000, 1, (340,)), (1, 44_100, 2, (420, 630))):
+                with self.subTest(track=track):
+                    selected = pcm(list(book.epub_embedded_audio(
+                        0, 0, audio_track=track, start_us=200_000, end_us=400_000, chunk_frames=337,
+                    )), rate, channels)
+                    self.assertEqual(len(selected), rate * channels * 2 // 5)
+                    signal = list(struct.iter_unpack("<" + "h" * channels, selected))
+                    for index, frequency in enumerate(frequencies):
+                        crossings = sum(a[index] < 0 <= b[index] for a, b in zip(signal, signal[1:]))
+                        self.assertAlmostEqual(crossings, frequency / 5, delta=2)
+
+                    narration = next(book.epub_narration(0, audio_tracks={voice: track})).audio
+                    assert narration is not None
+                    control = pcm(list(book.epub_embedded_audio(
+                        0, 1, audio_track=track, start_us=200_000, end_us=400_000,
+                    )), rate, channels)
+                    self.assertEqual(pcm([narration], rate, channels), control)
+                    played = []
+                    book.play_epub_narration(0, audio_tracks={voice: track}, play_audio=played.append,
+                                             speak_text=self.fail, chunk_frames=593)
+                    self.assertEqual(pcm(played, rate, channels), control)
+            pictures = list(book.epub_embedded_video(0, 0, source_index=1, start_us=200_000, end_us=400_000))
+            self.assertEqual(pictures[0].start_us, 200_000)
+            self.assertEqual(pictures[-1].start_us + pictures[-1].duration_us, 400_000)
+
+        self.assertEqual(movie.count(b"A_VORBIS"), 1)
+        unknown = movie.replace(b"A_VORBIS", b"A_UNKNWN")
+        with doc_ex.open(rewrite_epub(book_data, {"OEBPS/tracks.webm": unknown})) as book:
+            clip = next(book.epub_embedded_audio(0, 0, audio_track=0, start_us=200_000, end_us=400_000))
+            self.assertEqual((clip.sample_rate, clip.channels, clip.frame_count), (48_000, 1, 9_600))
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "requires an Opus or Vorbis track"):
+                next(book.epub_embedded_audio(0, 0, audio_track=1))
+
     def test_ogg_vorbis_audio_and_smil_obey_the_final_granule(self) -> None:
         encoded = (Path(__file__).parent / "fixtures" / "epub-audio-vorbis.ogg").read_bytes()
         voice = "OEBPS/voice.ogg"

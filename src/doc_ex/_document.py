@@ -42,12 +42,12 @@ def _epub_chunk_size(frames: int) -> int:
     return frames
 
 
-def _epub_opus_index(index: int | None) -> int | None:
+def _epub_track_index(index: int | None, name: str) -> int | None:
     if index is None:
         return None
     index = operator.index(index)
     if not 0 <= index <= 0xFFFFFFFF:
-        raise ValueError("Opus track index must be an unsigned 32-bit integer")
+        raise ValueError(f"{name} track index must be an unsigned 32-bit integer")
     return index
 
 
@@ -776,18 +776,27 @@ class Document:
         end_us: int | None = None,
         chunk_frames: int = 65_536,
         opus_track: int | None = None,
+        audio_track: int | None = None,
     ) -> Iterator[EpubAudioClip]:
-        """Stream PCM from an XHTML audio element or a supported video soundtrack."""
+        """Stream PCM from an XHTML media element with optional WebM audio track selection."""
         from . import _core, _native
         from .errors import UnsupportedFormatError
 
         embedded = self.epub_embedded_media(page)[operator.index(media_index)]
         sources = embedded.sources if source_index is None else (embedded.sources[operator.index(source_index)],)
         frames = _epub_chunk_size(chunk_frames)
-        selection = _epub_opus_index(opus_track)
+        opus_selection = _epub_track_index(opus_track, "Opus")
+        audio_selection = _epub_track_index(audio_track, "WebM audio")
+        if opus_selection is not None and audio_selection is not None:
+            raise ValueError("Opus and WebM audio track selections are mutually exclusive")
         unsupported_source: UnsupportedFormatError | None = None
         for source in sources:
             if source.path is None or source.media_type is None or not source.playable_audio:
+                continue
+            if (
+                source_index is None and audio_selection is not None
+                and source.media_type not in ("audio/webm", "video/webm")
+            ):
                 continue
             start, end = _epub_source_interval(source, start_us, end_us)
             self._ensure_open()
@@ -795,7 +804,8 @@ class Document:
                 return
             try:
                 decoder = _native(lambda: _core._open_epub_audio(
-                    self._source, source.path, source.media_type, selection, embedded.kind == "video"
+                    self._source, source.path, source.media_type, opus_selection, embedded.kind == "video",
+                    audio_selection,
                 ))
             except UnsupportedFormatError as error:
                 if source_index is not None:
@@ -808,6 +818,8 @@ class Document:
                 return
         if unsupported_source is not None:
             raise unsupported_source
+        if audio_selection is not None:
+            raise UnsupportedFormatError("WebM audio track selection requires a supported local WebM source")
         raise UnsupportedFormatError("embedded audio requires a supported local source")
 
     def epub_embedded_video(
@@ -905,6 +917,7 @@ class Document:
         start_cue: int,
         chunk_frames: int | None,
         opus_tracks: Mapping[str, int] | None,
+        audio_tracks: Mapping[str, int] | None,
     ) -> Iterator[Iterator[EpubNarrationCue]]:
         from . import _core, _native
 
@@ -914,7 +927,8 @@ class Document:
         if chunk_frames is not None:
             chunk_frames = _epub_chunk_size(chunk_frames)
         skipped = frozenset(skip_roles)
-        selections = dict(opus_tracks) if opus_tracks is not None else {}
+        opus_selections = dict(opus_tracks) if opus_tracks is not None else {}
+        audio_selections = dict(audio_tracks) if audio_tracks is not None else {}
         current_track = None
         decoder = None
         found_start = start_cue == 0
@@ -934,9 +948,12 @@ class Document:
                 continue
             track = (audio["path"], audio["media_type"])
             if track != current_track:
-                selection = _epub_opus_index(selections.get(track[0]))
+                opus_selection = _epub_track_index(opus_selections.get(track[0]), "Opus")
+                audio_selection = _epub_track_index(audio_selections.get(track[0]), "WebM audio")
                 decoder = None
-                decoder = _native(lambda: _core._open_epub_audio(self._source, *track, selection))
+                decoder = _native(lambda: _core._open_epub_audio(
+                    self._source, *track, opus_selection, audio_track=audio_selection,
+                ))
                 current_track = track
             yield self._epub_audio_group(
                 args, decoder, audio["clip_begin_us"], audio["clip_end_us"], chunk_frames,
@@ -988,9 +1005,12 @@ class Document:
         start_cue: int = 0,
         chunk_frames: int | None = None,
         opus_tracks: Mapping[str, int] | None = None,
+        audio_tracks: Mapping[str, int] | None = None,
     ) -> Iterator[EpubNarrationCue]:
-        """Read cues with optional chunking and zero-based Opus track indices by resource path."""
-        for group in self._epub_narration_groups(page, skip_roles, start_cue, chunk_frames, opus_tracks):
+        """Read cues with optional chunking and zero-based Ogg Opus or WebM audio selections."""
+        for group in self._epub_narration_groups(
+            page, skip_roles, start_cue, chunk_frames, opus_tracks, audio_tracks,
+        ):
             yield from group
 
     def play_epub_narration(
@@ -1004,9 +1024,12 @@ class Document:
         start_cue: int = 0,
         chunk_frames: int | None = None,
         opus_tracks: Mapping[str, int] | None = None,
+        audio_tracks: Mapping[str, int] | None = None,
     ) -> None:
-        """Play cues through blocking sinks, with optional Opus track indices by resource path."""
-        for group in self._epub_narration_groups(page, skip_roles, start_cue, chunk_frames, opus_tracks):
+        """Play cues through blocking sinks with optional Ogg Opus or WebM audio selections."""
+        for group in self._epub_narration_groups(
+            page, skip_roles, start_cue, chunk_frames, opus_tracks, audio_tracks,
+        ):
             first = next(group)
             if on_cue is not None:
                 on_cue(first)

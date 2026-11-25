@@ -60,8 +60,9 @@ impl AudioSource {
         media: &str,
         opus_track: Option<usize>,
         synchronize_video: bool,
+        audio_track: Option<usize>,
     ) -> Result<Self, EngineError> {
-        Self::decode(media, opus_track, synchronize_video, || {
+        Self::decode(media, opus_track, synchronize_video, audio_track, || {
             read(data, path, MAX_ENCODED_BYTES)
         })
     }
@@ -70,12 +71,23 @@ impl AudioSource {
         media: &str,
         opus_track: Option<usize>,
         synchronize_video: bool,
+        audio_track: Option<usize>,
         load: impl FnOnce() -> Result<Vec<u8>, EngineError>,
     ) -> Result<Self, EngineError> {
         let codec = audio_codec(media);
+        if opus_track.is_some() && audio_track.is_some() {
+            return Err(EngineError::InvalidArgument(
+                "Opus and WebM audio track selections are mutually exclusive".into(),
+            ));
+        }
         if opus_track.is_some() && !matches!(codec, Some(AudioCodec::Opus | AudioCodec::Ogg)) {
             return Err(EngineError::InvalidArgument(
                 "Opus track selection requires an Ogg audio resource".into(),
+            ));
+        }
+        if audio_track.is_some() && !matches!(codec, Some(AudioCodec::Webm)) {
+            return Err(EngineError::InvalidArgument(
+                "WebM audio track selection requires a WebM resource".into(),
             ));
         }
         let decoder = match codec {
@@ -108,7 +120,7 @@ impl AudioSource {
                 let bytes = load()?;
                 std::panic::catch_unwind(|| {
                     let reader = super::webm::Reader::open(bytes)?;
-                    let index = reader.track(oxideav_core::MediaType::Audio)?;
+                    let index = reader.track(oxideav_core::MediaType::Audio, audio_track)?;
                     use oxideav_core::Demuxer;
                     match reader.demux.streams()[index as usize]
                         .params
@@ -154,7 +166,7 @@ impl AudioSource {
         media: &str,
         load: impl FnOnce() -> Result<Vec<u8>, EngineError>,
     ) -> Result<u64, EngineError> {
-        let mut source = Self::decode(media, None, false, load)?;
+        let mut source = Self::decode(media, None, false, None, load)?;
         let (format, frames) = source.geometry()?;
         let frames = match (&source.decoder, frames) {
             (_, Some(frames)) => frames,
