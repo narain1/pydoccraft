@@ -199,6 +199,10 @@ pub(super) struct Work {
 }
 
 impl Work {
+    pub(super) fn inside_frame(&self) -> bool {
+        !self.paths.borrow().is_empty()
+    }
+
     pub(super) fn enter(&self, path: &str, pixels: u64) -> Result<Scope<'_>, EngineError> {
         let mut paths = self.paths.borrow_mut();
         if paths.iter().any(|ancestor| ancestor == path) {

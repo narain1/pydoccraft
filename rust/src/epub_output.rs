@@ -445,7 +445,9 @@ impl<'a> Output<'a> {
                 .archive
                 .as_mut()
                 .ok_or_else(|| conversion("missing EPUB archive"))?;
-            archive.frame_work = Some(Rc::clone(&self.frames));
+            if self.frames.inside_frame() {
+                archive.frame_work = Some(Rc::clone(&self.frames));
+            }
             let interactive =
                 self.svg_images.is_some() && image.metadata.contains_key("epub_svg_inline");
             let (tree, geometry) =
