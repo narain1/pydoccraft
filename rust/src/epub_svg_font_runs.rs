@@ -359,11 +359,17 @@ fn split_text<'a, 'input>(
     parent: Node<'a, 'input>,
 ) -> Result<TextContext<'a, 'input>, EngineError> {
     let mut owner = None;
+    let mut overlapping = false;
     for ancestor in parent.ancestors().filter(Node::is_element) {
         if ancestor.has_tag_name((NS, "textPath")) {
             return Err(unsupported("EPUB SVG mixed-font text path"));
         }
         if ancestor.has_tag_name((NS, "text")) {
+            if overlapping && !ancestor.has_attribute("textLength") {
+                return Err(unsupported(
+                    "EPUB SVG mixed-font overlapping textLength owners",
+                ));
+            }
             return Ok((
                 ancestor,
                 ancestor
@@ -372,10 +378,8 @@ fn split_text<'a, 'input>(
                     .or(owner),
             ));
         }
-        if ancestor.has_attribute("textLength") && owner.replace(ancestor).is_some() {
-            return Err(unsupported(
-                "EPUB SVG mixed-font overlapping textLength owners",
-            ));
+        if ancestor.has_attribute("textLength") {
+            overlapping |= owner.replace(ancestor).is_some();
         }
     }
     Err(invalid("missing EPUB SVG text root"))

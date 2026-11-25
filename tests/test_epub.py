@@ -4286,6 +4286,46 @@ class EpubTests(unittest.TestCase):
                     independent = render(peers(width, separate=True), inline)
                     self.assertEqual(render(peers(width), inline), independent)
 
+        def deeper(outer: int, parent: int, *, separate: bool = False) -> str:
+            markup = svg(None, 92).split('<text x="134"', 1)[0]
+            leaf_widths = (72, 84)
+            leaves = []
+            for start, name, length in zip((0, 2), ("inner", "second"), leaf_widths):
+                ink = "".join(f'<tspan fill="#{bytes(rgb).hex()}">{part}</tspan>'
+                              for rgb, part in zip(colors[start:start + 2], labels[start:start + 2]))
+                leaves.append(f'<tspan id="{name}" textLength="{length}">'
+                              f'<a href="https://example.org/{name}">{ink}</a></tspan>')
+            tail = f'<a href="https://example.org/tail" fill="#{bytes(sides[1]).hex()}">B</a>'
+            if separate:
+                left = 134 - outer / 2
+                # The middle owner has two resolved units. Its first leaf
+                # starts at the owner's left edge and its last ends at the
+                # right edge. The trailing glyph ends at the outer right edge.
+                return markup + "".join(
+                    f'<text x="{x}" y="70" style="text-anchor:{anchor}">{part}</text>'
+                    for x, anchor, part in (
+                        (left, "start", leaves[0]),
+                        (left + parent - leaf_widths[1], "start", leaves[1]),
+                        (left + outer, "end", tail),
+                    )
+                ) + "</svg>"
+            return (markup + f'<text x="134" y="70" textLength="{outer}">'
+                    f'<tspan textLength="{parent}">{"".join(leaves)}</tspan>{tail}</text></svg>')
+
+        for inline in (False, True):
+            for outer, parent in ((248, 176), (256, 196)):
+                with self.subTest(inline=inline, outer=outer, middle=parent):
+                    independent = render(deeper(outer, parent, separate=True), inline)
+                    self.assertEqual(render(deeper(outer, parent), inline), independent)
+
+        too_deep = deeper(248, 176).replace(
+            '<tspan textLength="176">', '<tspan textLength="176"><tspan textLength="168">',
+        ).replace('</a></tspan></tspan><a href="https://example.org/tail"',
+                  '</a></tspan></tspan></tspan><a href="https://example.org/tail"')
+        for source in (too_deep, deeper(248, 140)):
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "overlapping textLength owners"):
+                render(source, False)
+
         oversized = peers(224).replace(
             "</text></svg>", '<tspan textLength="78">B́é</tspan>' * 7 + "</text></svg>",
         )

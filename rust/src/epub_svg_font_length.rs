@@ -548,10 +548,17 @@ fn probe_chunks<'a>(
                     .map(|attr| (local(attr.range()), String::new()))
                     .collect()
             } else {
-                text.children()
-                    .filter(|child| *child != owner)
-                    .map(|child| (local(child.range()), String::new()))
-                    .collect()
+                let mut outside = Vec::new();
+                for retained in owner.ancestors().take_while(|node| *node != text) {
+                    let parent = retained.parent_element().ok_or_else(nested_error)?;
+                    outside.extend(
+                        parent
+                            .children()
+                            .filter(|sibling| *sibling != retained)
+                            .map(|sibling| (local(sibling.range()), String::new())),
+                    );
+                }
+                outside
             };
             copy_edits.push((local(attr.range_value()), probe_id.clone()));
             let copy = apply_edits(&source[range.clone()], copy_edits, XML_BYTES)?;

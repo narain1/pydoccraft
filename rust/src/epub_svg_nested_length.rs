@@ -27,6 +27,12 @@ struct Owner {
     target: f32,
     id: String,
     temporary_id: bool,
+    parent: Option<usize>,
+}
+
+struct Measurement {
+    range: Range<usize>,
+    width: f32,
 }
 
 pub(super) fn prepare(
@@ -55,7 +61,7 @@ pub(super) fn prepare(
     }
     if nested
         .iter()
-        .any(|owner| owner.parent_element() != Some(text) || !owner.has_tag_name((NS, "tspan")))
+        .any(|owner| !owner.has_tag_name((NS, "tspan")))
         || std::iter::once(text)
             .chain(nested.iter().copied())
             .any(|owner| !matches!(owner.attribute("lengthAdjust"), None | Some("spacing")))
@@ -67,12 +73,26 @@ pub(super) fn prepare(
         return Err(error());
     }
     let mut children = Vec::with_capacity(nested.len());
-    for owner in nested {
+    for (index, &owner) in nested.iter().enumerate() {
+        let enclosing = owner.parent_element().ok_or_else(error)?;
+        let parent = if enclosing == text {
+            None
+        } else if enclosing.parent_element() == Some(text) {
+            Some(
+                nested[..index]
+                    .iter()
+                    .position(|&node| node == enclosing)
+                    .ok_or_else(error)?,
+            )
+        } else {
+            return Err(error());
+        };
         let (id, temporary_id) = measurement_id(owner, ids, next_id, source, edits)?;
         children.push(Owner {
             target: length_target(owner, edits)?,
             id,
             temporary_id,
+            parent,
         });
     }
     Ok(Some(NestedLength {
@@ -90,14 +110,16 @@ impl NestedLength {
         &self,
         text: Node<'a, 'input>,
     ) -> Result<Vec<Node<'a, 'input>>, EngineError> {
-        self.children
-            .iter()
-            .map(|owner| {
-                text.children()
-                    .find(|child| child.attribute("id") == Some(owner.id.as_str()))
-                    .ok_or_else(error)
-            })
-            .collect()
+        let mut nodes = Vec::with_capacity(self.children.len());
+        for owner in &self.children {
+            let parent = owner.parent.map_or(text, |index| nodes[index]);
+            let node = parent
+                .children()
+                .find(|child| child.attribute("id") == Some(owner.id.as_str()))
+                .ok_or_else(error)?;
+            nodes.push(node);
+        }
+        Ok(nodes)
     }
 
     pub(super) fn fit(
@@ -125,67 +147,77 @@ impl NestedLength {
         if owners.len() != probes.len() {
             return Err(error());
         }
-        let mut resolved = Vec::<(Range<usize>, f32)>::with_capacity(owners.len());
-        let mut inside = 0.0;
-        let mut units = clusters.len();
+        let root = owners.len();
+        let whole = 0..clusters.len();
+        let mut measured = Vec::<Measurement>::with_capacity(root);
+        let mut sibling_ends = vec![0; root + 1];
         for ((owner, inner), &probe) in owners.iter().copied().zip(&self.children).zip(probes) {
             let bytes = source_range(node, owner, chunk.text())?;
             let range = verify_inner(&clusters, bytes, probe)?;
-            if resolved
-                .last()
-                .is_some_and(|(previous, _)| previous.end > range.start)
+            let parent = inner.parent.unwrap_or(root);
+            let enclosing = inner.parent.map_or(&whole, |index| &measured[index].range);
+            if range.start < enclosing.start
+                || range.end > enclosing.end
+                || range.start < sibling_ends[parent]
             {
                 return Err(error());
             }
-            let extra = growth(inner.target - probe.bounding_box().width())?;
-            units -= range.len() - 1;
-            inside += extra;
-            resolved.push((range, extra));
+            sibling_ends[parent] = range.end;
+            measured.push(Measurement {
+                range,
+                width: probe.bounding_box().width(),
+            });
         }
         let native_width = text.bounding_box().width();
-        let outside = growth(self.outer - native_width - inside)?;
-        if units < 2 || native_width > MAX_LENGTH {
+        if native_width > MAX_LENGTH {
             return Err(error());
         }
 
-        // Resolve child spacing first. The parent translates each resolved
-        // child as one unit and spreads its own slack between those units.
+        let children = |parent| {
+            self.children
+                .iter()
+                .zip(&measured)
+                .filter_map(move |(owner, measurement)| {
+                    (owner.parent.unwrap_or(root) == parent).then_some(&measurement.range)
+                })
+        };
+        let mut inside = vec![0.0; root + 1];
+        let mut offsets = vec![0.0; whole.len()];
+        // Each measured native width excludes authored length adjustments.
+        // Resolve descendants first, then count each fitted child as one
+        // spacing unit and carry only its measured growth into its parent.
+        for (index, owner) in self.children.iter().enumerate().rev() {
+            let extra = growth(owner.target - measured[index].width - inside[index])?;
+            expand(
+                measured[index].range.clone(),
+                children(index),
+                extra,
+                &mut offsets,
+            )?;
+            let growth = inside[index] + extra;
+            inside[owner.parent.unwrap_or(root)] += growth;
+        }
+        let outside = growth(self.outer - native_width - inside[root])?;
+        expand(whole, children(root), outside, &mut offsets)?;
+        let total = inside[root] + outside;
         let mut dx = String::from(" dx=\"");
-        let mut offsets = Vec::with_capacity(clusters.len());
         let mut previous = 0.0;
-        let mut resolved = resolved.into_iter().peekable();
-        let mut unit = 0;
-        let mut inside_before = 0.0;
-        let outside_gap = outside / (units - 1) as f32;
         let anchor_shift = match chunk.anchor() {
             usvg::TextAnchor::Start => 0.0,
-            usvg::TextAnchor::Middle => -(inside + outside) / 2.0,
-            usvg::TextAnchor::End => -(inside + outside),
+            usvg::TextAnchor::Middle => -total / 2.0,
+            usvg::TextAnchor::End => -total,
         };
-        for (index, cluster) in clusters.iter().enumerate() {
-            let mut shift = inside_before + outside_gap * unit as f32;
-            if let Some((range, extra)) =
-                resolved.peek().filter(|(range, _)| range.contains(&index))
-            {
-                shift += extra / (range.len() - 1) as f32 * (index - range.start) as f32;
-                if index + 1 == range.end {
-                    inside_before += extra;
-                    unit += 1;
-                    resolved.next();
-                }
-            } else {
-                unit += 1;
-            }
-            if !offsets.is_empty() {
+        for (index, (shift, cluster)) in offsets.iter_mut().zip(clusters).enumerate() {
+            if index != 0 {
                 dx.push(' ');
             }
-            write!(dx, "{}", shift - previous).map_err(invalid)?;
+            write!(dx, "{}", *shift - previous).map_err(invalid)?;
             let label = &cluster.last().ok_or_else(error)?.text;
             for _ in 1..label.chars().count() {
                 dx.push_str(" 0");
             }
-            offsets.push(shift + anchor_shift);
-            previous = shift;
+            previous = *shift;
+            *shift += anchor_shift;
         }
         dx.push('"');
         let mut edits = vec![(svg::style_insertion(source.as_bytes(), node)?, dx)];
@@ -200,6 +232,38 @@ impl NestedLength {
             edits,
         ))
     }
+}
+
+fn expand<'a>(
+    range: Range<usize>,
+    children: impl Iterator<Item = &'a Range<usize>> + Clone,
+    extra: f32,
+    offsets: &mut [f32],
+) -> Result<(), EngineError> {
+    let collapsed = children.clone().map(|child| child.len() - 1).sum::<usize>();
+    let units = range
+        .len()
+        .checked_sub(collapsed)
+        .filter(|&units| units >= 2)
+        .ok_or_else(error)?;
+    let gap = extra / (units - 1) as f32;
+    let mut child = children.peekable();
+    let mut unit = 0;
+    for (index, offset) in range.clone().zip(&mut offsets[range.clone()]) {
+        *offset += gap * unit as f32;
+        if let Some(inside) = child.peek().filter(|inside| inside.contains(&index)) {
+            if index + 1 == inside.end {
+                unit += 1;
+                child.next();
+            }
+        } else {
+            unit += 1;
+        }
+    }
+    for offset in &mut offsets[range.end..] {
+        *offset += extra;
+    }
+    Ok(())
 }
 
 fn measurable_chunk(text: &usvg::Text) -> Result<&usvg::TextChunk, EngineError> {
@@ -312,6 +376,6 @@ fn growth(delta: f32) -> Result<f32, EngineError> {
 
 pub(super) fn error() -> EngineError {
     unsupported(
-        "EPUB SVG mixed-font overlapping textLength owners require direct nested spacing expansions in an unkerned horizontal chunk",
+        "EPUB SVG mixed-font overlapping textLength owners require bounded direct nested spacing expansions in an unkerned horizontal chunk",
     )
 }
