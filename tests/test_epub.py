@@ -3281,6 +3281,63 @@ class EpubTests(unittest.TestCase):
         with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "geometry budget"):
             preview('textLength="1000000" lengthAdjust="spacingAndGlyphs"')
 
+    def test_epub_svg_mixed_face_spacing_moves_each_combining_cluster_as_a_unit(self) -> None:
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
+        resources = {"OEBPS/variable.ttf": doc_ex.EpubResource("font/ttf", font)}
+        labels = ("B\u0301", "é", "B\u0301", "é")
+        colors = ((162, 32, 34), (34, 133, 48), (40, 66, 151), (137, 42, 139))
+
+        def render(length: int | None) -> tuple:
+            measure = f' textLength="{length}"' if length else ""
+            elements = "".join(
+                f'<tspan fill="#{bytes(rgb).hex()}"><a href="https://example.org/{index}">{label}</a></tspan>'
+                for index, (rgb, label) in enumerate(zip(colors, labels))
+            )
+            svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 95">
+              <style>
+                @font-face {{font-family:Layout;src:url(variable.ttf);unicode-range:U+00E9;
+                             font-variation-settings:"wght" 340}}
+                @font-face {{font-family:Layout;src:url(variable.ttf);unicode-range:U+0042,U+0301;
+                             font-variation-settings:"wght" 760}}
+                text {{font-family:Layout;font-size:34px;font-optical-sizing:none}}
+              </style>
+              <text x="18" y="70"{measure}>{elements}</text></svg>"""
+            with doc_ex.open(epub_fixture()) as original:
+                data = original.edit_epub_structure(
+                    [doc_ex.EpubSvgChapterSource("Accents", svg, "OEBPS/accents.svg"), 0], resources=resources,
+                )
+            with doc_ex.open(data) as book:
+                width, pixels = preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                output = book.export_epub_fixed_pdf(dpi=96, pages=[0], searchable=True)
+            with doc_ex.open(output) as pdf:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+                self.assertEqual("".join(pdf[0].get_text().split()), "".join(labels))
+                self.assertEqual(len(pdf[0].search_for("B\u0301")), 2)
+                boxes = {int(link.uri.rsplit("/", 1)[1]): link.bbox
+                         for link in pdf[0].get_links() if link.uri and link.uri.startswith("https://example.org/")}
+                self.assertEqual(set(boxes), set(range(4)))
+            ink = [{(offset // 4 % width, offset // 4 // width) for offset in range(0, len(pixels), 4)
+                    if pixels[offset:offset + 4] == bytes((*color, 255))}
+                   for color in colors]
+            self.assertTrue(all(ink))
+            return ink, boxes
+
+        native, _ = render(None)
+        normal, boxes = render(104)
+        expanded, enlarged = render(128)
+        for index, (original, before, after) in enumerate(zip(native, normal, expanded)):
+            # The first cluster keeps the ordinary native origin. The
+            # other origins can have a different subpixel phase.
+            if index == 0:
+                self.assertEqual(original, before)
+            else:
+                self.assertAlmostEqual(len(original), len(before), delta=20)
+                self.assertAlmostEqual(min(y for _, y in original), min(y for _, y in before), delta=1)
+            dx = index * 8
+            self.assertEqual({(x + dx, y) for x, y in before}, after, index)
+            for coordinate, (old, current) in enumerate(zip(boxes[index], enlarged[index])):
+                self.assertAlmostEqual(current - old, dx * .75 if coordinate % 2 == 0 else 0, delta=.05)
+
     def test_epub_svg_nested_mixed_face_text_length_preserves_neighbor_layout(self) -> None:
         font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
         resources = {"OEBPS/variable.ttf": doc_ex.EpubResource("font/ttf", font)}
@@ -3383,7 +3440,7 @@ class EpubTests(unittest.TestCase):
         def svg(*, combined: bool, first: int, second: int) -> str:
             elements = (
                 f'<tspan x="110" y="38" id="first-owner" textLength="{first}" fill="#a03020">'
-                '<a href="https://example.org/first">éBBé</a></tspan>',
+                '<a href="https://example.org/first">B́éBé</a></tspan>',
                 f'<tspan x="270" y="68" id="second-owner" textLength="{second}" text-anchor="end" fill="#204090">'
                 '<a href="https://example.org/second">BééB</a></tspan>',
                 '<tspan x="152" y="99" textLength="80" style="font-family:sans-serif;fill:#305010">'
@@ -3395,7 +3452,7 @@ class EpubTests(unittest.TestCase):
               <style>
                 @font-face {{font-family:Layout;src:url(variable.ttf);unicode-range:U+00E9;
                              font-variation-settings:"wght" 340}}
-                @font-face {{font-family:Layout;src:url(variable.ttf);unicode-range:U+0042;
+                @font-face {{font-family:Layout;src:url(variable.ttf);unicode-range:U+0042,U+0301;
                              font-variation-settings:"wght" 760}}
                 text {{font-family:Layout;font-size:32px;font-optical-sizing:none;text-anchor:middle;
                        transform:translate(7 3)}}
@@ -3425,7 +3482,7 @@ class EpubTests(unittest.TestCase):
                 output = book.export_epub_fixed_pdf(dpi=96, pages=[0], searchable=True)
             with doc_ex.open(output) as pdf, pdf.edit() as edit:
                 self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), png)
-                words = ("éBBé", "BééB", "Neighbor")
+                words = ("B́éBé", "BééB", "Neighbor")
                 labels = pdf[0].get_text().split()
                 self.assertCountEqual(labels, words)
                 links = pdf[0].get_links()
@@ -3445,7 +3502,7 @@ class EpubTests(unittest.TestCase):
                 combined = render(svg(combined=True, first=94, second=78), inline)
                 self.assertEqual(combined, control)
                 adjusted = render(svg(combined=True, first=80, second=78), inline)
-                self.assertNotEqual(adjusted[1]["éBBé"], combined[1]["éBBé"])
+                self.assertNotEqual(adjusted[1]["B́éBé"], combined[1]["B́éBé"])
                 for word in ("BééB", "Neighbor"):
                     self.assertEqual(adjusted[1][word], combined[1][word])
                 for link in ("second", "neighbor"):

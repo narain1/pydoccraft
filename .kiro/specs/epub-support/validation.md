@@ -1229,3 +1229,7 @@ The Linux x86-64 CPython 3.11.15 wheel from `cb4b4ec` passed 249 installed EPUB 
 ## SVG independent sibling text lengths
 
 The installed regression compares two mixed-face spacing owners and an independently positioned native sibling against separate authored text elements. Standalone and inline fixed-layout SVG match exactly in raster pixels, reopened PDF pixels, searchable Unicode, link boxes and two local destinations. Changing one target length moves only its painted and searchable glyphs. An incomplete sibling origin reports an explicit unsupported error. [SVG text layout](https://www.w3.org/TR/SVG2/text.html#TextLayoutAlgorithm)
+
+## SVG combining clusters in mixed-face spacing
+
+Two target widths differ by 24 user units. Four native clusters move by 0, 8, 16 and 24 pixels with their combining marks intact. The first cluster’s pixels match an independently authored SVG without textLength. Reopened PDF search recovers both decomposed Unicode clusters, and annotation rectangles follow the known horizontal shifts. The sibling-owner regression also combines a multi-glyph owner and a plain mixed-face owner with a separate native sibling. [SVG text layout](https://www.w3.org/TR/SVG2/text.html#TextLayoutAlgorithm)

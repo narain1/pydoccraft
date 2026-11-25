@@ -14,7 +14,7 @@ use crate::{
 pub(super) struct SpacingCheck {
     index: usize,
     width: Option<f32>,
-    glyph_range: Range<usize>,
+    cluster_range: Range<usize>,
     gap: f32,
     anchor: f32,
 }
@@ -37,24 +37,15 @@ impl SpacingCheck {
                 "EPUB SVG mixed-font spacing textLength with authored letter or word spacing",
             ));
         }
-        // A nonempty mapping for every glyph and a complete logical sequence
-        // make each native cluster boundary unambiguous through the public API.
-        let mut remaining = chunk.text();
-        let mut count = 0;
-        for glyph in text
+        if !svg::logical_glyph_clusters(text) {
+            return Err(spacing_error());
+        }
+        let count = text
             .layouted()
             .iter()
-            .flat_map(|span| &span.positioned_glyphs)
-        {
-            if glyph.text.is_empty() {
-                return Err(spacing_error());
-            }
-            remaining = remaining
-                .strip_prefix(&glyph.text)
-                .ok_or_else(spacing_error)?;
-            count += 1;
-        }
-        if !remaining.is_empty() || count < 2 {
+            .flat_map(|span| svg::glyph_clusters(span, true))
+            .count();
+        if count < 2 {
             return Err(spacing_error());
         }
         let gaps = (count - 1) as f32;
@@ -72,7 +63,7 @@ impl SpacingCheck {
         Ok(Self {
             index,
             width: verify_full_width.then_some(target),
-            glyph_range: offset..offset + count,
+            cluster_range: offset..offset + count,
             gap,
             anchor,
         })
@@ -120,7 +111,8 @@ pub(super) fn verify_probe(
     let [target] = probe.chunks() else {
         return Err(spacing_error());
     };
-    if !same_chunk(&original.chunks()[index], target)
+    if !svg::logical_glyph_clusters(original)
+        || !same_chunk(&original.chunks()[index], target)
         || original.writing_mode() != probe.writing_mode()
         || original.abs_transform() != probe.abs_transform()
     {
@@ -134,42 +126,34 @@ pub(super) fn verify_probe(
     let mut reference = probe
         .layouted()
         .iter()
-        .flat_map(|span| &span.positioned_glyphs);
-    let logical = original
-        .chunks()
-        .iter()
-        .map(usvg::TextChunk::text)
-        .collect::<String>();
-    let mut remaining = logical.as_str();
+        .flat_map(|span| svg::glyph_clusters(span, true));
+    let mut byte = 0;
     let mut start = None;
-    for (index, glyph) in original
+    for (index, cluster) in original
         .layouted()
         .iter()
-        .flat_map(|span| &span.positioned_glyphs)
+        .flat_map(|span| svg::glyph_clusters(span, true))
         .enumerate()
     {
-        let byte = logical.len() - remaining.len();
-        if glyph.text.is_empty() {
-            return Err(spacing_error());
-        }
-        remaining = remaining
-            .strip_prefix(&glyph.text)
-            .ok_or_else(spacing_error)?;
         if byte == first_byte {
             start = Some(index);
         }
         if (first_byte..end_byte).contains(&byte) {
             let measured = reference.next().ok_or_else(spacing_error)?;
-            if measured.id != glyph.id
-                || measured.font != glyph.font
-                || measured.text != glyph.text
-                || measured.transform() != glyph.transform()
+            if measured.len() != cluster.len()
+                || measured.iter().zip(cluster).any(|(expected, actual)| {
+                    expected.id != actual.id
+                        || expected.font != actual.font
+                        || expected.text != actual.text
+                        || expected.transform() != actual.transform()
+                })
             {
                 return Err(spacing_error());
             }
         }
+        byte += cluster.last().ok_or_else(spacing_error)?.text.len();
     }
-    if !remaining.is_empty() || reference.next().is_some() {
+    if reference.next().is_some() {
         return Err(spacing_error());
     }
     start.ok_or_else(spacing_error)
@@ -215,7 +199,7 @@ pub(super) fn verify(
             })
             || checks
                 .windows(2)
-                .any(|pair| pair[0].glyph_range.end > pair[1].glyph_range.start)
+                .any(|pair| pair[0].cluster_range.end > pair[1].cluster_range.start)
         {
             return Err(spacing_error());
         }
@@ -234,34 +218,38 @@ pub(super) fn verify(
         let mut revised = after
             .layouted()
             .iter()
-            .flat_map(|span| &span.positioned_glyphs);
+            .flat_map(|span| svg::glyph_clusters(span, true));
         let originals = before
             .layouted()
             .iter()
-            .flat_map(|span| &span.positioned_glyphs);
+            .flat_map(|span| svg::glyph_clusters(span, true));
         let mut checks = checks.iter().peekable();
-        for (index, glyph) in originals.enumerate() {
+        for (index, cluster) in originals.enumerate() {
             let adjusted = revised.next().ok_or_else(spacing_error)?;
-            let mut old = glyph.transform();
-            let new = adjusted.transform();
             while checks
                 .peek()
-                .is_some_and(|check| check.glyph_range.end <= index)
+                .is_some_and(|check| check.cluster_range.end <= index)
             {
                 checks.next();
             }
-            let expected = checks
+            let shift = checks
                 .peek()
-                .filter(|check| check.glyph_range.contains(&index))
-                .map_or(old.tx, |check| {
-                    old.tx + check.gap * ((index - check.glyph_range.start) as f32 - check.anchor)
+                .filter(|check| check.cluster_range.contains(&index))
+                .map_or(0.0, |check| {
+                    check.gap * ((index - check.cluster_range.start) as f32 - check.anchor)
                 });
-            old.tx = new.tx;
-            if glyph.id != adjusted.id
-                || glyph.font != adjusted.font
-                || glyph.text != adjusted.text
-                || old != new
-                || !close(new.tx, expected)
+            if cluster.len() != adjusted.len()
+                || cluster.iter().zip(adjusted).any(|(glyph, adjusted)| {
+                    let mut old = glyph.transform();
+                    let new = adjusted.transform();
+                    let expected = old.tx + shift;
+                    old.tx = new.tx;
+                    glyph.id != adjusted.id
+                        || glyph.font != adjusted.font
+                        || glyph.text != adjusted.text
+                        || old != new
+                        || !close(new.tx, expected)
+                })
             {
                 return Err(spacing_error());
             }

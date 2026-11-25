@@ -413,6 +413,55 @@ fn visit_painted_svg<'tree>(
     Ok(())
 }
 
+// The locked shaper assigns a logical left-to-right cluster's text to
+// its last glyph. Earlier glyphs in that same cluster have empty labels.
+fn glyph_clusters(
+    span: &usvg::layout::Span,
+    group: bool,
+) -> impl Iterator<Item = &[usvg::layout::PositionedGlyph]> {
+    span.positioned_glyphs
+        .split_inclusive(move |glyph| !group || !glyph.text.is_empty())
+}
+
+fn logical_glyph_clusters(text: &usvg::Text) -> bool {
+    let clusters = text
+        .layouted()
+        .iter()
+        .flat_map(|span| glyph_clusters(span, true));
+    let mut chunks = text.chunks().iter();
+    let mut remaining = "";
+    for cluster in clusters {
+        let Some(last) = cluster.last() else {
+            return false;
+        };
+        let label = last.text.as_str();
+        if label.is_empty()
+            || cluster.len() > 1
+                && cluster
+                    .iter()
+                    .any(|glyph| glyph.id.0 == 0 || glyph.font != last.font)
+        {
+            return false;
+        }
+        while remaining.is_empty() {
+            let Some(chunk) = chunks.next() else {
+                return false;
+            };
+            remaining = chunk.text();
+            // In an RTL shaper run or a bidi override, empty and nonempty
+            // glyph labels can occur in a different order.
+            if unicode_bidi::BidiInfo::new(remaining, None).has_rtl() {
+                return false;
+            }
+        }
+        let Some(rest) = remaining.strip_prefix(label) else {
+            return false;
+        };
+        remaining = rest;
+    }
+    remaining.is_empty() && chunks.all(|chunk| chunk.text().is_empty())
+}
+
 type SvgGlyphMetrics = HashMap<(usvg::fontdb::ID, u32), Option<GlyphMetrics>>;
 
 #[derive(Clone, Copy)]
@@ -435,10 +484,11 @@ fn visit_glyphs(
         Option<wordcraft_geom::Rect>,
     ) -> Result<(), EngineError>,
 ) -> Result<(), EngineError> {
-    use skrifa::{
-        instance::{LocationRef, Size},
-        FontRef, GlyphId, MetadataProvider,
-    };
+    let group = node.layouted().iter().any(|span| {
+        span.positioned_glyphs
+            .iter()
+            .any(|glyph| glyph.text.is_empty())
+    }) && logical_glyph_clusters(node);
     for (index, span) in node.layouted().iter().enumerate() {
         if !select(index)
             || !span.visible
@@ -453,67 +503,104 @@ fn visit_glyphs(
         {
             continue;
         }
-        for glyph in &span.positioned_glyphs {
-            let Some(GlyphMetrics {
-                advance,
-                ascent,
-                descent,
-                ink,
-            }) = *metrics.entry((glyph.font, glyph.id.0)).or_insert_with(|| {
-                fonts
-                    .with_face_data(glyph.font, |data, index| {
-                        let font = FontRef::from_index(data, index).ok()?;
-                        let size = Size::unscaled();
-                        let location = LocationRef::default();
-                        let metrics = font.metrics(size, location);
-                        let metrics_at = font.glyph_metrics(size, location);
-                        let id = GlyphId::new(glyph.id.0);
-                        let advance = metrics_at.advance_width(id)?;
-                        let ink = metrics_at
-                            .bounds(id)
-                            .filter(|bounds| {
-                                bounds.x_min < bounds.x_max && bounds.y_min < bounds.y_max
-                            })
-                            .map(|bounds| {
-                                wordcraft_geom::Rect::new(
-                                    bounds.x_min,
-                                    bounds.y_min,
-                                    bounds.x_max - bounds.x_min,
-                                    bounds.y_max - bounds.y_min,
-                                )
-                            });
-                        Some(GlyphMetrics {
-                            advance,
-                            ascent: metrics.ascent,
-                            descent: metrics.descent,
-                            ink,
-                        })
-                    })
-                    .flatten()
-            })
-            else {
+        for cluster in glyph_clusters(span, group) {
+            let Some(text) = cluster.last().map(|glyph| glyph.text.as_str()) else {
                 continue;
             };
-            if advance <= 0.0 {
-                // Nonspacing marks share their source cluster with the base glyph.
+            if text.is_empty() {
                 continue;
             }
-            let mapping = node.abs_transform().pre_concat(glyph.outline_transform());
-            let page = kurbo::Affine::new(
-                [
-                    mapping.sx, mapping.ky, mapping.kx, mapping.sy, mapping.tx, mapping.ty,
-                ]
-                .map(f64::from),
-            );
-            let rect = super::rendition::text::transformed(
-                wordcraft_geom::Rect::new(0.0, descent, advance, ascent - descent),
-                page,
-            );
-            let ink = ink.map(|ink| super::rendition::text::transformed(ink, page));
-            visit(index, &glyph.text, rect, ink)?;
+            let mut rect: Option<wordcraft_geom::Rect> = None;
+            let mut ink: Option<wordcraft_geom::Rect> = None;
+            for glyph in cluster {
+                let Some((advance, footprint)) = measure_glyph(fonts, node, metrics, glyph) else {
+                    continue;
+                };
+                if let Some(advance) = advance {
+                    rect = Some(rect.map_or(advance, |prior| prior.union(&advance)));
+                }
+                if let Some(footprint) = footprint {
+                    ink = Some(ink.map_or(footprint, |prior| prior.union(&footprint)));
+                }
+            }
+            if cluster.len() > 1 {
+                // A positioned combining mark can extend beyond the base
+                // glyph's advance or ascent. Keep its ink in cluster geometry.
+                if let Some(ink) = ink {
+                    rect = Some(rect.map_or(ink, |prior| prior.union(&ink)));
+                }
+            }
+            if let Some(rect) = rect {
+                visit(index, text, rect, ink)?;
+            }
         }
     }
     Ok(())
+}
+
+fn measure_glyph(
+    fonts: &usvg::fontdb::Database,
+    node: &usvg::Text,
+    metrics: &mut SvgGlyphMetrics,
+    glyph: &usvg::layout::PositionedGlyph,
+) -> Option<(Option<wordcraft_geom::Rect>, Option<wordcraft_geom::Rect>)> {
+    use skrifa::{
+        instance::{LocationRef, Size},
+        FontRef, GlyphId, MetadataProvider,
+    };
+
+    let GlyphMetrics {
+        advance,
+        ascent,
+        descent,
+        ink,
+    } = (*metrics.entry((glyph.font, glyph.id.0)).or_insert_with(|| {
+        fonts
+            .with_face_data(glyph.font, |data, index| {
+                let font = FontRef::from_index(data, index).ok()?;
+                let size = Size::unscaled();
+                let location = LocationRef::default();
+                let metrics = font.metrics(size, location);
+                let metrics_at = font.glyph_metrics(size, location);
+                let id = GlyphId::new(glyph.id.0);
+                let advance = metrics_at.advance_width(id)?;
+                let ink = metrics_at
+                    .bounds(id)
+                    .filter(|bounds| bounds.x_min < bounds.x_max && bounds.y_min < bounds.y_max)
+                    .map(|bounds| {
+                        wordcraft_geom::Rect::new(
+                            bounds.x_min,
+                            bounds.y_min,
+                            bounds.x_max - bounds.x_min,
+                            bounds.y_max - bounds.y_min,
+                        )
+                    });
+                Some(GlyphMetrics {
+                    advance,
+                    ascent: metrics.ascent,
+                    descent: metrics.descent,
+                    ink,
+                })
+            })
+            .flatten()
+    }))?;
+    let mapping = node.abs_transform().pre_concat(glyph.outline_transform());
+    let page = kurbo::Affine::new(
+        [
+            mapping.sx, mapping.ky, mapping.kx, mapping.sy, mapping.tx, mapping.ty,
+        ]
+        .map(f64::from),
+    );
+    let rect = (advance > 0.0).then(|| {
+        super::rendition::text::transformed(
+            wordcraft_geom::Rect::new(0.0, descent, advance, ascent - descent),
+            page,
+        )
+    });
+    Some((
+        rect,
+        ink.map(|ink| super::rendition::text::transformed(ink, page)),
+    ))
 }
 
 pub(super) fn embedded(

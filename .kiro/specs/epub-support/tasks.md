@@ -51,6 +51,7 @@
 - [x] Fit spacing-only textLength between verifiable mixed-face clusters without changing their glyph shapes or losing searchable PDF text and links.
 - [x] Fit textLength on a sole nested tspan and spacing on an independently positioned nested owner while preserving sibling ink and PDF geometry.
 - [x] Fit multiple independently positioned sibling spacing owners in one mixed-face SVG text element.
+- [x] Fit verified left-to-right multi-glyph clusters and keep their native ink in searchable SVG PDF text and links.
 - [x] Preserve signed fractional synthetic oblique in reflowable and fixed-layout XHTML previews and fixed-layout PDF.
 - [x] Render alpha-preserving SVG color matrices, including saturation and hue rotation, with the fixed-layout PDF text and annotations preserved.
 - [x] Render bounded SVG filter chains with prior named inputs, including alpha-changing color matrices in visual output. Reject PDF text or annotation capture when the source geometry cannot be preserved.
