@@ -83,7 +83,8 @@
 - [x] Resolve same-dimension length and angle ratios and finite layout-dependent scalar divisors.
 - [x] Constrain horizontal XHTML boxes with measured min-content and max-content minimum and maximum widths.
 - [x] Apply fixed fit-content() limits to horizontal minimum and maximum widths using the measured native content bounds.
-- [ ] Extend the EPUB CSS profile with intrinsic block-axis and containing-box dependent minimum and maximum constraints, relative border-box edges, contain-fit sizing, percentage dimension ratios and other typed math, and subgrids.
+- [x] Evaluate bounded ratios of linear lengths and percentages on the native containing axis.
+- [ ] Extend the EPUB CSS profile with intrinsic block-axis and containing-box dependent minimum and maximum constraints, relative border-box edges, contain-fit sizing, nonlinear percentage ratios and other typed math, and subgrids.
 - [x] Match bounded sibling positions in either direction, including An+B, namespace-aware types, and filtered child selectors with the correct specificity.
 - [ ] Add SVG filter primitives and retain PDF text and links for multi-source, non-axis-aligned or ambiguous spatial filter results.
 - [ ] Extend mixed-font SVG text fallback to spacing across ambiguous clusters, deeper nested length owners and glyph positioning.

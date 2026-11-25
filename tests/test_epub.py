@@ -1686,6 +1686,59 @@ class EpubTests(unittest.TestCase):
                     with self.assertRaisesRegex(error, message):
                         book.render_page(0, dpi=96)
 
+    def test_epub_css_percentage_ratios_keep_containing_box_geometry(self) -> None:
+        original = fixed_spread_fixture([("", "white", 290, 120)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Percentage ratios</title>
+          <meta name="viewport" content="width=290,height=120"/><style>
+          html,body,p{{margin:0;font-size:9px}} section{{position:absolute;left:15px;top:12px;
+          width:{width}px;height:55px;background:#334c55}} p{{position:absolute;background:#96ba75}}
+          {css}</style></head><body><section><p><a href="https://example.org/ratio">Q</a></p>
+          </section></body></html>"""
+
+        def publication(width: int, css: str) -> bytes:
+            chapter = template.format(width=width, css=css)
+            return rewrite_epub(original, {"OEBPS/s0.xhtml": chapter})
+
+        computed = """p{top:3px;
+          inset-inline-start:calc(30px * ((25% + 45px) / (25% + 15px)));
+          width:calc(-12px * ((10% + 10px) / (-10% - 10px)));
+          height:calc(20px / (50% / 25%))}"""
+        for width, left in ((120, 50), (180, 45), (240, 42)):
+            outputs = []
+            for css in (computed, f"p{{top:3px;left:{left}px;width:12px;height:10px}}"):
+                with doc_ex.open(publication(width, css)) as book:
+                    pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                    exported = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+                with doc_ex.open(exported) as pdf:
+                    self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), pixels)
+                    link, = pdf[0].get_links()
+                    hit, = pdf[0].search_for("Q")
+                    self.assertEqual(link.uri, "https://example.org/ratio")
+                    outputs.append((pixels, hit, link.bbox))
+            with self.subTest(width=width):
+                self.assertTrue(outputs[0] == outputs[1], "percentage ratio changed geometry")
+
+        zero = []
+        for declared in ("calc((50% / 25%) * 6px)", "0px"):
+            with doc_ex.open(publication(0, f"p{{width:{declared};height:10px}}")) as book:
+                zero.append(rgba_pixels(png_chunks(book.render_page(0, dpi=96))))
+        self.assertTrue(zero[0] == zero[1], "zero percentage basis did not censor 0/0")
+
+        for source in (
+            "calc(((25% + 8px) / (25% - 15px)) * 2px)",
+            "calc((15px / 25%) * 10px)",
+            "calc((min(60%, 25px) / (15% + 15px)) * 2px)",
+        ):
+            with self.subTest(source=source):
+                with doc_ex.open(publication(120, f"p{{width:{source}}}")) as book:
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "unsupported EPUB CSS calc"):
+                        book.render_page(0, dpi=96)
+
+        excessive = "p{width:calc(((50% + 10px) / (.000001% + .000001px)) * 1px)}"
+        with doc_ex.open(publication(120, excessive)) as book:
+            with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "CSS calc exceeds"):
+                book.render_page(0, dpi=96)
+
     def test_epub_css_calc_rejects_unsupported_operations_and_excess_geometry(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Calculated geometry</title>
           <style>div {background:green; CSS}</style></head><body><div>Panel</div></body></html>"""

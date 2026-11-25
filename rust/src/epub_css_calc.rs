@@ -103,6 +103,11 @@ enum Expression {
     Sign(Box<Expression>),
     Product(Box<Expression>, Box<Expression>),
     Reciprocal(Box<Expression>, Interval),
+    AffineRatio {
+        numerator: [f32; 2],
+        denominator: [f32; 2],
+        bounds: Interval,
+    },
     Step(Step, Box<Expression>, Box<Expression>),
     Trig(Trig, Box<Expression>),
     Atan2(Box<Expression>, Box<Expression>),
@@ -127,6 +132,19 @@ impl Expression {
             Self::Sign(value) => sign(value.at(basis)),
             Self::Product(left, right) => left.at(basis) * right.at(basis),
             Self::Reciprocal(value, _) => value.at(basis).recip(),
+            Self::AffineRatio {
+                numerator,
+                denominator,
+                ..
+            } => {
+                // CSS percentage sizing has a nonnegative containing extent.
+                // Evaluate coefficients in f64 so a tiny nonzero basis can
+                // still cancel between proportional numerator and denominator.
+                let extent = f64::from(basis.max(0.0)) / 100.0;
+                let linear =
+                    |&[points, percent]: &[f32; 2]| f64::from(points) + f64::from(percent) * extent;
+                (linear(numerator) / linear(denominator)) as f32
+            }
             Self::Step(step, value, interval) => step.evaluate(value.at(basis), interval.at(basis)),
             Self::Trig(operation, value) => operation.evaluate(value.at(basis)),
             Self::Atan2(y, x) => trigonometry::atan2(y.at(basis), x.at(basis)),
@@ -165,7 +183,7 @@ impl Expression {
             Self::Abs(value) => value.scalar_bounds()?.absolute(),
             Self::Sign(_) => Interval::signed(1.0),
             Self::Product(one, other) => one.scalar_bounds()?.product(other.scalar_bounds()?),
-            Self::Reciprocal(_, bounds) => *bounds,
+            Self::Reciprocal(_, bounds) | Self::AffineRatio { bounds, .. } => *bounds,
             Self::Step(operation, value, interval) => {
                 let bound = interval.scalar_bounds()?.absolute().high;
                 match operation {
@@ -318,6 +336,53 @@ impl Calculation {
         })
     }
 
+    fn affine_ratio(self, denominator: Self) -> Result<Self, Issue> {
+        let coefficients = |expression: Expression| match expression {
+            Expression::Linear(points, percent) => {
+                let coefficients = [points.unwrap_or_default(), percent.unwrap_or_default()];
+                coefficients
+                    .into_iter()
+                    .all(f32::is_finite)
+                    .then_some(coefficients)
+            }
+            _ => None,
+        };
+        let numerator = coefficients(self.expression).ok_or(Issue::Unsupported)?;
+        let bottom = coefficients(denominator.expression).ok_or(Issue::Unsupported)?;
+        let [fixed, relative] = bottom;
+        if fixed != 0.0 && relative != 0.0 && fixed.signum() != relative.signum()
+            || (fixed == 0.0 && numerator[0] != 0.0)
+            || (relative == 0.0 && numerator[1] != 0.0)
+        {
+            return Err(Issue::Unsupported);
+        }
+        // When the denominator's terms share one sign, each quotient at a
+        // positive basis lies between the two coefficient ratios. A zero
+        // coefficient shared by numerator and denominator adds no endpoint.
+        let ratio = |top: f32, bottom: f32| {
+            (bottom != 0.0).then(|| (f64::from(top) / f64::from(bottom)) as f32)
+        };
+        let origin = ratio(numerator[0], fixed);
+        let infinity = ratio(numerator[1], relative);
+        let lo = origin.or(infinity).ok_or(Issue::Unsupported)?;
+        let hi = infinity.unwrap_or(lo);
+        let bounds = Interval {
+            low: lo.min(hi),
+            high: lo.max(hi),
+        };
+        Ok(Self {
+            expression: Expression::AffineRatio {
+                numerator,
+                denominator: bottom,
+                bounds,
+            },
+            point_bound: Some(bounds.absolute().high),
+            percent_bound: None,
+            relative_scalar: true,
+            nodes: self.nodes + denominator.nodes + 1,
+        })
+    }
+
     fn absolute(self) -> Self {
         Self {
             expression: Expression::Abs(Box::new(self.expression)),
@@ -419,12 +484,12 @@ impl Value {
         if kind != denominator_kind {
             return Err(Issue::Invalid);
         }
-        // These matching dimensions cancel to a scalar. A direct
-        // percentage needs a bound for its layout-dependent multiplier.
-        if value.percent_bound.is_some() || denominator.percent_bound.is_some() {
-            return Err(Issue::Unsupported);
-        }
-        Ok(Self::Number(value.multiply(denominator.reciprocal()?)))
+        let ratio = if value.percent_bound.is_some() || denominator.percent_bound.is_some() {
+            value.affine_ratio(denominator)?
+        } else {
+            value.multiply(denominator.reciprocal()?)
+        };
+        Ok(Self::Number(ratio))
     }
 
     fn compare(comparison: Comparison, mut values: Vec<Self>) -> Result<Self, Issue> {
