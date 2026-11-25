@@ -25,7 +25,7 @@ pub(super) struct IntrinsicBounds {
     pub inline: InlineBounds,
     pub block: MinMax<bool, bool>,
     pub contain: Size<bool>,
-    pub natural_ratio: bool,
+    pub content_box_ratio: bool,
 }
 
 impl IntrinsicBounds {
@@ -42,7 +42,7 @@ impl IntrinsicBounds {
             width: false,
             height: false,
         },
-        natural_ratio: false,
+        content_box_ratio: false,
     };
 
     pub fn has_inline(self) -> bool {
@@ -71,6 +71,7 @@ pub(super) struct ChapterStyles {
 pub(super) struct Styled {
     pub box_style: Style,
     pub intrinsic_bounds: IntrinsicBounds,
+    pub prefers_natural_ratio: bool,
     pub text: Typography,
     pub inline: bool,
     pub bidi: super::bidi::Mode,
@@ -281,12 +282,17 @@ impl ChapterStyles {
             } else {
                 0.0
             };
-            let ratio = value(&values, "aspect-ratio")
-                .split_once('/')
-                .and_then(|(a, b)| {
-                    Some(a.trim().parse::<f32>().ok()? / b.trim().parse::<f32>().ok()?)
-                })
-                .filter(|n| n.is_finite() && *n > 0.0);
+            let contain = Size {
+                width: value(&values, "width").eq_ignore_ascii_case("contain"),
+                height: value(&values, "height").eq_ignore_ascii_case("contain"),
+            };
+            let (ratio, prefers_natural_ratio) =
+                match css::aspect_ratio(value(&values, "aspect-ratio"), font, viewport) {
+                    Err(EngineError::Unsupported(_)) if !(contain.width || contain.height) => {
+                        (None, false)
+                    }
+                    result => result?,
+                };
             let mut tracks = |key, axis| {
                 let source = value(&values, key);
                 if source.eq_ignore_ascii_case("inherit") {
@@ -367,11 +373,8 @@ impl ChapterStyles {
                     min: block_bound("min-height"),
                     max: block_bound("max-height"),
                 },
-                contain: Size {
-                    width: value(&values, "width").eq_ignore_ascii_case("contain"),
-                    height: value(&values, "height").eq_ignore_ascii_case("contain"),
-                },
-                natural_ratio: false,
+                contain,
+                content_box_ratio: prefers_natural_ratio,
             };
             let box_style = Style {
                 display: match display {
@@ -521,6 +524,7 @@ impl ChapterStyles {
                 Styled {
                     box_style,
                     intrinsic_bounds,
+                    prefers_natural_ratio,
                     text,
                     inline,
                     bidi,

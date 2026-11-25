@@ -967,6 +967,56 @@ pub(super) enum FontFamilyValue {
     Initial,
 }
 
+pub(super) fn aspect_ratio(
+    source: &str,
+    font: f32,
+    viewport: [f32; 2],
+) -> Result<(Option<f32>, bool), EngineError> {
+    if source.is_empty() || css_wide(source) {
+        return Ok((None, false));
+    }
+    let source = format!("aspect-ratio:{source}");
+    let Ok(declaration) = Parser::new(&source, Syntax::Css).parse::<Declaration>() else {
+        return Ok((None, false));
+    };
+    let is_auto = |node: &ComponentValue<'_>| {
+        matches!(node, ComponentValue::InterpolableIdent(name)
+            if ident(name).is_some_and(|name| name.eq_ignore_ascii_case("auto")))
+    };
+    let (parts, prefers_natural) = match declaration.value.as_slice() {
+        [first, rest @ ..] if is_auto(first) => (rest, true),
+        [rest @ .., last] if is_auto(last) => (rest, true),
+        parts => (parts, false),
+    };
+    let term = |value: &ComponentValue<'_>| match value {
+        ComponentValue::Number(number) if number.value >= 0.0 => Ok(Some(number.value)),
+        ComponentValue::Function(_) => {
+            let span = value.span();
+            let raw = &source[span.start..span.end];
+            if calc::is_math(raw) {
+                calc::aspect_ratio_number(raw, font, viewport)
+            } else {
+                Err(unsupported("unsupported EPUB CSS aspect ratio calculation"))
+            }
+        }
+        _ => Ok(None),
+    };
+    let ratio = match parts {
+        [width] => term(width)?,
+        [width, ComponentValue::Delimiter(Delimiter {
+            kind: DelimiterKind::Solidus,
+            ..
+        }), height] => term(width)?
+            .zip(term(height)?)
+            .map(|(width, height)| width / height),
+        _ => None,
+    };
+    Ok((
+        ratio.filter(|ratio| ratio.is_finite() && *ratio > 0.0),
+        prefers_natural,
+    ))
+}
+
 pub(super) fn parse_font_family(source: &str) -> Option<FontFamilyValue> {
     let declaration = format!("font-family:{source}");
     let declaration = Parser::new(&declaration, Syntax::Css)

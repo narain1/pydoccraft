@@ -2713,6 +2713,10 @@ class EpubTests(unittest.TestCase):
         contain = "inline-size:contain;block-size:contain"
         for label, child, common, sized, explicit in (
             ("authored", text, "aspect-ratio:2 / 1", contain, "width:160px;height:80px"),
+            ("omitted denominator", text, "aspect-ratio:2", contain, "width:160px;height:80px"),
+            ("calculated terms", text, "aspect-ratio:calc(2 * 3) / calc(2 + 1)",
+             contain, "width:160px;height:80px"),
+            ("degenerate", text, "aspect-ratio:2 / 0", contain, "width:180px;height:80px"),
             ("inline only", text, "aspect-ratio:2 / 1", "inline-size:contain",
              "width:160px;height:80px"),
             ("maximum", text, "aspect-ratio:2 / 1;box-sizing:border-box;padding:4px;"
@@ -2724,6 +2728,10 @@ class EpubTests(unittest.TestCase):
              contain, "width:280px;height:140px"),
             ("natural", svg, "box-sizing:border-box;padding:4px;border:2px solid #165573",
              contain, "width:148px;height:80px"),
+            ("natural fallback", svg, "aspect-ratio:8 / 1 AUTO;box-sizing:border-box;"
+             "padding:4px;border:2px solid #165573", contain, "width:148px;height:80px"),
+            ("authored fallback", text, "aspect-ratio:auto 2;box-sizing:border-box;"
+             "padding:4px;border:2px solid #165573", contain, "width:148px;height:80px"),
             ("natural inline only", svg, "box-sizing:border-box;padding:4px;border:2px solid #165573",
              "inline-size:contain", "width:148px;height:80px"),
         ):
@@ -2758,6 +2766,8 @@ class EpubTests(unittest.TestCase):
              "independently sized block"),
             ("#fitted{aspect-ratio:2 / 1;min-width:170px;" + contain + "}",
              "aspect ratio conflicts"),
+            ("#fitted{aspect-ratio:calc((100% + 24px) / (100% + 12px));" + contain + "}",
+             "aspect ratio calculation"),
         ):
             with self.subTest(css=css):
                 xhtml = source.replace("CSS", css).replace("CHILD", text)

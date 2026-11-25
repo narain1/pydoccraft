@@ -560,9 +560,9 @@ impl<'book> Layout<'book> {
                 };
                 let [width, height] = picture.size();
                 style.item_is_replaced = true;
-                if !frame {
-                    bounds.natural_ratio = style.aspect_ratio.is_none();
-                    style.aspect_ratio.get_or_insert(width / height);
+                if !frame && (style.aspect_ratio.is_none() || styled.prefers_natural_ratio) {
+                    bounds.content_box_ratio = true;
+                    style.aspect_ratio = Some(width / height);
                 }
                 for (dim, attribute, natural) in [
                     (&mut style.size.width, "width", width),

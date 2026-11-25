@@ -250,7 +250,7 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
                     0.0
                 }
             });
-            let ratio_edges = if node.bounds.natural_ratio {
+            let ratio_edges = if node.bounds.content_box_ratio {
                 edges
             } else {
                 property_edges
@@ -289,10 +289,10 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
                     "EPUB CSS contain-fit aspect ratio conflicts with a minimum size",
                 ));
             }
-            // Keep the other preferred size native. A natural ratio on a border-box
-            // replacement needs the content-to-border adjustment on both axes.
-            let resolve_natural_auto =
-                node.bounds.natural_ratio && style.box_sizing == BoxSizing::BorderBox;
+            // Keep the other preferred size native unless an independent content-box ratio
+            // needs the content-to-border adjustment on both axes.
+            let resolve_content_auto =
+                node.bounds.content_box_ratio && style.box_sizing == BoxSizing::BorderBox;
             let style = &mut self.nodes[index].style;
             for (axis, size, fitted, ratio_edge, property_edge) in [
                 (
@@ -310,7 +310,7 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
                     property_edges.height,
                 ),
             ] {
-                if axis || (resolve_natural_auto && size.is_auto()) {
+                if axis || (resolve_content_auto && size.is_auto()) {
                     *size = Dimension::length((fitted + ratio_edge - property_edge).max(0.0));
                 }
             }

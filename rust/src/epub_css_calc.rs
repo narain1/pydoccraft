@@ -1045,6 +1045,24 @@ fn used_length(value: f32, signed: bool) -> f32 {
     }
 }
 
+pub(super) fn aspect_ratio_number(
+    source: &str,
+    font: f32,
+    viewport: [f32; 2],
+) -> Result<Option<f32>, EngineError> {
+    let unsupported_number = || unsupported("unsupported EPUB CSS aspect ratio calculation");
+    match read(source, font, viewport) {
+        Ok(Value::Number(value)) => {
+            Ok(Some(value.fixed().ok_or_else(unsupported_number)?.max(0.0)))
+        }
+        Ok(_) | Err(Issue::Invalid) => Ok(None),
+        Err(Issue::Limit) => Err(limited(
+            "EPUB CSS aspect ratio exceeds its expression budget",
+        )),
+        Err(Issue::Unsupported) => Err(unsupported_number()),
+    }
+}
+
 pub(super) fn valid(source: &str, percentages: bool) -> bool {
     match read(source, 12.0, [100.0; 2]) {
         Ok(Value::Number(_) | Value::Angle(_)) | Err(Issue::Invalid) => false,
