@@ -2542,6 +2542,43 @@ first
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "Theora"):
                 next(book.epub_embedded_video(0, 0, source_index=0))
 
+    def test_embedded_mp4_progressive_planar_avc_profiles(self) -> None:
+        path = "OEBPS/clip.mp4"
+        fixtures = Path(__file__).parent / "fixtures"
+        xhtml = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Video</title></head>
+        <body><video src="clip.mp4"/></body></html>"""
+        with doc_ex.open(epub_fixture()) as source:
+            data = source.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Video", xhtml, "OEBPS/new.xhtml")],
+                resources={
+                    path: doc_ex.EpubResource("video/mp4", (fixtures / "epub-video-h264.mp4").read_bytes()),
+                },
+            )
+        profiles = ("yuv422p", "yuv444p", "yuv420p10le", "yuv422p10le", "yuv444p10le")
+        for profile in profiles:
+            with self.subTest(profile=profile):
+                sample = (fixtures / f"epub-video-avc-{profile}.mp4").read_bytes()
+                with doc_ex.open(rewrite_epub(data, {path: sample})) as book:
+                    frames = list(book.epub_embedded_video(0, 0))
+                    self.assertEqual([(f.start_us, f.duration_us) for f in frames], [
+                        (i * 100_000, 100_000) for i in range(6)
+                    ])
+                    for index, frame in enumerate(frames):
+                        self.assertEqual((frame.width, frame.height, frame.pixel_aspect_ratio), (64, 42, (4, 3)))
+                        self.assertEqual(len(frame.rgb), 64 * 42 * 3)
+                        red, green, blue = frame.rgb[-3:]
+                        self.assertGreater(red if index < 3 else blue, 248)
+                        self.assertLess(green + (blue if index < 3 else red), 8)
+                    clipped = list(book.epub_embedded_video(0, 0, start_us=250_000, end_us=350_000))
+                    self.assertEqual([(f.start_us, f.duration_us) for f in clipped], [(250_000, 50_000), (300_000, 50_000)])
+                    self.assertEqual([f.rgb for f in clipped], [f.rgb for f in frames[2:4]])
+                    self.assertEqual(list(book.epub_embedded_video(0, 0, start_us=300_000)), frames[3:])
+
+        hdr = (fixtures / "epub-video-avc-hdr.mp4").read_bytes()
+        with doc_ex.open(rewrite_epub(data, {path: hdr})) as book:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "HDR transfer"):
+                next(book.epub_embedded_video(0, 0))
+
     def test_embedded_ogg_theora_and_opus_share_the_chained_presentation_clock(self) -> None:
         fixtures = Path(__file__).parent / "fixtures"
         first = (fixtures / "epub-narration-theora-opus.ogv").read_bytes()

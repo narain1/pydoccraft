@@ -65,6 +65,7 @@
 - [x] Select an Opus track explicitly for each media overlay resource with concurrent Ogg streams. Validate the remaining streams and preserve timing across chained segments.
 - [x] Inspect chapter media, preview video posters, preserve local source and caption references during editing, and stream embedded audio.
 - [x] Stream H.264 MP4 frames on their presentation timeline and offer the AAC-LC soundtrack on the same clip clock.
+- [x] Decode progressive 8-bit and 10-bit SDR planar AVC in 4:2:0, 4:2:2 and 4:4:4, with explicit HDR errors.
 - [x] Read local WebVTT and media-time TTML tracks and synchronize their overlapping cues and transition times with embedded video.
 - [x] Apply local normal-play-time fragments to embedded audio, video and synchronized captions.
 - [x] Stream embedded Ogg Theora and synchronize Opus and captions across sequential Ogg segments.

@@ -49,6 +49,7 @@ pub(crate) struct AvcSource {
     decoder: H264CodecDecoder,
     flushed: bool,
     geometry: Geometry,
+    pixel_format: PixelFormat,
     stream: u32,
     time_base: TimeBase,
     nal_length: u8,
@@ -76,6 +77,30 @@ struct Geometry {
     full_range: bool,
     kr: f32,
     kb: f32,
+}
+
+impl AvcSource {
+    fn pixel_format(sps: &Sps) -> Result<PixelFormat, EngineError> {
+        use PixelFormat::*;
+
+        if !sps.frame_mbs_only_flag
+            || sps.separate_colour_plane_flag
+            || sps.bit_depth_chroma_minus8 != sps.bit_depth_luma_minus8
+        {
+            return Err(unsupported("unsupported AVC picture structure"));
+        }
+        match (sps.chroma_format_idc, sps.bit_depth_luma_minus8) {
+            (1, 0) => Ok(Yuv420P),
+            (2, 0) => Ok(Yuv422P),
+            (3, 0) => Ok(Yuv444P),
+            (1, 2) => Ok(Yuv420P10Le),
+            (2, 2) => Ok(Yuv422P10Le),
+            (3, 2) => Ok(Yuv444P10Le),
+            _ => Err(unsupported(
+                "embedded AVC requires 8-bit or 10-bit planar YUV",
+            )),
+        }
+    }
 }
 
 impl VideoSource {
@@ -152,7 +177,7 @@ impl AvcSource {
             return Err(unsupported("rotated or transformed embedded MP4 video"));
         }
         let extra = &stream.params.extradata;
-        let (geometry, nal_length) = Geometry::from_avc(extra, &stream.params)?;
+        let (geometry, nal_length, pixel_format) = Geometry::from_avc(extra, &stream.params)?;
         let samples = demux.samples(stream.index);
         if samples.is_empty() || samples.len() > MAX_ACCESS_UNITS {
             return Err(limited("MP4 video access unit count is out of range"));
@@ -187,6 +212,7 @@ impl AvcSource {
             decoder,
             flushed: false,
             geometry,
+            pixel_format,
             stream: stream.index,
             time_base: stream.time_base,
             nal_length,
@@ -217,7 +243,7 @@ impl AvcSource {
                         .decoder
                         .output_params()
                         .ok_or_else(|| invalid("missing AVC video geometry"))?;
-                    if output.pixel_format != Some(PixelFormat::Yuv420P)
+                    if output.pixel_format != Some(self.pixel_format)
                         || output.width != Some(self.geometry.width)
                         || output.height != Some(self.geometry.height)
                     {
@@ -228,7 +254,7 @@ impl AvcSource {
                     let stop = expected.interval.end.min(self.clip.end);
                     return self
                         .geometry
-                        .avc_image(frame, start_us, stop - start_us)
+                        .avc_image(frame, self.pixel_format, start_us, stop - start_us)
                         .map(Some);
                 }
                 Ok(_) => return Err(unsupported("AVC video changed stream parameters")),
@@ -389,7 +415,10 @@ fn playback_range(
 }
 
 impl Geometry {
-    fn from_avc(extra: &[u8], params: &CodecParameters) -> Result<(Self, u8), EngineError> {
+    fn from_avc(
+        extra: &[u8],
+        params: &CodecParameters,
+    ) -> Result<(Self, u8, PixelFormat), EngineError> {
         if extra.len() > 16 * 1024 {
             return Err(limited("AVC configuration exceeds 16 KiB"));
         }
@@ -399,22 +428,20 @@ impl Geometry {
         }
         let sps =
             Sps::parse(&parse_nal_unit(&config.sps[0]).map_err(invalid)?.rbsp).map_err(invalid)?;
-        if !sps.frame_mbs_only_flag
-            || sps.chroma_format_idc != 1
-            || sps.bit_depth_luma_minus8 != 0
-            || sps.bit_depth_chroma_minus8 != 0
-        {
-            return Err(unsupported(
-                "embedded AVC requires progressive 8-bit 4:2:0 video",
-            ));
-        }
-        let coded_width = sps.pic_width_in_mbs() * 16;
-        let coded_height = sps.frame_height_in_mbs() * 16;
-        let (width, height) = sps.cropped_dimensions();
+        let pixel_format = AvcSource::pixel_format(&sps)?;
+        let geometry_limit = || limited("AVC frame geometry or reference buffering exceeds limits");
+        let coded_width = sps
+            .pic_width_in_mbs_minus1
+            .checked_add(1)
+            .and_then(|mbs| mbs.checked_mul(16))
+            .ok_or_else(geometry_limit)?;
+        let coded_height = sps
+            .pic_height_in_map_units_minus1
+            .checked_add(1)
+            .and_then(|mbs| mbs.checked_mul(16))
+            .ok_or_else(geometry_limit)?;
         let vui = sps.vui.as_ref();
-        if width == 0
-            || height == 0
-            || coded_width > 4096
+        if coded_width > 4096
             || coded_height > 4096
             || coded_width
                 .checked_mul(coded_height)
@@ -424,9 +451,11 @@ impl Geometry {
                 .and_then(|v| v.bitstream_restriction.as_ref())
                 .is_some_and(|r| r.max_num_reorder_frames > 16 || r.max_dec_frame_buffering > 16)
         {
-            return Err(limited(
-                "AVC frame geometry or reference buffering exceeds limits",
-            ));
+            return Err(geometry_limit());
+        }
+        let (width, height) = sps.cropped_dimensions();
+        if width == 0 || height == 0 {
+            return Err(invalid("invalid AVC frame cropping"));
         }
         let pps =
             Pps::parse(&parse_nal_unit(&config.pps[0]).map_err(invalid)?.rbsp).map_err(invalid)?;
@@ -475,6 +504,22 @@ impl Geometry {
             return Err(unsupported("MP4 video clean aperture"));
         }
         let signal = vui.and_then(|v| v.video_signal_type.as_ref());
+        let transfer = params
+            .options
+            .get("colr_transfer")
+            .map(str::parse::<u16>)
+            .transpose()
+            .map_err(invalid)?;
+        let coded_transfer = signal
+            .and_then(|s| s.colour_description.as_ref())
+            .map(|description| u16::from(description.transfer_characteristics));
+        if [transfer, coded_transfer]
+            .into_iter()
+            .flatten()
+            .any(|code| matches!(code, 16 | 18))
+        {
+            return Err(unsupported("embedded AVC HDR transfer characteristics"));
+        }
         let (full_range, matrix) = match params.options.get("colr_type") {
             None => (
                 signal.is_some_and(|signal| signal.video_full_range_flag),
@@ -509,31 +554,39 @@ impl Geometry {
                 kb,
             },
             config.length_size,
+            pixel_format,
         ))
     }
 
     fn avc_image(
         &self,
         frame: VideoFrame,
+        pixel_format: PixelFormat,
         start_us: u64,
         duration_us: u64,
     ) -> Result<VideoImage, EngineError> {
         let [y, u, v] = frame.image_planes() else {
             return Err(invalid("AVC video frame requires three image planes"));
         };
-        self.image::<2, 2>(
-            Yuv {
-                planes: [y, u, v].map(|plane| Plane {
-                    bytes: &plane.data,
-                    stride: plane.stride,
-                }),
-                x: 0,
-                y: 0,
-                bottom_up: false,
-            },
-            start_us,
-            duration_us,
-        )
+        let picture = Yuv {
+            planes: [y, u, v].map(|plane| Plane {
+                bytes: &plane.data,
+                stride: plane.stride,
+            }),
+            x: 0,
+            y: 0,
+            bottom_up: false,
+        };
+        use PixelFormat::*;
+        match pixel_format {
+            Yuv420P => self.image::<2, 2>(picture, start_us, duration_us),
+            Yuv422P => self.image::<2, 1>(picture, start_us, duration_us),
+            Yuv444P => self.image::<1, 1>(picture, start_us, duration_us),
+            Yuv420P10Le => self.image_depth::<2, 2, 2>(picture, 10, start_us, duration_us),
+            Yuv422P10Le => self.image_depth::<2, 1, 2>(picture, 10, start_us, duration_us),
+            Yuv444P10Le => self.image_depth::<1, 1, 2>(picture, 10, start_us, duration_us),
+            _ => Err(unsupported("unsupported AVC image planes")),
+        }
     }
 
     fn image<const SX: usize, const SY: usize>(
