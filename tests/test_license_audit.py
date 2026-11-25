@@ -44,6 +44,15 @@ class LicenseAuditTests(unittest.TestCase):
         prohibited["packages"][2]["name"] = "wordcraft-engine"
         with self.assertRaisesRegex(ValueError, "prohibited application"):
             audit.inventory(prohibited)
+        reviewed = deepcopy(metadata)
+        reviewed["packages"][2].update(
+            name="parley_engine", version="0.13.0",
+            source="registry+https://github.com/rust-lang/crates.io-index",
+        )
+        self.assertIn(("parley_engine", "0.13.0", "MIT"), audit.inventory(reviewed))
+        reviewed["packages"][2]["source"] = "git+https://example.com/replacement"
+        with self.assertRaisesRegex(ValueError, "prohibited application"):
+            audit.inventory(reviewed)
         metadata["packages"][2]["license"] = "AGPL-3.0-only"
         with self.assertRaisesRegex(ValueError, "prohibited licenses"):
             audit.inventory(metadata)

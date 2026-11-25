@@ -3758,6 +3758,10 @@ class EpubDocument(EditableDocument):
             raise TypeError("EPUB authors must be strings")
         self._call("set_metadata", title, identifier, language, authors, _change=True)
 
+    def set_publication_date(self, date: str | None) -> None:
+        """Set the optional publication date recorded in the package metadata."""
+        self._call("set_publication_date", date, _change=True)
+
     def add_chapter(self, title: str) -> EpubChapter:
         if not isinstance(title, str):
             raise TypeError("EPUB chapter title must be a string")
@@ -3781,6 +3785,15 @@ class EpubChapter:
 
     def add_link(self, text: str, href: str) -> None:
         self._owner._call("add_link", self._id, text, href, _change=True)
+
+    def add_list(self, items: Sequence[str], *, ordered: bool = False) -> None:
+        self._owner._call("add_list", self._id, list(items), ordered, _change=True)
+
+    def add_table(self, rows: Sequence[Sequence[str]], *, header: bool = False) -> None:
+        self._owner._call("add_table", self._id, [list(row) for row in rows], header, _change=True)
+
+    def add_preformatted(self, text: str) -> None:
+        self._owner._call("add_preformatted", self._id, text, _change=True)
 
     def add_image(self, source, *, media_type: str, alt: str = "") -> None:
         from . import _read

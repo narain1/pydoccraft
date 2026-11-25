@@ -27,7 +27,7 @@ fn extraction_and_rendering_are_available_without_python() {
     ));
     assert!(matches!(
         api::render(data, "epub", 0, 72.0, None, None),
-        Err(EngineError::Unsupported(_))
+        Err(EngineError::Malformed(_))
     ));
     assert!(matches!(
         api::extract(b"bad", "pdf", None),

@@ -44,7 +44,7 @@ fn copy_close_and_validation_are_independent() {
             "image/svg+xml".into(),
             "".into()
         ),
-        Err(EngineError::Unsupported(_))
+        Err(EngineError::InvalidArgument(_))
     ));
     let copy = book.copy().unwrap();
     book.close();

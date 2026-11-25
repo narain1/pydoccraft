@@ -1,0 +1,1381 @@
+//! Lay out styled XHTML in its viewport, then paint with the existing native renderer.
+use std::{collections::HashMap, rc::Rc, sync::Arc};
+
+#[path = "epub_layout/link_geometry.rs"]
+mod link_geometry;
+#[path = "epub_layout/tree.rs"]
+mod tree;
+pub(super) use link_geometry::InlineNavigation;
+
+use roxmltree::Node;
+use taffy::{
+    geometry::Size, prelude::*, style::Overflow, LayoutInput, LayoutOutput, RequestedAxis,
+};
+use wordcraft_doc::{
+    props::{Rgb, TextDirection},
+    Blocks, Document,
+};
+use wordcraft_geom::Rect;
+use wordcraft_layout::{
+    display::{page_display, Draw},
+    para::ClKind,
+    LayoutCache, LayoutOptions, Page, Placed, ViewMode,
+};
+
+use super::{
+    child, content,
+    css::{CalculationTable, Cascade},
+    fonts::{Fonts, Text as FontText},
+    invalid, limited, name,
+    output::{has_relative_math, image_bytes, Output, RasterImage},
+    parse_xml,
+    rendition::{capture_anchor, fixed, intersection, Capture, Region},
+    style::{ChapterStyles, Paint},
+    unsupported, Book, XHTML, XML_BYTES,
+};
+use crate::{
+    model::{BlockPayload, DocumentPayload, PagePayload},
+    rendering::{self, RasterRegion},
+    EngineError,
+};
+
+pub(super) const REFLOW_WIDTH: f32 = 612.0;
+const MAX_GEOMETRY: f32 = 20_000.0;
+pub(super) const MAX_PAINT_COORDINATE: f32 = MAX_GEOMETRY * 4.0;
+const MAX_BOXES: usize = 8_000;
+
+pub(super) fn render(
+    data: &[u8],
+    book: &DocumentPayload,
+    page: &PagePayload,
+    dpi: f64,
+    region: Region,
+) -> Result<Option<wordcraft_render::Rendered>, EngineError> {
+    render_with_navigation(data, book, page, dpi, region, None)
+}
+
+pub(super) fn render_with_navigation(
+    data: &[u8],
+    book: &DocumentPayload,
+    page: &PagePayload,
+    dpi: f64,
+    region: Region,
+    mut navigation: Option<Capture<'_, '_>>,
+) -> Result<Option<wordcraft_render::Rendered>, EngineError> {
+    let fixed = fixed(page);
+    rendering::validate_dpi(dpi)?;
+    let path = page
+        .metadata
+        .get("chapter_path")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| invalid("missing EPUB chapter path"))?;
+    let mut archive = Book::open(data)?;
+    let source = archive.read(path, XML_BYTES)?;
+    let doc = parse_xml(&source)?;
+    let root = doc.root_element();
+    if root.has_tag_name((super::svg::NS, "svg")) {
+        return super::svg::render(
+            root,
+            path,
+            &mut archive,
+            fixed,
+            dpi,
+            region,
+            navigation.as_mut(),
+        )
+        .map(Some);
+    }
+    let viewport = if fixed {
+        Some(dimensions(root).ok_or_else(|| {
+            unsupported("fixed-layout XHTML requires numeric viewport width and height")
+        })?)
+    } else {
+        None
+    };
+    let surface = Surface {
+        data,
+        book,
+        dpi,
+        region,
+        transparent: false,
+        frames: Rc::default(),
+    };
+    let markup = Markup {
+        root,
+        source: &source,
+        path,
+        page: page.number,
+        viewport,
+    };
+    paint_xhtml(surface, markup, &mut archive, navigation)
+}
+
+pub(super) struct Surface<'a> {
+    pub data: &'a [u8],
+    pub book: &'a DocumentPayload,
+    pub dpi: f64,
+    pub region: Region,
+    pub transparent: bool,
+    pub frames: Rc<super::frame::Work>,
+}
+
+struct Markup<'a, 'input> {
+    root: Node<'a, 'input>,
+    source: &'input [u8],
+    path: &'a str,
+    page: usize,
+    viewport: Option<[f32; 2]>,
+}
+
+pub(super) fn render_frame(
+    surface: Surface<'_>,
+    source: &[u8],
+    path: &str,
+    viewport: [f32; 2],
+    navigation: Option<Capture<'_, '_>>,
+) -> Result<wordcraft_render::Rendered, EngineError> {
+    let xml = parse_xml(source)?;
+    let markup = Markup {
+        root: xml.root_element(),
+        source,
+        path,
+        page: 0,
+        viewport: Some(viewport),
+    };
+    let mut archive = Book::open(surface.data)?;
+    paint_xhtml(surface, markup, &mut archive, navigation)?
+        .ok_or_else(|| invalid("embedded EPUB XHTML viewport was not rendered"))
+}
+
+fn paint_xhtml(
+    surface: Surface<'_>,
+    markup: Markup<'_, '_>,
+    archive: &mut Book<'_>,
+    navigation: Option<Capture<'_, '_>>,
+) -> Result<Option<wordcraft_render::Rendered>, EngineError> {
+    let Surface {
+        data,
+        book,
+        dpi,
+        region,
+        transparent,
+        frames,
+    } = surface;
+    let Markup {
+        root,
+        source,
+        path,
+        page,
+        viewport,
+    } = markup;
+    let fixed = viewport.is_some();
+    let viewport = viewport.unwrap_or([REFLOW_WIDTH, 792.0]);
+    let body = child(root, XHTML, "body").ok_or_else(|| invalid("XHTML chapter has no body"))?;
+    let has_frames = body.descendants().any(super::frame::is_frame);
+    if transparent || has_frames {
+        archive.frame_work = Some(Rc::clone(&frames));
+    }
+    let mut cascade = Cascade::load(root, path, archive, viewport)?;
+    let composed_math =
+        super::math::table::has_spans(body) || super::math::compose::needs_layout(body);
+    if !fixed && !cascade.needed(root) && !composed_math && !has_frames {
+        return Ok(None);
+    }
+    let styles = ChapterStyles::compute(root, &mut cascade, viewport)?;
+    let mut fonts = Fonts::load(&cascade.fonts, &styles.boxes, archive)?;
+    if composed_math {
+        fonts.get_or_insert_with(Fonts::bundled);
+    }
+    let manifest = book
+        .metadata
+        .get("manifest")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let path = item["path"].as_str()?;
+            let media = item["media_type"].as_str()?;
+            Some((path.to_owned(), media))
+        })
+        .collect::<HashMap<_, _>>();
+    let mut budget = content::Budget::default();
+    let mut context = content::Context {
+        source,
+        path,
+        page,
+        manifest: &manifest,
+        book: archive,
+        budget: &mut budget,
+        styles: Some(&styles.boxes),
+        collect_anchors: navigation
+            .as_ref()
+            .is_some_and(|capture| capture.anchors.is_some()),
+        equation_styles: Some((&styles, viewport)),
+    };
+    let mut output = Output::new(data, book, false, dpi);
+    output.frames = frames;
+    if let Some(capture) = &navigation {
+        output.svg_images = Some(super::rendition::text::SvgImages::new(
+            capture.text.is_some(),
+        ));
+        output.navigation = Some(HashMap::new());
+    }
+    let mut layout = Layout::new(output, viewport, fonts);
+    let root_id = layout.build(root, &mut context)?;
+    let id = layout.boxes[root_id].id;
+    let root_style = layout.tree.style_mut(id);
+    root_style.size.width = Dimension::length(viewport[0]);
+    if fixed {
+        root_style.size.height = Dimension::length(viewport[1]);
+    }
+    root_style.box_sizing = taffy::style::BoxSizing::BorderBox;
+    let dimension = layout.place(root_id, fixed, &styles.calculations)?;
+    let cropped = !matches!(region, Region::Viewport(None));
+    let region = region.for_page(dimension.map(f64::from), dpi, fixed)?;
+    if cropped {
+        layout.glyph_paths.set_clip(region, dpi / 72.0);
+    }
+    let html_color = styles.boxes[&root.id()]
+        .background
+        .filter(|(_, alpha)| *alpha > 0.0);
+    let paper = html_color.or(styles.boxes[&body.id()].background);
+    let viewport = Rect::new(0.0, 0.0, dimension[0], dimension[1]);
+    let mut drawing = Vec::new();
+    if !transparent {
+        fill(&mut drawing, viewport, Some((Rgb::WHITE, 1.0)));
+    }
+    fill(&mut drawing, viewport, paper);
+    // The HTML canvas background is propagated from the root, or from body when the root has none.
+    // Suppress its box fill so translucent page colors are composited once.
+    let canvas_source = if html_color.is_some() {
+        root.id()
+    } else {
+        body.id()
+    };
+    let mut positions = PaintPositions {
+        origins: HashMap::new(),
+        anchors: HashMap::new(),
+        navigation,
+    };
+    if let Some(anchors) = positions
+        .navigation
+        .as_ref()
+        .and_then(|capture| capture.anchors.as_ref())
+    {
+        for node in root.descendants().filter(Node::is_element) {
+            let Some(id) = node
+                .attribute("id")
+                .or_else(|| node.attribute((super::XML, "id")))
+            else {
+                continue;
+            };
+            if anchors.contains_key(id)
+                && styles
+                    .boxes
+                    .get(&node.id())
+                    .is_some_and(|style| !style.hidden)
+            {
+                positions.anchors.insert(node.id(), id);
+            }
+        }
+    }
+    layout.paint(
+        root_id,
+        [0.0, 0.0],
+        canvas_source,
+        viewport,
+        &mut positions,
+        &mut drawing,
+    )?;
+    raster(&layout.output.document, &drawing, dpi, region).map(Some)
+}
+
+pub(super) fn dimensions(root: Node<'_, '_>) -> Option<[f32; 2]> {
+    let head = child(root, XHTML, "head")?;
+    let meta = head.children().find(|node| {
+        name(*node, XHTML, "meta")
+            && node
+                .attribute("name")
+                .is_some_and(|value| value.eq_ignore_ascii_case("viewport"))
+    })?;
+    let mut input = meta.attribute("content")?;
+    let separator = |ch: char| ch.is_ascii_whitespace() || matches!(ch, ',' | ';');
+    let mut dims = [None; 2];
+    loop {
+        input = input.trim_start_matches(separator);
+        if input.is_empty() {
+            break;
+        }
+        let key_len = input
+            .find(|ch| separator(ch) || ch == '=')
+            .unwrap_or(input.len());
+        let (key, remaining) = input.split_at(key_len);
+        let remaining = remaining.trim_start_matches(|ch: char| ch.is_ascii_whitespace());
+        let Some(value) = remaining.strip_prefix('=') else {
+            input = remaining;
+            continue;
+        };
+        let value = value.trim_start_matches(|ch: char| ch.is_ascii_whitespace());
+        let (value, remaining) = value.split_at(value.find(separator).unwrap_or(value.len()));
+        input = remaining;
+        let index = if key.eq_ignore_ascii_case("width") {
+            0
+        } else if key.eq_ignore_ascii_case("height") {
+            1
+        } else {
+            continue;
+        };
+        if dims[index].is_none() {
+            let pixels = numeric_prefix(value)?;
+            let points = pixels * 0.75;
+            if !points.is_finite() || points <= 0.0 || points > MAX_GEOMETRY {
+                return None;
+            }
+            dims[index] = Some(points);
+        }
+    }
+    Some([dims[0]?, dims[1]?])
+}
+
+fn numeric_prefix(source: &str) -> Option<f32> {
+    let bytes = source.as_bytes();
+    let mut end = usize::from(bytes.first().is_some_and(|b| matches!(b, b'+' | b'-')));
+    end += bytes[end..]
+        .iter()
+        .take_while(|b| b.is_ascii_digit())
+        .count();
+    if bytes.get(end) == Some(&b'.') {
+        end += 1;
+        end += bytes[end..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .count();
+    }
+    if bytes.get(end).is_some_and(|b| matches!(b, b'e' | b'E')) {
+        let mut exponent = end + 1;
+        exponent += usize::from(
+            bytes
+                .get(exponent)
+                .is_some_and(|b| matches!(b, b'+' | b'-')),
+        );
+        let digits = bytes[exponent..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .count();
+        if digits != 0 {
+            end = exponent + digits;
+        }
+    }
+    source[..end].parse().ok()
+}
+
+struct Layout<'book> {
+    tree: tree::Tree,
+    boxes: Vec<PaintBox>,
+    output: Output<'book>,
+    cache: LayoutCache,
+    viewport: [f32; 2],
+    measure_count: usize,
+    glyph_paths: super::fonts::GlyphPaths,
+    fonts: Option<Fonts>,
+}
+
+struct PaintPositions<'doc, 'out, 'key> {
+    origins: HashMap<NodeId, [f32; 2]>,
+    anchors: HashMap<roxmltree::NodeId, &'doc str>,
+    navigation: Option<Capture<'out, 'key>>,
+}
+
+struct PaintBox {
+    id: NodeId,
+    dom: Option<roxmltree::NodeId>,
+    href: Option<Arc<str>>,
+    children: Vec<usize>,
+    content: Option<Contents>,
+    background: Option<Paint>,
+    borders: [Option<Paint>; 4],
+    z_index: i32,
+    clip_overflow: bool,
+    invisible: bool,
+}
+
+enum Contents {
+    Text(Blocks),
+    FontText(Vec<FontText>),
+    RelativeMath(RelativeMath),
+    Image(Picture, String),
+}
+
+struct RelativeMath {
+    blocks: Vec<BlockPayload>,
+    layouts: Vec<RelativeMathLayout>,
+}
+
+struct RelativeMathLayout {
+    width: f32,
+    text: Result<Vec<FontText>, EngineError>,
+}
+
+impl RelativeMath {
+    fn measure(
+        &mut self,
+        available: AvailableSpace,
+        fonts: &mut Fonts,
+        output: &mut Output<'_>,
+        work: &mut usize,
+    ) -> Result<Size<f32>, EngineError> {
+        let AvailableSpace::Definite(width) = available else {
+            // Intrinsic width probes cannot resolve a percentage table.
+            return Ok(Size::ZERO);
+        };
+        if !width.is_finite() || width <= 0.0 {
+            return Ok(Size::ZERO);
+        }
+        let index = self
+            .layouts
+            .iter()
+            .position(|layout| (layout.width - width).abs() <= 0.005);
+        let index = if let Some(index) = index {
+            index
+        } else {
+            let text = self
+                .blocks
+                .iter()
+                .map(|block| fonts.shape(block, output, width))
+                .collect::<Result<_, _>>();
+            // A narrower probe may have conflicting width constraints even
+            // when the final containing width would fit the exact same table.
+            let text = match text {
+                Err(error) if !matches!(error, EngineError::Unsupported(_)) => return Err(error),
+                text => text,
+            };
+            self.layouts.push(RelativeMathLayout { width, text });
+            self.layouts.len() - 1
+        };
+        let height = match &self.layouts[index].text {
+            Ok(text) => font_text_size(text, AvailableSpace::Definite(width), work)?.height,
+            Err(_) => 0.0,
+        };
+        Ok(Size { width, height })
+    }
+}
+
+enum Picture {
+    Raster(RasterImage),
+    Frame(crate::model::ImagePayload, [f32; 2]),
+    Svg {
+        tree: Box<resvg::usvg::Tree>,
+        navigation: Option<Box<super::svg::SvgNavigation>>,
+    },
+}
+
+impl Picture {
+    fn size(&self) -> [f32; 2] {
+        match self {
+            Self::Raster(image) => [image.width, image.height],
+            Self::Frame(_, size) => *size,
+            Self::Svg { tree, .. } => [tree.size().width(), tree.size().height()],
+        }
+    }
+
+    fn media(&self, output: &mut Output<'_>, rect: Rect) -> Result<String, EngineError> {
+        match self {
+            Self::Raster(image) => Ok(image.media.clone()),
+            Self::Frame(source, _) => output.rasterize_frame(source, [rect.w, rect.h]),
+            Self::Svg { tree, navigation } => {
+                output.rasterize_svg(tree, rect.w, rect.h, navigation.as_deref())
+            }
+        }
+    }
+}
+
+fn is_svg(node: Node<'_, '_>) -> bool {
+    node.has_tag_name((super::svg::NS, "svg"))
+}
+
+impl<'book> Layout<'book> {
+    fn new(output: Output<'book>, viewport: [f32; 2], fonts: Option<Fonts>) -> Self {
+        Self {
+            tree: tree::Tree::default(),
+            boxes: Vec::new(),
+            output,
+            cache: LayoutCache::new(),
+            viewport,
+            measure_count: 0,
+            glyph_paths: super::fonts::GlyphPaths::default(),
+            fonts,
+        }
+    }
+
+    fn build(
+        &mut self,
+        node: Node<'_, '_>,
+        context: &mut content::Context<'_, '_>,
+    ) -> Result<usize, EngineError> {
+        let styled = context
+            .styles
+            .and_then(|styles| styles.get(&node.id()))
+            .ok_or_else(|| invalid("missing EPUB node style"))?;
+        let mut style = styled.box_style.clone();
+        let mut bounds = styled.intrinsic_bounds;
+        let mut children = Vec::new();
+        let mut local = None;
+        if !styled.hidden {
+            let frame = super::frame::is_frame(node);
+            let image = if frame {
+                Some(super::frame::payload(node, context)?)
+            } else if is_svg(node) {
+                Some(content::inline_svg(node, context)?)
+            } else if name(node, XHTML, "img") && node.has_attribute("src") {
+                Some(content::image(
+                    super::attribute(node, "src")?,
+                    node.attribute("alt").unwrap_or_default(),
+                    None,
+                    context,
+                )?)
+            } else {
+                content::media_poster(node, context)?
+            };
+            if let Some(source) = image {
+                let alt = source.alt.clone();
+                let picture = if frame {
+                    let size = super::frame::size(&source)?;
+                    Picture::Frame(source, size)
+                } else if source.media_type == "image/svg+xml" {
+                    let base = super::svg::image_base(&source)?;
+                    let interactive = self.output.svg_images.is_some()
+                        && source.metadata.contains_key("epub_svg_inline");
+                    let (tree, navigation) = super::svg::embedded_with_links(
+                        &image_bytes(&source)?,
+                        base,
+                        context.book,
+                        interactive,
+                    )?;
+                    Picture::Svg {
+                        tree: Box::new(tree),
+                        navigation: navigation.map(Box::new),
+                    }
+                } else {
+                    Picture::Raster(self.output.load_image(&source)?)
+                };
+                let [width, height] = picture.size();
+                style.item_is_replaced = true;
+                if !frame && (style.aspect_ratio.is_none() || styled.prefers_natural_ratio) {
+                    bounds.content_box_ratio = true;
+                    style.aspect_ratio = Some(width / height);
+                }
+                for (dim, attribute, natural) in [
+                    (&mut style.size.width, "width", width),
+                    (&mut style.size.height, "height", height),
+                ] {
+                    if dim.is_auto() {
+                        let value = if frame {
+                            Some(natural)
+                        } else {
+                            node.attribute(attribute)
+                                .and_then(|n| n.parse::<f32>().ok())
+                                .filter(|n| *n > 0.0 && *n <= MAX_GEOMETRY)
+                        };
+                        if let Some(n) = value {
+                            *dim = Dimension::length(n * 0.75);
+                        }
+                    }
+                }
+                local = Some(Contents::Image(picture, alt));
+            } else if name(node, XHTML, "table") {
+                let blocks = content::layout_piece(node, &[], context)?;
+                if self.uses_shaped_text(&blocks)? {
+                    let table = blocks
+                        .iter()
+                        .find_map(|block| block.table.as_ref())
+                        .ok_or_else(|| invalid("missing EPUB table grid"))?;
+                    children = self.font_table(node, table, &mut style, context)?;
+                } else {
+                    local = Some(self.text_contents(&blocks)?);
+                }
+            } else {
+                let mut run = Vec::new();
+                let styles = context.styles;
+                let visible = node.children().filter(|child| {
+                    !child.is_element() || !styles.is_some_and(|styles| styles[&child.id()].hidden)
+                });
+                let mut significant = visible.clone().filter(|child| {
+                    child.is_element() || child.text().is_some_and(|text| !text.trim().is_empty())
+                });
+                let only_image = significant.next().is_some_and(|child| {
+                    name(child, XHTML, "img") || is_svg(child) || super::frame::is_frame(child)
+                }) && significant.next().is_none();
+                for child in visible {
+                    let layout_child = child.is_element()
+                        && context.styles.is_some_and(|styles| {
+                            !styles[&child.id()].inline
+                                || matches!(style.display, Display::Flex | Display::Grid)
+                                || only_image
+                        })
+                        && (child.tag_name().namespace().is_none_or(|ns| ns == XHTML)
+                            || is_svg(child));
+                    if layout_child {
+                        self.inline_run(node, &run, &mut children, context)?;
+                        run.clear();
+                        children.push(self.build(child, context)?);
+                    } else if child.is_element() || child.is_text() {
+                        run.push(child);
+                    }
+                }
+                if children.is_empty() {
+                    local = self.text(node, &run, context)?;
+                } else {
+                    self.inline_run(node, &run, &mut children, context)?;
+                }
+            }
+        }
+        let clip_overflow =
+            style.overflow.x != Overflow::Visible || style.overflow.y != Overflow::Visible;
+        self.add(
+            style,
+            bounds,
+            PaintBox {
+                id: NodeId::from(0usize),
+                dom: Some(node.id()),
+                href: if self.output.navigation.is_some() && name(node, XHTML, "a") {
+                    node.attribute("href").map(Arc::from)
+                } else {
+                    None
+                },
+                children,
+                content: local,
+                background: styled.background,
+                borders: styled.border,
+                z_index: styled.z_index,
+                clip_overflow,
+                invisible: styled.text.invisible,
+            },
+        )
+    }
+
+    fn font_table(
+        &mut self,
+        node: Node<'_, '_>,
+        table: &crate::model::TablePayload,
+        style: &mut Style,
+        context: &mut content::Context<'_, '_>,
+    ) -> Result<Vec<usize>, EngineError> {
+        use taffy::style_helpers::{fr, line, span};
+
+        let columns = table.rows.first().map_or(0, Vec::len);
+        if columns == 0 || columns > 128 {
+            return Err(limited("EPUB styled table exceeds 128 columns or is empty"));
+        }
+        let rows = node
+            .children()
+            .filter(Node::is_element)
+            .flat_map(|section| {
+                if name(section, XHTML, "tr") {
+                    vec![section]
+                } else if ["thead", "tbody", "tfoot"]
+                    .iter()
+                    .any(|group| name(section, XHTML, group))
+                {
+                    section.children().filter(Node::is_element).collect()
+                } else {
+                    Vec::new()
+                }
+            })
+            .collect::<Vec<_>>();
+        if rows.len() != table.cells.len() {
+            return Err(invalid("EPUB styled table row count differs from its grid"));
+        }
+        style.display = Display::Grid;
+        if style.grid_template_columns.is_empty() {
+            style.grid_template_columns = vec![fr(1.0); columns];
+        }
+        let mut children = Vec::new();
+        if let Some(caption) = super::child(node, XHTML, "caption") {
+            let index = self.build(caption, context)?;
+            let id = self.boxes[index].id;
+            let placement = self.tree.style_mut(id);
+            placement.grid_column.start = line(1);
+            placement.grid_column.end = span(columns as u16);
+            placement.grid_row.start = line(1);
+            children.push(index);
+        }
+        let first_row = 1 + children.len();
+        for (row, (element, cells)) in rows.into_iter().zip(&table.cells).enumerate() {
+            let mut positions = element.children().filter(Node::is_element);
+            for cell in cells {
+                let element = positions
+                    .next()
+                    .ok_or_else(|| invalid("EPUB styled table cell is missing"))?;
+                let index = self.build(element, context)?;
+                let id = self.boxes[index].id;
+                let column = cell.metadata["grid_column"]
+                    .as_u64()
+                    .ok_or_else(|| invalid("EPUB styled table cell has no column"))?
+                    as usize;
+                let placement = self.tree.style_mut(id);
+                placement.grid_column.start = line((column + 1) as i16);
+                placement.grid_column.end = span(cell.col_span as u16);
+                placement.grid_row.start = line((row + first_row) as i16);
+                placement.grid_row.end = span(cell.row_span as u16);
+                children.push(index);
+            }
+            if positions.next().is_some() {
+                return Err(invalid(
+                    "EPUB styled table cell count differs from its grid",
+                ));
+            }
+        }
+        Ok(children)
+    }
+
+    fn uses_shaped_text(&self, blocks: &[crate::model::BlockPayload]) -> Result<bool, EngineError> {
+        if let Some(fonts) = &self.fonts {
+            for block in blocks {
+                if fonts.used_in(block)? {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    fn text<'a, 'input>(
+        &mut self,
+        parent: Node<'a, 'input>,
+        nodes: &[Node<'a, 'input>],
+        context: &mut content::Context<'_, '_>,
+    ) -> Result<Option<Contents>, EngineError> {
+        let blocks = content::layout_piece(parent, nodes, context)?;
+        if blocks.is_empty() {
+            return Ok(None);
+        }
+        self.text_contents(&blocks).map(Some)
+    }
+
+    fn text_contents(
+        &mut self,
+        blocks: &[crate::model::BlockPayload],
+    ) -> Result<Contents, EngineError> {
+        if blocks.iter().any(has_relative_math) {
+            return Ok(Contents::RelativeMath(RelativeMath {
+                blocks: blocks.to_vec(),
+                layouts: Vec::new(),
+            }));
+        }
+        if let Some(fonts) = &mut self.fonts {
+            for block in blocks {
+                if fonts.used_in(block)? {
+                    return blocks
+                        .iter()
+                        .map(|block| fonts.shape(block, &mut self.output, self.viewport[0]))
+                        .collect::<Result<Vec<_>, _>>()
+                        .map(Contents::FontText);
+                }
+            }
+        }
+        Ok(Contents::Text(
+            self.output.blocks(blocks, self.viewport[0])?,
+        ))
+    }
+
+    fn inline_run<'a, 'input>(
+        &mut self,
+        parent: Node<'a, 'input>,
+        run: &[Node<'a, 'input>],
+        children: &mut Vec<usize>,
+        context: &mut content::Context<'_, '_>,
+    ) -> Result<(), EngineError> {
+        if let Some(content) = self.text(parent, run, context)? {
+            let index = self.add(
+                Style {
+                    display: Display::Block,
+                    ..Default::default()
+                },
+                super::style::IntrinsicBounds::NONE,
+                PaintBox {
+                    id: NodeId::from(0usize),
+                    dom: None,
+                    href: None,
+                    children: Vec::new(),
+                    content: Some(content),
+                    background: None,
+                    borders: [None; 4],
+                    z_index: 0,
+                    clip_overflow: false,
+                    invisible: false,
+                },
+            )?;
+            children.push(index);
+        }
+        Ok(())
+    }
+
+    fn add(
+        &mut self,
+        style: Style,
+        bounds: super::style::IntrinsicBounds,
+        mut paint_box: PaintBox,
+    ) -> Result<usize, EngineError> {
+        let index = self.boxes.len();
+        if index >= MAX_BOXES {
+            return Err(limited("EPUB layout exceeds 8000 boxes"));
+        }
+        let children = paint_box
+            .children
+            .iter()
+            .map(|index| self.boxes[*index].id)
+            .collect();
+        let relative_math = matches!(paint_box.content, Some(Contents::RelativeMath(_)));
+        paint_box.id = self.tree.add(style, bounds, children, relative_math);
+        self.boxes.push(paint_box);
+        Ok(index)
+    }
+
+    fn place(
+        &mut self,
+        root: usize,
+        fixed: bool,
+        calculations: &CalculationTable,
+    ) -> Result<[f32; 2], EngineError> {
+        let mut error = None;
+        self.tree.place(
+            self.boxes[root].id,
+            Size {
+                width: AvailableSpace::Definite(self.viewport[0]),
+                height: if fixed {
+                    AvailableSpace::Definite(self.viewport[1])
+                } else {
+                    AvailableSpace::MaxContent
+                },
+            },
+            calculations,
+            |input, index, style, intrinsic_bound| {
+                let size = if error.is_none() {
+                    let content = self.boxes[index].content.as_mut();
+                    if let Some(Contents::RelativeMath(relative)) = content {
+                        return taffy::compute_leaf_layout(
+                            input,
+                            style,
+                            |handle, basis| tree::calculated_length(calculations, handle, basis),
+                            |_, available| {
+                                if input.known_dimensions.width.is_some()
+                                    && !input.known_dimensions_are_definite.width
+                                {
+                                    return Size::ZERO;
+                                }
+                                let measured = self
+                                    .fonts
+                                    .as_mut()
+                                    .ok_or_else(|| invalid("missing EPUB MathML fonts"))
+                                    .and_then(|fonts| {
+                                        relative.measure(
+                                            available.width,
+                                            fonts,
+                                            &mut self.output,
+                                            &mut self.measure_count,
+                                        )
+                                    });
+                                match measured {
+                                    Ok(value) => value,
+                                    Err(err) => {
+                                        error = Some(err);
+                                        Size::ZERO
+                                    }
+                                }
+                            },
+                        );
+                    }
+                    let mut measure_content = |known_dimensions, available_space| match measure(
+                        content.as_deref(),
+                        LayoutInput {
+                            known_dimensions,
+                            available_space,
+                            ..input
+                        },
+                        &mut self.output.document,
+                        &mut self.cache,
+                        &mut self.measure_count,
+                    ) {
+                        Ok(value) => value,
+                        Err(err) => {
+                            error = Some(err);
+                            Size::ZERO
+                        }
+                    };
+                    if intrinsic_bound
+                        || style.size.width.is_sizing_keyword()
+                        || style.size.height.is_sizing_keyword()
+                        || style.padding != taffy::geometry::Rect::zero()
+                        || style.border != taffy::geometry::Rect::zero()
+                    {
+                        return taffy::compute_leaf_layout(
+                            input,
+                            style,
+                            |handle, basis| tree::calculated_length(calculations, handle, basis),
+                            |known, available| {
+                                // The native API keeps known dimensions in border-box
+                                // coordinates and supplies the content space separately.
+                                let content_extent = |known: Option<f32>, space: AvailableSpace| {
+                                    known.and(space.into_option()).map(|extent| extent.max(0.0))
+                                };
+                                measure_content(
+                                    Size {
+                                        width: content_extent(known.width, available.width),
+                                        height: content_extent(known.height, available.height),
+                                    },
+                                    available,
+                                )
+                            },
+                        );
+                    }
+                    measure_content(input.known_dimensions, input.available_space)
+                } else {
+                    Size::ZERO
+                };
+                LayoutOutput::from_outer_size(size)
+            },
+        )?;
+        if let Some(error) = error {
+            return Err(error);
+        }
+        for node in &mut self.boxes {
+            if let Some(Contents::RelativeMath(relative)) = node.content.as_mut() {
+                let layout = self.tree.layout(node.id);
+                let width = layout.size.width
+                    - layout.border.left
+                    - layout.border.right
+                    - layout.padding.left
+                    - layout.padding.right;
+                let index = relative
+                    .layouts
+                    .iter()
+                    .position(|layout| (layout.width - width).abs() <= 0.005)
+                    .ok_or_else(|| {
+                        unsupported(
+                            "MathML relative table width requires a definite containing text box",
+                        )
+                    })?;
+                node.content = Some(Contents::FontText(
+                    relative.layouts.swap_remove(index).text?,
+                ));
+            }
+        }
+        let root = self.tree.layout(self.boxes[root].id);
+        let height = if fixed {
+            self.viewport[1]
+        } else {
+            root.scroll_height().max(root.size.height).max(1.0)
+        };
+        if !height.is_finite() || height > MAX_PAINT_COORDINATE {
+            return Err(limited("EPUB laid-out chapter is too tall"));
+        }
+        Ok([self.viewport[0], height])
+    }
+
+    fn paint(
+        &mut self,
+        index: usize,
+        origin: [f32; 2],
+        canvas_source: roxmltree::NodeId,
+        clip: Rect,
+        positions: &mut PaintPositions<'_, '_, '_>,
+        output: &mut Vec<Draw>,
+    ) -> Result<(), EngineError> {
+        let node = &self.boxes[index];
+        let layout = *self.tree.layout(node.id);
+        let origin = positions.origins.remove(&node.id).unwrap_or(origin);
+        let [x, y] = [origin[0] + layout.location.x, origin[1] + layout.location.y];
+        // Taffy reports out-of-flow locations relative to their containing
+        // block. Paint in DOM order but use that block's geometry.
+        for &child in self.tree.hoisted_children(node.id) {
+            positions.origins.insert(child, [x, y]);
+        }
+        let rectangle = Rect::new(x, y, layout.size.width, layout.size.height);
+        if ![x, y, rectangle.w, rectangle.h]
+            .into_iter()
+            .all(|n| n.is_finite() && n.abs() <= MAX_PAINT_COORDINATE)
+        {
+            return Err(limited("EPUB box geometry exceeds renderer limits"));
+        }
+        if !node.invisible {
+            if let Some(navigation) = positions.navigation.as_mut() {
+                if let Some(id) = node.dom.and_then(|dom| positions.anchors.get(&dom)) {
+                    capture_anchor(&mut navigation.anchors, id, rectangle, clip);
+                }
+                if let Some(href) = &node.href {
+                    navigation.links.add(rectangle, clip, href.clone())?;
+                }
+            }
+        }
+        let border = layout.border;
+        let padding = layout.padding;
+        let content_box = Rect::new(
+            x + border.left + padding.left,
+            y + border.top + padding.top,
+            (rectangle.w - border.left - border.right - padding.left - padding.right).max(0.0),
+            (rectangle.h - border.top - border.bottom - padding.top - padding.bottom).max(0.0),
+        );
+        let overflow = node.clip_overflow.then(|| {
+            Rect::new(
+                x + border.left,
+                y + border.top,
+                (rectangle.w - border.left - border.right).max(0.0),
+                (rectangle.h - border.top - border.bottom).max(0.0),
+            )
+        });
+        let child_clip = overflow.map_or(clip, |rect| intersection(clip, rect));
+        let mut inner = Vec::new();
+        if !node.invisible {
+            if node.dom != Some(canvas_source) {
+                fill(output, rectangle, node.background);
+            }
+            for (rect, color) in [
+                Rect::new(x, y, rectangle.w, border.top),
+                Rect::new(x + rectangle.w - border.right, y, border.right, rectangle.h),
+                Rect::new(
+                    x,
+                    y + rectangle.h - border.bottom,
+                    rectangle.w,
+                    border.bottom,
+                ),
+                Rect::new(x, y, border.left, rectangle.h),
+            ]
+            .into_iter()
+            .zip(node.borders)
+            {
+                fill(output, rect, color);
+            }
+            match node.content.as_ref() {
+                Some(Contents::Text(blocks)) if content_box.w > 0.0 => {
+                    let page = layout_text(
+                        blocks,
+                        content_box.w,
+                        &mut self.output.document,
+                        &mut self.cache,
+                        &mut self.measure_count,
+                    )?;
+                    if let Some((capture, paragraphs)) = positions
+                        .navigation
+                        .as_mut()
+                        .zip(self.output.navigation.as_ref())
+                    {
+                        link_geometry::capture_native(
+                            &self.output.document,
+                            &page,
+                            paragraphs,
+                            content_box,
+                            child_clip,
+                            capture,
+                        )?;
+                    }
+                    let draws = page_display(
+                        &self.output.document,
+                        &page,
+                        &wordcraft_layout::display::DisplayOptions::default(),
+                    );
+                    if let Some(capture) = positions.navigation.as_mut() {
+                        super::rendition::text::draw_text(
+                            &draws,
+                            [content_box.x, content_box.y],
+                            child_clip,
+                            self.output.svg_images.as_ref(),
+                            capture,
+                        )?;
+                    }
+                    inner.push(Draw::Turned {
+                        x: content_box.x,
+                        y: content_box.y,
+                        turn: TextDirection::Horizontal,
+                        items: draws,
+                    });
+                }
+                Some(Contents::FontText(blocks)) if content_box.w > 0.0 => {
+                    let mut area = content_box;
+                    for block in blocks {
+                        area.y += block.draw(
+                            area,
+                            &mut self.glyph_paths,
+                            &mut inner,
+                            positions
+                                .navigation
+                                .as_mut()
+                                .map(|capture| (capture, child_clip)),
+                            self.output.svg_images.as_ref(),
+                        )?;
+                    }
+                }
+                Some(Contents::Image(image, alt)) if content_box.w > 0.0 && content_box.h > 0.0 => {
+                    let media = image.media(&mut self.output, content_box)?;
+                    if let Some(capture) = positions.navigation.as_mut() {
+                        super::rendition::text::draw_image(
+                            self.output.svg_images.as_ref(),
+                            &media,
+                            content_box,
+                            kurbo::Affine::IDENTITY,
+                            child_clip,
+                            capture,
+                        )?;
+                    }
+                    inner.push(Draw::Image {
+                        rect: content_box,
+                        media,
+                        crop: [0.0; 4],
+                        alpha: 1.0,
+                        alt: alt.clone(),
+                        decorative: false,
+                    });
+                }
+                _ => {}
+            }
+        }
+        let mut children = node.children.clone();
+        children.sort_by_key(|&child| self.boxes[child].z_index);
+        for child in children {
+            self.paint(
+                child,
+                [x, y],
+                canvas_source,
+                child_clip,
+                positions,
+                &mut inner,
+            )?;
+        }
+        if let Some(rect) = overflow.filter(|_| !inner.is_empty()) {
+            output.push(Draw::Clip { rect, items: inner });
+        } else {
+            output.extend(inner);
+        }
+        Ok(())
+    }
+}
+
+fn measure(
+    content: Option<&Contents>,
+    input: LayoutInput,
+    doc: &mut Document,
+    cache: &mut LayoutCache,
+    work: &mut usize,
+) -> Result<Size<f32>, EngineError> {
+    let known = input.known_dimensions;
+    if let (Some(width), Some(height)) = (known.width, known.height) {
+        return Ok(Size { width, height });
+    }
+    let natural = match content {
+        Some(Contents::Image(image, _)) => {
+            let [mut width, mut height] = image.size().map(|n| n * 0.75);
+            if let Some(w) = known.width {
+                height *= w / width;
+                width = w;
+            } else if let Some(h) = known.height {
+                width *= h / height;
+                height = h;
+            }
+            Size { width, height }
+        }
+        Some(Contents::FontText(blocks)) => {
+            font_text_size(blocks, available_text_width(input), work)?
+        }
+        Some(Contents::Text(blocks)) => {
+            let width = available_text_width(input);
+            let page = layout_text(
+                blocks,
+                width.into_option().unwrap_or(MAX_GEOMETRY),
+                doc,
+                cache,
+                work,
+            )?;
+            let mut size = text_size(&page, width);
+            if width == AvailableSpace::MinContent && input.axis != RequestedAxis::Horizontal {
+                let wrapped = layout_text(blocks, size.width, doc, cache, work)?;
+                size.height = text_size(&wrapped, AvailableSpace::Definite(size.width)).height;
+            }
+            size
+        }
+        None | Some(Contents::RelativeMath(_)) => Size::ZERO,
+    };
+    Ok(Size {
+        width: known.width.unwrap_or(natural.width),
+        height: known.height.unwrap_or(natural.height),
+    })
+}
+
+fn font_text_size(
+    blocks: &[FontText],
+    space: AvailableSpace,
+    work: &mut usize,
+) -> Result<Size<f32>, EngineError> {
+    super::charge(
+        work,
+        blocks.len(),
+        16_000,
+        "EPUB text layout work limit exceeded",
+    )?;
+    let mut total = Size::<f32>::ZERO;
+    for block in blocks {
+        let [w, h] = match space {
+            AvailableSpace::Definite(width) => block.size(width),
+            space => {
+                let width = block.intrinsic_width(space == AvailableSpace::MinContent);
+                [width, block.size(width)[1]]
+            }
+        };
+        total.width = total.width.max(w);
+        total.height += h;
+    }
+    Ok(total)
+}
+
+fn available_text_width(input: LayoutInput) -> AvailableSpace {
+    input
+        .known_dimensions
+        .width
+        .map_or(input.available_space.width, AvailableSpace::Definite)
+}
+
+fn layout_text(
+    blocks: &Blocks,
+    width: f32,
+    doc: &mut Document,
+    cache: &mut LayoutCache,
+    work: &mut usize,
+) -> Result<Page, EngineError> {
+    super::charge(
+        work,
+        blocks.len().max(1),
+        16_000,
+        "EPUB text layout work limit exceeded",
+    )?;
+    doc.body.clone_from(blocks);
+    doc.last_section = wordcraft_doc::SectionProps {
+        page_w: width.clamp(2.0, MAX_GEOMETRY),
+        page_h: MAX_GEOMETRY,
+        margin_left: 0.0,
+        margin_top: 0.0,
+        margin_right: 0.0,
+        margin_bottom: 0.0,
+        gutter: 0.0,
+        ..Default::default()
+    };
+    let result = wordcraft_layout::layout(
+        doc,
+        cache,
+        &LayoutOptions {
+            view: ViewMode::Print,
+            ..Default::default()
+        },
+    );
+    cache.clear();
+    if result.pages.len() != 1 {
+        return Err(limited("EPUB text box exceeds native page height"));
+    }
+    result
+        .pages
+        .into_iter()
+        .next()
+        .ok_or_else(|| invalid("empty EPUB text layout"))
+}
+
+fn text_size(page: &Page, space: AvailableSpace) -> Size<f32> {
+    let mut size = Size::ZERO;
+    for entry in &page.items {
+        match entry {
+            Placed::Lines {
+                x: _,
+                y,
+                para,
+                l0,
+                l1,
+                ..
+            } => {
+                let lines = &para.lines[*l0..*l1];
+                if let (Some(first), Some(last)) = (lines.first(), lines.last()) {
+                    size.height = size.height.max(y + last.top - first.top + last.height);
+                    for line in lines {
+                        let width = if space == AvailableSpace::MinContent {
+                            let mut part = 0.0f32;
+                            let mut end = 0.0f32;
+                            let mut widest = 0.0f32;
+                            for cluster in &para.clusters[line.c0..line.c1] {
+                                part += cluster.adv;
+                                if cluster.kind != ClKind::Space {
+                                    end = part;
+                                }
+                                if cluster.break_after {
+                                    widest = widest.max(end);
+                                    part = 0.0;
+                                    end = 0.0;
+                                }
+                            }
+                            widest.max(end)
+                        } else if space == AvailableSpace::MaxContent && !line.vis.is_empty() {
+                            let left = line
+                                .vis
+                                .iter()
+                                .map(|cluster| cluster.x)
+                                .fold(f32::INFINITY, f32::min);
+                            let right = line
+                                .vis
+                                .iter()
+                                .map(|cluster| cluster.x + cluster.w)
+                                .fold(f32::NEG_INFINITY, f32::max);
+                            right - left
+                        } else {
+                            line.xs
+                                .first()
+                                .zip(line.xs.last())
+                                .map_or(0.0, |(left, right)| (right - left).abs())
+                        };
+                        size.width = size.width.max(width);
+                    }
+                }
+            }
+            Placed::Cell { rect, .. }
+            | Placed::Image { rect, .. }
+            | Placed::Object { rect, .. } => {
+                size.height = size.height.max(rect.y + rect.h);
+                size.width = size.width.max(rect.x + rect.w);
+            }
+            _ => {}
+        }
+    }
+    size
+}
+
+fn fill(output: &mut Vec<Draw>, rect: Rect, color: Option<Paint>) {
+    if let Some((color, alpha)) =
+        color.filter(|(_, alpha)| *alpha > 0.0 && rect.w > 0.0 && rect.h > 0.0)
+    {
+        output.push(Draw::Fill {
+            rect,
+            color,
+            alpha,
+            text_bg: false,
+        });
+    }
+}
+
+fn raster(
+    doc: &Document,
+    drawing: &[Draw],
+    dpi: f64,
+    region: RasterRegion,
+) -> Result<wordcraft_render::Rendered, EngineError> {
+    let scale = dpi / 72.0;
+    // render_items uses its area only to determine dimensions and transform. Choose
+    // dimensions inside the quantized pixel interval to absorb its f32 rounding.
+    let area = Rect::new(
+        (f64::from(region.x) / scale) as f32,
+        (f64::from(region.y) / scale) as f32,
+        ((f64::from(region.width) - 0.125) / scale) as f32,
+        ((f64::from(region.height) - 0.125) / scale) as f32,
+    );
+    let rendered = wordcraft_render::render_items(
+        doc,
+        drawing,
+        area,
+        scale as f32,
+        &wordcraft_render::RenderOptions::default(),
+    );
+    region.validate_result(rendered.width, rendered.height)?;
+    Ok(rendered)
+}

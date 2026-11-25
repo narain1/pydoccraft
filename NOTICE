@@ -29,12 +29,11 @@ Licensed under the MIT License or the Apache License, Version 2.0, at your optio
 Source: https://github.com/storytold/craft-libs
 Pinned revision: 92d392cff132eaf53e13afff77f38b5c11b73aa0
 
-LexePub
-Copyright 2026 NellowTCS and LexePub contributors.
-Licensed under the Apache License, Version 2.0.
-Source: https://github.com/NellowTCS/lexepub
-Crate: lexepub 0.1.2; crates.io checksum 6d35d0fae6dc461c3bd7055d8d12ffd9e50ec255f488041d006b8b975bdef596
-Used for in-memory EPUB container, package metadata, spine, and XHTML extraction. CLI, C FFI, WASM, Embassy, and low-memory features are not enabled.
+roxmltree
+Copyright the roxmltree contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option.
+Source: https://github.com/RazrFalcon/roxmltree
+Crate: roxmltree 0.21.2. Used for bounded, namespace-aware EPUB XML traversal.
 
 rbook
 Copyright 2025-2026 Devin Sterling and rbook contributors.
@@ -42,6 +41,61 @@ Licensed under the Apache License, Version 2.0.
 Source: https://github.com/DevinSterling/rbook
 Crate: rbook 0.7.12; crates.io package source corresponds to tag revision c62988a09e5043444392fe998d5103821f545991.
 Only the `write` feature is enabled. It provides in-memory EPUB package, manifest, spine, navigation, MIME and ZIP serialization; pydoccraft does not use its filesystem writer.
+
+Raffia
+Copyright the Raffia contributors.
+Licensed under the MIT License.
+Source: https://github.com/g-plane/raffia
+Crate: raffia 0.13.0. Used to parse EPUB CSS syntax and selectors.
+
+Taffy
+Copyright the Taffy contributors.
+Licensed under the MIT License.
+Source: https://github.com/DioxusLabs/taffy
+Crate: taffy 0.16.0. Used for EPUB block, flex and grid geometry.
+
+resvg
+Copyright 2017 the Resvg Authors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option.
+Source: https://github.com/linebender/resvg
+Crates: resvg and usvg 0.50.0. Used to render validated EPUB SVG content documents.
+
+Parley and Fontique
+Copyright the Parley Authors.
+Licensed under the Apache License, Version 2.0, or the MIT License.
+Source: https://github.com/linebender/parley
+Crates: parley, parley_engine, parley_data, parley_emoji, and fontique 0.13.0. Used for EPUB text shaping and line layout with publication-local fonts.
+The EPUB renderer also uses the bundled WordCraft fonts already attributed in this file.
+
+RustCrypto SHA-1
+Licensed under the Apache License, Version 2.0, or the MIT License.
+Source: https://github.com/RustCrypto/hashes
+Crate: sha1 0.11.0. Used to derive the EPUB OCF font obfuscation key.
+
+Hound
+Copyright (C) 2015 Ruud van Asseldonk.
+Licensed under the Apache License, Version 2.0.
+Source: https://github.com/ruuda/hound
+Crate: hound 3.5.1. Used for PCM WAVE input and output in EPUB narration.
+
+mp3dec
+Copyright (c) 2025 Raph Levien.
+Licensed under the Apache License, Version 2.0 or the MIT License.
+Source: https://github.com/raphlinus/mp3dec
+Crate: mp3dec 0.1.0. Used to decode MPEG Layer III narration. It is a Rust port of minimp3 (CC0 1.0).
+
+OxideAV
+Copyright (c) 2026 Karpelès Lab Inc.
+Licensed under the MIT License.
+Sources: https://github.com/OxideAV/oxideav-core, https://github.com/OxideAV/oxideav-aac, https://github.com/OxideAV/oxideav-mp4, https://github.com/OxideAV/oxideav-opus, https://github.com/OxideAV/oxideav-h264, https://github.com/OxideAV/oxideav-theora, https://github.com/OxideAV/oxideav-mkv, https://github.com/OxideAV/oxideav-vp8, https://github.com/OxideAV/oxideav-vp9, https://github.com/OxideAV/oxideav-vorbis, https://github.com/OxideAV/oxideav-ogg, https://github.com/OxideAV/oxideav-av1
+Crates: oxideav-core 0.1.43, oxideav-aac 0.1.7, oxideav-mp4 0.0.11, oxideav-opus 0.0.15, oxideav-h264 0.1.12, oxideav-theora 0.0.13, oxideav-mkv 0.0.12, oxideav-vp8 0.2.9, oxideav-vp9 0.0.15, oxideav-vorbis 0.0.12, oxideav-ogg 0.1.9, and oxideav-av1 0.1.24. Used to demux local MP4 and WebM media and decode AAC-LC, Opus, AVC, Theora, AV1, VP8, VP9, and Vorbis.
+
+RustAudio Ogg
+Copyright (c) 2016-2017 est31 <MTest31@outlook.com> and contributors.
+Copyright (c) 2002-2015 Xiph.org Foundation.
+Licensed under the BSD 3-Clause License.
+Source: https://github.com/RustAudio/ogg
+Crate: ogg 0.9.2. Used to demux local Ogg Opus narration.
 
 Documentation image: website/assets/irs-1040-page-1.png is rendered from the U.S. Internal Revenue Service 2025 Form 1040 (https://www.irs.gov/pub/irs-prior/f1040--2025.pdf), a U.S. government work.
 
@@ -51,7 +105,7 @@ Bundled and linked third-party material
 - Foxit standard-14 substitute fonts: Copyright 2014 PDFium Authors; original code copyright 2014 Foxit Software Inc. BSD-3-Clause.
 - Adobe CMap resources: Copyright 1990-2023 Adobe. BSD-3-Clause. Neither Adobe nor contributor names may be used to endorse derived products without prior written permission.
 - Source Sans 3 and Source Serif 4: Adobe and their respective project authors. SIL Open Font License 1.1.
-- Inter: The Inter Project Authors. SIL Open Font License 1.1. The unmodified tests/fixtures/fonts/Inter-Regular.ttf fixture comes from the pinned PdfCraft assets/fonts directory; its full license and copyright are retained alongside it as OFL-Inter.txt.
+- Inter: The Inter Project Authors. SIL Open Font License 1.1. The unmodified tests/fixtures/fonts/Inter-Regular.ttf fixture comes from the pinned PdfCraft assets/fonts directory. The unmodified tests/fixtures/fonts/InterVariable.ttf fixture comes from Inter v4.1 at e3a3d4c57d5ecc01453a575621882a384c1995a3. Both fixtures retain the full license and copyright in OFL-Inter.txt.
 - JetBrains Mono: The JetBrains Mono Project Authors. SIL Open Font License 1.1.
 - Ubuntu Light: Dalton Maag Ltd for Canonical. Ubuntu Font Licence 1.0.
 - Hack, Noto Emoji, and the egui emoji icon font through epaint_default_fonts: MIT/Bitstream Vera, SIL Open Font License 1.1, and MIT respectively. Version 0.37 also bundles `egui-icons.ttf`, a five-glyph subset of the same emoji icon font (MIT).
@@ -59,7 +113,16 @@ Bundled and linked third-party material
 - WordCraft Polish and Italian hyphenation patterns are used under MIT; Portuguese patterns are used under BSD-3-Clause. Copyright details remain in the corresponding upstream source files.
 - Krilla 0.8.2 is MIT OR Apache-2.0. Compact ICC Profiles embedded by the PDF backend are by Clinton Ingram and released under CC0-1.0.
 - Kurbo 0.13.1, by the Linebender contributors, is Apache-2.0 OR MIT. The existing native geometry dependency is also used directly for WordCraft region-render transforms and native glyph curve bounds.
+- Color 0.3.3, by the Linebender contributors, is Apache-2.0 OR MIT. The existing color dependency is also used directly for EPUB CSS colors.
 - Skrifa 0.44.0, by the Fontations Authors, is MIT OR Apache-2.0. The existing font dependency is also used directly for bounded native TrueType outline inspection. All font parsing and outline geometry use public upstream library APIs.
+
+- Unicode Segmentation 1.13.3, by the Unicode-rs contributors, is MIT OR Apache-2.0. The existing dependency is also used directly to keep grapheme clusters together in SVG font fallback.
+
+The synthetic AV1 monochrome WebM fixtures in tests/fixtures/epub-video-av1-mono-{8,10,12}.webm contain project-authored sample patterns under Apache-2.0. libaom through FFmpeg was used solely to encode the source-tree test fixtures.
+
+The synthetic AV1 RGB WebM fixtures in tests/fixtures/epub-video-av1-rgb-{8,10,12}.webm contain project-authored sample patterns under Apache-2.0. libaom through FFmpeg was used solely to encode the source-tree test fixtures.
+
+The synthetic AV1 base operating-point fixture in tests/fixtures/epub-video-av1-base-op.webm uses project-authored picture patterns and a generated tone under Apache-2.0. libaom and FFmpeg with libopus generated this source-tree fixture, and libdav1d verified the base picture samples.
 
 The locked crate-by-crate license inventory is distributed as LICENSE-THIRD-PARTY and maintained in source as THIRD_PARTY_LICENSES.md.
 

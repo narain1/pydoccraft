@@ -103,6 +103,33 @@ impl NativeEditableEpub {
         self.inner.add_paragraph(chapter, text)
     }
 
+    #[pyo3(signature = (date=None))]
+    fn set_publication_date(&mut self, date: Option<String>) -> Result<(), EngineError> {
+        self.inner.set_publication_date(date)
+    }
+
+    fn add_list(
+        &mut self,
+        chapter: usize,
+        items: Vec<String>,
+        ordered: bool,
+    ) -> Result<(), EngineError> {
+        self.inner.add_list(chapter, items, ordered)
+    }
+
+    fn add_table(
+        &mut self,
+        chapter: usize,
+        rows: Vec<Vec<String>>,
+        header: bool,
+    ) -> Result<(), EngineError> {
+        self.inner.add_table(chapter, rows, header)
+    }
+
+    fn add_preformatted(&mut self, chapter: usize, text: String) -> Result<(), EngineError> {
+        self.inner.add_preformatted(chapter, text)
+    }
+
     fn add_link(&mut self, chapter: usize, text: String, href: String) -> Result<(), EngineError> {
         self.inner.add_link(chapter, text, href)
     }
@@ -321,6 +348,421 @@ fn render(
 }
 
 #[pyfunction]
+#[pyo3(signature = (data, page, dpi, landscape, clip=None))]
+fn _render_epub_spread(
+    data: &[u8],
+    page: usize,
+    dpi: f64,
+    landscape: bool,
+    clip: Option<rendering::Clip>,
+) -> Result<Vec<u8>, EngineError> {
+    crate::epub::render_spread(data, page, dpi, landscape, clip)
+}
+
+#[pyfunction]
+#[pyo3(signature = (data, dpi, pages=None, searchable=false))]
+fn _export_epub_fixed_pdf(
+    data: &[u8],
+    dpi: f64,
+    pages: Option<Vec<usize>>,
+    searchable: bool,
+) -> Result<Vec<u8>, EngineError> {
+    crate::epub::export_fixed_pdf(data, dpi, pages.as_deref(), searchable)
+}
+
+#[pyfunction]
+#[pyo3(signature = (data, title=None, description=None))]
+fn _edit_epub_metadata(
+    data: &[u8],
+    title: Option<&str>,
+    description: Option<&str>,
+) -> Result<Vec<u8>, EngineError> {
+    crate::epub::update_metadata(data, title, description)
+}
+
+#[pyfunction]
+#[pyo3(signature = (data, path, offset=0, length=None))]
+fn _epub_resource(
+    data: &[u8],
+    path: &str,
+    offset: u64,
+    length: Option<usize>,
+) -> Result<Vec<u8>, EngineError> {
+    crate::epub::read_resource(data, path, offset, length)
+}
+
+#[pyclass(module = "doc_ex._core", name = "_EpubAudio")]
+struct NativeEpubAudio(crate::epub::audio::AudioSource);
+
+#[pymethods]
+impl NativeEpubAudio {
+    #[pyo3(signature = (begin, end, clamp_to_duration=false))]
+    fn clip(
+        &mut self,
+        py: Python<'_>,
+        begin: u64,
+        end: Option<u64>,
+        clamp_to_duration: bool,
+    ) -> Result<PcmClip, EngineError> {
+        py.allow_threads(|| self.0.clip(begin, end, clamp_to_duration))
+            .map(pcm_clip)
+    }
+
+    #[pyo3(signature = (begin, end, clamp_to_duration=false))]
+    fn start_stream(
+        &mut self,
+        py: Python<'_>,
+        begin: u64,
+        end: Option<u64>,
+        clamp_to_duration: bool,
+    ) -> Result<(), EngineError> {
+        py.allow_threads(|| self.0.start_stream(begin, end, clamp_to_duration))
+    }
+
+    fn next_chunk(
+        &mut self,
+        py: Python<'_>,
+        frames: usize,
+    ) -> Result<Option<PcmClip>, EngineError> {
+        py.allow_threads(|| self.0.next_chunk(frames))
+            .map(|chunk| chunk.map(pcm_clip))
+    }
+}
+
+type PcmClip = (Vec<u8>, u32, u16, usize);
+
+fn pcm_clip(clip: crate::epub::audio::AudioClip) -> PcmClip {
+    (clip.wave, clip.sample_rate, clip.channels, clip.frames)
+}
+
+#[pyfunction]
+#[pyo3(signature = (data, path, media, opus_track=None, synchronize_video=false, audio_track=None, fragment_tracks=None))]
+#[allow(clippy::too_many_arguments)]
+fn _open_epub_audio(
+    py: Python<'_>,
+    data: &[u8],
+    path: &str,
+    media: &str,
+    opus_track: Option<u32>,
+    synchronize_video: bool,
+    audio_track: Option<u32>,
+    fragment_tracks: Option<Vec<String>>,
+) -> Result<NativeEpubAudio, EngineError> {
+    py.allow_threads(|| {
+        crate::epub::audio::AudioSource::open(
+            data,
+            path,
+            media,
+            opus_track.map(|index| index as usize),
+            synchronize_video,
+            audio_track.map(|index| index as usize),
+            fragment_tracks.as_deref().unwrap_or_default(),
+        )
+    })
+    .map(NativeEpubAudio)
+}
+
+#[pyclass(module = "doc_ex._core", name = "_EpubVideo")]
+struct NativeEpubVideo(crate::epub::video::VideoSource);
+
+type RgbFrame = (Vec<u8>, u32, u32, (u32, u32), u64, u64);
+
+#[pymethods]
+impl NativeEpubVideo {
+    fn clip_spatial(&mut self, percent: bool, coordinates: [u64; 4]) -> Result<(), EngineError> {
+        self.0.clip_spatial(percent, coordinates)
+    }
+
+    fn next_frame(&mut self, py: Python<'_>) -> Result<Option<RgbFrame>, EngineError> {
+        py.allow_threads(|| self.0.next()).map(|frame| {
+            frame.map(|frame| {
+                (
+                    frame.rgb,
+                    frame.width,
+                    frame.height,
+                    frame.aspect,
+                    frame.start_us,
+                    frame.duration_us,
+                )
+            })
+        })
+    }
+}
+
+#[pyfunction]
+fn _epub_caption_overlay(
+    py: Python<'_>,
+    size: (u32, u32),
+    paint: crate::epub::caption_paint::Paint,
+    runs: Vec<crate::epub::caption_paint::Run>,
+) -> Result<Vec<u8>, EngineError> {
+    py.allow_threads(|| crate::epub::caption_paint::overlay(size, paint, runs))
+}
+
+#[pyfunction]
+fn _epub_caption_composite(
+    py: Python<'_>,
+    rgb: &[u8],
+    overlay: &[u8],
+) -> Result<Vec<u8>, EngineError> {
+    py.allow_threads(|| crate::epub::caption_paint::composite(rgb, overlay))
+}
+
+#[pyfunction]
+#[pyo3(signature = (data, path, media, start, end, video_track=None, fragment_tracks=None))]
+#[allow(clippy::too_many_arguments)]
+fn _open_epub_video(
+    py: Python<'_>,
+    data: &[u8],
+    path: &str,
+    media: &str,
+    start: u64,
+    end: Option<u64>,
+    video_track: Option<u32>,
+    fragment_tracks: Option<Vec<String>>,
+) -> Result<NativeEpubVideo, EngineError> {
+    py.allow_threads(|| {
+        crate::epub::video::VideoSource::open(
+            data,
+            path,
+            media,
+            start,
+            end,
+            video_track.map(|index| index as usize),
+            fragment_tracks.as_deref().unwrap_or_default(),
+        )
+    })
+    .map(NativeEpubVideo)
+}
+
+#[pyfunction]
+fn _epub_webm_chapter(
+    py: Python<'_>,
+    data: &[u8],
+    path: &str,
+    id: &str,
+) -> Result<(u64, Option<u64>), EngineError> {
+    py.allow_threads(|| crate::epub::webm::chapter_interval(data, path, id))
+}
+
+#[pyfunction]
+fn _epub_mp4_chapter(
+    py: Python<'_>,
+    data: &[u8],
+    path: &str,
+    id: &str,
+) -> Result<(u64, Option<u64>), EngineError> {
+    py.allow_threads(|| crate::epub::mp4::chapter_interval(data, path, id))
+}
+
+type Rgba = (u8, u8, u8, u8);
+type TimedTextStyle = (
+    bool,
+    &'static str,
+    bool,
+    bool,
+    bool,
+    Option<Rgba>,
+    Option<Rgba>,
+    Vec<String>,
+    Option<String>,
+    Option<String>,
+);
+type TimedTextRun = (String, TimedTextStyle, Option<u64>);
+
+fn timed_text_style(style: crate::epub::text_tracks::TextStyle) -> TimedTextStyle {
+    let rgba = |[r, g, b, a]: [u8; 4]| (r, g, b, a);
+    (
+        style.bold,
+        style.font_style.as_str(),
+        style.underline,
+        style.line_through,
+        style.overline,
+        style.color.map(rgba),
+        style.background_color.map(rgba),
+        style.classes,
+        style.voice,
+        style.language,
+    )
+}
+
+fn timed_text_run(run: crate::epub::text_tracks::TextRun) -> TimedTextRun {
+    (
+        run.text,
+        timed_text_style(std::sync::Arc::unwrap_or_clone(run.style)),
+        run.timestamp,
+    )
+}
+
+type TimedTextRegion = (
+    String,
+    f64,
+    u32,
+    (f64, f64),
+    (f64, f64),
+    Option<&'static str>,
+    TimedTextStyle,
+    Option<f64>,
+    Option<&'static str>,
+);
+
+type TimedTtmlRegion = (
+    Option<String>,
+    (f64, f64),
+    (f64, f64),
+    (f64, f64, f64, f64),
+    &'static str,
+    &'static str,
+    &'static str,
+    Option<Rgba>,
+    &'static str,
+    Option<i32>,
+);
+
+type TimedTextCue = (
+    u64,
+    Option<u64>,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Vec<TimedTextRun>,
+    Option<Rgba>,
+    Option<TimedTextRegion>,
+    Option<TimedTtmlRegion>,
+);
+
+#[pyfunction]
+#[pyo3(signature = (data, path, media, start, end, language=None, video_context=true, ttml_forced=false))]
+#[allow(clippy::too_many_arguments)]
+fn _epub_text_track(
+    py: Python<'_>,
+    data: &[u8],
+    path: &str,
+    media: &str,
+    start: u64,
+    end: Option<u64>,
+    language: Option<&str>,
+    video_context: bool,
+    ttml_forced: bool,
+) -> Result<Vec<TimedTextCue>, EngineError> {
+    py.allow_threads(|| {
+        crate::epub::text_tracks::read(
+            data,
+            path,
+            media,
+            (start, end),
+            language,
+            video_context,
+            ttml_forced,
+        )
+    })
+    .map(|cues| {
+        cues.into_iter()
+            .map(|cue| {
+                (
+                    cue.start,
+                    cue.end,
+                    cue.text,
+                    cue.id,
+                    cue.settings,
+                    cue.region,
+                    cue.markup,
+                    cue.runs.into_iter().map(timed_text_run).collect(),
+                    cue.background_color
+                        .map(|[r, g, b, a]: [u8; 4]| (r, g, b, a)),
+                    cue.region_layout.map(|region| {
+                        (
+                            region.id.clone(),
+                            region.width_percent,
+                            region.lines,
+                            region.region_anchor_percent,
+                            region.viewport_anchor_percent,
+                            region.scroll_up.then_some("up"),
+                            timed_text_style(region.paint.style.clone()),
+                            region.paint.opacity,
+                            region.paint.visibility,
+                        )
+                    }),
+                    cue.ttml_region_layout.map(|region| {
+                        (
+                            region.id.clone(),
+                            region.origin_percent,
+                            region.extent_percent,
+                            region.padding_percent,
+                            region.display_align,
+                            region.writing_mode,
+                            region.overflow,
+                            region.background_color.map(|[r, g, b, a]| (r, g, b, a)),
+                            region.show_background,
+                            region.z_index,
+                        )
+                    }),
+                )
+            })
+            .collect()
+    })
+}
+
+#[pyfunction]
+#[pyo3(signature = (data, path, fragment))]
+fn _epub_narration_text(
+    data: &[u8],
+    path: &str,
+    fragment: Option<&str>,
+) -> Result<String, EngineError> {
+    crate::epub::audio::narration_text(data, path, fragment)
+}
+
+#[pyfunction]
+fn _epub_narration_ancestors(
+    data: &[u8],
+    path: &str,
+    fragment: &str,
+) -> Result<Option<Vec<String>>, EngineError> {
+    crate::epub::audio::narration_ancestors(data, path, fragment)
+}
+
+#[pyfunction]
+fn _edit_epub_chapters(
+    data: &[u8],
+    replacements: Vec<(i64, String)>,
+) -> Result<Vec<u8>, EngineError> {
+    crate::epub::update_chapters(data, &replacements)
+}
+
+#[pyfunction]
+#[pyo3(signature = (data, order, resources, modified, removed=Vec::new(), overlays=Vec::new(), chapters=Vec::new(), spine_properties=Vec::new()))]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "flat Python binding for EPUB structure edits"
+)]
+fn _edit_epub_structure(
+    data: &[u8],
+    order: Option<Vec<crate::epub::SpineEdit>>,
+    resources: Vec<crate::epub::ResourceEdit>,
+    modified: &str,
+    removed: Vec<String>,
+    overlays: Vec<crate::epub::OverlayEdit>,
+    chapters: Vec<(i64, String)>,
+    spine_properties: Vec<crate::epub::SpinePropertyEdit>,
+) -> Result<Vec<u8>, EngineError> {
+    crate::epub::update_structure(
+        data,
+        crate::epub::StructureEdits {
+            order: order.as_deref(),
+            resources: &resources,
+            modified,
+            removed: &removed,
+            overlays: &overlays,
+            chapters: &chapters,
+            spine_properties: &spine_properties,
+        },
+    )
+}
+
+#[pyfunction]
 fn detect(data: &[u8]) -> PyResult<String> {
     api::detect(data).map_err(Into::into)
 }
@@ -341,6 +783,21 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(_open_pdf, module)?)?;
     module.add_function(wrap_pyfunction!(_open_office, module)?)?;
     module.add_function(wrap_pyfunction!(extract, module)?)?;
+    module.add_function(wrap_pyfunction!(_render_epub_spread, module)?)?;
+    module.add_function(wrap_pyfunction!(_export_epub_fixed_pdf, module)?)?;
+    module.add_function(wrap_pyfunction!(_edit_epub_metadata, module)?)?;
+    module.add_function(wrap_pyfunction!(_edit_epub_chapters, module)?)?;
+    module.add_function(wrap_pyfunction!(_edit_epub_structure, module)?)?;
+    module.add_function(wrap_pyfunction!(_epub_resource, module)?)?;
+    module.add_function(wrap_pyfunction!(_open_epub_audio, module)?)?;
+    module.add_function(wrap_pyfunction!(_open_epub_video, module)?)?;
+    module.add_function(wrap_pyfunction!(_epub_caption_overlay, module)?)?;
+    module.add_function(wrap_pyfunction!(_epub_caption_composite, module)?)?;
+    module.add_function(wrap_pyfunction!(_epub_webm_chapter, module)?)?;
+    module.add_function(wrap_pyfunction!(_epub_mp4_chapter, module)?)?;
+    module.add_function(wrap_pyfunction!(_epub_text_track, module)?)?;
+    module.add_function(wrap_pyfunction!(_epub_narration_text, module)?)?;
+    module.add_function(wrap_pyfunction!(_epub_narration_ancestors, module)?)?;
     module.add_function(wrap_pyfunction!(extract_text, module)?)?;
     module.add_function(wrap_pyfunction!(convert, module)?)?;
     module.add_function(wrap_pyfunction!(render, module)?)?;

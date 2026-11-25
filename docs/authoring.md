@@ -39,9 +39,9 @@ A new PDF starts with one Letter page unless `size` is supplied. `pdf.pages.add(
 
 ### EPUB reflowable books
 
-`doc_ex.new("epub" | "ebook")` creates an append-only EPUB 3 book. Set required title, identifier, and language metadata, add ordered chapters, then append headings, paragraphs, HTTP(S)/mailto/fragment links, and PNG/JPEG/GIF images. Text must be valid XML 1.0. Images are signature checked, limited to 16 MiB each and 64 MiB total; authored content is limited to 64 MiB and estimated/actual output to 128 MiB. SVG is rejected because arbitrary SVG cannot be guaranteed inert. `copy()`, bytes/path/stream save, context management, and close follow the lifecycle above.
+`doc_ex.new("epub" | "ebook")` creates a reflowable EPUB 3 book. Set the title, identifier, and language, add ordered chapters, and append headings, paragraphs, lists, tables, preformatted text, links, and images. The lifecycle includes `copy()`, bytes/path/stream saving, context management, and close.
 
-EPUB rendering, conversion, CSS, raw XHTML/OPF, scripts, fixed layout, editing an existing book, and physical pagination are unavailable. The extraction API maps each spine chapter to one compatibility page.
+Existing books support title and description edits, batch chapter replacement, changes to spine order, and resource additions and replacements. See [EPUB creation](#epub-creation-unreleased) and the [EPUB format profile](formats.md#epub-unreleased) for the supported content and output.
 
 ## Typing and inspection
 
@@ -960,14 +960,66 @@ with doc_ex.new("epub") as book:
         language="en",
         authors=["Example Author"],
     )
+    book.set_publication_date("2026-11-23")
     chapter = book.add_chapter("Introduction")
     chapter.add_heading("Welcome", level=1)
     chapter.add_paragraph("A reflowable paragraph.")
+    chapter.add_list(["Read the introduction", "Review the examples"], ordered=True)
+    chapter.add_table([["Name", "Role"], ["Ada", "Editor"]], header=True)
+    chapter.add_preformatted("first line\n  indented line")
     chapter.add_link("Project", "https://example.com")
     chapter.add_image(png_bytes, media_type="image/png", alt="Diagram")
     epub_bytes = book.to_bytes()
 ```
 
-EPUB creation is append-only and semantic. `EpubDocument` supports the shared `to_bytes`, path/stream `save`, `copy`, context manager and idempotent `close` lifecycle. Required metadata is title, identifier and language. Links are inert ASCII-case-insensitive HTTP(S), mailto or safe fragment targets; remote resources are never fetched. Supported image resources are signature-checked PNG, JPEG and GIF bytes, limited to 16 MiB each and 64 MiB total. SVG authoring is rejected because active content cannot be guaranteed inert.
+EPUB creation appends semantic content. Title, identifier, and language are required. Links accept ASCII-case-insensitive HTTP(S), mailto, and safe fragments. The document can store signature-checked PNG, JPEG, GIF, and WebP, and validated static SVG. Each image is limited to 16 MiB. The media and chapter-content budgets are 64 MiB each, and the estimated and actual archive limits are 128 MiB.
 
-Callers cannot inject raw XHTML, OPF, CSS, SVG, scripts or archive paths. Existing EPUB editing, fixed-layout content, rendering, conversion, DRM and media overlays are unsupported.
+For an existing book, `document.edit_epub_metadata(title="New title", description="New description")` returns EPUB bytes with the supplied Dublin Core fields updated. A field left at `None` keeps its original value. `document.edit_epub_chapters({0: first_chapter_markup, -1: last_chapter_markup})` replaces complete XHTML or SVG resources by spine index. Each replacement is a UTF-8 XML document matching the existing media type. Fixed-layout replacements must declare a numeric XHTML viewport or SVG viewBox. A batch can rename an anchor when every link to it in the changed chapters is updated or removed in the same edit. Keep IDs still targeted by retained content documents, navigation or media overlays. When a spine resource appears more than once, the replacement applies at each occurrence.
+
+Use `document.edit_epub_structure(order, resources=...)` to set the reading order. Pass `replacements={index: markup}` to change existing XHTML or SVG chapters in the same transaction. Replacement indexes refer to the original spine, including negative indexes. Combine replacements with `overlays` to retarget narration when changing chapter IDs. If an obsolete SMIL resource remains in the archive, include its path in `remove_resources` when the replacement would remove its target. An integer selects an existing spine entry by index, including negative indexes. Use an `EpubChapterSource` to insert a new XHTML chapter. Replacing a packaged SVG preserves any existing fragment ID referenced by a retained or newly inserted chapter.
+
+For a packaged EPUB 3 navigation document outside the spine, pass its decoded archive path in `resources` with an `EpubResource("application/xhtml+xml", navigation_bytes)`. Supply complete UTF-8 XHTML with a table of contents. Local destinations and their element IDs must resolve in the finished package. Keep any navigation IDs still targeted by retained links. When the same edit changes the spine, the editor updates the authored navigation and reorders any compatibility NCX from its own hierarchy. If the spine order stays the same, the editor keeps the supplied navigation XHTML bytes. Use `replacements` for XHTML navigation that belongs to the spine. [EPUB 3.3 navigation documents](https://www.w3.org/TR/epub-33/#sec-nav)
+
+To replace the spine-linked EPUB 2 or EPUB 3 compatibility NCX, pass its decoded archive path with an `EpubResource("application/x-dtbncx+xml", ncx_bytes)`. Supply UTF-8 NCX with a nonempty navigation map. The table of contents, page list and auxiliary lists must target packaged content with valid element IDs. If the same edit changes the spine, the editor reorders the supplied NCX and assigns play-order numbers across its lists using the final spine and fragment positions. Without a spine change, the supplied NCX bytes are retained. [OPF 2.0.1 NCX requirements](https://idpf.org/epub/20/spec/OPF_2.0.1_draft.htm#Section2.4.1)
+
+```python
+added = doc_ex.EpubChapterSource(
+    "Appendix",
+    '<html xmlns="http://www.w3.org/1999/xhtml">'
+    '<head><title>Appendix</title>'
+    '<link rel="stylesheet" href="../Styles/appendix.css"/></head>'
+    '<body><h1 id="intro">Appendix</h1><aside id="aside">Further reading.</aside></body></html>',
+    path="Text/appendix.xhtml",
+)
+with doc_ex.open(epub_bytes) as source:
+    revised = source.edit_epub_structure([0, added], resources={
+        "Styles/appendix.css": doc_ex.EpubResource("text/css", b"h1 { color: navy; }"),
+    })
+```
+
+The order must contain at least one entry and each selected spine index must occur once. Omitted entries leave the spine and its navigation, while their resources stay in the manifest and archive for surviving references. The editor preserves nested TOC groups where possible and orders siblings by their earliest spine target. It updates EPUB 3 navigation or EPUB 2 NCX and creates a primary TOC if needed. Optional chapter paths are decoded, archive-relative paths. Omit the path to allocate a unique one. Set `fixed_layout=True` to insert EPUB 3 XHTML with a declared numerical viewport. Use `doc_ex.EpubSvgChapterSource(title, svg, path=None)` to insert a fixed-layout EPUB 3 SVG chapter with a numeric viewBox. A supplied SVG path must end in `.svg`. SVG chapters can use packaged stylesheets and PNG or JPEG images, including resources supplied in the same edit. [EPUB SVG content documents](https://www.w3.org/TR/epub-33/#sec-svg)
+
+`resources` maps decoded paths to `EpubResource(media_type, data)`. It supports supplemental XHTML, local stylesheets, images, fonts, audio, video and EPUB 3 SMIL files. Add or replace a supplemental XHTML document outside the spine with an `EpubResource("application/xhtml+xml", xhtml_bytes)`. Its chapter links and packaged media resolve against the staged archive. Update references to any renamed IDs in the same edit. Use `replacements` for the reading order, including effective fallback chapters. Reference a supplemental XHTML file from an `iframe` or an `object` with `type="application/xhtml+xml"` to render it in a static viewport. The reference must resolve to an XHTML manifest resource. Use `width` and `height` in CSS pixels or supported CSS sizing. An auxiliary document linked from a chapter or navigation belongs in the spine. Pass `linear=False` on a new `EpubChapterSource` or `EpubSvgChapterSource` to mark it auxiliary. Every edited reading order needs a linear chapter. [EPUB 3.3 spine](https://www.w3.org/TR/epub-33/#sec-spine) Replacements use the existing manifest media type. Pass `order=None` for resource-only changes.
+
+Pass `spine_properties={-1: doc_ex.EpubSpineProperties(linear=False, page_spread="center")}` to edit the last original spine entry. A property edit follows that occurrence when you reorder the chapters. EPUB 2 and 3 support changing `linear`. EPUB 3 also supports `layout` (`reflowable` or `pre-paginated`), `page_spread` (`left`, `right` or `center`), and `spread` (`none`, `landscape`, `portrait`, `both` or `auto`). Omit fields to preserve them and use `inherit` to clear a layout or spread override. When an EPUB 3 edit adds or marks a chapter as auxiliary, keep it reachable through navigation, the package guide or an authored link from the linear reading order. The check follows chains of local XHTML and SVG links and verifies named fragment targets. Links inside a supported local frame can provide a route. Set the numeric viewport in the same XHTML replacement when making a chapter fixed-layout. [EPUB 3.3 spine and itemref](https://www.w3.org/TR/epub-33/#sec-itemref-elem), [EPUB 3.3 fixed layouts](https://www.w3.org/TR/epub-33/#sec-fixed-layouts)
+
+Pass decoded manifest paths to `remove_resources` to delete packaged files. A transaction can update a stylesheet and remove the assets it previously used, or remove a chapter from the spine and delete its file. Retained package, navigation, XML and stylesheet references block deletion. Scripted dependencies, obfuscated fonts and protected package members require preservation.
+
+Pass `overlays={chapter_path: cues}` to attach or replace EPUB 3 narration for a chapter. Use a decoded chapter path and decoded element IDs. Omit a fragment to target the entire chapter. Audio paths must be local manifest resources, and audio cues need an explicit end after the start in microseconds. Text-only cues contribute zero to the recorded duration.
+
+```python
+with doc_ex.open(revised) as source:
+    narrated = source.edit_epub_structure(
+        resources={"Audio/appendix.mp3": doc_ex.EpubResource("audio/mpeg", narration_bytes)},
+        overlays={
+            "Text/appendix.xhtml": [
+                doc_ex.EpubOverlayCue("intro", "Audio/appendix.mp3", 0, 1_500_000),
+                doc_ex.EpubOverlayCue("aside", epub_type="aside"),
+            ],
+        },
+    )
+```
+
+To detach narration, pass `None` as the chapter's overlay value. Detach or replace every affected association when a SMIL document shared by several chapters targets a chapter being detached. Old SMIL and audio stay in the archive until explicitly removed. The editor recomputes publication duration from associated overlays. For retained overlays it uses a declared duration or finite clip intervals.
+
+The edit methods return a new archive and preserve the uncompressed bytes of untouched members. A failed edit leaves the original open document usable. Signed and encrypted EPUBs are rejected.

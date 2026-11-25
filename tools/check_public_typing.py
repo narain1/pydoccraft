@@ -10,7 +10,7 @@ from fractions import Fraction
 from io import BytesIO
 from pathlib import Path
 from numbers import Real
-from typing import Any, Literal, assert_type
+from typing import Any, Iterator, Literal, assert_type
 
 import doc_ex
 from doc_ex._authoring import (
@@ -18,6 +18,59 @@ from doc_ex._authoring import (
     PdfPage, Picture, Presentation, Shape, SlidePicture, SlideTable, TabStop, TextRange,
     WordDocument, _WordShape, _SlideCellParagraph,
 )
+
+
+def verify_epub_tracks(source: bytes) -> None:
+    with doc_ex.open(source, filetype="epub") as epub:
+        cues = epub.epub_embedded_text(0, 0, track_index=1, end_us=100_000, ttml_forced=True)
+        assert_type(cues, list[doc_ex.EpubTextCue])
+        assert_type(cues[0].end_us, int | None)
+        assert_type(cues[0].region, str | None)
+        region = cues[0].region_layout
+        assert_type(region, doc_ex.EpubTextRegion | None)
+        if region is not None:
+            assert_type(region.viewport_bounds(1280, 720), tuple[float, float, float, float])
+            assert_type(region.viewport_anchor_percent, tuple[float, float])
+            assert_type(region.scroll, Literal["up"] | None)
+            assert_type(region.style, doc_ex.EpubTextStyle)
+            assert_type(region.opacity, float | None)
+            assert_type(region.visibility, Literal["visible", "hidden", "collapse"] | None)
+        ttml_region = cues[0].ttml_region_layout
+        assert_type(ttml_region, doc_ex.EpubTtmlRegion | None)
+        if ttml_region is not None:
+            assert_type(ttml_region.content_bounds(1280, 720), tuple[float, float, float, float])
+            assert_type(ttml_region.writing_mode, Literal["lrtb", "rltb", "tbrl", "tblr"])
+        assert_type(cues[0].background_color, tuple[int, int, int, int] | None)
+        assert_type(cues[0].runs, tuple[doc_ex.EpubTextRun, ...])
+        assert_type(cues[0].runs[0].style, doc_ex.EpubTextStyle)
+        assert_type(cues[0].runs[0].style.color, tuple[int, int, int, int] | None)
+        assert_type(cues[0].runs[0].style.font_style, Literal["normal", "italic", "oblique"])
+        assert_type(cues[0].runs[0].timestamp_us, int | None)
+        assert_type(epub.epub_embedded_media(0)[0].sources[0].fragment_end_us, int | None)
+        assert_type(epub.epub_embedded_media(0)[0].sources[0].playable_video, bool)
+        assert_type(
+            epub.epub_embedded_media(0)[0].sources[0].fragment_xywh,
+            tuple[Literal["pixel", "percent"], int, int, int, int] | None,
+        )
+        assert_type(epub.epub_embedded_media(0)[0].sources[0].fragment_tracks, tuple[str, ...])
+        assert_type(epub.epub_embedded_media(0)[0].sources[0].fragment_id, str | None)
+        frames = epub.epub_embedded_video(0, 0, text_track=1, video_track=0, paint_captions=True)
+        assert_type(frames, Iterator[doc_ex.EpubVideoFrame])
+        assert_type(next(frames).text_cues, tuple[doc_ex.EpubTextCue, ...])
+        assert_type(epub.epub_embedded_video(0, 0, text_track=1, ttml_forced=True), Iterator[doc_ex.EpubVideoFrame])
+        audio = epub.epub_embedded_audio(0, 0, audio_track=1)
+        assert_type(audio, Iterator[doc_ex.EpubAudioClip])
+        narration = epub.epub_narration(0, start_fragment="section", audio_tracks={"OEBPS/voice.webm": 1})
+        assert_type(narration, Iterator[doc_ex.EpubNarrationCue])
+        epub.play_epub_narration(
+            0, start_fragment="section", play_audio=lambda _: None, speak_text=lambda _: None,
+            escape_role=lambda cue: "aside" if "aside" in cue.roles else None,
+        )
+        edited = epub.edit_epub_structure(
+            [0], replacements={0: "<html><body>Revised</body></html>"},
+            spine_properties={0: doc_ex.EpubSpineProperties(page_spread="center", spread="none")},
+        )
+        assert_type(edited, bytes)
 
 
 def verify(document_bytes: bytes, png: bytes, mode: str) -> None:

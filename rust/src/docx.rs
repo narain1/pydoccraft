@@ -16,6 +16,8 @@ use crate::model::{
 };
 use crate::EngineError;
 
+#[path = "docx_math_spacing.rs"]
+pub(crate) mod math_spacing;
 #[cfg(test)]
 #[path = "docx_mirror_proof.rs"]
 mod mirror_proof;
@@ -186,7 +188,7 @@ fn render_impl(
     render_with(&state.document, &state.layout, page, dpi, clip)
 }
 
-fn render_with(
+pub(crate) fn render_with(
     document: &Document,
     layout: &DocLayout,
     page: usize,
@@ -1474,8 +1476,8 @@ impl<'a> Adapter<'a> {
                             for image in &mut segments[segment_index].images[first_image..] {
                                 image.metadata.insert("source_offset".into(), json!(offset));
                             }
-                            let text = object.plain_text();
-                            segments[segment_index].push_text(text, props.link.as_deref());
+                            let text = math_spacing::visible_text(object);
+                            segments[segment_index].push_text(&text, props.link.as_deref());
                         }
                     }
                 }
@@ -1660,7 +1662,7 @@ fn visible_text(paragraph: &Paragraph) -> String {
     for character in paragraph.text.chars() {
         if character == OBJ {
             if let Some(object) = objects.next() {
-                output.push_str(object.plain_text());
+                output.push_str(&math_spacing::visible_text(object));
             }
         } else {
             output.push(character);

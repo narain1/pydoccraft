@@ -1,15 +1,267 @@
 # EPUB implementation plan
 
-- [x] 1. Select and license-review a permissive native EPUB parser; reject GPL alternatives.
-- [x] 2. Add EPUB ZIP detection, shared archive preflight, and encrypted-resource rejection.
-- [x] 3. Add thin Rust metadata and spine-text extraction adapter.
-- [x] 4. Route EPUB through the Python facade and existing owned compatibility models.
-- [x] 5. Add generated EPUB fixtures and extraction/error/lifecycle tests.
-- [x] 6. Regenerate Cargo.lock and runtime license inventories.
-- [x] 7. Run locked Rust/Clippy and installed-wheel validation; record size and limitations.
-- [x] 8. Add semantic headings, inline links, referenced image extraction, strict XHTML checks, EPUB 2 coverage, and OOXML collision protection.
-- [x] 9. Add native EPUB creation with metadata, ordered chapters, headings, paragraphs, links, images, save/copy/close, and extraction round trips.
-- [x] 10. Complete exact-head license/wheel-size/corpus review and record the accepted writer footprint.
-- [x] 11. Harden strict package/XHTML validation, bidirectional format detection, mixed block extraction, XML/link/image validation, atomic aggregate media limits, and generated edge tests.
-- [ ] 12. Obtain upstream bounded LexePub traversal and rbook sink APIs for hard intermediate-allocation ceilings.
-- [ ] 13. Scope CSS, richer navigation, SVG authoring, fixed layout/rendering, conversion, and edit-existing preservation separately.
+Follow-up work is tracked in GitHub for [CSS and fixed layout](https://github.com/narain1/pydoccraft/issues/147), [SVG geometry](https://github.com/narain1/pydoccraft/issues/148), [MathML](https://github.com/narain1/pydoccraft/issues/149), [captions and playback](https://github.com/narain1/pydoccraft/issues/150), [macOS and Windows wheel validation](https://github.com/narain1/pydoccraft/issues/151).
+
+- [x] Detect EPUB 2 and 3 and validate archive structure and sizes before reading resources.
+- [x] Replace the eager LexePub path with bounded in-repo container, OPF, navigation and XHTML extraction.
+- [x] Verify repeated metadata, path resolution, manifest and spine order, links, tables and media through the public API.
+- [x] Expose bounded member reads and targeted metadata editing for existing unsigned EPUBs.
+- [x] Extend reflowable EPUB 3 creation with publication dates, lists, tables, preformatted text and static media. Enforce the ZIP output limit at the writer sink.
+- [x] Add semantic reflow preview and DOCX/PDF conversion with explicit errors for unsupported features.
+- [x] Update locked dependencies, license inventories, and format and authoring documentation.
+- [x] Accept inert XHTML and selected legacy doctypes. Reopen and edit the original W3C Accessible EPUB 3 sample.
+- [x] Expand the public EPUB conformance corpus with a repeatable four-book installed-wheel check.
+- [x] Limit packaged-font outline emission to glyphs that can paint the requested EPUB preview region. Verify clipped regions of the public Children’s Literature EPUB.
+- [x] Open the unmodified math-heavy *Linear Algebra* sample within the semantic output budget and exercise its spine previews.
+- [x] Build and validate the manylinux x86-64 wheels for CPython 3.11, 3.12, and 3.13.
+- [ ] Run the installed release wheel matrix on macOS and Windows.
+- [x] Replace existing XHTML and SVG chapters transactionally and preserve targeted navigation and overlay anchors.
+- [x] Rename chapter anchors with their links in a single batch and preserve targets referenced by retained XHTML, SVG, navigation and media overlays outside the spine. Protect targets of local OPF metadata links and refinements, including percent-encoded paths and fragments.
+- [x] Insert fixed-layout SVG spine chapters with packaged dependencies and optional media overlays in the same edit.
+- [x] Synchronize EPUB 3 `mathml` and `svg` resource properties after chapter insertion or replacement.
+- [x] Read SMIL timing trees and expose chapter cue order, time ranges, target IDs and bounded audio reads.
+- [x] Convert SMIL clock forms exactly to microseconds for exposed cues, narration PCM and staged package durations.
+- [x] Project supported Presentation MathML into native equations for PNG, DOCX and PDF.
+- [x] Apply local author styles for the supported cascade and layout properties. Render fixed-layout XHTML and static SVG chapters with viewport bounds and clipping.
+- [x] Cascade horizontal logical sizes, spacing, offsets, overflow and solid borders against their physical aliases, including RTL inheritance and custom properties. Resolve HTML automatic direction for horizontal boxes and paragraph base direction.
+- [x] Resolve bounded XHTML box calc expressions using lengths or percentages as well as viewport and font-relative units. Preserve computed values through logical inheritance.
+- [x] Preserve independently directed inline spans and their Unicode bidi isolation through text shaping, link offsets and PDF capture.
+- [x] Render local CSS font faces, IDPF-obfuscated fonts, and static SVG embedded in XHTML. Preserve inline equations, images and table spans with packaged fonts. Rasterize static SVG in semantic export.
+- [x] Render SVG CSS, packaged SVG fonts, and referenced PNG and JPEG resources in spine previews, XHTML and semantic export.
+- [x] Render fixed-layout spreads in both reading directions, honor spine placement and orientation-dependent spread rules, and clip across page boundaries.
+- [x] Export selected fixed-layout viewports as raster PDF pages at their original sizes.
+- [x] Preserve the fixed-layout preview pixel grid in reopened PDF pages. Partial edge pixels can differ when the PDF viewport clips them.
+- [x] Preserve nested EPUB navigation in fixed-layout PDF outlines, with destinations remapped to the exported page order.
+- [x] Preserve clickable links and fragment destinations on fixed-layout XHTML content and standalone SVG objects.
+- [x] Preserve fixed-layout PDF links on SVG text spans and inline SVG inside XHTML, including local text-span destinations.
+- [x] Offer searchable fixed-layout PDF export for XHTML, native MathML, and standalone and embedded SVG.
+- [x] Use native nonrectangular clip and mask coverage to retain visible SVG text and constrain PDF annotation rectangles.
+- [x] Scope packaged XHTML font faces using CSS Unicode ranges, overlap order and glyph fallback.
+- [x] Preserve ordered XHTML font-family stacks across inherited and inline styles, including packaged and generic fallbacks.
+- [x] Shape variable-font glyphs with inherited CSS axis values and optical sizing in XHTML previews, and pass the properties to the static SVG renderer.
+- [x] Match XHTML font-face weight and width ranges and apply the selected face's variation defaults.
+- [x] Match XHTML oblique face ranges with signed, fractional angles and apply the selected slant to variable fonts.
+- [x] Resolve author-defined CSS custom properties in supported XHTML and SVG styles, including scoped inheritance, fallback cycles and deferred shorthands.
+- [x] Render bounded same-document SVG use references, including nested instances and symbols, in fixed-layout and inline content.
+- [x] Preserve packaged variable-font selection and inherited axis settings across distinct SVG use instances.
+- [x] Substitute inherited CSS custom properties in nested SVG use instances with instance-scoped cascade, local paint, variable fonts, and preserved PDF text links.
+- [x] Recover graphics hyperlinks and fragments inside repeated SVG use instances with native transformed and clipped PDF geometry.
+- [x] Render SVG gradient templates and bounded Gaussian blur in fixed-layout previews, visual PDF and rasterized inline SVG exports.
+- [x] Render a bounded SVG drop-shadow primitive with SourceGraphic and SourceAlpha input, signed offsets, and CSS flood color and opacity.
+- [x] Apply Unicode ranges and ordered font fallback to static SVG text, including inherited lists and matching in reopened exports.
+- [x] Match SVG font-face weight, width and signed oblique intervals and apply selected font variation defaults to the laid-out runs.
+- [x] Retain anchored spacingAndGlyphs textLength for directly painted mixed-face runs in fixed-layout SVG, including searchable PDF text and links.
+- [x] Fit spacing-only textLength between verifiable mixed-face clusters without changing their glyph shapes or losing searchable PDF text and links.
+- [x] Fit textLength on a sole nested tspan and spacing on an independently positioned nested owner while preserving sibling ink and PDF geometry.
+- [x] Include uniform authored letter spacing and native word spacing in the original advances for fitting one SVG length owner per chunk.
+- [x] Fit independently positioned sibling spacing owners in one mixed-face SVG text element, including an owner that fills a positioned branch through transparent wrappers and a branch that carries its previous baseline.
+- [x] Fit verified left-to-right multi-glyph clusters and keep their native ink in searchable SVG PDF text and links.
+- [x] Resolve up to eight nested SVG spacing owners before fitting their outer text length. Keep unpositioned tspan and anchor wrappers and verify final native glyphs.
+- [x] Preserve verified per-character relative position lists through mixed-face SVG spacing and horizontal glyph scaling.
+- [x] Preserve signed fractional synthetic oblique in reflowable and fixed-layout XHTML previews and fixed-layout PDF.
+- [x] Render alpha-preserving SVG color matrices, including saturation and hue rotation, with the fixed-layout PDF text and annotations preserved.
+- [x] Render bounded SVG filter chains with prior named inputs, including alpha-changing color matrices in visual output. Reject PDF text or annotation capture when the source geometry cannot be preserved.
+- [x] Render bounded native flood, signed offset, composite and merge filter primitives with checked named dependencies. Sample in-place filtered coverage for PDF text and annotations from a single painted source.
+- [x] Transport fixed-layout PDF text, annotations and destinations along provable single-layer SVG offset chains using native raster transforms and clipping.
+- [x] Compose nested axis-aligned SVG offsets for one painted source and capture surviving search, links and fragments from the whole native stack.
+- [x] Capture the surviving raster of one graphic or Unicode cluster through a verified affine SVG offset stack.
+- [x] Attribute links, targets and Unicode clusters independently when their raster supports stay separated through a common SVG offset stack.
+- [x] Measure separately surviving sources through pointwise alpha changes that preserve transparency in shared SVG offset layers and in a single in-place layer.
+- [x] Render bounded native SVG blend and component transfer and retain searchable text, links and fragments through provable alpha and offset chains.
+- [x] Render bounded native morphology and preserve PDF source attribution through provable erosion, dilation and erosion-to-offset chains.
+- [x] Render bounded native turbulence and displacement. Keep provable source geometry and reject ambiguous PDF attribution.
+- [x] Render bounded native convolution with signed kernels, edge modes and verified preservation or reduction of PDF source coverage.
+- [x] Repeat bounded native SVG tiles with preserved source phase and provable PDF attribution for original ink.
+- [x] Render bounded archive-local PNG and JPEG filter images with aspect fitting, clipping and provable PDF source geometry.
+- [x] Resolve mixed length and percentage calculations for supported box geometry against the native containing box and preserve indefinite percentage sizing.
+- [x] Resolve calculated grid rows and columns, intrinsic tracks, minmax, fit-content and bounded counted repetition.
+- [x] Resolve min(), max() and clamp() in supported box geometry and grid tracks, including nested arithmetic and containing-box percentages.
+- [x] Resolve intrinsic preferred sizes and stretch for XHTML layout boxes, including inherited and calculated fit-content limits.
+- [x] Resolve named grid lines, counted repeat boundaries, line and span placement, and rectangular grid template areas through the native layout engine.
+- [x] Resolve stepped and sign-related CSS math and finite numeric constants in supported geometry, including deferred scalar factors and inherited lengths.
+- [x] Expand grid-template and grid, including area rows and shared named boundaries. Apply implicit track size cycles and row/column dense placement.
+- [x] Resolve typed CSS trigonometry with degree, radian, gradian and turn inputs, inverse functions, and bounded containing-box operands.
+- [x] Resolve CSS powers, roots, logarithms and Euclidean norms in bounded geometry and grid calculations.
+- [x] Apply bounded automatic grid repetition with auto-fill and auto-fit, inherited calculated tracks, and template line names.
+- [x] Cascade the CSS gap shorthand and axis longhands, including typed calculations and inheritance.
+- [x] Resolve same-dimension length and angle ratios and finite layout-dependent scalar divisors.
+- [x] Constrain horizontal XHTML boxes with measured min-content and max-content minimum and maximum widths.
+- [x] Apply fixed fit-content() limits to horizontal minimum and maximum widths using the measured native content bounds.
+- [x] Evaluate bounded ratios of linear lengths and percentages on the native containing axis.
+- [x] Measure intrinsic block-axis minima and maxima at independently definite inline widths.
+- [x] Measure block-axis constraints for relative and in-flow automatic widths at a proven containing inline size.
+- [x] Resolve percentage fit-content() inline limits and relative border-box edges at independently definite containing blocks.
+- [x] Bound containing-axis percentage ratios with comparison, clamp, absolute-value and Euclidean norm operands.
+- [x] Resolve contain-fit preferred sizes at independently sized block edges and stretch when there is no aspect ratio. Honor numeric ratio syntax, including calculated terms and auto fallbacks.
+- [x] Propagate definite content and padding edges through nested block widths and heights, including ordinary auto inline widths and two-inset absolute inline widths.
+- [x] Resolve functional minima and maxima on ordinary blocks when the fit-content limit and the natural block probe both have independently resolvable geometry.
+- [x] Measure intrinsic block bounds after native flex growth and shrinkage for a single independently sized row with definite main-axis inputs.
+- [x] Resolve intrinsic inline and block bounds and contain-fit against independently sized native grid areas, including named spans and nested inline geometry.
+- [x] Render subgrids over independently sized parent tracks with inherited line names, local aliases, definite gutter overrides and nested inheritance.
+- [x] Preserve interior subgrid lines with definite margins, borders and padding, local percentage gutters, and reversed line numbering when parent and child directions differ.
+- [x] Resolve bounded counted and auto-fill subgrid line-name lists, truncation at the used span, and automatic parent spans from fixed aliases.
+- [x] Clamp definite numerical grid placements to inherited subgrid tracks, including signed indices and spans.
+- [x] Limit oversized automatic numeric spans to the inherited track count before native grid placement.
+- [x] Clip inherited named areas to the used two-axis subgrid rectangle and preserve authored and generated edge names across nested subgrids and inline direction changes.
+- [x] Project named areas across a single inherited axis with independent orthogonal track sizing and preserved names through nested mixed-axis subgrids.
+- [x] Merge inherited named areas with local templates and retain earliest and numbered same-name edges through nested and RTL subgrids.
+- [x] Clamp one terminal fully automatic unit-span item on the inherited axis that advances after a full row or column. Keep the native placements of in-bounds items.
+- [x] Clamp bounded repeated fully automatic overflow to the last inherited track when the scan direction has one track.
+- [ ] Extend the EPUB CSS profile with block and relative inline bounds in other content-dependent, flex and grid containing geometry, functional block bounds with an indefinite containing height, remaining contain-fit sizing contexts, other nonlinear ratio operands and typed math, and content-dependent subgrid sizing, edge insets that exhaust an outer track, scrollbar gutters, collapsed tracks, and mixed-phase automatic placement, repeated overflow with multiple scan tracks, and unresolved named-placement clamping.
+- [x] Match bounded sibling positions in either direction, including An+B, namespace-aware types, and filtered child selectors with the correct specificity.
+- [x] Render bounded native diffuse and specular distant lighting. Verify single-source PDF text and links when an original-alpha mask controls the lit result.
+- [x] Render bounded point lighting on flat surfaces under uniform device scaling and raised surfaces at unit scale. Preserve proven original-alpha PDF attribution.
+- [x] Render bounded spot lighting with a finite aim, focus and optional cone. Preserve proven PDF geometry and omit source text hidden by the specular cone.
+- [x] Resolve default and stylesheet-selected linearRGB for lighting. Preserve the sRGB override and proved original-alpha PDF attribution.
+- [x] Attribute flat diffuse or specular lighting through an immediate original-alpha mask in a shared layer with separated native source supports.
+- [x] Preserve disjoint source attribution through a shared flood tint or opacity mask and immediate `in` composite.
+- [x] Preserve disjoint source attribution through a shared SVG flood cutout or overlay with the original ink in the source-bounding `out` or `atop` input.
+- [x] Keep PDF text and link attribution through one shared erosion or dilation with disjoint native sampling neighborhoods, including an affine filter plane.
+- [ ] Add SVG filter primitives and retain PDF text and links for multi-source, non-axis-aligned or ambiguous spatial filter results.
+- [ ] Extend mixed-font SVG text fallback to spacing across ambiguous clusters, length owners separated by positioned or independently painted wrappers and glyph positioning.
+- [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.
+- [x] Render tall reflowable chapters within the paint coordinate budget and apply raster limits to the requested DPI and clip.
+- [x] Project inherited MathML attributes, accents, movable limits, repeated script pairs, varied fences and separators, horizontal spaces, and zero-dimension padding.
+- [x] Render the authored static MathML action selection in extraction, previews, editable DOCX and searchable PDF.
+- [x] Apply chapter CSS to MathML colors, font sizes, bold and italic runs, and movable limit placement in previews and native exports.
+- [x] Preview top-level MathML tables with row and column spans. Export standalone tables with editable DOCX cell equations and searchable PDF text.
+- [x] Render nested spanning MathML tables that are the sole expression in a containing cell. Export native nested tables in DOCX and searchable cell text in PDF.
+- [x] Compose spanning tables inside larger MathML formulas and table cells, including fractions, radicals and scripts.
+- [x] Apply MathML padding dimensions, relative padding offsets and vertical space in chapter previews and fixed-layout PDF.
+- [x] Export composed MathML, including tables mixed with paragraph content, as searchable reflowable PDF.
+- [x] Render authored fraction rules and operand alignment in previews, searchable reflowable PDF and visual fixed-layout PDF.
+- [x] Export fixed and additive horizontal MathML padding as editable DOCX equations, including equations in native spanning tables.
+- [x] Export absolute and content-relative MathML padding dimensions and vertical spaces as editable DOCX equations.
+- [x] Export signed vertical shifts and positive leading offsets that overhang the padded width as editable DOCX equations.
+- [x] Preserve the measured placement and editable cell equations of supported spanning grids inside formulas and paragraphs in DOCX.
+- [x] Honor authored MathML table spacing and alignment, including row and cell overrides and signed row numbers for the table baseline.
+- [x] Honor equal MathML rows and columns and supported fixed column widths in previews, PDF and editable DOCX grids.
+- [x] Allocate MathML percentage, automatic and fitted columns against a definite authored table width in previews and native exports.
+- [x] Resolve percentage and unitless MathML table widths against definite containing text widths in previews, fixed PDF, and reflowable PDF and DOCX.
+- [x] Resolve nested relative MathML widths from definite containing cell tracks, including fixed spans and fitted tracks.
+- [x] Resolve nested MathML relative widths inside a span whose aggregate width is forced by a definite unlabeled parent table, including mixed intrinsic and fitted tracks and grids within editable operands.
+- [x] Pass definite containing widths through vertical-only MathML padding, including inside independently sized grids used as editable equation operands.
+- [x] Resolve nested relative MathML widths in the sole fitted data track of a definite-width, non-overlap labeled grid with fixed remaining tracks and independent native label equations.
+- [x] Resolve nested relative MathML widths in multiple fitted or equal data tracks and spans with a definite remaining width after independent labels and fixed outside tracks.
+- [x] Resolve a labeled fitted track when a label uses one independently measured height or depth padding box with equal preview and editable widths.
+- [x] Resolve a labeled fitted track from a single label padding box with an absolute width and a representable nonnegative leading inset. Reject changes to its native editable geometry.
+- [ ] Resolve other relative widths when equation operands, label-dependent tracks or other intrinsically sized containers acquire an independent width after measurement.
+- [x] Draw MathML solid and dashed table rules and frames, respect span interruptions and frame spacing, and preserve standalone rules as editable Word table borders.
+- [x] Preserve tight column spacing in editable DOCX matrix projections and recover their logical rows during extraction.
+- [x] Render native MathML row labels outside auto-width data grids on the authored side, including minimum label spacing, searchable PDF and editable unruled DOCX.
+- [x] Honor definite whole-table widths for MathML labeled grids and retain editable unruled DOCX positions.
+- [x] Keep editable Word borders, merged data spans and borderless label tracks for standalone ruled MathML labeled grids at auto and definite widths.
+- [x] Resolve conditional left and right MathML row-label overlap at definite widths in previews, searchable PDF and editable unruled Word matrices.
+- [x] Preserve row-label overflow at boundaries outside vertical merges and outside the first and last data rows of a ruled grid. Keep searchable PDF geometry and editable standalone Word labels, borders and merges.
+- [x] Keep editable interior label bands at unruled gaps in horizontally ruled grids, with native data-row spacing, merge boundaries, and searchable PDF.
+- [ ] Support label overflow through a vertical merge, frame or rule, and support ruled labeled grids inside larger DOCX equations.
+- [x] Align a single MathML group per data cell to its edge, center or decimal point in previews, searchable PDF and editable DOCX.
+- [x] Preserve explicit MathML alignment marks on the group baseline and inside its tokens in searchable PDF and editable DOCX.
+- [x] Align the first baseline number in supported compound expressions, including native operators and trailing units, in searchable PDF and editable DOCX.
+- [x] Preserve punctuation in literal MathML numerals with or without alignment marks. Keep explicit operators spaced and editable separately.
+- [x] Align up to eight MathML sibling groups per data cell with ordinary run boundaries. Apply ordinal alignment lists and preserve missing trailing groups, baseline geometry, searchable text and editable equation operands.
+- [x] Align groups that cross MathML row and style wrappers and the selected presentation branch of semantics. Keep inherited styles, operand order and native editability.
+- [x] Preserve direct decimal and explicit alignment carets after bounded composed geometry in searchable PDF and editable DOCX.
+- [x] Align MathML decimal points inside native square and indexed roots and explicit marks inside native fraction and radical operands. Preserve editable operator trees and searchable text through geometry rewrites.
+- [x] Align implicit decimals in native script bases and explicit marks in ordinary base, subscript and superscript operands. Preserve operator spacing and editable scripts.
+- [x] Align native stacked limit operands and accent bases, including nested under/over paths. Preserve searchable text, operator spacing and editable Office Math objects.
+- [x] Preserve native spacing at a MathML alignment group boundary immediately beside an isolated binary, relation or punctuation operator between ordinary runs. Preserve editable operands and remap scalar and nested carets.
+- [x] Preserve decimal and explicit alignment carets inside native MathML enclosures with supported edges, strikes and radical notation.
+- [x] Preserve MathML alignment inside editable fence operands, including varying separators and multi-character delimiters.
+- [x] Preserve MathML baseline decimal alignment within tensor bases and explicit marks within the base or individual pre- and postscript operands across repeated editable script pairs.
+- [x] Preserve decimals and explicit marks in MathML padding with unchanged or zeroed native dimensions and zero offsets, including editable nested padding and script operands.
+- [x] Preserve both sides of an operator-edge mark and implicit decimals inside exactly representable positive horizontal MathML padding, including editable nested padding and script operands.
+- [x] Preserve decimal and explicit alignment carets through composed height and depth and signed vertical shifts in previews, searchable PDF and editable DOCX, including nested padding.
+- [ ] Extend MathML alignment through other operator spacing and nontransparent wrappers and operands, right-to-left groups and cross-table scopes.
+- [x] Preserve editable negative MathML padding offsets that fit within the preceding horizontal math space, including nested superscripts.
+- [x] Retain direct editable MathML carets before and after bounded negative padding that uses preceding space.
+- [x] Preserve original boundary carets within or at the end of an exactly representable borrowed MathML space run in editable DOCX, including merged equal spaces and native script operands.
+- [x] Borrow exact editable negative leading offsets across separate adjacent space runs and preserve original caret boundaries and native operators.
+- [ ] Extend editable negative offsets beyond the available preceding spaces and cover inexact borrowed spacing and remaining MathML visual properties.
+- [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
+- [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.
+- [x] Resume media overlays at a decoded navigation fragment that matches a cue or sequence target, including paths that share an overlay.
+- [x] Resume narration from XHTML links inside a narrated element, retaining explicit SMIL priority and the precise clip of the nearest enclosing cue.
+- [x] Allow callers to leave an active SMIL table, list, figure or aside between chunks or cues. Resume after the selected structure while retaining later same-role siblings.
+- [x] Clamp overlong SMIL clip ends at the physical presentation end in buffered and streamed narration, including unindexed MPEG and chained Ogg audio.
+- [x] Decode and stream single-track mono and stereo Ogg Opus overlays with the correct presentation bounds and gain.
+- [x] Stream sequentially chained mono and stereo Ogg Opus with a continuous sample timeline and bounded seeks.
+- [x] Decode family-1 Ogg Opus surround and preserve speaker assignments in standalone and chained WAVE playback.
+- [x] Read and author overlay cues from grouped and chained Ogg resources with one Opus track per segment. Validate auxiliary stream transport through its EOS.
+- [x] Select an Opus track explicitly for each media overlay resource with concurrent Ogg streams. Validate the remaining streams and preserve timing across chained segments.
+- [x] Inspect chapter media, preview video posters, preserve local source and caption references during editing, and stream embedded audio.
+- [x] Stream H.264 MP4 frames on their presentation timeline and offer the AAC-LC soundtrack on the same clip clock.
+- [x] Decode progressive 8-bit and 10-bit SDR planar AVC in 4:2:0, 4:2:2 and 4:4:4, with explicit HDR errors.
+- [x] Read local WebVTT and media-time TTML tracks and synchronize their overlapping cues and transition times with embedded video.
+- [x] Preserve typed WebVTT inline styling and TTML referenced and inherited typography through standalone cues and synchronized video.
+- [x] Apply bounded WebVTT author stylesheets to typed captions and preserve the cue background, inline styling and source timing in video playback.
+- [x] Expose bounded WebVTT region definitions, cue association and viewport-relative geometry in standalone captions and synchronized video.
+- [x] Apply WebVTT `:past` and `:future` author selectors on the source clock through clipped typed cues and synchronized video.
+- [x] Resolve rectangular TTML regions, validate staged definitions and activation, and expose typed geometry on captions and synchronized video.
+- [x] Apply bounded inline TTML set animations to supported subtitle styles on the source clock and restore the previous style at the end.
+- [x] Apply parallel and sequential one-shot geometry and background sets to named TTML regions in standalone captions and synchronized video.
+- [x] Bind inline TTML region sets to their owning division or paragraph and preserve inherited layout through caption and video seeks.
+- [x] Project contiguous named-region span groups in unassigned TTML paragraphs with independent lexical layout, timing and video synchronization.
+- [x] Evaluate bounded TTML boolean forced-parameter conditions and preserve explicit timing for omitted content in captions and video.
+- [x] Expose opt-in TTML forced-subtitle mode for standalone and synchronized captions, preserving the ordinary staged validation and exact presentation clock.
+- [x] Apply local normal-play-time fragments to embedded audio, video and synchronized captions.
+- [x] Crop local video spatial fragments in pixel and percent units, including when combined with timed audio and captions.
+- [x] Resolve repeated named track fragments for WebM and Ogg and keep the selected picture and soundtrack on one presentation clock.
+- [x] Select a Skeleton-named soundtrack across Opus and Vorbis Ogg links with a common 48 kHz layout, preserving seek, crop and caption alignment.
+- [x] Select an unambiguous default soundtrack across mixed Opus and Vorbis Ogg links, with shared video, PCM, caption and SMIL timing.
+- [x] Resolve local WebM media fragment IDs through simple Matroska chapters and synchronize the selected picture, soundtrack, crop, and captions.
+- [x] Resolve local MP4 and M4A media fragment IDs by exact QuickTime chapter title, preserving movie edits, AAC, cropped picture and caption timing.
+- [x] Play a leading empty MP4 edit followed by one rate-1 segment, preserving AVC, AAC silence, chapter IDs, and cropped caption seeks on the original clock.
+- [x] Preserve the implicit empty MP4 tail of a shorter continuous edited track with bounded AAC silence and the original chapter and caption clock.
+- [x] Combine multiple MP4 rate-1 edits that are exactly contiguous in the source clock, preserving empty intervals and matching a single edited AVC, AAC and chapter interval.
+- [x] Play one forward MP4 source jump across adjacent movie intervals, including cropped AVC, sample-aligned AAC and a chapter or caption spanning the edit.
+- [x] Play one backward MP4 source jump to repeat a rate-1 media span. Restart AVC and sample-aligned AAC, preserve positioned captions, and join touching chapter projections.
+- [x] Preserve one interior empty MP4 edit through gap-only and crossing seeks, silent AAC, cropped AVC and separately timed chapters and captions.
+- [x] Play up to eight MP4 rate-1 source spans with mixed forward jumps, replay and interior gaps. Preserve movie timing and bound cumulative decoder work across restarts.
+- [x] Resolve local MP4 and M4A media fragment IDs from bounded Nero chapter tables, validate coexistence with QuickTime and preserve time-fragment playback.
+- [x] Resolve legacy Adobe F4V chapter tables on the movie clock and synchronize cropped H.264, AAC and captions while preserving Nero and QuickTime behavior.
+- [x] Stream embedded Ogg Theora and synchronize Opus and captions across sequential Ogg segments. Select one Theora video ordinal across every link of a multiplexed chain.
+- [x] Stream mono and stereo Ogg Vorbis for embedded audio and SMIL narration. Preserve page granule timing across same-format chains and synchronize a Vorbis soundtrack with chained Theora and captions.
+- [x] Stream VP8 and SDR VP9 video, Opus soundtracks, and synchronized local captions from packaged WebM sources.
+- [x] Stream mono and stereo WebM Vorbis audio on the original presentation clock, including audio-only resources and soundtracks synchronized with video and captions.
+- [x] Play the legacy end-stamped Shared Culture WebM sources and carry real gaps and overlaps on the modern Vorbis presentation clock.
+- [x] Select a WebM audio track explicitly for embedded audio, video soundtracks and SMIL playback.
+- [x] Select a WebM video track explicitly while retaining clipped intervals and synchronized captions.
+- [x] Stream fixed-geometry SDR AV1 pictures from WebM with bounded keyframe seeking and synchronized audio and captions.
+- [x] Decode 8-, 10- and 12-bit monochrome SDR AV1 in WebM with full and studio range conversion, cropped seeks and synchronized captions.
+- [x] Decode 8-, 10- and 12-bit full-range BT.709/sRGB identity-matrix AV1 in WebM with exact RGB order, cropped seeks and synchronized captions.
+- [x] Stream the advertised fixed-geometry AV1 base operating point, preserving original timing, authored gaps and synchronized crops, seeks, audio and captions.
+- [x] Preserve surround Vorbis speaker assignments in Ogg and WebM audio, video soundtracks, and narration. Reject undefined speaker layouts.
+- [ ] Extend WebM to additional AV1 profiles, high dynamic range and alpha.
+- [ ] Support additional Ogg soundtrack codecs, mixed soundtracks with differing PCM layouts, simultaneous video tracks and more MP4 profiles.
+- [x] Apply bounded WebVTT region selectors and carry typed region paint and cue styles into standalone captions and synchronized video.
+- [x] Apply TTML initial and inherited region styles to typed runs, including bounded paragraph and division inline regions, content overrides and time-based restores.
+- [x] Evaluate conditions on supported TTML timed text and region sets while preserving their owner clocks, sequential region placement and synchronized style restores.
+- [x] Keep conditional TTML mixed-region paragraphs on the ordinary cue timeline when all scoped elements are active.
+- [x] Preserve timed omissions in mixed-region TTML, retain region order for visible cues, and validate region grouping independently in ordinary and forced playback.
+- [x] Opt in to painting one stationary WebVTT region cue over the cropped video RGB with authored styles, clipping and seek parity.
+- [ ] Support WebVTT region scrolling and painting with simultaneous cues, additional TTML condition contexts and conditional layout, interleaved or ambiguous region ownership, advanced TTML animation, additional TTML typography and TTML subtitle painting.
+- [ ] Support more media fragment track combinations and ID fragments in additional containers.
+- [x] Insert, remove and reorder spine entries, update EPUB 2 and 3 navigation, and add or replace packaged resources. Use staged explicit XHTML titles in generated fallback navigation labels. Protect referenced package IDs when an occurrence leaves the spine.
+- [x] Synchronize XHTML navigation and the spine's compatibility NCX in the same EPUB 3 chapter edit.
+- [x] Remove packaged resources after checking retained package, XML and stylesheet references across the staged transaction.
+- [x] Protect referenced fragment IDs across packaged SVG resource replacements and staged chapter insertions.
+- [x] Combine existing chapter replacements with spine, resource and narration edits in one validated transaction.
+- [x] Edit linear participation, layout, page placement and synthetic spread overrides on existing spine occurrences in the same transaction as content and order. Verify access to newly auxiliary EPUB 3 chapters through staged navigation or reachable local content.
+- [x] Replace packaged EPUB 3 navigation XHTML outside the spine through the resource map in the same chapter edit. Validate explicit navigation list structure and destinations from either the chapter indices or the resource map, including links to the same navigation document's fragments. Expose normalized XHTML navigation labels with authored text alternatives and reject newly staged blank labels. Check linked IDs pruned by implicit XHTML or NCX navigation updates.
+- [x] Enforce EPUB 3 page-list and landmark cardinality, landmark semantics, and distinct decoded landmark destinations during staged edits.
+- [x] Stage explicit replacements of EPUB 2 and EPUB 3 compatibility NCX with chapter and XHTML navigation edits. Preserve authored primary entries for inserted chapters, including nested fragment targets, and generate entries for chapters missing from each primary tree.
+- [x] Renumber NCX play order across the map and auxiliary lists using the final spine and fragment positions.
+- [x] Stage supplemental XHTML resources outside the spine and insert hyperlinked auxiliary chapters with a non-linear spine entry.
+- [x] Read and render archive-local static XHTML through iframe and XHTML object references, including nested viewport clipping and fixed PDF text and links.
+- [x] Attach or detach EPUB 3 media overlays and author sequential text and audio cues with package duration metadata.
+- [x] Edit a subset of chapters that share a SMIL resource while retaining the other chapters' cues and recalculating duration metadata. Resolve escaped and package-relative duration refinements during updates and removal. Preserve retained refinements of duration expressions.
+- [x] Replace IDPF-obfuscated fonts from plain font bytes and update their declarations after resource removal.
+- [x] Author nested SMIL sequences with chapter targets, inherited roles and clip-based durations. Recompute durations for a staged associated SMIL replacement or changed audio that supplies an open SMIL clip.
+
+## Current implementation limits
+
+- The locked Taffy grid API has no subgrid track type or parent track projection. EPUB's current adapter can delegate explicit, implicit and repeated track layout.
+- When an SVG spatial filter mixes overlapping sources into one RGBA raster, its final alpha cannot identify each contributor. Search and annotation geometry require a preservation proof or a representation that retains contributor identity.
+- WordCraft's editable equation matrix carries rows and column alignment. Its border boxes carry edge and strike flags. Interrupted dashed rules inside a larger equation cannot be represented by that model. Standalone Word tables retain authored borders.
+- EPUB video frames expose one RGB8 picture per presentation interval. Preserving HDR, alpha or simultaneous pictures requires a defined playback representation. The caption painter handles a single stationary WebVTT region cue. Scroll-up, simultaneous cues and TTML painting remain open.

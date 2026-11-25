@@ -1,0 +1,1627 @@
+//! Normalize one bounded XHTML tree while keeping source order and ownership.
+use std::collections::HashMap;
+
+use base64::Engine;
+use roxmltree::Node;
+use serde_json::json;
+
+use super::{
+    attribute, charge, child, external, invalid, limited, name, parse_xml, resolve, unsupported,
+    Book, XHTML, XML,
+};
+use crate::{
+    model::{BlockPayload, CellPayload, ImagePayload, LinkPayload, PagePayload, TablePayload},
+    EngineError,
+};
+
+const SVG: &str = "http://www.w3.org/2000/svg";
+const MATHML: &str = "http://www.w3.org/1998/Math/MathML";
+const MAX_IMAGE: usize = 16 * 1024 * 1024;
+const MAX_MODEL: usize = 48 * 1024 * 1024;
+const MAX_ITEMS: usize = 50_000;
+const MAX_GRID: usize = 100_000;
+const MAX_COLUMNS: usize = 1000;
+
+#[derive(Default)]
+pub(super) struct Budget {
+    bytes: usize,
+    objects: usize,
+    grid: usize,
+    frames: usize,
+}
+
+impl Budget {
+    pub(super) fn frame(&mut self) -> Result<(), EngineError> {
+        super::frame::charge_count(&mut self.frames)
+    }
+
+    pub(super) fn bytes(&mut self, bytes: usize) -> Result<(), EngineError> {
+        charge(
+            &mut self.bytes,
+            bytes,
+            MAX_MODEL,
+            "semantic output exceeds its byte budget",
+        )
+    }
+
+    pub(super) fn object(&mut self) -> Result<(), EngineError> {
+        charge(
+            &mut self.objects,
+            1,
+            MAX_ITEMS,
+            "semantic output has too many items",
+        )?;
+        self.bytes(128)
+    }
+}
+
+pub(super) struct Context<'a, 'book> {
+    pub source: &'a [u8],
+    pub path: &'a str,
+    pub page: usize,
+    pub manifest: &'a HashMap<String, &'a str>,
+    pub book: &'a mut Book<'book>,
+    pub budget: &'a mut Budget,
+    pub styles: Option<&'a super::style::Styles>,
+    pub collect_anchors: bool,
+    pub equation_styles: Option<(&'a super::style::ChapterStyles, [f32; 2])>,
+}
+
+#[derive(Default)]
+struct Inline {
+    text: String,
+    characters: usize,
+    links: Vec<LinkPayload>,
+    images: Vec<ImagePayload>,
+    math: Vec<serde_json::Value>,
+    styles: Vec<(usize, usize, super::output::RunStyle)>,
+    anchors: Vec<(usize, String, bool)>,
+    controls: Vec<(usize, bool)>,
+    scopes: Vec<super::bidi::Scope>,
+    last_text: Option<char>,
+}
+
+impl Inline {
+    fn push(&mut self, text: &str, budget: &mut Budget) -> Result<(), EngineError> {
+        budget.bytes(text.len())?;
+        self.text.push_str(text);
+        self.characters += text.chars().count();
+        if let Some(character) = text.chars().next_back() {
+            self.last_text = Some(character);
+        }
+        Ok(())
+    }
+
+    fn styled_text(
+        &mut self,
+        text: &str,
+        typography: &super::style::Typography,
+        budget: &mut Budget,
+    ) -> Result<(), EngineError> {
+        let start = self.characters;
+        if typography.preformatted {
+            if self.scopes.is_empty() {
+                self.push(text, budget)?;
+            } else {
+                self.preformatted_bidi(text, budget)?;
+            }
+        } else {
+            let mut collapsed = String::new();
+            let mut whitespace = self
+                .last_text
+                .is_none_or(|character| matches!(character, ' ' | '\n'));
+            for character in text.chars() {
+                if matches!(character, ' ' | '\t' | '\n' | '\r' | '\u{000C}') {
+                    if !whitespace {
+                        collapsed.push(' ');
+                    }
+                    whitespace = true;
+                } else {
+                    collapsed.push(character);
+                    whitespace = false;
+                }
+            }
+            self.push(&collapsed, budget)?;
+        }
+        self.record_style(start, typography, budget)
+    }
+
+    fn record_style(
+        &mut self,
+        start: usize,
+        typography: &super::style::Typography,
+        budget: &mut Budget,
+    ) -> Result<(), EngineError> {
+        if self.characters != start {
+            let mut props = typography.chars.clone();
+            if typography.invisible {
+                props.hidden = Some(true);
+            }
+            if let Some((_, end, last)) = self.styles.last_mut() {
+                if *end == start
+                    && last.chars == props
+                    && last.families.as_slice() == typography.families.as_ref()
+                    && last.axes.as_slice() == typography.axes.as_ref()
+                    && last.font_weight == typography.font_weight
+                    && last.font_width == typography.font_width
+                    && last.oblique == typography.oblique
+                    && last.optical_sizing_disabled == typography.optical_sizing_disabled
+                {
+                    *end = self.characters;
+                    return Ok(());
+                }
+            }
+            budget.object()?;
+            budget.bytes(
+                props
+                    .font
+                    .as_ref()
+                    .map_or(0, String::len)
+                    .saturating_add(256),
+            )?;
+            for family in typography.families.iter() {
+                budget.bytes(48 + family.name.len().saturating_mul(3))?;
+            }
+            budget.bytes(typography.axes.len().saturating_mul(48))?;
+            self.styles.push((
+                start,
+                self.characters,
+                super::output::RunStyle {
+                    chars: props,
+                    families: typography.families.to_vec(),
+                    axes: typography.axes.to_vec(),
+                    font_weight: typography.font_weight,
+                    font_width: typography.font_width,
+                    oblique: typography.oblique,
+                    optical_sizing_disabled: typography.optical_sizing_disabled,
+                },
+            ));
+        }
+        Ok(())
+    }
+
+    fn push_controls(&mut self, controls: &str, budget: &mut Budget) -> Result<(), EngineError> {
+        budget.bytes(controls.len() + 16)?;
+        for character in controls.chars() {
+            self.controls.push((
+                self.characters,
+                matches!(character, '\u{202c}' | '\u{2069}'),
+            ));
+            self.characters += 1;
+            self.text.push(character);
+        }
+        Ok(())
+    }
+
+    fn line_break(&mut self, value: &str, budget: &mut Budget) -> Result<(), EngineError> {
+        let scopes = std::mem::take(&mut self.scopes);
+        for scope in scopes.iter().rev() {
+            self.push_controls(scope.end, budget)?;
+        }
+        self.push(value, budget)?;
+        for scope in &scopes {
+            self.push_controls(scope.start, budget)?;
+        }
+        self.scopes = scopes;
+        Ok(())
+    }
+
+    fn preformatted_bidi(&mut self, text: &str, budget: &mut Budget) -> Result<(), EngineError> {
+        let mut start = 0;
+        let mut characters = text.char_indices().peekable();
+        while let Some((offset, character)) = characters.next() {
+            if matches!(character, '\n' | '\r' | '\u{2028}' | '\u{2029}') {
+                let mut end = offset + character.len_utf8();
+                if character == '\r' && characters.next_if(|&(_, next)| next == '\n').is_some() {
+                    end += 1;
+                }
+                self.push(&text[start..offset], budget)?;
+                self.line_break(&text[offset..end], budget)?;
+                start = end;
+            }
+        }
+        self.push(&text[start..], budget)
+    }
+
+    fn flush(
+        &mut self,
+        out: &mut Vec<BlockPayload>,
+        level: Option<u8>,
+        kind: Option<&str>,
+        cx: &mut Context<'_, '_>,
+    ) -> Result<(), EngineError> {
+        let mut inline = std::mem::take(self);
+        let empty_text = if inline.controls.is_empty() {
+            inline.text.trim().is_empty()
+        } else {
+            inline
+                .text
+                .chars()
+                .all(|c| c.is_whitespace() || super::bidi::control(c))
+        };
+        if empty_text && inline.images.is_empty() && inline.math.is_empty() {
+            return Ok(());
+        }
+        cx.budget.object()?;
+        let mut block = BlockPayload {
+            kind: if level.is_some() {
+                "heading"
+            } else {
+                "paragraph"
+            }
+            .into(),
+            text: inline.text,
+            level,
+            links: inline.links,
+            images: inline.images,
+            ..Default::default()
+        };
+        if let Some(kind) = kind {
+            block.metadata.insert("xhtml_kind".into(), json!(kind));
+        }
+        if !inline.math.is_empty() {
+            block
+                .metadata
+                .insert("mathml".into(), serde_json::Value::Array(inline.math));
+        }
+        if !inline.controls.is_empty() {
+            block.metadata.insert("bidi_shaping".into(), true.into());
+            for (offset, _, upstream) in &mut inline.anchors {
+                let start = inline
+                    .controls
+                    .partition_point(|(control, _)| *control < *offset);
+                if inline.controls.get(start) == Some(&(*offset, true)) {
+                    // The element ends inside the isolate, so use the
+                    // preceding logical glyph's trailing edge.
+                    *upstream = true;
+                    for &(control, _) in inline.controls[..start].iter().rev() {
+                        if control + 1 != *offset {
+                            break;
+                        }
+                        *offset = control;
+                    }
+                } else {
+                    for &(control, _) in &inline.controls[start..] {
+                        if control != *offset {
+                            break;
+                        }
+                        *offset += 1;
+                    }
+                }
+            }
+            inline.anchors.sort_by_key(|(offset, _, _)| *offset);
+        }
+        if !inline.anchors.is_empty() {
+            block
+                .metadata
+                .insert("layout_anchors".into(), json!(inline.anchors));
+        }
+        if !inline.styles.is_empty() {
+            block.metadata.insert(
+                "css_spans".into(),
+                serde_json::to_value(inline.styles).map_err(invalid)?,
+            );
+        }
+        out.push(block);
+        Ok(())
+    }
+}
+
+pub(super) fn chapter(
+    root: Node<'_, '_>,
+    cx: &mut Context<'_, '_>,
+) -> Result<PagePayload, EngineError> {
+    if !name(root, XHTML, "html") {
+        return Err(invalid("spine entry is not XHTML"));
+    }
+    let body = child(root, XHTML, "body").ok_or_else(|| invalid("XHTML chapter has no body"))?;
+    let media = super::media::inventory(body, cx)?;
+    let mut blocks = Vec::new();
+    flow(body, &mut blocks, 0, cx)?;
+    let title = document_title(root).or_else(|| {
+        blocks
+            .iter()
+            .find(|block| block.level.is_some())
+            .map(|block| block.text.clone())
+    });
+    let title = title.as_deref().map(str::trim).unwrap_or("Untitled");
+    cx.budget.bytes(title.len().saturating_mul(3))?;
+    let mut result = PagePayload {
+        number: cx.page,
+        blocks,
+        ..Default::default()
+    };
+    result.metadata.insert("chapter_title".into(), json!(title));
+    if !media.is_empty() {
+        result
+            .metadata
+            .insert("embedded_media".into(), media.into());
+    }
+    if let Some(language) = root
+        .attribute((XML, "lang"))
+        .or_else(|| root.attribute("lang"))
+    {
+        cx.budget.bytes(language.len().saturating_mul(3))?;
+        result.metadata.insert("language".into(), json!(language));
+    }
+    assets(&result.blocks, &mut result.links, &mut result.images);
+    for block in &result.blocks {
+        if let Some(table) = &block.table {
+            result.tables.push(table.clone());
+        }
+    }
+    Ok(result)
+}
+
+fn assets(blocks: &[BlockPayload], links: &mut Vec<LinkPayload>, images: &mut Vec<ImagePayload>) {
+    for block in blocks {
+        links.extend(block.links.iter().cloned());
+        images.extend(block.images.iter().cloned());
+        if let Some(table) = &block.table {
+            for cell in table.cells.iter().flatten() {
+                assets(&cell.blocks, links, images);
+            }
+        }
+    }
+}
+
+pub(super) fn document_title(root: Node<'_, '_>) -> Option<String> {
+    child(root, XHTML, "head")
+        .and_then(|head| child(head, XHTML, "title"))
+        .map(node_text)
+        .filter(|title| !title.trim().is_empty())
+}
+
+fn node_text(node: Node<'_, '_>) -> String {
+    node.descendants()
+        .filter(Node::is_text)
+        .filter_map(|n| n.text())
+        .collect()
+}
+
+fn heading(tag: &str) -> Option<u8> {
+    tag.strip_prefix('h')
+        .and_then(|n| n.parse().ok())
+        .filter(|n| (1..=6).contains(n))
+}
+
+fn block(tag: &str) -> bool {
+    matches!(
+        tag,
+        "p" | "section"
+            | "article"
+            | "main"
+            | "aside"
+            | "nav"
+            | "header"
+            | "footer"
+            | "address"
+            | "div"
+            | "pre"
+            | "ol"
+            | "ul"
+            | "li"
+            | "dl"
+            | "dt"
+            | "dd"
+            | "blockquote"
+            | "figure"
+            | "figcaption"
+            | "table"
+    ) || heading(tag).is_some()
+}
+
+fn ignored(tag: &str) -> bool {
+    matches!(
+        tag,
+        "style" | "script" | "template" | "head" | "source" | "track"
+    )
+}
+
+fn flow(
+    node: Node<'_, '_>,
+    out: &mut Vec<BlockPayload>,
+    table_depth: usize,
+    cx: &mut Context<'_, '_>,
+) -> Result<(), EngineError> {
+    flow_children(node, node.children(), out, table_depth, cx)
+}
+
+fn flow_children<'a, 'input>(
+    node: Node<'a, 'input>,
+    children: impl IntoIterator<Item = Node<'a, 'input>>,
+    out: &mut Vec<BlockPayload>,
+    table_depth: usize,
+    cx: &mut Context<'_, '_>,
+) -> Result<(), EngineError> {
+    let tag = node.tag_name().name();
+    let level = heading(tag);
+    let kind = matches!(
+        tag,
+        "pre" | "li" | "blockquote" | "figcaption" | "dt" | "dd"
+    )
+    .then_some(tag);
+    let mut run = Inline::default();
+    for n in children {
+        if styled(n, cx).is_some_and(|style| style.hidden) {
+            continue;
+        }
+        let child_tag = n.tag_name();
+        if n.is_element()
+            && child_tag.namespace().is_none_or(|ns| ns == XHTML)
+            && styled(n, cx).map_or_else(|| block(child_tag.name()), |style| !style.inline)
+        {
+            run.flush(out, level, kind, cx)?;
+            if super::frame::is_frame(n) {
+                inline(n, &mut run, cx)?;
+                run.flush(out, level, kind, cx)?;
+            } else if child_tag.name() == "table" {
+                table(n, out, table_depth, cx)?;
+            } else {
+                flow(n, out, table_depth, cx)?;
+            }
+        } else if n.is_element()
+            && name(n, XHTML, "a")
+            && n.children()
+                .any(|n| n.is_element() && block(n.tag_name().name()))
+        {
+            run.flush(out, level, kind, cx)?;
+            let start = out.len();
+            flow(n, out, table_depth, cx)?;
+            if let Some(href) = n.attribute("href") {
+                link_blocks(&mut out[start..], href, cx)?;
+            }
+        } else {
+            inline(n, &mut run, cx)?;
+        }
+    }
+    let start = out.len();
+    run.flush(out, level, kind, cx)?;
+    if let Some(style) = styled(node, cx) {
+        for block in &mut out[start..] {
+            block.metadata.insert(
+                "css_paragraph".into(),
+                json!({
+                    "align": style.text.align,
+                    "line_height": style.text.line_height,
+                    "bidi": style.text.chars.rtl
+                }),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn styled<'a, 'book>(
+    node: Node<'_, '_>,
+    cx: &Context<'a, 'book>,
+) -> Option<&'a super::style::Styled> {
+    cx.styles?.get(&node.id())
+}
+
+pub(super) fn layout_piece<'a, 'input>(
+    node: Node<'a, 'input>,
+    children: &[Node<'a, 'input>],
+    cx: &mut Context<'_, '_>,
+) -> Result<Vec<BlockPayload>, EngineError> {
+    let mut blocks = Vec::new();
+    if name(node, XHTML, "table") {
+        table(node, &mut blocks, 0, cx)?;
+    } else {
+        flow_children(node, children.iter().copied(), &mut blocks, 0, cx)?;
+    }
+    Ok(blocks)
+}
+
+fn link_blocks(
+    blocks: &mut [BlockPayload],
+    href: &str,
+    cx: &mut Context<'_, '_>,
+) -> Result<(), EngineError> {
+    for block in blocks {
+        if let Some(table) = &mut block.table {
+            for cell in table.cells.iter_mut().flatten() {
+                link_blocks(&mut cell.blocks, href, cx)?;
+            }
+        } else {
+            if !block.links.is_empty() {
+                return Err(invalid("nested links"));
+            }
+            let link = link(href, &block.text, 0, block.text.chars().count(), cx)?;
+            for image in &mut block.images {
+                cx.budget.bytes(href.len().saturating_mul(3))?;
+                image.metadata.insert("href".into(), json!(href));
+            }
+            block.links.push(link);
+        }
+    }
+    Ok(())
+}
+
+fn inline(
+    node: Node<'_, '_>,
+    run: &mut Inline,
+    cx: &mut Context<'_, '_>,
+) -> Result<(), EngineError> {
+    if node.is_text() {
+        let text = node.text().unwrap_or_default();
+        if let Some(style) = node.parent_element().and_then(|parent| styled(parent, cx)) {
+            return run.styled_text(text, &style.text, cx.budget);
+        }
+        return run.push(text, cx.budget);
+    }
+    if !node.is_element() || styled(node, cx).is_some_and(|style| style.hidden) {
+        return Ok(());
+    }
+    if cx.collect_anchors && styled(node, cx).is_some_and(|style| !style.text.invisible) {
+        if let Some(id) = node.attribute("id").or_else(|| node.attribute((XML, "id"))) {
+            cx.budget.object()?;
+            cx.budget.bytes(id.len())?;
+            run.anchors.push((run.characters, id.to_owned(), false));
+        }
+    }
+    let tag = node.tag_name();
+    if tag.namespace() == Some(SVG) && tag.name() == "svg" {
+        let mut image = inline_svg(node, cx)?;
+        image
+            .metadata
+            .insert("inline_offset".into(), json!(run.characters));
+        run.images.push(image);
+        return Ok(());
+    }
+    if tag.namespace() == Some(MATHML) && tag.name() == "math" {
+        cx.budget.object()?;
+        let markup = standalone(node, cx.source)?;
+        cx.budget.bytes(markup.len())?;
+        let text = super::math::presentation_text(node)?;
+        let start = run.characters;
+        if let Some(style) = styled(node, cx) {
+            run.styled_text(&text, &style.text, cx.budget)?;
+        } else {
+            run.push(&text, cx.budget)?;
+        }
+        let mut equation = json!({"start": start, "end": run.characters, "source": String::from_utf8(markup).map_err(invalid)?});
+
+        if super::math::table::has_spans(node) {
+            equation["spanning_table"] = true.into();
+        }
+        if super::math::table::has_rule_requests(node) {
+            equation["ruled_table"] = true.into();
+        }
+        if super::math::table::has_relative_widths(node) {
+            equation["relative_table"] = true.into();
+        }
+        if super::math::compose::needs_layout(node) {
+            equation["composed_math"] = true.into();
+        }
+        if let Some((styles, viewport)) = cx.equation_styles {
+            let base = node
+                .parent_element()
+                .and_then(|parent| styles.boxes.get(&parent.id()))
+                .map(|style| {
+                    let chars = &style.text.chars;
+                    wordcraft_doc::CharProps {
+                        size: chars.size,
+                        color: chars.color,
+                        bold: chars.bold,
+                        italic: chars.italic,
+                        ..Default::default()
+                    }
+                })
+                .unwrap_or_default();
+            // Detaching the fragment adds namespace declarations only, so
+            // its node IDs retain their order and distance from the root.
+            let nodes = node
+                .descendants()
+                .filter_map(|child| {
+                    let css = styles.equations.get(&child.id())?;
+                    Some((child.id().get() - node.id().get(), css.clone()))
+                })
+                .collect();
+            let stylesheet = super::math::FormulaCss {
+                base,
+                viewport,
+                nodes,
+            };
+            let encoded = crate::limits::bounded_json(&stylesheet, 512 * 1024)?;
+            cx.budget.bytes(encoded.len())?;
+            equation["css"] = encoded.into();
+        }
+        run.math.push(equation);
+        return Ok(());
+    }
+    if node.has_tag_name((super::EPUB, "trigger")) {
+        if node.children().any(|child| {
+            child.is_element() || child.text().is_some_and(|text| !text.trim().is_empty())
+        }) {
+            return Err(invalid("legacy EPUB trigger must be empty"));
+        }
+        return Ok(());
+    }
+    if tag.namespace().is_some_and(|ns| ns != XHTML) {
+        return Err(unsupported("unknown XHTML extension element"));
+    }
+    match tag.name() {
+        tag if ignored(tag) => return Ok(()),
+        "br" => {
+            if run.scopes.is_empty() {
+                return run.push("\n", cx.budget);
+            }
+            let start = run.characters;
+            run.line_break("\n", cx.budget)?;
+            if let Some(style) = styled(node, cx) {
+                run.record_style(start, &style.text, cx.budget)?;
+            }
+            return Ok(());
+        }
+        "img" => {
+            let alt = node.attribute("alt").unwrap_or_default();
+            if let Some(src) = node.attribute("src") {
+                let mut image = image(src, alt, None, cx)?;
+                image
+                    .metadata
+                    .insert("inline_offset".into(), json!(run.characters));
+                run.images.push(image);
+            } else {
+                run.push(alt, cx.budget)?;
+            }
+            return Ok(());
+        }
+        "iframe" | "object" if super::frame::is_frame(node) => {
+            let mut image = super::frame::payload(node, cx)?;
+            if let Some(style) = styled(node, cx) {
+                let mut size = super::frame::size(&image)?;
+                for (value, dimension) in size
+                    .iter_mut()
+                    .zip([style.box_style.size.width, style.box_style.size.height])
+                {
+                    if !dimension.is_auto() {
+                        *value = dimension
+                            .into_option()
+                            .filter(|size| *size > 0.0)
+                            .ok_or_else(|| {
+                                unsupported("indefinite inline embedded EPUB XHTML size")
+                            })?
+                            / 0.75;
+                    }
+                }
+                image.metadata.insert("frame_viewport".into(), json!(size));
+            }
+            image
+                .metadata
+                .insert("inline_offset".into(), json!(run.characters));
+            run.images.push(image);
+            return Ok(());
+        }
+        "object" => {
+            let mime = node
+                .attribute("type")
+                .filter(|mime| mime.starts_with("image/"))
+                .ok_or_else(|| unsupported("embedded XHTML objects require an image type"))?;
+            let data = attribute(node, "data")?;
+            let alt = node_text(node);
+            let mut image = image(data, &alt, Some(mime), cx)?;
+            image
+                .metadata
+                .insert("inline_offset".into(), json!(run.characters));
+            run.images.push(image);
+            return Ok(());
+        }
+        "video" if super::media::poster(node).is_some() => {
+            if let Some(mut image) = media_poster(node, cx)? {
+                image
+                    .metadata
+                    .insert("inline_offset".into(), json!(run.characters));
+                run.images.push(image);
+            }
+            return Ok(());
+        }
+        "embed" | "canvas" | "picture" => {
+            return Err(unsupported(
+                "embedded XHTML media or alternate image sources",
+            ));
+        }
+        _ => {}
+    }
+    let style = styled(node, cx);
+    let scope = style
+        .filter(|style| style.inline)
+        .and_then(|style| style.bidi.scope(style.text.chars.rtl == Some(true)));
+    if let Some(scope) = scope {
+        let start = run.characters;
+        run.push_controls(scope.start, cx.budget)?;
+        if let Some(style) = style {
+            run.record_style(start, &style.text, cx.budget)?;
+        }
+        run.scopes.push(scope);
+    }
+    let start = run.characters;
+    let start_byte = run.text.len();
+    let first_image = run.images.len();
+    let first_link = run.links.len();
+    for child in node.children() {
+        inline(child, run, cx)?;
+    }
+    if let Some(href) = (tag.name() == "a")
+        .then(|| node.attribute("href"))
+        .flatten()
+    {
+        if run.links.len() != first_link {
+            return Err(invalid("nested links"));
+        }
+        for image in &mut run.images[first_image..] {
+            cx.budget.bytes(href.len().saturating_mul(3))?;
+            image.metadata.insert("href".into(), json!(href));
+        }
+        if run.characters > start || run.images.len() > first_image {
+            run.links.push(link(
+                href,
+                &run.text[start_byte..],
+                start,
+                run.characters,
+                cx,
+            )?);
+        }
+    }
+    if let Some(scope) = scope {
+        run.scopes.pop();
+        let end = run.characters;
+        run.push_controls(scope.end, cx.budget)?;
+        if let Some(style) = style {
+            run.record_style(end, &style.text, cx.budget)?;
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn hyperlink_target<'a>(node: Node<'a, '_>) -> Option<&'a str> {
+    if node.has_tag_name((SVG, "a")) {
+        super::svg::image_href(node)
+    } else if name(node, XHTML, "a") || name(node, XHTML, "area") {
+        node.attribute("href")
+    } else {
+        None
+    }
+}
+
+pub(super) fn embedded_document_target<'a>(node: Node<'a, '_>) -> Option<&'a str> {
+    if name(node, XHTML, "iframe") {
+        node.attribute("src")
+    } else if name(node, XHTML, "object") {
+        node.attribute("data")
+    } else {
+        None
+    }
+}
+
+fn link(
+    href: &str,
+    label: &str,
+    start: usize,
+    end: usize,
+    cx: &mut Context<'_, '_>,
+) -> Result<LinkPayload, EngineError> {
+    link_in_chapter(href, label, start, end, cx.path, cx.page, cx.budget)
+}
+
+fn link_in_chapter(
+    href: &str,
+    label: &str,
+    start: usize,
+    end: usize,
+    path: &str,
+    page: usize,
+    budget: &mut Budget,
+) -> Result<LinkPayload, EngineError> {
+    budget.object()?;
+    budget.bytes(href.len().saturating_add(label.len()).saturating_mul(3))?;
+    let mut link = LinkPayload {
+        uri: href.into(),
+        text: label.into(),
+        page: Some(page),
+        ..Default::default()
+    };
+    link.metadata.insert("start".into(), json!(start));
+    link.metadata.insert("end".into(), json!(end));
+    let is_external = external(href);
+    link.metadata.insert(
+        "target_kind".into(),
+        json!(if is_external { "external" } else { "internal" }),
+    );
+    if !is_external {
+        let path = resolve(path, href)?;
+        budget.bytes(path.len().saturating_mul(3))?;
+        link.metadata.insert("target_path".into(), json!(path));
+        if let Some((_, fragment)) = href.split_once('#') {
+            link.metadata.insert(
+                "target_fragment".into(),
+                json!(super::percent_decode(fragment)?),
+            );
+        }
+    }
+    Ok(link)
+}
+
+pub(super) fn media_poster(
+    node: Node<'_, '_>,
+    cx: &mut Context<'_, '_>,
+) -> Result<Option<ImagePayload>, EngineError> {
+    super::media::poster(node)
+        .map(|src| image(src, super::media::label(node).unwrap_or_default(), None, cx))
+        .transpose()
+}
+
+pub(super) fn image(
+    src: &str,
+    alt: &str,
+    declared: Option<&str>,
+    cx: &mut Context<'_, '_>,
+) -> Result<ImagePayload, EngineError> {
+    if external(src) {
+        return Err(unsupported("remote images are not fetched"));
+    }
+    let path = resolve(cx.path, src)?;
+    let mime = declared
+        .or_else(|| cx.manifest.get(&path).copied())
+        .or_else(
+            || match path.rsplit('.').next()?.to_ascii_lowercase().as_str() {
+                "png" => Some("image/png"),
+                "jpg" | "jpeg" => Some("image/jpeg"),
+                "gif" => Some("image/gif"),
+                "svg" => Some("image/svg+xml"),
+                "webp" => Some("image/webp"),
+                _ => None,
+            },
+        )
+        .ok_or_else(|| unsupported("unknown image type"))?;
+    if let Some(manifest_mime) = cx.manifest.get(&path) {
+        if *manifest_mime != mime {
+            return Err(invalid("image type differs from manifest"));
+        }
+    }
+    let bytes = cx.book.read(&path, MAX_IMAGE)?;
+    if mime == "image/svg+xml" {
+        let d = parse_xml(&bytes)?;
+        let mut image = svg_image(d.root_element(), &bytes, cx.page, src, &path, cx.budget)?;
+        image.alt = alt.into();
+        return Ok(image);
+    }
+    let valid = match mime {
+        "image/png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "image/jpeg" => bytes.starts_with(b"\xff\xd8\xff"),
+        "image/gif" => bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"),
+        "image/webp" => bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP"),
+        _ => return Err(unsupported("image media type")),
+    };
+    if !valid {
+        return Err(invalid("image signature differs from its media type"));
+    }
+    encoded_image(&bytes, cx.page, src, mime, alt, cx.budget)
+}
+
+pub(super) fn encoded_image(
+    bytes: &[u8],
+    page: usize,
+    path: &str,
+    mime: &str,
+    alt: &str,
+    budget: &mut Budget,
+) -> Result<ImagePayload, EngineError> {
+    budget.object()?;
+    budget.bytes((bytes.len().div_ceil(3) * 4 + path.len() + alt.len()).saturating_mul(3))?;
+    Ok(ImagePayload {
+        name: path.into(),
+        data: base64::engine::general_purpose::STANDARD.encode(bytes),
+        media_type: mime.into(),
+        page: Some(page),
+        alt: alt.into(),
+        ..Default::default()
+    })
+}
+
+pub(super) fn svg_page(
+    root: Node<'_, '_>,
+    data: &[u8],
+    page: usize,
+    path: &str,
+    budget: &mut Budget,
+) -> Result<PagePayload, EngineError> {
+    let mut image = svg_image(root, data, page, path, path, budget)?;
+    let links = root
+        .descendants()
+        .filter(|node| name(*node, SVG, "a"))
+        .filter_map(super::svg::image_href)
+        .map(|href| link_in_chapter(href, "", 0, 0, path, page, budget))
+        .collect::<Result<Vec<_>, _>>()?;
+    if !links.is_empty() {
+        image.metadata.insert("epub_svg_links".into(), json!(true));
+    }
+    Ok(PagePayload {
+        number: page,
+        images: vec![image.clone()],
+        links,
+        blocks: vec![BlockPayload {
+            kind: "paragraph".into(),
+            images: vec![image],
+            ..Default::default()
+        }],
+        ..Default::default()
+    })
+}
+
+pub(super) fn inline_svg(
+    node: Node<'_, '_>,
+    cx: &mut Context<'_, '_>,
+) -> Result<ImagePayload, EngineError> {
+    let bytes = standalone(node, cx.source)?;
+    let mut image = svg_image(node, &bytes, cx.page, "inline.svg", cx.path, cx.budget)?;
+    image.metadata.insert("epub_svg_inline".into(), json!(true));
+    let mut targets = Vec::new();
+    for href in node
+        .descendants()
+        .filter(|node| name(*node, SVG, "a"))
+        .filter_map(super::svg::image_href)
+    {
+        image.metadata.insert("epub_svg_links".into(), json!(true));
+        let link = link_in_chapter(href, "", 0, 0, cx.path, cx.page, cx.budget)?;
+        if let Some(path) = link.metadata.get("target_path") {
+            if let Some(fragment) = link.metadata.get("target_fragment") {
+                targets.push(json!([path, fragment]));
+            }
+        }
+    }
+    if !targets.is_empty() {
+        image
+            .metadata
+            .insert("epub_svg_targets".into(), json!(targets));
+    }
+    Ok(image)
+}
+
+fn svg_image(
+    root: Node<'_, '_>,
+    data: &[u8],
+    page: usize,
+    path: &str,
+    base: &str,
+    budget: &mut Budget,
+) -> Result<ImagePayload, EngineError> {
+    validate_svg(root, Some(base))?;
+    let alt = child(root, SVG, "title").map(node_text).unwrap_or_default();
+    budget.bytes(base.len().saturating_mul(3))?;
+    let mut image = encoded_image(data, page, path, "image/svg+xml", &alt, budget)?;
+    image.metadata.insert("epub_svg_base".into(), json!(base));
+    Ok(image)
+}
+
+pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<bool, EngineError> {
+    if root.tag_name().namespace() != Some(SVG) || root.tag_name().name() != "svg" {
+        return Err(invalid("image is not SVG"));
+    }
+    for instruction in root
+        .parent()
+        .filter(Node::is_root)
+        .into_iter()
+        .flat_map(|parent| parent.children())
+        .take_while(|node| !node.is_element())
+        .filter_map(|node| node.pi())
+    {
+        let base = base.ok_or_else(|| unsupported("SVG processing instructions"))?;
+        if let Some((href, _)) = super::svg::stylesheet(instruction)? {
+            super::svg::resource_path(base, &href)?;
+        }
+    }
+    if root.descendants().any(|node| node.is_pi())
+        || (root.parent().is_some_and(|parent| parent.is_root())
+            && root.next_siblings().any(|node| node.is_pi()))
+    {
+        return Err(unsupported(
+            "SVG processing instructions outside the prolog",
+        ));
+    }
+    for node in root.descendants().filter(Node::is_element) {
+        let tag = node.tag_name().name();
+        let packaged_element = base.is_some() && matches!(tag, "image" | "style" | "a");
+        let filter_primitive = super::svg::effects::is_filter_primitive(tag);
+        let transfer_channel = super::svg::effects::is_transfer_channel(tag);
+        let light_source = super::svg::effects::is_light_source(tag);
+        if node.tag_name().namespace() != Some(SVG)
+            || (!packaged_element
+                && !filter_primitive
+                && !transfer_channel
+                && !light_source
+                && !matches!(
+                    tag,
+                    "svg"
+                        | "g"
+                        | "defs"
+                        | "symbol"
+                        | "use"
+                        | "title"
+                        | "desc"
+                        | "path"
+                        | "rect"
+                        | "circle"
+                        | "ellipse"
+                        | "line"
+                        | "polyline"
+                        | "polygon"
+                        | "text"
+                        | "tspan"
+                        | "linearGradient"
+                        | "radialGradient"
+                        | "stop"
+                        | "clipPath"
+                        | "mask"
+                        | "pattern"
+                        | "marker"
+                        | "filter"
+                        | "feMergeNode"
+                ))
+        {
+            return Err(unsupported("SVG contains unsupported or active elements"));
+        }
+        if tag == "feImage" && base.is_none() {
+            return Err(unsupported("SVG filter images require an EPUB archive"));
+        }
+        let raster_reference = matches!(tag, "image" | "feImage");
+        if raster_reference && super::svg::image_href(node).is_none() {
+            return Err(invalid("EPUB SVG image has no href"));
+        }
+        for attribute in node.attributes() {
+            let key = attribute.name();
+            let value = attribute.value();
+            if raster_reference
+                && key == "href"
+                && matches!(attribute.namespace(), None | Some(super::svg::XLINK))
+            {
+                super::svg::resource_path(base.unwrap_or_default(), value)?;
+                continue;
+            }
+            if tag == "a"
+                && key == "href"
+                && matches!(attribute.namespace(), None | Some(super::svg::XLINK))
+            {
+                if !external(value) {
+                    resolve(base.unwrap_or_default(), value)?;
+                    if let Some((_, fragment)) = value.split_once('#') {
+                        super::percent_decode(fragment)?;
+                    }
+                }
+                continue;
+            }
+            if tag == "use"
+                && key == "href"
+                && matches!(attribute.namespace(), None | Some(super::svg::XLINK))
+            {
+                super::svg::use_refs::href_id(value)?;
+                continue;
+            }
+            if super::svg::effects::is_gradient(tag)
+                && key == "href"
+                && matches!(attribute.namespace(), None | Some(super::svg::XLINK))
+            {
+                super::svg::fragment_id(value)
+                    .ok_or_else(|| unsupported("SVG gradient requires a same-document template"))?;
+                continue;
+            }
+            let static_attribute = match attribute.namespace() {
+                None if tag == "style" && matches!(key, "media" | "type") => true,
+                None if tag == "a" && key == "target" => true,
+                None if tag == "svg" && key == "baseProfile" => true,
+                None if tag == "filter" && matches!(key, "filterUnits" | "primitiveUnits") => true,
+                None if filter_primitive && matches!(key, "in" | "result") => true,
+                None if tag == "feMergeNode" && key == "in" => true,
+                None if tag == "feDistantLight" && matches!(key, "azimuth" | "elevation") => true,
+                None if matches!(tag, "fePointLight" | "feSpotLight")
+                    && matches!(key, "x" | "y" | "z") =>
+                {
+                    true
+                }
+                None if tag == "feSpotLight"
+                    && matches!(
+                        key,
+                        "pointsAtX"
+                            | "pointsAtY"
+                            | "pointsAtZ"
+                            | "specularExponent"
+                            | "limitingConeAngle"
+                    ) =>
+                {
+                    true
+                }
+                None if super::svg::effects::is_lighting(tag)
+                    && matches!(key, "surfaceScale" | "kernelUnitLength") =>
+                {
+                    true
+                }
+                None if tag == "feDiffuseLighting" && key == "diffuseConstant" => true,
+                None if tag == "feSpecularLighting"
+                    && matches!(key, "specularConstant" | "specularExponent") =>
+                {
+                    true
+                }
+                None if tag == "feBlend" && matches!(key, "in2" | "mode") => true,
+                None if tag == "feMorphology" && matches!(key, "operator" | "radius") => true,
+                None if tag == "feConvolveMatrix"
+                    && matches!(
+                        key,
+                        "order"
+                            | "kernelMatrix"
+                            | "divisor"
+                            | "bias"
+                            | "targetX"
+                            | "targetY"
+                            | "edgeMode"
+                            | "kernelUnitLength"
+                            | "preserveAlpha"
+                    ) =>
+                {
+                    true
+                }
+                None if tag == "feTurbulence"
+                    && matches!(
+                        key,
+                        "type" | "baseFrequency" | "numOctaves" | "seed" | "stitchTiles"
+                    ) =>
+                {
+                    true
+                }
+                None if tag == "feDisplacementMap"
+                    && matches!(
+                        key,
+                        "in2" | "scale" | "xChannelSelector" | "yChannelSelector"
+                    ) =>
+                {
+                    true
+                }
+                None if transfer_channel
+                    && matches!(
+                        key,
+                        "type"
+                            | "tableValues"
+                            | "slope"
+                            | "intercept"
+                            | "amplitude"
+                            | "exponent"
+                            | "offset"
+                    ) =>
+                {
+                    true
+                }
+                None if tag == "feComposite"
+                    && matches!(key, "in2" | "operator" | "k1" | "k2" | "k3" | "k4") =>
+                {
+                    true
+                }
+                None if matches!(tag, "feDropShadow" | "feGaussianBlur")
+                    && key == "stdDeviation" =>
+                {
+                    true
+                }
+                None if tag == "feColorMatrix" && matches!(key, "type" | "values") => true,
+                None if super::svg::effects::paint_properties(tag).contains(&key) => true,
+                Some(XML) => matches!(key, "lang" | "space"),
+                None => matches!(
+                    key,
+                    "id" | "role"
+                        | "class"
+                        | "style"
+                        | "aria-label"
+                        | "aria-hidden"
+                        | "version"
+                        | "viewBox"
+                        | "preserveAspectRatio"
+                        | "width"
+                        | "height"
+                        | "x"
+                        | "y"
+                        | "x1"
+                        | "x2"
+                        | "y1"
+                        | "y2"
+                        | "cx"
+                        | "cy"
+                        | "r"
+                        | "rx"
+                        | "ry"
+                        | "fx"
+                        | "fy"
+                        | "fr"
+                        | "d"
+                        | "points"
+                        | "pathLength"
+                        | "transform"
+                        | "fill"
+                        | "fill-opacity"
+                        | "fill-rule"
+                        | "stroke"
+                        | "stroke-opacity"
+                        | "stroke-width"
+                        | "stroke-linecap"
+                        | "stroke-linejoin"
+                        | "stroke-miterlimit"
+                        | "stroke-dasharray"
+                        | "stroke-dashoffset"
+                        | "opacity"
+                        | "color"
+                        | "display"
+                        | "visibility"
+                        | "clip-path"
+                        | "clip-rule"
+                        | "filter"
+                        | "color-interpolation-filters"
+                        | "clipPathUnits"
+                        | "mask"
+                        | "mask-type"
+                        | "maskUnits"
+                        | "maskContentUnits"
+                        | "gradientUnits"
+                        | "gradientTransform"
+                        | "spreadMethod"
+                        | "offset"
+                        | "stop-color"
+                        | "stop-opacity"
+                        | "patternUnits"
+                        | "patternContentUnits"
+                        | "patternTransform"
+                        | "marker"
+                        | "marker-start"
+                        | "marker-mid"
+                        | "marker-end"
+                        | "markerUnits"
+                        | "markerWidth"
+                        | "markerHeight"
+                        | "orient"
+                        | "refX"
+                        | "refY"
+                        | "dx"
+                        | "dy"
+                        | "rotate"
+                        | "image-rendering"
+                        | "shape-rendering"
+                        | "text-rendering"
+                        | "color-rendering"
+                        | "font-family"
+                        | "font-size"
+                        | "font-weight"
+                        | "font-style"
+                        | "font-stretch"
+                        | "text-anchor"
+                        | "textLength"
+                        | "lengthAdjust"
+                        | "dominant-baseline"
+                        | "letter-spacing"
+                        | "word-spacing"
+                ),
+                Some(_) => false,
+            };
+            // Paint references may resolve only to a simple same-document fragment.
+            let local_paint = matches!(
+                key,
+                "fill"
+                    | "stroke"
+                    | "clip-path"
+                    | "mask"
+                    | "marker"
+                    | "marker-start"
+                    | "marker-mid"
+                    | "marker-end"
+            ) && value
+                .strip_prefix("url(#")
+                .and_then(|v| v.strip_suffix(')'))
+                .is_some_and(|v| {
+                    !v.is_empty()
+                        && v.bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b"_-.".contains(&b))
+                });
+            // Filter values have their own local-fragment grammar and target checks.
+            if static_attribute && key == "filter" {
+                continue;
+            }
+            if !static_attribute
+                || (key != "style" || base.is_none())
+                    && (value.contains('\\')
+                        || (value.to_ascii_lowercase().contains("url(") && !local_paint))
+            {
+                return Err(unsupported("SVG contains external or active attributes"));
+            }
+        }
+    }
+    if root.descendants().any(|node| {
+        node.is_element()
+            && (node.has_tag_name("filter")
+                || node.has_tag_name((SVG, "feMergeNode"))
+                || super::svg::effects::is_light_source(node.tag_name().name())
+                || super::svg::effects::is_filter_primitive(node.tag_name().name())
+                || node.attribute("filter").is_some()
+                || (super::svg::effects::is_gradient(node.tag_name().name())
+                    && (node.attribute("href").is_some()
+                        || node.attribute((super::svg::XLINK, "href")).is_some())))
+    }) {
+        super::svg::effects::validate_markup(root)?;
+    }
+    super::svg::use_refs::validate_use_graph(root)
+}
+
+// Reattach inherited namespace bindings to a detached fragment.
+fn standalone(node: Node<'_, '_>, data: &[u8]) -> Result<Vec<u8>, EngineError> {
+    let raw = data
+        .get(node.range())
+        .ok_or_else(|| invalid("invalid XML fragment range"))?;
+    namespace_complete(node, raw)
+}
+
+pub(super) fn namespace_complete(node: Node<'_, '_>, raw: &[u8]) -> Result<Vec<u8>, EngineError> {
+    let mut reader = quick_xml::Reader::from_reader(raw);
+    let start = match reader.read_event().map_err(invalid)? {
+        quick_xml::events::Event::Start(start) | quick_xml::events::Event::Empty(start) => start,
+        _ => return Err(invalid("invalid XML fragment opening tag")),
+    };
+    let declared = start
+        .attributes()
+        .map(|a| a.map(|a| a.key.as_ref().to_vec()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(invalid)?;
+    let mut declarations = String::new();
+    for ns in node.namespaces().filter(|ns| ns.name() != Some("xml")) {
+        let key = ns
+            .name()
+            .map_or("xmlns".to_owned(), |n| format!("xmlns:{n}"));
+        if !declared.iter().any(|existing| existing == key.as_bytes()) {
+            let uri = ns
+                .uri()
+                .replace('&', "&amp;")
+                .replace('"', "&quot;")
+                .replace('<', "&lt;");
+            declarations.push_str(&format!(" {key}=\"{uri}\""));
+        }
+    }
+    let pos = start.name().as_ref().len() + 1;
+    let mut output = Vec::with_capacity(raw.len() + declarations.len());
+    output.extend_from_slice(&raw[..pos]);
+    output.extend_from_slice(declarations.as_bytes());
+    output.extend_from_slice(&raw[pos..]);
+    Ok(output)
+}
+
+fn table(
+    node: Node<'_, '_>,
+    out: &mut Vec<BlockPayload>,
+    depth: usize,
+    cx: &mut Context<'_, '_>,
+) -> Result<(), EngineError> {
+    if depth >= 8 {
+        return Err(limited("nested tables exceed depth 8"));
+    }
+    let mut source = Vec::new();
+    let mut groups = Vec::new();
+    let mut direct_start = None;
+    let mut columns = Vec::new();
+    let mut caption = false;
+    for n in node.children() {
+        if n.is_text() && !n.text().unwrap_or_default().trim().is_empty() {
+            return Err(invalid("text outside EPUB table cells"));
+        }
+        if !n.is_element() {
+            continue;
+        }
+        if n.tag_name().namespace().is_some_and(|ns| ns != XHTML) {
+            return Err(unsupported("non-XHTML table children"));
+        }
+        let tag = n.tag_name().name();
+        if tag != "tr" {
+            finish_direct(&mut groups, &mut direct_start, source.len());
+        }
+        match tag {
+            "caption" if !caption && source.is_empty() => {
+                flow(n, out, depth + 1, cx)?;
+                caption = true;
+            }
+            "colgroup" if source.is_empty() => {
+                cx.budget.object()?;
+                let mut cols = Vec::new();
+                for col in n.children().filter(Node::is_element) {
+                    if !name(col, XHTML, "col") {
+                        return Err(invalid("invalid colgroup child"));
+                    }
+                    cx.budget.object()?;
+                    cols.push(column(col, cx.budget)?);
+                }
+                let mut group = column(n, cx.budget)?;
+                group["columns"] = serde_json::Value::Array(cols);
+                columns.push(group);
+            }
+            "tr" => {
+                direct_start.get_or_insert(source.len());
+                source.push(n);
+            }
+            "thead" | "tbody" | "tfoot" => {
+                let start = source.len();
+                for row in n.children().filter(Node::is_element) {
+                    if !name(row, XHTML, "tr") {
+                        return Err(invalid("invalid table row group child"));
+                    }
+                    source.push(row);
+                }
+                groups.push((tag, start, source.len(), n.attribute("id")));
+            }
+            _ => return Err(unsupported("table structure cannot be represented")),
+        }
+        if source.len() > 10_000 {
+            return Err(limited("table row count exceeds 10000"));
+        }
+    }
+    finish_direct(&mut groups, &mut direct_start, source.len());
+    let mut occupied = vec![0usize; MAX_COLUMNS];
+    let mut result = TablePayload {
+        page: Some(cx.page),
+        ..Default::default()
+    };
+    let mut width = 0;
+    let mut html_groups = Vec::new();
+    for (kind, start, end, id) in groups {
+        if kind != "implicit" {
+            cx.budget.object()?;
+            cx.budget.bytes(id.map_or(0, str::len).saturating_mul(3))?;
+            html_groups
+                .push(json!({"kind": kind, "start_row": start, "row_count": end-start, "id": id}));
+        }
+        for (row_index, row) in source.iter().copied().enumerate().take(end).skip(start) {
+            cx.budget.object()?;
+            let mut cells = Vec::new();
+            let mut row_text = Vec::new();
+            let mut col = 0;
+            for cell in row.children() {
+                if cell.is_text() && !cell.text().unwrap_or_default().trim().is_empty() {
+                    return Err(invalid("text outside EPUB table cells"));
+                }
+                if !cell.is_element() {
+                    continue;
+                }
+                let header = name(cell, XHTML, "th");
+                if !header && !name(cell, XHTML, "td") {
+                    return Err(invalid("invalid table cell element"));
+                }
+                cx.budget.object()?;
+                while col < MAX_COLUMNS && occupied[col] > row_index {
+                    col += 1;
+                }
+                let col_span = span(cell, "colspan")?;
+                let rows = span(cell, "rowspan")?;
+                let row_span = if rows == 0 { end - row_index } else { rows };
+                if col_span == 0
+                    || col_span > MAX_COLUMNS
+                    || col > MAX_COLUMNS - col_span
+                    || row_span > end - row_index
+                {
+                    return Err(invalid("table span exceeds its grid or row group"));
+                }
+                let right = col + col_span;
+                if occupied[col..right].iter().any(|end| *end > row_index) {
+                    return Err(invalid("overlapping EPUB table spans"));
+                }
+                charge(
+                    &mut cx.budget.grid,
+                    col_span * row_span,
+                    MAX_GRID,
+                    "table coverage exceeds its budget",
+                )?;
+                occupied[col..right].fill(row_index + row_span);
+                let mut mapped = CellPayload {
+                    col_span,
+                    row_span,
+                    ..Default::default()
+                };
+                mapped.metadata.insert("grid_column".into(), json!(col));
+                mapped.metadata.insert("header".into(), json!(header));
+                for key in ["id", "scope", "headers", "abbr"] {
+                    if let Some(value) = cell.attribute(key) {
+                        cx.budget.bytes(value.len().saturating_mul(3))?;
+                        mapped.metadata.insert(format!("html_{key}"), json!(value));
+                    }
+                }
+                flow(cell, &mut mapped.blocks, depth + 1, cx)?;
+                let text = flat_text(&mapped.blocks, cx.budget)?;
+                row_text.push(text);
+                cells.push(mapped);
+                col = right;
+                width = width.max(right);
+            }
+            // Keep row strings compact until the final rectangular-grid check.
+            result.rows.push(row_text);
+            result.cells.push(cells);
+        }
+    }
+    charge(
+        &mut cx.budget.grid,
+        width.saturating_mul(result.rows.len()),
+        MAX_GRID,
+        "table grid exceeds its budget",
+    )?;
+    for (row, cells) in result.rows.iter_mut().zip(&result.cells) {
+        let mut grid = vec![String::new(); width];
+        for (field, cell) in row.drain(..).zip(cells) {
+            let col = cell.metadata["grid_column"].as_u64().unwrap_or_default() as usize;
+            grid[col] = field;
+        }
+        *row = grid;
+    }
+    if !html_groups.is_empty() {
+        result.metadata.insert(
+            "html_row_groups".into(),
+            serde_json::Value::Array(html_groups),
+        );
+    }
+    if !columns.is_empty() {
+        result.metadata.insert(
+            "html_column_groups".into(),
+            serde_json::Value::Array(columns),
+        );
+    }
+    cx.budget.object()?;
+    out.push(BlockPayload {
+        kind: "table".into(),
+        table: Some(result),
+        ..Default::default()
+    });
+    Ok(())
+}
+
+fn finish_direct<'a>(
+    groups: &mut Vec<(&'a str, usize, usize, Option<&'a str>)>,
+    direct_start: &mut Option<usize>,
+    end: usize,
+) {
+    if let Some(start) = direct_start.take() {
+        groups.push(("implicit", start, end, None));
+    }
+}
+
+fn span(node: Node<'_, '_>, name: &str) -> Result<usize, EngineError> {
+    node.attribute(name)
+        .map_or(Ok(1), |value| value.trim().parse().map_err(invalid))
+}
+
+fn column(node: Node<'_, '_>, budget: &mut Budget) -> Result<serde_json::Value, EngineError> {
+    let count = span(node, "span")?;
+    if !(1..=MAX_COLUMNS).contains(&count) {
+        return Err(limited("invalid table column span"));
+    }
+    let width = node.attribute("width");
+    let style = node.attribute("style");
+    if width.into_iter().chain(style).any(|text| text.len() > 4096) {
+        return Err(limited("table column attributes exceed their budget"));
+    }
+    for value in width.into_iter().chain(style) {
+        budget.bytes(value.len().saturating_mul(3))?;
+    }
+    Ok(json!({"span": count, "width": width, "style": style}))
+}
+
+fn flat_text(blocks: &[BlockPayload], budget: &mut Budget) -> Result<String, EngineError> {
+    let mut out = String::new();
+    for block in blocks {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        if let Some(table) = &block.table {
+            for (index, row) in table.rows.iter().enumerate() {
+                if index > 0 {
+                    out.push('\n');
+                }
+                for (index, cell) in row.iter().enumerate() {
+                    if index > 0 {
+                        out.push('\t');
+                    }
+                    budget.bytes(cell.len().saturating_mul(3))?;
+                    out.push_str(cell);
+                }
+            }
+        } else {
+            budget.bytes(block.text.len().saturating_mul(3))?;
+            out.push_str(&block.text);
+        }
+    }
+    Ok(out)
+}

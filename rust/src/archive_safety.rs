@@ -183,11 +183,8 @@ pub(crate) struct DirectoryInfo {
     end: usize,
 }
 
-/// Ensure the ZIP readers used by EPUB see the same bounded entries and local
-/// headers. This runs only after `validate_directory` and common ZIP preflight.
-pub(crate) fn validate_epub_readers(data: &[u8]) -> Result<(), EngineError> {
-    use futures::executor::block_on;
-
+/// Open EPUB content only after verifying its directory and local headers.
+pub(crate) fn open_epub(data: &[u8]) -> Result<zip::ZipArchive<Cursor<&[u8]>>, EngineError> {
     let directory = validate_directory(data)?;
     if data[directory.end + 4..]
         .windows(4)
@@ -208,33 +205,22 @@ pub(crate) fn validate_epub_readers(data: &[u8]) -> Result<(), EngineError> {
     }
     modern.validate_header_consistency().map_err(malformed)?;
     let mut original = zip::ZipArchive::new(Cursor::new(data)).map_err(malformed)?;
-    let asynchronous = block_on(async_zip::base::read::seek::ZipFileReader::new(
-        futures::io::Cursor::new(data),
-    ))
-    .map_err(malformed)?;
-    let entries = asynchronous.file().entries();
-    if original.len() != modern.len() || entries.len() != modern.len() {
+    if original.len() != modern.len() {
         return Err(malformed("archive readers disagree on member count"));
     }
-    for (index, asynchronous) in entries.iter().enumerate() {
+    for index in 0..modern.len() {
         let first = original.by_index_raw(index).map_err(malformed)?;
         let second = modern.by_index_data(index).map_err(malformed)?;
         let name = second.name().map_err(malformed)?;
-        let async_name = asynchronous.filename().as_str().map_err(malformed)?;
         if first.name_raw() != second.name_raw()
             || first.name() != name
-            || name != async_name
             || first.size() != second.size()
             || first.compressed_size() != second.compressed_size()
             || first.crc32() != second.crc32()
             || first.header_start() != second.header_start()
-            || asynchronous.uncompressed_size() != second.size()
-            || asynchronous.compressed_size() != second.compressed_size()
-            || asynchronous.crc32() != second.crc32()
-            || asynchronous.header_offset() != second.header_start()
         {
             return Err(malformed("archive readers disagree on a member"));
         }
     }
-    Ok(())
+    Ok(original)
 }

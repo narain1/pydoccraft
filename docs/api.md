@@ -37,7 +37,32 @@ Recognized explicit `filetype` values are:
 
 For paths, the suffix is checked against the detected content. For bytes, the native detector identifies PDF, OOXML and EPUB content. A mismatched explicit type raises `UnsupportedFormatError`.
 
-Passwords are supported for encrypted PDF and DOCX input. Encrypted PPTX is rejected by the upstream DeckCraft importer.
+Passwords are supported for encrypted PDF and DOCX input. Encrypted PPTX and EPUB files are rejected.
+
+For an open EPUB, `document.read_epub_resource(path, offset=0, length=None)` reads a local resource by its decoded archive path. The manifest in `document.metadata["manifest"]` lists paths, media types and resource properties. `document.epub_media_cues(page)` returns the chapter's ordered SMIL audio and text cues. `document.edit_epub_metadata(title=..., description=...)` and `document.edit_epub_chapters({page: markup})` return new EPUB bytes with the requested changes. `document.edit_epub_structure(order, resources=...)` reorders, inserts or removes entries in the reading order and can add or replace packaged resources. See [EPUB authoring](authoring.md#epub-creation-unreleased) and the [EPUB format profile](formats.md#epub-unreleased).
+
+For a selected TTML caption track, pass `ttml_forced=True` to `document.epub_embedded_text` or `document.epub_embedded_video` to enable authored forced-subtitle conditions. Both methods default to ordinary subtitle playback.
+
+`document.epub_narration(page, skip_roles=())` yields `EpubNarrationCue` values in playback order. Each value identifies a chapter path, element fragment, and inherited roles. Recorded cues carry an `EpubAudioClip` with signed 16-bit PCM WAVE bytes and sample geometry. Text-only cues carry the target's readable text.
+
+To resume at a chapter's navigation destination, pass the decoded element ID as `start_fragment` to either narration method. Use the destination's spine page and its `fragment` value from `document.metadata["navigation"]`. A SMIL sequence target starts at the first cue within the sequence on that page. For a position in `epub_media_cues(page)`, pass the zero-based `start_cue` instead.
+
+When an XHTML fragment lies inside a narrated element, playback can start at that element's authored cue. Explicit SMIL targets take precedence, and otherwise the nearest enclosing cue supplies the starting position. A whole-chapter cue covers the chapter body.
+
+```python
+with doc_ex.open(epub_bytes) as book:
+    book.play_epub_narration(
+        0,
+        play_audio=lambda clip: audio_sink.play_until_done(clip.wave),
+        speak_text=speech_sink.speak_until_done,
+        on_cue=reader.set_active_cue,
+        skip_roles={"pagebreak"},
+    )
+```
+
+The callbacks run in sequence on the calling thread. The audio and speech callbacks return when playback ends. If supplied, `on_cue` receives the active target before playback and `None` when playback ends or the sink raises. The library decodes the audio in-process and delegates output to the supplied sinks. Pass EPUB structural roles to `skip_roles` to omit matching cues and descendants of matching sequences.
+
+Pass `escape_role` to let a reader leave an active `table`, `list`, `figure`, or `aside` during playback. The callback receives the current `EpubNarrationCue` after each delivered audio chunk or text cue in one of those structures. Return `None` to continue, or return an active role to resume immediately after its innermost matching SMIL structure on the selected page. Returning a role that is absent raises `ValueError`. Use `chunk_frames` to control how soon a request can take effect during recorded audio.
 
 ## Fast text extraction
 

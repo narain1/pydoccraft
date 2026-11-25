@@ -2,10 +2,266 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from html import escape
-from typing import Any, Callable
+from math import isfinite
+from typing import Any, Callable, Iterable, Literal
 from urllib.parse import urlsplit
 
 BBox = tuple[float, float, float, float]
+
+
+@dataclass(frozen=True, slots=True)
+class EpubChapterSource:
+    """XHTML and navigation title for a new spine entry."""
+
+    title: str
+    xhtml: str
+    path: str | None = None
+    fixed_layout: bool = False
+    linear: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class EpubSvgChapterSource:
+    """Static SVG and navigation title for a new fixed-layout spine entry."""
+
+    title: str
+    svg: str
+    path: str | None = None
+    linear: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class EpubSpineProperties:
+    """Edit reading order participation and rendition of an existing spine entry."""
+
+    linear: bool | None = None
+    layout: Literal["reflowable", "pre-paginated", "inherit"] | None = None
+    page_spread: Literal["left", "right", "center", "inherit"] | None = None
+    spread: Literal["none", "landscape", "portrait", "both", "auto", "inherit"] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EpubResource:
+    """Media type and bytes for a local publication resource."""
+
+    media_type: str
+    data: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class EpubOverlayCue:
+    """A chapter fragment and its optional local narration interval in microseconds."""
+
+    fragment: str | None = None
+    audio_path: str | None = None
+    clip_begin_us: int = 0
+    clip_end_us: int | None = None
+    epub_type: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EpubOverlaySequence:
+    """An ordered group of chapter cues with an optional fragment and inherited roles."""
+
+    children: Iterable[EpubOverlayCue | EpubOverlaySequence]
+    fragment: str | None = None
+    epub_type: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EpubAudioClip:
+    """Owned signed 16-bit PCM WAVE and its sample geometry."""
+
+    wave: bytes
+    sample_rate: int
+    channels: int
+    frame_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class EpubTextStyle:
+    """Supported authored typography, colors, and annotations for a subtitle run."""
+
+    bold: bool = False
+    font_style: Literal["normal", "italic", "oblique"] = "normal"
+    underline: bool = False
+    line_through: bool = False
+    overline: bool = False
+    color: tuple[int, int, int, int] | None = None
+    background_color: tuple[int, int, int, int] | None = None
+    classes: tuple[str, ...] = ()
+    voice: str | None = None
+    language: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EpubTextRun:
+    """Normalized cue text and its style. The optional timestamp is on the source clock."""
+
+    text: str
+    style: EpubTextStyle = field(default_factory=EpubTextStyle)
+    timestamp_us: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EpubTextRegion:
+    """An authored WebVTT region with anchors measured from the top left."""
+
+    id: str
+    width_percent: float = 100.0
+    lines: int = 3
+    region_anchor_percent: tuple[float, float] = (0.0, 100.0)
+    viewport_anchor_percent: tuple[float, float] = (0.0, 100.0)
+    scroll: Literal["up"] | None = None
+    style: EpubTextStyle = field(default_factory=EpubTextStyle)
+    opacity: float | None = None
+    visibility: Literal["visible", "hidden", "collapse"] | None = None
+
+    def viewport_bounds(
+        self, viewport_width: float, viewport_height: float
+    ) -> tuple[float, float, float, float]:
+        """Return (left, top, width, height) using the WebVTT region line height."""
+        if not all(isfinite(size) and size > 0 for size in (viewport_width, viewport_height)):
+            raise ValueError("WebVTT region bounds require finite positive viewport dimensions")
+        width = (self.width_percent / 100) * viewport_width
+        height = (0.06 * self.lines) * viewport_height
+        rx, ry = self.region_anchor_percent
+        vx, vy = self.viewport_anchor_percent
+        left = (vx / 100) * viewport_width - (rx / 100) * width
+        top = (vy / 100) * viewport_height - (ry / 100) * height
+        bounds = (left, top, width, height)
+        if not all(isfinite(value) for value in bounds):
+            raise ValueError("WebVTT region bounds exceed the finite coordinate range")
+        return bounds
+
+
+@dataclass(frozen=True, slots=True)
+class EpubTtmlRegion:
+    """A TTML rectangle with coordinates and physical insets relative to the root container."""
+
+    id: str | None = None
+    origin_percent: tuple[float, float] = (0.0, 0.0)
+    extent_percent: tuple[float, float] = (100.0, 100.0)
+    padding_percent: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    display_align: Literal["before", "center", "after", "justify"] = "before"
+    writing_mode: Literal["lrtb", "rltb", "tbrl", "tblr"] = "lrtb"
+    overflow: Literal["hidden", "visible"] = "hidden"
+    background_color: tuple[int, int, int, int] | None = None
+    show_background: Literal["always", "whenActive"] = "always"
+    z_index: int | None = None
+
+    def viewport_bounds(
+        self, viewport_width: float, viewport_height: float
+    ) -> tuple[float, float, float, float]:
+        """Return (left, top, width, height) within the supplied TTML root viewport."""
+        if not all(isfinite(size) and size > 0 for size in (viewport_width, viewport_height)):
+            raise ValueError("TTML region bounds require finite positive viewport dimensions")
+        x, y = self.origin_percent
+        width, height = self.extent_percent
+        bounds = (
+            (x / 100) * viewport_width,
+            (y / 100) * viewport_height,
+            (width / 100) * viewport_width,
+            (height / 100) * viewport_height,
+        )
+        if not all(isfinite(value) for value in bounds):
+            raise ValueError("TTML region bounds exceed the finite coordinate range")
+        return bounds
+
+    def content_bounds(
+        self, viewport_width: float, viewport_height: float
+    ) -> tuple[float, float, float, float]:
+        """Return the region rectangle after applying the physical padding insets."""
+        x, y, width, height = self.viewport_bounds(viewport_width, viewport_height)
+        t, r, b, l = self.padding_percent
+        top, bottom = (t / 100) * viewport_height, (b / 100) * viewport_height
+        left, right = (l / 100) * viewport_width, (r / 100) * viewport_width
+        bounds = (x + left, y + top, max(0.0, width - left - right), max(0.0, height - top - bottom))
+        if not all(isfinite(value) for value in (*bounds, right, bottom)):
+            raise ValueError("TTML region bounds exceed the finite coordinate range")
+        return bounds
+
+
+@dataclass(frozen=True, slots=True)
+class EpubTextCue:
+    """Plain text and an interval on the embedded media presentation timeline."""
+
+    start_us: int
+    end_us: int | None
+    text: str
+    id: str | None = None
+    settings: str | None = None
+    region: str | None = None
+    markup: str | None = None
+    runs: tuple[EpubTextRun, ...] = field(default=(), compare=False, repr=False)
+    background_color: tuple[int, int, int, int] | None = field(default=None, compare=False, repr=False)
+    region_layout: EpubTextRegion | None = field(default=None, compare=False, repr=False)
+    ttml_region_layout: EpubTtmlRegion | None = field(default=None, compare=False, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class EpubVideoFrame:
+    """Owned packed RGB8 pixels and a frame interval on the presentation timeline."""
+
+    rgb: bytes
+    width: int
+    height: int
+    pixel_aspect_ratio: tuple[int, int]
+    start_us: int
+    duration_us: int
+    text_cues: tuple[EpubTextCue, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class EpubMediaSource:
+    """An authored URL and its optional local publication resource."""
+
+    uri: str
+    path: str | None
+    media_type: str | None
+    playable_audio: bool
+    fragment_start_us: int = 0
+    fragment_end_us: int | None = None
+    playable_video: bool = False
+    fragment_xywh: tuple[Literal["pixel", "percent"], int, int, int, int] | None = None
+    fragment_tracks: tuple[str, ...] = ()
+    fragment_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EpubMediaTrack:
+    """A local caption, subtitle, description or metadata track."""
+
+    path: str
+    media_type: str
+    kind: str
+    label: str | None
+    language: str | None
+    default: bool
+
+
+@dataclass(frozen=True, slots=True)
+class EpubEmbeddedMedia:
+    """An XHTML audio or video element and its ordered resource references."""
+
+    kind: Literal["audio", "video"]
+    id: str | None
+    label: str | None
+    sources: tuple[EpubMediaSource, ...]
+    tracks: tuple[EpubMediaTrack, ...]
+    poster_path: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class EpubNarrationCue:
+    """Playable narration for one SMIL target."""
+
+    id: str | None
+    path: str
+    fragment: str | None
+    roles: tuple[str, ...]
+    audio: EpubAudioClip | None = None
+    text: str | None = None
 
 
 @dataclass(slots=True)
@@ -62,11 +318,21 @@ class Table:
     def _markdown(self, image_reference: Callable[[Image, tuple], str] | None = None, path: tuple = ()) -> str:
         # Pipe tables cannot represent nested tables, merged cells or rich content.
         # HTML preserves that hierarchy without emitting the flat rows a second time.
-        if any(
-            cell.col_span != 1 or cell.row_span != 1 or cell.covered
-            or cell.metadata.get("grid_column", column) != column
-            or any(block.table or block.links or block.images for block in cell.blocks)
-            for row in self.cells for column, cell in enumerate(row)
+        declared_headers = any("header" in cell.metadata for row in self.cells for cell in row)
+        simple_headers = bool(self.cells and self.cells[0]) and all(
+            cell.metadata.get("header") is True for cell in self.cells[0]
+        ) and all(cell.metadata.get("header") is not True for row in self.cells[1:] for cell in row)
+        source_attributes = ("html_id", "html_scope", "html_headers", "html_abbr")
+        if (
+            "html_row_groups" in self.metadata
+            or (declared_headers and not simple_headers)
+            or any(any(key in cell.metadata for key in source_attributes) for row in self.cells for cell in row)
+            or any(
+                cell.col_span != 1 or cell.row_span != 1 or cell.covered
+                or cell.metadata.get("grid_column", column) != column
+                or any(block.table or block.links or block.images for block in cell.blocks)
+                for row in self.cells for column, cell in enumerate(row)
+            )
         ):
             return self._to_html(image_reference, path)
         if not self.rows:
@@ -88,9 +354,24 @@ class Table:
 
     def _to_html(self, image_reference: Callable[[Image, tuple], str] | None = None, path: tuple = ()) -> str:
         rows = self.cells or [[Cell([Block("paragraph", text)]) for text in row] for row in self.rows]
+        groups = self._html_groups(len(rows))
+        groups_by_start: dict[int, list[tuple[str, int, str | None]]] = {}
+        ends: dict[int, str] = {}
+        row_group_end: list[int | None] = [None] * len(rows)
+        for kind, start, count, group_id in groups:
+            groups_by_start.setdefault(start, []).append((kind, count, group_id))
+            if count:
+                ends[start + count] = kind
+                for index in range(start, start + count):
+                    row_group_end[index] = start + count
         output = ["<table>"]
         occupied: dict[int, int] = {}
         for row_number, row in enumerate(rows):
+            for kind, count, group_id in groups_by_start.get(row_number, []):
+                attribute = f' id="{escape(group_id, quote=True)}"' if group_id is not None else ""
+                output.append(f"<{kind}{attribute}>")
+                if not count:
+                    output.append(f"</{kind}>")
             output.append("<tr>")
             column = 0
             for cell_number, cell in enumerate(row):
@@ -102,6 +383,9 @@ class Table:
                     or not isinstance(cell.row_span, int) or not 1 <= cell.row_span <= 32767
                 ):
                     raise ValueError("structured table spans must fit a 1000-column, 32767-row grid")
+                group_end = row_group_end[row_number]
+                if group_end is not None and cell.row_span > group_end - row_number:
+                    raise ValueError("structured table row span exceeds its row group")
                 while column < grid_column:
                     if column not in occupied:
                         output.append("<td></td>")
@@ -113,7 +397,15 @@ class Table:
                     continue
                 if cell.row_span > 1:
                     occupied.update((index, cell.row_span) for index in range(grid_column, column))
-                output.append(f'<td colspan="{cell.col_span}" rowspan="{cell.row_span}">')
+                tag = "th" if cell.metadata.get("header") is True else "td"
+                attributes = f' colspan="{cell.col_span}" rowspan="{cell.row_span}"'
+                for key, name in (("html_id", "id"), ("html_scope", "scope"), ("html_headers", "headers"), ("html_abbr", "abbr")):
+                    if key in cell.metadata:
+                        value = cell.metadata[key]
+                        if not isinstance(value, str):
+                            raise ValueError("structured table HTML attributes must be strings")
+                        attributes += f' {name}="{escape(value, quote=True)}"'
+                output.append(f"<{tag}{attributes}>")
                 for block_number, block in enumerate(cell.blocks):
                     block_path = path + ("cells", row_number, cell_number, "blocks", block_number)
                     if block.table:
@@ -123,11 +415,38 @@ class Table:
                     for image_number, image in enumerate(block.images):
                         reference = image_reference(image, block_path + ("images", image_number)) if image_reference else image.name
                         output.append(f'<img src="{escape(reference, quote=True)}" alt="{escape(image.alt, quote=True)}">')
-                output.append("</td>")
+                output.append(f"</{tag}>")
             output.append("</tr>")
+            if row_number + 1 in ends:
+                output.append(f'</{ends[row_number + 1]}>')
             occupied = {column: remaining - 1 for column, remaining in occupied.items() if remaining > 1}
+        for kind, count, group_id in groups_by_start.get(len(rows), []):
+            attribute = f' id="{escape(group_id, quote=True)}"' if group_id is not None else ""
+            output.append(f"<{kind}{attribute}></{kind}>")
         output.append("</table>")
         return "".join(output)
+
+    def _html_groups(self, row_count: int) -> list[tuple[str, int, int, str | None]]:
+        raw = self.metadata.get("html_row_groups", [])
+        if not isinstance(raw, list):
+            raise ValueError("structured table row groups must be a list")
+        result: list[tuple[str, int, int, str | None]] = []
+        previous_end = 0
+        for group in raw:
+            if not isinstance(group, dict):
+                raise ValueError("invalid structured table row group")
+            kind, start, count = group.get("kind"), group.get("start_row"), group.get("row_count")
+            group_id = group.get("id")
+            if (
+                kind not in ("thead", "tbody", "tfoot")
+                or type(start) is not int or type(count) is not int
+                or start < previous_end or count < 0 or start + count > row_count
+                or (group_id is not None and not isinstance(group_id, str))
+            ):
+                raise ValueError("invalid structured table row group")
+            result.append((kind, start, count, group_id))
+            previous_end = start + count
+        return result
 
 
 def _html_text(text: str, links: list[Link]) -> str:

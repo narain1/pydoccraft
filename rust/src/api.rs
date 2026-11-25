@@ -51,9 +51,7 @@ pub fn render(
         ("docx", Some(clip)) => docx::render_region(data, page, dpi, password, clip),
         ("pptx", None) => pptx::render(data, page, dpi),
         ("pptx", Some(clip)) => pptx::render_region(data, page, dpi, clip),
-        ("epub", _) => Err(EngineError::Unsupported(
-            "EPUB rendering is not supported".into(),
-        )),
+        ("epub", clip) => epub::render(data, page, dpi, password, clip),
         _ => unreachable!(),
     }
 }
@@ -94,6 +92,7 @@ pub fn convert(
         ("pdf", "docx") => conversion::pdf_to_docx(data, password),
         ("docx", "pdf") => conversion::docx_to_pdf(data, password),
         ("pptx", "pdf") => conversion::pptx_to_pdf(data),
+        ("epub", "pdf" | "docx") => epub::convert(data, target, password),
         _ => Err(EngineError::Unsupported(format!(
             "conversion from {source} to {target}"
         ))),

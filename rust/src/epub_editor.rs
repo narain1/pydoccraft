@@ -1,0 +1,692 @@
+//! Rebuild a guarded EPUB archive while preserving untouched members.
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    io::Write,
+};
+
+use roxmltree::{Document, Node};
+use serde_json::Value;
+
+use super::{
+    charge, external, extract, invalid, limited, name, parse_xml, percent_decode, required,
+    resolve, unsupported, Book, DC, METADATA_BYTES, MIME, NCX, OPF, XHTML, XML_BYTES,
+};
+use crate::{
+    author_epub::{escape_attribute, escape_text, validate_text, BoundedOutput},
+    model::{DocumentPayload, PagePayload},
+    EngineError,
+};
+
+pub(super) fn open_for_edit(data: &[u8]) -> Result<Book<'_>, EngineError> {
+    let book = Book::open(data)?;
+    if book
+        .archive
+        .file_names()
+        .any(|path| path.eq_ignore_ascii_case("META-INF/signatures.xml"))
+    {
+        return Err(unsupported("editing signed packages"));
+    }
+    Ok(book)
+}
+
+/// Change selected Dublin Core values while retaining other XML and ZIP members.
+pub(crate) fn update_metadata(
+    data: &[u8],
+    title: Option<&str>,
+    description: Option<&str>,
+) -> Result<Vec<u8>, EngineError> {
+    let mut book = open_for_edit(data)?;
+    let package_path = book.package_path()?;
+    let package = book.read(&package_path, METADATA_BYTES)?;
+    let xml = parse_xml(&package)?;
+    let root = required(xml.root_element(), "metadata")?;
+    let source = std::str::from_utf8(&package).map_err(invalid)?;
+    let mut edits = Vec::new();
+    for (tag, value) in [("title", title), ("description", description)] {
+        let Some(value) = value else {
+            continue;
+        };
+        validate_text(value, 65_536, tag)?;
+        if tag == "title" && value.trim().is_empty() {
+            return Err(EngineError::InvalidArgument(
+                "EPUB title cannot be empty".into(),
+            ));
+        }
+        let escaped = escape_text(value);
+        let existing = root.children().rfind(|node| node.has_tag_name((DC, tag)));
+        if let Some(node) = existing {
+            if node.children().any(|node| !node.is_text()) {
+                return Err(unsupported(
+                    "editing Dublin Core entries with structured content",
+                ));
+            }
+            let range = node.range();
+            let raw = &source[range.clone()];
+            let mut reader = quick_xml::Reader::from_str(raw);
+            let event = reader.read_event().map_err(invalid)?;
+            let end_of_open = reader.buffer_position() as usize;
+            match event {
+                quick_xml::events::Event::Start(_) => {
+                    let end = raw
+                        .rfind("</")
+                        .ok_or_else(|| invalid("invalid source metadata element"))?;
+                    edits.push((range.start + end_of_open..range.start + end, escaped));
+                }
+                quick_xml::events::Event::Empty(node) => {
+                    let name = std::str::from_utf8(node.name().into_inner()).map_err(invalid)?;
+                    edits.push((range.end - 2..range.end, format!(">{escaped}</{name}>")));
+                }
+                _ => return Err(invalid("invalid source metadata element")),
+            }
+        } else {
+            let range = root.range();
+            let end = source[range.clone()]
+                .rfind("</")
+                .ok_or_else(|| unsupported("empty metadata elements"))?;
+            let start = range.start + end;
+            edits.push((
+                start..start,
+                format!("<dc:{tag} xmlns:dc=\"{DC}\">{escaped}</dc:{tag}>"),
+            ));
+        }
+    }
+    if edits.is_empty() {
+        return Ok(data.to_vec());
+    }
+    edits.sort_by_key(|(range, _)| std::cmp::Reverse(range.start));
+    let mut new_package = source.to_owned();
+    for (range, replacement) in edits {
+        new_package.replace_range(range, &replacement);
+    }
+    if new_package.len() > METADATA_BYTES {
+        return Err(limited("edited package exceeds its byte budget"));
+    }
+    parse_xml(new_package.as_bytes())?;
+    rewrite(
+        &mut book,
+        HashMap::from([(package_path.as_str(), new_package.as_bytes())]),
+        BTreeMap::new(),
+        &HashSet::new(),
+    )
+}
+
+pub(super) fn rewrite(
+    book: &mut Book<'_>,
+    mut replacements: HashMap<&str, &[u8]>,
+    additions: BTreeMap<&str, &[u8]>,
+    removed: &HashSet<&str>,
+) -> Result<Vec<u8>, EngineError> {
+    crate::limits::validate_member_count(
+        book.archive
+            .len()
+            .saturating_sub(removed.len())
+            .saturating_add(additions.len()),
+    )?;
+    for path in additions.keys() {
+        super::validate_archive_path(path)?;
+        if book.archive.index_for_name(path).is_some() {
+            return Err(invalid("new EPUB member already exists"));
+        }
+    }
+    let mut sink = BoundedOutput::default();
+    let result = (|| {
+        let mut writer = zip::ZipWriter::new(&mut sink);
+        // OCF requires a stored mimetype as the first member.
+        writer.start_file(
+            "mimetype",
+            zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored),
+        )?;
+        writer.write_all(MIME.as_bytes())?;
+        writer.set_raw_comment(book.archive.comment().into());
+        for index in 0..book.archive.len() {
+            let member = book.archive.by_index_raw(index)?;
+            if member.name() == "mimetype" || removed.contains(member.name()) {
+                continue;
+            }
+            if let Some(content) = replacements.remove(member.name()) {
+                writer.start_file(
+                    member.name(),
+                    zip::write::SimpleFileOptions::default()
+                        .compression_method(zip::CompressionMethod::Stored),
+                )?;
+                writer.write_all(content)?;
+            } else {
+                writer.raw_copy_file(member)?;
+            }
+        }
+        for (path, content) in additions {
+            writer.start_file(
+                path,
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored),
+            )?;
+            writer.write_all(content)?;
+        }
+        writer.finish()?;
+        Ok::<(), zip::result::ZipError>(())
+    })();
+    if let Err(error) = result {
+        return Err(if sink.exceeded {
+            limited("edited EPUB exceeds its output budget")
+        } else {
+            invalid(error)
+        });
+    }
+    if !replacements.is_empty() {
+        return Err(invalid("a replacement member is absent from the archive"));
+    }
+    let result = sink.into_bytes();
+    crate::archive_safety::open_epub(&result)?;
+    Ok(result)
+}
+
+/// Replace the content files at selected spine positions in one transaction.
+pub(crate) fn update_chapters(
+    data: &[u8],
+    changes: &[(i64, String)],
+) -> Result<Vec<u8>, EngineError> {
+    charge_chapter_replacements(changes, &mut 0)?;
+    let mut book = open_for_edit(data)?;
+    if changes.is_empty() {
+        return Ok(data.to_vec());
+    }
+    let extracted = extract(data, None)?;
+    let mut removed = RemovedAnchors::new();
+    let ChapterReplacements {
+        mut files,
+        svg_paths,
+        declarations,
+        replaces_navigation,
+        ..
+    } = prepare_chapter_replacements(
+        &mut book,
+        &extracted,
+        changes,
+        &mut removed,
+        &mut 0,
+        false,
+        super::rendition::fixed,
+    )?;
+    if !removed.is_empty() {
+        if let Some(overlays) = extracted.metadata.get("media_overlays") {
+            check_overlay_anchors(overlays, &removed)?;
+        }
+        check_staged_links(&mut book, &files, &removed, &HashSet::new())?;
+    }
+    let package = sync_chapter_properties(&mut book, &declarations)?;
+    if let Some((path, xml)) = &package {
+        files.insert(path, xml.as_bytes());
+    }
+    let result = rewrite(&mut book, files, BTreeMap::new(), &HashSet::new())?;
+    let updated = extract(&result, None)?;
+    if replaces_navigation {
+        super::structure::validate_navigation_replacement(
+            &result,
+            &updated.metadata,
+            true,
+            None,
+            &HashSet::new(),
+        )?;
+    }
+    validate_svg_chapters(&result, svg_paths.into_iter())?;
+    Ok(result)
+}
+
+pub(super) fn charge_chapter_replacements(
+    changes: &[(i64, String)],
+    total: &mut usize,
+) -> Result<(), EngineError> {
+    crate::limits::validate_member_count(changes.len())?;
+    for (_, replacement) in changes {
+        if replacement.len() > XML_BYTES {
+            return Err(limited("replacement chapter exceeds its XML byte budget"));
+        }
+        super::charge(
+            total,
+            replacement.len(),
+            crate::limits::MAX_INPUT_SIZE,
+            "chapter replacements exceed their byte budget",
+        )?;
+    }
+    Ok(())
+}
+
+pub(super) struct ChapterReplacements<'doc, 'edit> {
+    pub(super) files: HashMap<&'doc str, &'edit [u8]>,
+    pub(super) svg_paths: HashSet<&'doc str>,
+    pub(super) declarations: HashMap<&'doc str, Vec<&'static str>>,
+    pub(super) replaces_navigation: bool,
+    pub(super) titles: HashMap<&'doc str, String>,
+}
+
+pub(super) fn prepare_chapter_replacements<'doc, 'edit>(
+    book: &mut Book<'_>,
+    extracted: &'doc DocumentPayload,
+    changes: &'edit [(i64, String)],
+    removed_anchors: &mut RemovedAnchors<'doc>,
+    anchor_bytes: &mut usize,
+    collect_titles: bool,
+    fixed: impl Fn(&PagePayload) -> bool,
+) -> Result<ChapterReplacements<'doc, 'edit>, EngineError> {
+    let fixed_paths: HashSet<_> = extracted
+        .pages
+        .iter()
+        .filter(|page| fixed(page))
+        .filter_map(|page| page.metadata["chapter_path"].as_str())
+        .collect();
+    let mut svg_paths = HashSet::new();
+    let mut replacements = HashMap::new();
+    for (index, replacement) in changes {
+        let count = extracted.pages.len() as i64;
+        let index = if *index < 0 { index + count } else { *index };
+        let page = usize::try_from(index)
+            .ok()
+            .and_then(|i| extracted.pages.get(i))
+            .ok_or_else(|| EngineError::PageIndex("EPUB chapter is out of range".into()))?;
+        let path = page.metadata["chapter_path"]
+            .as_str()
+            .ok_or_else(|| invalid("missing chapter path"))?;
+        if page.metadata["chapter_media_type"] == "image/svg+xml" {
+            svg_paths.insert(path);
+        }
+        if let Some(existing) = replacements.insert(path, replacement.as_bytes()) {
+            if existing != replacement.as_bytes() {
+                return Err(EngineError::InvalidArgument(
+                    "conflicting replacements of the same EPUB chapter resource".into(),
+                ));
+            }
+        }
+    }
+    let epub3 = extracted.metadata["epub_version"]
+        .as_str()
+        .is_some_and(|version| version.starts_with('3'));
+    let navigation = extracted.metadata["manifest"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| {
+            epub3
+                && item["properties"].as_str().is_some_and(|properties| {
+                    properties
+                        .split_ascii_whitespace()
+                        .any(|property| property == "nav")
+                })
+        })
+        .find_map(|item| item["path"].as_str());
+    let replaces_navigation = navigation.is_some_and(|path| replacements.contains_key(path));
+    let mut declarations = HashMap::new();
+    let mut titles = HashMap::new();
+    for (&path, &replacement) in &replacements {
+        let xml = parse_xml(replacement)?;
+        let root = xml.root_element();
+        if svg_paths.contains(path) {
+            if !root.has_tag_name((super::svg::NS, "svg")) {
+                return Err(invalid("replacement SVG chapter must have an SVG root"));
+            }
+            if fixed_paths.contains(path) && super::svg::viewport(root).is_none() {
+                return Err(invalid(
+                    "replacement fixed-layout SVG chapter requires a numeric viewBox",
+                ));
+            }
+        } else {
+            if !name(root, XHTML, "html") {
+                return Err(invalid("replacement chapter must be XHTML"));
+            }
+            if fixed_paths.contains(path) && super::layout::dimensions(root).is_none() {
+                return Err(invalid(
+                    "replacement fixed-layout XHTML chapter requires a numeric viewport",
+                ));
+            }
+            if epub3 {
+                declarations.insert(path, xhtml_properties(root));
+            }
+            if navigation == Some(path) {
+                super::structure::validate_xhtml_navigation_replacement(root, path)?;
+            }
+            if collect_titles {
+                if let Some(title) = super::content::document_title(root) {
+                    titles.insert(path, title);
+                }
+            }
+        }
+        collect_removed_anchors(book, path, replacement, &xml, removed_anchors, anchor_bytes)?;
+    }
+    Ok(ChapterReplacements {
+        replaces_navigation,
+        files: replacements,
+        svg_paths,
+        declarations,
+        titles,
+    })
+}
+
+pub(super) fn validate_svg_chapters<'a>(
+    data: &[u8],
+    paths: impl Iterator<Item = &'a str>,
+) -> Result<(), EngineError> {
+    let mut paths = paths.peekable();
+    if paths.peek().is_some() {
+        let mut book = Book::open(data)?;
+        for path in paths {
+            let source = book.read(path, XML_BYTES)?;
+            super::svg::embedded(&source, path, &mut book)?;
+        }
+    }
+    Ok(())
+}
+
+const XHTML_PROPERTIES: [&str; 2] = ["mathml", "svg"];
+
+pub(super) fn xhtml_properties(root: Node<'_, '_>) -> Vec<&'static str> {
+    let mut math = false;
+    let mut svg = false;
+    for node in root.descendants().filter(Node::is_element) {
+        match node.tag_name().namespace() {
+            Some(super::math::MATHML) => math = true,
+            Some(super::svg::NS) => svg = true,
+            _ => {}
+        }
+        if math && svg {
+            break;
+        }
+    }
+    XHTML_PROPERTIES
+        .into_iter()
+        .zip([math, svg])
+        .filter_map(|(property, present)| present.then_some(property))
+        .collect()
+}
+
+pub(super) fn properties_attribute(properties: &[&str]) -> String {
+    if properties.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " properties=\"{}\"",
+            escape_attribute(&properties.join(" "))
+        )
+    }
+}
+
+pub(super) fn before_attributes(source: &str, element: Node<'_, '_>) -> Result<usize, EngineError> {
+    let name_start = element.range().start + 1;
+    let name_length = source[name_start..]
+        .bytes()
+        .position(|byte| byte.is_ascii_whitespace() || matches!(byte, b'/' | b'>'))
+        .ok_or_else(|| invalid("invalid EPUB manifest opening tag"))?;
+    Ok(name_start + name_length)
+}
+
+fn sync_chapter_properties(
+    book: &mut Book<'_>,
+    declarations: &HashMap<&str, Vec<&str>>,
+) -> Result<Option<(String, String)>, EngineError> {
+    if declarations.is_empty() {
+        return Ok(None);
+    }
+    let path = book.package_path()?;
+    let bytes = book.read(&path, METADATA_BYTES)?;
+    let source = std::str::from_utf8(&bytes).map_err(invalid)?;
+    let xml = parse_xml(&bytes)?;
+    let manifest = required(xml.root_element(), "manifest")?;
+    let mut edits = Vec::new();
+    chapter_property_edits(source, &path, manifest, declarations, &mut edits)?;
+    if edits.is_empty() {
+        return Ok(None);
+    }
+    let updated = super::structure::apply_edits(source, edits, METADATA_BYTES)?;
+    Ok(Some((path, updated)))
+}
+
+pub(super) fn chapter_property_edits(
+    source: &str,
+    path: &str,
+    manifest: Node<'_, '_>,
+    declarations: &HashMap<&str, Vec<&str>>,
+    edits: &mut Vec<(std::ops::Range<usize>, String)>,
+) -> Result<(), EngineError> {
+    for item in manifest.children().filter(|&node| name(node, OPF, "item")) {
+        let href = super::attribute(item, "href")?;
+        if external(href) {
+            continue;
+        }
+        let target = resolve(path, href)?;
+        let Some(inferred) = declarations.get(target.as_str()) else {
+            continue;
+        };
+        let current: Vec<_> = item
+            .attribute("properties")
+            .unwrap_or_default()
+            .split_ascii_whitespace()
+            .collect();
+        let mut properties = Vec::new();
+        for &property in &current {
+            if !XHTML_PROPERTIES.contains(&property)
+                || (inferred.contains(&property) && !properties.contains(&property))
+            {
+                properties.push(property);
+            }
+        }
+        for &property in inferred {
+            if !properties.contains(&property) {
+                properties.push(property);
+            }
+        }
+        if properties == current {
+            continue;
+        }
+        let range = if let Some(attribute) = item.attribute_node("properties") {
+            attribute.range()
+        } else {
+            let at = before_attributes(source, item)?;
+            at..at
+        };
+        edits.push((range, properties_attribute(&properties)));
+    }
+    Ok(())
+}
+
+fn anchors<'a>(xml: &'a Document<'_>) -> HashSet<&'a str> {
+    xml.descendants()
+        .filter(roxmltree::Node::is_element)
+        .flat_map(super::element_ids)
+        .collect()
+}
+
+pub(super) type RemovedAnchors<'a> = HashMap<&'a str, HashSet<String>>;
+
+pub(super) fn collect_removed_anchors<'a>(
+    book: &mut Book<'_>,
+    path: &'a str,
+    replacement: &[u8],
+    xml: &Document<'_>,
+    removed_anchors: &mut RemovedAnchors<'a>,
+    anchor_bytes: &mut usize,
+) -> Result<(), EngineError> {
+    let original = book.read(path, XML_BYTES)?;
+    if original == replacement {
+        return Ok(());
+    }
+    let source = parse_xml(&original)?;
+    collect_removed_xml_anchors(path, &source, xml, removed_anchors, anchor_bytes)
+}
+
+pub(super) fn collect_removed_xml_anchors<'a>(
+    path: &'a str,
+    original: &Document<'_>,
+    replacement: &Document<'_>,
+    removed_anchors: &mut RemovedAnchors<'a>,
+    anchor_bytes: &mut usize,
+) -> Result<(), EngineError> {
+    let retained = anchors(replacement);
+    for &id in anchors(original).difference(&retained) {
+        let removed = removed_anchors.entry(path).or_default();
+        if !removed.contains(id) {
+            charge(
+                anchor_bytes,
+                id.len() + 48,
+                XML_BYTES,
+                "removed EPUB anchors exceed their byte budget",
+            )?;
+            removed.insert(id.to_owned());
+        }
+    }
+    Ok(())
+}
+
+fn check_anchor(
+    removed: &RemovedAnchors<'_>,
+    path: &str,
+    fragment: &str,
+) -> Result<(), EngineError> {
+    if removed.get(path).is_some_and(|ids| ids.contains(fragment)) {
+        return Err(EngineError::InvalidArgument(
+            "replacement chapter removes a referenced anchor".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn check_overlay_anchors(value: &Value, removed: &RemovedAnchors<'_>) -> Result<(), EngineError> {
+    match value {
+        Value::Object(fields) => {
+            if let (Some(path), Some(fragment)) = (
+                fields.get("path").and_then(Value::as_str),
+                fields.get("fragment").and_then(Value::as_str),
+            ) {
+                check_anchor(removed, path, fragment)?;
+            }
+            for child in fields.values() {
+                check_overlay_anchors(child, removed)?;
+            }
+        }
+        Value::Array(items) => {
+            for child in items {
+                check_overlay_anchors(child, removed)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+pub(super) fn check_staged_links(
+    book: &mut Book<'_>,
+    replacements: &HashMap<&str, &[u8]>,
+    removed: &RemovedAnchors<'_>,
+    omitted: &HashSet<&str>,
+) -> Result<(), EngineError> {
+    let package_path = book.package_path()?;
+    let original;
+    let package: &[u8] = if let Some(replacement) = replacements.get(package_path.as_str()) {
+        replacement
+    } else {
+        original = book.read(&package_path, METADATA_BYTES)?;
+        &original
+    };
+    let xml = parse_xml(package)?;
+    let mut declared = HashSet::new();
+    for item in required(xml.root_element(), "manifest")?.children() {
+        if !name(item, OPF, "item")
+            || !matches!(
+                item.attribute("media-type"),
+                Some(
+                    "application/xhtml+xml"
+                        | "text/html"
+                        | "image/svg+xml"
+                        | "application/x-dtbncx+xml"
+                        | "application/smil+xml"
+                )
+            )
+        {
+            continue;
+        }
+        if let Some(href) = item.attribute("href").filter(|href| !external(href)) {
+            declared.insert(resolve(&package_path, href)?);
+        }
+    }
+    // A retained file can still be followed by another chapter even when it
+    // is not in the spine. Replacements contribute their staged markup.
+    let paths: HashSet<_> = book
+        .archive
+        .file_names()
+        .chain(replacements.keys().copied())
+        .filter(|&path| {
+            !omitted.contains(path)
+                && (declared.contains(path)
+                    || path.rsplit_once('.').is_some_and(|(_, ext)| {
+                        ext.eq_ignore_ascii_case("xhtml") || ext.eq_ignore_ascii_case("html")
+                    }))
+        })
+        .map(str::to_owned)
+        .collect();
+    for path in paths {
+        let original;
+        let source = if let Some(&replacement) = replacements.get(path.as_str()) {
+            replacement
+        } else {
+            original = book.read(&path, XML_BYTES)?;
+            &original
+        };
+        check_markup_anchors(source, &path, removed)?;
+    }
+    check_markup_anchors(package, &package_path, removed)
+}
+
+fn check_markup_anchors(
+    source: &[u8],
+    base: &str,
+    removed: &RemovedAnchors<'_>,
+) -> Result<(), EngineError> {
+    let xml = parse_xml(source)?;
+    let root = xml.root_element();
+    let ncx = name(root, NCX, "ncx");
+    let package = name(root, OPF, "package");
+    let smil = root.tag_name().namespace().filter(|namespace| {
+        matches!(
+            *namespace,
+            super::overlay::SMIL | super::overlay::SMIL_HTTPS
+        ) && name(root, namespace, "smil")
+    });
+    for node in root.descendants().filter(Node::is_element) {
+        let content_target = super::content::hyperlink_target(node)
+            .or_else(|| super::content::embedded_document_target(node));
+        let package_node = package && node.tag_name().namespace() == Some(OPF);
+        let tag = node.tag_name().name();
+        let href = if content_target.is_some() {
+            content_target
+        } else if ncx && name(node, NCX, "content")
+            || smil.is_some_and(|namespace| name(node, namespace, "text"))
+        {
+            node.attribute("src")
+        } else if smil
+            .is_some_and(|namespace| name(node, namespace, "seq") || name(node, namespace, "body"))
+        {
+            node.attribute((super::EPUB, "textref"))
+        } else if package_node && matches!(tag, "reference" | "link") {
+            node.attribute("href")
+        } else {
+            None
+        };
+        let refines = if package_node && matches!(tag, "meta" | "link") {
+            node.attribute("refines")
+        } else {
+            None
+        };
+        for href in [href, refines].into_iter().flatten().map(str::trim) {
+            let Some((_, fragment)) = href.split_once('#').filter(|_| !external(href)) else {
+                continue;
+            };
+            // Unresolved URLs were already outside the editor's ID contract.
+            if let Ok(path) = resolve(base, href) {
+                if removed.contains_key(path.as_str()) {
+                    if let Ok(fragment) = percent_decode(fragment) {
+                        check_anchor(removed, &path, &fragment)?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}

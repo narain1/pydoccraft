@@ -2723,3 +2723,392 @@ Local Rust 1.95 validation: formatting and strict all-target Clippy passed. The 
 ### 0.3.2 version metadata
 
 Updated the Python and Rust package versions, public `doc_ex.__version__`, and root and Node lockfiles to 0.3.2. Rust 1.95 locked offline `cargo check` and both dependency-license audits passed; regenerated third-party inventories were unchanged. A local CPython 3.13 debug wheel built and installed in an isolated target, and its installed distribution metadata and imported public version both report 0.3.2. This is a development-wheel check, not release-candidate validation.
+
+## 2026-11-23 EPUB reader, metadata editing and semantic output
+
+The shared engine pins remain at PdfCraft `03996b10`, WordCraft `bbe3547d`, DeckCraft `f7a7fd7f`, and craft-libs `92d392cf`. The EPUB reader now runs locally over the bounded ZIP and XML libraries. The exact locked audits cover 275 core and 265 Node normal/build packages. Linux x86-64 CPython 3.11 and 3.13 release wheels measure 19,625,782 and 19,618,416 bytes, with uncompressed native extensions of 45,550,904 and 45,527,256 bytes. See [the EPUB validation record](../epub-support/validation.md#2026-11-23-in-repo-epub-reader-and-semantic-output) for the corpus results, checksums, and output limits.
+
+## 2026-11-24 EPUB chapter edits, SMIL cues and equation output
+
+The locked engine revisions are unchanged from the November 23 validation. A Linux x86-64 CPython 3.11.15 release wheel passed 620 installed tests, measured 19,665,214 bytes, and contained a 45,630,024-byte native extension. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-chapter-editing-media-overlay-cues-and-equation-output) for the exact test evidence, checksum and remaining EPUB work.
+
+## 2026-11-24 EPUB CSS and fixed-layout previews
+
+The release wheel for Linux x86-64 CPython 3.11.15 passed 623 installed tests, measured 21,546,751 bytes, and contained a 50,102,776-byte native extension. The engine pins remain unchanged. The audited lockfiles include the EPUB CSS parser, box layout, and SVG renderer. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-css-and-fixed-layout-previews) for the exact checks and supported output profile.
+
+## 2026-11-24 EPUB spine, navigation and resource edits
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 627 installed tests, including 32 EPUB tests. It measured 21,623,959 bytes with a 50,267,848-byte native extension. The locked engine revisions are unchanged. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-structural-chapter-and-resource-edits) for the conformance smoke test, checksum, and remaining work.
+
+## 2026-11-24 EPUB narration and XHTML doctype support
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 632 installed tests, including 37 EPUB tests. It measured 22,120,575 bytes with a 51,365,608-byte native extension. The renderer and PDF backend Git revisions are unchanged. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-offline-media-overlay-playback-and-inert-doctypes) for checksums, narration coverage, and remaining limits.
+
+## 2026-11-24 EPUB packaged fonts and embedded SVG
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 638 installed tests, including 43 EPUB tests. It measured 22,502,324 bytes with a 52,303,096-byte native extension. The locked engine revisions remain at the November 23 pins. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-packaged-fonts-and-svg-preview) for exact checksums, the font and SVG profile, and public sample validation.
+
+## 2026-11-24 EPUB archive-local SVG resources
+
+The Linux x86-64 CPython 3.11.15 wheel passed 641 installed tests, including 46 EPUB tests. It measured 22,682,725 bytes with a 52,700,856-byte native extension. All 13 SVG-in-spine pages of the official *Sous le Vent* sample rendered at their declared viewports. The ArtCraft engine and shared backend revisions remain at the November 23 pins. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-archive-local-svg-resources) for exact checksums, license counts and output limits.
+
+## 2026-11-24 EPUB MathML presentation and equation geometry
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 644 installed tests, including 49 EPUB tests. It measured 22,683,515 bytes with a 52,692,216-byte native extension. Tests reopen both DOCX and PDF to verify MathML styling and measure native equation placement. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-inherited-mathml-styles-and-equation-geometry) for the exact wheel and public sample limitations.
+
+## 2026-11-24 EPUB resource removal and media overlay authoring
+
+The Linux x86-64 CPython 3.11.15 wheel passed 648 installed tests, including 53 EPUB tests. It measured 22,741,921 bytes with a 52,844,280-byte native extension. An EPUB with newly authored narration and a copy with its narration resources removed both passed EPUBCheck. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-resource-removal-and-media-overlay-authoring) for exact artifacts and checks.
+
+## 2026-11-24 EPUB fixed-layout spreads and visual PDF
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 652 installed tests, including 57 EPUB tests. It measured 22,737,576 bytes with a 52,829,608-byte native extension. The ten-page *Page Blanche* EPUB rendered in landscape and portrait and exported to an image-only PDF at its source viewports. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-fixed-layout-spreads-and-visual-pdf) for exact check results.
+
+## 2026-11-24 EPUB streamed and seekable media overlays
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 656 installed tests, including 61 EPUB tests. It measured 22,742,307 bytes with a 52,838,312-byte native extension. The playback tests verify bounded WAV, MP3 and AAC-LC chunks, chapter cue seeking, and Xing/Info presentation timing. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-streamed-and-seekable-media-overlay-playback) for exact checks and the reference audio comparison.
+
+## 2026-11-24 EPUB Ogg Opus overlays
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 658 installed tests, including 63 EPUB tests. It measured 22,912,369 bytes with a 53,193,912-byte native extension. It decodes single-stream mono and stereo Opus in Ogg. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-ogg-opus-media-overlays) for license attribution and reference decoder comparisons.
+
+## 2026-11-24 EPUB obfuscated font replacement and removal
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 659 installed tests, including 64 EPUB tests. It measured 22,906,617 bytes with a 53,176,808-byte native extension. EPUBCheck accepted both the replacement and removal samples. See the [EPUB validation record](../epub-support/validation.md#2026-11-24-idpf-obfuscated-font-edits) for detailed check results.
+
+## 2026-11-24 EPUB nested SMIL authoring
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 661 installed tests, including 66 EPUB tests. It measured 22,911,408 bytes with a 53,190,488-byte native extension. EPUBCheck accepted the authored EPUB and its nested media overlay. The [EPUB validation record](../epub-support/validation.md#2026-11-24-nested-smil-authoring) includes the test results and sample checksum.
+
+## 2026-11-24 EPUB MathML styled by chapter CSS
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 663 installed tests, including 68 EPUB tests. It measured 22,969,631 bytes with a 53,339,640-byte native extension. Formula styling carried through EPUB previews and reopened native DOCX and PDF exports. The [EPUB validation record](../epub-support/validation.md#2026-11-24-css-for-mathml-equations) includes the fixed-layout and corpus checks.
+
+## 2026-11-24 EPUB chapter manifest declarations
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 665 installed tests, including 70 EPUB tests. It measured 22,964,955 bytes with a 53,324,040-byte native extension. EPUBCheck accepted chapters after insertion, replacement and removal of MathML and SVG markup. The [EPUB validation record](../epub-support/validation.md#2026-11-24-chapter-manifest-declarations) includes the exact results.
+
+## 2026-11-24 EPUB MathML whitespace
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 666 installed tests, including 71 EPUB tests. It measured 22,977,316 bytes with a 53,341,128-byte native extension. The complete public *Linear Algebra* EPUB opened within the existing semantic budget. The [EPUB validation record](../epub-support/validation.md#2026-11-24-mathml-whitespace-and-full-linear-algebra-extraction) contains the complete spine preview results and remaining limits.
+
+## 2026-11-24 EPUB stylesheet scaling
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 668 installed tests, including 73 EPUB tests. It measured 22,985,020 bytes with a 53,376,248-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-css-scaling-and-tall-reflowable-previews) covers the larger formula stylesheets, tall chapter clipping, and full spine check.
+
+## 2026-11-24 EPUB MathML table spans
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 670 installed tests, including 75 EPUB tests. It measured 23,010,957 bytes with a 53,441,784-byte native extension. Standalone spanning tables exported to reopened editable DOCX and searchable PDF. The [EPUB validation record](../epub-support/validation.md#2026-11-24-mathml-table-spans) includes the full 94-chapter corpus result.
+
+## 2026-11-24 EPUB SVG spine edits
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 672 installed tests, including 77 EPUB tests. It measured 22,996,107 bytes with a 53,399,848-byte native extension. Insertion and replacement of fixed-layout SVG spine entries retained navigation, narration and local resources in reopened books. The [EPUB validation record](../epub-support/validation.md#2026-11-24-svg-spine-chapter-editing) includes the rendering and EPUBCheck results.
+
+## 2026-11-24 Chained EPUB Opus narration
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 673 installed tests, including 78 EPUB tests. It measured 23,001,236 bytes with a 53,409,736-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-chained-ogg-opus-narration) covers boundary-crossing cues, streaming, and the reference decoder comparison.
+
+## 2026-11-24 EPUB XHTML font Unicode ranges
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 674 installed tests, including 79 EPUB tests. It measured 23,069,375 bytes with a 53,562,792-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-epub-xhtml-font-unicode-ranges) records the composite face, glyph fallback and font table bound checks.
+
+## 2026-11-24 EPUB XHTML font-family stacks
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 675 installed tests, including 80 EPUB tests. It measured 23,066,712 bytes with a 53,554,920-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-epub-xhtml-font-family-stacks) records the font fallback, fixed-layout and complete spine checks.
+
+## 2026-11-24 EPUB variable font axes
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 677 installed tests, including 82 EPUB tests. It measured 23,088,249 bytes with a 53,607,160-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-epub-variable-font-axes) covers variable glyph outlines, bundled font fallback, and the complete sample spine.
+
+## 2026-11-24 Nested spanning MathML tables
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 678 installed tests, including 83 EPUB tests. It measured 23,074,002 bytes with a 53,577,912-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-nested-spanning-mathml-tables) records preview geometry, native DOCX and PDF export, and grid limits.
+
+## 2026-11-24 Surround Ogg Opus narration
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 679 installed tests, including 84 EPUB tests. It measured 23,077,723 bytes with a 53,584,824-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-surround-ogg-opus-narration) covers speaker layouts, bounded clip playback, and libopus comparisons.
+
+## 2026-11-24 Multiplexed Ogg narration
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 680 installed tests, including 85 EPUB tests. It measured 23,068,182 bytes with a 53,559,080-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-multiplexed-ogg-narration) covers grouped stream timing, auxiliary stream checks and chapter editing.
+
+## 2026-11-24 Shared SMIL chapter edits
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 681 installed tests, including 86 EPUB tests. It measured 23,098,392 bytes with a 53,622,472-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-shared-smil-chapter-edits) covers shared cue preservation, staged audio timing, and EPUBCheck results.
+
+## 2026-11-24 CSS custom properties in EPUB previews
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 683 installed tests, including 88 EPUB tests. It measured 23,116,535 bytes with a 53,687,352-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-css-custom-properties-in-epub-previews) covers the cascade, expansion limits, SVG paint, and the complete Linear Algebra spine.
+
+## 2026-11-24 Same-document SVG use references
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 685 installed tests, including 90 EPUB tests. It measured 23,121,075 bytes with a 53,692,376-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-same-document-svg-use-references) covers reference expansion, reopened export geometry and public samples.
+
+## 2026-11-24 SVG gradient templates and Gaussian blur
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 687 installed tests, including 92 EPUB tests. It measured 23,127,416 bytes with a 53,709,736-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-svg-gradient-templates-and-gaussian-blur) covers gradient and blur fidelity, raster limits, and the unmodified SVG-in-spine sample.
+
+## 2026-11-24 Explicit Opus track selection
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 688 installed tests, including 93 EPUB tests. It measured 23,124,655 bytes with a 53,695,016-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-explicit-opus-track-selection) covers selected audio across grouped links, unselected stream validation, and EPUBCheck results.
+
+## 2026-11-24 Embedded XHTML media and audio playback
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 690 installed tests, including 95 EPUB tests. It measured 23,133,097 bytes with a 53,721,400-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-embedded-xhtml-media-and-audio-playback) covers embedded playback, transactional chapter edits, EPUBCheck and the original Shared Culture EPUB.
+
+## 2026-11-24 Embedded MP4 video playback
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 691 installed tests, including 96 EPUB tests. It measured 23,719,606 bytes with a 55,150,280-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-embedded-mp4-video-playback) covers video and audio timing, EPUBCheck, the coded-frame budget, and complete playback of the public Shared Culture MP4.
+
+## 2026-11-24 Composed MathML previews
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 693 installed tests, including 98 EPUB tests. It measured 23,738,411 bytes with a 55,178,248-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-composed-mathml-previews) covers nested table geometry, padding and vertical spacing, reopened fixed-layout PDF, and the complete Linear Algebra spine.
+
+## 2026-11-24 Searchable MathML PDF and EPUB 3 compatibility navigation
+
+The Linux x86-64 CPython 3.11.15 wheel passed 696 installed tests, including 101 EPUB tests. It measured 23,757,129 bytes with a 55,226,840-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-searchable-mathml-pdf-and-epub-3-compatibility-navigation) covers reopened search and render results and the EPUBCheck validation of synchronized navigation.
+
+## 2026-11-24 MathML fraction rules and alignment
+
+The Linux x86-64 CPython 3.11.15 wheel passed 698 installed tests, including 103 EPUB tests. It measured 23,769,408 bytes with a 55,261,512-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-mathml-fraction-rules-and-alignment) covers measured rule thickness, operand alignment, searchable PDF, and the public Linear Algebra sample.
+
+## 2026-11-24 SVG Unicode ranges and font fallback
+
+The Linux x86-64 CPython 3.11.15 wheel passed 700 installed tests, including 105 EPUB tests. It measured 23,808,547 bytes with a 55,356,264-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-svg-unicode-ranges-and-font-fallback) covers preserved glyphs, overlapping ranges, mixed-font ligatures, reopened exports, and EPUBCheck.
+
+## 2026-11-24 Embedded text tracks and temporal media fragments
+
+The Linux x86-64 CPython 3.11.15 wheel passed 703 installed tests, including 108 EPUB tests. It measured 23,832,044 bytes with a 55,406,632-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-embedded-text-tracks-and-temporal-media-fragments) covers exact cue and frame boundaries, reopened chapter edits, and the authored and public media samples.
+
+## 2026-11-24 Embedded Ogg Theora video
+
+The Linux x86-64 CPython 3.11.15 wheel passed 704 installed tests, including 109 EPUB tests. It measured 23,917,222 bytes with a 55,584,936-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-embedded-ogg-theora-video) covers the coded picture limit, decoded colors, frame and caption intervals, synchronized Opus and the public MP4 regression.
+
+## 2026-11-24 Editable MathML horizontal padding
+
+The Linux x86-64 CPython 3.11.15 wheel passed 705 installed tests, including 110 EPUB tests. It measured 23,923,742 bytes with a 55,588,712-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-editable-mathml-horizontal-padding) covers reopened DOCX geometry, editable formulas inside a table cell, and the results of editing OMML operand text.
+
+## 2026-11-24 CSS font-face ranges and defaults
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 706 installed tests, including 111 EPUB tests. It measured 23,951,308 bytes with a 55,669,144-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-css-font-face-ranges-and-defaults) covers fractional weight and width matching, per-face defaults across fallback, and reopened fixed-layout PDF geometry.
+
+## 2026-11-24 Embedded WebM VP8, VP9 and Opus
+
+The Linux x86-64 CPython 3.11.15 release wheel passed 708 installed tests, including 113 EPUB tests. It measured 24,452,023 bytes with a 56,871,048-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-embedded-webm-vp8-vp9-and-opus) covers shared video, audio and caption timing, laced Opus, higher-depth VP9 and the public MP4 regression.
+
+## 2026-11-24 Fixed-layout PDF bookmarks
+
+The Linux x86-64 CPython 3.11.15 wheel passed 709 installed tests, including 114 EPUB tests. It measured 24,460,435 bytes with a 56,885,912-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-fixed-layout-pdf-bookmarks) covers nested EPUB 2 and 3 outlines, selection and fragment destinations, and reopened fixed-layout page geometry.
+
+## 2026-11-24 Fixed-layout PDF links
+
+The Linux x86-64 CPython 3.11.15 wheel passed 712 installed tests, including 117 EPUB tests. It measured 24,498,410 bytes with a 56,979,672-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-fixed-layout-pdf-links) covers XHTML and SVG annotations, local destination coordinates, chapter edits and reopened page geometry.
+
+## 2026-11-24 Searchable fixed-layout PDF
+
+The Linux x86-64 CPython 3.11.15 wheel passed 713 installed tests, including 118 EPUB tests. It measured 24,519,101 bytes with a 57,026,776-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-searchable-fixed-layout-pdf) covers native text extraction, an independent check with a system Poppler command, search geometry, fixed-layout raster equality, and local link and bookmark retention. The wheel links and uses the native PDF engine without Poppler.
+
+## 2026-11-24 XHTML oblique font-face ranges
+
+The Linux x86-64 CPython 3.11.15 wheel passed 714 installed tests, including 119 EPUB tests. It measured 24,532,386 bytes with a 57,044,184-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-xhtml-oblique-font-face-ranges) covers directional matching, resolved variable slant, chapter edits, and reopened fixed-layout PDF geometry.
+
+## 2026-11-24 SVG variable font-face ranges
+
+The Linux x86-64 CPython 3.11.15 wheel passed 715 installed tests, including 120 EPUB tests. It measured 24,549,796 bytes with a 57,076,568-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-svg-variable-font-face-ranges) covers SVG font range matching, per-run default axes, chapter replacement and reopened fixed-layout PDF.
+
+## 2026-11-24 Fixed-layout PDF pixel grid
+
+The Linux x86-64 CPython 3.11.15 wheel passed 716 installed tests, including 121 EPUB tests. It measured 24,551,725 bytes with a 57,076,120-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-fixed-layout-pdf-pixel-grid) covers fractional DPI, reopened page geometry and preview pixel alignment.
+
+## 2026-11-24 Integrated EPUB authoring, rendering and playback
+
+The Linux x86-64 CPython 3.11.15 wheel passed 727 installed tests, including 132 EPUB tests. It measured 24,700,585 bytes with a 57,448,584-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-integrated-epub-authoring-rendering-and-playback) covers editable MathML, revised archive anchors, fixed-layout links, fractional XHTML oblique, Vorbis playback and the remaining corpus gaps.
+
+## 2026-11-24 Integrated EPUB clipping, equation placement and track selection
+
+The Linux x86-64 CPython 3.11.15 wheel passed 736 installed tests, including 141 EPUB tests. It measured 24,725,709 bytes with a 57,624,184-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-integrated-epub-clipping-equation-placement-and-track-selection) covers rendered coverage, editable equations, WebM timing and selection, and reopened sample exports.
+
+## 2026-11-24 EPUB Linux wheel and integrated regression validation
+
+The three Rust 1.95.0 manylinux x86-64 wheels for CPython 3.11, 3.12 and 3.13 each passed 749 installed tests, including 154 EPUB tests. The default and Python-free Rust suites, Node preview, public typing, binding and license audits, W3C EPUB samples and EPUBCheck all passed. The upstream engine and shared backend revisions are unchanged. The macOS and Windows matrix remains open. [Detailed EPUB wheel and test evidence](../epub-support/validation.md#2026-11-24-integrated-epub-typography-equations-media-and-navigation)
+
+## 2026-11-24 EPUB filter, media, MathML and navigation regression validation
+
+The Linux x86-64 CPython 3.11 host wheel passed 757 installed tests including 162 EPUB tests. The locked Rust suites, Node, public typing, four W3C EPUB books, two EPUBCheck documents, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-24-integrated-svg-filter-chains-mathml-sizing-spatial-fragments-and-ncx-editing)
+
+## 2026-11-24 EPUB auxiliary chapters, MathML table rules and named track checks
+
+The Linux x86-64 CPython 3.11 host wheel passed 764 installed tests, including 169 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-24-integrated-epub-spine-mathml-rules-svg-use-cascade-and-named-track-validation)
+
+## 2026-11-24 EPUB frames, SVG graphics links, fitted MathML columns and WebM chapters
+
+The Linux x86-64 CPython 3.11 host wheel passed 770 installed tests, including 175 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-24-integrated-epub-frames-svg-links-mathml-widths-and-webm-chapters)
+
+## 2026-11-24 EPUB spine properties, relative math widths, filtered SVG and typed subtitles
+
+The Linux x86-64 CPython 3.11 host wheel passed 779 installed tests, including 184 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-24-integrated-epub-spine-properties-relative-mathml-svg-filters-and-subtitle-styles)
+
+## 2026-11-24 EPUB auxiliary links, tight MathML, translated SVG and timed text
+
+The Linux x86-64 CPython 3.11 host wheel passed 785 installed tests, including 190 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-24-integrated-epub-auxiliary-links-tight-mathml-matrices-translated-svg-and-timed-styles)
+
+## 2026-11-24 EPUB logical boxes, nested math widths, SVG length and cue styles
+
+The Linux x86-64 CPython 3.11 host wheel passed 791 installed tests, including 196 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-24-integrated-epub-logical-css-nested-mathml-svg-text-lengths-and-webvtt-styles)
+
+## 2026-11-24 EPUB direction, equation labels, SVG spacing and timed captions
+
+The Linux x86-64 CPython 3.11 host wheel passed 796 installed tests, including 201 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-24-integrated-epub-automatic-direction-mathml-labels-svg-spacing-and-timed-captions)
+
+## 2026-11-24 EPUB inline bidi, decimal alignment, SVG transfer and caption regions
+
+The Linux x86-64 CPython 3.11 host wheel passed 803 installed tests, including 208 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-24-integrated-epub-inline-bidi-mathml-group-alignment-svg-transfer-and-caption-regions)
+
+## 2026-11-25 EPUB timed TTML regions, nested SVG offsets and MathML table geometry
+
+The Linux x86-64 CPython 3.11 host wheel passed 809 installed tests, including 214 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-ttml-regions-nested-svg-offsets-and-mathml-table-geometry)
+
+## 2026-11-25 EPUB CSS calculations, nested SVG text lengths, native Word borders and caption styles
+
+The Linux x86-64 CPython 3.11 host wheel passed 814 installed tests, including 219 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-css-calculations-svg-text-lengths-mathml-borders-and-caption-styles)
+
+## 2026-11-25 EPUB mixed CSS calculations, SVG morphology, MathML overlaps and TTML region styles
+
+The Linux x86-64 CPython 3.11 host wheel passed 820 installed tests, including 225 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-containing-box-calculations-svg-morphology-mathml-overlaps-and-ttml-region-styles)
+
+## 2026-11-25 EPUB grid sizing, compound MathML alignment, SVG effects and MP4 chapters
+
+The Linux x86-64 CPython 3.11 host wheel passed 827 installed tests, including 232 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-grid-sizing-compound-mathml-alignment-svg-spatial-effects-and-mp4-chapters)
+
+## 2026-11-25 EPUB CSS comparisons, MathML leading offsets, SVG convolution and Nero chapters
+
+The Linux x86-64 CPython 3.11 host wheel passed 835 installed tests, including 240 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-css-comparisons-mathml-leading-offsets-svg-convolution-and-nero-chapters)
+
+## 2026-11-25 EPUB intrinsic sizing, MathML alignment, SVG tiling and mixed Ogg
+
+The Linux x86-64 CPython 3.11 host wheel passed 843 installed tests, including 248 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-intrinsic-sizing-mathml-alignment-svg-tiling-and-mixed-ogg)
+
+## 2026-11-25 EPUB named grids, nested MathML groups, SVG filter images and Ogg defaults
+
+The Linux x86-64 CPython 3.11 host wheel passed 849 installed tests, including 254 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-named-grids-nested-mathml-groups-svg-filter-images-and-ogg-defaults)
+
+## 2026-11-25 EPUB CSS steps, MathML span widths, SVG spacing and TTML region timing
+
+The Linux x86-64 CPython 3.11 host wheel passed 855 installed tests, including 260 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-css-steps-mathml-span-widths-svg-spacing-and-ttml-region-timing)
+
+## 2026-11-25 EPUB grid shorthands, MathML label geometry, nested SVG spacing and inline TTML
+
+The Linux x86-64 CPython 3.11 host wheel passed 861 installed tests, including 266 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-grid-shorthands-mathml-label-geometry-nested-svg-spacing-and-inline-ttml)
+
+## 2026-11-25 EPUB sibling selectors, MathML signed carets, SVG positioning and mixed TTML
+
+The Linux x86-64 CPython 3.11 host wheel passed 865 installed tests, including 270 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-sibling-selectors-mathml-signed-carets-svg-positioning-and-mixed-ttml)
+
+## 2026-11-25 EPUB trigonometry, interior MathML labels, affine SVG and F4V
+
+The Linux x86-64 CPython 3.11 host wheel passed 871 installed tests, including 276 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-trigonometry-interior-mathml-labels-affine-svg-and-f4v)
+
+## 2026-11-25 EPUB exponential CSS, MathML operand carets, separated SVG and AV1
+
+The Linux x86-64 CPython 3.11 host wheel passed 877 installed tests, including 282 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-exponential-css-mathml-operand-carets-separated-svg-and-av1)
+
+## 2026-11-25 EPUB automatic grids, MathML scripts, shared SVG effects and RGB AV1
+
+The Linux x86-64 CPython 3.11 host wheel passed 881 installed tests, including 286 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-automatic-grids-mathml-scripts-shared-svg-effects-and-rgb-av1)
+
+## 2026-11-25 EPUB chapter navigation, CSS gaps, MathML widths, SVG spacing and TTML
+
+The Linux x86-64 CPython 3.11 host wheel passed 886 installed tests, including 291 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-chapter-navigation-css-gaps-mathml-widths-svg-spacing-and-ttml)
+
+## 2026-11-25 EPUB intrinsic CSS bounds, labeled MathML widths and in-place SVG filters
+
+The Linux x86-64 CPython 3.11 host wheel passed 889 installed tests, including 294 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-intrinsic-css-bounds-labeled-mathml-widths-and-in-place-svg-filters)
+
+## 2026-11-25 EPUB fit-content bounds, TTML timed sets, Theora selection and MathML limits
+
+The Linux x86-64 CPython 3.11 host wheel passed 893 installed tests, including 298 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-fit-content-bounds-ttml-timed-sets-theora-selection-and-mathml-limits)
+
+## 2026-11-25 EPUB CSS percentage ratios, staged narration, MathML spacing and layered AV1
+
+The Linux x86-64 CPython 3.11 host wheel passed 898 installed tests, including 303 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-css-percentage-ratios-staged-narration-mathml-spacing-and-layered-av1)
+
+## 2026-11-25 EPUB CSS block bounds, nested SVG spacing, padded MathML labels and MP4 edits
+
+The Linux x86-64 CPython 3.11 host wheel passed 901 installed tests, including 306 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-css-block-bounds-nested-svg-spacing-padded-mathml-labels-and-mp4-edits)
+
+## 2026-11-25 EPUB CSS relative inline constraints and containing edges
+
+The Linux x86-64 CPython 3.11 host wheel passed 902 installed tests, including 307 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-css-relative-inline-constraints-and-containing-edges)
+
+## 2026-11-25 EPUB CSS block sizing, SVG owner limits, MathML label padding and MP4 trailing edits
+
+The Linux x86-64 CPython 3.11 host wheel passed 904 installed tests, including 309 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-css-block-sizing-svg-owner-limits-mathml-label-padding-and-mp4-trailing-edits)
+
+## 2026-11-25 EPUB CSS nonlinear ratios, MathML enclosures and SVG wrappers
+
+The Linux x86-64 CPython 3.11 host wheel passed 906 installed tests, including 311 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-css-nonlinear-ratios-mathml-enclosures-and-svg-wrappers)
+
+## 2026-11-25 EPUB CSS Euclidean ratios and contiguous MP4 edits
+
+The Linux x86-64 CPython 3.11 host wheel passed 907 installed tests, including 312 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-css-euclidean-ratios-and-contiguous-mp4-edits)
+
+
+## 2026-11-25 EPUB chapter validation, contain-fit sizing, MathML carets and forward media edits
+
+The Linux x86-64 CPython 3.11 host wheel passed 910 installed tests, including 315 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-chapter-validation-contain-fit-sizing-mathml-carets-and-forward-media-edits)
+
+## 2026-11-25 EPUB CSS ratio syntax, editable MathML operands, SVG baselines and narration EOF
+
+The Linux x86-64 CPython 3.11 host wheel passed 913 installed tests, including 318 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-css-ratio-syntax-editable-mathml-operands-svg-baselines-and-narration-eof)
+
+## 2026-11-25 EPUB authored chapter navigation and fixed-layout SVG spacing
+
+The Linux x86-64 CPython 3.11 host wheel passed 914 installed tests, including 319 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-authored-chapter-navigation-and-fixed-layout-svg-spacing)
+
+## 2026-11-25 EPUB nested intrinsic sizing, MathML padding, exact SMIL clocks and distant SVG lighting
+
+The Linux x86-64 CPython 3.11 host wheel passed 918 installed tests, including 323 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-nested-intrinsic-sizing-mathml-padding-exact-smil-clocks-and-distant-svg-lighting)
+
+## 2026-11-25 EPUB native flex bounds, composed MathML carets, SVG point lighting and MP4 gaps
+
+The Linux x86-64 CPython 3.11 host wheel passed 922 installed tests, including 327 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-native-flex-bounds-composed-mathml-carets-svg-point-lighting-and-mp4-gaps)
+
+## 2026-11-25 EPUB native grid areas, merged MathML carets, SVG spotlights and narration fragments
+
+The Linux x86-64 CPython 3.11 host wheel passed 924 installed tests, including 329 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-native-grid-areas-merged-mathml-carets-svg-spotlights-and-narration-fragments)
+
+## 2026-11-25 EPUB nested subgrids, chapter reference safety, linear lighting and repeated media
+
+The Linux x86-64 CPython 3.11 host wheel passed 929 installed tests, including 334 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-nested-subgrids-chapter-reference-safety-linear-lighting-and-repeated-media)
+
+## 2026-11-25 EPUB subgrid edges, native MathML borrowing, shared lighting and narration escape
+
+The Linux x86-64 CPython 3.11 host wheel passed 932 installed tests, including 337 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-subgrid-edges-native-mathml-borrowing-shared-lighting-and-narration-escape)
+
+## 2026-11-25 EPUB subgrid line names, navigation titles, shared flood masks and inline narration
+
+The Linux x86-64 CPython 3.11 host wheel passed 935 installed tests, including 340 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-subgrid-line-names-navigation-titles-shared-flood-masks-and-inline-narration)
+
+## 2026-11-25 EPUB subgrid spans, navigation guards and directional flood composites
+
+The Linux x86-64 CPython 3.11 host wheel passed 936 installed tests, including 341 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-subgrid-spans-navigation-guards-and-directional-flood-composites)
+
+## 2026-11-25 EPUB static MathML actions, multi-span MP4, navigation labels and two-axis area clipping
+
+The Linux x86-64 CPython 3.11 host wheel passed 940 installed tests, including 345 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-static-mathml-actions-multi-span-mp4-navigation-labels-and-two-axis-area-clipping)
+
+## 2026-11-25 EPUB package ID protection, single-axis grid areas and forced TTML captions
+
+The Linux x86-64 CPython 3.11 host wheel passed 943 installed tests, including 348 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-package-id-protection-single-axis-grid-areas-and-forced-ttml-captions)
+
+## 2026-11-25 EPUB merged subgrid areas, vertical MathML carets, captions and navigation landmarks
+
+The Linux x86-64 CPython 3.11 host wheel passed 947 installed tests, including 352 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-merged-subgrid-areas-vertical-mathml-carets-captions-and-navigation-landmarks)
+
+## 2026-11-25 EPUB literal MathML tokens, native operator spacing and terminal subgrid placement
+
+The Linux x86-64 CPython 3.11 host wheel passed 949 installed tests, including 354 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-literal-mathml-tokens-native-operator-spacing-and-terminal-subgrid-placement)
+
+## 2026-11-25 EPUB subgrid, MathML, SVG and stationary captions
+
+The Linux x86-64 CPython 3.11 host wheel passed 952 installed tests, including 357 EPUB tests. Locked Rust, Node, public typing, four released W3C books, EPUBCheck, documentation and attribution checks passed. [Detailed EPUB validation](../epub-support/validation.md#2026-11-25-integrated-epub-subgrid-mathml-svg-and-stationary-captions)

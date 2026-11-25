@@ -14,6 +14,12 @@ ALLOWED = {"0BSD", "Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "BSL-1.0
            "OFL-1.1", "Ubuntu-font-1.0", "Unicode-3.0", "Unlicense", "Zlib"}
 EXCEPTIONS = {("Apache-2.0", "LLVM-exception")}
 
+# This crate is Parley's shaping and line breaking library. Limit the exception
+# to the registry source and version reviewed in the lockfile.
+REVIEWED_LIBRARIES = {
+    ("parley_engine", "0.13.0", "registry+https://github.com/rust-lang/crates.io-index"),
+}
+
 
 def allowed(expression: str | None) -> bool:
     if not expression:
@@ -88,10 +94,17 @@ def inventory(metadata):
     rejected = [(name, version, license) for name, version, license in rows if not allowed(license)]
     if rejected:
         raise ValueError(f"unreviewed or prohibited licenses: {rejected}")
-    prohibited = [name for name, _, _ in rows if re.search(
-        r"(?:^|[-_])(engine|ui|cli|mcp|automation|updater|ocr|javascript|winprint|print|printing|signing)(?:[-_]|$)", name)]
+    prohibited = []
+    for key in reached:
+        package = packages[key]
+        name = package["name"]
+        identity = (name, package["version"], package.get("source"))
+        if identity not in REVIEWED_LIBRARIES and re.search(
+            r"(?:^|[-_])(engine|ui|cli|mcp|automation|updater|ocr|javascript|winprint|print|printing|signing)(?:[-_]|$)", name
+        ):
+            prohibited.append(name)
     if prohibited:
-        raise ValueError(f"prohibited application/runtime packages: {prohibited}")
+        raise ValueError(f"prohibited application/runtime packages: {sorted(prohibited)}")
     return rows
 
 
