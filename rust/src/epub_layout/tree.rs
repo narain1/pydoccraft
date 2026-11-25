@@ -439,7 +439,8 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
 
         // CSS Grid stretches subgrids in their inherited axes regardless of
         // the authored preferred size, limits or alignment in those axes.
-        let node = &mut self.nodes[index];
+        let (descendants, subtree) = self.nodes.split_at_mut(index);
+        let node = &mut subtree[0];
         let style = &mut node.style;
         let [horizontal, vertical] = layout;
         let mut expected = Size::NONE;
@@ -479,6 +480,24 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
         }
         if axes.width && axes.height {
             style.aspect_ratio = None;
+        }
+        for child in &node.children {
+            let child = &mut descendants[usize::from(*child)].style;
+            if child.display == Display::None || child.position.is_out_of_flow() {
+                continue;
+            }
+            if axes.width {
+                subgrid::clamp_numeric_placement(
+                    &mut child.grid_column,
+                    style.grid_template_columns.len(),
+                );
+            }
+            if axes.height {
+                subgrid::clamp_numeric_placement(
+                    &mut child.grid_row,
+                    style.grid_template_rows.len(),
+                );
+            }
         }
         self.grid_areas[index]
             .as_mut()

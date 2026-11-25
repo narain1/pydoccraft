@@ -3236,10 +3236,23 @@ class EpubTests(unittest.TestCase):
                     )
                     self.assertTrue(render(direction + inherited + change) == render(explicit))
 
+        # Two columns and two rows are inherited. Each control places the
+        # same content directly on the explicit edge or across both tracks.
+        for direction in ("", "#parent{direction:rtl}"):
+            for authored, expected in (
+                ("4/6;grid-row:-9/-6", "2/3;grid-row:1/2"),
+                ("2/span 5;grid-row:span 5/2", "2/3;grid-row:1/2"),
+                ("8/-8;grid-row:-9/8", "1/3;grid-row:1/3"),
+            ):
+                with self.subTest(direction=direction, authored=authored):
+                    actual = direction + inherited + f"#one{{grid-column:{authored}}}"
+                    control = direction + inherited + f"#one{{grid-column:{expected}}}"
+                    self.assertEqual(render(actual), render(control))
+
         for invalid in (
             "#parent{grid-template-columns:[outer] 60px [left] 80px [middle] 1fr [end]}",
             "#sub{padding-left:240px}",
-            "#one{grid-column:4}",
+            "#one{grid-column:unknown}",
             "#parent{display:block}",
         ):
             with self.subTest(invalid=invalid):

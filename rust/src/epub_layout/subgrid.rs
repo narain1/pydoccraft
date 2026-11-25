@@ -3,7 +3,8 @@ use std::ops::Range;
 
 use taffy::{
     geometry::Line,
-    style::{GridTemplateComponent, LengthPercentage, TrackSizingFunction},
+    style::{GridPlacement, GridTemplateComponent, LengthPercentage, TrackSizingFunction},
+    style_helpers::line,
     DetailedGridTracksInfo,
 };
 
@@ -29,6 +30,31 @@ pub(super) fn unresolved() -> EngineError {
 
 pub(super) fn implicit(tracks: &DetailedGridTracksInfo<String>) -> bool {
     tracks.negative_implicit_tracks != 0 || tracks.positive_implicit_tracks != 0
+}
+
+pub(super) fn clamp_numeric_placement(placement: &mut Line<GridPlacement<String>>, tracks: usize) {
+    let is_named = |line: &GridPlacement<String>| {
+        matches!(
+            line,
+            GridPlacement::NamedLine(..) | GridPlacement::NamedSpan(..)
+        )
+    };
+    if is_named(&placement.start) || is_named(&placement.end) {
+        return;
+    }
+    let lines = placement.into_origin_zero_ignoring_named(tracks as u16);
+    if !lines.is_definite() {
+        return;
+    }
+    let area = lines.resolve_definite_grid_lines();
+    let limit = tracks as i16;
+    if area.start.0 < 0 || area.end.0 > limit {
+        // A completely outside area occupies the nearest edge track.
+        *placement = Line {
+            start: line(area.start.0.clamp(0, limit - 1) + 1),
+            end: line(area.end.0.clamp(1, limit) + 1),
+        };
+    }
 }
 
 pub(super) struct Projection {
