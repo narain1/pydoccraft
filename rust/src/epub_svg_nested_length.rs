@@ -7,6 +7,7 @@ use roxmltree::Node;
 use super::{length_target, measurement_id, solid_fill, Edit, SpacingCheck, MAX_LENGTH};
 use crate::{
     epub::{
+        css::svg_declarations,
         invalid, limited,
         svg::{self, NS},
         unsupported,
@@ -74,11 +75,11 @@ pub(super) fn prepare(
     }
     let mut children = Vec::with_capacity(nested.len());
     for (index, &owner) in nested.iter().enumerate() {
-        let enclosing = owner.parent_element().ok_or_else(error)?;
+        let enclosing = enclosing_owner(owner, text)?;
         let parent = if enclosing == text {
             None
         } else {
-            // The parent must already be in the depth-first owner order.
+            // The parent owner must already be in the depth-first order.
             // The shared owner limit bounds both branching and depth.
             Some(
                 nested[..index]
@@ -101,6 +102,44 @@ pub(super) fn prepare(
     }))
 }
 
+fn enclosing_owner<'a, 'input>(
+    owner: Node<'a, 'input>,
+    text: Node<'a, 'input>,
+) -> Result<Node<'a, 'input>, EngineError> {
+    const NEUTRAL_EFFECTS: [(&str, &str); 7] = [
+        ("filter", "none"),
+        ("clip-path", "none"),
+        ("mask", "none"),
+        ("transform", "none"),
+        ("opacity", "1"),
+        ("mix-blend-mode", "normal"),
+        ("isolation", "auto"),
+    ];
+    for parent in owner.ancestors().skip(1) {
+        if parent == text || parent.has_attribute("textLength") {
+            return Ok(parent);
+        }
+        if !parent.has_tag_name((NS, "tspan")) && !parent.has_tag_name((NS, "a")) {
+            return Err(error());
+        }
+        let style = parent
+            .attribute("style")
+            .map(svg_declarations)
+            .transpose()?
+            .unwrap_or_default();
+        if NEUTRAL_EFFECTS.iter().any(|&(name, neutral)| {
+            style
+                .get(name)
+                .map(String::as_str)
+                .or_else(|| parent.attribute(name))
+                .is_some_and(|value| value != neutral)
+        }) {
+            return Err(error());
+        }
+    }
+    Err(error())
+}
+
 impl NestedLength {
     pub(super) fn count(&self) -> usize {
         self.children.len()
@@ -114,7 +153,8 @@ impl NestedLength {
         for owner in &self.children {
             let parent = owner.parent.map_or(text, |index| nodes[index]);
             let node = parent
-                .children()
+                .descendants()
+                .skip(1)
                 .find(|child| child.attribute("id") == Some(owner.id.as_str()))
                 .ok_or_else(error)?;
             nodes.push(node);
@@ -376,6 +416,6 @@ fn growth(delta: f32) -> Result<f32, EngineError> {
 
 pub(super) fn error() -> EngineError {
     unsupported(
-        "EPUB SVG mixed-font overlapping textLength owners require bounded direct nested spacing expansions in an unkerned horizontal chunk",
+        "EPUB SVG mixed-font overlapping textLength owners require bounded nested spacing expansions in an unkerned horizontal chunk",
     )
 }

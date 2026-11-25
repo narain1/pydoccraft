@@ -4365,7 +4365,7 @@ class EpubTests(unittest.TestCase):
               <text x="134" y="70"{length}>{before}<tspan id="inner" textLength="{inner}" {inner_attributes}><a
                 href="https://example.org/inner">{own}</a></tspan>{after}</text></svg>"""
 
-        def render(source: str, inline: bool) -> tuple:
+        def render(source: str, inline: bool, *, keep_pixels: bool = False) -> tuple:
             if inline:
                 path = "OEBPS/s0.xhtml"
                 authored = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Nested lengths</title>
@@ -4397,7 +4397,19 @@ class EpubTests(unittest.TestCase):
                         if pixels[offset:offset + 4] == bytes((*rgb, 255))}
                        for rgb in (*colors, *sides)]
             self.assertTrue(all(painted[:4]))
-            return painted, tuple(search), links, tuple(map(float, target))
+            geometry = painted, tuple(search), links, tuple(map(float, target))
+            return (*geometry, preview) if keep_pixels else geometry
+
+        def check_geometry(actual: tuple, reference: tuple) -> None:
+            ink, search, links, target = actual
+            reference_ink, reference_search, reference_links, reference_target = reference
+            self.assertEqual(ink, reference_ink)
+            self.assertEqual(links.keys(), reference_links.keys())
+            geometry = (*search, *(links[name] for name in reference_links), target)
+            reference_geometry = (*reference_search, *reference_links.values(), reference_target)
+            for measured, authored in zip(geometry, reference_geometry, strict=True):
+                for actual, expected in zip(measured, authored, strict=True):
+                    self.assertAlmostEqual(actual, expected, delta=.001)
 
         for inline in (False, True):
             with self.subTest(inline=inline):
@@ -4514,20 +4526,47 @@ class EpubTests(unittest.TestCase):
         for inline in (False, True):
             for depth in (3, 8):
                 with self.subTest(inline=inline, depth=depth):
-                    ink, search, links, target = render(chain(depth), inline)
-                    reference_ink, reference_search, reference_links, reference_target = render(
-                        chain(depth, separate=True), inline,
+                    check_geometry(
+                        render(chain(depth), inline),
+                        render(chain(depth, separate=True), inline),
                     )
-                    self.assertEqual(ink, reference_ink)
-                    self.assertEqual(links.keys(), reference_links.keys())
-                    geometry = (*search, *(links[name] for name in reference_links), target)
-                    reference_geometry = (*reference_search, *reference_links.values(), reference_target)
-                    for measured, authored in zip(geometry, reference_geometry, strict=True):
-                        for actual, expected in zip(measured, authored, strict=True):
-                            self.assertAlmostEqual(actual, expected, delta=.001)
 
-        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "overlapping textLength owners"):
-            render(chain(3).replace(' textLength="100"', ""), False)
+        def wrapped(outer: int, parent: int, *, separate: bool = False) -> str:
+            markup = svg(None, 92).split('<text x="134"', 1)[0].replace(
+                "</style>", ".voice {font-size:31px} .small {font-size:26px}</style>",
+            )
+            leaves = []
+            for start, name, length in ((0, "inner", 72), (2, "second", 84)):
+                ink = "".join(f'<tspan fill="#{bytes(rgb).hex()}">{part}</tspan>'
+                              for rgb, part in zip(colors[start:start + 2], labels[start:start + 2]))
+                leaves.append(f'<a id="{name}" href="https://example.org/{name}">'
+                              f'<tspan textLength="{length}">{ink}</tspan></a>')
+            leaves[1] = f'<tspan class="small">{leaves[1]}</tspan>'
+            tail = f'<a href="https://example.org/tail" fill="#{bytes(sides[1]).hex()}">B</a>'
+            if separate:
+                left = 134 - outer / 2
+                return (markup + f'<text x="{left}" y="70" style="text-anchor:start"><tspan class="voice">'
+                        f'{leaves[0]}</tspan></text><text x="{left + parent - 84}" y="70" style="text-anchor:start">'
+                        f'<tspan class="voice">{leaves[1]}</tspan></text>'
+                        f'<text x="{left + outer}" y="70" style="text-anchor:end">{tail}</text></svg>')
+            return (markup + f'<text x="134" y="70" textLength="{outer}"><tspan>'
+                    f'<tspan textLength="{parent}"><tspan class="voice">{"".join(leaves)}</tspan></tspan>'
+                    f'{tail}</tspan></text></svg>')
+
+        for inline in (False, True):
+            for outer, parent in ((248, 176), (256, 196)):
+                with self.subTest(inline=inline, wrapped_outer=outer, wrapped_parent=parent):
+                    actual = render(wrapped(outer, parent), inline, keep_pixels=True)
+                    expected = render(wrapped(outer, parent, separate=True), inline, keep_pixels=True)
+                    self.assertTrue(actual[-1] == expected[-1], "separately authored wrapped SVG pixels differ")
+                    check_geometry(actual[:-1], expected[:-1])
+        for effect in ('transform="translate(1 0)"', 'style="opacity:.5"'):
+            with self.subTest(effect=effect), self.assertRaisesRegex(
+                doc_ex.UnsupportedFormatError, "overlapping textLength owners",
+            ):
+                render(wrapped(248, 176).replace('class="voice"', f'class="voice" {effect}'), False)
+        with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "descendant per-glyph positioning"):
+            render(wrapped(248, 176).replace('class="voice"', 'class="voice" dx="4"'), False)
 
         oversized = peers(224).replace(
             "</text></svg>", '<tspan textLength="78">B́é</tspan>' * 7 + "</text></svg>",

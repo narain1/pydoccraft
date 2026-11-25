@@ -52,7 +52,7 @@
 - [x] Fit textLength on a sole nested tspan and spacing on an independently positioned nested owner while preserving sibling ink and PDF geometry.
 - [x] Fit multiple independently positioned sibling spacing owners in one mixed-face SVG text element.
 - [x] Fit verified left-to-right multi-glyph clusters and keep their native ink in searchable SVG PDF text and links.
-- [x] Resolve up to eight SVG spacing owners in a directly nested tree before fitting their outer text length. Verify final native glyphs.
+- [x] Resolve up to eight nested SVG spacing owners before fitting their outer text length. Keep unpositioned tspan and anchor wrappers and verify final native glyphs.
 - [x] Preserve verified per-character relative position lists through mixed-face SVG spacing and horizontal glyph scaling.
 - [x] Preserve signed fractional synthetic oblique in reflowable and fixed-layout XHTML previews and fixed-layout PDF.
 - [x] Render alpha-preserving SVG color matrices, including saturation and hue rotation, with the fixed-layout PDF text and annotations preserved.
@@ -91,7 +91,7 @@
 - [ ] Extend the EPUB CSS profile with block bounds at dependent inline widths, functional block bounds, relative inline bounds and edges in dependent containing blocks, contain-fit sizing, other nonlinear ratio operands and typed math, and subgrids.
 - [x] Match bounded sibling positions in either direction, including An+B, namespace-aware types, and filtered child selectors with the correct specificity.
 - [ ] Add SVG filter primitives and retain PDF text and links for multi-source, non-axis-aligned or ambiguous spatial filter results.
-- [ ] Extend mixed-font SVG text fallback to spacing across ambiguous clusters, length owners separated by spans without their own length and glyph positioning.
+- [ ] Extend mixed-font SVG text fallback to spacing across ambiguous clusters, length owners separated by positioned or independently painted wrappers and glyph positioning.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.
 - [x] Render tall reflowable chapters within the paint coordinate budget and apply raster limits to the requested DPI and clip.
 - [x] Project inherited MathML attributes, accents, movable limits, repeated script pairs, varied fences and separators, horizontal spaces, and zero-dimension padding.
