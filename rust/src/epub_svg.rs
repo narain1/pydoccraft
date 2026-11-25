@@ -165,7 +165,7 @@ pub(super) fn render(
         }
     }
     let scale = dpi / 72.0;
-    let region = region.for_page([f64::from(w), f64::from(h)], dpi)?;
+    let region = region.for_page([f64::from(w), f64::from(h)], dpi, fixed)?;
     let mut image = tiny_skia::Pixmap::new(region.width, region.height)
         .ok_or_else(|| limited("cannot allocate EPUB SVG viewport"))?;
     image.fill(tiny_skia::Color::WHITE);

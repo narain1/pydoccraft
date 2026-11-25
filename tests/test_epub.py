@@ -733,6 +733,48 @@ class EpubTests(unittest.TestCase):
                     self.assertEqual(len(result[index].get_images()), 1)
                     self.assertEqual(result[index].get_text().strip(), "")
 
+    def test_fixed_pdf_preserves_interior_samples_at_fractional_dpi(self) -> None:
+        data = fixed_spread_fixture([("", "#125369", 169, 105)] * 2)
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'href="s1.xhtml" media-type="application/xhtml+xml"',
+                b'href="s1.svg" media-type="image/svg+xml"',
+            )
+        stripes = "".join(f'<rect x="{4 + i}" y="7" width="1.4" height="105" fill="#04b"/>'
+                          for i in range(1, 169, 3))
+        stripes += "".join(f'<rect x="4" y="{7 + i}" width="169" height="1.4" fill="#c30" opacity=".4"/>'
+                           for i in range(1, 105, 3))
+        svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="4 7 169 105">{stripes}</svg>'
+        data = rewrite_epub(data, {"OEBPS/content.opf": package, "OEBPS/s1.svg": svg})
+        viewport = (126.75, 78.75)
+        nearly_whole = (100.005 * 96) / 169
+        with doc_ex.open(data) as book:
+            for dpi, dimensions, interior in (
+                (47.25, (84, 52), (83, 51)),
+                (60, (106, 66), (105, 65)),
+                (96, (169, 105), (169, 105)),
+                (nearly_whole, (100, 63), (100, 62)),
+            ):
+                pdf = book.export_epub_fixed_pdf(dpi=dpi, searchable=dpi == 47.25)
+                with doc_ex.open(pdf) as result:
+                    for index in range(2):
+                        with self.subTest(dpi=dpi, page=index):
+                            rendered = png_chunks(result.render_page(index, dpi=dpi))
+                            preview = png_chunks(book.render_page(index, dpi=dpi))
+                            self.assertEqual((result[index].metadata["width"], result[index].metadata["height"]),
+                                             viewport)
+                            self.assertEqual(struct.unpack_from(">II", preview[b"IHDR"]), dimensions)
+                            self.assertEqual(struct.unpack_from(">II", rendered[b"IHDR"]), dimensions)
+                            image, = result[index].get_images()
+                            self.assertEqual((image.metadata["width"], image.metadata["height"]), dimensions)
+                            pixels = rgba_pixels(preview)[1]
+                            pdf_pixels = rgba_pixels(rendered)[1]
+                            stride = dimensions[0] * 4
+                            for row in range(interior[1]):
+                                start = row * stride
+                                end = start + interior[0] * 4
+                                self.assertEqual(pixels[start:end], pdf_pixels[start:end], f"row {row}")
+
     def test_fixed_layout_pdf_preserves_nested_navigation_after_page_selection(self) -> None:
         source = fixed_spread_fixture([("", "white", 160, 100)] * 3)
         with zipfile.ZipFile(io.BytesIO(source)) as archive:

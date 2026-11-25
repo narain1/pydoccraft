@@ -146,7 +146,7 @@ pub(super) fn render_with_navigation(
     root_style.box_sizing = taffy::style::BoxSizing::BorderBox;
     layout.tree.set_style(id, root_style).map_err(failure)?;
     let dimension = layout.place(root_id, fixed)?;
-    let region = region.for_page(dimension.map(f64::from), dpi)?;
+    let region = region.for_page(dimension.map(f64::from), dpi, fixed)?;
     let html_color = styles.boxes[&root.id()]
         .background
         .filter(|(_, alpha)| *alpha > 0.0);

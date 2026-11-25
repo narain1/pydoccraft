@@ -120,8 +120,13 @@ impl Region {
         self,
         dimensions: [f64; 2],
         dpi: f64,
+        fixed: bool,
     ) -> Result<RasterRegion, EngineError> {
-        let pixels = raster_size(dimensions, dpi);
+        let pixels = if fixed {
+            fixed_raster_size(dimensions, dpi)
+        } else {
+            dimensions.map(|size| (size * (dpi / 72.0)).ceil().max(1.0) as u32)
+        };
         let extent = pixels.map(f64::from);
         match self {
             Self::Viewport(Some(clip)) => RasterRegion::new(
@@ -158,8 +163,9 @@ impl Region {
     }
 }
 
-pub(super) fn raster_size(dimensions: [f64; 2], dpi: f64) -> [u32; 2] {
-    dimensions.map(|size| (size * (dpi / 72.0)).ceil().max(1.0) as u32)
+fn fixed_raster_size(dimensions: [f64; 2], dpi: f64) -> [u32; 2] {
+    // Match the PDF renderer's treatment of floating-point noise near a whole pixel.
+    dimensions.map(|size| pdfcraft_render::device_pixels(size as f32, (dpi / 72.0) as f32))
 }
 
 pub(super) fn fixed(page: &PagePayload) -> bool {
@@ -280,11 +286,11 @@ pub(super) fn render_spread(
     let Spread::Facing(pages) = spread(book, page, landscape) else {
         return super::render_page(data, book, requested, dpi, clip);
     };
-    let default = raster_size(viewport(requested)?, dpi);
+    let default = fixed_raster_size(viewport(requested)?, dpi);
     let mut sizes = [default; 2];
     for (size, index) in sizes.iter_mut().zip(pages) {
         if let Some(index) = index {
-            *size = raster_size(viewport(&book.pages[index])?, dpi);
+            *size = fixed_raster_size(viewport(&book.pages[index])?, dpi);
         }
     }
     let extent = [sizes[0][0] + sizes[1][0], sizes[0][1].max(sizes[1][1])].map(f64::from);
@@ -404,7 +410,7 @@ pub(super) fn export_pdf(
                 "fixed EPUB viewport exceeds PDF page dimensions",
             ));
         }
-        let [width, height] = raster_size([w, h], dpi);
+        let [width, height] = fixed_raster_size([w, h], dpi);
         charge(
             &mut rendered_pixels,
             (width as usize).saturating_mul(height as usize),
@@ -428,6 +434,15 @@ pub(super) fn export_pdf(
             64 * 1024 * 1024,
             "fixed-layout PDF images exceed 64 MiB",
         )?;
+        // Place the original samples at the requested DPI. The PDF page bounds
+        // clip the last partial pixel instead of squeezing the whole raster.
+        let points_per_pixel = 72.0 / dpi;
+        let image_rect = Rect::new(
+            0.0,
+            0.0,
+            (f64::from(image.width) * points_per_pixel) as f32,
+            (f64::from(image.height) * points_per_pixel) as f32,
+        );
         let media = document.add_media(png, "png");
         let (w, h) = (w as f32, h as f32);
         let full = Rect::new(0.0, 0.0, w, h);
@@ -437,7 +452,7 @@ pub(super) fn export_pdf(
             number: page.number as u32 + 1,
             body: full,
             items: vec![Placed::Image {
-                rect: full,
+                rect: image_rect,
                 media,
                 crop: [0.0; 4],
                 story: StoryRef::Body,

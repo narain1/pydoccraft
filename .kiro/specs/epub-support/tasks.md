@@ -21,7 +21,7 @@
 - [x] Render SVG CSS, packaged SVG fonts, and referenced PNG and JPEG resources in spine previews, XHTML and semantic export.
 - [x] Render fixed-layout spreads in both reading directions, honor spine placement and orientation-dependent spread rules, and clip across page boundaries.
 - [x] Export selected fixed-layout viewports as raster PDF pages at their original sizes.
-- [ ] Investigate small preview and reopened PDF pixel differences at fractional raster scales.
+- [x] Preserve the fixed-layout preview pixel grid in reopened PDF pages. Partial edge pixels can differ when the PDF viewport clips them.
 - [x] Preserve nested EPUB navigation in fixed-layout PDF outlines, with destinations remapped to the exported page order.
 - [x] Preserve clickable links and fragment destinations on fixed-layout XHTML content and standalone SVG objects.
 - [ ] Extend fixed-layout link geometry to SVG text spans and SVG embedded in XHTML, and resolve remaining inline fragment cases.

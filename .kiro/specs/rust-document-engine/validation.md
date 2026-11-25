@@ -2915,3 +2915,7 @@ The Linux x86-64 CPython 3.11.15 wheel passed 714 installed tests, including 119
 ## 2026-11-24 SVG variable font-face ranges
 
 The Linux x86-64 CPython 3.11.15 wheel passed 715 installed tests, including 120 EPUB tests. It measured 24,549,796 bytes with a 57,076,568-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-svg-variable-font-face-ranges) covers SVG font range matching, per-run default axes, chapter replacement and reopened fixed-layout PDF.
+
+## 2026-11-24 Fixed-layout PDF pixel grid
+
+The Linux x86-64 CPython 3.11.15 wheel passed 716 installed tests, including 121 EPUB tests. It measured 24,551,725 bytes with a 57,076,120-byte native extension. The [EPUB validation record](../epub-support/validation.md#2026-11-24-fixed-layout-pdf-pixel-grid) covers fractional DPI, reopened page geometry and preview pixel alignment.
