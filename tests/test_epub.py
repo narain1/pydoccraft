@@ -4651,6 +4651,110 @@ first
             self.assertEqual(shifted["Green"], preview["Green"])
             self.assertAlmostEqual(shifted["Right"][0] - preview["Right"][0], 20 * 96 / 72, delta=1)
 
+    def test_mathml_table_equal_and_fixed_tracks_reopen(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>MathML track sizes</title><style>body {{margin:0}}</style></head>
+          <body><p><m:math mathsize="18pt">{}</m:math></p></body></html>"""
+        table = """<m:mtable rowalign="top" columnalign="left" rowspacing="6pt" columnspacing="10pt" {}>
+          <m:mtr><m:mtd mathcolor="#bf222d"><m:mtext>H</m:mtext></m:mtd>
+            <m:mtd mathsize="36pt"><m:mtext>High</m:mtext></m:mtd>
+            <m:mtd><m:mtext>Long</m:mtext></m:mtd></m:mtr>
+          <m:mtr><m:mtd mathcolor="#ac661b"><m:mtext>H</m:mtext></m:mtd>
+            <m:mtd mathcolor="#1644df"><m:mtext>H</m:mtext></m:mtd>
+            <m:mtd mathcolor="#8343cd"><m:mtext>H</m:mtext></m:mtd></m:mtr>
+          <m:mtr><m:mtd mathcolor="#006a71"><m:mtext>H</m:mtext></m:mtd>{}</m:mtr>
+          </m:mtable>"""
+        equal = 'equalrows="true" equalcolumns="true"'
+        tail = '<m:mtext mathcolor="#5920ac">End</m:mtext>'
+        colors = {
+            "upper": "bf222d", "middle": "ac661b", "lower": "006a71",
+            "second": "1644df", "third": "8343cd", "end": "5920ac",
+        }
+
+        def fixture(attributes: str) -> bytes:
+            return epub_fixture(chapter_one=template.format(table.format(attributes, "") + tail))
+
+        def positions(doc: doc_ex.Document) -> dict[str, tuple[int, int]]:
+            width, pixels = rgba_pixels(png_chunks(doc.render_page(0, dpi=96)))
+            starts = {}
+            for label, color in colors.items():
+                ink = bytes.fromhex(color + "ff")
+                points = [divmod(i // 4, width) for i in range(0, len(pixels), 4) if pixels[i:i + 4] == ink]
+                self.assertTrue(points, label)
+                starts[label] = min(x for _, x in points), min(y for y, _ in points)
+            x, y = starts["upper"]
+            return {label: (left - x, top - y) for label, (left, top) in starts.items()}
+
+        with doc_ex.open(fixture(equal)) as book:
+            preview = positions(book)
+            self.assertAlmostEqual(preview["lower"][1], 2 * preview["middle"][1], delta=2)
+            self.assertAlmostEqual(preview["third"][0], 2 * preview["second"][0], delta=2)
+            for target in ("pdf", "docx"):
+                with self.subTest(target=target), doc_ex.open(book.convert(target)) as reopened:
+                    placed = positions(reopened)
+                    for label in colors:
+                        self.assertAlmostEqual(placed[label][0], preview[label][0], delta=2)
+                        self.assertAlmostEqual(placed[label][1], preview[label][1], delta=2)
+                    for text in ("High", "Long", "End"):
+                        self.assertEqual(reopened[0].get_text().count(text), 1)
+        with doc_ex.open(fixture('equalrows="false" equalcolumns="false"')) as book:
+            automatic = positions(book)
+            self.assertNotAlmostEqual(automatic["lower"][1], 2 * automatic["middle"][1], delta=10)
+            self.assertNotAlmostEqual(automatic["third"][0], 2 * automatic["second"][0], delta=10)
+
+        with doc_ex.open(fixture('columnwidth="75pt auto 46pt"')) as book:
+            fixed = positions(book)
+            self.assertAlmostEqual(fixed["second"][0], 85 * 96 / 72, delta=1)
+            with doc_ex.open(book.convert("docx")) as reopened:
+                placed = positions(reopened)
+                self.assertAlmostEqual(placed["second"][0], fixed["second"][0], delta=1)
+                self.assertAlmostEqual(placed["end"][0], fixed["end"][0], delta=1)
+        with doc_ex.open(fixture('columnwidth="75pt auto 66pt"')) as wider:
+            self.assertAlmostEqual(positions(wider)["end"][0] - fixed["end"][0], 20 * 96 / 72, delta=1)
+
+        def spanning_grid(attributes: str, label: str) -> bytes:
+            spanning = table.format(attributes, f'<m:mtd columnspan="2"><m:mtext>{label}</m:mtext></m:mtd>')
+            with doc_ex.open(epub_fixture(chapter_one=template.format(spanning))) as book:
+                return book.convert("docx")
+
+        word = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+        def grid(document: ET.Element) -> list[int]:
+            return [int(col.attrib[f"{{{word}}}w"]) for col in document.findall(".//w:tblGrid/w:gridCol", {"w": word})]
+
+        converted = spanning_grid(equal, "Span")
+        with zipfile.ZipFile(io.BytesIO(converted)) as archive:
+            document = ET.fromstring(archive.read("word/document.xml"))
+        cols = grid(document)
+        rows = [int(row.attrib[f"{{{word}}}val"]) for row in document.findall(".//w:trHeight", {"w": word})]
+        self.assertEqual(len(cols), 3)
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(cols, [cols[1] - 100, cols[1], cols[1] - 100])
+        self.assertEqual(rows, [rows[1] - 60, rows[1], rows[1] - 60])
+        with doc_ex.open(converted) as reopened:
+            self.assertEqual(reopened[0].get_text().count("Span"), 1)
+
+        widths = 'columnwidth="75pt auto 46pt"'
+        grids = []
+        for label in ("Span", "Much Wider Spanning Expression"):
+            converted = spanning_grid(widths, label)
+            with zipfile.ZipFile(io.BytesIO(converted)) as archive:
+                grids.append(grid(ET.fromstring(archive.read("word/document.xml"))))
+            with doc_ex.open(converted) as reopened:
+                self.assertEqual(reopened[0].get_text().count(label), 1)
+        self.assertEqual([grids[0][0], grids[0][2]], [1600, 1020])
+        self.assertEqual([grids[1][0], grids[1][2]], [1600, 1020])
+        self.assertGreater(grids[1][1], grids[0][1])
+
+        for attributes, message in (
+            ('columnwidth="1pt auto 46pt"', "exceeds fixed column widths"),
+            (equal + ' columnwidth="75pt 75pt 46pt"', "conflicting fixed widths"),
+            ('columnwidth="30% fit"', "fitted or percentage column widths"),
+        ):
+            with self.subTest(attributes=attributes), doc_ex.open(fixture(attributes)) as book:
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
+                    book.convert("docx")
+
     def test_mathml_custom_fraction_rule_and_alignment_render_and_export(self) -> None:
         def fraction(thickness: str, alignment: str = "center") -> str:
             return f"""<m:math display="block" mathsize="24pt" mathcolor="#1360c8">

@@ -19,11 +19,15 @@ use crate::EngineError;
 
 const MAX_ROWS: usize = 128;
 const MAX_DIMENSION: f32 = 20_000.0;
+const WIDTH_EPSILON: f32 = 0.0001;
 
 pub(in crate::epub) struct Table {
     cells: Vec<Cell>,
     row_gaps: Vec<f32>,
     column_gaps: Vec<f32>,
+    column_widths: Vec<Option<f32>>,
+    equal_rows: bool,
+    equal_columns: bool,
     alignment: Vertical,
     alignment_row: Option<usize>,
     em: f32,
@@ -69,9 +73,20 @@ impl Vertical {
 pub(super) fn has_authored_geometry(table: Node<'_, '_>) -> bool {
     let cell_alignment =
         |node: Node<'_, '_>| node.has_attribute("rowalign") || node.has_attribute("columnalign");
-    ["align", "rowalign", "rowspacing", "columnspacing"]
-        .into_iter()
-        .any(|key| table.has_attribute(key))
+    [
+        "align",
+        "rowalign",
+        "rowspacing",
+        "columnspacing",
+        "columnwidth",
+    ]
+    .into_iter()
+    .any(|key| table.has_attribute(key))
+        || ["equalrows", "equalcolumns"].into_iter().any(|key| {
+            table
+                .attribute(key)
+                .is_some_and(|value| value.trim() != "false")
+        })
         || table.children().filter(Node::is_element).any(|row| {
             cell_alignment(row) || row.children().filter(Node::is_element).any(cell_alignment)
         })
@@ -236,6 +251,9 @@ pub(super) fn project<'xml>(
         cells,
         row_gaps: gaps(table, "rowspacing", rows.len(), em, "1ex")?,
         column_gaps: gaps(table, "columnspacing", column_count, em, "0.8em")?,
+        column_widths: column_widths(table, column_count, em)?,
+        equal_rows: boolean(table, "equalrows")?,
+        equal_columns: boolean(table, "equalcolumns")?,
         alignment,
         alignment_row,
         em,
@@ -290,6 +308,48 @@ fn indexed(values: Option<&str>, index: usize) -> Option<&str> {
     values?.split_ascii_whitespace().take(index + 1).last()
 }
 
+fn boolean(node: Node<'_, '_>, key: &str) -> Result<bool, EngineError> {
+    match node.attribute(key).map(str::trim) {
+        Some("true") => Ok(true),
+        None | Some("false") => Ok(false),
+        Some(_) => Err(invalid("invalid MathML table boolean attribute")),
+    }
+}
+
+fn column_widths(
+    table: Node<'_, '_>,
+    columns: usize,
+    em: f32,
+) -> Result<Vec<Option<f32>>, EngineError> {
+    (0..columns)
+        .map(
+            |column| match indexed(table.attribute("columnwidth"), column) {
+                None | Some("auto") => Ok(None),
+                Some(value)
+                    if value.ends_with('%')
+                        || value.ends_with("vw")
+                        || value.ends_with("vh")
+                        || value == "fit" =>
+                {
+                    Err(unsupported("MathML fitted or percentage column widths"))
+                }
+                Some(value) => length(value, em)
+                    .map(Some)
+                    .ok_or_else(|| unsupported("MathML table column width")),
+            },
+        )
+        .collect()
+}
+
+fn length(value: &str, em: f32) -> Option<f32> {
+    value
+        .strip_suffix("ex")
+        .and_then(|n| n.parse::<f32>().ok())
+        .map(|units| units * em * 0.5)
+        .or_else(|| size_points(value, em, [0.0; 2]))
+        .filter(|size| (0.0..=MAX_DIMENSION).contains(size))
+}
+
 fn gaps(
     table: Node<'_, '_>,
     key: &str,
@@ -300,13 +360,7 @@ fn gaps(
     (0..tracks - 1)
         .map(|index| {
             let value = indexed(table.attribute(key), index).unwrap_or(default);
-            value
-                .strip_suffix("ex")
-                .and_then(|n| n.parse::<f32>().ok())
-                .map(|units| units * em * 0.5)
-                .or_else(|| size_points(value, em, [0.0; 2]))
-                .filter(|size| (0.0..=MAX_DIMENSION).contains(size))
-                .ok_or_else(|| unsupported("MathML table spacing"))
+            length(value, em).ok_or_else(|| unsupported("MathML table spacing"))
         })
         .collect()
 }
@@ -376,6 +430,44 @@ impl Table {
             }
         }
         Ok(())
+    }
+
+    fn grow_columns(
+        &self,
+        widths: &mut [f32],
+        span: &Range<usize>,
+        needed: f32,
+    ) -> Result<(), EngineError> {
+        let excess = needed - extent(widths, &self.column_gaps, span);
+        if excess <= WIDTH_EPSILON {
+            return Ok(());
+        }
+        let tracks = &self.column_widths[span.clone()];
+        let flexible = tracks.iter().filter(|width| width.is_none()).count();
+        if flexible == 0 {
+            return Err(unsupported("MathML cell exceeds fixed column widths"));
+        }
+        let share = excess / flexible as f32;
+        for (width, fixed) in widths[span.clone()].iter_mut().zip(tracks) {
+            if fixed.is_none() {
+                *width += share;
+            }
+        }
+        Ok(())
+    }
+
+    fn equal_column_width(&self, minimum: f32) -> Result<f32, EngineError> {
+        let mut fixed_widths = self.column_widths.iter().flatten().copied();
+        let width = fixed_widths.next().unwrap_or(minimum);
+        if fixed_widths.any(|fixed| (fixed - width).abs() > WIDTH_EPSILON) {
+            return Err(unsupported(
+                "MathML equal columns request conflicting fixed widths",
+            ));
+        }
+        if minimum > width + WIDTH_EPSILON {
+            return Err(unsupported("MathML cell exceeds fixed column widths"));
+        }
+        Ok(width)
     }
 
     pub(super) fn editable_matrix(
@@ -495,7 +587,11 @@ impl Table {
         let table_axis = self.em * axis_ratio;
         let enclosing_axis = self.enclosing_em * axis_ratio;
         let row_count = self.row_gaps.len() + 1;
-        let mut widths = vec![0.0; self.column_gaps.len() + 1];
+        let mut widths: Vec<_> = self
+            .column_widths
+            .iter()
+            .map(|width| width.unwrap_or_default())
+            .collect();
         let mut ascent = vec![0.0f32; row_count];
         let mut descent = vec![0.0f32; row_count];
         let mut row_baselines = vec![false; row_count];
@@ -549,25 +645,41 @@ impl Table {
             indices.sort_by_key(|&index| key(&self.cells[index]));
             indices
         };
-        for index in ordered(|cell| cell.columns.len()) {
-            grow(
-                &mut widths,
-                &self.column_gaps,
-                &self.cells[index].columns,
-                measures[index].0.size().0,
-            );
+        if self.equal_columns {
+            let common_width = self
+                .cells
+                .iter()
+                .zip(&measures)
+                .map(|(cell, (measure, _))| {
+                    equal_track_size(&self.column_gaps, &cell.columns, measure.size().0)
+                })
+                .fold(0.0, f32::max);
+            widths.fill(self.equal_column_width(common_width)?);
+        } else {
+            for index in ordered(|cell| cell.columns.len()) {
+                self.grow_columns(
+                    &mut widths,
+                    &self.cells[index].columns,
+                    measures[index].0.size().0,
+                )?;
+            }
         }
+        let mut common_height = heights.iter().copied().fold(0.0, f32::max);
         for index in ordered(|cell| cell.rows.len()) {
             let cell = &self.cells[index];
             let (measure, offset) = &measures[index];
             let (_, cell_ascent, cell_descent) = measure.size();
             let top = offset.map_or(0.0, |offset| ascent[cell.rows.start] + offset - cell_ascent);
-            grow(
-                &mut heights,
-                &self.row_gaps,
-                &cell.rows,
-                top + cell_ascent + cell_descent,
-            );
+            let needed = top + cell_ascent + cell_descent;
+            if self.equal_rows {
+                common_height =
+                    common_height.max(equal_track_size(&self.row_gaps, &cell.rows, needed));
+            } else {
+                grow(&mut heights, &self.row_gaps, &cell.rows, needed);
+            }
+        }
+        if self.equal_rows {
+            heights.fill(common_height);
         }
         let x = starts(&widths, &self.column_gaps);
         let y = starts(&heights, &self.row_gaps);
@@ -768,7 +880,15 @@ fn side_gap(gaps: &[f32], index: Option<usize>) -> f32 {
 }
 
 fn extent(sizes: &[f32], gaps: &[f32], range: &Range<usize>) -> f32 {
-    sizes[range.clone()].iter().sum::<f32>() + gaps[range.start..range.end - 1].iter().sum::<f32>()
+    sizes[range.clone()].iter().sum::<f32>() + internal_gaps(gaps, range)
+}
+
+fn internal_gaps(gaps: &[f32], range: &Range<usize>) -> f32 {
+    gaps[range.start..range.end - 1].iter().sum()
+}
+
+fn equal_track_size(gaps: &[f32], span: &Range<usize>, needed: f32) -> f32 {
+    (needed - internal_gaps(gaps, span)).max(0.0) / span.len() as f32
 }
 
 fn grow(sizes: &mut [f32], gaps: &[f32], range: &Range<usize>, needed: f32) {
