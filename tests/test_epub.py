@@ -13893,8 +13893,11 @@ Resume
                     self.assertAlmostEqual(fixed[label][0] - fixed["North"][0],
                                            reference[label][0] - reference["North"][0], delta=0.65)
 
-        unsafe = source.replace("<m:maligngroup/><m:mtext>RedMarker", "<m:maligngroup/><m:mo>=</m:mo><m:mtext>RedMarker")
-        with doc_ex.open(epub_fixture(chapter_one=unsafe)) as book:
+        ambiguous = source.replace(
+            "<m:maligngroup/><m:mtext>RedMarker",
+            "<m:maligngroup/><m:mo>=</m:mo><m:mo>−</m:mo><m:mtext>RedMarker",
+        )
+        with doc_ex.open(epub_fixture(chapter_one=ambiguous)) as book:
             for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "alignment group boundary through operator spacing"):
                     operation()
