@@ -391,13 +391,13 @@ impl<'xml> Projection<'_, 'xml> {
         &mut self,
         node: Node<'xml, '_>,
         depth: usize,
-        style: Presentation<'xml>,
+        inherited: Presentation<'xml>,
     ) -> Result<Arg, EngineError> {
         self.charge(depth)?;
         if node.tag_name().namespace() != Some(MATHML) {
             return Err(unsupported("foreign elements in MathML equations"));
         }
-        let style = self.style(node, style)?;
+        let style = self.style(node, inherited)?;
         let tag = node.tag_name().name();
         let native = match tag {
             "mi" | "mn" | "mo" | "ms" | "mtext" => token(node, style)?,
@@ -477,8 +477,8 @@ impl<'xml> Projection<'_, 'xml> {
             }
             "mmultiscripts" => return self.multiscripts(node, depth, style),
             "mfenced" => self.fenced(node, depth, style)?,
-            "mtable" if table::has_spans(node) => {
-                let grid = table::project(self, node, depth, style)?;
+            "mtable" if table::has_authored_geometry(node) || table::has_spans(node) => {
+                let grid = table::project(self, node, depth, style, inherited.font_size())?;
                 return self.extras.push(compose::Extra::Table(
                     grid,
                     Box::new(compose::format(style)),

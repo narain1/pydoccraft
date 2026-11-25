@@ -58,6 +58,7 @@
 - [x] Export absolute and content-relative MathML padding dimensions and vertical spaces as editable DOCX equations.
 - [x] Export signed vertical shifts and positive leading offsets that overhang the padded width as editable DOCX equations.
 - [x] Preserve the measured placement and editable cell equations of supported spanning grids inside formulas and paragraphs in DOCX.
+- [x] Honor authored MathML table spacing and alignment, including row and cell overrides and signed row numbers for the table baseline.
 - [ ] Extend editable DOCX export to negative leading offsets and tighter matrix column spacing. Expand the remaining MathML visual properties.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.

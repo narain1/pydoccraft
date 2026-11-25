@@ -24,7 +24,10 @@ pub(in crate::epub) struct Table {
     cells: Vec<Cell>,
     row_gaps: Vec<f32>,
     column_gaps: Vec<f32>,
+    alignment: Vertical,
+    alignment_row: Option<usize>,
     em: f32,
+    enclosing_em: f32,
 }
 
 struct Cell {
@@ -48,6 +51,30 @@ enum Vertical {
     Center,
     Baseline,
     Axis,
+}
+
+impl Vertical {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "top" => Some(Self::Top),
+            "bottom" => Some(Self::Bottom),
+            "center" => Some(Self::Center),
+            "baseline" => Some(Self::Baseline),
+            "axis" => Some(Self::Axis),
+            _ => None,
+        }
+    }
+}
+
+pub(super) fn has_authored_geometry(table: Node<'_, '_>) -> bool {
+    let cell_alignment =
+        |node: Node<'_, '_>| node.has_attribute("rowalign") || node.has_attribute("columnalign");
+    ["align", "rowalign", "rowspacing", "columnspacing"]
+        .into_iter()
+        .any(|key| table.has_attribute(key))
+        || table.children().filter(Node::is_element).any(|row| {
+            cell_alignment(row) || row.children().filter(Node::is_element).any(cell_alignment)
+        })
 }
 
 pub(in crate::epub) fn has_spans(root: Node<'_, '_>) -> bool {
@@ -92,15 +119,17 @@ pub(super) fn project_group<'xml>(
             _ => return Ok(None),
         }
     }
-    let table = *wrappers
-        .last()
+    let table = wrappers
+        .pop()
         .ok_or_else(|| invalid("missing MathML table"))?;
     for wrapper in wrappers {
         depth += 1;
         projection.charge(depth)?;
         style = projection.style(wrapper, style)?;
     }
-    project(projection, table, depth, style).map(Some)
+    projection.charge(depth + 1)?;
+    let table_style = projection.style(table, style)?;
+    project(projection, table, depth + 1, table_style, style.font_size()).map(Some)
 }
 
 pub(super) fn project<'xml>(
@@ -108,6 +137,7 @@ pub(super) fn project<'xml>(
     table: Node<'xml, '_>,
     depth: usize,
     style: Presentation<'xml>,
+    enclosing_em: f32,
 ) -> Result<Table, EngineError> {
     let rows: Vec<_> = table
         .children()
@@ -117,6 +147,7 @@ pub(super) fn project<'xml>(
     if rows.len() > MAX_ROWS {
         return Err(limited("MathML table exceeds 128 rows"));
     }
+    let (alignment, alignment_row) = table_alignment(table, rows.len())?;
     let mut column_count = 0;
     let mut occupied = [0; MAX_MATRIX_SIZE];
     let mut cells = Vec::new();
@@ -160,25 +191,20 @@ pub(super) fn project<'xml>(
                 .or_else(|| indexed(row.attribute("columnalign"), column))
                 .or_else(|| indexed(table.attribute("columnalign"), column))
                 .unwrap_or("center")
+                .trim()
             {
                 "left" => ColJc::Left,
                 "right" => ColJc::Right,
                 "center" => ColJc::Center,
                 _ => return Err(unsupported("MathML table column alignment")),
             };
-            let vertical = match cell
+            let row_alignment = cell
                 .attribute("rowalign")
                 .or_else(|| row.attribute("rowalign"))
                 .or_else(|| indexed(table.attribute("rowalign"), row_index))
-                .unwrap_or("baseline")
-            {
-                "top" => Vertical::Top,
-                "bottom" => Vertical::Bottom,
-                "center" => Vertical::Center,
-                "baseline" => Vertical::Baseline,
-                "axis" => Vertical::Axis,
-                _ => return Err(unsupported("MathML table row alignment")),
-            };
+                .unwrap_or("baseline");
+            let vertical = Vertical::parse(row_alignment.trim())
+                .ok_or_else(|| unsupported("MathML table row alignment"))?;
             cells.push(Cell {
                 rows: row_index..bottom,
                 columns: column..right,
@@ -210,8 +236,39 @@ pub(super) fn project<'xml>(
         cells,
         row_gaps: gaps(table, "rowspacing", rows.len(), em, "1ex")?,
         column_gaps: gaps(table, "columnspacing", column_count, em, "0.8em")?,
+        alignment,
+        alignment_row,
         em,
+        enclosing_em,
     })
+}
+
+fn table_alignment(
+    table: Node<'_, '_>,
+    rows: usize,
+) -> Result<(Vertical, Option<usize>), EngineError> {
+    let mut words = table
+        .attribute("align")
+        .unwrap_or("axis")
+        .split_ascii_whitespace();
+    let alignment = words
+        .next()
+        .and_then(Vertical::parse)
+        .ok_or_else(|| unsupported("MathML table alignment"))?;
+    let row = words
+        .next()
+        .and_then(|value| value.parse::<isize>().ok())
+        .and_then(|index| match index {
+            1.. => index.checked_sub(1),
+            ..=-1 => (rows as isize).checked_add(index),
+            0 => None,
+        })
+        .and_then(|index| usize::try_from(index).ok())
+        .filter(|&index| index < rows);
+    if words.next().is_some() {
+        return Err(unsupported("MathML table alignment"));
+    }
+    Ok((alignment, row))
 }
 
 fn span(node: Node<'_, '_>, key: &str) -> Result<usize, EngineError> {
@@ -436,10 +493,12 @@ impl Table {
             constants.get(C::AxisHeight) / (face.upem as f32).max(1.0)
         });
         let table_axis = self.em * axis_ratio;
+        let enclosing_axis = self.enclosing_em * axis_ratio;
         let row_count = self.row_gaps.len() + 1;
         let mut widths = vec![0.0; self.column_gaps.len() + 1];
         let mut ascent = vec![0.0f32; row_count];
         let mut descent = vec![0.0f32; row_count];
+        let mut row_baselines = vec![false; row_count];
         let mut heights = vec![0.0; row_count];
         let mut measures = Vec::with_capacity(self.cells.len());
         for cell in &self.cells {
@@ -472,6 +531,7 @@ impl Table {
             };
             if let Some(offset) = offset {
                 let row = cell.rows.start;
+                row_baselines[row] = true;
                 ascent[row] = ascent[row].max(cell_ascent - offset);
                 if cell.rows.len() == 1 {
                     descent[row] = descent[row].max(cell_descent + offset);
@@ -547,10 +607,27 @@ impl Table {
                 (left, top, measure)
             })
             .collect();
+        let (top, bottom, row_baseline) = self.alignment_row.map_or((0.0, height, None), |row| {
+            (
+                y[row],
+                y[row] + heights[row],
+                row_baselines[row].then_some(y[row] + ascent[row]),
+            )
+        });
+        let center = (top + bottom) / 2.0;
+        let baseline = match self.alignment {
+            Vertical::Top => top,
+            Vertical::Bottom => bottom,
+            Vertical::Center => center,
+            Vertical::Baseline => row_baseline.unwrap_or(center),
+            Vertical::Axis => (row_baseline.map_or(center, |baseline| baseline - table_axis)
+                + enclosing_axis)
+                .clamp(0.0, height),
+        };
         Ok(Layout {
             width,
             height,
-            baseline: (height / 2.0 + table_axis).min(height),
+            baseline,
             cells,
             widths,
             heights,

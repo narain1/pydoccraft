@@ -4484,6 +4484,77 @@ first
             with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "closer than the native DOCX gap"):
                 book.convert("docx")
 
+    def test_mathml_matrix_honors_authored_spacing_and_alignment(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Aligned MathML</title><style>body {{margin:0}}</style></head>
+          <body><p><m:math mathsize="20pt"><m:mtext mathcolor="#5920ac">Anchor</m:mtext>
+            <m:mtable mathsize="{table_size}pt" columnalign="left" rowalign="bottom baseline" align="{align}"
+                rowspacing="{row_gap}pt" columnspacing="{column_gap}pt {last_gap}pt">
+              <m:mtr mathsize="20pt" columnalign="right left" rowalign="top">
+                <m:mtd mathcolor="#bf222d"><m:mtext>Red</m:mtext></m:mtd>
+                <m:mtd mathcolor="#198144" mathsize="32pt"><m:mtext>Green</m:mtext></m:mtd>
+                <m:mtd mathcolor="#8343cd"><m:mtext>Right</m:mtext></m:mtd>
+              </m:mtr><m:mtr mathsize="20pt">
+                <m:mtd mathcolor="#ac661b"><m:mtext>Wider</m:mtext></m:mtd>
+                <m:mtd mathcolor="#1644df" columnalign="{cell_align}"><m:mtext>Blue</m:mtext></m:mtd>
+                <m:mtd mathcolor="#006a71"><m:mtext>Last</m:mtext></m:mtd>
+              </m:mtr>
+            </m:mtable></m:math></p></body></html>"""
+        colors = {
+            "Anchor": "5920ac", "Red": "bf222d", "Green": "198144", "Right": "8343cd",
+            "Wider": "ac661b", "Blue": "1644df", "Last": "006a71",
+        }
+
+        def source(align="baseline -1", row_gap=14, column_gap=16, last_gap=28, cell_align="right", table_size=20):
+            return epub_fixture(chapter_one=template.format(
+                align=align, row_gap=row_gap, column_gap=column_gap, last_gap=last_gap, cell_align=cell_align,
+                table_size=table_size,
+            ))
+
+        def positions(doc: doc_ex.Document) -> dict[str, tuple[int, int]]:
+            width, pixels = rgba_pixels(png_chunks(doc.render_page(0, dpi=96)))
+            starts = {}
+            for label, color in colors.items():
+                ink = bytes.fromhex(color + "ff")
+                points = [divmod(i // 4, width) for i in range(0, len(pixels), 4) if pixels[i:i + 4] == ink]
+                self.assertTrue(points, label)
+                starts[label] = min(x for _, x in points), min(y for y, _ in points)
+            x, y = starts["Anchor"]
+            return {label: (left - x, top - y) for label, (left, top) in starts.items()}
+
+        with doc_ex.open(source()) as book:
+            preview = positions(book)
+            for target in ("pdf", "docx"):
+                with self.subTest(target=target), doc_ex.open(book.convert(target)) as reopened:
+                    actual = positions(reopened)
+                    for label in colors:
+                        self.assertAlmostEqual(preview[label][0], actual[label][0], delta=2)
+                        self.assertAlmostEqual(preview[label][1], actual[label][1], delta=2)
+                        self.assertEqual(reopened[0].get_text().count(label), 1)
+        self.assertAlmostEqual(preview["Blue"][1], 0, delta=2)
+        self.assertAlmostEqual(preview["Red"][1], preview["Green"][1], delta=2)
+        self.assertGreater(preview["Red"][0], preview["Wider"][0] + 12)
+        with doc_ex.open(source(align="baseline 2")) as equivalent:
+            self.assertEqual(positions(equivalent), preview)
+        with doc_ex.open(source(align="axis 2")) as equivalent:
+            self.assertEqual(positions(equivalent), preview)
+        with doc_ex.open(source(align="axis", table_size=42)) as enlarged, doc_ex.open(source(align="axis")) as original:
+            self.assertEqual(positions(enlarged), positions(original))
+        with doc_ex.open(source(align="baseline -99")) as out_of_range, doc_ex.open(source(align="baseline")) as whole:
+            self.assertEqual(positions(out_of_range), positions(whole))
+        with doc_ex.open(source(align="top 1")) as top:
+            self.assertGreater(positions(top)["Red"][1], preview["Red"][1] + 35)
+        with doc_ex.open(source(row_gap=34, column_gap=36, cell_align="left")) as spaced:
+            shifted = positions(spaced)
+            self.assertAlmostEqual(preview["Red"][1] - shifted["Red"][1], 20 * 96 / 72, delta=1)
+            for label in ("Green", "Right", "Last"):
+                self.assertAlmostEqual(shifted[label][0] - preview[label][0], 20 * 96 / 72, delta=1)
+            self.assertLess(shifted["Blue"][0] - preview["Blue"][0], 15)
+        with doc_ex.open(source(last_gap=48)) as spaced:
+            shifted = positions(spaced)
+            self.assertEqual(shifted["Green"], preview["Green"])
+            self.assertAlmostEqual(shifted["Right"][0] - preview["Right"][0], 20 * 96 / 72, delta=1)
+
     def test_mathml_custom_fraction_rule_and_alignment_render_and_export(self) -> None:
         def fraction(thickness: str, alignment: str = "center") -> str:
             return f"""<m:math display="block" mathsize="24pt" mathcolor="#1360c8">

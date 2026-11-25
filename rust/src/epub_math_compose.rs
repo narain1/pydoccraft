@@ -101,6 +101,7 @@ pub(in crate::epub) fn selected(node: Node<'_, '_>) -> bool {
         "mpadded" => ["width", "height", "depth", "lspace", "voffset"]
             .iter()
             .any(|&key| node.attribute(key).is_some_and(|value| !zero_length(value))),
+        "mtable" => table::has_authored_geometry(node),
         _ => false,
     }
 }

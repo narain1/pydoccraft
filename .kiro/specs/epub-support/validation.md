@@ -670,6 +670,12 @@ The baseline wheel rejected a spanning grid mixed with paragraph text. The insta
 
 All 142 EPUB tests passed against the installed Linux x86-64 CPython 3.11.15 wheel. It measured 24,750,119 bytes with a 57,688,856-byte native extension and SHA-256 `c1739e8e3d205abe2cb742d1bba955dfbea0799b1f93fc6f3fcd160a16c19c42`. Rust 1.95 formatting, locked release all-target Clippy with warnings denied and the documentation link check passed. The dependency pins and lockfiles remain at the preceding revisions. The wheel attribution files match the source. Cleanup removed 1.6 GiB of Cargo output, the temporary wheels, virtual environments and the generated site.
 
+## 2026-11-24 Authored MathML matrix spacing and alignment
+
+The baseline preview positioned a selected matrix row 24 pixels below the specified baseline. The installed regression compares seven glyph positions across the EPUB preview and reopened PDF and DOCX at 96 DPI. The exports match the relative positions within two pixels and retain each label once in extracted text. Additional previews verify separate entries in the column spacing list, a 20-point increase in row spacing, row and cell alignment overrides, equivalent positive and negative row numbers, and the fallback for an out-of-range row. The test also checks that an unchanged surrounding math axis anchors the same content when only the table font size changes. [MathML 3 table geometry](https://www.w3.org/TR/MathML3/chapter3.html#presm.mtable)
+
+All 143 EPUB tests passed against the installed Linux x86-64 CPython 3.11.15 wheel. It measured 24,763,183 bytes with a 57,705,688-byte native extension and SHA-256 `76b87effc2b2a86930c350f1868ae63a39e95f61f4f5a0434ada40c0682e03ff`. Rust 1.95 formatting, locked release all-target Clippy with warnings denied and the documentation link check passed. The dependency pins and lockfiles are unchanged. The wheel attribution files match the source. Cleanup removed 1.6 GiB of Cargo output, the temporary wheels, virtual environments and the generated site.
+
 ## 2026-11-24 Staged SVG resource anchors
 
 The pre-change integrated wheel allowed a packaged SVG replacement to orphan a retained fragment. The installed regression confirms a percent-encoded link from a retained or newly inserted XHTML chapter prevents removal of its existing target. The editor accepts a staged link to the SVG’s new ID and leaves the source members unchanged on rejection. The two staged chapter-anchor regressions also passed. Rust formatting and warnings-denied release Clippy passed.
