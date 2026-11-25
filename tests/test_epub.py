@@ -3016,6 +3016,61 @@ class EpubTests(unittest.TestCase):
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "definite containing inline size"):
                     render(rules)
 
+    def test_css_block_bounds_use_native_flex_widths(self) -> None:
+        original = fixed_spread_fixture([("", "white", 305, 160)])
+        source = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Flex block bounds</title>
+          <meta name="viewport" content="width=305,height=160"/><style>
+          html,body,p{margin:0;font-size:12px}
+          #row{position:absolute;left:12px;top:10px;width:180px;height:116px;
+            display:flex;gap:8px;align-items:flex-start}
+          #panel{box-sizing:border-box;width:auto;min-width:0;flex-basis:160px;flex-grow:1;
+            padding:3px;border:2px solid #175475;background:#a4bc6b}
+          #peer{box-sizing:border-box;min-width:0;flex-basis:80px;flex-shrink:0;
+            height:24px;background:#557a99}
+          CSS</style></head><body><div id="row"><div id="panel">
+          <p><a href="https://example.org/flex">First line contains several searchable words</a></p>
+          <p>More words at the measured width.</p></div><p id="peer">Peer</p>
+          </div></body></html>"""
+
+        def render(rules: str) -> tuple[tuple[int, bytes], object, object, int]:
+            epub = rewrite_epub(original, {"OEBPS/s0.xhtml": source.replace("CSS", rules)})
+            with doc_ex.open(epub) as book:
+                png = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                frozen = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+            with doc_ex.open(frozen) as pdf:
+                self.assertTrue(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))) == png)
+                hits = pdf[0].search_for("First")
+                links = pdf[0].get_links()
+                self.assertEqual(len(hits), 1)
+                self.assertTrue(links)
+                self.assertTrue(all(link.uri == "https://example.org/flex" for link in links))
+            width, rgba = png
+            green = bytes.fromhex("a4bc6bff")
+            edge = [index // 4 % width for index in range(0, len(rgba), 4)
+                    if rgba[index:index + 4] == green]
+            return png, hits, [link.bbox for link in links], max(edge) - min(edge) + 1
+
+        for mode, width in (("", 92), ("#row{width:260px;flex-direction:row-reverse}", 172)):
+            control = render(mode + "#panel{height:auto}")
+            self.assertEqual(control[-1], width - 4)
+            for bound in (
+                "height:2px;min-block-size:min-content",
+                "height:150px;max-height:max-content",
+                "height:2px;min-height:fit-content(calc(25% + 3px))",
+            ):
+                with self.subTest(mode=mode, bound=bound):
+                    candidate = render(mode + f"#panel{{{bound}}}")
+                    self.assertTrue(candidate == control, "the native flex width changed the block bound")
+
+        for dependent in (
+            "#row{flex-wrap:wrap}",
+            "#peer{min-width:auto}",
+            "#peer{flex-basis:auto;width:max-content}",
+        ):
+            with self.subTest(dependent=dependent):
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "definite inline size after flexing"):
+                    render(dependent + "#panel{min-height:min-content}")
+
     def test_css_intrinsic_box_counts_padding_and_wraps_before_column_flex_height(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic box edges</title>
           <style>body,p{margin:0} section{width:200px;CONTAINER}

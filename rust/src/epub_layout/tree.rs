@@ -5,8 +5,8 @@ use taffy::{
     geometry::{AbsoluteAxis, Size},
     style::{
         AlignItems, AlignItemsKeyword, AvailableSpace, BoxSizing, CalcHandle, Dimension, Display,
-        ExpandedDimension, ExpandedLengthPercentage, FlexDirection, LengthPercentageAuto, Position,
-        Style,
+        ExpandedDimension, ExpandedLengthPercentage, FlexDirection, FlexWrap, LengthPercentageAuto,
+        Position, Style,
     },
     util::{MaybeResolve, ResolveOrZero},
     BlockContext, Cache, CacheTree, DetailedGridInfo, DetailedLayoutInfo, Layout,
@@ -96,6 +96,7 @@ impl Tree {
         let mut view = View {
             viewport,
             geometry: Vec::new(),
+            flex_widths: Vec::new(),
             nodes: &mut self.nodes,
             calculations,
             measure,
@@ -112,6 +113,7 @@ impl Tree {
             view.geometry
                 .resize(view.nodes.len(), BoxGeometry::default());
             view.resolve_geometry()?;
+            view.measure_flex_widths()?;
             view.resolve_bounds()?;
         }
         compute_root_layout(&mut view, root, space);
@@ -123,6 +125,18 @@ impl Tree {
         if view.grid_limit {
             return Err(limited(
                 "EPUB CSS grid automatic repetition exceeds its track or line name budget",
+            ));
+        }
+        if view
+            .flex_widths
+            .iter()
+            .zip(view.nodes.iter())
+            .any(|(width, node)| {
+                width.is_some_and(|width| (node.layout.size.width - width).abs() > 0.001)
+            })
+        {
+            return Err(unsupported(
+                "EPUB CSS block bounds changed their measured flex width",
             ));
         }
         Ok(())
@@ -141,12 +155,14 @@ pub(super) fn calculated_length(
 struct BoxGeometry {
     content: Size<Option<f32>>,
     padding: Size<Option<f32>>,
+    outer: Size<Option<f32>>,
     auto_block: bool,
 }
 
 struct View<'a, F> {
     viewport: Size<Option<f32>>,
     geometry: Vec<BoxGeometry>,
+    flex_widths: Vec<Option<f32>>,
     nodes: &'a mut [Node],
     calculations: &'a CalculationTable,
     measure: F,
@@ -199,7 +215,7 @@ fn box_axis(
     inline_basis: Option<f32>,
     auto_size: Option<f32>,
     calculate: impl Fn(CalcHandle, f32) -> f32,
-) -> Option<(f32, f32)> {
+) -> Option<(f32, f32, f32)> {
     let edges = |sides: taffy::geometry::Rect<taffy::LengthPercentage>| {
         let [start, end] = match axis {
             AbsoluteAxis::Horizontal => [sides.left, sides.right],
@@ -216,6 +232,7 @@ fn box_axis(
     outer.is_finite().then_some((
         (outer - (padding + border)).max(0.0),
         (outer - border).max(0.0),
+        outer,
     ))
 }
 
@@ -422,8 +439,10 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
     fn box_geometry(&self, index: usize) -> BoxGeometry {
         let node = &self.nodes[index];
         let style = &node.style;
-        if !matches!(style.display, Display::Block | Display::FlowRoot)
-            || style.aspect_ratio.is_some()
+        if !matches!(
+            style.display,
+            Display::Block | Display::FlowRoot | Display::Flex
+        ) || style.aspect_ratio.is_some()
             || style.scrollbar_width != 0.0
         {
             return BoxGeometry::default();
@@ -434,7 +453,7 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
         let mut geometry = BoxGeometry::default();
         if !node.bounds.has_inline() && !self.inline_flex_changes_width(node) {
             let width = self.auto_outer_inline(index, basis.width);
-            if let Some((content, padding)) = box_axis(
+            if let Some((content, padding, outer)) = box_axis(
                 style,
                 AbsoluteAxis::Horizontal,
                 basis.width,
@@ -444,6 +463,7 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
             ) {
                 geometry.content.width = Some(content);
                 geometry.padding.width = Some(padding);
+                geometry.outer.width = Some(outer);
             }
         }
         let adjustable_block = !style.position.is_out_of_flow()
@@ -454,7 +474,7 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
                 )
             });
         if !node.bounds.has_block() && !adjustable_block {
-            if let Some((content, padding)) = box_axis(
+            if let Some((content, padding, outer)) = box_axis(
                 style,
                 AbsoluteAxis::Vertical,
                 basis.height,
@@ -464,6 +484,7 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
             ) {
                 geometry.content.height = Some(content);
                 geometry.padding.height = Some(padding);
+                geometry.outer.height = Some(outer);
             } else {
                 geometry.auto_block = style.size.height.is_auto()
                     && style.min_size.height.is_auto()
@@ -510,6 +531,117 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
             width
         };
         Some((available - margins).max(0.0))
+    }
+
+    fn measure_flex_widths(&mut self) -> Result<(), EngineError> {
+        if !self
+            .nodes
+            .iter()
+            .any(|node| node.bounds.has_block() && self.inline_flex_changes_width(node))
+        {
+            return Ok(());
+        }
+        let mut parents = vec![false; self.nodes.len()];
+        for node in &*self.nodes {
+            let Some(parent) = node.parent else { continue };
+            if node.bounds.has_block()
+                && node.style.display != Display::None
+                && self.inline_flex_changes_width(node)
+            {
+                parents[usize::from(parent)] = true;
+            }
+        }
+        self.flex_widths.resize(self.nodes.len(), None);
+        let unsupported_width = || {
+            unsupported(
+                "EPUB CSS intrinsic block bounds require a definite inline size after flexing",
+            )
+        };
+
+        for (index, requested) in parents.into_iter().enumerate() {
+            if !requested || self.fit_probes > MAX_FIT_PROBES || self.grid_limit {
+                continue;
+            }
+            let node = &self.nodes[index];
+            let geometry = self.geometry[index];
+            let width = geometry.outer.width.ok_or_else(unsupported_width)?;
+            let inline = geometry.content.width;
+            let calculate = |handle, basis| self.calculations.at(handle, basis);
+            let independently_sized = |id: &NodeId| {
+                let child = &self.nodes[usize::from(*id)];
+                let style = &child.style;
+                if style.display == Display::None || style.position.is_out_of_flow() {
+                    return true;
+                }
+                let basis = if style.flex_basis.is_auto() {
+                    style.size.width
+                } else {
+                    style.flex_basis
+                };
+                // The native main-axis inputs must never need an intrinsic
+                // contribution that could change after applying a block bound.
+                !child.bounds.has_inline()
+                    && style.aspect_ratio.is_none()
+                    && !style.item_is_replaced
+                    && basis.maybe_resolve(inline, calculate).is_some()
+                    && style
+                        .min_size
+                        .width
+                        .maybe_resolve(inline, calculate)
+                        .is_some()
+                    && (style.max_size.width.is_auto()
+                        || style
+                            .max_size
+                            .width
+                            .maybe_resolve(inline, calculate)
+                            .is_some())
+            };
+            if node.style.flex_wrap != FlexWrap::NoWrap
+                || !node.children.iter().all(independently_sized)
+            {
+                return Err(unsupported_width());
+            }
+
+            self.fit_probes += 1;
+            self.place_node(
+                NodeId::from(index),
+                LayoutInput {
+                    run_mode: RunMode::PerformLayout,
+                    sizing_mode: SizingMode::InherentSize,
+                    axis: RequestedAxis::Both,
+                    known_dimensions: geometry.outer,
+                    known_dimensions_are_definite: geometry.outer.map(|size| size.is_some()),
+                    parent_size: self.containing_size(index),
+                    available_space: Size {
+                        width: AvailableSpace::Definite(width),
+                        height: geometry
+                            .outer
+                            .height
+                            .map_or(AvailableSpace::MaxContent, AvailableSpace::Definite),
+                    },
+                    ..LayoutInput::HIDDEN
+                },
+                None,
+            );
+            for child in &self.nodes[index].children {
+                let child = usize::from(*child);
+                let node = &self.nodes[child];
+                if node.bounds.has_block()
+                    && node.style.display != Display::None
+                    && self.inline_flex_changes_width(node)
+                {
+                    let width = node.layout.size.width;
+                    if !width.is_finite() {
+                        return Err(unsupported_width());
+                    }
+                    self.flex_widths[child] = Some(width);
+                }
+            }
+        }
+        for node in &mut *self.nodes {
+            node.cache.clear();
+        }
+        Ok(())
     }
 
     fn resolve_bounds(&mut self) -> Result<(), EngineError> {
@@ -667,9 +799,15 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
         let style = &node.style;
         let unresolved =
             || unsupported("EPUB CSS intrinsic block bounds require a definite inline size");
-        if self.inline_flex_changes_width(node) {
+        let flex_width = self.flex_widths.get(index).copied().flatten();
+        if self.inline_flex_changes_width(node) && flex_width.is_none() {
             return Err(unresolved());
         }
+        let basis = if let (Some(_), Some(parent)) = (flex_width, node.parent) {
+            self.geometry[usize::from(parent)].content
+        } else {
+            self.containing_size(index)
+        };
         if style.aspect_ratio.is_some() && !style.item_is_replaced {
             return Err(unsupported(
                 "EPUB CSS intrinsic block bounds on non-replaced aspect ratios",
@@ -684,7 +822,7 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
                 }
                 // Both intrinsic block sizes use the same automatic height in this profile.
                 // Still require a definite argument before applying the fit-content formula.
-                let basis = self.containing_size(index).height;
+                let basis = basis.height;
                 if limit
                     .maybe_resolve(basis, |handle, basis| self.calculations.at(handle, basis))
                     .is_none()
@@ -695,7 +833,7 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
                 }
             }
         }
-        let basis = self.definite_containing_width(index);
+        let basis = basis.width;
         let calculate = |handle, basis| self.calculations.at(handle, basis);
         let edge = |length: taffy::LengthPercentage| {
             if basis.is_none() && !matches!(length.expand(), ExpandedLengthPercentage::Length(_)) {
@@ -713,16 +851,18 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
             + edge(style.padding.bottom)?
             + edge(style.border.top)?
             + edge(style.border.bottom)?;
-        let auto_width = self.auto_outer_inline(index, basis);
-        let width = outer_size(
-            style,
-            AbsoluteAxis::Horizontal,
-            inline_edges,
-            basis,
-            auto_width,
-            calculate,
-        )
-        .ok_or_else(unresolved)?;
+        let width = flex_width
+            .or_else(|| {
+                outer_size(
+                    style,
+                    AbsoluteAxis::Horizontal,
+                    inline_edges,
+                    basis,
+                    self.auto_outer_inline(index, basis),
+                    calculate,
+                )
+            })
+            .ok_or_else(unresolved)?;
         let height_adjust = if style.box_sizing == BoxSizing::ContentBox {
             block_edges
         } else {
