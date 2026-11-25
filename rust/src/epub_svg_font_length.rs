@@ -241,13 +241,26 @@ fn nested_chunk(
         // With no surrounding text, measuring the containing text is equivalent.
         return Ok(None);
     }
-    if owner.parent_element() != Some(root)
-        || adjust != usvg::LengthAdjust::Spacing
+    if adjust != usvg::LengthAdjust::Spacing
         || root.children().any(|child| {
             child.is_text() && child.text().is_some_and(|value| !collapsible_space(value))
         })
     {
         return Err(nested_error());
+    }
+    // A wrapped owner must cover the entire independently positioned
+    // chunk. This lets the probe retain the same anchors and typography.
+    let mut position = owner;
+    while let Some(wrapper) = position.parent_element().filter(|&node| node != root) {
+        if wrapper.has_attribute("textLength")
+            || !transparent_wrapper(wrapper)?
+            || wrapper
+                .children()
+                .any(|child| child != position && (child.is_element() || child.is_text()))
+        {
+            return Err(nested_error());
+        }
+        position = wrapper;
     }
     let mut index = None;
     let mut count = 0;
@@ -264,7 +277,7 @@ fn nested_chunk(
         {
             return Err(nested_error());
         }
-        if child == owner {
+        if child == position {
             index = Some(count);
         }
         count += 1;
@@ -272,6 +285,33 @@ fn nested_chunk(
     Ok(Some(PositionedChunk {
         index: index.ok_or_else(nested_error)?,
         count,
+    }))
+}
+
+fn transparent_wrapper(node: Node<'_, '_>) -> Result<bool, EngineError> {
+    const NEUTRAL_EFFECTS: [(&str, &str); 7] = [
+        ("filter", "none"),
+        ("clip-path", "none"),
+        ("mask", "none"),
+        ("transform", "none"),
+        ("opacity", "1"),
+        ("mix-blend-mode", "normal"),
+        ("isolation", "auto"),
+    ];
+    if !node.has_tag_name((NS, "tspan")) && !node.has_tag_name((NS, "a")) {
+        return Ok(false);
+    }
+    let style = node
+        .attribute("style")
+        .map(svg_declarations)
+        .transpose()?
+        .unwrap_or_default();
+    Ok(NEUTRAL_EFFECTS.iter().all(|&(name, neutral)| {
+        style
+            .get(name)
+            .map(String::as_str)
+            .or_else(|| node.attribute(name))
+            .is_none_or(|value| value == neutral)
     }))
 }
 
@@ -378,11 +418,11 @@ pub(in crate::epub::svg) fn fit_lengths(
             })
             .transpose()?;
         for adjustment in &length.owners {
-            let (chunk, start, owner) = if let Some(origin) = adjustment.chunk {
+            let (chunk, start, scope) = if let Some(origin) = adjustment.chunk {
                 if text.chunks().len() != origin.count {
                     return Err(nested_error());
                 }
-                let owner = positioned_owner(node, origin)?;
+                let positioned = positioned_chunk_node(node, origin)?;
                 let probe = probe_ids
                     .get(&(id, origin.index))
                     .and_then(|id| probes.get(id.as_str()).copied())
@@ -391,7 +431,7 @@ pub(in crate::epub::svg) fn fit_lengths(
                     return Err(nested_error());
                 };
                 let start = spacing::verify_probe(text, origin.index, probe)?;
-                (chunk, Some((start, probe)), owner)
+                (chunk, Some((start, probe)), positioned)
             } else {
                 let [chunk] = text.chunks() else {
                     return Err(unsupported(
@@ -435,7 +475,7 @@ pub(in crate::epub::svg) fn fit_lengths(
                     if leading_dx.is_some() {
                         check.require_order();
                     }
-                    check.apply(source, owner, &mut edits, &mut bytes)?;
+                    check.apply(source, scope, &mut edits, &mut bytes)?;
                     spacing.push(check);
                 }
                 usvg::LengthAdjust::SpacingAndGlyphs => {
@@ -471,7 +511,7 @@ pub(in crate::epub::svg) fn fit_lengths(
     })
 }
 
-fn positioned_owner<'a, 'input>(
+fn positioned_chunk_node<'a, 'input>(
     text: Node<'a, 'input>,
     origin: PositionedChunk,
 ) -> Result<Node<'a, 'input>, EngineError> {
@@ -530,7 +570,7 @@ fn probe_chunks<'a>(
             selected.push((0, text));
         } else {
             for origin in length.owners.iter().filter_map(|owner| owner.chunk) {
-                selected.push((origin.index, positioned_owner(text, origin)?));
+                selected.push((origin.index, positioned_chunk_node(text, origin)?));
             }
         }
         for (index, owner) in selected {

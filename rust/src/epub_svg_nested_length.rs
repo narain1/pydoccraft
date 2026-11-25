@@ -4,10 +4,11 @@ use std::{collections::HashMap, fmt::Write, ops::Range};
 use resvg::usvg;
 use roxmltree::Node;
 
-use super::{length_target, measurement_id, solid_fill, Edit, SpacingCheck, MAX_LENGTH};
+use super::{
+    length_target, measurement_id, solid_fill, transparent_wrapper, Edit, SpacingCheck, MAX_LENGTH,
+};
 use crate::{
     epub::{
-        css::svg_declarations,
         invalid, limited,
         svg::{self, NS},
         unsupported,
@@ -106,34 +107,11 @@ fn enclosing_owner<'a, 'input>(
     owner: Node<'a, 'input>,
     text: Node<'a, 'input>,
 ) -> Result<Node<'a, 'input>, EngineError> {
-    const NEUTRAL_EFFECTS: [(&str, &str); 7] = [
-        ("filter", "none"),
-        ("clip-path", "none"),
-        ("mask", "none"),
-        ("transform", "none"),
-        ("opacity", "1"),
-        ("mix-blend-mode", "normal"),
-        ("isolation", "auto"),
-    ];
     for parent in owner.ancestors().skip(1) {
         if parent == text || parent.has_attribute("textLength") {
             return Ok(parent);
         }
-        if !parent.has_tag_name((NS, "tspan")) && !parent.has_tag_name((NS, "a")) {
-            return Err(error());
-        }
-        let style = parent
-            .attribute("style")
-            .map(svg_declarations)
-            .transpose()?
-            .unwrap_or_default();
-        if NEUTRAL_EFFECTS.iter().any(|&(name, neutral)| {
-            style
-                .get(name)
-                .map(String::as_str)
-                .or_else(|| parent.attribute(name))
-                .is_some_and(|value| value != neutral)
-        }) {
+        if !transparent_wrapper(parent)? {
             return Err(error());
         }
     }

@@ -4242,15 +4242,25 @@ class EpubTests(unittest.TestCase):
         resources = {"OEBPS/variable.ttf": doc_ex.EpubResource("font/ttf", font)}
         fixture = fixed_spread_fixture([("", "white", 340, 112)])
 
-        def svg(*, combined: bool, first: int, second: int) -> str:
+        def svg(*, combined: bool, first: int, second: int, wrapped: bool = False) -> str:
             elements = (
-                f'<tspan x="110" y="38" id="first-owner" textLength="{first}" fill="#a03020">'
+                f'<tspan x="110" y="38" id="first-owner" textLength="{first}" font-size="31" fill="#a03020">'
                 '<a href="https://example.org/first">B́éBé</a></tspan>',
-                f'<tspan x="270" y="68" id="second-owner" textLength="{second}" text-anchor="end" fill="#204090">'
+                f'<tspan x="270" y="68" id="second-owner" textLength="{second}" '
+                'font-size="29" text-anchor="end" fill="#204090">'
                 '<a href="https://example.org/second">BééB</a></tspan>',
                 '<tspan x="152" y="99" textLength="80" style="font-family:sans-serif;fill:#305010">'
                 '<a href="https://example.org/neighbor">Neighbor</a></tspan>',
             )
+            if wrapped:
+                elements = (
+                    '<tspan x="110" y="38" class="voice" fill="#a03020"><a href="https://example.org/first">'
+                    f'<tspan id="first-owner" textLength="{first}">B́éBé</tspan></a></tspan>',
+                    '<tspan x="270" y="68" text-anchor="end"><tspan class="quiet">'
+                    f'<tspan id="second-owner" textLength="{second}" fill="#204090">'
+                    '<a href="https://example.org/second">BééB</a></tspan></tspan></tspan>',
+                    elements[2],
+                )
             text = ("<text>" + "".join(elements) + "</text>" if combined else
                     "".join(f"<text>{element}</text>" for element in elements))
             return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 112">
@@ -4261,6 +4271,7 @@ class EpubTests(unittest.TestCase):
                              font-variation-settings:"wght" 760}}
                 text {{font-family:Layout;font-size:32px;font-optical-sizing:none;text-anchor:middle;
                        transform:translate(7 3)}}
+                .voice {{font-size:31px}} .quiet {{font-size:29px}}
               </style>
               <a href="#first-owner"><rect x="10" y="8" width="7" height="7" fill="green"/></a>
               <a href="#second-owner"><rect x="25" y="8" width="7" height="7" fill="purple"/></a>
@@ -4306,7 +4317,11 @@ class EpubTests(unittest.TestCase):
                 control = render(svg(combined=False, first=94, second=78), inline)
                 combined = render(svg(combined=True, first=94, second=78), inline)
                 self.assertEqual(combined, control)
+                wrapped = render(svg(combined=True, first=94, second=78, wrapped=True), inline)
+                self.assertEqual(wrapped, control)
                 adjusted = render(svg(combined=True, first=80, second=78), inline)
+                wrapped_adjusted = render(svg(combined=True, first=80, second=78, wrapped=True), inline)
+                self.assertEqual(wrapped_adjusted, adjusted)
                 self.assertNotEqual(adjusted[1]["B́éBé"], combined[1]["B́éBé"])
                 for word in ("BééB", "Neighbor"):
                     self.assertEqual(adjusted[1][word], combined[1][word])
@@ -4316,6 +4331,14 @@ class EpubTests(unittest.TestCase):
         unsupported = svg(combined=True, first=94, second=78).replace('x="270" y="68"', 'x="270"')
         with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "independently positioned"):
             render(unsupported, False)
+
+        wrapped = svg(combined=True, first=94, second=78, wrapped=True)
+        for unsupported in (
+            wrapped.replace('class="quiet">', 'class="quiet">X'),
+            wrapped.replace('class="quiet"', 'class="quiet" style="opacity:.5"'),
+        ):
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "independently positioned"):
+                render(unsupported, False)
 
     def test_epub_svg_position_lists_preserve_mixed_face_spacing_and_scaling(self) -> None:
         font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
