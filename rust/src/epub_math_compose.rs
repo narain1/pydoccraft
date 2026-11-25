@@ -142,6 +142,10 @@ impl Extras {
         self.nodes.is_empty()
     }
 
+    pub(super) fn box_count(&self) -> usize {
+        self.nodes.len()
+    }
+
     pub(super) fn remember(&mut self, color: Rgb) {
         self.occupied_colors.insert([color.0, color.1, color.2]);
     }

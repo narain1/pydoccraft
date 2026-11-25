@@ -106,7 +106,8 @@
 - [x] Resolve nested relative MathML widths from definite containing cell tracks, including fixed spans and fitted tracks.
 - [x] Resolve nested MathML relative widths inside a span whose aggregate width is forced by a definite unlabeled parent table, including mixed intrinsic and fitted tracks and grids within editable operands.
 - [x] Pass definite containing widths through vertical-only MathML padding, including inside independently sized grids used as editable equation operands.
-- [ ] Resolve relative widths when equation operands, label-dependent tracks or other intrinsically sized containers acquire an independent width after measurement.
+- [x] Resolve nested relative MathML widths in the sole fitted data track of a definite-width, non-overlap labeled grid with fixed remaining tracks and independent native label equations.
+- [ ] Resolve other relative widths when equation operands, label-dependent tracks or other intrinsically sized containers acquire an independent width after measurement.
 - [x] Draw MathML solid and dashed table rules and frames, respect span interruptions and frame spacing, and preserve standalone rules as editable Word table borders.
 - [x] Preserve tight column spacing in editable DOCX matrix projections and recover their logical rows during extraction.
 - [x] Render native MathML row labels outside auto-width data grids on the authored side, including minimum label spacing, searchable PDF and editable unruled DOCX.

@@ -410,12 +410,11 @@ impl<'a> Output<'a> {
             style.bold = css.base.bold;
             style.italic = css.base.italic;
         }
-        let base_size = self.document.styles.resolve_char(None, style).size;
         super::math::equation(
             source,
             css.as_ref(),
             style,
-            base_size,
+            &self.document,
             width,
             &mut self.math_nodes_remaining,
         )

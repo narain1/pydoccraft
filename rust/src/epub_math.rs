@@ -7,6 +7,7 @@ use wordcraft_doc::{
     math::{self, Arg, ColJc, FracKind, LimLoc, MNode, MRun, MScr, MSty, Math, ScriptKind},
     math_edit::MathPos,
     props::{CharProps, Rgb, TextColor},
+    Document,
 };
 
 use super::{css, invalid, limited, parse_xml, unsupported};
@@ -188,7 +189,7 @@ pub(super) fn equation(
     source: &str,
     stylesheet: Option<&FormulaCss>,
     format: &mut CharProps,
-    base_size: f32,
+    document: &Document,
     line_width: f32,
     remaining: &mut usize,
 ) -> Result<Equation, EngineError> {
@@ -204,7 +205,7 @@ pub(super) fn equation(
     let root_css = stylesheet.and_then(|css| css.nodes.get(&0));
     let viewport = stylesheet.map_or([0.0; 2], |css| css.viewport);
     let style = Presentation {
-        base_size,
+        base_size: document.styles.resolve_char(None, format).size,
         display_style: display,
         ..Default::default()
     }
@@ -216,6 +217,7 @@ pub(super) fn equation(
         format.color = Some(TextColor::Rgb(ink));
     }
     let mut projection = Projection {
+        document,
         root: style,
         root_id: root.id().get(),
         stylesheet,
@@ -353,6 +355,7 @@ fn checked_size(size: Option<f32>) -> Result<f32, EngineError> {
 }
 
 struct Projection<'a, 'xml> {
+    document: &'a Document,
     root: Presentation<'xml>,
     root_id: u32,
     stylesheet: Option<&'a FormulaCss>,

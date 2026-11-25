@@ -11304,6 +11304,97 @@ Trailing
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "labeled contents exceed the authored"):
                     operation()
 
+    def test_mathml_nested_relative_width_uses_a_labeled_fitted_track(self) -> None:
+        source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Relative MathML width in a labeled fit track</title>
+            <meta name="viewport" content="width=500,height=330"/>
+            <style>body {margin:0} .wide {font-size:16pt}</style>
+          </head><body><p><m:math mathsize="12pt">
+            <m:mtable width="320pt" columnwidth="42pt fit" columnspacing="8pt"
+                side="right" minlabelspacing="6pt" columnalign="left">
+              <m:mlabeledtr>
+                <m:mtd><m:mtext>Tiny</m:mtext></m:mtd><m:mtd><m:mtext>Guard</m:mtext></m:mtd>
+                <m:mtd><m:mrow><m:mtable width="INNER" columnwidth="50% fit" columnspacing="4pt" columnalign="left">
+                  <m:mtr><m:mtd><m:mtext>Near</m:mtext></m:mtd><m:mtd><m:mtext>Far</m:mtext></m:mtd></m:mtr>
+                </m:mtable><m:mtext>Tail</m:mtext></m:mrow></m:mtd>
+              </m:mlabeledtr>
+              <m:mlabeledtr>
+                <m:mtd><m:mtext class="wide">NorthTag</m:mtext></m:mtd>
+                <m:mtd><m:mtext>Below</m:mtext></m:mtd><m:mtd><m:mtext>Center</m:mtext></m:mtd>
+              </m:mlabeledtr>
+            </m:mtable>
+          </m:math></p></body></html>"""
+        terms = ("Tiny", "NorthTag", "Guard", "Below", "Center", "Near", "Far", "Tail")
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+        fixture = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 500, 330)])
+
+        def boxes(doc: doc_ex.Document) -> dict[str, tuple[float, float, float, float]]:
+            matches = {}
+            for term in terms:
+                matches[term], = doc[0].search_for(term)
+            return matches
+
+        # Measure the author-styled label on an independent absolute control.
+        # Both label margins must reserve the widest label and its 6pt gap.
+        probe = source.replace("INNER", "68pt")
+        with doc_ex.open(epub_fixture(chapter_one=probe)) as book, doc_ex.open(book.convert("pdf")) as pdf:
+            label = boxes(pdf)["NorthTag"]
+        fitted = 320 - 42 - 8 - 2 * (label[2] - label[0] + 6)
+        inner = fitted / 2
+        self.assertGreater(inner, 45)
+        samples = []
+        for width in (f"{inner:.6f}pt", "50%"):
+            chapter = source.replace("INNER", width)
+            with self.subTest(width=width), doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+                preview = book.render_page(0, dpi=96)
+                with doc_ex.open(book.convert("pdf")) as pdf:
+                    vector = boxes(pdf)
+                    self.assertFalse(pdf[0].get_images())
+                    self.assertAlmostEqual(vector["Far"][0] - vector["Near"][0], inner / 2 + 4, delta=0.002)
+                    self.assertAlmostEqual(vector["Tail"][0] - vector["Near"][0], inner, delta=0.002)
+                editable = book.convert("docx")
+                with zipfile.ZipFile(io.BytesIO(editable)) as archive:
+                    xml = ET.fromstring(archive.read("word/document.xml"))
+                matrix = xml.find(".//m:oMath//m:m", ns)
+                self.assertIsNotNone(matrix)
+                self.assertIsNotNone(matrix.find(".//m:m", ns))
+                tokens = [run.text for run in matrix.findall(".//m:t", ns)]
+                for term in terms:
+                    self.assertEqual(tokens.count(term), 1)
+                with doc_ex.open(editable) as word, doc_ex.open(word.convert("pdf")) as pdf:
+                    native = boxes(pdf)
+                    for term in terms:
+                        self.assertEqual(word[0].get_text().count(term), 1)
+                        for expected, actual in zip(vector[term], native[term]):
+                            self.assertAlmostEqual(expected, actual, delta=0.35)
+            with doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": chapter})) as book:
+                fixed = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                    self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), fixed)
+                    fixed_vector = boxes(pdf)
+            samples.append((preview, vector, native, fixed, fixed_vector))
+
+        self.assertEqual(samples[0][0], samples[1][0])
+        self.assertEqual(samples[0][3], samples[1][3])
+        for index in (1, 2, 4):
+            for term in terms:
+                for expected, actual in zip(samples[0][index][term], samples[1][index][term]):
+                    self.assertAlmostEqual(expected, actual, delta=0.002)
+
+        relative = source.replace("INNER", "50%")
+        for chapter, message in (
+            (relative.replace(' width="320pt"', "", 1), "column widths require a definite table width"),
+            (relative.replace('columnwidth="42pt fit"', 'columnwidth="auto fit"'), "definite containing line width"),
+            (relative.replace('side="right"', 'side="rightoverlap"'), "definite containing line width"),
+            (relative.replace('<m:mtext>Tiny</m:mtext>',
+                              '<m:mpadded height="+3pt"><m:mtext>Tiny</m:mtext></m:mpadded>'),
+             "independently measurable native labels"),
+        ):
+            with self.subTest(message=message), doc_ex.open(epub_fixture(chapter_one=chapter)) as book:
+                for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
+                        operation()
+
     def test_mathml_ruled_overlap_labels_stay_outside_the_native_frame(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Ruled overflow labels</title><meta name="viewport" content="width=500,height=340"/>

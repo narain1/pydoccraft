@@ -397,139 +397,189 @@ pub(super) fn project<'xml>(
         em,
         enclosing_em,
     };
-    // A labeled grid's free space depends on the measured label. Its
-    // authored fixed tracks remain available for nested relative widths.
-    let track_total = if grid.labels.is_some() {
-        None
-    } else {
-        grid.declared_track_width(0.0)?
+    // Measure labels only when a nested table needs the independently
+    // resolvable fitted width. All other grids keep their normal projection.
+    let measured_fit = grid.labeled_fit_column().filter(|&column| {
+        placements
+            .iter()
+            .any(|cell| cell.columns.contains(&column) && has_relative_widths(cell.node))
+    });
+    let mut measured_labels = Vec::new();
+    let track_total = match &grid.labels {
+        Some(labels) if measured_fit.is_some() => {
+            let measurements = compose::Measurements::default();
+            let mut label_width = 0.0f32;
+            for cell in placements.iter().filter(|cell| cell.columns.is_empty()) {
+                let prior_boxes = projection.extras.box_count();
+                let label = project_cell(projection, table, depth, cell, None)?;
+                let CellContent::Equation(math) = &label.content else {
+                    return Err(unsupported(
+                        "MathML fitted track width requires independently measurable native labels",
+                    ));
+                };
+                if projection.extras.box_count() != prior_boxes {
+                    return Err(unsupported(
+                        "MathML fitted track width requires independently measurable native labels",
+                    ));
+                }
+                if !math.nodes.is_empty() {
+                    // Label cells carry no alignment groups. The final table
+                    // uses the same document styles to resolve their metrics.
+                    let resolved = projection.document.styles.resolve_char(None, &label.format);
+                    let layout = measurements.layout(math, "", &resolved, false, MAX_DIMENSION)?;
+                    label_width = label_width.max(layout.width);
+                }
+                measured_labels.push(label);
+            }
+            grid.declared_track_width(label_width + labels.gap)?
+        }
+        Some(_) => None,
+        None => grid.declared_track_width(0.0)?,
     };
     let definite_columns = grid.definite_columns(track_total)?;
+    let mut measured_labels = measured_labels.into_iter();
     for cell in placements {
+        if cell.columns.is_empty() {
+            if let Some(label) = measured_labels.next() {
+                grid.cells.push(label);
+                continue;
+            }
+        }
         let content_width = grid.cell_width(&cell.columns, &definite_columns, track_total)?;
-        let (content, anchor) =
-            projection.with_cell_width(cell.node, content_width, |projection| {
-                let cell_depth = depth + 2;
-                let groups = cell
-                    .marker
-                    .map(|marker| {
-                        let row = cell
-                            .node
-                            .parent_element()
-                            .ok_or_else(|| invalid("missing MathML row"))?;
-                        Groups::read(
-                            table,
-                            row,
-                            cell.node,
-                            marker,
-                            cell.columns.start,
-                            cell_depth,
-                            *projection.remaining,
-                        )
-                    })
-                    .transpose()?;
-                let group = match groups {
-                    Some(Groups::Multiple(parts)) => {
-                        // Wrapper styles stay active when an alignment boundary
-                        // passes through their inferred rows.
-                        let mut styles = vec![cell.style];
-                        let mut aligned = Vec::with_capacity(parts.len());
-                        for part in parts {
-                            let (nodes, mut caret) = projection.with_alignment_group(
-                                Some(part.group.scope.clone()),
-                                |projection| {
-                                    let mut nodes = Arg::new();
-                                    for item in part.items {
-                                        let style = styles.last().copied().ok_or_else(|| {
-                                            invalid("missing MathML wrapper style")
-                                        })?;
-                                        let depth = cell_depth + styles.len();
-                                        match item {
-                                            GroupItem::Enter(wrapper) => {
-                                                if wrapper.attribute("dir").map(str::trim)
-                                                    == Some("rtl")
-                                                {
-                                                    return Err(unsupported(
-                                                        "right-to-left MathML alignment groups",
-                                                    ));
-                                                }
-                                                projection.charge(depth)?;
-                                                styles.push(projection.style(wrapper, style)?);
-                                            }
-                                            GroupItem::Leave => {
-                                                styles.pop();
-                                            }
-                                            GroupItem::Element(node) => {
-                                                projection.append_element(
-                                                    &mut nodes, node, depth, style,
-                                                )?;
-                                            }
-                                        }
-                                    }
-                                    Ok(nodes)
-                                },
-                            )?;
-                            aligned.push(AlignedEquation {
-                                math: Math {
-                                    nodes: alignment::merge_aligned_runs(
-                                        nodes,
-                                        caret
-                                            .as_mut()
-                                            .map_or(&mut [], |pos| pos.path.as_mut_slice()),
-                                    )?,
-                                    ..Default::default()
-                                },
-                                anchor: part.group.resolve(caret)?,
-                            });
-                        }
-                        alignment::check_boundaries(aligned.iter().map(|group| &group.math))?;
-                        return Ok((CellContent::Aligned(aligned), None));
-                    }
-                    Some(Groups::Single(group)) => Some(group),
-                    None => {
-                        if let Some(table) =
-                            project_group(projection, cell.node, depth + 2, cell.style)?
-                        {
-                            return Ok((CellContent::Table(table), None));
-                        }
-                        None
-                    }
-                };
-                let (nodes, mut caret) = projection.with_alignment_group(
-                    group.as_ref().map(|group| group.scope.clone()),
-                    |projection| projection.elements(cell.node, depth + 2, cell.style),
-                )?;
-                let nodes = alignment::merge_aligned_runs(
-                    nodes,
-                    caret
-                        .as_mut()
-                        .map_or(&mut [], |pos| pos.path.as_mut_slice()),
-                )?;
-                let anchor = group.map(|group| group.resolve(caret)).transpose()?;
-                Ok((
-                    CellContent::Equation(Math {
-                        nodes,
-                        ..Default::default()
-                    }),
-                    anchor,
-                ))
-            })?;
-        grid.cells.push(Cell {
-            rows: cell.rows,
-            columns: cell.columns,
-            horizontal: cell.horizontal,
-            vertical: cell.vertical,
-            label_above: cell.label_above,
-            anchor,
-            content,
-            format: CharProps {
-                size: Some(cell.style.font_size()),
-                color: cell.style.ink.map(TextColor::Rgb),
-                ..Default::default()
-            },
-        });
+        grid.cells.push(project_cell(
+            projection,
+            table,
+            depth,
+            &cell,
+            content_width,
+        )?);
     }
     Ok(grid)
+}
+
+fn project_cell<'xml>(
+    projection: &mut Projection<'_, 'xml>,
+    table: Node<'xml, '_>,
+    depth: usize,
+    cell: &CellPlacement<'xml, '_>,
+    content_width: Option<f32>,
+) -> Result<Cell, EngineError> {
+    let (content, anchor) = projection.with_cell_width(cell.node, content_width, |projection| {
+        let cell_depth = depth + 2;
+        let groups = cell
+            .marker
+            .map(|marker| {
+                let row = cell
+                    .node
+                    .parent_element()
+                    .ok_or_else(|| invalid("missing MathML row"))?;
+                Groups::read(
+                    table,
+                    row,
+                    cell.node,
+                    marker,
+                    cell.columns.start,
+                    cell_depth,
+                    *projection.remaining,
+                )
+            })
+            .transpose()?;
+        let group = match groups {
+            Some(Groups::Multiple(parts)) => {
+                // Wrapper styles stay active when an alignment boundary
+                // passes through their inferred rows.
+                let mut styles = vec![cell.style];
+                let mut aligned = Vec::with_capacity(parts.len());
+                for part in parts {
+                    let (nodes, mut caret) = projection.with_alignment_group(
+                        Some(part.group.scope.clone()),
+                        |projection| {
+                            let mut nodes = Arg::new();
+                            for item in part.items {
+                                let style = styles
+                                    .last()
+                                    .copied()
+                                    .ok_or_else(|| invalid("missing MathML wrapper style"))?;
+                                let depth = cell_depth + styles.len();
+                                match item {
+                                    GroupItem::Enter(wrapper) => {
+                                        if wrapper.attribute("dir").map(str::trim) == Some("rtl") {
+                                            return Err(unsupported(
+                                                "right-to-left MathML alignment groups",
+                                            ));
+                                        }
+                                        projection.charge(depth)?;
+                                        styles.push(projection.style(wrapper, style)?);
+                                    }
+                                    GroupItem::Leave => {
+                                        styles.pop();
+                                    }
+                                    GroupItem::Element(node) => {
+                                        projection
+                                            .append_element(&mut nodes, node, depth, style)?;
+                                    }
+                                }
+                            }
+                            Ok(nodes)
+                        },
+                    )?;
+                    aligned.push(AlignedEquation {
+                        math: Math {
+                            nodes: alignment::merge_aligned_runs(
+                                nodes,
+                                caret
+                                    .as_mut()
+                                    .map_or(&mut [], |pos| pos.path.as_mut_slice()),
+                            )?,
+                            ..Default::default()
+                        },
+                        anchor: part.group.resolve(caret)?,
+                    });
+                }
+                alignment::check_boundaries(aligned.iter().map(|group| &group.math))?;
+                return Ok((CellContent::Aligned(aligned), None));
+            }
+            Some(Groups::Single(group)) => Some(group),
+            None => {
+                if let Some(table) = project_group(projection, cell.node, depth + 2, cell.style)? {
+                    return Ok((CellContent::Table(table), None));
+                }
+                None
+            }
+        };
+        let (nodes, mut caret) = projection.with_alignment_group(
+            group.as_ref().map(|group| group.scope.clone()),
+            |projection| projection.elements(cell.node, depth + 2, cell.style),
+        )?;
+        let nodes = alignment::merge_aligned_runs(
+            nodes,
+            caret
+                .as_mut()
+                .map_or(&mut [], |pos| pos.path.as_mut_slice()),
+        )?;
+        let anchor = group.map(|group| group.resolve(caret)).transpose()?;
+        Ok((
+            CellContent::Equation(Math {
+                nodes,
+                ..Default::default()
+            }),
+            anchor,
+        ))
+    })?;
+    Ok(Cell {
+        rows: cell.rows.clone(),
+        columns: cell.columns.clone(),
+        horizontal: cell.horizontal,
+        vertical: cell.vertical,
+        label_above: cell.label_above,
+        anchor,
+        content,
+        format: CharProps {
+            size: Some(cell.style.font_size()),
+            color: cell.style.ink.map(TextColor::Rgb),
+            ..Default::default()
+        },
+    })
 }
 
 fn table_alignment(
@@ -898,6 +948,22 @@ impl Table {
             }
         }
         Ok(())
+    }
+
+    fn labeled_fit_column(&self) -> Option<usize> {
+        let labels = self.labels.as_ref()?;
+        if labels.overlap || self.equal_columns || self.width.is_none() {
+            return None;
+        }
+        let fit = self
+            .column_widths
+            .iter()
+            .position(|width| *width == ColumnWidth::Fit)?;
+        self.column_widths
+            .iter()
+            .enumerate()
+            .all(|(column, width)| column == fit || width.fixed().is_some())
+            .then_some(fit)
     }
 
     fn declared_track_width(&self, label_inset: f32) -> Result<Option<f32>, EngineError> {
