@@ -733,6 +733,77 @@ class EpubTests(unittest.TestCase):
                     self.assertEqual(len(result[index].get_images()), 1)
                     self.assertEqual(result[index].get_text().strip(), "")
 
+    def test_fixed_layout_pdf_preserves_nested_navigation_after_page_selection(self) -> None:
+        source = fixed_spread_fixture([("", "white", 160, 100)] * 3)
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            package = archive.read("OEBPS/content.opf")
+        package = package.replace(b'href="s1.xhtml" media-type="application/xhtml+xml"',
+                                  b'href="s1.svg" media-type="image/svg+xml"')
+        xhtml = """<html xmlns="http://www.w3.org/1999/xhtml"><head>
+        <title>First</title><meta name="viewport" content="width=160,height=100"/>
+        <style>body { margin: 0 } h1 { position: absolute; left: 16px; top: 32px;
+        margin: 0; color: #124578; font-size: 18px }</style>
+        </head><body><h1 id="café">Chapter</h1></body></html>"""
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 20 160 100">
+        <g transform="translate(10 20)"><rect id="plate" x="24" y="16" width="40"
+        height="32" fill="#bb1256"/></g></svg>"""
+        navigation = """<html xmlns="http://www.w3.org/1999/xhtml"
+            xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head>
+            <body><nav epub:type="toc landmarks"><ol>
+              <li><span>Part one</span><ol>
+                <li><a href="s0.xhtml#caf%C3%A9">Café</a></li>
+                <li><a href="s2.xhtml">Omitted</a></li>
+                <li><a href="s1.svg#plate">Plate</a></li>
+              </ol></li>
+              <li><a href="s1.svg">Whole plate</a></li>
+            </ol></nav></body></html>"""
+        ncx_items = """<navPoint id="part"><navLabel><text>Part one</text></navLabel>
+            <content src="s0.xhtml#caf%C3%A9"/>
+            <navPoint id="cafe"><navLabel><text>Café</text></navLabel><content src="s0.xhtml#caf%C3%A9"/></navPoint>
+            <navPoint id="omit"><navLabel><text>Omitted</text></navLabel><content src="s2.xhtml"/></navPoint>
+            <navPoint id="plate"><navLabel><text>Plate</text></navLabel><content src="s1.svg#plate"/></navPoint>
+            </navPoint>
+            <navPoint id="whole"><navLabel><text>Whole plate</text></navLabel><content src="s1.svg"/></navPoint>"""
+        for version in ("2", "3"):
+            with self.subTest(version=version):
+                if version == "3":
+                    opf = package.replace(
+                        b"</manifest>",
+                        b'<item id="nav" href="toc.xhtml" properties="nav" media-type="application/xhtml+xml"/></manifest>',
+                    )
+                    files = {"OEBPS/toc.xhtml": navigation}
+                else:
+                    opf = package.replace(b'version="3.0"', b'version="2.0"').replace(
+                        b'<spine page-progression-direction="ltr">', b'<spine toc="ncx">',
+                    ).replace(
+                        b"</manifest>", b'<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/></manifest>',
+                    )
+                    files = {"OEBPS/toc.ncx": f'<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"><navMap>{ncx_items}</navMap></ncx>'}
+                data = rewrite_epub(source, {
+                    **files, "OEBPS/content.opf": opf, "OEBPS/s0.xhtml": xhtml, "OEBPS/s1.svg": svg,
+                })
+                with doc_ex.open(data) as book:
+                    selection = [1, 0, 1]
+                    pdf = book.export_epub_fixed_pdf(dpi=96, pages=selection)
+                    previews = [rgba_pixels(png_chunks(book.render_page(index, dpi=96))) for index in selection]
+                    omitted_pdf = book.export_epub_fixed_pdf(dpi=96, pages=[1])
+                with doc_ex.open(pdf) as result, result.edit() as editor:
+                    bookmarks = editor.bookmarks
+                    self.assertEqual([(entry.title, entry.page) for entry in bookmarks],
+                                     [("Part one", 1), ("Whole plate", 0)])
+                    self.assertEqual([(entry.title, entry.page) for entry in bookmarks[0].children],
+                                     [("Café", 1), ("Plate", 0)])
+                    for index, preview in enumerate(previews):
+                        self.assertEqual(rgba_pixels(png_chunks(result.render_page(index, dpi=96))), preview)
+                    readable_pdf = editor.to_bytes(object_streams=False)
+                with doc_ex.open(omitted_pdf) as result, result.edit() as editor:
+                    self.assertEqual([(entry.title, entry.page) for entry in editor.bookmarks],
+                                     [("Part one", 0), ("Whole plate", 0)])
+                    self.assertEqual([(entry.title, entry.page) for entry in editor.bookmarks[0].children],
+                                     [("Plate", 0)])
+                self.assertRegex(readable_pdf, rb'/XYZ\s+12(?:\.0+)?\s+51(?:\.0+)?\s+null')
+                self.assertRegex(readable_pdf, rb'/XYZ\s+18(?:\.0+)?\s+63(?:\.0+)?\s+null')
+
     def test_fixed_layout_uses_viewport_and_local_stylesheet_cascade(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head>
         <meta name="viewport" content="width=320, height=240"/>

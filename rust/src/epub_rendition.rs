@@ -1,5 +1,22 @@
 //! Compose EPUB viewports on a common pixel grid and export fixed pages.
+use std::collections::HashMap;
+
 use serde_json::Value;
+use wordcraft_geom::Rect;
+
+#[cfg(feature = "python")]
+#[path = "epub_rendition/navigation.rs"]
+mod navigation;
+
+pub(super) type Anchors<'a> = HashMap<&'a str, Option<[f32; 2]>>;
+
+pub(super) fn anchor_position(rect: Rect, clip: Rect) -> Option<[f32; 2]> {
+    let left = rect.x.max(clip.x);
+    let top = rect.y.max(clip.y);
+    let right = rect.right().min(clip.right());
+    let bottom = rect.bottom().min(clip.bottom());
+    (clip.w > 0.0 && clip.h > 0.0 && left <= right && top <= bottom).then_some([left, top])
+}
 #[cfg(feature = "python")]
 use wordcraft_render::Rendered;
 
@@ -266,7 +283,6 @@ pub(super) fn export_pdf(
     pages: Option<&[usize]>,
 ) -> Result<Vec<u8>, EngineError> {
     use wordcraft_doc::StoryRef;
-    use wordcraft_geom::Rect;
     use wordcraft_layout::{DocLayout, Page, Placed};
 
     rendering::validate_dpi(dpi)?;
@@ -293,11 +309,12 @@ pub(super) fn export_pdf(
             "visual PDF export requires fixed-layout spine entries",
         ));
     }
+    let mut navigation = navigation::Navigation::new(book, &selected)?;
     let mut document = super::output::Output::new(data, book, false, dpi).document;
     let mut pdf_layout = DocLayout::default();
     let mut rendered_pixels = 0;
     let mut embedded_bytes = 0;
-    for page in selected {
+    for (index, page) in selected.into_iter().enumerate() {
         let [w, h] = viewport(page)?;
         // WordCraft's writer clamps sizes outside this range. Reject those
         // sizes here so the exported MediaBox and viewport remain identical.
@@ -316,7 +333,16 @@ pub(super) fn export_pdf(
             64_000_000,
             "fixed-layout PDF exceeds 64 megapixels",
         )?;
-        let image = render_fixed(data, book, page, dpi, Region::Viewport(None))?;
+        let image = layout::render_with_anchors(
+            data,
+            book,
+            page,
+            dpi,
+            Region::Viewport(None),
+            navigation.anchors(index, page),
+        )?
+        .ok_or_else(|| invalid("fixed-layout preview has no raster"))?;
+        rendering::validate_rgba(image.width, image.height, &image.pixels)?;
         let png = rendering::encode_png(image.width, image.height, &image.pixels, dpi)?;
         charge(
             &mut embedded_bytes,
@@ -352,6 +378,7 @@ pub(super) fn export_pdf(
     .map_err(|error| {
         EngineError::Conversion(format!("EPUB fixed-layout PDF export failed: {error}"))
     })?;
+    let pdf = navigation.attach(pdf)?;
     crate::limits::validate_input_size(pdf.len())?;
     Ok(pdf)
 }

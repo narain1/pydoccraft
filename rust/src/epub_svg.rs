@@ -136,19 +136,52 @@ pub(super) fn viewport(root: Node<'_, '_>) -> Option<[f32; 2]> {
 
 pub(super) fn render(
     root: Node<'_, '_>,
-    source: &[u8],
     base: &str,
     book: &mut Book<'_>,
     fixed: bool,
     dpi: f64,
     region: Region,
+    anchors: Option<&mut super::rendition::Anchors<'_>>,
 ) -> Result<wordcraft_render::Rendered, EngineError> {
     let viewport = viewport(root);
     if fixed && viewport.is_none() {
         return Err(unsupported("fixed-layout SVG requires a numeric viewBox"));
     }
-    let tree = parse(root, source, base, book, viewport)?;
+    let tree = parse(
+        root,
+        root.document().input_text().as_bytes(),
+        base,
+        book,
+        viewport,
+    )?;
     let [w, h] = viewport.unwrap_or([tree.size().width() * 0.75, tree.size().height() * 0.75]);
+    if let Some(anchors) = anchors {
+        let clip = wordcraft_geom::Rect::new(0.0, 0.0, w, h);
+        let scale = [w / tree.size().width(), h / tree.size().height()];
+        let mut stack = vec![tree.root().children().iter()];
+        while let Some(children) = stack.last_mut() {
+            if let Some(node) = children.next() {
+                if let Some(position) = anchors.get_mut(node.id()) {
+                    if position.is_none() {
+                        if let Some(rect) = node.abs_bounding_box() {
+                            let geometry = wordcraft_geom::Rect::new(
+                                rect.x() * scale[0],
+                                rect.y() * scale[1],
+                                rect.width() * scale[0],
+                                rect.height() * scale[1],
+                            );
+                            *position = super::rendition::anchor_position(geometry, clip);
+                        }
+                    }
+                }
+                if let usvg::Node::Group(group) = node {
+                    stack.push(group.children().iter());
+                }
+            } else {
+                stack.pop();
+            }
+        }
+    }
     let scale = dpi / 72.0;
     let region = region.for_page([f64::from(w), f64::from(h)], dpi)?;
     let mut image = tiny_skia::Pixmap::new(region.width, region.height)

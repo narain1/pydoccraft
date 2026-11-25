@@ -673,7 +673,7 @@ class Document:
         )))
 
     def export_epub_fixed_pdf(self, *, dpi: float = 144, pages: Iterable[int] | None = None) -> bytes:
-        """Export selected fixed-layout spine pages as full-page images in a PDF."""
+        """Export fixed-layout spine pages as full-page PDF images with EPUB bookmarks."""
         self._ensure_open()
         if self._filetype != "epub":
             from .errors import UnsupportedFormatError

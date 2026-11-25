@@ -20,7 +20,10 @@
 - [x] Render local CSS font faces, IDPF-obfuscated fonts, and static SVG embedded in XHTML. Preserve inline equations, images and table spans with packaged fonts. Rasterize static SVG in semantic export.
 - [x] Render SVG CSS, packaged SVG fonts, and referenced PNG and JPEG resources in spine previews, XHTML and semantic export.
 - [x] Render fixed-layout spreads in both reading directions, honor spine placement and orientation-dependent spread rules, and clip across page boundaries.
-- [x] Export selected fixed-layout viewports as image-only PDF pages at their original sizes.
+- [x] Export selected fixed-layout viewports as raster PDF pages at their original sizes.
+- [x] Preserve nested EPUB navigation in fixed-layout PDF outlines, with destinations remapped to the exported page order.
+- [ ] Preserve clickable links and fragment destinations using the visible fixed-layout geometry.
+- [ ] Preserve searchable text in fixed-layout PDF export.
 - [x] Scope packaged XHTML font faces using CSS Unicode ranges, overlap order and glyph fallback.
 - [x] Preserve ordered XHTML font-family stacks across inherited and inline styles, including packaged and generic fallbacks.
 - [x] Shape variable-font glyphs with inherited CSS axis values and optical sizing in XHTML previews, and pass the properties to the static SVG renderer.
@@ -29,7 +32,7 @@
 - [x] Render bounded same-document SVG use references, including nested instances and symbols, in fixed-layout and inline content.
 - [x] Render SVG gradient templates and bounded Gaussian blur in fixed-layout previews, visual PDF and rasterized inline SVG exports.
 - [x] Apply Unicode ranges and ordered font fallback to static SVG text, including inherited lists and matching in reopened exports.
-- [ ] Extend source CSS and fixed-layout fidelity, including XHTML oblique face ranges, SVG variable face ranges and defaults, additional SVG effects, complex SVG text fallback and semantic fixed-layout conversion.
+- [ ] Extend source CSS and fixed-layout fidelity, including XHTML oblique face ranges, SVG variable face ranges and defaults, additional SVG effects, and complex SVG text fallback.
 - [x] Track chapter box styles separately from equation styles and index CSS rules by subject while preserving cascade order.
 - [x] Render tall reflowable chapters within the paint coordinate budget and apply raster limits to the requested DPI and clip.
 - [x] Project inherited MathML attributes, accents, movable limits, repeated script pairs, varied fences and separators, horizontal spaces, and zero-dimension padding.

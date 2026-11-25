@@ -42,6 +42,17 @@ pub(super) fn render(
     dpi: f64,
     region: Region,
 ) -> Result<Option<wordcraft_render::Rendered>, EngineError> {
+    render_with_anchors(data, book, page, dpi, region, None)
+}
+
+pub(super) fn render_with_anchors(
+    data: &[u8],
+    book: &DocumentPayload,
+    page: &PagePayload,
+    dpi: f64,
+    region: Region,
+    anchors: Option<&mut super::rendition::Anchors<'_>>,
+) -> Result<Option<wordcraft_render::Rendered>, EngineError> {
     let fixed = fixed(page);
     rendering::validate_dpi(dpi)?;
     let path = page
@@ -54,7 +65,7 @@ pub(super) fn render(
     let doc = parse_xml(&source)?;
     let root = doc.root_element();
     if root.has_tag_name((super::svg::NS, "svg")) {
-        return super::svg::render(root, &source, path, &mut archive, fixed, dpi, region).map(Some);
+        return super::svg::render(root, path, &mut archive, fixed, dpi, region, anchors).map(Some);
     }
     let body = child(root, XHTML, "body").ok_or_else(|| invalid("XHTML chapter has no body"))?;
     let viewport = if fixed {
@@ -114,17 +125,10 @@ pub(super) fn render(
         .background
         .filter(|(_, alpha)| *alpha > 0.0);
     let paper = html_color.or(styles.boxes[&body.id()].background);
+    let viewport = Rect::new(0.0, 0.0, dimension[0], dimension[1]);
     let mut drawing = Vec::new();
-    fill(
-        &mut drawing,
-        Rect::new(0.0, 0.0, dimension[0], dimension[1]),
-        Some((Rgb::WHITE, 1.0)),
-    );
-    fill(
-        &mut drawing,
-        Rect::new(0.0, 0.0, dimension[0], dimension[1]),
-        paper,
-    );
+    fill(&mut drawing, viewport, Some((Rgb::WHITE, 1.0)));
+    fill(&mut drawing, viewport, paper);
     // The HTML canvas background is propagated from the root, or from body when the root has none.
     // Suppress its box fill so translucent page colors are composited once.
     let canvas_source = if html_color.is_some() {
@@ -132,11 +136,32 @@ pub(super) fn render(
     } else {
         body.id()
     };
+    let mut positions = PaintPositions {
+        origins: HashMap::new(),
+        anchors: HashMap::new(),
+        found: anchors,
+    };
+    if let Some(anchors) = positions.found.as_ref() {
+        for node in root.descendants().filter(Node::is_element) {
+            let Some(id) = node.attribute("id") else {
+                continue;
+            };
+            if anchors.contains_key(id)
+                && styles
+                    .boxes
+                    .get(&node.id())
+                    .is_some_and(|style| !style.hidden)
+            {
+                positions.anchors.insert(node.id(), id);
+            }
+        }
+    }
     layout.paint(
         root_id,
         [0.0, 0.0],
         canvas_source,
-        &mut HashMap::new(),
+        viewport,
+        &mut positions,
         &mut drawing,
     )?;
     raster(&layout.output.document, &drawing, dpi, region).map(Some)
@@ -230,6 +255,12 @@ struct Layout<'book> {
     measure_count: usize,
     glyph_paths_remaining: usize,
     fonts: Option<Fonts>,
+}
+
+struct PaintPositions<'doc, 'out, 'key> {
+    origins: HashMap<NodeId, [f32; 2]>,
+    anchors: HashMap<roxmltree::NodeId, &'doc str>,
+    found: Option<&'out mut super::rendition::Anchors<'key>>,
 }
 
 struct PaintBox {
@@ -640,17 +671,18 @@ impl<'book> Layout<'book> {
         index: usize,
         origin: [f32; 2],
         canvas_source: roxmltree::NodeId,
-        positioned_origins: &mut HashMap<NodeId, [f32; 2]>,
+        clip: Rect,
+        positions: &mut PaintPositions<'_, '_, '_>,
         output: &mut Vec<Draw>,
     ) -> Result<(), EngineError> {
         let node = &self.boxes[index];
         let layout = *self.tree.layout(node.id).map_err(failure)?;
-        let origin = positioned_origins.remove(&node.id).unwrap_or(origin);
+        let origin = positions.origins.remove(&node.id).unwrap_or(origin);
         let [x, y] = [origin[0] + layout.location.x, origin[1] + layout.location.y];
         // Taffy reports out-of-flow locations relative to their containing
         // block. Paint in DOM order but use that block's geometry.
         for &child in self.tree.hoisted_children(node.id).map_err(failure)? {
-            positioned_origins.insert(child, [x, y]);
+            positions.origins.insert(child, [x, y]);
         }
         let rectangle = Rect::new(x, y, layout.size.width, layout.size.height);
         if ![x, y, rectangle.w, rectangle.h]
@@ -658,6 +690,17 @@ impl<'book> Layout<'book> {
             .all(|n| n.is_finite() && n.abs() <= MAX_PAINT_COORDINATE)
         {
             return Err(limited("EPUB box geometry exceeds renderer limits"));
+        }
+        if !node.invisible {
+            if let Some(position) = node
+                .dom
+                .and_then(|dom| positions.anchors.get(&dom))
+                .and_then(|id| positions.found.as_mut()?.get_mut(*id))
+            {
+                if position.is_none() {
+                    *position = super::rendition::anchor_position(rectangle, clip);
+                }
+            }
         }
         let border = layout.border;
         let padding = layout.padding;
@@ -728,19 +771,37 @@ impl<'book> Layout<'book> {
                 _ => {}
             }
         }
-        let clip = node.clip_overflow;
-        let mut children = node.children.clone();
-        children.sort_by_key(|&child| self.boxes[child].z_index);
-        for child in children {
-            self.paint(child, [x, y], canvas_source, positioned_origins, &mut inner)?;
-        }
-        if clip && !inner.is_empty() {
-            let rect = Rect::new(
+        let overflow = node.clip_overflow.then(|| {
+            Rect::new(
                 x + border.left,
                 y + border.top,
                 (rectangle.w - border.left - border.right).max(0.0),
                 (rectangle.h - border.top - border.bottom).max(0.0),
-            );
+            )
+        });
+        let child_clip = overflow.map_or(clip, |rect| {
+            let x = rect.x.max(clip.x);
+            let y = rect.y.max(clip.y);
+            Rect::new(
+                x,
+                y,
+                rect.right().min(clip.right()) - x,
+                rect.bottom().min(clip.bottom()) - y,
+            )
+        });
+        let mut children = node.children.clone();
+        children.sort_by_key(|&child| self.boxes[child].z_index);
+        for child in children {
+            self.paint(
+                child,
+                [x, y],
+                canvas_source,
+                child_clip,
+                positions,
+                &mut inner,
+            )?;
+        }
+        if let Some(rect) = overflow.filter(|_| !inner.is_empty()) {
             output.push(Draw::Clip { rect, items: inner });
         } else {
             output.extend(inner);
