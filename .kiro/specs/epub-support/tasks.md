@@ -18,6 +18,7 @@
 - [x] Insert fixed-layout SVG spine chapters with packaged dependencies and optional media overlays in the same edit.
 - [x] Synchronize EPUB 3 `mathml` and `svg` resource properties after chapter insertion or replacement.
 - [x] Read SMIL timing trees and expose chapter cue order, time ranges, target IDs and bounded audio reads.
+- [x] Convert SMIL clock forms exactly to microseconds for exposed cues, narration PCM and staged package durations.
 - [x] Project supported Presentation MathML into native equations for PNG, DOCX and PDF.
 - [x] Apply local author styles for the supported cascade and layout properties. Render fixed-layout XHTML and static SVG chapters with viewport bounds and clipping.
 - [x] Cascade horizontal logical sizes, spacing, offsets, overflow and solid borders against their physical aliases, including RTL inheritance and custom properties. Resolve HTML automatic direction for horizontal boxes and paragraph base direction.

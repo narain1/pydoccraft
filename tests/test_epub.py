@@ -9791,6 +9791,68 @@ Final cue
                 document.play_epub_narration(0, play_audio=fail, speak_text=lambda _: None, on_cue=cues.append)
         self.assertEqual([cue and cue.fragment for cue in cues], ["café", None])
 
+    def test_smil_clock_forms_round_exactly_before_selecting_narration_samples(self) -> None:
+        source, wav = narrated_epub()
+        path = "OEBPS/Sync/read.smil"
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            smil = archive.read(path)
+        original = b'clipBegin="250ms" clipEnd="00:00:01.125"'
+
+        def timed(begin: bytes, end: bytes) -> bytes:
+            return smil.replace(original, b'clipBegin="' + begin + b'" clipEnd="' + end + b'"')
+
+        with wave.open(io.BytesIO(wav), "rb") as fixture_audio:
+            fixture_audio.setpos(2)
+            raw = fixture_audio.readframes(3)
+        expected = struct.pack("<3h", *((sample - 128) * 256 for sample in raw))
+        for begin, end in (
+            (b"0.0001255s", b"0.0005005s"),
+            (b" 0.1255ms ", b"&#xA;0.5005ms&#x9;"),
+            (b"00:00.0001255000", b"00:00:00.0005005000"),
+            (b"0.0001255" + b"0" * 100, b"0.0005005000000000"),
+        ):
+            with self.subTest(begin=begin, end=end), doc_ex.open(
+                rewrite_epub(source, {path: timed(begin, end)}),
+            ) as book:
+                cue = book.epub_media_cues(0)[0]["audio"]
+                self.assertEqual((cue["clip_begin_us"], cue["clip_end_us"]), (126, 501))
+                for chunk_frames in (None, 2):
+                    output = bytearray()
+                    for chunk in book.epub_narration(0, skip_roles={"aside"}, chunk_frames=chunk_frames):
+                        assert chunk.audio is not None
+                        with wave.open(io.BytesIO(chunk.audio.wave), "rb") as pcm:
+                            self.assertEqual(pcm.getframerate(), 8000)
+                            output.extend(pcm.readframes(chunk.audio.frame_count))
+                    self.assertEqual(output, expected)
+
+        staged = timed(b" 0.0001255s ", b"00:00.0005005")
+        with doc_ex.open(source) as book:
+            edited = book.edit_epub_structure(resources={path: doc_ex.EpubResource("application/smil+xml", staged)})
+        with doc_ex.open(edited) as book:
+            self.assertEqual(book.read_epub_resource(path), staged)
+            cue = book.epub_media_cues(0)[0]["audio"]
+            self.assertEqual((cue["clip_begin_us"], cue["clip_end_us"]), (126, 501))
+            package = ET.fromstring(book.read_epub_resource("OEBPS/content.opf"))
+            durations = {meta.get("refines"): meta.text
+                         for meta in package.findall(".//{http://www.idpf.org/2007/opf}meta")
+                         if meta.get("property") == "media:duration"}
+            self.assertEqual(durations, {"#sync": "0:00:00.923375", None: "0:00:00.923375"})
+
+        for clock, micros in (
+            (b"0.000000025min", 2),
+            (b"0.00000000125h", 5),
+            (b"0.000125499999999999999999s", 125),
+            (b"00:59.999999999999", 60_000_000),
+            (b"9007199254.740991s", (1 << 53) - 1),
+        ):
+            with self.subTest(clock=clock), doc_ex.open(rewrite_epub(source, {path: timed(b"0s", clock)})) as book:
+                self.assertEqual(book.epub_media_cues(0)[0]["audio"]["clip_end_us"], micros)
+
+        for clock in (b"00:60", b"0.000 1255s", b"9007199254.740992s", b"", b"18446744073709551616"):
+            with self.subTest(invalid_clock=clock):
+                with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "invalid media overlay clock"):
+                    doc_ex.open(rewrite_epub(source, {path: timed(b"0s", clock)}))
+
     def test_smil_narration_clamps_overlong_clip_end_to_physical_audio(self) -> None:
         source, wav = narrated_epub()
         with zipfile.ZipFile(io.BytesIO(source)) as archive:

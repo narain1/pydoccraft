@@ -5,8 +5,8 @@ use roxmltree::{Document, Node};
 use serde_json::{json, Map, Value};
 
 use super::{
-    attribute, charge, external, invalid, parse_xml, percent_decode, resolve, unsupported, Book,
-    Item, EPUB, XML_BYTES,
+    attribute, charge, external, invalid, media::MAX_TIME, parse_xml, percent_decode, resolve,
+    unsupported, Book, Item, EPUB, XML_BYTES,
 };
 use crate::EngineError;
 
@@ -286,16 +286,21 @@ pub(super) fn local_path(base: &str, source: &str) -> Result<String, EngineError
 }
 
 pub(super) fn clock(source: &str) -> Result<u64, EngineError> {
+    const SECOND: u64 = 1_000_000;
+    const MINUTE: u64 = 60 * SECOND;
+    const HOUR: u64 = 60 * MINUTE;
+
+    let source = source.trim_ascii();
     let bad = || invalid("invalid media overlay clock value");
     let micros = if source.contains(':') {
         let mut parts = source.rsplit(':');
-        let seconds = decimal(parts.next().ok_or_else(bad)?)
-            .filter(|num| *num < 60.0)
+        let (_, seconds) = decimal(parts.next().ok_or_else(bad)?, SECOND)
+            .filter(|&(whole, _)| whole < 60)
             .ok_or_else(bad)?;
         let minutes = parts
             .next()
             .and_then(integer)
-            .filter(|num| *num < 60)
+            .filter(|&count| count < 60)
             .ok_or_else(bad)?;
         let hours = match parts.next() {
             Some(hours) => integer(hours).ok_or_else(bad)?,
@@ -304,24 +309,22 @@ pub(super) fn clock(source: &str) -> Result<u64, EngineError> {
         if parts.next().is_some() {
             return Err(bad());
         }
-        (hours as f64 * 3600.0 + minutes as f64 * 60.0 + seconds) * 1_000_000.0
+        hours
+            .checked_mul(HOUR)
+            .and_then(|hours| hours.checked_add(minutes * MINUTE + seconds))
+            .ok_or_else(bad)?
     } else {
-        let (number, scale) = [
-            ("min", 60_000_000.0),
-            ("ms", 1_000.0),
-            ("h", 3_600_000_000.0),
-            ("s", 1_000_000.0),
-        ]
-        .into_iter()
-        .find_map(|(suffix, scale)| source.strip_suffix(suffix).map(|value| (value, scale)))
-        .unwrap_or((source, 1_000_000.0));
-        decimal(number).ok_or_else(bad)? * scale
+        let (number, scale) = [("min", MINUTE), ("ms", 1_000), ("h", HOUR), ("s", SECOND)]
+            .into_iter()
+            .find_map(|(suffix, scale)| source.strip_suffix(suffix).map(|value| (value, scale)))
+            .unwrap_or((source, SECOND));
+        decimal(number, scale).ok_or_else(bad)?.1
     };
     // Keep clip times exactly representable as integers across JSON clients.
-    if !micros.is_finite() || micros > ((1u64 << 53) - 1) as f64 {
+    if u128::from(micros) > MAX_TIME {
         return Err(bad());
     }
-    Ok(micros.round() as u64)
+    Ok(micros)
 }
 
 fn integer(value: &str) -> Option<u64> {
@@ -332,16 +335,25 @@ fn integer(value: &str) -> Option<u64> {
     }
 }
 
-fn decimal(value: &str) -> Option<f64> {
+fn decimal(value: &str, scale: u64) -> Option<(u64, u64)> {
     let (whole, fraction) = value.split_once('.').unwrap_or((value, "0"));
-    if whole.is_empty()
-        || fraction.is_empty()
-        || !whole
-            .bytes()
-            .chain(fraction.bytes())
-            .all(|digit| digit.is_ascii_digit())
-    {
+    let whole = integer(whole)?;
+    if fraction.is_empty() {
         return None;
     }
-    value.parse().ok()
+    let mut carry = 0;
+    let mut round_up = false;
+    // Decimal multiplication from right to left retains the first discarded
+    // digit without accumulating an unbounded integer or a floating error.
+    for digit in fraction.bytes().rev() {
+        let digit = digit.checked_sub(b'0').filter(|&digit| digit <= 9)?;
+        let scaled = u64::from(digit) * scale + carry;
+        carry = scaled / 10;
+        round_up = scaled % 10 >= 5;
+    }
+    let micros = whole
+        .checked_mul(scale)?
+        .checked_add(carry)?
+        .checked_add(u64::from(round_up))?;
+    Some((whole, micros))
 }
