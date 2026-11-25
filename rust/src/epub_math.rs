@@ -167,7 +167,7 @@ impl Equation {
         else {
             return Ok(self);
         };
-        let nodes = extras.push(compose::Extra::Table(table, Box::new(format.clone())))?;
+        let nodes = extras.push(compose::Extra::Table(Box::new((table, format.clone()))))?;
         Ok(Self::Composed {
             math: Math {
                 nodes,
@@ -535,10 +535,10 @@ impl<'xml> Projection<'_, 'xml> {
             "mfenced" => self.fenced(node, depth, style)?,
             "mtable" if table::has_authored_geometry(node) || table::has_spans(node) => {
                 let grid = table::project(self, node, depth, style, inherited.font_size())?;
-                return self.extras.push(compose::Extra::Table(
+                return self.extras.push(compose::Extra::Table(Box::new((
                     grid,
-                    Box::new(compose::format(style)),
-                ));
+                    compose::format(style),
+                ))));
             }
             "mtable" => return self.matrix(node, depth, style),
             "mphantom" => MNode::Phant {

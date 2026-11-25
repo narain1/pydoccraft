@@ -34,6 +34,7 @@ pub(in crate::epub) struct Table {
     width: Option<f32>,
     equal_rows: bool,
     equal_columns: bool,
+    labels: Option<Labels>,
     rules: Rules,
     rule_color: Option<Rgb>,
     alignment: Vertical,
@@ -44,6 +45,7 @@ pub(in crate::epub) struct Table {
 
 struct Cell {
     rows: Range<usize>,
+    // Row labels occupy their own track outside the table's data columns.
     columns: Range<usize>,
     horizontal: ColJc,
     vertical: Vertical,
@@ -63,6 +65,11 @@ struct CellPlacement<'xml, 'input> {
 enum CellContent {
     Equation(Math),
     Table(Table),
+}
+
+struct Labels {
+    left: bool,
+    gap: f32,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -125,7 +132,9 @@ pub(super) fn has_authored_geometry(table: Node<'_, '_>) -> bool {
                 .is_some_and(|value| value.trim() != "false")
         })
         || table.children().filter(Node::is_element).any(|row| {
-            cell_alignment(row) || row.children().filter(Node::is_element).any(cell_alignment)
+            row.has_tag_name((MATHML, "mlabeledtr"))
+                || cell_alignment(row)
+                || row.children().filter(Node::is_element).any(cell_alignment)
         })
 }
 
@@ -201,6 +210,14 @@ pub(super) fn project_group<'xml>(
     let table = wrappers
         .pop()
         .ok_or_else(|| invalid("missing MathML table"))?;
+    // A labeled grid uses editable equation tracks outside the data table.
+    // It cannot be represented by the standalone native Word table path.
+    if table
+        .children()
+        .any(|row| row.has_tag_name((MATHML, "mlabeledtr")))
+    {
+        return Ok(None);
+    }
     for wrapper in wrappers {
         depth += 1;
         projection.charge(depth)?;
@@ -230,22 +247,69 @@ pub(super) fn project<'xml>(
     let mut column_count = 0;
     let mut occupied = [0; MAX_MATRIX_SIZE];
     let mut placements = Vec::new();
+    let em = style.font_size();
+    let mut labels = None;
     for (row_index, row) in rows.iter().copied().enumerate() {
-        if !row.has_tag_name((MATHML, "mtr")) {
+        let labeled = row.has_tag_name((MATHML, "mlabeledtr"));
+        if !labeled && !row.has_tag_name((MATHML, "mtr")) {
             return Err(unsupported("MathML table row type"));
+        }
+        if labeled && !row.children().any(|node| node.is_element()) {
+            return Err(invalid("missing MathML table row label"));
+        }
+        if labeled && labels.is_none() {
+            labels = Some(Labels::read(table, em)?);
         }
         projection.charge(depth + 1)?;
         let row_style = projection.style(row, style)?;
         let mut column = 0;
-        for cell in row.children().filter(Node::is_element) {
+        for (index, cell) in row.children().filter(Node::is_element).enumerate() {
             if !cell.has_tag_name((MATHML, "mtd")) {
                 return Err(invalid("unexpected MathML table child"));
             }
-            while column < MAX_MATRIX_SIZE && occupied[column] > row_index {
+            let label = labeled && index == 0;
+            while !label && column < MAX_MATRIX_SIZE && occupied[column] > row_index {
                 column += 1;
             }
-            let right = column + span(cell, "columnspan")?;
-            let bottom = row_index + span(cell, "rowspan")?;
+            let horizontal = horizontal_alignment(
+                cell.attribute("columnalign")
+                    .or_else(|| indexed(row.attribute("columnalign"), column))
+                    .or_else(|| {
+                        if label {
+                            None
+                        } else {
+                            indexed(table.attribute("columnalign"), column)
+                        }
+                    })
+                    .unwrap_or("center"),
+            )?;
+            let row_alignment = cell
+                .attribute("rowalign")
+                .or_else(|| row.attribute("rowalign"))
+                .or_else(|| indexed(table.attribute("rowalign"), row_index))
+                .unwrap_or("baseline");
+            let vertical = Vertical::parse(row_alignment.trim())
+                .ok_or_else(|| unsupported("MathML table row alignment"))?;
+            projection.charge(depth + 2)?;
+            let style = projection.style(cell, row_style)?;
+            let rows_spanned = span(cell, "rowspan")?;
+            let columns_spanned = span(cell, "columnspan")?;
+            if label {
+                if rows_spanned != 1 || columns_spanned != 1 {
+                    return Err(unsupported("spanning MathML table row label"));
+                }
+                placements.push(CellPlacement {
+                    node: cell,
+                    rows: row_index..row_index + 1,
+                    columns: 0..0,
+                    horizontal,
+                    vertical,
+                    style,
+                });
+                continue;
+            }
+            let right = column + columns_spanned;
+            let bottom = row_index + rows_spanned;
             if right > MAX_MATRIX_SIZE {
                 return Err(limited("MathML table exceeds 32 columns"));
             }
@@ -255,27 +319,6 @@ pub(super) fn project<'xml>(
                 ));
             }
             occupied[column..right].fill(bottom);
-            projection.charge(depth + 2)?;
-            let style = projection.style(cell, row_style)?;
-            let horizontal = match cell
-                .attribute("columnalign")
-                .or_else(|| indexed(row.attribute("columnalign"), column))
-                .or_else(|| indexed(table.attribute("columnalign"), column))
-                .unwrap_or("center")
-                .trim()
-            {
-                "left" => ColJc::Left,
-                "right" => ColJc::Right,
-                "center" => ColJc::Center,
-                _ => return Err(unsupported("MathML table column alignment")),
-            };
-            let row_alignment = cell
-                .attribute("rowalign")
-                .or_else(|| row.attribute("rowalign"))
-                .or_else(|| indexed(table.attribute("rowalign"), row_index))
-                .unwrap_or("baseline");
-            let vertical = Vertical::parse(row_alignment.trim())
-                .ok_or_else(|| unsupported("MathML table row alignment"))?;
             placements.push(CellPlacement {
                 node: cell,
                 rows: row_index..bottom,
@@ -293,12 +336,12 @@ pub(super) fn project<'xml>(
     }
     // Native export materializes the full grid before merging, including
     // entries implied by sparse rows and spanning cells.
-    let implicit_cells = rows.len() * column_count - placements.len();
+    let margin_cells = usize::from(labels.is_some()) * 2 * rows.len();
+    let implicit_cells = rows.len() * column_count + margin_cells - placements.len();
     *projection.remaining = projection
         .remaining
         .checked_sub(implicit_cells)
         .ok_or_else(|| limited("MathML table cells exceed the layout budget"))?;
-    let em = style.font_size();
     let mut row_gaps = gaps(table, "rowspacing", rows.len(), em, "1ex")?;
     let mut column_gaps = gaps(table, "columnspacing", column_count, em, "0.8em")?;
     let rules = Rules::read(table, em, &mut row_gaps, &mut column_gaps)?;
@@ -311,6 +354,7 @@ pub(super) fn project<'xml>(
         width,
         equal_rows: boolean(table, "equalrows")?,
         equal_columns: boolean(table, "equalcolumns")?,
+        labels,
         rules,
         rule_color: style.ink,
         alignment,
@@ -320,11 +364,15 @@ pub(super) fn project<'xml>(
     };
     let definite_columns = grid.definite_columns()?;
     for cell in placements {
-        let content_width = definite_columns[cell.columns.clone()]
-            .iter()
-            .copied()
-            .sum::<Option<f32>>()
-            .map(|width| width + internal_gaps(&grid.column_gaps, &cell.columns));
+        let content_width = if cell.columns.is_empty() {
+            None
+        } else {
+            definite_columns[cell.columns.clone()]
+                .iter()
+                .copied()
+                .sum::<Option<f32>>()
+                .map(|width| width + internal_gaps(&grid.column_gaps, &cell.columns))
+        };
         let content = projection.with_cell_width(cell.node, content_width, |projection| {
             if let Some(table) = project_group(projection, cell.node, depth + 2, cell.style)? {
                 return Ok(CellContent::Table(table));
@@ -395,6 +443,54 @@ fn span(node: Node<'_, '_>, key: &str) -> Result<usize, EngineError> {
 
 fn indexed(values: Option<&str>, index: usize) -> Option<&str> {
     values?.split_ascii_whitespace().take(index + 1).last()
+}
+
+fn horizontal_alignment(value: &str) -> Result<ColJc, EngineError> {
+    match value.trim() {
+        "left" => Ok(ColJc::Left),
+        "right" => Ok(ColJc::Right),
+        "center" => Ok(ColJc::Center),
+        _ => Err(unsupported("MathML table column alignment")),
+    }
+}
+
+impl Labels {
+    fn read(table: Node<'_, '_>, em: f32) -> Result<Self, EngineError> {
+        if table
+            .attribute("width")
+            .is_some_and(|width| width.trim() != "auto")
+        {
+            return Err(unsupported(
+                "MathML table row labels with a definite table width",
+            ));
+        }
+        let left = match table.attribute("side").unwrap_or("right").trim() {
+            "left" => true,
+            "right" => false,
+            "leftoverlap" | "rightoverlap" => {
+                return Err(unsupported("overlapping MathML table row labels"));
+            }
+            _ => return Err(invalid("invalid MathML table label side")),
+        };
+        let default = 0.8 * em;
+        let gap = match table.attribute("minlabelspacing").map(str::trim) {
+            None => Some(default),
+            Some(value) => match value.strip_suffix('%') {
+                Some(percent) => percent
+                    .parse::<f32>()
+                    .ok()
+                    .map(|value| value / 100.0 * default),
+                None => value
+                    .parse::<f32>()
+                    .ok()
+                    .map(|factor| factor * default)
+                    .or_else(|| length(value, em)),
+            },
+        }
+        .filter(|gap| (0.0..=MAX_DIMENSION).contains(gap))
+        .ok_or_else(|| unsupported("MathML table label spacing"))?;
+        Ok(Self { left, gap })
+    }
 }
 
 fn boolean(node: Node<'_, '_>, key: &str) -> Result<bool, EngineError> {
@@ -526,6 +622,7 @@ pub(in crate::epub) struct Layout {
     widths: Vec<f32>,
     heights: Vec<f32>,
     row_positions: Vec<f32>,
+    label_width: f32,
     rules: Vec<MItem>,
     occupancy: Option<Occupancy>,
     rule_color: Rgb,
@@ -747,13 +844,21 @@ impl Table {
             ));
         }
         let [column_gap, row_pitch] = editor.matrix_spacing()?;
-        let native_columns = self.matrix_columns(&layout.widths, column_gap);
+        let mut widths = layout.widths;
+        let mut gaps = self.column_gaps;
+        if let Some(labels) = &self.labels {
+            widths.insert(0, layout.label_width);
+            widths.push(layout.label_width);
+            gaps.insert(0, labels.gap);
+            gaps.push(labels.gap);
+        }
+        let native_columns = matrix_columns(&widths, &gaps, column_gap);
         let split_columns = native_columns.is_none();
         let (origins, advances) = native_columns
-            .or_else(|| self.matrix_columns(&layout.widths, 0.0))
+            .or_else(|| matrix_columns(&widths, &gaps, 0.0))
             .ok_or_else(|| invalid("invalid MathML matrix column origins"))?;
         let rows = layout.heights.len();
-        let columns = layout.widths.len();
+        let columns = widths.len();
         let mut contents = vec![vec![Arg::new(); columns]; rows];
         let first_baseline = editor.axis() + (rows - 1) as f32 * row_pitch / 2.0;
         // Native matrices have no cell spans. Give the logical slots their
@@ -761,7 +866,17 @@ impl Table {
         // Each expression can then extend into slots covered by its span.
         for (cell, (left, top, drawing)) in self.cells.into_iter().zip(layout.cells) {
             let row = cell.rows.start;
-            let column = cell.columns.start;
+            let column = match &self.labels {
+                Some(labels) if cell.columns.is_empty() => {
+                    if labels.left {
+                        0
+                    } else {
+                        columns - 1
+                    }
+                }
+                Some(_) => cell.columns.start + 1,
+                None => cell.columns.start,
+            };
             let (_, ascent, _) = drawing.size();
             let nodes = match (cell.content, drawing) {
                 (CellContent::Equation(math), CellDrawing::Equation(_)) => math.nodes,
@@ -832,35 +947,6 @@ impl Table {
         Ok(MNode::Boxed { e: nodes })
     }
 
-    fn matrix_columns(&self, widths: &[f32], native_gap: f32) -> Option<(Vec<f32>, Vec<f32>)> {
-        let mut origins = Vec::with_capacity(widths.len());
-        let mut advances = Vec::with_capacity(widths.len());
-        let mut current = 0.0;
-        for (index, desired_end) in starts(widths, &self.column_gaps)
-            .into_iter()
-            .skip(1)
-            .enumerate()
-        {
-            let gap = if index + 1 < widths.len() {
-                native_gap
-            } else {
-                0.0
-            };
-            let reserve = desired_end - current - gap;
-            if reserve < -0.0001 {
-                return None;
-            }
-            // Round cumulative origins down so the cell's correction stays
-            // nonnegative. The minimum native math space carries 0.4 points.
-            let units = (reserve * 5.0 + 0.0001).floor();
-            let advance = if units < 2.0 { 0.0 } else { units / 5.0 };
-            origins.push(current);
-            advances.push(advance);
-            current += advance + gap;
-        }
-        Some((origins, advances))
-    }
-
     pub(in crate::epub) fn layout(
         &self,
         doc: &Document,
@@ -894,6 +980,7 @@ impl Table {
         let mut row_baselines = vec![false; row_count];
         let mut heights = vec![0.0; row_count];
         let mut measures = Vec::with_capacity(self.cells.len());
+        let mut label_width = 0.0f32;
         for cell in &self.cells {
             let chars = CharProps {
                 size: cell.format.size,
@@ -919,7 +1006,10 @@ impl Table {
                     MAX_DIMENSION,
                 )?),
             };
-            let (_, cell_ascent, cell_descent) = measure.size();
+            let (cell_width, cell_ascent, cell_descent) = measure.size();
+            if cell.columns.is_empty() {
+                label_width = label_width.max(cell_width);
+            }
             let offset = match cell.vertical {
                 Vertical::Baseline => Some(0.0),
                 Vertical::Axis => Some(resolved.draw_size() * axis_ratio - table_axis),
@@ -951,6 +1041,7 @@ impl Table {
                 .cells
                 .iter()
                 .zip(&measures)
+                .filter(|(cell, _)| !cell.columns.is_empty())
                 .map(|(cell, (measure, _))| {
                     equal_track_size(&self.column_gaps, &cell.columns, measure.size().0)
                 })
@@ -967,6 +1058,9 @@ impl Table {
             let mut fitted = Vec::new();
             for index in order {
                 let span = &self.cells[index].columns;
+                if span.is_empty() {
+                    continue;
+                }
                 if self.column_widths[span.clone()].contains(&ColumnWidth::Fit) {
                     fitted.push(index);
                     continue;
@@ -1003,7 +1097,12 @@ impl Table {
         let x = starts(&widths, &self.column_gaps);
         let y = starts(&heights, &self.row_gaps);
         let [left_inset, top_inset] = self.rules.inset();
-        let width = x[widths.len()] + left_inset * 2.0;
+        let grid_width = x[widths.len()] + left_inset * 2.0;
+        let label_inset = self
+            .labels
+            .as_ref()
+            .map_or(0.0, |labels| label_width + labels.gap);
+        let width = grid_width + 2.0 * label_inset;
         let height = y[heights.len()] + top_inset * 2.0;
         if ![width, height]
             .into_iter()
@@ -1017,12 +1116,24 @@ impl Table {
             .zip(measures)
             .map(|(cell, (measure, offset))| {
                 let (cell_width, cell_ascent, cell_descent) = measure.size();
-                let horizontal_room =
-                    extent(&widths, &self.column_gaps, &cell.columns) - cell_width;
+                let (left, track_width) = match &self.labels {
+                    Some(labels) if cell.columns.is_empty() => (
+                        if labels.left {
+                            0.0
+                        } else {
+                            width - label_width
+                        },
+                        label_width,
+                    ),
+                    _ => (
+                        label_inset + left_inset + x[cell.columns.start],
+                        extent(&widths, &self.column_gaps, &cell.columns),
+                    ),
+                };
+                let horizontal_room = track_width - cell_width;
                 let vertical_room =
                     extent(&heights, &self.row_gaps, &cell.rows) - cell_ascent - cell_descent;
-                let left = left_inset
-                    + x[cell.columns.start]
+                let left = left
                     + match cell.horizontal {
                         ColJc::Left => 0.0,
                         ColJc::Center => horizontal_room / 2.0,
@@ -1066,7 +1177,7 @@ impl Table {
             .rules
             .visible()
             .then(|| Occupancy::new(&self.cells, heights.len(), widths.len()));
-        let rules = occupancy
+        let mut rules = occupancy
             .as_ref()
             .map(|map| {
                 self.rules.draw(
@@ -1080,6 +1191,11 @@ impl Table {
             })
             .transpose()?
             .unwrap_or_default();
+        if label_inset != 0.0 {
+            for rule in &mut rules {
+                compose::position(rule, label_inset, 0.0, 1.0);
+            }
+        }
         Ok(Layout {
             width,
             height,
@@ -1088,6 +1204,7 @@ impl Table {
             widths,
             heights,
             row_positions: y.into_iter().map(|start| start + top_inset).collect(),
+            label_width,
             rules,
             occupancy,
             rule_color,
@@ -1236,6 +1353,31 @@ impl Table {
         }
         Ok(native)
     }
+}
+
+fn matrix_columns(widths: &[f32], gaps: &[f32], native_gap: f32) -> Option<(Vec<f32>, Vec<f32>)> {
+    let mut origins = Vec::with_capacity(widths.len());
+    let mut advances = Vec::with_capacity(widths.len());
+    let mut current = 0.0;
+    for (index, desired_end) in starts(widths, gaps).into_iter().skip(1).enumerate() {
+        let gap = if index + 1 < widths.len() {
+            native_gap
+        } else {
+            0.0
+        };
+        let reserve = desired_end - current - gap;
+        if reserve < -0.0001 {
+            return None;
+        }
+        // Round cumulative origins down so the cell's correction stays
+        // nonnegative. The minimum native math space carries 0.4 points.
+        let units = (reserve * 5.0 + 0.0001).floor();
+        let advance = if units < 2.0 { 0.0 } else { units / 5.0 };
+        origins.push(current);
+        advances.push(advance);
+        current += advance + gap;
+    }
+    Some((origins, advances))
 }
 
 fn margins_for_tracks(sizes: &[f32], gaps: &[f32], frame: f32) -> Vec<f32> {

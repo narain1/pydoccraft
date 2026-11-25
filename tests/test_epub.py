@@ -6497,6 +6497,157 @@ overlay
                     with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "definite containing line width"):
                         operation()
 
+    def test_mathml_labeled_rows_keep_editable_labels_outside_data_columns(self) -> None:
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Labeled MathML</title><meta name="viewport" content="width=440,height=320"/>
+            <style>body {{margin:0}}</style></head>
+          <body><p style="text-align:center">
+            <m:math mathsize="16pt"><m:mtable {attrs} columnwidth="70pt 65pt"
+                columnalign="left right" rowspacing="15pt">
+              <m:mlabeledtr>
+                <m:mtd mathcolor="#bf222d" columnalign="left"><m:mtext>NoOne</m:mtext></m:mtd>
+                <m:mtd rowspan="2" mathcolor="#198144"><m:mtext>North</m:mtext></m:mtd>
+                <m:mtd mathcolor="#1644df"><m:mtext>East</m:mtext></m:mtd>
+              </m:mlabeledtr>
+              <m:mtr><m:mtd mathcolor="#8343cd"><m:mtext>Center</m:mtext></m:mtd></m:mtr>
+              <m:mlabeledtr>
+                <m:mtd mathcolor="#ac661b" columnalign="right"><m:mtext>LongLabel</m:mtext></m:mtd>
+                <m:mtd columnspan="2" mathcolor="#006a71"><m:mtext>South</m:mtext></m:mtd>
+              </m:mlabeledtr>
+            </m:mtable></m:math>
+          </p></body></html>"""
+        colors = {
+            "NoOne": "bf222d", "North": "198144", "East": "1644df",
+            "Center": "8343cd", "LongLabel": "ac661b", "South": "006a71",
+        }
+        data = ("North", "East", "Center", "South")
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+        fixed = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 440, 320)])
+
+        def ink_points(rgba: bytes, width: int, color: str) -> list[tuple[int, int]]:
+            ink = bytes.fromhex(color + "ff")
+            position, points = 0, []
+            while (position := rgba.find(ink, position)) >= 0:
+                if position % 4 == 0:
+                    points.append(divmod(position // 4, width))
+                position += 1
+            return points
+
+        def pixels(doc: doc_ex.Document, dpi: int = 96) -> dict[str, tuple[int, int]]:
+            width, rgba = rgba_pixels(png_chunks(doc.render_page(0, dpi=dpi)))
+            positions = {}
+            for label, color in colors.items():
+                points = ink_points(rgba, width, color)
+                self.assertTrue(points, label)
+                positions[label] = (min(x for _, x in points), min(y for y, _ in points))
+            return positions
+
+        def boxes(doc: doc_ex.Document) -> dict[str, tuple[float, float, float, float]]:
+            result = {}
+            for label in colors:
+                result[label], = doc[0].search_for(label)
+            return result
+
+        preview_positions, pdf_boxes = {}, {}
+        for side in ("right", "left"):
+            source = template.format(attrs=f'side="{side}" minlabelspacing="18pt"')
+            with doc_ex.open(epub_fixture(chapter_one=source)) as book:
+                preview_positions[side] = preview = pixels(book)
+                self.assertLess(book[0].get_text().index("NoOne"), book[0].get_text().index("North"))
+                with doc_ex.open(book.convert("pdf")) as reopened:
+                    self.assertFalse(reopened[0].get_images())
+                    pdf_boxes[side] = vector = boxes(reopened)
+                    self.assertAlmostEqual(vector["NoOne"][1], vector["North"][1], delta=0.1)
+                    self.assertAlmostEqual(vector["LongLabel"][1], vector["South"][1], delta=0.1)
+                exported = book.convert("docx")
+                with zipfile.ZipFile(io.BytesIO(exported)) as archive:
+                    xml = ET.fromstring(archive.read("word/document.xml"))
+                self.assertIsNotNone(xml.find(".//m:oMath//m:m", ns))
+                native_tokens = [node.text for node in xml.findall(".//m:t", ns)]
+                with doc_ex.open(exported) as reopened:
+                    text = reopened[0].get_text()
+                    self.assertNotIn("⟡H", text)
+                    with doc_ex.open(reopened.convert("pdf")) as reopened_pdf:
+                        word_vector = boxes(reopened_pdf)
+                    rendered = pixels(reopened)
+                    for label in colors:
+                        self.assertEqual(native_tokens.count(label), 1)
+                        self.assertEqual(text.count(label), 1)
+                        for axis in (0, 1):
+                            self.assertAlmostEqual(
+                                preview[label][axis] - preview["North"][axis],
+                                rendered[label][axis] - rendered["North"][axis],
+                                delta=2,
+                            )
+                        for epub_coordinate, word_coordinate in zip(vector[label], word_vector[label]):
+                            self.assertAlmostEqual(epub_coordinate, word_coordinate, delta=0.35)
+            with doc_ex.open(rewrite_epub(fixed, {"OEBPS/s0.xhtml": source})) as book:
+                with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as reopened:
+                    self.assertEqual(pixels(reopened), pixels(book))
+                    fixed_vector = boxes(reopened)
+                    for label in colors:
+                        self.assertAlmostEqual(
+                            fixed_vector[label][0] - fixed_vector["North"][0],
+                            vector[label][0] - vector["North"][0],
+                            delta=0.6,
+                        )
+        for label in data:
+            self.assertEqual(preview_positions["left"][label], preview_positions["right"][label])
+        right, left = pdf_boxes["right"], pdf_boxes["left"]
+        self.assertGreater(right["NoOne"][0] - right["East"][2], 17)
+        self.assertGreater(left["North"][0] - left["NoOne"][2], 17)
+        self.assertAlmostEqual(left["North"][0] - left["LongLabel"][2], 18, delta=1)
+        self.assertAlmostEqual(right["NoOne"][0] - right["East"][2], 18, delta=1)
+        self.assertGreater(right["LongLabel"][2], right["NoOne"][2])
+        self.assertGreater(right["Center"][1], right["NoOne"][1])
+        self.assertLess(right["Center"][1], right["LongLabel"][1])
+
+        for attrs, factor in (("", 1.0), ('minlabelspacing="150%"', 1.5), ('minlabelspacing="2"', 2.0)):
+            with self.subTest(attrs=attrs), doc_ex.open(epub_fixture(chapter_one=template.format(attrs=attrs))) as book:
+                with doc_ex.open(book.convert("pdf")) as reopened:
+                    actual = boxes(reopened)
+                    self.assertAlmostEqual(actual["NoOne"][0] - actual["East"][2], factor * 0.8 * 16, delta=1)
+
+        # Use the native paragraph's math size to compare fraction geometry.
+        fractional = template.format(attrs="").replace('mathsize="16pt"', 'mathsize="12pt"').replace(
+            "<m:mtext>NoOne</m:mtext>",
+            "<m:mfrac><m:mtext>NoOne</m:mtext><m:mn>2</m:mn></m:mfrac>",
+        )
+        with doc_ex.open(epub_fixture(chapter_one=fractional)) as book:
+            exported = book.convert("docx")
+            with zipfile.ZipFile(io.BytesIO(exported)) as archive:
+                xml = ET.fromstring(archive.read("word/document.xml"))
+            self.assertIsNotNone(xml.find(".//m:m//m:f/m:num//m:t", ns))
+            with doc_ex.open(exported) as reopened, doc_ex.open(book.convert("pdf")) as pdf:
+                with doc_ex.open(reopened.convert("pdf")) as native_pdf:
+                    expected, actual = boxes(pdf)["NoOne"], boxes(native_pdf)["NoOne"]
+                    for expected_coordinate, actual_coordinate in zip(expected, actual):
+                        self.assertAlmostEqual(expected_coordinate, actual_coordinate, delta=0.35)
+
+        ruled = template.format(attrs='frame="solid" mathcolor="#a01b70" rowlines="dashed"')
+        with doc_ex.open(epub_fixture(chapter_one=ruled)) as book:
+            with doc_ex.open(book.convert("pdf")) as reopened:
+                for doc in (book, reopened):
+                    width, rgba = rgba_pixels(png_chunks(doc.render_page(0, dpi=192)))
+                    rule_x = [x for _, x in ink_points(rgba, width, "a01b70")]
+                    self.assertTrue(rule_x)
+                    positions = pixels(doc, dpi=192)
+                    self.assertLess(min(rule_x), positions["North"][0])
+                    self.assertGreater(max(rule_x), positions["East"][0])
+                    self.assertLess(max(rule_x), positions["NoOne"][0])
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "MathML table rules inside equations"):
+                book.convert("docx")
+
+        for attrs, message in (
+            ('side="rightoverlap"', "overlapping MathML table row labels"),
+            ('width="250pt"', "MathML table row labels with a definite table width"),
+            ('minlabelspacing="-1pt"', "MathML table label spacing"),
+        ):
+            with self.subTest(attrs=attrs), doc_ex.open(epub_fixture(chapter_one=template.format(attrs=attrs))) as book:
+                for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
+                        operation()
+
     def test_mathml_table_rules_and_frame_preserve_spans(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Ruled MathML</title><style>body {{margin:0}}</style></head>

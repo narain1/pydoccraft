@@ -45,7 +45,7 @@ pub(super) struct EditableLayout<'a> {
 }
 
 pub(super) enum Extra {
-    Table(table::Table, Box<CharProps>),
+    Table(Box<(table::Table, CharProps)>),
     Padded(Box<Padding>),
     Fraction(Box<super::fraction::Fraction>),
     Space([f32; 3]),
@@ -153,7 +153,8 @@ impl Extras {
         };
         for extra in self.nodes {
             let node = match extra {
-                Extra::Table(mut table, format) => {
+                Extra::Table(grid) => {
+                    let (mut table, format) = *grid;
                     table.apply_editable(&editable)?;
                     let measured = table.layout(document, &format, &Measurements::default())?;
                     table.editable_matrix(measured, &layout)?
@@ -205,10 +206,11 @@ impl Extras {
                 "MathML composed box exceeds the native vertical extent"
             };
             let mut layout = match extra {
-                Extra::Table(table, local) => {
+                Extra::Table(grid) => {
+                    let (table, local) = *grid;
                     let style = CharProps {
                         color: local.color.or(format.color),
-                        ..*local
+                        ..local
                     };
                     table.layout(doc, &style, &measurements)?.into_math()
                 }

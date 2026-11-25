@@ -76,6 +76,8 @@
 - [ ] Resolve relative widths for MathML tables inside other equation operands or intrinsically sized containers when their width becomes available.
 - [x] Draw MathML solid and dashed table rules and frames, respect span interruptions and frame spacing, and preserve standalone rules as editable Word table borders.
 - [x] Preserve tight column spacing in editable DOCX matrix projections and recover their logical rows during extraction.
+- [x] Render native MathML row labels outside auto-width data grids on the authored side, including minimum label spacing, searchable PDF and editable unruled DOCX.
+- [ ] Support MathML row-label overlap modes, authored whole-table widths with row labels, and editable Word borders for ruled labeled grids.
 - [ ] Extend editable DOCX export to negative leading offsets and expand the remaining MathML visual properties.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.

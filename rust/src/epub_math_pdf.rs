@@ -56,7 +56,7 @@ impl PdfMath {
                 mut extras,
                 display,
             } => {
-                let nodes = extras.push(Extra::Table(table, Box::new(format.clone())))?;
+                let nodes = extras.push(Extra::Table(Box::new((table, format.clone()))))?;
                 (
                     Math {
                         nodes,

@@ -72,7 +72,8 @@ fn grid_body(node: &MNode) -> Option<MNode> {
     let MNode::Matrix { rows, .. } = matrices.first()? else {
         return None;
     };
-    if matrices.len() > 32 || !(1..=128).contains(&rows.len()) {
+    // A 32-column MathML grid may also have two outer tracks for labels.
+    if matrices.len() > 34 || !(1..=128).contains(&rows.len()) {
         return None;
     }
     // A tightly spaced MathML grid stores one single-column native matrix
