@@ -4180,8 +4180,14 @@ first
             with self.assertRaisesRegex(doc_ex.MalformedDocumentError, "MathML table spans overlap"):
                 book.render_page(0, dpi=96)
         with doc_ex.open(fixture(outer.format("<m:mrow><m:mi>x</m:mi>" + inner + "</m:mrow>"))) as book:
-            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "composed geometry"):
-                book.convert("docx")
+            converted = book.convert("docx")
+        with zipfile.ZipFile(io.BytesIO(converted)) as archive:
+            document = archive.read("word/document.xml")
+        self.assertIn(b"<w:tbl>", document)
+        self.assertIn(b"<m:m>", document)
+        with doc_ex.open(converted) as reopened:
+            self.assertEqual(reopened[0].get_text().count("InnerHead"), 1)
+            self.assertTrue(reopened.render_page(0, dpi=96).startswith(b"\x89PNG"))
 
         deep = inner
         for _ in range(9):
@@ -4206,8 +4212,11 @@ first
         with doc_ex.open(epub_fixture(chapter_one=template.format("Before " + table + " after"))) as book:
             self.assertIn("Before XAB after", book[0].get_text())
             self.assertTrue(book.render_page(0, dpi=96).startswith(b"\x89PNG"))
-            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "mixed with other paragraph content"):
-                book.convert("docx")
+            with doc_ex.open(book.convert("docx")) as word:
+                text = word[0].get_text()
+                for token in ("Before", "X", "A", "B", "after"):
+                    self.assertIn(token, text)
+                self.assertNotIn("⟡H", text)
         fixed = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 300, 200)])
         viewport = '<meta name="viewport" content="width=300,height=200"/>'
         chapter = template.format(table.replace("<m:math>", '<m:math mathcolor="#1644df">'))
@@ -4306,7 +4315,65 @@ first
             self.assertIn("TopLeftRight", book[0].get_text())
             with doc_ex.open(book.convert("pdf")) as pdf:
                 check_layout(pdf.render_page(0, dpi=120))
-            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "composed geometry"):
+            word_bytes = book.convert("docx")
+        with zipfile.ZipFile(io.BytesIO(word_bytes)) as archive:
+            xml = archive.read("word/document.xml")
+        for tag in (b"<m:f>", b"<m:rad>", b"<m:sSup>"):
+            self.assertIn(tag, xml)
+        self.assertEqual(xml.count(b"<m:m>"), 3)
+        with doc_ex.open(word_bytes) as word:
+            check_layout(word.render_page(0, dpi=120))
+            for label in ("Top", "Left", "Right"):
+                self.assertEqual(word[0].get_text().count(label), 3)
+
+    def test_mathml_editable_inline_spans_keep_measured_grid_geometry(self) -> None:
+        table = """<m:mtable columnspacing="9pt" rowspacing="5pt">
+          <m:mtr><m:mtd rowspan="2" rowalign="center" mathcolor="#bf222d"><m:mtext>Red</m:mtext></m:mtd>
+            <m:mtd columnspan="2" columnalign="right" mathcolor="#8343cd"><m:mtext>Head</m:mtext></m:mtd></m:mtr>
+          <m:mtr><m:mtd mathcolor="#198144"><m:mtext>Green</m:mtext></m:mtd>
+            <m:mtd mathcolor="#1644df"><m:mtext>Blue</m:mtext></m:mtd></m:mtr>
+          <m:mtr><m:mtd columnspan="3" mathcolor="#ac661b"><m:mtext>Total</m:mtext></m:mtd></m:mtr></m:mtable>"""
+        template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Editable grid</title><style>body {{margin:0}}</style></head>
+          <body><p>Before <m:math mathsize="20pt">{}</m:math> after.</p></body></html>"""
+        labels = ("Red", "Head", "Green", "Blue", "Total")
+
+        def positions(doc: doc_ex.Document) -> list[tuple[int, int]]:
+            width, pixels = rgba_pixels(png_chunks(doc.render_page(0, dpi=96)))
+            starts = []
+            for color in ("bf222d", "8343cd", "198144", "1644df", "ac661b"):
+                ink = bytes.fromhex(color + "ff")
+                points = [divmod(i // 4, width) for i in range(0, len(pixels), 4) if pixels[i:i + 4] == ink]
+                self.assertTrue(points, color)
+                starts.append((min(x for _, x in points), min(y for y, _ in points)))
+            return starts
+
+        with doc_ex.open(epub_fixture(chapter_one=template.format(table))) as book:
+            preview = positions(book)
+            converted = book.convert("docx")
+        with zipfile.ZipFile(io.BytesIO(converted)) as archive:
+            document = ET.fromstring(archive.read("word/document.xml"))
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+        matrix, = document.findall(".//m:m", ns)
+        self.assertEqual([len(row.findall("./m:e", ns)) for row in matrix.findall("./m:mr", ns)], [3, 3, 3])
+        runs = [run.text for run in matrix.findall(".//m:t", ns)]
+        for label in labels:
+            self.assertEqual(runs.count(label), 1)
+        with doc_ex.open(converted) as word:
+            actual = positions(word)
+            text = word[0].get_text()
+            for label in ("Before", *labels, "after."):
+                self.assertEqual(text.count(label), 1, text)
+            self.assertNotIn("⟡H", text)
+            self.assertNotIn("⟡g", text)
+        for expect, got in zip(preview, actual):
+            for axis in range(2):
+                self.assertAlmostEqual(expect[axis] - preview[0][axis], got[axis] - actual[0][axis], delta=2)
+
+        tiny = """<m:mtable columnspacing="0"><m:mtr><m:mtd columnspan="2"/></m:mtr>
+          <m:mtr><m:mtd/><m:mtd><m:mi>x</m:mi></m:mtd></m:mtr></m:mtable>"""
+        with doc_ex.open(epub_fixture(chapter_one=template.format(tiny))) as book:
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "closer than the native DOCX gap"):
                 book.convert("docx")
 
     def test_mathml_custom_fraction_rule_and_alignment_render_and_export(self) -> None:

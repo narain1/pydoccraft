@@ -6,7 +6,7 @@ use std::{
 
 use roxmltree::Node;
 use wordcraft_doc::{
-    math::{Arg, MNode, MRun, Math},
+    math::{Arg, ColJc, MNode, MRun, Math},
     math_linear::map_args,
     props::{CharProps, Rgb},
     resolve::ResolvedChar,
@@ -23,6 +23,8 @@ const GUIDE_SIZE: f32 = 16.0;
 pub(super) const MAX_GEOMETRY: f32 = 20_000.0;
 const LIMIT_BOXES: usize = 512;
 const MAX_SAVED_DRAW_UNITS: usize = 250_000;
+// The pinned WordCraft equation shaper stops at this many native nodes.
+const MAX_EDITABLE_NODES: usize = 200_000;
 
 #[derive(Default)]
 pub(in crate::epub) struct Extras {
@@ -35,10 +37,11 @@ pub(in crate::epub) struct Editable {
     boxes: Vec<Cell<Option<MNode>>>,
 }
 
-struct EditableLayout<'a> {
+pub(super) struct EditableLayout<'a> {
     document: &'a Document,
     carrier: ResolvedChar,
     guide_ratios: OnceCell<[f32; 2]>,
+    matrix_spacing: OnceCell<[f32; 2]>,
 }
 
 pub(super) enum Extra {
@@ -145,9 +148,15 @@ impl Extras {
                 .styles
                 .resolve_char(paragraph_style, &CharProps::default()),
             guide_ratios: OnceCell::new(),
+            matrix_spacing: OnceCell::new(),
         };
         for extra in self.nodes {
             let node = match extra {
+                Extra::Table(mut table, format) => {
+                    table.apply_editable(&editable)?;
+                    let measured = table.layout(document, &format, &Measurements::default())?;
+                    table.editable_matrix(measured, &layout)?
+                }
                 Extra::Padded(padding) => padding.editable(&editable, &layout)?,
                 Extra::Space([width, ascent, descent]) => {
                     let mut nodes: Arg = editable_gap(width)?.into_iter().collect();
@@ -239,10 +248,16 @@ impl Editable {
     pub(in crate::epub) fn apply(&self, math: &mut Math) -> Result<(), EngineError> {
         let nodes = self.substitute(std::mem::take(&mut math.nodes))?;
         let too_deep = Cell::new(false);
-        math.nodes = check_editable_depth(nodes, 0, &too_deep);
+        let node_count = Cell::new(0);
+        math.nodes = check_editable_bounds(nodes, 0, &too_deep, &node_count);
         if too_deep.get() {
             return Err(limited(
                 "editable MathML exceeds the DOCX equation depth limit",
+            ));
+        }
+        if node_count.get() > MAX_EDITABLE_NODES {
+            return Err(limited(
+                "editable MathML exceeds the DOCX equation node limit",
             ));
         }
         Ok(())
@@ -262,15 +277,28 @@ impl Editable {
     }
 }
 
-fn check_editable_depth(nodes: Arg, level: usize, exceeded: &Cell<bool>) -> Arg {
+fn check_editable_bounds(
+    nodes: Arg,
+    level: usize,
+    too_deep: &Cell<bool>,
+    node_count: &Cell<usize>,
+) -> Arg {
     if level >= wordcraft_doc::math::MAX_DEPTH / 2 && !nodes.is_empty() {
         // WordCraft advances its layout depth both into a node and into its argument.
-        exceeded.set(true);
+        too_deep.set(true);
+        return nodes;
+    }
+    node_count.set(node_count.get().saturating_add(nodes.len()));
+    if node_count.get() > MAX_EDITABLE_NODES {
         return nodes;
     }
     nodes
         .into_iter()
-        .map(|node| map_args(node, &|arg| check_editable_depth(arg, level + 1, exceeded)))
+        .map(|node| {
+            map_args(node, &|arg| {
+                check_editable_bounds(arg, level + 1, too_deep, node_count)
+            })
+        })
         .collect()
 }
 
@@ -535,16 +563,74 @@ impl Padding {
 }
 
 impl EditableLayout<'_> {
-    fn shift(&self, contents: Arg, shift: f32) -> Result<MNode, EngineError> {
+    pub(super) fn axis(&self) -> f32 {
         let (face, constants) = resolve_math("Cambria Math");
         let axis_ratio = constants.as_ref().map_or(0.25, |table| {
             table.get(C::AxisHeight) / face.upem.max(1.0) as f32
         });
-        let axis = self.carrier.draw_size().clamp(1.0, 1638.0) * axis_ratio;
+        self.carrier.draw_size().clamp(1.0, 1638.0) * axis_ratio
+    }
+
+    pub(super) fn matrix_spacing(&self) -> Result<[f32; 2], EngineError> {
+        let [column, row] = *self.matrix_spacing.get_or_init(|| {
+            // A matrix with zero-sized cells reveals the native gaps before
+            // we place the MathML cells into those logical slots.
+            let colors = [Rgb(1, 2, 6), Rgb(1, 2, 7), Rgb(1, 2, 8)];
+            let marker = |color| {
+                vec![phantom(
+                    guide("H", GUIDE_SIZE, Some(color)),
+                    true,
+                    true,
+                    true,
+                    true,
+                )]
+            };
+            let math = Math {
+                nodes: vec![MNode::Matrix {
+                    col_jc: vec![ColJc::Left; 2],
+                    rows: vec![
+                        vec![marker(colors[0]), marker(colors[1])],
+                        vec![marker(colors[2]), vec![MNode::Run(MRun::plain(""))]],
+                    ],
+                }],
+                ..Default::default()
+            };
+            let measured = layout_equation(
+                &math,
+                "",
+                &self.carrier,
+                false,
+                MAX_GEOMETRY,
+                &Default::default(),
+                &mut 0,
+            );
+            let mut positions = [[f32::NAN; 2]; 3];
+            for item in measured.items {
+                if let MItem::Glyphs { color, glyphs, .. } = item {
+                    if let (Some(index), Some(&(_, x, y))) =
+                        (colors.iter().position(|ink| *ink == color), glyphs.first())
+                    {
+                        positions[index] = [x, y];
+                    }
+                }
+            }
+            let [origin, next_column, next_row] = positions;
+            [next_column[0] - origin[0], origin[1] - next_row[1]]
+        });
+        if ![column, row]
+            .into_iter()
+            .all(|value| value.is_finite() && value > 0.0)
+        {
+            return Err(unsupported("native DOCX math matrix spacing"));
+        }
+        Ok([column, row])
+    }
+
+    pub(super) fn shift(&self, contents: Arg, shift: f32) -> Result<MNode, EngineError> {
         // A one-row equation array centers its row on the math axis. Zero the
         // operand extents and give the row an independent ascent or descent so
         // its baseline lands at the requested offset.
-        let correction = 2.0 * (axis - shift);
+        let correction = 2.0 * (self.axis() - shift);
         let mut row = vec![
             MNode::Phant {
                 show: true,
@@ -579,7 +665,11 @@ impl EditableLayout<'_> {
             .get_or_init(|| guide_ratios(&self.carrier))
     }
 
-    fn add_extents(&self, nodes: &mut Arg, extents: [Option<f32>; 2]) -> Result<(), EngineError> {
+    pub(super) fn add_extents(
+        &self,
+        nodes: &mut Arg,
+        extents: [Option<f32>; 2],
+    ) -> Result<(), EngineError> {
         for (index, extent) in extents.into_iter().enumerate() {
             let Some(extent) = extent.filter(|extent| *extent != 0.0) else {
                 continue;
@@ -606,6 +696,30 @@ impl EditableLayout<'_> {
         }
         Ok(())
     }
+}
+
+pub(super) fn grid_marker() -> MNode {
+    phantom(
+        guide("H", 1.0, Some(math_spacing::GRID_GUIDE_COLOR)),
+        false,
+        true,
+        true,
+        true,
+    )
+}
+
+pub(super) fn grid_gap(width: f32) -> Result<Option<MNode>, EngineError> {
+    if width < 0.2 {
+        return Ok(None);
+    }
+    let gap = editable_gap(width.max(0.4))?.ok_or_else(|| invalid("empty MathML matrix gap"))?;
+    Ok(Some(MNode::Phant {
+        show: false,
+        zero_wid: false,
+        zero_asc: true,
+        zero_desc: true,
+        e: vec![gap, grid_marker()],
+    }))
 }
 
 fn zeroed(length: Option<Length>, dimension: usize) -> Option<bool> {

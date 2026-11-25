@@ -3,7 +3,7 @@ use std::{ops::Range, sync::Arc};
 
 use roxmltree::Node;
 use wordcraft_doc::{
-    math::{self, ColJc, Math},
+    math::{self, Arg, ColJc, MNode, Math},
     para::InlineObject,
     props::{Align, Borders, CharProps, HeightRule, TextColor},
     Block, Document, Paragraph, Table as NativeTable,
@@ -319,6 +319,110 @@ impl Table {
             }
         }
         Ok(())
+    }
+
+    pub(super) fn editable_matrix(
+        self,
+        layout: Layout,
+        editor: &compose::EditableLayout<'_>,
+    ) -> Result<MNode, EngineError> {
+        let [column_gap, row_pitch] = editor.matrix_spacing()?;
+        let (origins, advances) = self.matrix_columns(&layout.widths, column_gap)?;
+        let rows = layout.heights.len();
+        let columns = layout.widths.len();
+        let mut contents = vec![vec![Arg::new(); columns]; rows];
+        let first_baseline = editor.axis() + (rows - 1) as f32 * row_pitch / 2.0;
+        // Native matrices have no cell spans. Give the logical slots their
+        // measured widths independently of the expressions' painted bounds.
+        // Each expression can then extend into slots covered by its span.
+        for (cell, (left, top, drawing)) in self.cells.into_iter().zip(layout.cells) {
+            let row = cell.rows.start;
+            let column = cell.columns.start;
+            let (_, ascent, _) = drawing.size();
+            let nodes = match (cell.content, drawing) {
+                (CellContent::Equation(math), CellDrawing::Equation(_)) => math.nodes,
+                (CellContent::Table(table), CellDrawing::Table(nested)) => {
+                    vec![table.editable_matrix(nested, editor)?]
+                }
+                _ => return Err(invalid("MathML table layout does not match its cells")),
+            };
+            if nodes.is_empty() {
+                continue;
+            }
+            let matrix_baseline = first_baseline - row as f32 * row_pitch;
+            let offset = layout.baseline - top - ascent - matrix_baseline;
+            let mut cell_body = Arg::new();
+            cell_body.extend(compose::grid_gap((left - origins[column]).max(0.0))?);
+            cell_body.extend(nodes);
+            contents[row][column].push(MNode::Phant {
+                show: true,
+                zero_wid: true,
+                zero_asc: true,
+                zero_desc: true,
+                e: vec![editor.shift(cell_body, offset)?],
+            });
+        }
+        for row in &mut contents {
+            for (cell, &advance) in row.iter_mut().zip(&advances) {
+                cell.extend(compose::grid_gap(advance)?);
+                if cell.is_empty() {
+                    cell.push(compose::grid_marker());
+                }
+            }
+        }
+        let mut nodes = vec![MNode::Phant {
+            show: true,
+            zero_wid: false,
+            zero_asc: true,
+            zero_desc: true,
+            e: vec![
+                MNode::Matrix {
+                    rows: contents,
+                    col_jc: vec![ColJc::Left; columns],
+                },
+                compose::grid_marker(),
+            ],
+        }];
+        editor.add_extents(
+            &mut nodes,
+            [Some(layout.baseline), Some(layout.height - layout.baseline)],
+        )?;
+        Ok(MNode::Boxed { e: nodes })
+    }
+
+    fn matrix_columns(
+        &self,
+        widths: &[f32],
+        native_gap: f32,
+    ) -> Result<(Vec<f32>, Vec<f32>), EngineError> {
+        let mut origins = Vec::with_capacity(widths.len());
+        let mut advances = Vec::with_capacity(widths.len());
+        let mut current = 0.0;
+        for (index, desired_end) in starts(widths, &self.column_gaps)
+            .into_iter()
+            .skip(1)
+            .enumerate()
+        {
+            let gap = if index + 1 < widths.len() {
+                native_gap
+            } else {
+                0.0
+            };
+            let reserve = desired_end - current - gap;
+            if reserve < -0.0001 {
+                return Err(unsupported(
+                    "MathML matrix columns are closer than the native DOCX gap",
+                ));
+            }
+            // Round cumulative origins down so the cell's correction stays
+            // nonnegative. The minimum native math space carries 0.4 points.
+            let units = (reserve * 5.0 + 0.0001).floor();
+            let advance = if units < 2.0 { 0.0 } else { units / 5.0 };
+            origins.push(current);
+            advances.push(advance);
+            current += advance + gap;
+        }
+        Ok((origins, advances))
     }
 
     pub(in crate::epub) fn layout(

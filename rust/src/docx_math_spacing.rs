@@ -11,6 +11,7 @@ use wordcraft_doc::{
 pub(crate) const GUIDE_FONT: &str = "Liberation Serif";
 pub(crate) const GUIDE_COLOR: Rgb = Rgb(1, 2, 3);
 pub(crate) const SHIFT_GUIDE_COLOR: Rgb = Rgb(1, 2, 4);
+pub(crate) const GRID_GUIDE_COLOR: Rgb = Rgb(1, 2, 5);
 
 pub(super) fn visible_text(object: &InlineObject) -> Cow<'_, str> {
     if let InlineObject::Equation { linear, math, .. } = object {
@@ -31,8 +32,13 @@ fn remove_guides(nodes: Arg, removed: &Cell<bool>) -> Arg {
         if let Some(body) = shifted_body(&node) {
             removed.set(true);
             result.extend(remove_guides(body.to_vec(), removed));
-        } else if guide_flags(&node, GUIDE_COLOR)
-            .is_some_and(|flags| matches!(flags, ("H", false, true) | ("g", true, false)))
+        } else if let Some(matrix) = grid_body(&node) {
+            removed.set(true);
+            result.push(map_args(matrix.clone(), &|arg| remove_guides(arg, removed)));
+        } else if is_grid_marker(&node)
+            || is_grid_gap(&node)
+            || guide_flags(&node, GUIDE_COLOR)
+                .is_some_and(|flags| matches!(flags, ("H", false, true) | ("g", true, false)))
         {
             removed.set(true);
         } else {
@@ -40,6 +46,44 @@ fn remove_guides(nodes: Arg, removed: &Cell<bool>) -> Arg {
         }
     }
     result
+}
+
+fn grid_body(node: &MNode) -> Option<&MNode> {
+    let MNode::Boxed { e } = node else {
+        return None;
+    };
+    let [MNode::Phant {
+        show: true,
+        zero_wid: false,
+        zero_asc: true,
+        zero_desc: true,
+        e,
+    }, ..] = e.as_slice()
+    else {
+        return None;
+    };
+    let [matrix @ MNode::Matrix { .. }, marker] = e.as_slice() else {
+        return None;
+    };
+    is_grid_marker(marker).then_some(matrix)
+}
+
+fn is_grid_marker(node: &MNode) -> bool {
+    guide_flags(node, GRID_GUIDE_COLOR) == Some(("H", true, true))
+}
+
+fn is_grid_gap(node: &MNode) -> bool {
+    let MNode::Phant {
+        show: false,
+        zero_wid: false,
+        zero_asc: true,
+        zero_desc: true,
+        e,
+    } = node
+    else {
+        return false;
+    };
+    matches!(e.as_slice(), [_, marker] if is_grid_marker(marker))
 }
 
 fn shifted_body(node: &MNode) -> Option<&Arg> {

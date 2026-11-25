@@ -157,6 +157,28 @@ pub(super) enum Equation {
     },
 }
 
+impl Equation {
+    pub(super) fn with_embedded_table(self, format: &CharProps) -> Result<Self, EngineError> {
+        let Self::SpanningTable {
+            table,
+            mut extras,
+            display,
+        } = self
+        else {
+            return Ok(self);
+        };
+        let nodes = extras.push(compose::Extra::Table(table, Box::new(format.clone())))?;
+        Ok(Self::Composed {
+            math: Math {
+                nodes,
+                ..Default::default()
+            },
+            display,
+            extras,
+        })
+    }
+}
+
 pub(super) fn equation(
     source: &str,
     stylesheet: Option<&FormulaCss>,

@@ -12,6 +12,8 @@ use crate::{
     rendering, EngineError,
 };
 
+use super::math::Equation;
+
 pub(super) fn render(
     data: &[u8],
     book: &DocumentPayload,
@@ -199,7 +201,7 @@ impl<'a> Output<'a> {
                 let mut format = text.style_at(*start);
                 let equation = self.equation(source, *css, &mut format)?;
                 match equation {
-                    super::math::Equation::SpanningTable {
+                    Equation::SpanningTable {
                         mut table, extras, ..
                     } if extras.is_empty() || self.pdf_math.is_none() => {
                         if !extras.is_empty() {
@@ -210,34 +212,32 @@ impl<'a> Output<'a> {
                             .export(&self.document, &format, width, align)
                             .map(|table| Some(Arc::new(Block::Table(table))));
                     }
-                    equation if self.pdf_math.is_some() => {
-                        let object = self.equation_object(equation, &format, width, None)?;
+                    equation => {
                         return self
-                            .paragraph(block, width, Some((object, format)))
+                            .paragraph(block, width, Some((equation, format)))
                             .map(wordcraft_doc::para_block)
                             .map(Some);
                     }
-                    _ => return Err(unsupported("MathML composed geometry in semantic export")),
                 }
             }
         }
-        if self.pdf_math.is_some() {
-            return Ok(None);
-        }
-        Err(unsupported(
-            "MathML table spans mixed with other paragraph content in semantic export",
-        ))
+        Ok(None)
     }
 
     fn equation_object(
         &mut self,
-        equation: super::math::Equation,
+        equation: Equation,
         format: &CharProps,
         width: f32,
         paragraph_style: Option<&str>,
     ) -> Result<InlineObject, EngineError> {
+        let equation = if self.pdf_math.is_none() {
+            equation.with_embedded_table(format)?
+        } else {
+            equation
+        };
         match equation {
-            super::math::Equation::Native {
+            Equation::Native {
                 linear,
                 display,
                 math,
@@ -246,7 +246,7 @@ impl<'a> Output<'a> {
                 display,
                 math,
             }),
-            super::math::Equation::Composed {
+            Equation::Composed {
                 mut math,
                 display,
                 extras,
@@ -292,7 +292,7 @@ impl<'a> Output<'a> {
         &mut self,
         block: &BlockPayload,
         width: f32,
-        mut prepared: Option<(InlineObject, CharProps)>,
+        mut prepared: Option<(Equation, CharProps)>,
     ) -> Result<Paragraph, EngineError> {
         let mut p = Paragraph::new();
         if let Some(style) = CssParagraph::from_block(block)? {
@@ -319,21 +319,15 @@ impl<'a> Output<'a> {
             match item {
                 Inline::Image(image) => self.image(&mut p, image, width)?,
                 Inline::Equation { end, source, css } => {
-                    let (object, style) = if let Some(prepared) = prepared.take() {
+                    let (equation, style) = if let Some(prepared) = prepared.take() {
                         prepared
                     } else {
                         let mut style = text.style_at(start);
                         let equation = self.equation(source, css, &mut style)?;
-                        (
-                            self.equation_object(
-                                equation,
-                                &style,
-                                width,
-                                p.props.style.as_deref(),
-                            )?,
-                            style,
-                        )
+                        (equation, style)
                     };
+                    let object =
+                        self.equation_object(equation, &style, width, p.props.style.as_deref())?;
                     p.insert_object(p.len(), object, &style)
                         .map_err(conversion)?;
                     text_cursor = end;
