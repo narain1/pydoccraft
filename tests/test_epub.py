@@ -1572,6 +1572,53 @@ class EpubTests(unittest.TestCase):
         self.assertNotEqual(preview(shallow + steep, "", mixed),
                             preview(shallow + steep, "font-style:oblique 8deg", "ABC"))
 
+    def test_xhtml_synthetic_oblique_keeps_signed_fractional_angles(self) -> None:
+        font = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()
+
+        def preview(slope: str, text: str = "H", *, face: str = "normal", fixed: bool = False,
+                    export: bool = False) -> tuple[int, bytes]:
+            chapter = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Slant</title>
+            <meta name="viewport" content="width=320,height=128"/>
+            <style>@font-face{{font-family:Sample;src:url(upright.ttf);font-style:{face}}}
+            body {{margin:0;padding-left:64px;font-family:Sample;font-size:80px;line-height:112px;
+                   letter-spacing:16px;font-style:{slope}}}
+            p {{margin:0}}</style></head><body><p>{text}</p></body></html>"""
+            if fixed:
+                source = rewrite_epub(fixed_spread_fixture([("", "white", 320, 128)]),
+                                      {"OEBPS/s0.xhtml": chapter})
+            else:
+                source = epub_fixture(chapter_one=chapter)
+            data = rewrite_epub(source, {"OEBPS/upright.ttf": font})
+            with doc_ex.open(data) as book:
+                pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                if export:
+                    with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                        self.assertTrue(pixels == rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))))
+                        self.assertEqual(pdf[0].get_text(), "H")
+                return pixels
+
+        def ink_x(pixels: tuple[int, bytes]) -> float:
+            width, rgba = pixels
+            positions = [index // 4 % width for index in range(0, len(rgba), 4) if rgba[index] < 128]
+            return sum(positions) / len(positions)
+
+        for fixed in (False, True):
+            with self.subTest(fixed=fixed):
+                upright = preview("oblique 0deg", fixed=fixed)
+                left = preview("oblique -0.75deg", fixed=fixed)
+                right = preview("oblique 0.75deg", fixed=fixed, export=fixed)
+                self.assertLess(ink_x(left), ink_x(upright))
+                self.assertLess(ink_x(upright), ink_x(right))
+                self.assertTrue(preview("oblique 13.25deg", fixed=fixed)
+                                != preview("oblique 13.75deg", fixed=fixed))
+
+        mixed = '<span style="font-style:oblique 0.25deg">H</span><span style="font-style:oblique -0.75deg">H</span>'
+        self.assertTrue(preview("normal", mixed) != preview("normal", mixed.replace("-0.75", "0.25")))
+        oblique_face = "oblique -2deg 2deg"
+        self.assertTrue(preview("oblique 0.75deg", face=oblique_face) == preview("oblique 0deg", face=oblique_face))
+        with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "synthetic oblique"):
+            preview("oblique 90deg")
+
     def test_epub_svg_variable_axes_change_rendered_text(self) -> None:
         font = (Path(__file__).parent / "fixtures" / "fonts" / "InterVariable.ttf").read_bytes()
 

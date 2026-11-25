@@ -9,6 +9,7 @@ use std::{
 use kurbo::BezPath;
 use parley::{
     fontique::{Blob, FontInfoOverride, GenericFamily},
+    layout::GlyphRun,
     setting::{FontVariation, Tag},
     Alignment, AlignmentOptions, BaseDirection, FontContext, FontFamily, FontFamilyName, FontStyle,
     FontVariations, FontWeight, FontWidth, InlineBox, InlineBoxKind, Layout, LayoutContext,
@@ -46,7 +47,13 @@ pub(super) mod slope;
 pub(super) const MAX_FONT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_REGISTERED_FACES: usize = 512;
 const MAX_VARIATION_SPAN_BYTES: usize = 8 * 1024 * 1024;
-type Brush = [u8; 4];
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Brush {
+    rgba: [u8; 4],
+    oblique: Option<f32>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct FontRequest {
     weight: u32,
@@ -94,6 +101,7 @@ struct FaceVariations {
 pub(super) struct Fonts {
     names: FontNames,
     variations: HashMap<u64, FaceVariations>,
+    face_upright: Arc<HashMap<u64, bool>>,
     fonts: FontContext,
     layout: LayoutContext<Brush>,
     shaping_bytes: usize,
@@ -104,6 +112,7 @@ impl Fonts {
         Self {
             names: HashMap::new(),
             variations: HashMap::new(),
+            face_upright: Arc::default(),
             fonts: FontContext::new(),
             layout: LayoutContext::new(),
             shaping_bytes: 0,
@@ -227,6 +236,7 @@ impl Fonts {
         }
         // Fontique tries matching faces in registration order. CSS composite faces
         // try the last declaration first when multiple faces cover a character.
+        let mut face_upright = HashMap::new();
         for face in faces.iter().rev() {
             let key = face.family.to_ascii_lowercase();
             if !used.contains_key(&key) {
@@ -272,6 +282,7 @@ impl Fonts {
             // an author face's range can reach the next family on the CSS list.
             let mut register = |data: Vec<u8>| {
                 let blob = Blob::new(Arc::new(data));
+                face_upright.insert(blob.id(), face.style == FontStyle::Normal);
                 if face.weight.is_some()
                     || face.width.is_some()
                     || face.oblique.is_some()
@@ -369,6 +380,7 @@ impl Fonts {
         if result.names.is_empty() && !needs_stack {
             return Ok(None);
         }
+        result.face_upright = Arc::new(face_upright);
         result.register_bundled();
         Ok(Some(result))
     }
@@ -495,7 +507,11 @@ impl Fonts {
             builder.push_default(StyleProperty::FontFamily(FontFamily::Source(
                 "Source Sans 3".into(),
             )));
-            builder.push_default(StyleProperty::Brush([0, 0, 0, 255]));
+            let black = [0, 0, 0, 255];
+            builder.push_default(StyleProperty::Brush(Brush {
+                rgba: black,
+                oblique: None,
+            }));
             let mut align = Alignment::Start;
             if let Some(properties) = &properties {
                 if let Some(rtl) = properties.bidi {
@@ -588,10 +604,23 @@ impl Fonts {
                         range.clone(),
                     );
                 }
-                if style.hidden == Some(true) {
-                    builder.push(StyleProperty::Brush([0, 0, 0, 0]), range.clone());
+                let rgba = if style.hidden == Some(true) {
+                    [0, 0, 0, 0]
                 } else if let Some(TextColor::Rgb(Rgb(r, g, b))) = style.color {
-                    builder.push(StyleProperty::Brush([r, g, b, 255]), range.clone());
+                    [r, g, b, 255]
+                } else {
+                    black
+                };
+                if rgba != black || run.oblique.is_some() {
+                    // Glyph runs can share a shaping run after Fontique rounds
+                    // distinct angles to the same synthetic skew.
+                    builder.push(
+                        StyleProperty::Brush(Brush {
+                            rgba,
+                            oblique: run.oblique,
+                        }),
+                        range.clone(),
+                    );
                 }
                 if let Some(spacing) = style.spacing {
                     builder.push(StyleProperty::LetterSpacing(spacing), range.clone());
@@ -669,6 +698,7 @@ impl Fonts {
                 .is_some_and(|images| images.searchable())
                 .then_some(text),
             layout: RefCell::new(layout),
+            face_upright: self.face_upright.clone(),
             align,
             navigation,
             inline: inline
@@ -941,6 +971,7 @@ pub(super) fn read_face(face: &Face, book: &mut Book<'_>) -> Result<Vec<u8>, Eng
 
 pub(super) struct Text {
     layout: RefCell<Layout<Brush>>,
+    face_upright: Arc<HashMap<u64, bool>>,
     search_text: Option<String>,
     align: Alignment,
     inline: Vec<(usize, Vec<Draw>)>,
@@ -998,13 +1029,13 @@ impl Text {
                     .iter()
                     .map(|coordinate| NormalizedCoord::from_bits(coordinate.to_bits()))
                     .collect();
-                let synthesis = run.run().synthesis();
-                let skew = synthesis.skew().unwrap_or_default().to_radians().tan();
                 let style = run.style();
-                let [red, green, blue, alpha] = style.brush;
+                let [red, green, blue, alpha] = style.brush.rgba;
                 if alpha == 0 {
                     continue;
                 }
+                let synthesis = run.run().synthesis();
+                let skew = self.synthetic_skew(&run, &font)?;
                 let mut pen = Pen {
                     path: BezPath::new(),
                     x: 0.0,
@@ -1088,6 +1119,48 @@ impl Text {
         Ok(layout.height())
     }
 
+    fn synthetic_skew(
+        &self,
+        run: &GlyphRun<'_, Brush>,
+        font: &FontRef<'_>,
+    ) -> Result<f32, EngineError> {
+        let native = run.run();
+        let synthesis = native.synthesis();
+        let authored = run.style().brush.oblique;
+        let angle = if let Some(skew) = synthesis.skew() {
+            authored.unwrap_or(skew)
+        } else if let Some(angle) = authored.filter(|angle| *angle != 0.0 && angle.abs() < 1.0) {
+            // A fractional angle below one degree is reported as no skew.
+            // Respect the packaged style descriptor, or check the selected
+            // bundled face's metadata when there is no descriptor override.
+            let upright = self
+                .face_upright
+                .get(&native.font().data.id())
+                .copied()
+                .unwrap_or_else(|| font.attributes().style == skrifa::attribute::Style::Normal);
+            let variable = synthesis
+                .variation_settings()
+                .iter()
+                .any(|(tag, _)| matches!(&tag.to_be_bytes(), b"slnt" | b"ital"));
+            if upright && !variable {
+                angle
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+        let skew = angle.to_radians().tan();
+        if angle.abs() >= 90.0
+            || skew.abs() * native.font_size() > super::layout::MAX_PAINT_COORDINATE
+        {
+            return Err(limited(
+                "EPUB synthetic oblique exceeds the paint geometry limit",
+            ));
+        }
+        Ok(skew)
+    }
+
     fn capture_line(
         &self,
         line: &parley::layout::Line<'_, Brush>,
@@ -1110,7 +1183,7 @@ impl Text {
                     .inline
                     .binary_search_by_key(&range.start, |(at, _)| *at)
                     .is_ok();
-                if advance > 0.0 && !is_object && cluster.style().brush[3] != 0 {
+                if advance > 0.0 && !is_object && cluster.style().brush.rgba[3] != 0 {
                     geometry.push((range, Rect::new(area.x + left, top, advance, height), None));
                 }
                 left += advance;

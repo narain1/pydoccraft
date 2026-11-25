@@ -614,6 +614,14 @@ The Linux x86-64 CPython 3.11.15 wheel passed 714 tests in a fresh environment, 
 
 Rust 1.95 formatting and warnings-denied all-target Clippy passed. The locked default suite passed 479 unit and 7 integration tests. The locked Python-free suite passed 401 unit and 8 integration tests. All 17 Node 22.22.1 preview tests passed, along with public typing, documentation links, support evidence and roadmap checks. Cleanup removed about 6.4 GiB of Cargo output across both release builds and the native test build, plus the temporary wheel, virtual environments, sample EPUBs, external font fixture, generated site and Node addon.
 
+## 2026-11-24 Fractional XHTML synthetic oblique
+
+The earlier wheel renders both signs of a 0.75-degree request at the same upright ink position. The installed regression now verifies that a packaged upright face leans in the requested direction at subdegree angles in both chapter layouts. It distinguishes 13.25 and 13.75 degrees, retains different angles on adjacent spans, honors a declared oblique face range, and checks the explicit paint limit at 90 degrees. The fixed-layout PDF reopens with matching pixels and searchable text. [CSS Fonts 4 font-style](https://www.w3.org/TR/css-fonts-4/#font-style-prop)
+
+An independent fixture with Roboto Flex 3.200 verifies that a positive 0.75-degree request matches an explicit `slnt` value of −0.75. The opposite request matches the upright axis endpoint. The temporary font has SHA-256 `a55c1e67f6dcf27f2bb71dc3e4c03d3abcbc5054411aac943b2f94985195825e`. [Roboto Flex release 3.200](https://github.com/googlefonts/roboto-flex/releases/tag/3.200)
+
+The isolated Linux x86-64 CPython 3.11.15 wheel passed all 122 EPUB tests. Rust 1.95 formatting and warnings-denied release Clippy passed. The documentation checker verified 35 pages and 2,317 local references. The wheel measured 24,566,602 bytes with a 57,130,152-byte native extension and SHA-256 `630548d4ccfa56f72d0985653c74c22577c3a807875590ef45e20d9e68345a53`. Cleanup removed 1.6 GiB of Cargo output, both wheels, their virtual environments and the temporary font archive.
+
 ## 2026-11-24 SVG variable font-face ranges
 
 Installed regressions compare fractional font weights against explicit axes, check width and signed oblique face ranking, and exercise per-face defaults in Unicode fallback. They verify that automatic optical sizing and explicit element axes take precedence, including an override in a local tspan. A single selected face retains authored textLength, while a mixed-face run that requires splitting returns an explicit unsupported error for that placement. The searchable fixed-layout PDF retains the original label and reopens with the preview pixels. [CSS font matching and variation precedence](https://www.w3.org/TR/css-fonts-4/)

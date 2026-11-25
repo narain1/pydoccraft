@@ -36,7 +36,7 @@ use crate::{
 
 pub(super) const REFLOW_WIDTH: f32 = 612.0;
 const MAX_GEOMETRY: f32 = 20_000.0;
-const MAX_PAINT_COORDINATE: f32 = MAX_GEOMETRY * 4.0;
+pub(super) const MAX_PAINT_COORDINATE: f32 = MAX_GEOMETRY * 4.0;
 const MAX_BOXES: usize = 8_000;
 
 pub(super) fn render(
