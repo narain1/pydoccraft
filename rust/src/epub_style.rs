@@ -24,6 +24,8 @@ pub(super) type InlineBounds = MinMax<Option<InlineBound>, Option<InlineBound>>;
 pub(super) struct IntrinsicBounds {
     pub inline: InlineBounds,
     pub block: MinMax<bool, bool>,
+    pub contain: Size<bool>,
+    pub natural_ratio: bool,
 }
 
 impl IntrinsicBounds {
@@ -36,6 +38,11 @@ impl IntrinsicBounds {
             min: false,
             max: false,
         },
+        contain: Size {
+            width: false,
+            height: false,
+        },
+        natural_ratio: false,
     };
 
     pub fn has_inline(self) -> bool {
@@ -360,6 +367,11 @@ impl ChapterStyles {
                     min: block_bound("min-height"),
                     max: block_bound("max-height"),
                 },
+                contain: Size {
+                    width: value(&values, "width").eq_ignore_ascii_case("contain"),
+                    height: value(&values, "height").eq_ignore_ascii_case("contain"),
+                },
+                natural_ratio: false,
             };
             let box_style = Style {
                 display: match display {
@@ -768,7 +780,7 @@ fn intrinsic_dimension(value: &str, handle: Option<taffy::CalcHandle>) -> Option
     Some(match value.to_ascii_lowercase().as_str() {
         "min-content" => Dimension::min_content(),
         "max-content" => Dimension::max_content(),
-        "stretch" => Dimension::stretch(),
+        "stretch" | "contain" => Dimension::stretch(),
         "fit-content" => handle.map_or_else(Dimension::fit_content, Dimension::fit_content_calc),
         _ => {
             let limit = css::logical::fit_content_argument(value)?;

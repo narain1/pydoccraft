@@ -2690,10 +2690,80 @@ class EpubTests(unittest.TestCase):
         self.assertEqual(middle, preview("width:8px;min-width:fit-content(calc(4em + 7px))"))
         self.assertEqual(minimum, preview("width:0px;min-inline-size:fit-content(0px)"))
         self.assertEqual(maximum, preview("width:200px;max-width:fit-content(200px)"))
-        for size in ("min-height:fit-content(10px)", "width:contain"):
+        self.assertEqual(preview("width:stretch", box=True), preview("inline-size:contain", box=True))
+        self.assertEqual(preview("height:stretch", "height:80px"),
+                         preview("block-size:contain", "height:80px"))
+        for size in ("min-height:fit-content(10px)", "min-width:contain"):
             with self.subTest(size=size):
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "CSS intrinsic box size"):
                     preview(size)
+
+    def test_css_contain_fit_preserves_aspect_ratio_in_fixed_and_reflow_layout(self) -> None:
+        original = fixed_spread_fixture([("", "white", 280, 150)])
+        source = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Contain fit</title>
+          <meta name="viewport" content="width=280,height=150"/><style>
+          html,body{margin:0;font-size:12px}
+          #parent{position:relative;margin:10px;width:180px;height:80px;
+            padding:8px;border:4px solid #465793;background:#ece3e0}
+          #fitted{display:block;background:#64b4a3}
+          CSS</style></head><body><div id="parent">CHILD</div></body></html>"""
+        text = '<div id="fitted"><a href="https://example.org/contain">Contain fit</a></div>'
+        svg = ('<svg xmlns="http://www.w3.org/2000/svg" id="fitted" viewBox="0 0 24 12">'
+               '<rect width="24" height="12" fill="#123450"/></svg>')
+        contain = "inline-size:contain;block-size:contain"
+        for label, child, common, sized, explicit in (
+            ("authored", text, "aspect-ratio:2 / 1", contain, "width:160px;height:80px"),
+            ("inline only", text, "aspect-ratio:2 / 1", "inline-size:contain",
+             "width:160px;height:80px"),
+            ("maximum", text, "aspect-ratio:2 / 1;box-sizing:border-box;padding:4px;"
+             "border:2px solid #165573;max-inline-size:calc(50% + 10px)",
+             contain, "width:100px;height:50px"),
+            ("absolute", text, "aspect-ratio:2 / 1;position:absolute;top:0;left:0;"
+             "margin:4px 5px", contain, "width:176px;height:88px"),
+            ("viewport", text, "aspect-ratio:2 / 1;position:fixed;top:0;left:0",
+             contain, "width:280px;height:140px"),
+            ("natural", svg, "box-sizing:border-box;padding:4px;border:2px solid #165573",
+             contain, "width:148px;height:80px"),
+            ("natural inline only", svg, "box-sizing:border-box;padding:4px;border:2px solid #165573",
+             "inline-size:contain", "width:148px;height:80px"),
+        ):
+            with self.subTest(case=label):
+                projected = []
+                for sizes in (sized, explicit):
+                    css = "#fitted{" + common + ";" + sizes + "}"
+                    xhtml = source.replace("CSS", css).replace("CHILD", child)
+                    with doc_ex.open(rewrite_epub(original, {"OEBPS/s0.xhtml": xhtml})) as book:
+                        png = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                        output = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+                    with doc_ex.open(output) as pdf:
+                        self.assertTrue(png == rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))))
+                        words = pdf[0].search_for("Contain fit")
+                        links = pdf[0].get_links()
+                        if child == text:
+                            self.assertEqual(len(words), 1)
+                            self.assertEqual([link.uri for link in links], ["https://example.org/contain"])
+                        projected.append((png, words, [link.bbox for link in links]))
+                self.assertTrue(projected[0] == projected[1], "contain-fit changed geometry")
+
+        reflow = source.replace("height:80px;", "").replace("CHILD", text)
+        previews = []
+        for sizes in (contain, "width:180px;height:90px"):
+            css = "#fitted{aspect-ratio:2 / 1;" + sizes + "}"
+            with doc_ex.open(epub_fixture(chapter_one=reflow.replace("CSS", css))) as book:
+                previews.append(rgba_pixels(png_chunks(book.render_page(0, dpi=96))))
+        self.assertTrue(previews[0] == previews[1])
+
+        for css, message in (
+            ("#parent{display:flex}#fitted{aspect-ratio:2 / 1;" + contain + "}",
+             "independently sized block"),
+            ("#fitted{aspect-ratio:2 / 1;min-width:170px;" + contain + "}",
+             "aspect ratio conflicts"),
+        ):
+            with self.subTest(css=css):
+                xhtml = source.replace("CSS", css).replace("CHILD", text)
+                with doc_ex.open(rewrite_epub(original, {"OEBPS/s0.xhtml": xhtml})) as book:
+                    with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
+                        book.render_page(0, dpi=96)
 
     def test_css_intrinsic_inline_bounds_drive_parent_and_searchable_fixed_layout(self) -> None:
         original = fixed_spread_fixture([("", "white", 280, 132)])

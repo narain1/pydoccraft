@@ -363,13 +363,17 @@ pub(super) fn intrinsic_size_kind(name: &str, value: &str) -> Option<ValueKind> 
     if !size {
         return None;
     }
-    let kind = if ["min-content", "max-content", "fit-content", "stretch"]
-        .iter()
-        .any(|name| keyword(value, name))
+    let kind = if [
+        "min-content",
+        "max-content",
+        "fit-content",
+        "stretch",
+        "contain",
+    ]
+    .iter()
+    .any(|name| keyword(value, name))
     {
         ValueKind::Supported
-    } else if keyword(value, "contain") {
-        ValueKind::Unsupported
     } else if let Some(argument) = fit_content_argument(value) {
         let argument = argument.to_ascii_lowercase();
         if calc::is_math(&argument) {

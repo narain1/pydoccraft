@@ -98,6 +98,7 @@ impl Tree {
             fit_probes: 0,
             grid_limit: false,
         };
+        view.resolve_contains(space)?;
         view.resolve_bounds()?;
         compute_root_layout(&mut view, root, space);
         if view.fit_probes > MAX_FIT_PROBES {
@@ -166,7 +167,216 @@ fn outer_width(
     )
 }
 
+// Both a finite limit and an available extent refer to the same aspect-ratio box.
+fn contain_axis(
+    available: Option<f32>,
+    margin: f32,
+    edges: f32,
+    property_to_ratio: f32,
+    min: LengthPercentageAuto,
+    max: LengthPercentageAuto,
+    calculate: impl Fn(CalcHandle, f32) -> f32,
+) -> Option<(f32, f32)> {
+    let limit = |value: LengthPercentageAuto, default| {
+        if value.is_auto() {
+            Some(default)
+        } else {
+            value
+                .maybe_resolve(available, &calculate)
+                .map(|length| (length + property_to_ratio).max(0.0))
+        }
+    };
+    let minimum = limit(min, 0.0)?;
+    let maximum = limit(max, f32::INFINITY)?.max(minimum);
+    let available = available.map_or(f32::INFINITY, |size| (size - margin - edges).max(0.0));
+    Some((minimum, available.min(maximum)))
+}
+
 impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
+    fn resolve_contains(&mut self, viewport: Size<AvailableSpace>) -> Result<(), EngineError> {
+        // Parents precede their children during intrinsic containing-block resolution.
+        for index in (0..self.nodes.len()).rev() {
+            let node = &self.nodes[index];
+            let style = &node.style;
+            let axes = node
+                .bounds
+                .contain
+                .zip_map(style.size, |contain, size| contain && size.is_stretch());
+            let Some(ratio) = style.aspect_ratio else {
+                continue;
+            };
+            if !(axes.width || axes.height) || style.display == Display::None {
+                continue;
+            }
+            let unresolved =
+                || unsupported("EPUB CSS contain-fit requires independently sized block geometry");
+            if node.bounds.has_inline() || node.bounds.has_block() || style.scrollbar_width != 0.0 {
+                return Err(unresolved());
+            }
+
+            let available = if style.position == Position::Fixed {
+                viewport.map(AvailableSpace::into_option)
+            } else {
+                Size {
+                    width: Some(
+                        self.definite_containing_width(index)
+                            .ok_or_else(unresolved)?,
+                    ),
+                    height: self.contain_block_height(index).ok_or_else(unresolved)?,
+                }
+            };
+            let width = available.width.ok_or_else(unresolved)?;
+            let calculate = |handle, basis| self.calculations.at(handle, basis);
+            let margin = style
+                .margin
+                .resolve_or_zero(Some(width), calculate)
+                .sum_axes();
+            let padding = style
+                .padding
+                .resolve_or_zero(Some(width), calculate)
+                .sum_axes();
+            let border = style
+                .border
+                .resolve_or_zero(Some(width), calculate)
+                .sum_axes();
+            let edges = Size {
+                width: padding.width + border.width,
+                height: padding.height + border.height,
+            };
+            let property_edges = edges.map(|edge| {
+                if style.box_sizing == BoxSizing::ContentBox {
+                    edge
+                } else {
+                    0.0
+                }
+            });
+            let ratio_edges = if node.bounds.natural_ratio {
+                edges
+            } else {
+                property_edges
+            };
+            let (minimum_width, maximum_width) = contain_axis(
+                available.width,
+                margin.width,
+                ratio_edges.width,
+                property_edges.width - ratio_edges.width,
+                style.min_size.width,
+                style.max_size.width,
+                calculate,
+            )
+            .ok_or_else(unresolved)?;
+            let (minimum_height, maximum_height) = contain_axis(
+                available.height,
+                margin.height,
+                ratio_edges.height,
+                property_edges.height - ratio_edges.height,
+                style.min_size.height,
+                style.max_size.height,
+                calculate,
+            )
+            .ok_or_else(unresolved)?;
+            let width = f64::from(maximum_width).min(f64::from(maximum_height) * f64::from(ratio));
+            let height = width / f64::from(ratio);
+            let fitted = Size {
+                width: width as f32,
+                height: height as f32,
+            };
+            if !fitted.width.is_finite() || !fitted.height.is_finite() {
+                return Err(unresolved());
+            }
+            if fitted.width < minimum_width || fitted.height < minimum_height {
+                return Err(unsupported(
+                    "EPUB CSS contain-fit aspect ratio conflicts with a minimum size",
+                ));
+            }
+            // Keep the other preferred size native. A natural ratio on a border-box
+            // replacement needs the content-to-border adjustment on both axes.
+            let resolve_natural_auto =
+                node.bounds.natural_ratio && style.box_sizing == BoxSizing::BorderBox;
+            let style = &mut self.nodes[index].style;
+            for (axis, size, fitted, ratio_edge, property_edge) in [
+                (
+                    axes.width,
+                    &mut style.size.width,
+                    fitted.width,
+                    ratio_edges.width,
+                    property_edges.width,
+                ),
+                (
+                    axes.height,
+                    &mut style.size.height,
+                    fitted.height,
+                    ratio_edges.height,
+                    property_edges.height,
+                ),
+            ] {
+                if axis || (resolve_natural_auto && size.is_auto()) {
+                    *size = Dimension::length((fitted + ratio_edge - property_edge).max(0.0));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // The outer option records whether the containing block could be proven.
+    // An in-flow auto height is allowed to remain indefinite.
+    fn contain_block_height(&self, index: usize) -> Option<Option<f32>> {
+        let node = &self.nodes[index];
+        let parent = &self.nodes[usize::from(node.parent?)];
+        let style = &parent.style;
+        if parent.bounds.has_block()
+            || (!style.position.is_out_of_flow()
+                && parent.parent.is_some_and(|grandparent| {
+                    matches!(
+                        self.nodes[usize::from(grandparent)].style.display,
+                        Display::Flex | Display::Grid
+                    )
+                }))
+        {
+            return None;
+        }
+        let positioned = node.style.position == Position::Absolute;
+        if style.size.height.is_auto() {
+            return (!positioned
+                && style.min_size.height.is_auto()
+                && style.max_size.height.is_auto()
+                && !(style.position.is_out_of_flow()
+                    && !style.inset.top.is_auto()
+                    && !style.inset.bottom.is_auto()))
+            .then_some(None);
+        }
+        let fixed_edge = |edge: taffy::LengthPercentage| match edge.expand() {
+            ExpandedLengthPercentage::Length(points) => Some(points),
+            _ => None,
+        };
+        let padding = fixed_edge(style.padding.top)? + fixed_edge(style.padding.bottom)?;
+        let border = fixed_edge(style.border.top)? + fixed_edge(style.border.bottom)?;
+        let calculate = |_, _| 0.0;
+        let limit = |value: LengthPercentageAuto, default| {
+            if value.is_auto() {
+                Some(default)
+            } else {
+                value.maybe_resolve(None, calculate)
+            }
+        };
+        let height = style
+            .size
+            .height
+            .maybe_resolve(None, calculate)?
+            .min(limit(style.max_size.height, f32::INFINITY)?)
+            .max(limit(style.min_size.height, 0.0)?);
+        let outer = if style.box_sizing == BoxSizing::ContentBox {
+            height + padding + border
+        } else {
+            height.max(padding + border)
+        };
+        Some(Some(if positioned {
+            outer - border
+        } else {
+            outer - padding - border
+        }))
+    }
+
     fn resolve_bounds(&mut self) -> Result<(), EngineError> {
         let input = LayoutInput {
             run_mode: RunMode::ComputeSize,

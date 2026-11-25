@@ -517,6 +517,7 @@ impl<'book> Layout<'book> {
             .and_then(|styles| styles.get(&node.id()))
             .ok_or_else(|| invalid("missing EPUB node style"))?;
         let mut style = styled.box_style.clone();
+        let mut bounds = styled.intrinsic_bounds;
         let mut children = Vec::new();
         let mut local = None;
         if !styled.hidden {
@@ -560,6 +561,7 @@ impl<'book> Layout<'book> {
                 let [width, height] = picture.size();
                 style.item_is_replaced = true;
                 if !frame {
+                    bounds.natural_ratio = style.aspect_ratio.is_none();
                     style.aspect_ratio.get_or_insert(width / height);
                 }
                 for (dim, attribute, natural) in [
@@ -631,7 +633,7 @@ impl<'book> Layout<'book> {
             style.overflow.x != Overflow::Visible || style.overflow.y != Overflow::Visible;
         self.add(
             style,
-            styled.intrinsic_bounds,
+            bounds,
             PaintBox {
                 id: NodeId::from(0usize),
                 dom: Some(node.id()),
