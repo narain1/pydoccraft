@@ -31,13 +31,27 @@ pub(super) fn implicit(tracks: &DetailedGridTracksInfo<String>) -> bool {
     tracks.negative_implicit_tracks != 0 || tracks.positive_implicit_tracks != 0
 }
 
+pub(super) struct Projection {
+    pub(super) span: Range<usize>,
+    pub(super) trim: Line<f32>,
+    pub(super) local_gap: Option<f32>,
+    pub(super) parent_rtl: bool,
+    pub(super) child_rtl: bool,
+}
+
 pub(super) fn inherit_axis(
     source: &DetailedGridTracksInfo<String>,
-    span: Range<usize>,
     aliases: &[Vec<String>],
-    local_gap: Option<f32>,
-    reversed: bool,
+    projection: Projection,
 ) -> Result<Axis, EngineError> {
+    let Projection {
+        span,
+        trim,
+        local_gap,
+        parent_rtl,
+        child_rtl,
+    } = projection;
+    let reverse_order = parent_rtl != child_rtl;
     let tracks = source.positions.get(span.clone()).ok_or_else(unresolved)?;
     if tracks.is_empty() || tracks.len() > MAX_TRACKS {
         return Err(limited("EPUB CSS inherited grid track limit"));
@@ -52,7 +66,7 @@ pub(super) fn inherit_axis(
     }
 
     let separation = |pair: &[Line<f32>]| {
-        if reversed {
+        if parent_rtl {
             pair[0].start - pair[1].end
         } else {
             pair[1].start - pair[0].end
@@ -74,12 +88,19 @@ pub(super) fn inherit_axis(
     // A changed gap moves each inner track edge by half the difference while
     // preserving the first and last outer grid lines.
     let half = (gap - inherited_gap) * 0.5;
-    let sizes = tracks
-        .iter()
-        .enumerate()
-        .map(|(index, position)| {
-            let start = if index == 0 { 0.0 } else { half };
-            let end = if index + 1 == tracks.len() { 0.0 } else { half };
+    let sizes = (0..tracks.len())
+        .map(|index| {
+            let position = if reverse_order {
+                tracks[tracks.len() - 1 - index]
+            } else {
+                tracks[index]
+            };
+            let start = if index == 0 { trim.start } else { half };
+            let end = if index + 1 == tracks.len() {
+                trim.end
+            } else {
+                half
+            };
             let size = position.end - position.start - start - end;
             if !size.is_finite() || size < 0.0 {
                 return Err(unresolved());
@@ -91,10 +112,14 @@ pub(super) fn inherit_axis(
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut total = 0;
-    let names = (span.start..=span.end)
-        .enumerate()
-        .map(|(index, line)| {
-            let mut line = source.names_for_line(line).to_vec();
+    let names = (0..=tracks.len())
+        .map(|index| {
+            let line_index = if reverse_order {
+                span.end - index
+            } else {
+                span.start + index
+            };
+            let mut line = source.names_for_line(line_index).to_vec();
             for alias in aliases.get(index).into_iter().flatten() {
                 if !line.contains(alias) {
                     line.push(alias.clone());

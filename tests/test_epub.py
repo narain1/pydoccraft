@@ -3238,13 +3238,76 @@ class EpubTests(unittest.TestCase):
 
         for invalid in (
             "#parent{grid-template-columns:[outer] 60px [left] 80px [middle] 1fr [end]}",
-            "#sub{padding-left:1px}",
+            "#sub{padding-left:240px}",
             "#one{grid-column:4}",
             "#parent{display:block}",
         ):
             with self.subTest(invalid=invalid):
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "subgrid"):
                     render(inherited + invalid)
+
+    def test_css_subgrid_keeps_interior_lines_with_edges_and_used_alignment(self) -> None:
+        fixture = fixed_spread_fixture([("", "white", 340, 194)])
+        source = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Subgrid exterior edges</title>
+          <meta name="viewport" content="width=340,height=194"/><style>
+          html,body,p{margin:0;font-size:12px}
+          #parent{position:absolute;left:15px;top:12px;width:300px;height:156px;display:grid;
+            grid-template-columns:[outside]60px [left]80px [middle] minmax(0,1fr) [end];
+            grid-template-rows:[top]40px [second]106px [bottom];gap:10px;
+            justify-items:end;align-items:center;background:#e8e0cc}
+          #grid{display:grid;grid-column:left/end;grid-row:top/bottom;
+            margin:2px 7px 4px 3px;border:2px solid #182f53;
+            padding:6px 11px 8px 7px;background:#dadef0}
+          #label{grid-column:left/middle;grid-row:top/second;background:#9cbc77}
+          #secondary{grid-column:middle/end;grid-row:second/bottom;background:#8dc2b9}
+          CSS</style></head><body><div id="parent"><section id="grid">
+          <p id="label"><a href="https://example.org/edge">First label</a></p>
+          <p id="secondary">Second label</p></section></div></body></html>"""
+
+        def render(rules: str) -> tuple[tuple[int, bytes], object, object]:
+            epub = rewrite_epub(fixture, {"OEBPS/s0.xhtml": source.replace("CSS", rules)})
+            with doc_ex.open(epub) as book:
+                png = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                output = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+            with doc_ex.open(output) as pdf:
+                self.assertTrue(png == rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))))
+                page = pdf[0]
+                words = [page.search_for(word) for word in ("First", "Second")]
+                links = page.get_links()
+                self.assertTrue(all(words))
+                self.assertEqual([link.uri for link in links], ["https://example.org/edge"])
+                return png, words, [link.bbox for link in links]
+
+        authored = (
+            "#grid{grid-template-columns:subgrid;grid-template-rows:subgrid;"
+            "column-gap:calc(100% / 11 - 4px);row-gap:calc(50% - 52px);"
+            "width:12px;min-width:300px;max-width:16px;height:5px;min-height:max-content;"
+            "max-height:8px;aspect-ratio:9/1;justify-self:end;align-self:center;"
+            "justify-content:space-between;align-content:center}"
+        )
+        for context, columns in (
+            ("", "[left]66px [middle]118px [end]"),
+            ("#parent{direction:rtl}", "[left]58px [middle]126px [end]"),
+            ("#grid{direction:rtl}", "[end]118px [middle]66px [left]"),
+        ):
+            with self.subTest(context=context):
+                control = (
+                    "#grid{justify-self:stretch;align-self:stretch;gap:14px;"
+                    f"grid-template-columns:{columns};"
+                    "grid-template-rows:[top]28px [second]90px [bottom]}"
+                )
+                self.assertTrue(render(context + authored) == render(context + control))
+
+        signed = (
+            "#grid{margin-left:-4px;grid-template-columns:subgrid;grid-template-rows:subgrid;"
+            "margin-top:auto}"
+        )
+        signed_control = (
+            "#grid{margin-top:0;margin-left:-4px;justify-self:stretch;align-self:stretch;gap:10px;"
+            "grid-template-columns:[left]75px [middle]120px [end];"
+            "grid-template-rows:[top]32px [second]92px [bottom]}"
+        )
+        self.assertTrue(render(signed) == render(signed_control))
 
     def test_css_intrinsic_box_counts_padding_and_wraps_before_column_flex_height(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic box edges</title>

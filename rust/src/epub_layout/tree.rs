@@ -2,11 +2,11 @@
 use taffy::{
     compute_block_layout, compute_cached_layout, compute_flexbox_layout, compute_grid_layout,
     compute_hidden_layout, compute_oof_layout, compute_root_layout,
-    geometry::{AbsoluteAxis, Size},
+    geometry::{AbsoluteAxis, Line, Size},
     style::{
-        AlignItems, AlignItemsKeyword, AvailableSpace, BoxSizing, CalcHandle, Dimension, Display,
-        ExpandedDimension, ExpandedLengthPercentage, FlexDirection, FlexWrap, LengthPercentageAuto,
-        Position, Style,
+        AlignContent, AlignItems, AlignItemsKeyword, AvailableSpace, BoxSizing, CalcHandle,
+        Dimension, Display, ExpandedDimension, ExpandedLengthPercentage, FlexDirection, FlexWrap,
+        LengthPercentageAuto, Position, Style,
     },
     util::{MaybeResolve, ResolveOrZero},
     BlockContext, Cache, CacheTree, DetailedGridInfo, DetailedLayoutInfo, Layout,
@@ -18,7 +18,7 @@ use taffy::{
 use crate::epub::{
     css::CalculationTable,
     limited,
-    style::{IntrinsicBound, IntrinsicBounds},
+    style::{IntrinsicBound, IntrinsicBounds, SizeBounds},
     unsupported,
 };
 use crate::EngineError;
@@ -181,6 +181,7 @@ struct GridArea {
     item_slot: usize,
     size: Size<f32>,
     block_probe_width: Option<f32>,
+    subgrid_outer: Size<Option<f32>>,
 }
 
 struct View<'a, F> {
@@ -348,79 +349,124 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
             .get(area.item_slot)
             .ok_or_else(subgrid::unresolved)?;
         let style = &node.style;
-        if style.aspect_ratio.is_some()
+        if (style.aspect_ratio.is_some() && !(axes.width && axes.height))
             || style.scrollbar_width != 0.0
-            || (axes.width && style.direction != parent.style.direction)
         {
             return Err(subgrid::unresolved());
         }
         let calculate = |handle, basis| self.calculations.at(handle, basis);
         let inline = Some(area.size.width);
-        let padding = style.padding.resolve_or_zero(inline, calculate).sum_axes();
-        let border = style.border.resolve_or_zero(inline, calculate).sum_axes();
-        let margin = style
-            .margin
-            .map(|edge| edge.maybe_resolve(inline, calculate));
+        let padding = style.padding.resolve_or_zero(inline, calculate);
+        let border = style.border.resolve_or_zero(inline, calculate);
+        let margin = style.margin.resolve_or_zero(inline, calculate);
+        let trim = padding + border + margin;
+        let outer = area.size - margin.sum_axes();
+        let inner = area.size - trim.sum_axes();
         let mut layout = [None, None];
         for (axis, output) in [Horizontal, Vertical].into_iter().zip(&mut layout) {
             if !axes.get_abs(axis) {
                 continue;
             }
-            let (alignment, margins, tracks, span, aliases, reversed) = match axis {
+            let (tracks, span, aliases, edges, parent_rtl, child_rtl) = match axis {
                 Horizontal => (
-                    style.justify_self.unwrap_or(parent.style.justify_items),
-                    [margin.left, margin.right],
                     &details.columns,
                     usize::from(item.column_start - 1)..usize::from(item.column_end - 1),
                     &style.grid_template_column_names,
+                    trim.horizontal_components(),
+                    parent.style.direction.is_rtl(),
                     style.direction.is_rtl(),
                 ),
                 Vertical => (
-                    style.align_self.unwrap_or(parent.style.align_items),
-                    [margin.top, margin.bottom],
                     &details.rows,
                     usize::from(item.row_start - 1)..usize::from(item.row_end - 1),
                     &style.grid_template_row_names,
+                    trim.vertical_components(),
+                    false,
                     false,
                 ),
             };
-            let minimum = style.min_size.get_abs(axis);
-            let extent = Some(area.size.get_abs(axis));
-            if !matches!(
-                alignment.keyword,
-                AlignItemsKeyword::Normal | AlignItemsKeyword::Stretch
-            ) || margins != [Some(0.0); 2]
-                || padding.get_abs(axis) != 0.0
-                || border.get_abs(axis) != 0.0
-                || !style.size.get_abs(axis).is_auto()
-                || !style.max_size.get_abs(axis).is_auto()
-                || !(minimum.is_auto() || minimum.maybe_resolve(extent, calculate) == Some(0.0))
-                || match axis {
-                    Horizontal => node.bounds.has_inline(),
-                    Vertical => node.bounds.has_block(),
-                }
+            let content = inner.get_abs(axis);
+            if !content.is_finite()
+                || content < 0.0
+                || !outer.get_abs(axis).is_finite()
+                || outer.get_abs(axis) < 0.0
             {
                 return Err(subgrid::unresolved());
             }
-            let gap = node
-                .bounds
-                .subgrid_local_gap
-                .get_abs(axis)
-                .then(|| style.gap.get_abs(axis).resolve_or_zero(extent, calculate));
-            *output = Some(subgrid::inherit_axis(tracks, span, aliases, gap, reversed)?);
+            let local_gap = node.bounds.subgrid_local_gap.get_abs(axis).then(|| {
+                style
+                    .gap
+                    .get_abs(axis)
+                    .resolve_or_zero(Some(content), calculate)
+            });
+            let trim = if child_rtl {
+                Line {
+                    start: edges.end,
+                    end: edges.start,
+                }
+            } else {
+                edges
+            };
+            *output = Some(subgrid::inherit_axis(
+                tracks,
+                aliases,
+                subgrid::Projection {
+                    span,
+                    trim,
+                    local_gap,
+                    parent_rtl,
+                    child_rtl,
+                },
+            )?);
         }
-        let style = &mut self.nodes[index].style;
+
+        // CSS Grid stretches subgrids in their inherited axes regardless of
+        // the authored preferred size, limits or alignment in those axes.
+        let node = &mut self.nodes[index];
+        let style = &mut node.style;
         let [horizontal, vertical] = layout;
+        let mut expected = Size::NONE;
         if let Some(inherited) = horizontal {
             style.grid_template_columns = inherited.tracks;
             style.grid_template_column_names = inherited.names;
             style.gap.width = inherited.gap;
+            style.size.width = Dimension::auto();
+            style.min_size.width = LengthPercentageAuto::auto();
+            style.max_size.width = LengthPercentageAuto::auto();
+            style.justify_self = Some(AlignItems::STRETCH);
+            style.justify_content = AlignContent::START;
+            style.margin.left = LengthPercentageAuto::length(margin.left);
+            style.margin.right = LengthPercentageAuto::length(margin.right);
+            node.bounds.inline = SizeBounds {
+                min: None,
+                max: None,
+            };
+            expected.width = Some(outer.width);
         }
         if let Some(inherited) = vertical {
             style.grid_template_rows = inherited.tracks;
             style.grid_template_row_names = inherited.names;
             style.gap.height = inherited.gap;
+            style.size.height = Dimension::auto();
+            style.min_size.height = LengthPercentageAuto::auto();
+            style.max_size.height = LengthPercentageAuto::auto();
+            style.align_self = Some(AlignItems::STRETCH);
+            style.align_content = AlignContent::START;
+            style.margin.top = LengthPercentageAuto::length(margin.top);
+            style.margin.bottom = LengthPercentageAuto::length(margin.bottom);
+            node.bounds.block = SizeBounds {
+                min: None,
+                max: None,
+            };
+            expected.height = Some(outer.height);
         }
+        if axes.width && axes.height {
+            style.aspect_ratio = None;
+        }
+        self.grid_areas[index]
+            .as_mut()
+            .ok_or_else(subgrid::unresolved)?
+            .subgrid_outer = expected;
         Ok(())
     }
 
@@ -431,9 +477,14 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
                 continue;
             }
             let area = self.grid_area(index).ok_or_else(subgrid::unresolved)?;
-            let different = node.layout.size.zip_map(area.size, |actual, expected| {
-                !actual.is_finite() || (actual - expected).abs() > 0.001
-            });
+            let different = node
+                .layout
+                .size
+                .zip_map(area.subgrid_outer, |actual, expected| {
+                    expected.is_none_or(|expected| {
+                        !actual.is_finite() || (actual - expected).abs() > 0.001
+                    })
+                });
             if (axes.width && different.width) || (axes.height && different.height) {
                 return Err(subgrid::unresolved());
             }
@@ -663,9 +714,7 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
                 AbsoluteAxis::Vertical,
                 basis.height,
                 basis.width,
-                grid_area
-                    .filter(|_| node.bounds.subgrid.height)
-                    .map(|area| area.size.height),
+                grid_area.and_then(|area| area.subgrid_outer.height),
                 calculate,
             ) {
                 geometry.content.height = Some(content);
@@ -804,6 +853,7 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
                 item_slot: slot,
                 size,
                 block_probe_width: None,
+                subgrid_outer: Size::NONE,
             });
         }
         Ok(())
