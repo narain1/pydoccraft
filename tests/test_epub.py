@@ -9723,7 +9723,7 @@ Trailing
             (source.replace('<m:maligngroup/><m:mn', '<m:maligngroup/><m:maligngroup/><m:mn', 1),
              "MathML element maligngroup"),
             (source.replace('<m:mn mathcolor="#bf222d">12.345</m:mn>',
-                            '<m:msqrt><m:mn>12.345</m:mn></m:msqrt>'),
+                            '<m:mphantom><m:mn>12.345</m:mn></m:mphantom>'),
              "MathML decimal alignment inside a nontransparent operator"),
             (source.replace('columnwidth="140pt 100pt"', 'columnwidth="60pt 100pt"'),
              "MathML cell exceeds fixed column widths"),
@@ -10213,12 +10213,97 @@ Trailing
 
         unsupported = source.replace(
             '<m:mn mathcolor="#bf222d">12<m:malignmark/>:34<m:malignmark/>5</m:mn>',
-            '<m:mfrac><m:mrow><m:mn>12<m:malignmark/>3</m:mn></m:mrow><m:mn>4</m:mn></m:mfrac>',
+            '<m:mfrac linethickness="2pt"><m:mrow><m:mn>12<m:malignmark/>3</m:mn></m:mrow><m:mn>4</m:mn></m:mfrac>',
         )
         with doc_ex.open(epub_fixture(chapter_one=unsupported)) as book:
             for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
-                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "MathML alignment mark outside"):
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "MathML alignment mark inside a composed fraction"):
                     operation()
+
+    def test_mathml_aligns_carets_inside_native_fraction_and_radical_operands(self) -> None:
+        source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Native MathML operand carets</title>
+            <meta name="viewport" content="width=520,height=360"/><style>body {margin:0}</style>
+          </head><body><p><m:math mathsize="12pt">
+            <m:mtable groupalign="{decimalpoint}" columnwidth="250pt" rowspacing="12pt">
+              <m:mtr><m:mtd><m:maligngroup/><m:mtext>West</m:mtext><m:mtext>Gate</m:mtext>
+                <m:msqrt><m:mstyle decimalpoint=","><m:mn mathcolor="#bf222d">12,345</m:mn></m:mstyle></m:msqrt>
+              </m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:mtext>Near</m:mtext>
+                <m:mspace width="12pt"/><m:mpadded lspace="-4pt"><m:mtext>Movable</m:mtext></m:mpadded>
+                <m:mroot><m:mn>.675</m:mn><m:mi>k</m:mi></m:mroot>
+              </m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:mfrac>
+                <m:mrow><m:mtext>Label</m:mtext><m:mn>87<m:malignmark/>:654</m:mn></m:mrow>
+                <m:mtext>Lower</m:mtext>
+              </m:mfrac></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:mfrac linethickness="0">
+                <m:mtext>Upper</m:mtext>
+                <m:mrow><m:msqrt><m:mn>9<m:malignmark/>;01</m:mn></m:msqrt><m:mtext>Terms</m:mtext></m:mrow>
+              </m:mfrac></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:mn>55.7</m:mn></m:mtd></m:mtr>
+            </m:mtable>
+          </m:math></p></body></html>"""
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+        literals = ("12,345", ".675", "87:654", "9;01", "55.7",
+                    "WestGate", "Near", "Movable", "Label", "Lower", "Upper", "Terms")
+
+        def boxes(doc: doc_ex.Document, terms: tuple[str, ...]) -> dict[str, tuple[float, float, float, float]]:
+            rects = {}
+            for term in terms:
+                rects[term], = doc[0].search_for(term)
+            return rects
+
+        def geometry(doc: doc_ex.Document, delta: float) -> dict[str, tuple[float, float, float, float]]:
+            rects = boxes(doc, (*literals, "12", "87", "9", "55"))
+            point = rects[".675"][0]
+            for prefix in ("12", "87", "9", "55"):
+                self.assertAlmostEqual(rects[prefix][2], point, delta=delta)
+            self.assertLess(rects["87:654"][1], rects["Lower"][1])
+            self.assertLess(rects["Upper"][1], rects["9;01"][1])
+            return rects
+
+        with doc_ex.open(epub_fixture(chapter_one=source)) as book:
+            self.assertTrue(book.render_page(0, dpi=96).startswith(b"\x89PNG"))
+            with doc_ex.open(book.convert("pdf")) as pdf:
+                self.assertFalse(pdf[0].get_images())
+                reference = geometry(pdf, 0.05)
+            editable = book.convert("docx")
+        with zipfile.ZipFile(io.BytesIO(editable)) as archive:
+            xml = ET.fromstring(archive.read("word/document.xml"))
+        matrix = xml.find(".//m:oMath//m:m", ns)
+        self.assertIsNotNone(matrix)
+        for path, term in (
+            (".//m:rad/m:e", "12,345"),
+            (".//m:rad/m:e", ".675"),
+            (".//m:f/m:num", "87:654"),
+            (".//m:f/m:den//m:rad/m:e", "9;01"),
+        ):
+            texts = [run.text for body in matrix.findall(path, ns) for run in body.findall(".//m:t", ns)]
+            self.assertEqual(texts.count(term), 1, texts)
+        with doc_ex.open(editable) as word:
+            word_text = word[0].get_text()
+            for term in literals:
+                self.assertEqual(word_text.count(term), 1, word_text)
+            self.assertNotIn("⟡H", word_text)
+            with doc_ex.open(word.convert("pdf")) as pdf:
+                native = geometry(pdf, 0.25)
+                for term in literals:
+                    for expected, actual in zip(reference[term], native[term]):
+                        self.assertAlmostEqual(expected, actual, delta=0.35)
+
+        fixture = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 520, 360)])
+        with doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": source})) as book:
+            preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+                fixed = boxes(pdf, literals)
+                for term in literals:
+                    self.assertAlmostEqual(
+                        fixed[term][0] - fixed[".675"][0],
+                        reference[term][0] - reference[".675"][0],
+                        delta=0.65,
+                    )
 
     def test_mathml_labeled_rows_keep_editable_labels_outside_data_columns(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">

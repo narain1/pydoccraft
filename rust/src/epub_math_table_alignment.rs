@@ -1,19 +1,22 @@
 //! Measure MathML table alignment points without changing editable runs.
 use roxmltree::{Node, NodeId};
-use wordcraft_doc::math::{math_class, MClass, MNode, Math};
+use wordcraft_doc::{
+    math::{self, math_class, Arg, MClass, MNode, Math},
+    math_edit::{self, MathPos},
+};
 use wordcraft_layout::math::MathLayout;
 
 use super::super::{append_token_text, xml_space, DEPTH};
 use super::{compose, indexed, invalid, limited, unsupported, MATHML};
 use crate::EngineError;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) enum Anchor {
     Left,
     Center,
     Right,
-    Decimal(usize, Edge),
-    Marked(usize, Edge),
+    Decimal(MathPos, Edge),
+    Marked(MathPos, Edge),
 }
 
 #[derive(Clone, Copy)]
@@ -23,18 +26,18 @@ pub(super) enum Edge {
 }
 
 impl Anchor {
-    pub(super) fn uses_caret(self) -> bool {
+    pub(super) fn uses_caret(&self) -> bool {
         matches!(self, Self::Marked(..) | Self::Decimal(..))
     }
 
-    pub(super) fn caret_offset_mut(&mut self) -> Option<&mut usize> {
+    pub(super) fn caret_mut(&mut self) -> Option<&mut MathPos> {
         match self {
             Self::Decimal(offset, _) | Self::Marked(offset, _) => Some(offset),
             _ => None,
         }
     }
 
-    pub(super) fn measure(self, layout: &MathLayout) -> Result<f32, EngineError> {
+    pub(super) fn measure(&self, layout: &MathLayout) -> Result<f32, EngineError> {
         match self {
             Self::Left => Ok(0.0),
             Self::Center => Ok(layout.width / 2.0),
@@ -50,20 +53,59 @@ impl Anchor {
 }
 
 impl Edge {
-    fn caret(self, layout: &MathLayout, offset: usize) -> Option<f32> {
+    fn caret(self, layout: &MathLayout, position: &MathPos) -> Option<f32> {
         let slots = layout
             .slots
             .iter()
-            .filter(|slot| slot.path.is_empty() && slot.off == offset)
+            .filter(|slot| slot.path == position.path && slot.off == position.off)
             .map(|slot| slot.x);
         // Operator spacing gives a shared logical offset two visual stops.
         let x = match self {
             Self::Left => slots.max_by(f32::total_cmp),
             Self::Right => slots.min_by(f32::total_cmp),
         };
-        x.or_else(|| (offset == 0 && layout.width == 0.0).then_some(0.0))
-            .filter(|x| (0.0..=layout.width).contains(x))
+        x.or_else(|| {
+            (position.path.is_empty() && position.off == 0 && layout.width == 0.0).then_some(0.0)
+        })
+        .filter(|x| (0.0..=layout.width).contains(x))
     }
+}
+
+pub(super) fn merge_aligned_runs(
+    mut nodes: Arg,
+    path: &mut [(usize, usize)],
+) -> Result<Arg, EngineError> {
+    let Some(((index, argument), rest)) = path.split_first_mut() else {
+        return Ok(math::merge_runs(nodes));
+    };
+    if *index >= nodes.len() {
+        return Err(invalid("MathML alignment operand is missing"));
+    }
+    // The compound at the selected path separates the two runs. Reuse
+    // WordCraft's merge independently on both sides and on its arguments.
+    let mut tail = nodes.split_off(*index).into_iter();
+    let mut operator = tail
+        .next()
+        .ok_or_else(|| invalid("MathML alignment operand is missing"))?;
+    let mut result = math::merge_runs(nodes);
+    *index = result.len();
+    let children = math_edit::child_count(&operator);
+    if *argument >= children {
+        return Err(invalid("MathML alignment operand is missing"));
+    }
+    for child in 0..children {
+        let slot = math_edit::child_mut(&mut operator, child)
+            .ok_or_else(|| invalid("MathML alignment operand is missing"))?;
+        let body = std::mem::take(slot);
+        *slot = if child == *argument {
+            merge_aligned_runs(body, rest)?
+        } else {
+            math::merge_runs(body)
+        };
+    }
+    result.push(operator);
+    result.extend(math::merge_runs(tail.collect()));
+    Ok(result)
 }
 
 pub(super) fn check_boundaries<'a>(
@@ -212,13 +254,11 @@ fn visit_group_items<'xml, 'input>(
     emit(GroupItem::Leave)
 }
 
-#[derive(Clone, Copy)]
 pub(super) struct Group {
     pub(super) scope: Scope,
     anchor: RequestedAnchor,
 }
 
-#[derive(Clone, Copy)]
 enum RequestedAnchor {
     Automatic(Anchor),
     Decimal(Edge),
@@ -226,7 +266,7 @@ enum RequestedAnchor {
 }
 
 impl Group {
-    pub(super) fn resolve(self, caret: Option<usize>) -> Result<Anchor, EngineError> {
+    pub(super) fn resolve(self, caret: Option<MathPos>) -> Result<Anchor, EngineError> {
         match self.anchor {
             RequestedAnchor::Automatic(anchor) => Ok(anchor),
             RequestedAnchor::Decimal(edge) => caret
@@ -245,31 +285,31 @@ enum Cursor {
     Number(NodeId, usize),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(in crate::epub::math) struct Scope {
     cell: NodeId,
     opening: NodeId,
     cursor: Option<Cursor>,
-    pub(in crate::epub::math) caret: Option<usize>,
+    pub(in crate::epub::math) caret: Option<MathPos>,
 }
 
 impl Scope {
-    pub(in crate::epub::math) fn seeking_caret(self) -> bool {
+    pub(in crate::epub::math) fn seeking_caret(&self) -> bool {
         self.cursor.is_some() && self.caret.is_none()
     }
 
-    pub(in crate::epub::math) fn is_selected_mark(self, node: Node<'_, '_>) -> bool {
+    pub(in crate::epub::math) fn is_selected_mark(&self, node: Node<'_, '_>) -> bool {
         matches!(self.cursor, Some(Cursor::Mark(mark)) if mark == node.id())
     }
 
-    pub(in crate::epub::math) fn numeric_offset(self, node: Node<'_, '_>) -> Option<usize> {
+    pub(in crate::epub::math) fn numeric_offset(&self, node: Node<'_, '_>) -> Option<usize> {
         match self.cursor {
             Some(Cursor::Number(number, offset)) if number == node.id() => Some(offset),
             _ => None,
         }
     }
 
-    pub(in crate::epub::math) fn removes(self, node: Node<'_, '_>) -> bool {
+    pub(in crate::epub::math) fn removes(&self, node: Node<'_, '_>) -> bool {
         node.id() == self.opening
             || tag(node) == Some("malignmark")
                 && node
@@ -432,7 +472,7 @@ fn mark_edge(cell: Node<'_, '_>, mark: Node<'_, '_>) -> Result<Edge, EngineError
         .next()
         .ok_or_else(|| invalid("MathML alignment mark has no parent"))?;
     let token = matches!(tag(parent), Some("mi" | "mn" | "mo" | "ms" | "mtext"));
-    if !token && parent != cell && !matches!(tag(parent), Some("mrow" | "mstyle")) {
+    if !token && parent != cell && !matches!(tag(parent), Some("mrow" | "mstyle" | "msqrt")) {
         return Err(unsupported(
             "MathML alignment mark outside the cell baseline",
         ));
@@ -440,7 +480,12 @@ fn mark_edge(cell: Node<'_, '_>, mark: Node<'_, '_>) -> Result<Edge, EngineError
     if parent != cell
         && ancestors
             .take_while(|ancestor| *ancestor != cell)
-            .any(|ancestor| !matches!(tag(ancestor), Some("mrow" | "mstyle" | "semantics")))
+            .any(|ancestor| {
+                !matches!(
+                    tag(ancestor),
+                    Some("mrow" | "mstyle" | "semantics" | "mfrac" | "msqrt" | "mroot")
+                )
+            })
         || mark
             .ancestors()
             .take_while(|ancestor| *ancestor != cell)
@@ -515,7 +560,12 @@ fn decimal_offset(cell: Node<'_, '_>, number: Node<'_, '_>) -> Result<usize, Eng
         .ancestors()
         .skip(1)
         .take_while(|node| *node != cell)
-        .any(|node| !matches!(tag(node), Some("mrow" | "mstyle" | "semantics")))
+        .any(|node| {
+            !matches!(
+                tag(node),
+                Some("mrow" | "mstyle" | "semantics" | "msqrt" | "mroot")
+            )
+        })
     {
         return Err(unsupported(
             "MathML decimal alignment inside a nontransparent operator",

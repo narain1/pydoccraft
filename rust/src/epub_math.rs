@@ -5,6 +5,7 @@ use roxmltree::Node;
 use serde::{Deserialize, Serialize};
 use wordcraft_doc::{
     math::{self, Arg, ColJc, FracKind, LimLoc, MNode, MRun, MScr, MSty, Math, ScriptKind},
+    math_edit::MathPos,
     props::{CharProps, Rgb, TextColor},
 };
 
@@ -406,7 +407,7 @@ impl<'xml> Projection<'_, 'xml> {
         &mut self,
         scope: Option<table::alignment::Scope>,
         project: impl FnOnce(&mut Self) -> Result<T, EngineError>,
-    ) -> Result<(T, Option<usize>), EngineError> {
+    ) -> Result<(T, Option<MathPos>), EngineError> {
         let outer = std::mem::replace(&mut self.alignment_group, scope);
         let result = project(self);
         let caret =
@@ -478,12 +479,17 @@ impl<'xml> Projection<'_, 'xml> {
     ) -> Result<(), EngineError> {
         let seeking = self
             .alignment_group
+            .as_ref()
             .is_some_and(table::alignment::Scope::seeking_caret);
         let nodes = self.element(child, depth, style)?;
         if seeking {
             if let Some(scope) = &mut self.alignment_group {
                 if let Some(caret) = &mut scope.caret {
-                    *caret += rows.iter().map(argument_units).sum::<usize>();
+                    if let Some((index, _)) = caret.path.first_mut() {
+                        *index += rows.len();
+                    } else {
+                        caret.off += wordcraft_doc::math_edit::units(rows);
+                    }
                 }
             }
         }
@@ -499,21 +505,27 @@ impl<'xml> Projection<'_, 'xml> {
     ) -> Result<MNode, EngineError> {
         let mut caret = self
             .alignment_group
+            .as_ref()
             .and_then(|scope| scope.numeric_offset(node));
         for child in node.children().filter(Node::is_element) {
-            let Some(scope) = self.alignment_group.filter(|scope| scope.removes(child)) else {
+            let Some(scope) = self
+                .alignment_group
+                .as_ref()
+                .filter(|scope| scope.removes(child))
+            else {
                 return Err(unsupported("nested content in a MathML token"));
             };
+            let selected = scope.is_selected_mark(child);
             table::alignment::check_mark_empty(child)?;
             self.charge(depth + 1)?;
-            if scope.is_selected_mark(child) {
+            if selected {
                 caret = Some(token_mark_offset(node, child));
             }
         }
         let mut run = native_token(node, style)?;
         if let Some(caret) = caret {
             if let Some(scope) = &mut self.alignment_group {
-                scope.caret = Some(caret);
+                scope.caret = Some(MathPos::new(Vec::new(), caret));
             }
             if node.has_tag_name((MATHML, "mn")) {
                 // Keep punctuation inside an aligned number in the same
@@ -537,7 +549,7 @@ impl<'xml> Projection<'_, 'xml> {
                     table::alignment::check_mark_empty(node)?;
                 }
                 if scope.is_selected_mark(node) {
-                    scope.caret = Some(0);
+                    scope.caret = Some(MathPos::default());
                 }
                 return Ok(Vec::new());
             }
@@ -576,6 +588,10 @@ impl<'xml> Projection<'_, 'xml> {
                 return padded(node, body);
             }
             "mfrac" => {
+                let seeking = self
+                    .alignment_group
+                    .as_ref()
+                    .is_some_and(table::alignment::Scope::seeking_caret);
                 let [num, den] = self.arguments(node, depth, style)?;
                 let kind = if boolean(node, "bevelled")? == Some(true) {
                     FracKind::Skewed
@@ -585,6 +601,16 @@ impl<'xml> Projection<'_, 'xml> {
                         .map_or([super::layout::REFLOW_WIDTH, 792.0], |sheet| sheet.viewport);
                     let fraction = fraction::Style::read(node, style.font_size(), viewport);
                     let Some(kind) = fraction.native() else {
+                        if seeking
+                            && self
+                                .alignment_group
+                                .as_ref()
+                                .is_some_and(|scope| scope.caret.is_some())
+                        {
+                            return Err(unsupported(
+                                "MathML alignment mark inside a composed fraction",
+                            ));
+                        }
                         return self.extras.push(compose::Extra::Fraction(Box::new(
                             fraction::Fraction::new(fraction, style, num, den),
                         )));
@@ -596,7 +622,8 @@ impl<'xml> Projection<'_, 'xml> {
             "msqrt" => MNode::Rad {
                 deg: Vec::new(),
                 deg_hide: true,
-                e: self.elements(node, depth, style)?,
+                e: self
+                    .with_operand_caret(1, |projection| projection.elements(node, depth, style))?,
             },
             "mroot" => {
                 let [e, deg] = self.arguments(node, depth, style)?;
@@ -646,6 +673,29 @@ impl<'xml> Projection<'_, 'xml> {
         Ok(vec![native])
     }
 
+    fn with_operand_caret(
+        &mut self,
+        slot: usize,
+        project: impl FnOnce(&mut Self) -> Result<Arg, EngineError>,
+    ) -> Result<Arg, EngineError> {
+        let seeking = self
+            .alignment_group
+            .as_ref()
+            .is_some_and(table::alignment::Scope::seeking_caret);
+        let body = project(self)?;
+        if seeking {
+            if let Some(caret) = self
+                .alignment_group
+                .as_mut()
+                .and_then(|scope| scope.caret.as_mut())
+            {
+                // The enclosing operator is the only node emitted by this element.
+                caret.path.insert(0, (0, slot));
+            }
+        }
+        Ok(body)
+    }
+
     fn arguments<const N: usize>(
         &mut self,
         node: Node<'xml, '_>,
@@ -654,11 +704,22 @@ impl<'xml> Projection<'_, 'xml> {
     ) -> Result<[Arg; N], EngineError> {
         let mut children = node.children().filter(Node::is_element);
         let mut args = std::array::from_fn(|_| Vec::new());
-        for arg in &mut args {
+        let slots: &[usize] = match node.tag_name().name() {
+            "mfrac" => &[0, 1],
+            "mroot" => &[1, 0],
+            _ => &[],
+        };
+        for (index, arg) in args.iter_mut().enumerate() {
             let child = children
                 .next()
                 .ok_or_else(|| invalid("missing MathML operand"))?;
-            *arg = self.element(child, depth + 1, style)?;
+            *arg = if let Some(&slot) = slots.get(index) {
+                self.with_operand_caret(slot, |projection| {
+                    projection.element(child, depth + 1, style)
+                })?
+            } else {
+                self.element(child, depth + 1, style)?
+            };
         }
         if children.next().is_some() {
             return Err(invalid("too many MathML operands"));

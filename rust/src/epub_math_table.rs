@@ -435,8 +435,8 @@ pub(super) fn project<'xml>(
                         let mut styles = vec![cell.style];
                         let mut aligned = Vec::with_capacity(parts.len());
                         for part in parts {
-                            let (nodes, caret) = projection.with_alignment_group(
-                                Some(part.group.scope),
+                            let (nodes, mut caret) = projection.with_alignment_group(
+                                Some(part.group.scope.clone()),
                                 |projection| {
                                     let mut nodes = Arg::new();
                                     for item in part.items {
@@ -471,7 +471,12 @@ pub(super) fn project<'xml>(
                             )?;
                             aligned.push(AlignedEquation {
                                 math: Math {
-                                    nodes: math::merge_runs(nodes),
+                                    nodes: alignment::merge_aligned_runs(
+                                        nodes,
+                                        caret
+                                            .as_mut()
+                                            .map_or(&mut [], |pos| pos.path.as_mut_slice()),
+                                    )?,
                                     ..Default::default()
                                 },
                                 anchor: part.group.resolve(caret)?,
@@ -490,11 +495,16 @@ pub(super) fn project<'xml>(
                         None
                     }
                 };
-                let (nodes, caret) = projection
-                    .with_alignment_group(group.map(|group| group.scope), |projection| {
-                        projection.elements(cell.node, depth + 2, cell.style)
-                    })?;
-                let nodes = math::merge_runs(nodes);
+                let (nodes, mut caret) = projection.with_alignment_group(
+                    group.as_ref().map(|group| group.scope.clone()),
+                    |projection| projection.elements(cell.node, depth + 2, cell.style),
+                )?;
+                let nodes = alignment::merge_aligned_runs(
+                    nodes,
+                    caret
+                        .as_mut()
+                        .map_or(&mut [], |pos| pos.path.as_mut_slice()),
+                )?;
                 let anchor = group.map(|group| group.resolve(caret)).transpose()?;
                 Ok((
                     CellContent::Equation(Math {
@@ -841,13 +851,12 @@ impl Table {
         for cell in &mut self.cells {
             match &mut cell.content {
                 CellContent::Equation(math) => {
-                    let caret = cell.anchor.as_mut().and_then(Anchor::caret_offset_mut);
+                    let caret = cell.anchor.as_mut().and_then(Anchor::caret_mut);
                     editable.apply_with_caret(math, caret)?
                 }
                 CellContent::Aligned(groups) => {
                     for group in groups {
-                        editable
-                            .apply_with_caret(&mut group.math, group.anchor.caret_offset_mut())?;
+                        editable.apply_with_caret(&mut group.math, group.anchor.caret_mut())?;
                     }
                 }
                 CellContent::Table(table) => table.apply_editable(editable)?,
@@ -1375,7 +1384,7 @@ impl Table {
         let mut caret_columns = [false; MAX_MATRIX_SIZE];
         if editable_carrier.is_some() {
             for cell in &self.cells {
-                if cell.anchor.is_some_and(Anchor::uses_caret)
+                if cell.anchor.as_ref().is_some_and(Anchor::uses_caret)
                     || matches!(&cell.content, CellContent::Aligned(groups)
                         if groups.iter().any(|group| group.anchor.uses_caret()))
                 {
@@ -1435,7 +1444,7 @@ impl Table {
                 }
             };
             let (cell_width, _, _) = measure.size();
-            let anchor = if let Some(anchor) = cell.anchor {
+            let anchor = if let Some(anchor) = &cell.anchor {
                 let CellDrawing::Equation(equation) = &measure else {
                     return Err(invalid("MathML alignment group has no equation"));
                 };

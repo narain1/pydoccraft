@@ -7,6 +7,7 @@ use std::{
 use roxmltree::Node;
 use wordcraft_doc::{
     math::{Arg, ColJc, MNode, MRun, Math},
+    math_edit::{self, MathPos},
     math_linear::map_args,
     props::{CharProps, Rgb},
     resolve::ResolvedChar,
@@ -54,6 +55,8 @@ struct EditableBox {
     node: MNode,
     borrow: f32,
 }
+
+type ArgumentCaret<'a> = (&'a mut [(usize, usize)], &'a mut usize);
 
 pub(super) struct EditableLayout<'a> {
     document: &'a Document,
@@ -282,8 +285,9 @@ impl Editable {
     pub(super) fn apply_with_caret(
         &self,
         math: &mut Math,
-        caret: Option<&mut usize>,
+        caret: Option<&mut MathPos>,
     ) -> Result<(), EngineError> {
+        let caret = caret.map(|pos| (pos.path.as_mut_slice(), &mut pos.off));
         let nodes = self.substitute(std::mem::take(&mut math.nodes), caret)?;
         let too_deep = Cell::new(false);
         let node_count = Cell::new(0);
@@ -301,10 +305,24 @@ impl Editable {
         Ok(())
     }
 
-    fn substitute(&self, body: Arg, mut caret: Option<&mut usize>) -> Result<Arg, EngineError> {
+    fn substitute(&self, body: Arg, caret: Option<ArgumentCaret<'_>>) -> Result<Arg, EngineError> {
+        let (mut operand, mut caret) = match caret {
+            Some((path, offset)) if path.is_empty() => (None, Some(offset)),
+            Some(nested) => (Some(nested), None),
+            None => (None, None),
+        };
+        let selected = operand.as_ref().map(|(path, _)| path[0].0);
         let mut native_end = 0;
         let mut result = Vec::with_capacity(body.len());
-        for node in body {
+        for (index, node) in body.into_iter().enumerate() {
+            if selected == Some(index) {
+                let (path, offset) = operand
+                    .take()
+                    .ok_or_else(|| invalid("MathML alignment operand is missing"))?;
+                path[0].0 = result.len();
+                result.push(self.substitute_operand(node, path, offset)?);
+                continue;
+            }
             if let Some(index) = box_index(&node) {
                 let EditableBox { node, borrow } = self
                     .boxes
@@ -363,7 +381,32 @@ impl Editable {
             }
             result.push(node);
         }
+        if operand.is_some() {
+            return Err(invalid("MathML alignment operand is missing"));
+        }
         Ok(result)
+    }
+
+    fn substitute_operand(
+        &self,
+        mut node: MNode,
+        path: &mut [(usize, usize)],
+        offset: &mut usize,
+    ) -> Result<MNode, EngineError> {
+        let ((_, target), rest) = path
+            .split_first_mut()
+            .ok_or_else(|| invalid("MathML alignment operand is missing"))?;
+        let count = math_edit::child_count(&node);
+        if *target >= count {
+            return Err(invalid("MathML alignment operand is missing"));
+        }
+        for index in 0..count {
+            let argument = math_edit::child_mut(&mut node, index)
+                .ok_or_else(|| invalid("MathML alignment operand is missing"))?;
+            let caret = (index == *target).then_some((&mut *rest, &mut *offset));
+            *argument = self.substitute(std::mem::take(argument), caret)?;
+        }
+        Ok(node)
     }
 }
 

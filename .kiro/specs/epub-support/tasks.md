@@ -116,7 +116,8 @@
 - [x] Align up to eight MathML sibling groups per data cell with ordinary run boundaries. Apply ordinal alignment lists and preserve missing trailing groups, baseline geometry, searchable text and editable equation operands.
 - [x] Align groups that cross MathML row and style wrappers and the selected presentation branch of semantics. Keep inherited styles, operand order and native editability.
 - [x] Preserve direct decimal and explicit alignment carets after bounded composed geometry in searchable PDF and editable DOCX.
-- [ ] Extend multi-group MathML alignment through operator spacing and nontransparent wrappers. Support marks and decimal points inside nontransparent operands, right-to-left groups and cross-table scopes.
+- [x] Align MathML decimal points inside native square and indexed roots and explicit marks inside native fraction and radical operands. Preserve editable operator trees and searchable text through geometry rewrites.
+- [ ] Extend MathML alignment through operator spacing and other nontransparent wrappers and operands, right-to-left groups and cross-table scopes.
 - [x] Preserve editable negative MathML padding offsets that fit within the preceding horizontal math space, including nested superscripts.
 - [x] Retain direct editable MathML carets before and after bounded negative padding that uses preceding space.
 - [ ] Expand editable negative leading offsets beyond preceding space or with carets inside the borrowed spacing, and cover remaining MathML visual properties.
