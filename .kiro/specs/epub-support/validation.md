@@ -1355,3 +1355,13 @@ Two independently authored tracks compare conditional animations with unconditio
 ## Ogg Theora video ordinals
 
 The installed regression selects both Theora ordinals from two Ogg links with reversed picture-stream order and a Vorbis-to-Opus soundtrack. The RGB frames, clipped intervals, captions and seeks match separately authored single-picture controls. A missing ordinal in either link, a simultaneous named and ordinal selection, and nonzero Skeleton base granules on the selected picture return explicit errors. [Ogg multiplexing and chaining](https://www.xiph.org/ogg/doc/oggstream.html#chaining)
+
+## 2026-11-25 Integrated EPUB fit-content bounds, TTML timed sets, Theora selection and MathML limits
+
+The combined regressions verify fixed fit-content() minima and maxima, including computed font units through inheritance. They compare conditional TTML text and region sets with independently authored unconditional timing, exercise explicit Theora ordinals across reordered chained links with captioned seeks, and verify searchable positions and editable native equation operands for stacked MathML limits and accent bases. The prior intrinsic sizing budget still rejects a separate 4,100-box publication.
+
+The installed Linux x86-64 CPython 3.11.15 release wheel from `3c812721ce` passed 893 tests, including 298 EPUB tests, with zero failures, errors or skips. It measured 25,941,824 bytes with a 60,385,896-byte native extension. Its SHA-256 is `a727f63d946c086300d8573326578147760685a9e9a2be7e8bf019ad2e8bdaaf`. This checkpoint used the host Linux wheel. The macOS and Windows release matrix remains open.
+
+Four released W3C EPUB books passed with 28 chapter previews and four reopened fixed-layout PDF pages. Two independently authored fixed-layout EPUBs with automatic grid repetition, gap shorthands, stepped CSS geometry, inline bidi isolation and labeled MathML widths passed EPUBCheck 5.4.0 with zero fatals, errors, warnings or informational messages. Rust 1.95 formatting and locked release all-target Clippy with warnings denied passed. Rust passed 479 unit and 7 integration tests with default features and 401 unit and 8 integration tests without Python. Node 22.22.1 passed 17 tests.
+
+Both lockfiles, the dependency inventory and the upstream revisions match the preceding checkpoint. The audit reviewed 349 core packages and binding licenses. All wheel attribution files matched their source copies. The Linux extension uses system C and GCC libraries. The public typing, documentation, support evidence and roadmap checks passed. Generated wheels, installed test environments, downloaded EPUB inputs and the Node addon were pruned after validation. The Rust dependencies were retained for the next combined check.
