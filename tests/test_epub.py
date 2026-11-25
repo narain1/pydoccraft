@@ -11229,6 +11229,108 @@ Trailing
                     with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "MathML alignment caret in a promoted script operator"):
                         operation()
 
+    def test_mathml_aligns_native_limits_and_accent_bases(self) -> None:
+        source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>MathML limit and accent carets</title><meta name="viewport" content="width=520,height=390"/>
+            <style>body {margin:0}</style></head><body><p><m:math mathsize="12pt">
+            <m:mtable groupalign="{decimalpoint}" columnwidth="215pt" rowspacing="12pt">
+              <m:mtr><m:mtd><m:maligngroup/><m:mover accent="true">
+                <m:mn mathcolor="#bf222d">12.345</m:mn><m:mo>^</m:mo>
+              </m:mover></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:munder accentunder="false">
+                <m:mtext>LowBase</m:mtext><m:mrow><m:mn>77<m:malignmark/>;819</m:mn></m:mrow>
+              </m:munder></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:munderover accentunder="false" accent="false">
+                <m:mtext>DualBase</m:mtext><m:mn>63<m:malignmark/>:925</m:mn><m:mtext>Crown</m:mtext>
+              </m:munderover></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:munderover accentunder="false" accent="false">
+                <m:mtext>Spire</m:mtext><m:mtext>Foot</m:mtext><m:mn>54<m:malignmark/>:290</m:mn>
+              </m:munderover></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:munderover accentunder="true" accent="false">
+                <m:mrow><m:mtext>West</m:mtext><m:malignmark edge="right"/><m:mo>+</m:mo><m:mtext>Arm</m:mtext></m:mrow>
+                <m:mo>_</m:mo><m:mtext>Topper</m:mtext>
+              </m:munderover></m:mtd></m:mtr>
+              <m:mtr><m:mtd><m:maligngroup/><m:mn>.456</m:mn></m:mtd></m:mtr>
+            </m:mtable>
+          </m:math></p></body></html>"""
+        terms = ("LowBase", "77;819", "DualBase", "63:925", "Crown",
+                 "Spire", "Foot", "54:290", "West", "+", "Arm", "Topper", ".456")
+        searchable = ("12", *terms)
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+
+        def boxes(doc: doc_ex.Document, names: tuple[str, ...]) -> dict[str, tuple[float, float, float, float]]:
+            matches = {}
+            for name in names:
+                matches[name], = doc[0].search_for(name)
+            return matches
+
+        def operator_gaps(rects: dict[str, tuple[float, float, float, float]]) -> tuple[float, float]:
+            return rects["+"][0] - rects["West"][2], rects["Arm"][0] - rects["+"][2]
+
+        control = re.sub(r"<m:malign(?:group|mark)[^>]*/>", "", source)
+        with doc_ex.open(epub_fixture(chapter_one=control)) as book, doc_ex.open(book.convert("pdf")) as pdf:
+            expected_gaps = operator_gaps(boxes(pdf, ("West", "+", "Arm")))
+        self.assertGreater(min(expected_gaps), 1.0)
+
+        def geometry(doc: doc_ex.Document, delta: float) -> dict[str, tuple[float, float, float, float]]:
+            # The native PDF accent can be interleaved with the base digits.
+            self.assertIn("12.345", doc[0].get_text().replace("\u0302", ""))
+            rects = boxes(doc, (*searchable, "77", "63", "54"))
+            for term in ("12", "77", "63", "54", "West"):
+                self.assertAlmostEqual(rects[term][2], rects[".456"][0], delta=delta)
+            for expected, actual in zip(expected_gaps, operator_gaps(rects)):
+                self.assertAlmostEqual(expected, actual, delta=delta)
+            for upper, lower in (("LowBase", "77;819"), ("Crown", "DualBase"),
+                                 ("DualBase", "63:925"), ("54:290", "Spire"), ("Spire", "Foot")):
+                self.assertLess(rects[upper][1], rects[lower][1])
+            return rects
+
+        with doc_ex.open(epub_fixture(chapter_one=source)) as book:
+            self.assertTrue(book.render_page(0, dpi=96).startswith(b"\x89PNG"))
+            with doc_ex.open(book.convert("pdf")) as pdf:
+                self.assertFalse(pdf[0].get_images())
+                reference = geometry(pdf, 0.05)
+            editable = book.convert("docx")
+        with zipfile.ZipFile(io.BytesIO(editable)) as archive:
+            xml = ET.fromstring(archive.read("word/document.xml"))
+        matrix = xml.find(".//m:oMath//m:m", ns)
+        self.assertIsNotNone(matrix)
+        for path, token in (
+            (".//m:acc/m:e", "12.345"),
+            (".//m:limLow/m:lim", "77;819"),
+            (".//m:limUpp/m:e/m:limLow/m:lim", "63:925"),
+            (".//m:limUpp/m:lim", "54:290"),
+            (".//m:limUpp/m:e/m:bar/m:e", "+"),
+        ):
+            tokens = [run.text for arg in matrix.findall(path, ns) for run in arg.findall(".//m:t", ns)]
+            self.assertEqual(tokens.count(token), 1, tokens)
+        with doc_ex.open(editable) as word, doc_ex.open(word.convert("pdf")) as pdf:
+            text = word[0].get_text()
+            for term in ("12.345", *terms):
+                self.assertEqual(text.count(term), 1, text)
+            self.assertNotIn("⟡H", text)
+            native = geometry(pdf, 0.25)
+            for term in searchable:
+                for expected, actual in zip(reference[term], native[term]):
+                    self.assertAlmostEqual(expected, actual, delta=0.35)
+
+        fixture = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 520, 390)])
+        with doc_ex.open(rewrite_epub(fixture, {"OEBPS/s0.xhtml": source})) as book:
+            preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+                self.assertIn("12.345", pdf[0].get_text().replace("\u0302", ""))
+                fixed = boxes(pdf, searchable)
+                for term in searchable:
+                    self.assertAlmostEqual(fixed[term][0] - fixed[".456"][0],
+                                           reference[term][0] - reference[".456"][0], delta=0.65)
+
+        generated = source.replace("<m:mo>^</m:mo>", "<m:mo><m:malignmark/>^</m:mo>")
+        with doc_ex.open(epub_fixture(chapter_one=generated)) as book:
+            for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "MathML alignment caret on a generated accent"):
+                    operation()
+
     def test_mathml_labeled_rows_keep_editable_labels_outside_data_columns(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Labeled MathML</title><meta name="viewport" content="width=440,height=320"/>

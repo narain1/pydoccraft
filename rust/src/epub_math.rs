@@ -659,19 +659,14 @@ impl<'xml> Projection<'_, 'xml> {
                         (base, Vec::new(), sup)
                     }
                 };
-                let native = scripts(node, base, sub, sup, style.display_style, self.root)?;
-                if seeking
-                    && !matches!(native, MNode::Script { .. })
-                    && self
-                        .alignment_group
-                        .as_ref()
-                        .is_some_and(|scope| scope.caret.is_some())
-                {
-                    return Err(unsupported(
-                        "MathML alignment caret in a promoted script operator",
-                    ));
-                }
-                native
+                let caret = if seeking {
+                    self.alignment_group
+                        .as_mut()
+                        .and_then(|scope| scope.caret.as_mut())
+                } else {
+                    None
+                };
+                scripts(node, base, sub, sup, style.display_style, self.root, caret)?
             }
             "mmultiscripts" => return self.multiscripts(node, depth, style),
             "mfenced" => self.fenced(node, depth, style)?,
@@ -731,10 +726,10 @@ impl<'xml> Projection<'_, 'xml> {
         let mut children = node.children().filter(Node::is_element);
         let mut args = std::array::from_fn(|_| Vec::new());
         let slots: &[usize] = match node.tag_name().name() {
-            "mfrac" | "msub" => &[0, 1],
+            "mfrac" | "msub" | "munder" => &[0, 1],
             "mroot" => &[1, 0],
-            "msup" => &[0, 2],
-            "msubsup" => &[0, 1, 2],
+            "msup" | "mover" => &[0, 2],
+            "msubsup" | "munderover" => &[0, 1, 2],
             _ => &[],
         };
         for (index, arg) in args.iter_mut().enumerate() {
@@ -926,6 +921,7 @@ fn scripts(
     sup: Arg,
     display_style: bool,
     root: Presentation<'_>,
+    caret: Option<&mut MathPos>,
 ) -> Result<MNode, EngineError> {
     let tag = node.tag_name().name();
     let stacked = matches!(tag, "munder" | "mover" | "munderover");
@@ -965,6 +961,11 @@ fn scripts(
             let grow = boolean(op, "largeop")?.unwrap_or(true);
             if sub_accent.is_none() && sup_accent.is_none() && generated_operator_style(&base, root)
             {
+                if caret.is_some() {
+                    return Err(unsupported(
+                        "MathML alignment caret in a promoted script operator",
+                    ));
+                }
                 return Ok(MNode::Nary {
                     chr,
                     lim_loc: Some(if sideways {
@@ -994,6 +995,24 @@ fn scripts(
             sub,
             sup,
         });
+    }
+    if let Some(caret) = caret {
+        let (_, slot) = caret
+            .path
+            .first_mut()
+            .ok_or_else(|| invalid("MathML alignment operand is missing"))?;
+        if (*slot == 1 && sub_accent.is_some()) || (*slot == 2 && sup_accent.is_some()) {
+            return Err(unsupported("MathML alignment caret on a generated accent"));
+        }
+        // The combined schema places its lower wrapper inside the upper
+        // wrapper's base. Both limits expose their separate attachment as slot 1.
+        if tag == "munderover" && *slot < 2 {
+            let lower_slot = *slot;
+            *slot = 0;
+            caret.path.insert(1, (0, lower_slot));
+        } else if *slot == 2 {
+            *slot = 1;
+        }
     }
     let base = if matches!(tag, "munder" | "munderover") {
         let under = match sub_accent {

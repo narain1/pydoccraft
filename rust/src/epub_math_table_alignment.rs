@@ -493,6 +493,9 @@ fn mark_edge(cell: Node<'_, '_>, mark: Node<'_, '_>) -> Result<Edge, EngineError
                             | "msub"
                             | "msup"
                             | "msubsup"
+                            | "munder"
+                            | "mover"
+                            | "munderover"
                     )
                 )
             })
@@ -582,6 +585,9 @@ fn decimal_offset(cell: Node<'_, '_>, number: Node<'_, '_>) -> Result<usize, Eng
                         | "msub"
                         | "msup"
                         | "msubsup"
+                        | "munder"
+                        | "mover"
+                        | "munderover"
                 )
             )
         })
