@@ -9,6 +9,8 @@ pub(super) enum AudioCodec {
     Mpeg,
     Aac,
     Opus,
+    Ogg,
+    Vorbis,
     Webm,
     Wave,
 }
@@ -17,9 +19,9 @@ pub(super) fn audio_codec(media: &str) -> Option<AudioCodec> {
     match media {
         "audio/mpeg" | "audio/mp3" => Some(AudioCodec::Mpeg),
         "audio/mp4" | "audio/x-m4a" | "video/mp4" => Some(AudioCodec::Aac),
-        "audio/ogg" | "audio/opus" | "audio/ogg; codecs=opus" | "application/ogg" | "video/ogg" => {
-            Some(AudioCodec::Opus)
-        }
+        "audio/opus" | "audio/ogg; codecs=opus" => Some(AudioCodec::Opus),
+        "audio/ogg; codecs=vorbis" => Some(AudioCodec::Vorbis),
+        "audio/ogg" | "application/ogg" | "video/ogg" => Some(AudioCodec::Ogg),
         "audio/webm" | "video/webm" => Some(AudioCodec::Webm),
         "audio/wav" | "audio/wave" | "audio/x-wav" | "audio/vnd.wave" => Some(AudioCodec::Wave),
         _ => None,
@@ -44,7 +46,8 @@ fn supported_audio_hint(hint: &str) -> bool {
     let codecs = codec_hint(hint);
     codecs.is_none_or(|name| match codec {
         AudioCodec::Opus => name.eq_ignore_ascii_case("opus"),
-        AudioCodec::Webm => {
+        AudioCodec::Vorbis => name.eq_ignore_ascii_case("vorbis"),
+        AudioCodec::Ogg | AudioCodec::Webm => {
             name.eq_ignore_ascii_case("opus") || name.eq_ignore_ascii_case("vorbis")
         }
         AudioCodec::Mpeg => name.eq_ignore_ascii_case("mp3"),
@@ -139,8 +142,7 @@ fn source(
     let playable_audio =
         (kind == "audio" && audio_codec(media).is_some() && hint.is_none_or(supported_audio_hint))
             || (kind == "video" && media == "video/mp4")
-            || ((ogg_video || webm_video) && advertises("opus"))
-            || (webm_video && advertises("vorbis"));
+            || ((ogg_video || webm_video) && (advertises("opus") || advertises("vorbis")));
     let playable_video = kind == "video" && media == "video/mp4"
         || (ogg_video && advertises("theora"))
         || (webm_video && ["vp8", "vp9", "vp09"].into_iter().any(advertises));

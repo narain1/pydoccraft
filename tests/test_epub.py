@@ -2145,7 +2145,7 @@ class EpubTests(unittest.TestCase):
         xhtml = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Highlights</title></head>
         <body><p>Start.</p>
         <audio id="sample" title="A ticking sound">
-          <source src="teaser.ogg" type="audio/ogg; codecs=vorbis"/>
+          <source src="teaser.ogg" type="audio/ogg; codecs=flac"/>
           <source src="sample%20audio.wav"/>
           <span>A written transcript.</span>
         </audio>
@@ -2521,6 +2521,82 @@ first
         with doc_ex.open(rewrite_epub(data, {path: first + second[:-1]})) as book:
             with self.assertRaises(doc_ex.MalformedDocumentError):
                 next(book.epub_embedded_video(0, 0))
+
+    def test_ogg_vorbis_audio_and_smil_obey_the_final_granule(self) -> None:
+        encoded = (Path(__file__).parent / "fixtures" / "epub-audio-vorbis.ogg").read_bytes()
+        voice = "OEBPS/voice.ogg"
+        chapter = "OEBPS/ogg.xhtml"
+        markup = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Vorbis</title></head>
+          <body><p id="one">Narrated text</p><audio><source src="voice.ogg" type="audio/ogg; codecs=vorbis"/>
+          </audio></body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Vorbis", markup, chapter)],
+                resources={voice: doc_ex.EpubResource("audio/ogg", encoded)},
+                overlays={chapter: [doc_ex.EpubOverlayCue("one", voice, 150_000, 650_000)]},
+            )
+
+        def pcm(clip: doc_ex.EpubAudioClip | None) -> bytes:
+            assert clip is not None
+            self.assertEqual((clip.sample_rate, clip.channels), (16_000, 1))
+            with wave.open(io.BytesIO(clip.wave), "rb") as samples:
+                return samples.readframes(clip.frame_count)
+
+        with doc_ex.open(data) as book:
+            self.assertTrue(book.epub_embedded_media(0)[0].sources[0].playable_audio)
+            full = b"".join(pcm(clip) for clip in book.epub_embedded_audio(0, 0, chunk_frames=733))
+            self.assertEqual(len(full), 10_400 * 2)
+            narration = b"".join(pcm(cue.audio) for cue in book.epub_narration(0, chunk_frames=313))
+            self.assertEqual(narration, full[2_400 * 2:])
+            fragment = book.edit_epub_chapters({0: markup.replace("voice.ogg", "voice.ogg#t=0.15,0.65")})
+        with doc_ex.open(fragment) as book:
+            self.assertEqual(b"".join(pcm(clip) for clip in book.epub_embedded_audio(0, 0)), narration)
+        with doc_ex.open(rewrite_epub(data, {voice: encoded[:-1]})) as book:
+            with self.assertRaises(doc_ex.MalformedDocumentError):
+                next(book.epub_embedded_audio(0, 0))
+
+    def test_chained_theora_vorbis_uses_the_longer_track_at_the_boundary(self) -> None:
+        fixtures = Path(__file__).parent / "fixtures"
+        red = (fixtures / "epub-theora-vorbis-short-audio.ogv").read_bytes()
+        blue = (fixtures / "epub-theora-vorbis-long-audio.ogv").read_bytes()
+        markup = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Vorbis chain</title></head>
+          <body><video><source src="chain.ogv" type="video/ogg; codecs=&quot;theora, vorbis&quot;"/>
+          <track kind="captions" srclang="en" src="captions.vtt"/></video>
+          <video src="red.ogv"/><video src="blue.ogv"/></body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Vorbis chain", markup, "OEBPS/chain.xhtml")],
+                resources={"OEBPS/chain.ogv": doc_ex.EpubResource("video/ogg", red + blue),
+                           "OEBPS/red.ogv": doc_ex.EpubResource("video/ogg", red),
+                           "OEBPS/blue.ogv": doc_ex.EpubResource("video/ogg", blue),
+                           "OEBPS/captions.vtt": doc_ex.EpubResource(
+                               "text/vtt", b"WEBVTT\n\n00:00:00.735 --> 00:00:00.770\nBoundary\n")},
+            )
+
+        def pcm(book: doc_ex.Document, index: int, **clip: int) -> bytes:
+            output = bytearray()
+            for item in book.epub_embedded_audio(0, index, chunk_frames=487, **clip):
+                self.assertEqual((item.sample_rate, item.channels), (44_100, 2))
+                with wave.open(io.BytesIO(item.wave), "rb") as samples:
+                    output.extend(samples.readframes(item.frame_count))
+            return bytes(output)
+
+        with doc_ex.open(data) as book:
+            source, = book.epub_embedded_media(0)[0].sources
+            self.assertTrue(source.playable_audio and source.playable_video)
+            full = pcm(book, 0)
+            self.assertEqual(len(full), 68_355 * 4)
+            self.assertEqual(full, pcm(book, 1) + bytes(15_435 * 4) + pcm(book, 2))
+            self.assertEqual(pcm(book, 0, start_us=700_000, end_us=800_000),
+                             full[30_870 * 4:35_280 * 4])
+            pictures = list(book.epub_embedded_video(0, 0))
+            self.assertEqual([frame.start_us for frame in pictures], [i * 125_000 for i in range(11)])
+            self.assertGreater(pictures[5].rgb[0], 245)
+            self.assertGreater(pictures[6].rgb[2], 245)
+            clipped = list(book.epub_embedded_video(0, 0, start_us=700_000, end_us=800_000, text_track=0))
+            self.assertEqual([(frame.start_us, frame.duration_us, bool(frame.text_cues)) for frame in clipped],
+                             [(700_000, 35_000, False), (735_000, 15_000, True),
+                              (750_000, 20_000, True), (770_000, 30_000, False)])
 
     def test_embedded_webm_vp8_opus_and_captions_share_the_presentation_clock(self) -> None:
         resource = (Path(__file__).parent / "fixtures" / "epub-video-vp8-opus.webm").read_bytes()

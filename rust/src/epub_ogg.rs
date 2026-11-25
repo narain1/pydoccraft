@@ -20,6 +20,7 @@ const EOS: u8 = 4;
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(super) enum Codec {
     Opus,
+    Vorbis,
     Theora,
 }
 
@@ -27,6 +28,8 @@ impl Codec {
     fn from_identification(bytes: &[u8]) -> Option<Self> {
         if bytes.starts_with(b"OpusHead") {
             Some(Self::Opus)
+        } else if bytes.starts_with(b"\x01vorbis") {
+            Some(Self::Vorbis)
         } else if bytes.starts_with(b"\x80theora") {
             Some(Self::Theora)
         } else {
@@ -37,6 +40,7 @@ impl Codec {
     fn name(self) -> &'static str {
         match self {
             Self::Opus => "Opus",
+            Self::Vorbis => "Vorbis",
             Self::Theora => "Theora",
         }
     }
@@ -45,6 +49,7 @@ impl Codec {
 pub(super) struct Segment<'a> {
     pub pages: Vec<Page<'a>>,
     pub opus_tracks: usize,
+    pub vorbis_tracks: usize,
     pub has_other_audio: bool,
 }
 
@@ -87,6 +92,11 @@ impl<'a> Page<'a> {
             .map_err(invalid)
     }
 
+    pub(super) fn empty_eos_granule(&self) -> Option<u64> {
+        (self.flag(EOS) && self.lacing.is_empty())
+            .then(|| u64::from_le_bytes(self.header[6..14].try_into().expect("Ogg granule field")))
+    }
+
     fn flag(&self, flag: u8) -> bool {
         self.header[5] & flag != 0
     }
@@ -118,6 +128,9 @@ impl Stream {
             };
             if opus && self.partial > maximum {
                 return Err(limited("Ogg Opus packet size exceeds its limit"));
+            }
+            if self.codec == Some(Codec::Vorbis) && self.partial > maximum {
+                return Err(limited("Ogg Vorbis packet size exceeds its limit"));
             }
             if self.selected
                 && self.codec == Some(Codec::Theora)
@@ -168,6 +181,7 @@ pub(super) fn groups(
     let mut beginning = true;
     let mut tracks = 0;
     let mut opus_tracks = 0;
+    let mut vorbis_tracks = 0;
     let mut has_other_audio = false;
     let mut packets_left = MAX_PACKETS;
     for _ in 0..MAX_PAGES {
@@ -191,9 +205,9 @@ pub(super) fn groups(
             let selected_track = matches && track.unwrap_or(0) == tracks;
             tracks += usize::from(matches);
             opus_tracks += usize::from(identified == Some(Codec::Opus));
-            has_other_audio |= page.body.starts_with(b"\x01vorbis")
-                || page.body.starts_with(b"\x7fFLAC")
-                || page.body.starts_with(b"Speex   ");
+            vorbis_tracks += usize::from(identified == Some(Codec::Vorbis));
+            has_other_audio |=
+                page.body.starts_with(b"\x7fFLAC") || page.body.starts_with(b"Speex   ");
             active.insert(
                 serial,
                 Stream {
@@ -227,6 +241,7 @@ pub(super) fn groups(
             if tracks == 0 {
                 return Err(unsupported(match codec {
                     Codec::Opus => "Ogg segment requires an Opus stream",
+                    Codec::Vorbis => "Ogg segment requires a Vorbis stream",
                     Codec::Theora => "Ogg segment requires a Theora stream",
                 }));
             }
@@ -236,6 +251,7 @@ pub(super) fn groups(
                         "multiple Opus tracks in one Ogg segment require an explicit selection"
                     }
                     Codec::Theora => "multiple Theora tracks in one Ogg segment",
+                    Codec::Vorbis => "multiple Vorbis tracks in one Ogg segment",
                 };
                 return Err(unsupported(message));
             }
@@ -251,11 +267,13 @@ pub(super) fn groups(
             groups.push(Segment {
                 pages: std::mem::take(&mut selected),
                 opus_tracks,
+                vorbis_tracks,
                 has_other_audio,
             });
             beginning = true;
             tracks = 0;
             opus_tracks = 0;
+            vorbis_tracks = 0;
             has_other_audio = false;
         }
         if bytes.is_empty() {
@@ -264,6 +282,28 @@ pub(super) fn groups(
             }
             return Ok(groups);
         }
+    }
+    Err(limited("Ogg exceeds its page count limit"))
+}
+
+/// Recognize the first segment before choosing the full, checksum-checked reader.
+/// Automatic selection preserves preference for Opus when both codecs are available.
+pub(super) fn audio_codec(mut bytes: &[u8]) -> Result<Codec, EngineError> {
+    let mut codec = Codec::Opus;
+    for _ in 0..MAX_PAGES {
+        let (page, rest) = Page::read(bytes)?;
+        if !page.flag(BOS) {
+            return Ok(codec);
+        }
+        match Codec::from_identification(page.body) {
+            Some(Codec::Opus) => return Ok(Codec::Opus),
+            Some(Codec::Vorbis) => codec = Codec::Vorbis,
+            _ => {}
+        }
+        if rest.is_empty() {
+            return Ok(codec);
+        }
+        bytes = rest;
     }
     Err(limited("Ogg exceeds its page count limit"))
 }

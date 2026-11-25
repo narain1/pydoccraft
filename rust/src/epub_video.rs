@@ -27,7 +27,7 @@ mod theora;
 #[path = "epub_webm_video.rs"]
 mod webm;
 
-pub(super) use theora::align_audio;
+pub(super) use theora::{align_audio, align_vorbis_audio};
 
 const MAX_PIXELS: u32 = 1920 * 1088;
 const MAX_PACKET: usize = 2 * 1024 * 1024;

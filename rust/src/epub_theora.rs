@@ -13,7 +13,7 @@ use super::{
     invalid, limited, unsupported, EngineError, Geometry, Plane, VideoImage, Yuv, MAX_PIXELS,
 };
 use crate::epub::{
-    audio::opus,
+    audio::{opus, vorbis},
     ogg::{self, Codec, Segment},
 };
 
@@ -51,21 +51,27 @@ impl TheoraSource {
         end_us: Option<u64>,
     ) -> Result<Self, EngineError> {
         let segments = ogg::groups(bytes, Codec::Theora, None)?;
-        let audio: Option<Vec<_>> = if chained_soundtrack(&segments)? {
-            Some(opus::Track::open(bytes, None)?.link_lengths().collect())
-        } else {
-            None
+        let audio: Option<(u32, Vec<_>)> = match chained_soundtrack(&segments)? {
+            Some(Codec::Opus) => Some((
+                OUTPUT_SAMPLE_RATE_HZ,
+                opus::Track::open(bytes, None)?.link_lengths().collect(),
+            )),
+            Some(Codec::Vorbis) => {
+                let track = vorbis::Track::open_ogg(bytes)?;
+                Some((track.spec().sample_rate, track.link_lengths().collect()))
+            }
+            _ => None,
         };
         let mut offset = 0;
         let mut clock = 0usize;
         let mut links = Vec::with_capacity(segments.len());
         for (index, segment) in segments.into_iter().enumerate() {
             let link = Link::index(segment, offset)?;
-            if let Some(sound) = &audio {
+            if let Some((rate, sound)) = &audio {
                 clock = clock
-                    .checked_add(sound[index].max(link.sample_frames()?))
+                    .checked_add(sound[index].max(link.sample_frames(*rate)?))
                     .ok_or_else(|| limited("Ogg chain duration exceeds limits"))?;
-                offset = clock as u128 * 1_000_000_000 / u128::from(OUTPUT_SAMPLE_RATE_HZ);
+                offset = clock as u128 * 1_000_000_000 / u128::from(*rate);
             } else {
                 offset += elapsed_ns(&link.ident, link.frames.len());
             }
@@ -239,11 +245,9 @@ impl Link {
         })
     }
 
-    fn sample_frames(&self) -> Result<usize, EngineError> {
-        let frames = (self.frames.len() as u128
-            * u128::from(self.ident.frd)
-            * u128::from(OUTPUT_SAMPLE_RATE_HZ))
-        .div_ceil(u128::from(self.ident.frn));
+    fn sample_frames(&self, rate: u32) -> Result<usize, EngineError> {
+        let frames = (self.frames.len() as u128 * u128::from(self.ident.frd) * u128::from(rate))
+            .div_ceil(u128::from(self.ident.frn));
         usize::try_from(frames).map_err(|_| limited("Ogg chain duration exceeds limits"))
     }
 
@@ -288,34 +292,57 @@ pub(in crate::epub) fn align_audio(
     if track.link_lengths().len() < 2 {
         return Ok(());
     }
-    let segments = ogg::groups(bytes, Codec::Theora, None)?;
-    if !chained_soundtrack(&segments)? {
-        return Err(invalid("Ogg video and soundtrack segments disagree"));
-    }
-    let video = segments
-        .into_iter()
-        .map(|segment| Link::index(segment, 0)?.sample_frames())
-        .collect::<Result<Vec<_>, _>>()?;
+    let video = alignment_frames(bytes, Codec::Opus, OUTPUT_SAMPLE_RATE_HZ)?;
     track.align_video_links(&video)
 }
 
-fn chained_soundtrack(segments: &[Segment<'_>]) -> Result<bool, EngineError> {
-    if segments.len() < 2 {
-        return Ok(false);
+pub(in crate::epub) fn align_vorbis_audio(
+    bytes: &[u8],
+    track: &mut vorbis::Track,
+) -> Result<(), EngineError> {
+    if track.link_lengths().len() < 2 {
+        return Ok(());
     }
-    let audio = segments
+    let video = alignment_frames(bytes, Codec::Vorbis, track.spec().sample_rate)?;
+    track.align_video_links(&video)
+}
+
+fn alignment_frames(bytes: &[u8], codec: Codec, rate: u32) -> Result<Vec<usize>, EngineError> {
+    let segments = ogg::groups(bytes, Codec::Theora, None)?;
+    if chained_soundtrack(&segments)? != Some(codec) {
+        return Err(invalid("Ogg video and soundtrack segments disagree"));
+    }
+    segments
+        .into_iter()
+        .map(|segment| Link::index(segment, 0)?.sample_frames(rate))
+        .collect()
+}
+
+fn chained_soundtrack(segments: &[Segment<'_>]) -> Result<Option<Codec>, EngineError> {
+    if segments.len() < 2 {
+        return Ok(None);
+    }
+    if segments
         .iter()
-        .any(|segment| segment.opus_tracks != 0 || segment.has_other_audio);
-    if audio
-        && segments
-            .iter()
-            .any(|segment| segment.opus_tracks != 1 || segment.has_other_audio)
+        .all(|s| s.opus_tracks == 1 && s.vorbis_tracks == 0 && !s.has_other_audio)
+    {
+        return Ok(Some(Codec::Opus));
+    }
+    if segments
+        .iter()
+        .all(|s| s.vorbis_tracks == 1 && s.opus_tracks == 0 && !s.has_other_audio)
+    {
+        return Ok(Some(Codec::Vorbis));
+    }
+    if segments
+        .iter()
+        .any(|s| s.opus_tracks != 0 || s.vorbis_tracks != 0 || s.has_other_audio)
     {
         return Err(unsupported(
-            "chained Ogg video requires one Opus soundtrack in each segment",
+            "chained Ogg video requires one consistent Opus or Vorbis soundtrack in each segment",
         ));
     }
-    Ok(audio)
+    Ok(None)
 }
 
 fn geometry(ident: &TheoraIdentHeader) -> Result<Geometry, EngineError> {

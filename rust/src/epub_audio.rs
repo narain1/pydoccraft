@@ -6,6 +6,7 @@ use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 use super::{
     invalid, limited,
     media::{audio_codec, AudioCodec},
+    ogg::{self, Codec},
     parse_xml, unsupported, validate_archive_path, Book, XHTML, XML_BYTES,
 };
 use crate::EngineError;
@@ -15,7 +16,7 @@ mod aac;
 #[path = "epub_opus.rs"]
 pub(super) mod opus;
 #[path = "epub_vorbis.rs"]
-mod vorbis;
+pub(in crate::epub) mod vorbis;
 
 pub(super) const MAX_ENCODED_BYTES: usize = 32 * 1024 * 1024;
 const MAX_CLIP_SAMPLES: usize = 8 * 1024 * 1024;
@@ -72,23 +73,36 @@ impl AudioSource {
         load: impl FnOnce() -> Result<Vec<u8>, EngineError>,
     ) -> Result<Self, EngineError> {
         let codec = audio_codec(media);
-        if opus_track.is_some() && !matches!(codec, Some(AudioCodec::Opus)) {
+        if opus_track.is_some() && !matches!(codec, Some(AudioCodec::Opus | AudioCodec::Ogg)) {
             return Err(EngineError::InvalidArgument(
                 "Opus track selection requires an Ogg audio resource".into(),
             ));
         }
         let decoder = match codec {
-            Some(AudioCodec::Opus) => {
+            Some(AudioCodec::Ogg | AudioCodec::Opus | AudioCodec::Vorbis) => {
                 let bytes = load()?;
-                let track = std::panic::catch_unwind(|| {
-                    let mut track = opus::Track::open(&bytes, opus_track)?;
-                    if synchronize_video {
-                        super::video::align_audio(&bytes, &mut track)?;
+                std::panic::catch_unwind(|| {
+                    let codec = match codec {
+                        Some(AudioCodec::Vorbis) => Codec::Vorbis,
+                        Some(AudioCodec::Opus) => Codec::Opus,
+                        _ if opus_track.is_some() => Codec::Opus,
+                        _ => ogg::audio_codec(&bytes)?,
+                    };
+                    if codec == Codec::Vorbis {
+                        let mut track = vorbis::Track::open_ogg(&bytes)?;
+                        if synchronize_video {
+                            super::video::align_vorbis_audio(&bytes, &mut track)?;
+                        }
+                        Ok(Decoder::Vorbis(Box::new(track)))
+                    } else {
+                        let mut track = opus::Track::open(&bytes, opus_track)?;
+                        if synchronize_video {
+                            super::video::align_audio(&bytes, &mut track)?;
+                        }
+                        Ok(Decoder::Opus(Box::new(track)))
                     }
-                    Ok::<_, EngineError>(track)
                 })
-                .map_err(|_| invalid("malformed Ogg Opus audio"))??;
-                Decoder::Opus(Box::new(track))
+                .map_err(|_| invalid("malformed Ogg audio"))??
             }
             Some(AudioCodec::Webm) => {
                 let bytes = load()?;
