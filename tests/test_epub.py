@@ -2629,7 +2629,7 @@ class EpubTests(unittest.TestCase):
         self.assertEqual(middle, preview("width:8px;min-width:fit-content(calc(4em + 7px))"))
         self.assertEqual(minimum, preview("width:0px;min-inline-size:fit-content(0px)"))
         self.assertEqual(maximum, preview("width:200px;max-width:fit-content(200px)"))
-        for size in ("min-height:fit-content(10px)", "max-inline-size:fit-content(10%)", "width:contain"):
+        for size in ("min-height:fit-content(10px)", "width:contain"):
             with self.subTest(size=size):
                 with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "CSS intrinsic box size"):
                     preview(size)
@@ -2688,8 +2688,57 @@ class EpubTests(unittest.TestCase):
         with doc_ex.open(publication(
             "#limit{box-sizing:border-box;padding-left:10%;min-width:max-content}"
         )) as book:
-            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "relative border-box padding"):
+            with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "definite containing inline size"):
                 book.render_page(0, dpi=96)
+
+    def test_css_intrinsic_inline_bounds_use_proven_containing_edges(self) -> None:
+        original = fixed_spread_fixture([("", "white", 310, 170)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Relative bounds</title>
+          <meta name="viewport" content="width=310,height=170"/><style>
+          html,body,p{margin:0;font-size:11px}
+          #wrapper{position:absolute;top:10px;left:20px;width:160px;padding:6px 12px;
+            border:2px solid #45546d}
+          p{height:28px;background:#98b970}
+          #minimum{width:5px} #edge{width:5px;box-sizing:border-box;padding-right:2px}
+          #maximum{position:absolute;left:8px;top:86px;width:190px;background:#729bb9}
+          CSS</style></head><body><section id="wrapper">
+          <p id="minimum">Words wrap here when limits change.</p>
+          <p id="edge">Short line</p>
+          <p id="maximum"><a href="https://example.org/relative">Fixed caption</a></p>
+          </section></body></html>"""
+
+        def publication(rules: str) -> bytes:
+            chapter = template.replace("CSS", rules)
+            return rewrite_epub(original, {"OEBPS/s0.xhtml": chapter})
+
+        results = []
+        for style in (
+            "#minimum{min-inline-size:fit-content(calc(20% + 10px))}"
+            "#edge{min-width:max-content;padding-left:10%}"
+            "#maximum{max-width:fit-content(calc(25% + 8px))}",
+            "#minimum{min-width:42px}#edge{min-width:max-content;padding-left:16px}"
+            "#maximum{max-width:54px}",
+        ):
+            with doc_ex.open(publication(style)) as book:
+                pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                frozen = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+            with doc_ex.open(frozen) as pdf:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), pixels)
+                self.assertTrue(pdf[0].search_for("Fixed"))
+                links = pdf[0].get_links()
+                self.assertTrue(links)
+                self.assertTrue(all(link.uri == "https://example.org/relative" for link in links))
+                results.append((pixels, pdf[0].search_for("Fixed"), [link.bbox for link in links]))
+        self.assertTrue(results[0] == results[1], "relative intrinsic bounds used the wrong edge")
+
+        for style in (
+            "#wrapper{width:auto}#minimum{min-width:fit-content(50%)}",
+            "#wrapper{max-width:max-content}#minimum{min-width:fit-content(50%)}",
+            "#wrapper{display:grid}#edge{min-width:max-content;padding-left:10%}",
+        ):
+            with self.subTest(style=style), doc_ex.open(publication(style)) as book:
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "definite containing inline size"):
+                    book.render_page(0, dpi=96)
 
     def test_css_intrinsic_block_bounds_measure_at_definite_inline_sizes(self) -> None:
         original = fixed_spread_fixture([("", "white", 280, 165)])

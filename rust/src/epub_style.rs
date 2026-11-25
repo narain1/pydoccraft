@@ -12,7 +12,7 @@ use wordcraft_doc::props::{Align, CharProps, LineSpacing, Rgb, TextColor, Underl
 use super::{
     charge,
     css::{self, Cascade, Properties},
-    limited, math, unsupported, XHTML,
+    limited, math, XHTML,
 };
 use crate::EngineError;
 
@@ -51,7 +51,7 @@ impl IntrinsicBounds {
 pub(super) enum InlineBound {
     Minimum,
     Maximum,
-    FitContent(f32),
+    FitContent(LengthPercentage),
 }
 
 #[derive(Default)]
@@ -331,22 +331,20 @@ impl ChapterStyles {
             let intrinsic_bound = |key| {
                 let source = value(&values, key);
                 let dimension = intrinsic_dimension(source, calculations.get(key).copied());
-                Ok(match dimension.map(Dimension::expand) {
+                match dimension.map(Dimension::expand) {
                     Some(ExpandedDimension::MinContent) => Some(InlineBound::Minimum),
                     Some(ExpandedDimension::MaxContent) => Some(InlineBound::Maximum),
                     Some(ExpandedDimension::FitContentPx(limit)) => {
-                        Some(InlineBound::FitContent(limit))
+                        Some(InlineBound::FitContent(LengthPercentage::length(limit)))
                     }
-                    Some(
-                        ExpandedDimension::FitContentPercent(_)
-                        | ExpandedDimension::FitContentCalc(_),
-                    ) => {
-                        return Err(unsupported(
-                            "EPUB CSS intrinsic box size requires a fixed fit-content bound",
-                        ));
+                    Some(ExpandedDimension::FitContentPercent(fraction)) => {
+                        Some(InlineBound::FitContent(LengthPercentage::percent(fraction)))
+                    }
+                    Some(ExpandedDimension::FitContentCalc(handle)) => {
+                        Some(InlineBound::FitContent(LengthPercentage::calc(handle)))
                     }
                     _ => None,
-                })
+                }
             };
             let block_bound = |key| {
                 let value = value(&values, key);
@@ -355,8 +353,8 @@ impl ChapterStyles {
             };
             let intrinsic_bounds = IntrinsicBounds {
                 inline: InlineBounds {
-                    min: intrinsic_bound("min-width")?,
-                    max: intrinsic_bound("max-width")?,
+                    min: intrinsic_bound("min-width"),
+                    max: intrinsic_bound("max-width"),
                 },
                 block: MinMax {
                     min: block_bound("min-height"),

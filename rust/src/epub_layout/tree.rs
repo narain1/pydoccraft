@@ -6,8 +6,9 @@ use taffy::{
     style::{
         AvailableSpace, BoxSizing, CalcHandle, Dimension, Display, ExpandedDimension,
         ExpandedLengthPercentage, ExpandedLengthPercentageAuto, FlexDirection,
-        LengthPercentageAuto, Style,
+        LengthPercentageAuto, Position, Style,
     },
+    util::ResolveOrZero,
     BlockContext, Cache, CacheTree, DetailedGridInfo, DetailedLayoutInfo, Layout,
     LayoutBlockContainer, LayoutContainingBlock, LayoutFlexboxContainer, LayoutGridContainer,
     LayoutInput, LayoutOutput, LayoutPartialTree, NodeId, RequestedAxis, RunMode, SizingMode,
@@ -132,6 +133,25 @@ struct View<'a, F> {
 
 const MAX_FIT_PROBES: usize = 4_096;
 
+fn fixed_outer_width(style: &Style, inline_edges: f32) -> Option<f32> {
+    let ExpandedDimension::Length(width) = style.size.width.expand() else {
+        return None;
+    };
+    let limit = |length: LengthPercentageAuto, initial| match length.expand() {
+        ExpandedLengthPercentageAuto::Length(width) => Some(width),
+        ExpandedLengthPercentageAuto::Auto => Some(initial),
+        _ => None,
+    };
+    let width = width
+        .min(limit(style.max_size.width, f32::INFINITY)?)
+        .max(limit(style.min_size.width, 0.0)?);
+    Some(if style.box_sizing == BoxSizing::ContentBox {
+        width + inline_edges
+    } else {
+        width.max(inline_edges)
+    })
+}
+
 impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
     fn resolve_bounds(&mut self) -> Result<(), EngineError> {
         let input = LayoutInput {
@@ -171,47 +191,51 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
     fn resolve_inline_bound(
         &mut self,
         index: usize,
-        input: LayoutInput,
+        mut input: LayoutInput,
     ) -> Result<(), EngineError> {
-        let node = &mut self.nodes[index];
+        let node = &self.nodes[index];
         let bounds = node.bounds.inline;
-        let style = &mut node.style;
         if node.has_relative_math {
             return Err(unsupported(
                 "EPUB CSS intrinsic width bounds on percentage MathML",
             ));
         }
+        let style = &node.style;
         let edges = [
             style.padding.left,
             style.padding.right,
             style.border.left,
             style.border.right,
         ];
-        let absolute_edges = edges
-            .into_iter()
-            .map(|edge| match edge.expand() {
-                ExpandedLengthPercentage::Length(points) => Some(points),
-                _ => None,
-            })
-            .sum::<Option<f32>>();
+        let relative_edges = style.box_sizing == BoxSizing::BorderBox
+            && edges
+                .iter()
+                .any(|edge| !matches!(edge.expand(), ExpandedLengthPercentage::Length(_)));
+        let relative_limit = [bounds.min, bounds.max].into_iter().flatten().any(|bound| {
+            matches!(bound, InlineBound::FitContent(limit)
+                if !matches!(limit.expand(), ExpandedLengthPercentage::Length(_)))
+        });
+        let basis = if relative_edges || relative_limit {
+            Some(self.definite_containing_width(index).ok_or_else(|| {
+                unsupported(
+                    "EPUB CSS intrinsic inline bounds require a definite containing inline size",
+                )
+            })?)
+        } else {
+            None
+        };
+        let calculations = self.calculations;
+        let calculate = |handle, basis| calculations.at(handle, basis);
         let subtract_padding = if style.box_sizing == BoxSizing::ContentBox {
-            // Intrinsic probes have no percentage basis, so only fixed
-            // edges are included in their native border-box result.
             edges
                 .into_iter()
-                .filter_map(|edge| match edge.expand() {
-                    ExpandedLengthPercentage::Length(points) => Some(points),
-                    _ => None,
-                })
+                .map(|edge| edge.resolve_or_zero(basis, calculate))
                 .sum()
         } else {
-            if absolute_edges.is_none() {
-                return Err(unsupported(
-                    "EPUB CSS intrinsic width bounds with relative border-box padding",
-                ));
-            }
             0.0
         };
+        input.parent_size.width = basis;
+        let style = &mut self.nodes[index].style;
         let width = std::mem::replace(&mut style.size.width, Dimension::auto());
         let minimum = std::mem::replace(&mut style.min_size.width, LengthPercentageAuto::auto());
         let maximum = std::mem::replace(&mut style.max_size.width, LengthPercentageAuto::auto());
@@ -242,7 +266,10 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
             let width = match bound {
                 InlineBound::Minimum => minimum_width,
                 InlineBound::Maximum => maximum_width,
-                InlineBound::FitContent(limit) => limit.min(maximum_width).max(minimum_width),
+                InlineBound::FitContent(limit) => limit
+                    .resolve_or_zero(basis, calculate)
+                    .min(maximum_width)
+                    .max(minimum_width),
             };
             LengthPercentageAuto::length(width)
         };
@@ -256,35 +283,55 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
         Ok(())
     }
 
+    fn definite_containing_width(&self, index: usize) -> Option<f32> {
+        let node = &self.nodes[index];
+        let parent = &self.nodes[usize::from(node.parent?)];
+        let style = &parent.style;
+        if !matches!(style.display, Display::Block | Display::FlowRoot)
+            || parent.bounds.has_inline()
+            || style.aspect_ratio.is_some()
+            || style.scrollbar_width != 0.0
+            || self.inline_flex_changes_width(parent)
+        {
+            return None;
+        }
+        let fixed_edge = |edge: taffy::LengthPercentage| match edge.expand() {
+            ExpandedLengthPercentage::Length(points) => Some(points),
+            _ => None,
+        };
+        let padding = fixed_edge(style.padding.left)? + fixed_edge(style.padding.right)?;
+        let border = fixed_edge(style.border.left)? + fixed_edge(style.border.right)?;
+        let outer = fixed_outer_width(style, padding + border)?;
+        match node.style.position {
+            Position::Fixed => None,
+            Position::Absolute if style.position == Position::Static => None,
+            Position::Absolute => Some((outer - border).max(0.0)),
+            _ => Some((outer - padding - border).max(0.0)),
+        }
+    }
+
+    fn inline_flex_changes_width(&self, node: &Node) -> bool {
+        !node.style.position.is_out_of_flow()
+            && node.parent.is_some_and(|parent| {
+                let parent = &self.nodes[usize::from(parent)].style;
+                parent.display == Display::Flex
+                    && matches!(
+                        parent.flex_direction,
+                        FlexDirection::Row | FlexDirection::RowReverse
+                    )
+            })
+            && (node.style.flex_grow != 0.0
+                || node.style.flex_shrink != 0.0
+                || !node.style.flex_basis.is_auto())
+    }
+
     fn resolve_block_bound(&mut self, index: usize, input: LayoutInput) -> Result<(), EngineError> {
         let node = &self.nodes[index];
         let bound = node.bounds.block;
         let style = &node.style;
         let unresolved =
             || unsupported("EPUB CSS intrinsic block bounds require a definite inline size");
-        let ExpandedDimension::Length(width) = style.size.width.expand() else {
-            return Err(unresolved());
-        };
-        let width_limit = |length: LengthPercentageAuto, initial| match length.expand() {
-            ExpandedLengthPercentageAuto::Length(width) => Ok(width),
-            ExpandedLengthPercentageAuto::Auto => Ok(initial),
-            _ => Err(unresolved()),
-        };
-        let width = width
-            .min(width_limit(style.max_size.width, f32::INFINITY)?)
-            .max(width_limit(style.min_size.width, 0.0)?);
-        let horizontal_flex = node.parent.is_some_and(|parent| {
-            let parent = &self.nodes[usize::from(parent)].style;
-            parent.display == Display::Flex
-                && matches!(
-                    parent.flex_direction,
-                    FlexDirection::Row | FlexDirection::RowReverse
-                )
-        });
-        if !style.position.is_out_of_flow()
-            && horizontal_flex
-            && (style.flex_grow != 0.0 || style.flex_shrink != 0.0 || !style.flex_basis.is_auto())
-        {
+        if self.inline_flex_changes_width(node) {
             return Err(unresolved());
         }
         if style.aspect_ratio.is_some() && !style.item_is_replaced {
@@ -306,10 +353,11 @@ impl<F: FnMut(LayoutInput, usize, &Style, bool) -> LayoutOutput> View<'_, F> {
             + edge(style.padding.bottom)?
             + edge(style.border.top)?
             + edge(style.border.bottom)?;
-        let (width, height_adjust) = if style.box_sizing == BoxSizing::ContentBox {
-            (width + inline_edges, block_edges)
+        let width = fixed_outer_width(style, inline_edges).ok_or_else(unresolved)?;
+        let height_adjust = if style.box_sizing == BoxSizing::ContentBox {
+            block_edges
         } else {
-            (width.max(inline_edges), 0.0)
+            0.0
         };
         let node = &mut self.nodes[index];
         let style = &mut node.style;
