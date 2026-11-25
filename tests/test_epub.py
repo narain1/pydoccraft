@@ -10402,6 +10402,15 @@ Trailing
                         delta=0.65,
                     )
 
+        empty_operand = source.replace(
+            '<m:msqrt><m:mstyle decimalpoint=","><m:mn mathcolor="#bf222d">12,345</m:mn></m:mstyle></m:msqrt>',
+            '<m:msqrt><m:malignmark/></m:msqrt>',
+        )
+        with doc_ex.open(epub_fixture(chapter_one=empty_operand)) as book:
+            for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "MathML alignment mark in an empty operand"):
+                    operation()
+
     def test_mathml_labeled_rows_keep_editable_labels_outside_data_columns(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Labeled MathML</title><meta name="viewport" content="width=440,height=320"/>

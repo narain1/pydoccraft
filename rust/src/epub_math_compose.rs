@@ -307,7 +307,7 @@ impl Editable {
 
     fn substitute(&self, body: Arg, caret: Option<ArgumentCaret<'_>>) -> Result<Arg, EngineError> {
         let (mut operand, mut caret) = match caret {
-            Some((path, offset)) if path.is_empty() => (None, Some(offset)),
+            Some(([], offset)) => (None, Some(offset)),
             Some(nested) => (Some(nested), None),
             None => (None, None),
         };

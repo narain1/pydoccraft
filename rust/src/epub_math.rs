@@ -689,6 +689,9 @@ impl<'xml> Projection<'_, 'xml> {
                 .as_mut()
                 .and_then(|scope| scope.caret.as_mut())
             {
+                if body.is_empty() {
+                    return Err(unsupported("MathML alignment mark in an empty operand"));
+                }
                 // The enclosing operator is the only node emitted by this element.
                 caret.path.insert(0, (0, slot));
             }
