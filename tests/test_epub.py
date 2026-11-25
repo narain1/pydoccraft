@@ -3752,7 +3752,6 @@ STYLE
 ::cue(u) {{ text-decoration: none; }}
 ::cue(i.accent:lang(fr)) {{ font-style: normal; color: teal; }}
 ::cue(.accent) {{ background-color: rgba(0,0,255,.5); text-decoration-line: underline line-through; }}
-::cue(:past) {{ color: purple; }}
 
 special
 00:00:00.075 --> 00:00:00.170 align:start
@@ -3809,6 +3808,111 @@ Second
             for frame, cue in zip(frames, (lead, second), strict=True):
                 self.assertEqual(frame.text_cues[0].runs, cue.runs)
                 self.assertEqual(frame.text_cues[0].background_color, cue.background_color)
+
+    def test_webvtt_timed_styles_follow_the_source_clock_during_clipped_video(self) -> None:
+        video = (Path(__file__).parent / "fixtures/epub-video-h264.mp4").read_bytes()
+        markup = ('<c.wrap><c.past>Before</c><00:00:00.170><c.past.future><b>Middle</b></c>'
+                  '<00:00:00.174><c.future.deep>After</c><00:00:00.176><c.same>Steady</c></c>')
+        vtt = f'''WEBVTT
+
+STYLE
+::cue {{ color: white; }}
+::cue(c.past:past) {{ color: yellow; text-decoration: underline; font-weight: bold; }}
+::cue(c.future:future) {{ color: cyan; background: #112233; font-style: italic; }}
+::cue(c.deep:future) {{ color: lime !important; }}
+::cue(.wrap:past), ::cue(.wrap:future) {{ color: red; }}
+::cue(.same:future) {{ color: white; }}
+
+lead
+00:00:00.150 --> 00:00:00.230 align:start
+{markup}
+
+overlay
+00:00:00.165 --> 00:00:00.181
+<c.future>Overlay</c>
+'''.encode()
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Timed subtitles</title></head>
+          <body><video src="clip.mp4#t=0.169998,0.177002&amp;xywh=1,1,6,4">
+          <track src="styled.vtt" kind="captions" srclang="en"/>
+          </video></body></html>'''
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Timed subtitles", chapter, "OEBPS/style.xhtml")],
+                resources={
+                    "OEBPS/clip.mp4": doc_ex.EpubResource("video/mp4", video),
+                    "OEBPS/styled.vtt": doc_ex.EpubResource("text/vtt", vtt),
+                },
+            )
+        intervals = [(169_998, 170_000), (170_000, 170_001), (170_001, 174_000),
+                     (174_000, 174_001), (174_001, 177_002)]
+        white, yellow = (255, 255, 255, 255), (255, 255, 0, 255)
+        cyan, lime = (0, 255, 255, 255), (0, 255, 0, 255)
+        with doc_ex.open(data) as book:
+            cues = book.epub_embedded_text(0, 0, start_us=169_998, end_us=177_002)
+            self.assertEqual([cue.id for cue in cues], ["lead", "overlay", "lead", "lead", "lead", "lead"])
+            lead = [cue for cue in cues if cue.id == "lead"]
+            overlay = cues[1]
+            self.assertEqual([(cue.start_us, cue.end_us) for cue in lead], intervals)
+            self.assertTrue(all(cue.text == "BeforeMiddleAfterSteady" and cue.markup == markup
+                                and cue.settings == "align:start" for cue in lead))
+            self.assertTrue(all([run.timestamp_us for run in cue.runs] == [None, 170_000, 174_000, 176_000]
+                                for cue in lead))
+            self.assertEqual([tuple(run.style.color for run in cue.runs) for cue in lead], [
+                (white, cyan, lime, white),
+                (white, white, lime, white),
+                (yellow, white, lime, white),
+                (yellow, white, white, white),
+                (yellow, yellow, white, white),
+            ])
+            self.assertEqual(lead[0].runs[1].style.background_color, (17, 34, 51, 255))
+            self.assertIsNone(lead[1].runs[1].style.background_color)
+            self.assertTrue(lead[-1].runs[0].style.underline)
+            self.assertTrue(lead[-1].runs[1].style.underline)
+            self.assertFalse(lead[-1].runs[0].style.bold)
+            self.assertTrue(lead[0].runs[1].style.bold)
+            self.assertEqual(lead[0].runs[1].style.font_style, "normal")
+            self.assertEqual(overlay.runs[0].style.color, white)
+            sought = book.epub_embedded_text(0, 0, start_us=170_002, end_us=170_004)
+            self.assertEqual([cue.runs for cue in sought], [lead[2].runs, overlay.runs])
+            frames = list(book.epub_embedded_video(0, 0, start_us=160_000, end_us=190_000, text_track=0))
+            self.assertEqual([(f.start_us, f.start_us + f.duration_us) for f in frames], intervals)
+            control, = book.epub_embedded_video(0, 0, start_us=160_000, end_us=190_000)
+            self.assertEqual((control.width, control.height, control.start_us, control.duration_us),
+                             (6, 4, 169_998, 7_004))
+            for frame, cue in zip(frames, lead, strict=True):
+                self.assertEqual((frame.width, frame.height, frame.rgb), (6, 4, control.rgb))
+                self.assertIs(frame.rgb, frames[0].rgb)
+                self.assertEqual([item.id for item in frame.text_cues], ["lead", "overlay"])
+                self.assertEqual([item.runs for item in frame.text_cues], [cue.runs, overlay.runs])
+            clipped, = book.epub_embedded_video(0, 0, start_us=170_002, end_us=170_004, text_track=0)
+            self.assertEqual([item.runs for item in clipped.text_cues], [lead[2].runs, overlay.runs])
+
+    def test_webvtt_timed_style_projection_bounds_nodes_intervals_and_repeated_work(self) -> None:
+        chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Timed subtitles</title></head>
+          <body><video><track src="style.vtt" kind="captions" srclang="en"/></video></body></html>'''
+        header = (b"WEBVTT\n\nSTYLE\n::cue(.absent:past), ::cue(.absent:future) {color:red}\n\n"
+                  b"00:00:00.000 --> 00:00:04.000\n")
+        with doc_ex.open(epub_fixture()) as original:
+            data = original.edit_epub_structure(
+                [doc_ex.EpubChapterSource("Timed subtitles", chapter, "OEBPS/style.xhtml")],
+                resources={"OEBPS/style.vtt": doc_ex.EpubResource("text/vtt", header + b"Text")},
+            )
+
+        def timeline(count: int) -> bytes:
+            return (''.join(f'<c>t</c><00:00:{i // 1000:02d}.{i % 1000:03d}>' for i in range(1, count + 1))
+                    + '<c>end</c>').encode()
+
+        for markup, message in (
+            (b"".join(f"<c.node{i}></c>".encode() for i in range(50_001)), "timed cue exceeds its node budget"),
+            (timeline(2_049), "style boundary budget"),
+            (timeline(650), "timed style projection exceeds its work budget"),
+            (b"<c." + b"n" * 900 + b">" + timeline(150) + b"</c>",
+             "timed style projection exceeds its work budget"),
+        ):
+            with self.subTest(message=message):
+                changed = rewrite_epub(data, {"OEBPS/style.vtt": header + markup})
+                with doc_ex.open(changed) as book, self.assertRaisesRegex(doc_ex.UnsafeArchiveError, message):
+                    book.epub_embedded_text(0, 0)
 
     def test_webvtt_author_styles_bound_work_and_reject_resource_rules(self) -> None:
         chapter = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>CSS subtitles</title></head>

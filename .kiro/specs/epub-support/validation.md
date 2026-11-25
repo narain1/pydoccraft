@@ -995,3 +995,11 @@ The lockfiles and upstream revisions match the preceding checkpoint. The audit r
 Installed regressions verify automatic direction against explicit LTR and RTL control EPUBs. The first-strong scan ignores independently directed and style subtrees, treats Arabic-Indic digits as weak, uses left-to-right fallback for neutral text, and resolves an unqualified bdi. Fixed-layout PNG and reopened searchable PDF retain the same pixels and local link rectangles. Reflowable XHTML honors the direction with no author CSS, and an invalid winning direction substitution inherits the parent direction. EPUBCheck 5.4.0 accepted an independently authored fixed-layout direction fixture with zero errors or warnings.
 
 Both lockfiles add the existing unicode-bidi 0.3.18 package as a direct dependency for its Unicode class lookup. The resolved crate identities and licenses match the previous build. Regenerating both attribution copies produced identical bytes.
+
+## 2026-11-24 WebVTT timed author styles
+
+The installed regression checks nested spans that contain inline timestamps, strict equality at 170,000 and 174,000 µs, and `:past` styling on the following microsecond. Foreground, background and underline changes preserve authored run timestamps. The fixture checks the specification’s restriction on font declarations in timed selectors. A no-op timestamp and its following microsecond coalesce. An overlapping caption keeps its authored relative order throughout the transitions. Seeking into the cue returns the same styles, and the video iterator reuses one cropped 6 × 4 RGB picture across all five style intervals. [WebVTT timed selectors](https://www.w3.org/TR/webvtt1/#the-past-and-future-pseudo-classes)
+
+The installed bounds regression rejects excess timed nodes, candidate boundaries, repeated markup projection and repeated expansion of inherited labels.
+
+All 198 EPUB tests passed against the installed Linux x86-64 CPython 3.11 release wheel. The wheel measured 25,620,523 bytes with a 59,670,120-byte native extension. Its SHA-256 is `5eaf92e23f6c3dfa39290c99b20c87531a8e6800155281a13daac65f1aaa08cc`. Rust 1.95 formatting, locked release all-target Clippy with warnings denied, strict public typing and the roadmap check passed. The lockfiles match the base revision, and the three packaged attribution files match their source copies.

@@ -27,6 +27,13 @@ pub(super) struct Cascade {
     blocks: usize,
     selectors: usize,
     work: usize,
+    timed: PlaybackState,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(super) struct PlaybackState {
+    pub past: bool,
+    pub future: bool,
 }
 
 #[derive(Default)]
@@ -37,6 +44,7 @@ pub(super) struct Target<'a> {
     pub voice: Option<&'a str>,
     pub language: Option<&'a str>,
     pub language_attribute: Option<&'a str>,
+    pub playback: PlaybackState,
 }
 
 struct Rule {
@@ -52,6 +60,8 @@ struct Selector {
 enum Test {
     Universal,
     Root,
+    Past,
+    Future,
     Tag(String),
     Id(String),
     Class(String),
@@ -99,6 +109,10 @@ enum Value {
 }
 
 impl Value {
+    fn applies_to_timed_selector(self) -> bool {
+        !matches!(self, Self::Bold(_) | Self::Slant(_))
+    }
+
     fn slot(self) -> usize {
         match self {
             Self::Color(_) => 0,
@@ -112,6 +126,7 @@ impl Value {
 
 pub(super) struct Paint([Option<(Rank, Value)>; 5]);
 
+#[derive(Clone, Copy)]
 struct Declaration {
     value: Value,
     important: bool,
@@ -151,18 +166,42 @@ impl Cascade {
                 "WebVTT stylesheets exceed their selector count budget",
             )?;
             let declarations: Arc<[_]> = declarations(&rule.block, &source)?.into();
+            let mut timed_declarations: Option<Arc<[Declaration]>> = None;
             for selector in &rule.selector.selectors {
-                if let Some(selector) = Selector::from_css(selector)? {
-                    if !declarations.is_empty() {
-                        self.rules.push(Rule {
-                            selector,
-                            declarations: declarations.clone(),
-                        });
-                    }
+                let Some(selector) = Selector::from_css(selector)? else {
+                    continue;
+                };
+                let past = selector.tests.iter().any(|test| matches!(test, Test::Past));
+                let future = selector
+                    .tests
+                    .iter()
+                    .any(|test| matches!(test, Test::Future));
+                let declarations = if past || future {
+                    timed_declarations.get_or_insert_with(|| {
+                        declarations
+                            .iter()
+                            .copied()
+                            .filter(|declaration| declaration.value.applies_to_timed_selector())
+                            .collect()
+                    })
+                } else {
+                    &declarations
+                };
+                if !declarations.is_empty() {
+                    self.timed.past |= past;
+                    self.timed.future |= future;
+                    self.rules.push(Rule {
+                        selector,
+                        declarations: declarations.clone(),
+                    });
                 }
             }
         }
         Ok(())
+    }
+
+    pub(super) fn timed(&self) -> PlaybackState {
+        self.timed
     }
 
     pub(super) fn paint(&mut self, target: Target<'_>) -> Result<Paint, EngineError> {
@@ -304,7 +343,7 @@ impl Test {
 
     fn cost(&self, target: &Target<'_>) -> usize {
         1 + match self {
-            Self::Universal | Self::Root => 0,
+            Self::Universal | Self::Root | Self::Past | Self::Future => 0,
             Self::Tag(value) | Self::Id(value) => value.len(),
             Self::Class(class) => class.len() * target.classes.len(),
             Self::Language(ranges) => ranges.iter().map(String::len).sum(),
@@ -319,6 +358,8 @@ impl Test {
         match self {
             Self::Universal => true,
             Self::Root => target.tag.is_none(),
+            Self::Past => target.playback.past,
+            Self::Future => target.playback.future,
             Self::Tag(tag) => target.tag == Some(tag.as_str()),
             Self::Id(id) => target.id == Some(id.as_str()),
             Self::Class(class) => target.classes.contains(class),
@@ -391,8 +432,13 @@ fn attribute_test(attribute: &AttributeSelector<'_>) -> Result<Option<Test>, Eng
 
 fn pseudo_test(pseudo: &PseudoClassSelector<'_>) -> Result<Option<Test>, EngineError> {
     let name = css::ident(&pseudo.name).unwrap_or_default();
-    if name.eq_ignore_ascii_case("root") && pseudo.arg.is_none() {
-        return Ok(Some(Test::Root));
+    if pseudo.arg.is_none() {
+        return Ok(match name.to_ascii_lowercase().as_str() {
+            "root" => Some(Test::Root),
+            "past" => Some(Test::Past),
+            "future" => Some(Test::Future),
+            _ => None,
+        });
     }
     if name.eq_ignore_ascii_case("lang") {
         if let Some(PseudoClassSelectorArgKind::LanguageRangeList(list)) =

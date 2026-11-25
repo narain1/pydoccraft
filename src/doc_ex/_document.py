@@ -754,7 +754,12 @@ class Document:
         else:
             track = embedded.tracks[operator.index(track_index)]
         start, end = _epub_playback_interval(start_us, end_us)
-        return [] if track is None else self._read_epub_text(track, start, end)
+        if track is None:
+            return []
+        cues = self._read_epub_text(track, start, end)
+        if track.media_type == "text/vtt":
+            cues.sort(key=operator.attrgetter("start_us"))
+        return cues
 
     def _read_epub_text(self, track: EpubMediaTrack, start: int, end: int | None) -> list[EpubTextCue]:
         from . import _core, _native

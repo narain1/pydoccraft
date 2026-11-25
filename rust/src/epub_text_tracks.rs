@@ -1,5 +1,5 @@
 //! Read bounded, standalone text tracks from local EPUB resources.
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use super::{charge, invalid, limited, media::integer, unsupported, validate_archive_path, Book};
 use crate::EngineError;
@@ -16,6 +16,9 @@ const MAX_STYLE_LABEL: usize = 1024;
 const MAX_STYLE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CUE_RUNS: usize = 10_000;
 const MAX_TRACK_RUNS: usize = 50_000;
+const MAX_TIMED_CUE_NODES: usize = 50_000;
+const MAX_TIMED_CUE_BOUNDARIES: usize = 4096;
+const MAX_TIMED_WEBVTT_WORK: usize = 8 * 1024 * 1024;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum FontStyle {
@@ -212,7 +215,10 @@ pub(crate) fn read(
         cue.end = cue.end.into_iter().chain(end).min();
         cue.end.is_none_or(|end| cue.start < end)
     });
-    track.cues.sort_by_key(|cue| cue.start);
+    // Keep WebVTT style intervals in authored cue order for the video sweep.
+    if media != "text/vtt" {
+        track.cues.sort_by_key(|cue| cue.start);
+    }
     Ok(track.cues)
 }
 
@@ -246,6 +252,7 @@ fn webvtt(bytes: &[u8], track: &mut Track, language: Option<&str>) -> Result<(),
     }
     let mut previous = 0;
     let mut cascade = webvtt_css::Cascade::default();
+    let mut timed_work = 0;
     while let Some(first) = lines.by_ref().find(|line| !line.is_empty()) {
         if first.trim_end_matches([' ', '\t']) == "STYLE" {
             let style_lines = lines.by_ref().take_while(|line| !line.is_empty());
@@ -301,8 +308,7 @@ fn webvtt(bytes: &[u8], track: &mut Track, language: Option<&str>) -> Result<(),
         let settings = parts.collect::<Vec<_>>().join(" ");
         let region = settings
             .split_ascii_whitespace()
-            .find_map(|value| value.strip_prefix("region:"))
-            .map(str::to_owned);
+            .find_map(|value| value.strip_prefix("region:"));
         let mut markup = String::new();
         for line in lines.by_ref().take_while(|line| !line.is_empty()) {
             if !markup.is_empty() {
@@ -310,19 +316,16 @@ fn webvtt(bytes: &[u8], track: &mut Track, language: Option<&str>) -> Result<(),
             }
             markup.push_str(line);
         }
-        let (StyledText { text, runs, .. }, background_color) =
-            styled_webvtt(&markup, start, end, id.as_deref(), language, &mut cascade)?;
-        track.push(Cue {
+        WebvttCue {
             start,
-            end: Some(end),
-            text,
-            id,
+            end,
+            id: id.as_deref(),
             region,
-            settings: (!settings.is_empty()).then_some(settings),
-            markup: Some(markup),
-            runs,
-            background_color,
-        })?;
+            settings: (!settings.is_empty()).then_some(settings.as_str()),
+            markup: &markup,
+            language,
+        }
+        .emit(track, &mut cascade, &mut timed_work)?;
     }
     Ok(())
 }
@@ -355,129 +358,360 @@ fn vtt_timestamp(source: &str) -> Result<u64, EngineError> {
         .ok_or_else(|| invalid("invalid EPUB WebVTT timestamp"))
 }
 
-fn styled_webvtt(
-    mut markup: &str,
+struct WebvttCue<'a> {
     start: u64,
     end: u64,
-    id: Option<&str>,
-    language: Option<&str>,
-    cascade: &mut webvtt_css::Cascade,
-) -> Result<(StyledText, Option<[u8; 4]>), EngineError> {
-    let mut out = StyledText::default();
-    let mut stack = Vec::<(&str, Arc<TextStyle>)>::new();
-    let inherited = TextStyle::default();
-    let mut fallback = inherited.clone();
-    let background_color = cascade
-        .paint(webvtt_css::Target {
-            id,
-            language,
-            language_attribute: language,
-            ..Default::default()
-        })?
-        .apply(&inherited, &mut fallback);
-    let fallback = Arc::new(fallback);
-    let mut style_work = 0;
-    let mut annotation = false;
-    let mut timestamp = None;
-    while let Some(index) = markup.find(['<', '&']) {
-        let style = stack.last().map_or(&fallback, |(_, style)| style);
-        if !annotation {
-            out.append(&markup[..index], style, timestamp)?;
-        }
-        let (symbol, rest) = markup[index..].split_at(1);
-        if symbol == "<" {
-            if let Some(end_tag) = rest
-                .find(['<', '>'])
-                .filter(|&end| rest.as_bytes()[end] == b'>')
-            {
-                let (tag, tail) = (&rest[..end_tag], &rest[end_tag + 1..]);
-                // Keep ruby pronunciation in authored markup and out of the plain projection.
-                if tag == "/rt" || tag == "/ruby" {
-                    annotation = false;
-                } else if tag == "rt" || tag.starts_with("rt.") {
-                    annotation = true;
-                }
-                if let Ok(time) = vtt_timestamp(tag) {
-                    if time > timestamp.unwrap_or(start) && time < end {
-                        timestamp = Some(time);
-                    }
-                } else {
-                    webvtt_style(
-                        tag,
-                        &mut stack,
-                        &mut style_work,
-                        &fallback,
-                        language,
-                        cascade,
+    id: Option<&'a str>,
+    region: Option<&'a str>,
+    settings: Option<&'a str>,
+    markup: &'a str,
+    language: Option<&'a str>,
+}
+
+struct WebvttSpan<'a> {
+    tag: &'a str,
+    name: &'a str,
+    classes: &'a str,
+    annotation: &'a str,
+}
+
+enum WebvttEvent<'a> {
+    Text(&'a str),
+    Character(char),
+    Timestamp(u64),
+    Open(WebvttSpan<'a>),
+    Close(usize),
+}
+
+struct TimedNode {
+    before: Option<u64>,
+    after: usize,
+}
+
+#[derive(Default)]
+struct WebvttTiming {
+    nodes: Vec<TimedNode>,
+    timestamps: Vec<u64>,
+}
+
+impl WebvttTiming {
+    fn build(cue: &WebvttCue<'_>) -> Result<Self, EngineError> {
+        let mut timing = Self::default();
+        let mut open = Vec::new();
+        let mut nodes = 0;
+        cue.walk(|event| {
+            match event {
+                WebvttEvent::Timestamp(time) => {
+                    charge(
+                        &mut nodes,
+                        1,
+                        MAX_TIMED_CUE_NODES,
+                        "WebVTT timed cue exceeds its node budget",
                     )?;
+                    timing.timestamps.push(time);
+                }
+                WebvttEvent::Open(_) => {
+                    charge(
+                        &mut nodes,
+                        1,
+                        MAX_TIMED_CUE_NODES,
+                        "WebVTT timed cue exceeds its node budget",
+                    )?;
+                    open.push(timing.nodes.len());
+                    timing.nodes.push(TimedNode {
+                        before: timing.timestamps.last().copied(),
+                        after: usize::MAX,
+                    });
+                }
+                WebvttEvent::Close(count) => {
+                    for node in open.drain(open.len() - count..) {
+                        // The following timestamp index excludes the entire subtree.
+                        timing.nodes[node].after = timing.timestamps.len();
+                    }
+                }
+                _ => {}
+            }
+            Ok(())
+        })?;
+        Ok(timing)
+    }
+
+    fn position(&self, index: usize, time: u64) -> webvtt_css::PlaybackState {
+        let Some(node) = self.nodes.get(index) else {
+            return webvtt_css::PlaybackState::default();
+        };
+        webvtt_css::PlaybackState {
+            past: self
+                .timestamps
+                .get(node.after)
+                .is_some_and(|&after| after < time),
+            future: node.before.is_some_and(|before| before > time),
+        }
+    }
+
+    fn boundaries(
+        &self,
+        selectors: webvtt_css::PlaybackState,
+        end: u64,
+    ) -> Result<BTreeSet<u64>, EngineError> {
+        let mut boundaries = BTreeSet::new();
+        for node in &self.nodes {
+            if selectors.past {
+                if let Some(&timestamp) = self.timestamps.get(node.after) {
+                    // Match a strict comparison on the public integer microsecond clock.
+                    let time = timestamp + 1;
+                    if time < end {
+                        boundaries.insert(time);
+                    }
+                }
+            }
+            if selectors.future {
+                if let Some(time) = node.before {
+                    boundaries.insert(time);
+                }
+            }
+            if boundaries.len() > MAX_TIMED_CUE_BOUNDARIES {
+                return Err(limited(
+                    "WebVTT timed cue exceeds its style boundary budget",
+                ));
+            }
+        }
+        Ok(boundaries)
+    }
+}
+
+impl<'a> WebvttCue<'a> {
+    fn emit(
+        &self,
+        track: &mut Track,
+        cascade: &mut webvtt_css::Cascade,
+        work: &mut usize,
+    ) -> Result<(), EngineError> {
+        let timed = cascade.timed();
+        let has_timed_styles = timed.past || timed.future;
+        let timing = if has_timed_styles {
+            WebvttTiming::build(self)?
+        } else {
+            WebvttTiming::default()
+        };
+        let boundaries = timing.boundaries(timed, self.end)?;
+        let first = track.cues.len();
+        let mut start = self.start;
+        for end in boundaries.into_iter().chain([self.end]) {
+            if has_timed_styles {
+                charge_timed_projection(work, self.markup.len().max(1))?;
+            }
+            let (StyledText { text, runs, .. }, background_color) = self.styled(
+                &timing,
+                start,
+                cascade,
+                has_timed_styles.then_some(&mut *work),
+            )?;
+            let previous = track.cues.get_mut(first..).and_then(|cues| cues.last_mut());
+            if let Some(previous) =
+                previous.filter(|cue| cue.runs == runs && cue.background_color == background_color)
+            {
+                previous.end = Some(end);
+            } else {
+                track.push(Cue {
+                    start,
+                    end: Some(end),
+                    text,
+                    id: self.id.map(str::to_owned),
+                    region: self.region.map(str::to_owned),
+                    settings: self.settings.map(str::to_owned),
+                    markup: Some(self.markup.to_owned()),
+                    runs,
+                    background_color,
+                })?;
+            }
+            start = end;
+        }
+        Ok(())
+    }
+
+    fn styled(
+        &self,
+        timing: &WebvttTiming,
+        position: u64,
+        cascade: &mut webvtt_css::Cascade,
+        mut timed_work: Option<&mut usize>,
+    ) -> Result<(StyledText, Option<[u8; 4]>), EngineError> {
+        let mut out = StyledText::default();
+        let mut styles = Vec::<Arc<TextStyle>>::new();
+        let inherited = TextStyle::default();
+        let mut fallback = inherited.clone();
+        let background_color = cascade
+            .paint(webvtt_css::Target {
+                id: self.id,
+                language: self.language,
+                language_attribute: self.language,
+                ..Default::default()
+            })?
+            .apply(&inherited, &mut fallback);
+        let fallback = Arc::new(fallback);
+        let mut timestamp = None;
+        let mut style_work = 0;
+        let mut node = 0;
+        self.walk(|event| {
+            let style = styles.last().unwrap_or(&fallback);
+            match event {
+                WebvttEvent::Text(text) => out.append(text, style, timestamp)?,
+                WebvttEvent::Character(character) => {
+                    let mut encoded = [0; 4];
+                    out.append(character.encode_utf8(&mut encoded), style, timestamp)?;
+                }
+                WebvttEvent::Timestamp(time) => timestamp = Some(time),
+                WebvttEvent::Open(span) => {
+                    let inherited_bytes = style.bytes();
+                    charge(
+                        &mut style_work,
+                        span.tag.len() + inherited_bytes,
+                        MAX_STYLE_BYTES,
+                        "WebVTT cue styling exceeds its processing budget",
+                    )?;
+                    if let Some(work) = timed_work.as_deref_mut() {
+                        charge_timed_projection(work, inherited_bytes)?;
+                    }
+                    styles.push(Arc::new(webvtt_span_style(
+                        span,
+                        style,
+                        self.language,
+                        timing.position(node, position),
+                        cascade,
+                    )?));
+                    node += 1;
+                }
+                WebvttEvent::Close(count) => styles.truncate(styles.len() - count),
+            }
+            Ok(())
+        })?;
+        Ok((out, background_color))
+    }
+
+    fn walk(
+        &self,
+        mut visit: impl FnMut(WebvttEvent<'a>) -> Result<(), EngineError>,
+    ) -> Result<(), EngineError> {
+        let mut markup = self.markup;
+        let mut stack = Vec::new();
+        let mut annotation = false;
+        let mut timestamp = self.start;
+        while let Some(index) = markup.find(['<', '&']) {
+            if !annotation {
+                visit(WebvttEvent::Text(&markup[..index]))?;
+            }
+            let (symbol, rest) = markup[index..].split_at(1);
+            if symbol == "<" {
+                if let Some(end_tag) = rest
+                    .find(['<', '>'])
+                    .filter(|&end| rest.as_bytes()[end] == b'>')
+                {
+                    let (tag, tail) = (&rest[..end_tag], &rest[end_tag + 1..]);
+                    // Keep ruby pronunciation in authored markup and out of the plain projection.
+                    if tag == "/rt" || tag == "/ruby" {
+                        annotation = false;
+                    } else if tag == "rt" || tag.starts_with("rt.") {
+                        annotation = true;
+                    }
+                    if let Ok(time) = vtt_timestamp(tag) {
+                        if time > timestamp && time < self.end {
+                            timestamp = time;
+                            visit(WebvttEvent::Timestamp(time))?;
+                        }
+                    } else {
+                        webvtt_tag(tag, &mut stack, &mut visit)?;
+                    }
+                    markup = tail;
+                    continue;
+                }
+            } else if let Some((character, tail)) = character_reference(rest) {
+                if !annotation {
+                    visit(WebvttEvent::Character(character))?;
                 }
                 markup = tail;
                 continue;
             }
-        } else if let Some((ch, tail)) = character_reference(rest) {
             if !annotation {
-                let mut encoded = [0; 4];
-                out.append(ch.encode_utf8(&mut encoded), style, timestamp)?;
+                visit(WebvttEvent::Text(symbol))?;
             }
-            markup = tail;
-            continue;
+            markup = rest;
         }
         if !annotation {
-            out.append(symbol, style, timestamp)?;
+            visit(WebvttEvent::Text(markup))?;
         }
-        markup = rest;
+        Ok(())
     }
-    if !annotation {
-        out.append(
-            markup,
-            stack.last().map_or(&fallback, |(_, style)| style),
-            timestamp,
-        )?;
-    }
-    Ok((out, background_color))
 }
 
-fn webvtt_style<'a>(
+fn charge_timed_projection(work: &mut usize, amount: usize) -> Result<(), EngineError> {
+    charge(
+        work,
+        amount,
+        MAX_TIMED_WEBVTT_WORK,
+        "WebVTT timed style projection exceeds its work budget",
+    )
+}
+
+fn webvtt_tag<'a>(
     tag: &'a str,
-    stack: &mut Vec<(&'a str, Arc<TextStyle>)>,
-    work: &mut usize,
-    fallback: &TextStyle,
-    track_language: Option<&str>,
-    cascade: &mut webvtt_css::Cascade,
+    stack: &mut Vec<&'a str>,
+    visit: &mut impl FnMut(WebvttEvent<'a>) -> Result<(), EngineError>,
 ) -> Result<(), EngineError> {
     if let Some(close) = tag.strip_prefix('/') {
-        if close == "ruby" && stack.last().is_some_and(|(tag, _)| *tag == "rt") {
+        let mut count = 0;
+        if close == "ruby" && stack.last() == Some(&"rt") {
             stack.pop();
+            count += 1;
         }
-        if stack.last().is_some_and(|(open, _)| *open == close) {
+        if stack.last() == Some(&close) {
             stack.pop();
+            count += 1;
+        }
+        if count > 0 {
+            visit(WebvttEvent::Close(count))?;
         }
         return Ok(());
     }
     let (name, annotation) = tag.split_once([' ', '\t', '\n']).unwrap_or((tag, ""));
-    let mut parts = name.split('.');
-    let name = parts.next().unwrap_or_default();
+    let (name, classes) = name.split_once('.').unwrap_or((name, ""));
     if !matches!(name, "b" | "i" | "u" | "c" | "v" | "lang" | "ruby" | "rt") {
         return Ok(());
     }
     if name == "rt" {
-        if stack.last().is_some_and(|(tag, _)| *tag == "rt") {
+        if stack.last() == Some(&"rt") {
             stack.pop();
+            visit(WebvttEvent::Close(1))?;
         }
-        if stack.last().is_none_or(|(tag, _)| *tag != "ruby") {
+        if stack.last() != Some(&"ruby") {
             return Ok(());
         }
     }
     if stack.len() == 32 {
         return Err(limited("WebVTT cue span nesting exceeds 32"));
     }
-    let inherited = stack.last().map_or(fallback, |(_, style)| style);
-    charge(
-        work,
-        tag.len() + inherited.bytes(),
-        MAX_STYLE_BYTES,
-        "WebVTT cue styling exceeds its processing budget",
-    )?;
+    stack.push(name);
+    visit(WebvttEvent::Open(WebvttSpan {
+        tag,
+        name,
+        classes,
+        annotation,
+    }))
+}
+
+fn webvtt_span_style(
+    span: WebvttSpan<'_>,
+    inherited: &TextStyle,
+    track_language: Option<&str>,
+    playback: webvtt_css::PlaybackState,
+    cascade: &mut webvtt_css::Cascade,
+) -> Result<TextStyle, EngineError> {
+    let WebvttSpan {
+        name,
+        classes,
+        annotation,
+        ..
+    } = span;
     let mut style = inherited.clone();
     let annotation = annotation.trim_ascii();
     match name {
@@ -499,7 +733,7 @@ fn webvtt_style<'a>(
     }
     let class_start = style.classes.len();
     let mut local_background = None;
-    for class in parts.filter(|class| !class.is_empty()) {
+    for class in classes.split('.').filter(|class| !class.is_empty()) {
         if style.classes.len() == 32 || class.len() > MAX_STYLE_LABEL {
             return Err(limited("WebVTT cue classes exceed their budget"));
         }
@@ -522,11 +756,11 @@ fn webvtt_style<'a>(
         language_attribute: (name == "lang" && !annotation.is_empty())
             .then_some(())
             .and(style.language.as_deref()),
+        playback,
     })?;
     let background = paint.apply(inherited, &mut style).or(local_background);
     style.background_color = webvtt_css::background(background, inherited.background_color);
-    stack.push((name, Arc::new(style)));
-    Ok(())
+    Ok(style)
 }
 
 fn webvtt_color(class: &str) -> Option<[u8; 4]> {
