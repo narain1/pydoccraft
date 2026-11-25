@@ -1788,3 +1788,15 @@ Both lockfiles, the dependency inventory and the upstream revisions match the pr
 The first hosted matrix at `8b73fff` found that the negative decimal fixture could fit a 60-point track with the installed math font. The revised fixture authors an 80-point space in that cell and retains the overflow assertion in preview, PDF and DOCX. The width fixture now derives the script scale from an independent 150-point track and 16-point gap. The measured 29.05-point internal advance on macOS and 33.20-point advance on Linux agree with their respective 70% and 80% script scales.
 
 The nested borrowed-space controls have the same PDF coordinates within each renderer on Windows and macOS. Reopened editable DOCX can use different glyph extents in its nested fraction. The fixture checks the fraction placement and row separation, the other token bounds, and the existing per-renderer four-coordinate controls. On Windows, three nested cases differed by one antialiasing level in the three color channels of one pixel. The fixture allows only that measured raster difference in nested scripts and retains exact nonnested and reopened fixed-PDF pixel checks. The corrected checks passed against the original installed Linux, Windows and macOS wheels. [Hosted MathML checks](https://github.com/narain1/pydoccraft/actions/runs/45643222841)
+
+## EPUB in the 0.3.2 wheel matrix
+
+The release matrix tested `7a461c1de1954e21d229e502a8ac1e095df8478e` on Linux x86-64, macOS arm64 and Windows x86-64 with CPython 3.11, 3.12 and 3.13. Each installed wheel passed 952 tests with zero failures, errors or skips. GitHub merged the same source tree into `main` at `e6525053f07b3067690565a08a87876ac871478b`. The release PR carries the tested runtime and records the installed-wheel evidence. [Wheel validation run](https://github.com/narain1/pydoccraft/actions/runs/45643982278)
+
+| Platform | Wheel size in bytes | Native extension size in bytes |
+| --- | ---: | ---: |
+| Linux | 26,044,787–26,062,715 | 60,563,584–60,602,336 |
+| macOS | 23,226,374–23,226,743 | 50,566,336–50,566,496 |
+| Windows | 25,134,390–25,160,006 | 61,959,168–61,968,896 |
+
+The release workflow retries a version when its bump already merged and the tag is still missing. The 0.3.2 release merge runs the nine installed-wheel jobs before creating the source tag and publishing its wheels.

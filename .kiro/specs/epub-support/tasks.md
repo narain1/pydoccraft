@@ -14,7 +14,7 @@ Follow-up work is tracked in GitHub for [CSS and fixed layout](https://github.co
 - [x] Limit packaged-font outline emission to glyphs that can paint the requested EPUB preview region. Verify clipped regions of the public Children’s Literature EPUB.
 - [x] Open the unmodified math-heavy *Linear Algebra* sample within the semantic output budget and exercise its spine previews.
 - [x] Build and validate the manylinux x86-64 wheels for CPython 3.11, 3.12, and 3.13.
-- [ ] Run the installed release wheel matrix on macOS and Windows.
+- [x] Run the installed release wheel matrix on macOS and Windows.
 - [x] Replace existing XHTML and SVG chapters transactionally and preserve targeted navigation and overlay anchors.
 - [x] Rename chapter anchors with their links in a single batch and preserve targets referenced by retained XHTML, SVG, navigation and media overlays outside the spine. Protect targets of local OPF metadata links and refinements, including percent-encoded paths and fragments.
 - [x] Insert fixed-layout SVG spine chapters with packaged dependencies and optional media overlays in the same edit.
