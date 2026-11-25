@@ -2875,6 +2875,98 @@ class EpubTests(unittest.TestCase):
                 results.append((preview, names, external.bbox, internal.bbox))
         self.assertTrue(results[0] == results[1], "sibling selectors and direct controls differ")
 
+    def test_css_grid_automatic_tracks_names_and_fit(self) -> None:
+        source = fixed_spread_fixture([("", "white", 300, 180)])
+        template = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Automatic grid</title>
+          <meta name="viewport" content="width=300,height=180"/><style>
+          html,body,p{margin:0;font-size:10px}
+          #holder{position:absolute;left:12px;top:14px;width:220px}
+          #grid{display:grid;width:220px;grid-template-columns:inherit;row-gap:4px;column-gap:8px}
+          #one{background:#b73337} #two{background:#358348} #three{background:#3e62a0}
+          CSS</style></head><body><div id="holder"><div id="grid">
+          <p id="one">One</p><p id="two"><a href="#three">Two</a></p>
+          <p id="three"><a href="https://example.org/end">End</a></p>
+          </div></div></body></html>"""
+
+        def publication(styles: str) -> bytes:
+            return rewrite_epub(source, {"OEBPS/s0.xhtml": template.replace("CSS", styles)})
+
+        automatic = """
+          #holder{grid-template-columns:[head] 12px
+            repeat(auto-fill,[lane] calc(10% + 10px) [inner] 20px [turn])
+            [tail] 14px [finish]}
+          #grid{grid-template-rows:repeat(auto-fill,[level] 24px);height:91px}
+          #one{grid-column:lane 1;grid-row:level 1}
+          #two{grid-column:2 lane / span inner;grid-row:2 level}
+          #three{grid-column:tail / finish;grid-row:level -1}
+        """
+        counted = """
+          #holder{grid-template-columns:12px 32px 20px 32px 20px 14px}
+          #grid{grid-template-rows:repeat(3,24px);height:91px}
+          #one{grid-column:2;grid-row:1}
+          #two{grid-column:4 / 5;grid-row:2}
+          #three{grid-column:6 / 7;grid-row:3}
+        """
+        visual = []
+        for styles in (automatic, counted):
+            with doc_ex.open(publication(styles)) as book:
+                pixels = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+                exported = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+            with doc_ex.open(exported) as pdf:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), pixels)
+                hits = [pdf[0].search_for(word) for word in ("One", "Two", "End")]
+                self.assertTrue(all(len(hit) == 1 for hit in hits), pdf[0].get_text())
+                links = pdf[0].get_links()
+                self.assertEqual(links[0].metadata["target_page"], 0)
+                self.assertEqual(links[1].uri, "https://example.org/end")
+                visual.append((pixels, hits, [link.bbox for link in links]))
+        self.assertEqual(visual[0][1:], visual[1][1:])
+        self.assertTrue(visual[0][0] == visual[1][0], "automatic and counted grid pixels differ")
+
+        def preview(styles: str) -> tuple[int, bytes]:
+            with doc_ex.open(publication(styles)) as book:
+                return rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+
+        for mode, control in (
+            ("auto-fill", "repeat(5,minmax(35px,1fr))"),
+            ("auto-fit", "repeat(3,minmax(35px,1fr))"),
+        ):
+            with self.subTest(mode=mode):
+                self.assertEqual(
+                    preview(f"#holder{{grid-template-columns:repeat({mode},minmax(35px,1fr))}}"),
+                    preview(f"#holder{{grid-template-columns:{control}}}"),
+                )
+        for size, rows in (("min-height:91px", 4), ("", 1)):
+            with self.subTest(size=size):
+                settings = f"#grid{{{size};grid-template-columns:80px}}"
+                self.assertEqual(
+                    preview(settings + "#grid{grid-template-rows:repeat(auto-fill,24px)}"),
+                    preview(settings + f"#grid{{grid-template-rows:repeat({rows},24px)}}"),
+                )
+        for declaration in (
+            "height:100px;row-gap:0;grid-template:repeat(auto-fill,1px) / 1fr",
+            "column-gap:0;grid-template-columns:repeat(auto-fit,1px)",
+            "column-gap:0;grid-template-columns:repeat(auto-fill,0)",
+            "grid-template-columns:repeat(auto-fit,[a b c d e] 0.5px)",
+        ):
+            with self.subTest(declaration=declaration), doc_ex.open(
+                publication(f"#grid{{{declaration}}}")
+            ) as book:
+                with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "automatic repetition exceeds"):
+                    book.render_page(0, dpi=96)
+
+        fallback = "#holder{grid-template-columns:70px 70px}"
+        for invalid in (
+            "repeat(auto-fill,1fr)", "10px repeat(auto-fit,min-content)",
+            "repeat(auto-fill,20px) repeat(auto-fit,20px)",
+            "auto repeat(auto-fill,20px)",
+        ):
+            with self.subTest(invalid=invalid):
+                self.assertEqual(
+                    preview(fallback + f"#holder{{grid-template-columns:{invalid}}}"),
+                    preview(fallback),
+                )
+
     def test_css_grid_intrinsic_and_fit_tracks_in_reflow(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Intrinsic grid</title>
           <style>body,p{margin:0;font-size:10px}
@@ -2899,15 +2991,10 @@ class EpubTests(unittest.TestCase):
         minimum, maximum, fit = pixel_widths
         self.assertLess(minimum, maximum)
         self.assertAlmostEqual(fit, 56, delta=1)
-        for value, error, message in (
-            ("repeat(33, 1px)", doc_ex.UnsafeArchiveError, "grid track expression exceeds"),
-            ("repeat(auto-fit, 10px)", doc_ex.UnsupportedFormatError, "unsupported EPUB grid track"),
-        ):
-            with self.subTest(value=value):
-                xhtml = chapter.replace("min-content max-content FIT", value)
-                with doc_ex.open(epub_fixture(chapter_one=xhtml)) as book:
-                    with self.assertRaisesRegex(error, message):
-                        book.render_page(0, dpi=96)
+        xhtml = chapter.replace("min-content max-content FIT", "repeat(33, 1px)")
+        with doc_ex.open(epub_fixture(chapter_one=xhtml)) as book:
+            with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "grid track expression exceeds"):
+                book.render_page(0, dpi=96)
 
     def test_reflow_css_flex_layout_and_archive_only_imports(self) -> None:
         chapter = """<html xmlns="http://www.w3.org/1999/xhtml"><head>

@@ -8,7 +8,7 @@ use raffia::{
 use taffy::{
     style::{
         GridAutoFlow, GridPlacement, GridTemplateArea, GridTemplateAreas, GridTemplateComponent,
-        LengthPercentage, TrackSizingFunction,
+        GridTemplateRepetition, LengthPercentage, RepetitionCount, TrackSizingFunction,
     },
     style_helpers::{auto, fit_content, fr, max_content, min_content},
 };
@@ -19,8 +19,8 @@ use crate::{
     EngineError,
 };
 
-const MAX_TRACKS: usize = 32;
-const MAX_LINE_NAMES: usize = 128;
+pub(in crate::epub) const MAX_TRACKS: usize = 32;
+pub(in crate::epub) const MAX_LINE_NAMES: usize = 128;
 const MAX_LINE_NAME_BYTES: usize = 128;
 const MAX_PLACEMENT: i16 = 64;
 
@@ -49,6 +49,22 @@ enum Track<'a> {
     Breadth(Breadth<'a>),
     MinMax(Breadth<'a>, Breadth<'a>),
     Fit(Length<'a>),
+}
+
+enum TrackPart<'a> {
+    Single(Track<'a>),
+    Automatic(RepetitionCount, Template<Track<'a>>),
+}
+
+impl Track<'_> {
+    fn has_fixed_breadth(self) -> bool {
+        matches!(
+            self,
+            Self::Breadth(Breadth::Fixed(_))
+                | Self::MinMax(Breadth::Fixed(_), _)
+                | Self::MinMax(_, Breadth::Fixed(_))
+        )
+    }
 }
 
 enum Issue {
@@ -145,7 +161,7 @@ pub(in crate::epub) fn resolve_flow(
 fn parse<'a>(
     value: &'a str,
     components: &[ComponentValue<'_>],
-) -> Result<Template<Track<'a>>, Issue> {
+) -> Result<Template<TrackPart<'a>>, Issue> {
     if value.eq_ignore_ascii_case("none") {
         return Ok(Template::default());
     }
@@ -156,6 +172,7 @@ fn parse<'a>(
         value.get(span.start.checked_sub(offset)?..span.end.checked_sub(offset)?)
     };
     let mut names = 0;
+    let mut automatic_tracks: usize = 0;
     let mut previous_line = false;
     for item in components {
         check_adjacent_lines(item, &mut previous_line)?;
@@ -168,53 +185,80 @@ fn parse<'a>(
             if !comma(delimiter) || list.is_empty() {
                 return Err(Issue::Invalid);
             }
-            let count = match count {
+            let (count, automatic) = match count {
                 ComponentValue::Number(count) => {
                     let digits = count.raw.strip_prefix('+').unwrap_or(count.raw);
                     if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
                         return Err(Issue::Invalid);
                     }
-                    digits.parse::<usize>().map_err(|_| Issue::Limit)?
+                    let count = digits.parse::<usize>().map_err(|_| Issue::Limit)?;
+                    if count == 0 {
+                        return Err(Issue::Invalid);
+                    }
+                    (count, None)
                 }
-                ComponentValue::InterpolableIdent(name)
-                    if ident(name).is_some_and(|name| {
-                        matches!(name.to_ascii_lowercase().as_str(), "auto-fit" | "auto-fill")
-                    }) =>
-                {
-                    return Err(Issue::Unsupported);
-                }
+                item if keyword(item, "auto-fit") => (1, Some(RepetitionCount::AutoFit)),
+                item if keyword(item, "auto-fill") => (1, Some(RepetitionCount::AutoFill)),
                 _ => return Err(Issue::Invalid),
             };
-            if count == 0 {
-                return Err(Issue::Invalid);
-            }
             let mut repeated = Template::with_first_line();
             let mut repeated_names = 0;
             let mut previous_line = false;
             for item in list {
                 check_adjacent_lines(item, &mut previous_line)?;
-                append_slot(&mut repeated, item, &raw, &mut repeated_names)?;
+                append_slot(&mut repeated, item, &raw, &mut repeated_names, |track| {
+                    track
+                })?;
             }
             let track_count = repeated.tracks.len();
             if track_count == 0 {
                 return Err(Issue::Invalid);
             }
-            if count > (MAX_TRACKS - template.tracks.len()) / track_count
+            let occupied = template.tracks.len() + automatic_tracks.saturating_sub(1);
+            if count > (MAX_TRACKS - occupied) / track_count
                 || repeated_names.saturating_mul(count) > MAX_LINE_NAMES - names
             {
                 return Err(Issue::Limit);
             }
             names += repeated_names * count;
-            for _ in 0..count {
-                template.tracks.extend_from_slice(&repeated.tracks);
-                merge_names(template.names.last_mut().unwrap(), &repeated.names[0]);
-                template.names.extend_from_slice(&repeated.names[1..]);
+            if let Some(mode) = automatic {
+                if automatic_tracks != 0
+                    || !repeated
+                        .tracks
+                        .iter()
+                        .all(|track| track.has_fixed_breadth())
+                {
+                    return Err(Issue::Invalid);
+                }
+                automatic_tracks = track_count;
+                if repeated_names == 0 {
+                    repeated.names.clear();
+                }
+                template.tracks.push(TrackPart::Automatic(mode, repeated));
+                template.names.push(Vec::new());
+            } else {
+                for _ in 0..count {
+                    template
+                        .tracks
+                        .extend(repeated.tracks.iter().copied().map(TrackPart::Single));
+                    merge_names(template.names.last_mut().unwrap(), &repeated.names[0]);
+                    template.names.extend_from_slice(&repeated.names[1..]);
+                }
             }
         } else {
-            append_slot(&mut template, item, &raw, &mut names)?;
+            append_slot(&mut template, item, &raw, &mut names, TrackPart::Single)?;
+            if template.tracks.len() + automatic_tracks.saturating_sub(1) > MAX_TRACKS {
+                return Err(Issue::Limit);
+            }
         }
     }
-    if template.tracks.is_empty() {
+    if template.tracks.is_empty()
+        || (automatic_tracks != 0
+            && template
+                .tracks
+                .iter()
+                .any(|part| matches!(part, TrackPart::Single(track) if !track.has_fixed_breadth())))
+    {
         return Err(Issue::Invalid);
     }
     if names == 0 {
@@ -239,11 +283,12 @@ fn merge_names(line: &mut Vec<String>, more: &[String]) {
     }
 }
 
-fn append_slot<'a>(
-    template: &mut Template<Track<'a>>,
+fn append_slot<'a, T>(
+    template: &mut Template<T>,
     item: &ComponentValue<'_>,
     raw: &impl Fn(&ComponentValue<'_>) -> Option<&'a str>,
     names: &mut usize,
+    convert: impl FnOnce(Track<'a>) -> T,
 ) -> Result<(), Issue> {
     if let ComponentValue::BracketBlock(block) = item {
         let line = template.names.last_mut().unwrap();
@@ -261,7 +306,7 @@ fn append_slot<'a>(
         if template.tracks.len() == MAX_TRACKS {
             return Err(Issue::Limit);
         }
-        template.tracks.push(track(item, raw)?);
+        template.tracks.push(convert(track(item, raw)?));
         template.names.push(Vec::new());
     }
     Ok(())
@@ -651,34 +696,28 @@ fn breadth<'a>(
     })
 }
 
-pub(in crate::epub) fn resolve(
-    source: &str,
-    font: f32,
-    viewport: [f32; 2],
-    lengths: &mut calc::CalculationTable,
-) -> Result<Template<GridTemplateComponent<String>>, EngineError> {
-    let Template { tracks, names } = resolve_tracks(source, font, viewport, lengths)?;
-    Ok(Template {
-        tracks: tracks.into_iter().map(Into::into).collect(),
-        names,
-    })
-}
-
 pub(in crate::epub) fn resolve_auto_tracks(
     source: &str,
     font: f32,
     viewport: [f32; 2],
     lengths: &mut calc::CalculationTable,
 ) -> Result<Vec<TrackSizingFunction>, EngineError> {
-    Ok(resolve_tracks(source, font, viewport, lengths)?.tracks)
+    resolve(source, font, viewport, lengths)?
+        .tracks
+        .into_iter()
+        .map(|part| match part {
+            GridTemplateComponent::Single(track) => Ok(track),
+            GridTemplateComponent::Repeat(_) => Err(invalid("invalid EPUB implicit grid tracks")),
+        })
+        .collect()
 }
 
-fn resolve_tracks(
+pub(in crate::epub) fn resolve(
     source: &str,
     font: f32,
     viewport: [f32; 2],
     lengths: &mut calc::CalculationTable,
-) -> Result<Template<TrackSizingFunction>, EngineError> {
+) -> Result<Template<GridTemplateComponent<String>>, EngineError> {
     if source.is_empty()
         || ["none", "initial", "unset", "revert"]
             .iter()
@@ -698,46 +737,59 @@ fn resolve_tracks(
         Issue::Unsupported => unsupported("unsupported EPUB grid track expression"),
         Issue::Limit => limited("EPUB grid track expression exceeds its limit"),
     })?;
+    let mut resolve_track = |track: Track<'_>| -> Result<TrackSizingFunction, EngineError> {
+        let mut length = |length| -> Result<LengthPercentage, EngineError> {
+            Ok(match length {
+                Length::Points(raw) => {
+                    let points = points(&raw.to_ascii_lowercase(), font, viewport)
+                        .ok_or_else(|| unsupported("unsupported EPUB grid track unit"))?;
+                    LengthPercentage::length(points)
+                }
+                Length::Percent(factor) => LengthPercentage::percent(factor),
+                Length::Calc(raw) => match calc::resolve(raw, font, viewport, false)? {
+                    calc::Resolved::Points(points) => LengthPercentage::length(points),
+                    calc::Resolved::Percent(percent) => LengthPercentage::percent(percent / 100.0),
+                    calc::Resolved::Deferred(length) => {
+                        LengthPercentage::calc(lengths.register(length)?)
+                    }
+                },
+            })
+        };
+        let mut breadth = |item| -> Result<TrackSizingFunction, EngineError> {
+            Ok(match item {
+                Breadth::Fixed(value) => length(value)?.into(),
+                Breadth::Auto => auto(),
+                Breadth::MinContent => min_content(),
+                Breadth::MaxContent => max_content(),
+                Breadth::Flex(factor) => fr(factor),
+            })
+        };
+        Ok(match track {
+            Track::Breadth(item) => breadth(item)?,
+            Track::MinMax(minimum, maximum) => TrackSizingFunction {
+                min: breadth(minimum)?.min,
+                max: breadth(maximum)?.max,
+            },
+            Track::Fit(limit) => fit_content(length(limit)?),
+        })
+    };
     let tracks = tracks
         .into_iter()
-        .map(|track| -> Result<_, EngineError> {
-            let mut length = |length| -> Result<LengthPercentage, EngineError> {
-                Ok(match length {
-                    Length::Points(raw) => {
-                        let points = points(&raw.to_ascii_lowercase(), font, viewport)
-                            .ok_or_else(|| unsupported("unsupported EPUB grid track unit"))?;
-                        LengthPercentage::length(points)
-                    }
-                    Length::Percent(factor) => LengthPercentage::percent(factor),
-                    Length::Calc(raw) => match calc::resolve(raw, font, viewport, false)? {
-                        calc::Resolved::Points(points) => LengthPercentage::length(points),
-                        calc::Resolved::Percent(percent) => {
-                            LengthPercentage::percent(percent / 100.0)
-                        }
-                        calc::Resolved::Deferred(length) => {
-                            LengthPercentage::calc(lengths.register(length)?)
-                        }
-                    },
-                })
-            };
-            let mut breadth = |item| -> Result<TrackSizingFunction, EngineError> {
-                Ok(match item {
-                    Breadth::Fixed(value) => length(value)?.into(),
-                    Breadth::Auto => auto(),
-                    Breadth::MinContent => min_content(),
-                    Breadth::MaxContent => max_content(),
-                    Breadth::Flex(factor) => fr(factor),
-                })
-            };
-            Ok(match track {
-                Track::Breadth(item) => breadth(item)?,
-                Track::MinMax(minimum, maximum) => TrackSizingFunction {
-                    min: breadth(minimum)?.min,
-                    max: breadth(maximum)?.max,
-                },
-                Track::Fit(limit) => fit_content(length(limit)?),
-            })
+        .map(|part| match part {
+            TrackPart::Single(track) => Ok(GridTemplateComponent::Single(resolve_track(track)?)),
+            TrackPart::Automatic(count, repeated) => {
+                let tracks = repeated
+                    .tracks
+                    .into_iter()
+                    .map(&mut resolve_track)
+                    .collect::<Result<_, _>>()?;
+                Ok(GridTemplateComponent::Repeat(GridTemplateRepetition {
+                    count,
+                    tracks,
+                    line_names: repeated.names,
+                }))
+            }
         })
-        .collect::<Result<_, _>>()?;
+        .collect::<Result<_, EngineError>>()?;
     Ok(Template { tracks, names })
 }

@@ -16,6 +16,9 @@ use taffy::{
 use crate::epub::{css::CalculationTable, limited};
 use crate::EngineError;
 
+#[path = "grid_budget.rs"]
+mod grid_budget;
+
 #[derive(Default)]
 pub(super) struct Tree {
     nodes: Vec<Node>,
@@ -68,11 +71,17 @@ impl Tree {
             calculations,
             measure,
             fit_probes: 0,
+            grid_limit: false,
         };
         compute_root_layout(&mut view, root, space);
         if view.fit_probes > MAX_FIT_PROBES {
             return Err(limited(
                 "EPUB CSS intrinsic box layout exceeds its sizing budget",
+            ));
+        }
+        if view.grid_limit {
+            return Err(limited(
+                "EPUB CSS grid automatic repetition exceeds its track or line name budget",
             ));
         }
         Ok(())
@@ -92,6 +101,7 @@ struct View<'a, F> {
     calculations: &'a CalculationTable,
     measure: F,
     fit_probes: usize,
+    grid_limit: bool,
 }
 
 const MAX_FIT_PROBES: usize = 4_096;
@@ -176,7 +186,7 @@ impl<F: FnMut(LayoutInput, usize, &Style) -> LayoutOutput> View<'_, F> {
         if input.run_mode == RunMode::PerformHiddenLayout {
             return compute_hidden_layout(self, id);
         }
-        if self.fit_probes > MAX_FIT_PROBES {
+        if self.grid_limit || self.fit_probes > MAX_FIT_PROBES {
             return LayoutOutput::HIDDEN;
         }
         compute_cached_layout(self, id, input, |tree, id, mut input| {
@@ -194,7 +204,13 @@ impl<F: FnMut(LayoutInput, usize, &Style) -> LayoutOutput> View<'_, F> {
                 (Display::Block, false) => compute_block_layout(tree, id, input, block),
                 (Display::FlowRoot, false) => compute_block_layout(tree, id, input, None),
                 (Display::Flex, false) => compute_flexbox_layout(tree, id, input),
-                (Display::Grid, false) => compute_grid_layout(tree, id, input),
+                (Display::Grid, false) => {
+                    if !grid_budget::permits(&node.style, input, tree.calculations) {
+                        tree.grid_limit = true;
+                        return LayoutOutput::HIDDEN;
+                    }
+                    compute_grid_layout(tree, id, input)
+                }
                 (_, true) => (tree.measure)(input, index, &node.style),
             };
             if input.run_mode == RunMode::PerformLayout {
