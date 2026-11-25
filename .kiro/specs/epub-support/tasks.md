@@ -28,7 +28,7 @@
 - [x] Preserve clickable links and fragment destinations on fixed-layout XHTML content and standalone SVG objects.
 - [x] Preserve fixed-layout PDF links on SVG text spans and inline SVG inside XHTML, including local text-span destinations.
 - [x] Offer searchable fixed-layout PDF export for XHTML, native MathML, and standalone and embedded SVG.
-- [ ] Match searchable SVG text geometry to nonrectangular clipping and masks.
+- [x] Use native nonrectangular clip and mask coverage to retain visible SVG text and constrain PDF annotation rectangles.
 - [x] Scope packaged XHTML font faces using CSS Unicode ranges, overlap order and glyph fallback.
 - [x] Preserve ordered XHTML font-family stacks across inherited and inline styles, including packaged and generic fallbacks.
 - [x] Shape variable-font glyphs with inherited CSS axis values and optical sizing in XHTML previews, and pass the properties to the static SVG renderer.

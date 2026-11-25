@@ -1056,6 +1056,97 @@ class EpubTests(unittest.TestCase):
                     self.assertRegex(editor.to_bytes(object_streams=False), rb"/XYZ\s+123(?:\.0+)?\s+[0-9.]+\s+null")
                     self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
 
+    def test_fixed_layout_pdf_svg_coverage_follows_clip_rules_and_masks(self) -> None:
+        data = fixed_spread_fixture([("", "white", 360, 236)] * 2)
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'href="s0.xhtml" media-type="application/xhtml+xml"',
+                b'href="s0.svg" media-type="image/svg+xml"',
+            )
+        outline = "M0 0H208V114H0Z M59 4H143V59H59Z"
+        svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="360" height="236" viewBox="0 0 360 236">
+          <defs>
+            <clipPath id="odd"><path clip-rule="evenodd" d="{outline}"/></clipPath>
+            <clipPath id="winding"><path clip-rule="nonzero" d="{outline}"/></clipPath>
+            <clipPath id="edge"><circle cx="4" cy="28" r="11"/></clipPath>
+            <mask id="lum" maskUnits="userSpaceOnUse" x="0" y="62" width="208" height="52">
+              <rect x="0" y="62" width="208" height="52" fill="white"/>
+              <circle cx="128" cy="93" r="27" fill="black"/>
+            </mask>
+            <mask id="alpha" mask-type="alpha" maskContentUnits="objectBoundingBox"
+                  x="0" y="0" width="1" height="1">
+              <rect width=".54" height="1" fill="black" opacity=".6"/>
+            </mask>
+          </defs>
+          <g font-family="monospace" font-size="16">
+            <g transform="translate(20 14)" clip-path="url(#odd)">
+              <text x="8" y="30">KEPT</text>
+              <text x="70" y="30"><a href="https://example.org/hidden">HOLE</a></text>
+              <a href="https://example.org/obscured"><rect x="79" y="45" width="40" height="8"/></a>
+              <g mask="url(#lum)">
+                <text x="6" y="99">OPEN SPACE</text><text x="102" y="99">BLACK</text>
+              </g>
+            </g>
+            <g transform="translate(20 118)" clip-path="url(#winding)">
+              <text x="70" y="30">FILLED</text>
+            </g>
+            <g transform="translate(222 22) rotate(5)" mask="url(#alpha)">
+              <text x="4" y="33">ALPHA</text><text x="63" y="33">ZERO</text>
+            </g>
+            <g transform="translate(230 79)" clip-path="url(#edge)">
+              <text x="5" y="39" font-size="24"><a href="https://example.org/edge">M</a></text>
+            </g>
+            <g transform="translate(240 144)">
+              <a href="https://example.org/shape" clip-path="url(#edge)">
+                <rect x="0" y="13" width="40" height="30" fill="#d44"/>
+              </a>
+            </g>
+          </g></svg>"""
+        xhtml = f"""<html xmlns="http://www.w3.org/1999/xhtml"><head><title>SVG coverage</title>
+          <meta name="viewport" content="width=360,height=236"/>
+          <style>html,body {{margin:0}} svg {{display:block}}</style></head><body>{svg}</body></html>"""
+        data = rewrite_epub(data, {"OEBPS/content.opf": package, "OEBPS/s0.svg": svg, "OEBPS/s1.xhtml": xhtml})
+        with doc_ex.open(data) as book:
+            rendered = [rgba_pixels(png_chunks(book.render_page(i, dpi=96))) for i in range(2)]
+            output = book.export_epub_fixed_pdf(dpi=96, searchable=True)
+        with doc_ex.open(output) as pdf:
+            for i in range(2):
+                with self.subTest(page=i):
+                    text = pdf[i].get_text()
+                    for label in ("KEPT", "OPEN SPACE", "FILLED", "ALPHA", "M"):
+                        self.assertIn(label, text)
+                        self.assertTrue(pdf[i].search_for(label))
+                    for label in ("HOLE", "BLACK", "ZERO"):
+                        self.assertNotIn(label, text)
+                    edge, shape = pdf[i].get_links()
+                    self.assertEqual(edge.uri, "https://example.org/edge")
+                    self.assertEqual(shape.uri, "https://example.org/shape")
+                    hit, = pdf[i].search_for("M")
+                    self.assertLessEqual(hit[2], 184)
+                    self.assertLessEqual(edge.bbox[2], 184)
+                    self.assertLessEqual(shape.bbox[2], 191.25)
+                    self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(i, dpi=96))), rendered[i])
+
+    def test_fixed_layout_pdf_svg_coverage_budget_does_not_limit_visual_exports(self) -> None:
+        data = fixed_spread_fixture([("", "white", 9000, 45)])
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            package = archive.read("OEBPS/content.opf").replace(
+                b'href="s0.xhtml" media-type="application/xhtml+xml"',
+                b'href="s0.svg" media-type="image/svg+xml"',
+            )
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9000 45">
+          <defs><clipPath id="window"><rect width="9000" height="44"/></clipPath></defs>
+          <g clip-path="url(#window)"><rect width="9000" height="44" fill="#f5f5ff"/>
+            <text x="20" y="30">Large layer</text></g></svg>"""
+        data = rewrite_epub(data, {"OEBPS/content.opf": package, "OEBPS/s0.svg": svg})
+        with doc_ex.open(data) as book:
+            visual = book.export_epub_fixed_pdf(dpi=96)
+            with self.assertRaisesRegex(doc_ex.UnsafeArchiveError, "coverage exceeds its tile budget"):
+                book.export_epub_fixed_pdf(dpi=96, searchable=True)
+        with doc_ex.open(visual) as pdf:
+            self.assertEqual(pdf[0].metadata["width"], 6750)
+            self.assertEqual(pdf[0].get_text(), "")
+
     def test_fixed_layout_pdf_searchable_text_preserves_rendering_and_selection(self) -> None:
         source = fixed_spread_fixture([("", "white", 320, 200)] * 3)
         font = (Path(__file__).parent / "fixtures" / "fonts" / "Inter-Regular.ttf").read_bytes()

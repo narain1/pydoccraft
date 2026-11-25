@@ -59,6 +59,7 @@ impl SvgImages {
         media: &str,
         tree: &resvg::usvg::Tree,
         size: [f32; 2],
+        pixels: [u32; 2],
         geometry: Option<Arc<LinkGeometry>>,
     ) -> Result<(), EngineError> {
         if self.images.contains_key(media) {
@@ -67,7 +68,15 @@ impl SvgImages {
         let mut capture = TextLayer::default();
         if self.searchable {
             capture.begin_page();
-            crate::epub::svg::collect_image_text(tree, size, &mut capture)?;
+            crate::epub::svg::collect_image_text(
+                tree,
+                size,
+                [
+                    pixels[0] as f32 / tree.size().width(),
+                    pixels[1] as f32 / tree.size().height(),
+                ],
+                &mut capture,
+            )?;
         }
         if let Some(geometry) = &geometry {
             super::super::charge(

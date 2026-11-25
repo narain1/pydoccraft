@@ -962,6 +962,7 @@ pub(super) fn validate_svg(root: Node<'_, '_>, base: Option<&str>) -> Result<boo
                         | "color-interpolation-filters"
                         | "clipPathUnits"
                         | "mask"
+                        | "mask-type"
                         | "maskUnits"
                         | "maskContentUnits"
                         | "gradientUnits"

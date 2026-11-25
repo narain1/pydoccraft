@@ -472,7 +472,7 @@ impl<'a> Output<'a> {
         let bytes = super::svg::transparent_png(tree, pixels[0], pixels[1])?;
         let media = self.add_preview_media(bytes, "png");
         if let Some(capture) = self.svg_images.as_mut() {
-            capture.record(&media, tree, [width, height], geometry)?;
+            capture.record(&media, tree, [width, height], pixels, geometry)?;
         }
         Ok(media)
     }

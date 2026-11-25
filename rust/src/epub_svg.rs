@@ -13,6 +13,8 @@ use super::{
 };
 use crate::{author_epub::escape_attribute, model::ImagePayload, EngineError};
 
+#[path = "epub_svg_coverage.rs"]
+mod coverage;
 #[path = "epub_svg_effects.rs"]
 pub(super) mod effects;
 #[path = "epub_svg_links.rs"]
@@ -160,6 +162,7 @@ pub(super) fn render(
         links.as_ref(),
     )?;
     let [w, h] = viewport.unwrap_or([tree.size().width() * 0.75, tree.size().height() * 0.75]);
+    let scale = dpi / 72.0;
     if let Some((capture, geometry)) = navigation.as_mut().zip(geometry.as_ref()) {
         let clip = wordcraft_geom::Rect::new(0.0, 0.0, w, h);
         geometry.place(
@@ -171,10 +174,17 @@ pub(super) fn render(
             capture,
         )?;
         if let Some(text) = capture.text.as_deref_mut() {
-            collect_image_text(&tree, [w, h], text)?;
+            collect_image_text(
+                &tree,
+                [w, h],
+                [
+                    (w / tree.size().width()) * scale as f32,
+                    (h / tree.size().height()) * scale as f32,
+                ],
+                text,
+            )?;
         }
     }
-    let scale = dpi / 72.0;
     let region = region.for_page([f64::from(w), f64::from(h)], dpi, fixed)?;
     let mut image = tiny_skia::Pixmap::new(region.width, region.height)
         .ok_or_else(|| limited("cannot allocate EPUB SVG viewport"))?;
@@ -199,87 +209,129 @@ pub(super) fn render(
 pub(super) fn collect_image_text(
     tree: &usvg::Tree,
     size: [f32; 2],
+    density: [f32; 2],
     output: &mut super::rendition::text::TextLayer,
 ) -> Result<(), EngineError> {
-    let clip = wordcraft_geom::Rect::new(0.0, 0.0, size[0], size[1]);
-    let scale = [
-        size[0] / tree.size().width(),
-        size[1] / tree.size().height(),
-    ];
+    let page = wordcraft_geom::Rect::new(0.0, 0.0, size[0], size[1]);
+    let clip = wordcraft_geom::Rect::new(0.0, 0.0, tree.size().width(), tree.size().height());
+    let scale = kurbo::Affine::scale_non_uniform(
+        f64::from(size[0] / tree.size().width()),
+        f64::from(size[1] / tree.size().height()),
+    );
     let mut metrics = HashMap::new();
-    visit_painted_svg(tree, scale, clip, |node, clip| {
-        if let usvg::Node::Text(source) = node {
-            capture_svg_text(tree.fontdb(), source, scale, clip, &mut metrics, output)?;
+    let mut coverage = coverage::Coverage::new(tree, density);
+    visit_painted_svg(tree, clip, |paint, clip, effects| {
+        if let usvg::Node::Text(source) = paint.node {
+            let scaled_clip = super::rendition::text::transformed(clip, scale);
+            let scaled_clip = super::rendition::intersection(page, scaled_clip);
+            visit_glyphs(
+                tree.fontdb(),
+                source,
+                &mut metrics,
+                |_| true,
+                |_, text, rect, ink| {
+                    if let Some(rect) =
+                        coverage.refine(paint, effects, rect, clip, coverage::Target::Glyph(ink))?
+                    {
+                        output.add(
+                            text,
+                            super::rendition::text::transformed(rect, scale),
+                            scaled_clip,
+                        )?;
+                    }
+                    Ok(())
+                },
+            )?;
         }
         Ok(())
     })
 }
 
+#[derive(Clone, Copy)]
+struct PaintedNode<'tree> {
+    node: &'tree usvg::Node,
+    parent: tiny_skia::Transform,
+}
+
 fn visit_painted_svg<'tree>(
     tree: &'tree usvg::Tree,
-    scale: [f32; 2],
     clip: wordcraft_geom::Rect,
-    mut visit: impl FnMut(&'tree usvg::Node, wordcraft_geom::Rect) -> Result<(), EngineError>,
+    mut visit: impl FnMut(
+        PaintedNode<'tree>,
+        wordcraft_geom::Rect,
+        &[PaintedNode<'tree>],
+    ) -> Result<(), EngineError>,
 ) -> Result<(), EngineError> {
-    let geometry = |rect: usvg::Rect| {
-        wordcraft_geom::Rect::new(
-            rect.x() * scale[0],
-            rect.y() * scale[1],
-            rect.width() * scale[0],
-            rect.height() * scale[1],
-        )
-    };
-    let mut stack = vec![(tree.root().children().iter(), clip)];
-    while let Some((children, parent_clip)) = stack.last_mut() {
+    let mut effects = Vec::new();
+    let mut stack = vec![(
+        tree.root().children().iter(),
+        clip,
+        tiny_skia::Transform::identity(),
+        0,
+    )];
+    while let Some((children, parent_clip, parent, inherited)) = stack.last_mut() {
         let Some(node) = children.next() else {
             stack.pop();
             continue;
+        };
+        effects.truncate(*inherited);
+        let paint = PaintedNode {
+            node,
+            parent: *parent,
         };
         let mut clip = *parent_clip;
         if let usvg::Node::Group(group) = node {
             if group.opacity().get() == 0.0 {
                 continue;
             }
-            if group.clip_path().is_some() {
+            if group.clip_path().is_some() || group.mask().is_some() {
                 let Some(bounds) = group.abs_layer_bounding_box() else {
                     continue;
                 };
-                clip = super::rendition::intersection(clip, geometry(bounds.to_rect()));
+                clip = super::rendition::intersection(
+                    clip,
+                    wordcraft_geom::Rect::new(
+                        bounds.x(),
+                        bounds.y(),
+                        bounds.width(),
+                        bounds.height(),
+                    ),
+                );
+                effects.push(paint);
             }
-            stack.push((group.children().iter(), clip));
+            stack.push((
+                group.children().iter(),
+                clip,
+                paint.parent.pre_concat(group.transform()),
+                effects.len(),
+            ));
         }
-        visit(node, clip)?;
+        visit(paint, clip, &effects)?;
     }
     Ok(())
 }
 
-type SvgGlyphMetrics = HashMap<(usvg::fontdb::ID, u32), Option<[f32; 3]>>;
+type SvgGlyphMetrics = HashMap<(usvg::fontdb::ID, u32), Option<GlyphMetrics>>;
 
-fn capture_svg_text(
-    fonts: &usvg::fontdb::Database,
-    node: &usvg::Text,
-    scale: [f32; 2],
-    clip: wordcraft_geom::Rect,
-    metrics: &mut SvgGlyphMetrics,
-    output: &mut super::rendition::text::TextLayer,
-) -> Result<(), EngineError> {
-    visit_glyphs(
-        fonts,
-        node,
-        scale,
-        metrics,
-        |_| true,
-        |_, text, rect| output.add(text, rect, clip),
-    )
+#[derive(Clone, Copy)]
+struct GlyphMetrics {
+    advance: f32,
+    ascent: f32,
+    descent: f32,
+    ink: Option<wordcraft_geom::Rect>,
 }
 
 fn visit_glyphs(
     fonts: &usvg::fontdb::Database,
     node: &usvg::Text,
-    scale: [f32; 2],
     metrics: &mut SvgGlyphMetrics,
     select: impl Fn(usize) -> bool,
-    mut visit: impl FnMut(usize, &str, wordcraft_geom::Rect) -> Result<(), EngineError>,
+    mut visit: impl FnMut(
+        usize,
+        &str,
+        wordcraft_geom::Rect,
+        Option<wordcraft_geom::Rect>,
+    ) -> Result<(), EngineError>,
 ) -> Result<(), EngineError> {
     use skrifa::{
         instance::{LocationRef, Size},
@@ -300,21 +352,43 @@ fn visit_glyphs(
             continue;
         }
         for glyph in &span.positioned_glyphs {
-            let Some([advance, ascent, descent]) =
-                *metrics.entry((glyph.font, glyph.id.0)).or_insert_with(|| {
-                    fonts
-                        .with_face_data(glyph.font, |data, index| {
-                            let font = FontRef::from_index(data, index).ok()?;
-                            let size = Size::unscaled();
-                            let location = LocationRef::default();
-                            let metrics = font.metrics(size, location);
-                            let advance = font
-                                .glyph_metrics(size, location)
-                                .advance_width(GlyphId::new(glyph.id.0))?;
-                            Some([advance, metrics.ascent, metrics.descent])
+            let Some(GlyphMetrics {
+                advance,
+                ascent,
+                descent,
+                ink,
+            }) = *metrics.entry((glyph.font, glyph.id.0)).or_insert_with(|| {
+                fonts
+                    .with_face_data(glyph.font, |data, index| {
+                        let font = FontRef::from_index(data, index).ok()?;
+                        let size = Size::unscaled();
+                        let location = LocationRef::default();
+                        let metrics = font.metrics(size, location);
+                        let metrics_at = font.glyph_metrics(size, location);
+                        let id = GlyphId::new(glyph.id.0);
+                        let advance = metrics_at.advance_width(id)?;
+                        let ink = metrics_at
+                            .bounds(id)
+                            .filter(|bounds| {
+                                bounds.x_min < bounds.x_max && bounds.y_min < bounds.y_max
+                            })
+                            .map(|bounds| {
+                                wordcraft_geom::Rect::new(
+                                    bounds.x_min,
+                                    bounds.y_min,
+                                    bounds.x_max - bounds.x_min,
+                                    bounds.y_max - bounds.y_min,
+                                )
+                            });
+                        Some(GlyphMetrics {
+                            advance,
+                            ascent: metrics.ascent,
+                            descent: metrics.descent,
+                            ink,
                         })
-                        .flatten()
-                })
+                    })
+                    .flatten()
+            })
             else {
                 continue;
             };
@@ -323,18 +397,18 @@ fn visit_glyphs(
                 continue;
             }
             let mapping = node.abs_transform().pre_concat(glyph.outline_transform());
-            let page = kurbo::Affine::scale_non_uniform(scale[0].into(), scale[1].into())
-                * kurbo::Affine::new(
-                    [
-                        mapping.sx, mapping.ky, mapping.kx, mapping.sy, mapping.tx, mapping.ty,
-                    ]
-                    .map(f64::from),
-                );
+            let page = kurbo::Affine::new(
+                [
+                    mapping.sx, mapping.ky, mapping.kx, mapping.sy, mapping.tx, mapping.ty,
+                ]
+                .map(f64::from),
+            );
             let rect = super::rendition::text::transformed(
                 wordcraft_geom::Rect::new(0.0, descent, advance, ascent - descent),
                 page,
             );
-            visit(index, &glyph.text, rect)?;
+            let ink = ink.map(|ink| super::rendition::text::transformed(ink, page));
+            visit(index, &glyph.text, rect, ink)?;
         }
     }
     Ok(())
@@ -615,6 +689,7 @@ fn svg_property(key: &str) -> bool {
             | "clip-path"
             | "clip-rule"
             | "mask"
+            | "mask-type"
             | "filter"
             | "color-interpolation-filters"
             | "stop-color"

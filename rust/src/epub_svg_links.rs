@@ -8,7 +8,10 @@ use resvg::usvg;
 use roxmltree::Node;
 use wordcraft_geom::Rect;
 
-use super::{image_href, native_tree, visit_painted_svg, NS};
+use super::{
+    coverage::{Coverage, Target},
+    image_href, native_tree, visit_painted_svg, NS,
+};
 use crate::{
     author_epub::escape_attribute,
     epub::{charge, invalid, parse_xml, rendition, structure::apply_edits, XML_BYTES},
@@ -84,8 +87,8 @@ impl<'a> Links<'a> {
             .transpose()?;
         let mut text_targets = HashMap::<_, VecDeque<_>>::new();
         if let Some(marked_tree) = &marked_tree {
-            visit_painted_svg(marked_tree, [1.0; 2], clip, |node, _| {
-                if let usvg::Node::Text(text) = node {
+            visit_painted_svg(marked_tree, clip, |paint, _, _| {
+                if let usvg::Node::Text(text) = paint.node {
                     // Instance expansion can discard IDs. Identical keys retain paint order.
                     text_targets
                         .entry(text_key(text))
@@ -99,16 +102,26 @@ impl<'a> Links<'a> {
         let mut geometry = Geometry::default();
         let synthetic_ids: HashSet<&str> =
             self.generated_ids.values().map(String::as_str).collect();
-        visit_painted_svg(tree, [1.0; 2], clip, |node, clip| {
+        let mut coverage = Coverage::new(tree, [1.0; 2]);
+        visit_painted_svg(tree, clip, |paint, clip, effects| {
+            let node = paint.node;
             let id = node.id();
             if !id.is_empty() && !synthetic_ids.contains(id) {
                 if let Some(rect) = node.abs_bounding_box() {
-                    geometry.anchor(id, actual_rect(rect), clip)?;
+                    if let Some(rect) =
+                        coverage.refine(paint, effects, actual_rect(rect), clip, Target::Object)?
+                    {
+                        geometry.anchor(id, rect, clip)?;
+                    }
                 }
             }
             if let Some(href) = self.objects.get(id) {
                 if let Some(rect) = node.abs_stroke_bounding_box() {
-                    geometry.link(actual_rect(rect), clip, (*href).into())?;
+                    if let Some(rect) =
+                        coverage.refine(paint, effects, actual_rect(rect), clip, Target::Object)?
+                    {
+                        geometry.link(rect, clip, (*href).into())?;
+                    }
                 }
             }
             if let (usvg::Node::Text(text), Some(marked)) = (node, &marked) {
@@ -131,16 +144,20 @@ impl<'a> Links<'a> {
                     super::visit_glyphs(
                         tree.fontdb(),
                         text,
-                        [1.0; 2],
                         &mut metrics,
                         |index| assignment[index].is_some_and(|owner| !owner.is_empty()),
-                        |index, glyph, rect| {
+                        |index, glyph, rect, ink| {
                             let Some(owner) = assignment[index] else {
                                 return Ok(());
                             };
                             if glyph.is_empty() {
                                 return Ok(());
                             }
+                            let Some(rect) =
+                                coverage.refine(paint, effects, rect, clip, Target::Glyph(ink))?
+                            else {
+                                return Ok(());
+                            };
                             if let Some(href) = &owner.href {
                                 geometry.link(rect, clip, href.clone())?;
                             }
@@ -174,8 +191,8 @@ impl<'a> Links<'a> {
         // Choose colors absent from the real tree so unmarked runs cannot be
         // mistaken for a target, even when they inherit arbitrary author paint.
         let mut occupied = HashSet::new();
-        visit_painted_svg(tree, [1.0; 2], clip, |node, _| {
-            if let usvg::Node::Text(text) = node {
+        visit_painted_svg(tree, clip, |paint, _, _| {
+            if let usvg::Node::Text(text) = paint.node {
                 occupied.extend(
                     text.layouted()
                         .iter()
