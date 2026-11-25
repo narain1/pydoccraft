@@ -82,7 +82,8 @@
 - [x] Honor definite whole-table widths for MathML labeled grids and retain editable unruled DOCX positions.
 - [ ] Support MathML row-label overlap modes and editable Word borders for ruled labeled grids.
 - [x] Align a single MathML group per data cell to its edge, center or decimal point in previews, searchable PDF and editable DOCX.
-- [ ] Extend MathML alignment to multiple groups per cell, explicit alignment marks, compound numeric expressions, right-to-left groups and cross-table scopes.
+- [x] Preserve explicit MathML alignment marks on the group baseline and inside its tokens in searchable PDF and editable DOCX.
+- [ ] Extend MathML alignment to multiple groups per cell, marks inside operator arguments, automatic decimal alignment in compound numeric expressions, right-to-left groups and cross-table scopes.
 - [ ] Extend editable DOCX export to negative leading offsets and expand the remaining MathML visual properties.
 - [x] Decode and synchronize MPEG Layer III, AAC-LC MP4, WAVE and text-only media overlay cues through caller-supplied playback sinks.
 - [x] Apply Xing/Info encoder delay and padding. Stream long overlay cues in bounded PCM chunks and start playback at a chapter cue index.

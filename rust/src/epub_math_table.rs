@@ -6,6 +6,7 @@ use wordcraft_doc::{
     math::{self, Arg, ColJc, MNode, Math},
     para::InlineObject,
     props::{Align, Borders, CharProps, HeightRule, Rgb, TextColor},
+    resolve::ResolvedChar,
     Block, Document, Paragraph, Table as NativeTable,
 };
 use wordcraft_fonts::math::{resolve_math, C};
@@ -18,7 +19,7 @@ use super::{
 use crate::EngineError;
 
 #[path = "epub_math_table_alignment.rs"]
-mod alignment;
+pub(super) mod alignment;
 #[path = "epub_math_table_rules.rs"]
 mod rules;
 use alignment::Anchor;
@@ -63,7 +64,7 @@ struct CellPlacement<'xml, 'input> {
     columns: Range<usize>,
     horizontal: ColJc,
     vertical: Vertical,
-    group: Option<(roxmltree::NodeId, Anchor)>,
+    group: Option<alignment::Group>,
     style: Presentation<'xml>,
 }
 
@@ -308,10 +309,7 @@ pub(super) fn project<'xml>(
                             "MathML alignment group without one data column",
                         ));
                     }
-                    Ok((
-                        marker.id(),
-                        alignment::read(table, row, cell, marker, column)?,
-                    ))
+                    alignment::read(table, row, cell, marker, column)
                 })
                 .transpose()?;
             if label {
@@ -395,35 +393,38 @@ pub(super) fn project<'xml>(
                 .sum::<Option<f32>>()
                 .map(|width| width + internal_gaps(&grid.column_gaps, &cell.columns))
         };
-        let content = projection.with_cell_width(cell.node, content_width, |projection| {
-            if cell.group.is_none() {
-                if let Some(table) = project_group(projection, cell.node, depth + 2, cell.style)? {
-                    return Ok(CellContent::Table(table));
+        let (content, anchor) =
+            projection.with_cell_width(cell.node, content_width, |projection| {
+                if cell.group.is_none() {
+                    if let Some(table) =
+                        project_group(projection, cell.node, depth + 2, cell.style)?
+                    {
+                        return Ok((CellContent::Table(table), None));
+                    }
                 }
-            }
-            projection.with_alignment_group(cell.group.map(|(marker, _)| marker), |projection| {
-                let mut nodes =
-                    math::merge_runs(projection.elements(cell.node, depth + 2, cell.style)?);
-                if matches!(cell.group, Some((_, Anchor::Decimal(_)))) {
-                    let [MNode::Run(run)] = nodes.as_mut_slice() else {
-                        return Err(invalid("MathML decimal alignment token projection differs"));
-                    };
-                    // A separator inside a number is part of the token. Keep
-                    // its text and metrics together through native shaping and OMML.
-                    run.lit = true;
-                }
-                Ok(CellContent::Equation(Math {
-                    nodes,
-                    ..Default::default()
-                }))
-            })
-        })?;
+                let (nodes, caret) = projection
+                    .with_alignment_group(cell.group.map(|group| group.scope), |projection| {
+                        projection.elements(cell.node, depth + 2, cell.style)
+                    })?;
+                let mut nodes = math::merge_runs(nodes);
+                let anchor = cell
+                    .group
+                    .map(|group| group.resolve(caret, &mut nodes))
+                    .transpose()?;
+                Ok((
+                    CellContent::Equation(Math {
+                        nodes,
+                        ..Default::default()
+                    }),
+                    anchor,
+                ))
+            })?;
         grid.cells.push(Cell {
             rows: cell.rows,
             columns: cell.columns,
             horizontal: cell.horizontal,
             vertical: cell.vertical,
-            anchor: cell.group.map(|(_, anchor)| anchor),
+            anchor,
             content,
             format: CharProps {
                 size: Some(cell.style.font_size()),
@@ -1010,7 +1011,28 @@ impl Table {
         format: &CharProps,
         measurements: &compose::Measurements,
     ) -> Result<Layout, EngineError> {
-        self.layout_with_rules(doc, format, measurements, &mut { rules::MAX_RULE_ITEMS })
+        self.layout_with_rules(
+            doc,
+            format,
+            measurements,
+            &mut { rules::MAX_RULE_ITEMS },
+            None,
+        )
+    }
+
+    pub(super) fn layout_editable(
+        &self,
+        doc: &Document,
+        format: &CharProps,
+        carrier: &ResolvedChar,
+    ) -> Result<Layout, EngineError> {
+        self.layout_with_rules(
+            doc,
+            format,
+            &compose::Measurements::default(),
+            &mut { rules::MAX_RULE_ITEMS },
+            Some(carrier),
+        )
     }
 
     fn layout_with_rules(
@@ -1019,6 +1041,7 @@ impl Table {
         format: &CharProps,
         measurements: &compose::Measurements,
         rule_budget: &mut usize,
+        editable_carrier: Option<&ResolvedChar>,
     ) -> Result<Layout, EngineError> {
         let (face, constants) = resolve_math("Cambria Math");
         let axis_ratio = constants.as_ref().map_or(0.25, |constants| {
@@ -1038,6 +1061,14 @@ impl Table {
         let mut heights = vec![0.0; row_count];
         let mut measures = Vec::with_capacity(self.cells.len());
         let mut anchors = vec![[0.0f32; 2]; widths.len()];
+        let mut marked_columns = [false; MAX_MATRIX_SIZE];
+        if editable_carrier.is_some() {
+            for cell in &self.cells {
+                if matches!(cell.anchor, Some(Anchor::Marked(..))) {
+                    marked_columns[cell.columns.start] = true;
+                }
+            }
+        }
         let mut label_width = 0.0f32;
         for cell in &self.cells {
             let chars = CharProps {
@@ -1045,13 +1076,24 @@ impl Table {
                 color: cell.format.color.or(format.color),
                 ..Default::default()
             };
-            let resolved = doc.styles.resolve_char(None, &chars);
+            let resolved = if let Some(carrier) = editable_carrier
+                .filter(|_| cell.anchor.is_some() && marked_columns[cell.columns.start])
+            {
+                // A native operator's spacing follows the Word paragraph's
+                // math size even when its runs have authored point sizes.
+                let mut resolved = carrier.clone();
+                resolved.color = chars.color.unwrap_or(resolved.color);
+                resolved
+            } else {
+                doc.styles.resolve_char(None, &chars)
+            };
             let measure = match &cell.content {
                 CellContent::Table(table) => CellDrawing::Table(table.layout_with_rules(
                     doc,
                     &chars,
                     measurements,
                     rule_budget,
+                    editable_carrier,
                 )?),
                 CellContent::Equation(math) if math.nodes.is_empty() => {
                     CellDrawing::Equation(MathLayout::default())

@@ -156,7 +156,7 @@ impl Extras {
                 Extra::Table(grid) => {
                     let (mut table, format) = *grid;
                     table.apply_editable(&editable)?;
-                    let measured = table.layout(document, &format, &Measurements::default())?;
+                    let measured = table.layout_editable(document, &format, &layout.carrier)?;
                     table.editable_matrix(measured, &layout)?
                 }
                 Extra::Padded(padding) => padding.editable(&editable, &layout)?,

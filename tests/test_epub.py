@@ -7015,6 +7015,105 @@ overlay
                     with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, message):
                         operation()
 
+    def test_mathml_explicit_alignment_marks_preserve_editable_edges_and_tokens(self) -> None:
+        source = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
+          <head><title>Math alignment marks</title><meta name="viewport" content="width=500,height=300"/>
+            <style>body {margin:0}</style></head><body><p>
+            <m:math mathsize="16pt"><m:mtable groupalign="{right} {right}" columnwidth="95pt 205pt"
+                rowspacing="18pt" columnspacing="24pt">
+              <m:mtr>
+                <m:mtd><m:maligngroup/><m:mn mathcolor="#bf222d">12<m:malignmark/>:34<m:malignmark/>5</m:mn></m:mtd>
+                <m:mtd><m:maligngroup/><m:mtext>West</m:mtext><m:mrow><m:mtext>Bank</m:mtext>
+                  <m:malignmark edge="right"/><m:mo>+</m:mo><m:mtext>East</m:mtext></m:mrow></m:mtd>
+              </m:mtr>
+              <m:mtr>
+                <m:mtd><m:mrow><m:maligngroup/><m:mn mathcolor="#198144">7<m:malignmark edge="right"/>,89</m:mn></m:mrow></m:mtd>
+                <m:mtd><m:maligngroup/><m:mtext>LongerWest</m:mtext><m:mstyle><m:mrow>
+                  <m:mtext>Depot</m:mtext><m:malignmark edge="left"/><m:mo>+</m:mo>
+                  <m:mtext>Harbor</m:mtext></m:mrow></m:mstyle></m:mtd>
+              </m:mtr>
+            </m:mtable></m:math>
+          </p></body></html>"""
+        labels = ("12:345", "7,89", "WestBank", "LongerWestDepot", "East", "Harbor")
+        ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
+
+        def boxes(doc: doc_ex.Document, terms: tuple[str, ...]) -> dict[str, tuple[float, float, float, float]]:
+            rects = {}
+            for term in terms:
+                rects[term], = doc[0].search_for(term)
+            return rects
+
+        def geometry(doc: doc_ex.Document, delta: float) -> dict[str, tuple[float, float, float, float]]:
+            rects = boxes(doc, (*labels, "12", "7"))
+            upper, lower = sorted(doc[0].search_for("+"), key=lambda rect: rect[1])
+            self.assertAlmostEqual(rects["12"][2], rects["7"][2], delta=delta)
+            self.assertAlmostEqual(rects["WestBank"][2], lower[0], delta=delta)
+            upper_gap = upper[0] - rects["WestBank"][2]
+            lower_gap = lower[0] - rects["LongerWestDepot"][2]
+            self.assertGreater(upper_gap, 1.0)
+            self.assertAlmostEqual(upper_gap, lower_gap, delta=delta)
+            return rects
+
+        with doc_ex.open(epub_fixture(chapter_one=source)) as book:
+            with doc_ex.open(book.convert("pdf")) as pdf:
+                self.assertFalse(pdf[0].get_images())
+                reference = geometry(pdf, 0.05)
+            exported = book.convert("docx")
+            with zipfile.ZipFile(io.BytesIO(exported)) as archive:
+                xml = ET.fromstring(archive.read("word/document.xml"))
+            matrix = xml.find(".//m:oMath//m:m", ns)
+            self.assertIsNotNone(matrix)
+            runs = [element.text for element in matrix.findall(".//m:t", ns)]
+            for label in labels:
+                self.assertEqual(runs.count(label), 1, runs)
+            self.assertEqual(runs.count("+"), 2, runs)
+            with doc_ex.open(exported) as reopened:
+                text = reopened[0].get_text()
+                for label in labels:
+                    self.assertEqual(text.count(label), 1, text)
+                self.assertNotIn("⟡H", text)
+                with doc_ex.open(reopened.convert("pdf")) as pdf:
+                    rendered = geometry(pdf, 0.25)
+                    for label in labels:
+                        self.assertAlmostEqual(
+                            rendered[label][2] - rendered[label][0],
+                            reference[label][2] - reference[label][0],
+                            delta=0.1,
+                        )
+
+        # A matching paragraph size also preserves the native operator gaps.
+        matching = source.replace('mathsize="16pt"', 'mathsize="12pt"')
+        with doc_ex.open(epub_fixture(chapter_one=matching)) as book:
+            with doc_ex.open(book.convert("pdf")) as pdf:
+                expected = geometry(pdf, 0.05)
+            with doc_ex.open(book.convert("docx")) as reopened, doc_ex.open(reopened.convert("pdf")) as pdf:
+                rendered = geometry(pdf, 0.25)
+                for label in labels:
+                    for source_coordinate, native_coordinate in zip(expected[label], rendered[label]):
+                        self.assertAlmostEqual(native_coordinate, source_coordinate, delta=0.35)
+
+        fixed = fixed_spread_fixture([("rendition:page-spread-center", "#ffffff", 500, 300)])
+        with doc_ex.open(rewrite_epub(fixed, {"OEBPS/s0.xhtml": source})) as book:
+            preview = rgba_pixels(png_chunks(book.render_page(0, dpi=96)))
+            with doc_ex.open(book.export_epub_fixed_pdf(dpi=96, searchable=True)) as pdf:
+                self.assertEqual(rgba_pixels(png_chunks(pdf.render_page(0, dpi=96))), preview)
+                fixed_boxes = boxes(pdf, labels)
+                for label in labels:
+                    self.assertAlmostEqual(
+                        fixed_boxes[label][0] - fixed_boxes["WestBank"][0],
+                        reference[label][0] - reference["WestBank"][0],
+                        delta=0.65,
+                    )
+
+        unsupported = source.replace(
+            '<m:mn mathcolor="#bf222d">12<m:malignmark/>:34<m:malignmark/>5</m:mn>',
+            '<m:mfrac><m:mrow><m:mn>12<m:malignmark/>3</m:mn></m:mrow><m:mn>4</m:mn></m:mfrac>',
+        )
+        with doc_ex.open(epub_fixture(chapter_one=unsupported)) as book:
+            for operation in (lambda: book.render_page(0), lambda: book.convert("pdf"), lambda: book.convert("docx")):
+                with self.assertRaisesRegex(doc_ex.UnsupportedFormatError, "MathML alignment mark outside"):
+                    operation()
+
     def test_mathml_labeled_rows_keep_editable_labels_outside_data_columns(self) -> None:
         template = """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML">
           <head><title>Labeled MathML</title><meta name="viewport" content="width=440,height=320"/>

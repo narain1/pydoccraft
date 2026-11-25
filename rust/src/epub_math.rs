@@ -120,13 +120,17 @@ fn xml_space(character: char) -> bool {
 }
 
 fn append_token_text(node: Node<'_, '_>, output: &mut String) {
-    let start = output.len();
-    let mut gap = false;
     let text = node
         .descendants()
         .filter(Node::is_text)
         .filter_map(|child| child.text());
-    for character in text.flat_map(str::chars) {
+    append_normalized_token(text.flat_map(str::chars), output);
+}
+
+fn append_normalized_token(characters: impl Iterator<Item = char>, output: &mut String) {
+    let start = output.len();
+    let mut gap = false;
+    for character in characters {
         if xml_space(character) {
             gap = output.len() != start;
         } else {
@@ -352,7 +356,7 @@ struct Projection<'a, 'xml> {
     root_id: u32,
     stylesheet: Option<&'a FormulaCss>,
     width_scope: WidthScope,
-    alignment_group: Option<roxmltree::NodeId>,
+    alignment_group: Option<table::alignment::Scope>,
     remaining: &'a mut usize,
     extras: compose::Extras,
 }
@@ -392,13 +396,14 @@ impl<'xml> Projection<'_, 'xml> {
 
     fn with_alignment_group<T>(
         &mut self,
-        marker: Option<roxmltree::NodeId>,
+        scope: Option<table::alignment::Scope>,
         project: impl FnOnce(&mut Self) -> Result<T, EngineError>,
-    ) -> Result<T, EngineError> {
-        let outer = std::mem::replace(&mut self.alignment_group, marker);
+    ) -> Result<(T, Option<usize>), EngineError> {
+        let outer = std::mem::replace(&mut self.alignment_group, scope);
         let result = project(self);
-        self.alignment_group = outer;
-        result
+        let caret =
+            std::mem::replace(&mut self.alignment_group, outer).and_then(|group| group.caret);
+        result.map(|value| (value, caret))
     }
 
     fn containing_width(&self, node: Node<'xml, '_>) -> Option<f32> {
@@ -451,9 +456,59 @@ impl<'xml> Projection<'_, 'xml> {
     ) -> Result<Arg, EngineError> {
         let mut rows = Vec::new();
         for child in node.children().filter(Node::is_element) {
-            rows.extend(self.element(child, depth + 1, style)?);
+            let seeking = self
+                .alignment_group
+                .is_some_and(|scope| scope.mark.is_some() && scope.caret.is_none());
+            let nodes = self.element(child, depth + 1, style)?;
+            if seeking {
+                if let Some(caret) = self
+                    .alignment_group
+                    .as_mut()
+                    .and_then(|group| group.caret.as_mut())
+                {
+                    // WordCraft counts one caret unit per run character or
+                    // compound node in the containing equation argument.
+                    *caret += rows
+                        .iter()
+                        .map(|node| match node {
+                            MNode::Run(run) => run.text.chars().count(),
+                            _ => 1,
+                        })
+                        .sum::<usize>();
+                }
+            }
+            rows.extend(nodes);
         }
         Ok(rows)
+    }
+
+    fn token(
+        &mut self,
+        node: Node<'xml, '_>,
+        style: Presentation<'xml>,
+        depth: usize,
+    ) -> Result<MNode, EngineError> {
+        let mut caret = None;
+        for child in node.children().filter(Node::is_element) {
+            let Some(scope) = self.alignment_group.filter(|scope| scope.removes(child)) else {
+                return Err(unsupported("nested content in a MathML token"));
+            };
+            table::alignment::check_mark_empty(child)?;
+            self.charge(depth + 1)?;
+            if scope.mark == Some(child.id()) {
+                caret = Some(token_mark_offset(node, child));
+            }
+        }
+        let mut run = native_token(node, style)?;
+        if let Some(caret) = caret {
+            if let Some(scope) = &mut self.alignment_group {
+                scope.caret = Some(caret);
+            }
+            if node.has_tag_name((MATHML, "mn")) {
+                run.lit = true;
+            }
+        }
+        Ok(MNode::Run(run))
     }
 
     fn element(
@@ -463,8 +518,16 @@ impl<'xml> Projection<'_, 'xml> {
         inherited: Presentation<'xml>,
     ) -> Result<Arg, EngineError> {
         self.charge(depth)?;
-        if self.alignment_group == Some(node.id()) {
-            return Ok(Vec::new());
+        if let Some(scope) = &mut self.alignment_group {
+            if scope.removes(node) {
+                if node.has_tag_name((MATHML, "malignmark")) {
+                    table::alignment::check_mark_empty(node)?;
+                }
+                if scope.mark == Some(node.id()) {
+                    scope.caret = Some(0);
+                }
+                return Ok(Vec::new());
+            }
         }
         if node.tag_name().namespace() != Some(MATHML) {
             return Err(unsupported("foreign elements in MathML equations"));
@@ -472,7 +535,7 @@ impl<'xml> Projection<'_, 'xml> {
         let style = self.style(node, inherited)?;
         let tag = node.tag_name().name();
         let native = match tag {
-            "mi" | "mn" | "mo" | "ms" | "mtext" => token(node, style)?,
+            "mi" | "mn" | "mo" | "ms" | "mtext" => self.token(node, style, depth)?,
             "math" | "mrow" | "mstyle" | "merror" => return self.elements(node, depth, style),
             "semantics" => {
                 let presentation = node
@@ -643,11 +706,33 @@ impl<'xml> Projection<'_, 'xml> {
     }
 }
 
-fn token(node: Node<'_, '_>, style: Presentation<'_>) -> Result<MNode, EngineError> {
+fn token_mark_offset(node: Node<'_, '_>, marker: Node<'_, '_>) -> usize {
+    let before: String = node
+        .children()
+        .take_while(|child| *child != marker)
+        .filter(Node::is_text)
+        .filter_map(|child| child.text())
+        .collect();
+    let mut normalized = String::new();
+    append_normalized_token(before.chars(), &mut normalized);
+    let gap = !normalized.is_empty()
+        && before.chars().next_back().is_some_and(xml_space)
+        && marker
+            .next_siblings()
+            .skip(1)
+            .filter(Node::is_text)
+            .filter_map(|child| child.text())
+            .any(|text| text.chars().any(|character| !xml_space(character)));
+    let quotes = if node.has_tag_name((MATHML, "ms")) {
+        node.attribute("lquote").unwrap_or("\"").chars().count()
+    } else {
+        0
+    };
+    normalized.chars().count() + usize::from(gap) + quotes
+}
+
+fn native_token(node: Node<'_, '_>, style: Presentation<'_>) -> Result<MRun, EngineError> {
     let tag = node.tag_name().name();
-    if node.children().any(|child| child.is_element()) {
-        return Err(unsupported("nested content in a MathML token"));
-    }
     let mut text = String::new();
     append_token_text(node, &mut text);
     let mut run = MRun::new(text);
@@ -691,7 +776,7 @@ fn token(node: Node<'_, '_>, style: Presentation<'_>) -> Result<MNode, EngineErr
         (false, false) => MSty::Plain,
     });
     run.scr = alphabet;
-    Ok(MNode::Run(run))
+    Ok(run)
 }
 
 fn single_char(arg: &Arg) -> Option<char> {
